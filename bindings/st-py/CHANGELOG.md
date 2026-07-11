@@ -58,6 +58,11 @@
   `logging_steps` can emit enough telemetry to arm the callback. Scale-up
   automatically tightens sparse logging cadence, direct bridge use validates
   the horizon, and preflight fails closed when total steps are insufficient.
+- Live geometry-guard arming receipts: guard traces now distinguish warm-up
+  from fully armed coverage per desire/psi axis and emit one arm transition.
+  Adapter promotion, chain audit, and continuation postflight reject early
+  unarmed exits unless a consistent guard-trigger receipt proves intervention;
+  the shared verifier is also public through the model-neutral Python façade.
 - Adapter generation-transition audit: promotion chains now expose explicit
   parent-to-child rows for depth/root/base continuity, parent fingerprints,
   changed weights, eval handoff and improvement, promotion revalidation, and

@@ -1847,6 +1847,46 @@ def hf_finetune_geometry_guard_horizon_report(
     patience: object = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_geometry_guard_runtime_evidence_report(
+    *,
+    active: object,
+    minimum_observations: object = ...,
+    required_axes: object = ...,
+    expected_axes: object = ...,
+    armed_axes: object = ...,
+    pending_axes: object = ...,
+    armed: object = ...,
+    armed_transition_count: object = ...,
+    armed_at_step: object = ...,
+    arming_progress: object = ...,
+    desire_observation_count: object = ...,
+    psi_observation_count: object = ...,
+    trigger_count: object = ...,
+    status: object = ...,
+    reason_codes: object = ...,
+    trigger_step: object = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_geometry_guard_runtime_evidence_report(
+    *,
+    active: object,
+    minimum_observations: object = ...,
+    required_axes: object = ...,
+    expected_axes: object = ...,
+    armed_axes: object = ...,
+    pending_axes: object = ...,
+    armed: object = ...,
+    armed_transition_count: object = ...,
+    armed_at_step: object = ...,
+    arming_progress: object = ...,
+    desire_observation_count: object = ...,
+    psi_observation_count: object = ...,
+    trigger_count: object = ...,
+    status: object = ...,
+    reason_codes: object = ...,
+    trigger_step: object = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_trainer_trace_event(
     event: str,
     *,

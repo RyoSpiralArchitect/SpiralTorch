@@ -13437,7 +13437,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("psi", rows[1])
         self.assertEqual(
             rows[1]["training_geometry_guard"]["status"],
-            "within_limits",
+            "warming_up",
+        )
+        self.assertFalse(rows[1]["training_geometry_guard"]["armed"])
+        self.assertEqual(
+            rows[1]["training_geometry_guard"]["pending_axes"],
+            ["desire_stability"],
         )
         self.assertIn("hf_ft.psi.total", rows[1]["telemetry"])
         self.assertTrue(getattr(control, "should_training_stop", False))
@@ -13455,6 +13460,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "stop_requested",
         )
         self.assertTrue(rows[2]["training_geometry_guard"]["triggered_now"])
+        self.assertTrue(rows[2]["training_geometry_guard"]["armed"])
+        self.assertTrue(rows[2]["training_geometry_guard"]["armed_now"])
+        self.assertEqual(rows[2]["training_geometry_guard"]["armed_axes"], [
+            "desire_stability",
+            "psi_total",
+        ])
+        self.assertEqual(rows[2]["training_geometry_guard"]["pending_axes"], [])
         self.assertEqual(
             rows[2]["training_geometry_guard"]["reason_codes"],
             ["desire_stability_below_minimum"],
@@ -13481,6 +13493,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             1,
         )
         self.assertTrue(summary["trace_training_geometry_guard_triggered"])
+        self.assertTrue(summary["trace_training_geometry_guard_ever_armed"])
+        self.assertEqual(
+            summary["trace_training_geometry_guard_armed_transition_count"],
+            1,
+        )
+        self.assertTrue(summary["trace_last_training_geometry_guard_armed"])
+        self.assertTrue(
+            summary["trace_training_geometry_guard_runtime_evidence"]["ready"]
+        )
+        self.assertEqual(
+            summary["trace_training_geometry_guard_runtime_evidence"]["basis"],
+            "fully_armed",
+        )
         self.assertEqual(
             summary["trace_last_training_geometry_guard_status"],
             "stop_requested",
@@ -13624,6 +13649,144 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(psi_only["ready"])
         self.assertEqual(psi_only["required_log_events"], 4)
         self.assertIn("hf_finetune_geometry_guard_horizon_report", st.__all__)
+        self.assertIn(
+            "hf_finetune_geometry_guard_runtime_evidence_report",
+            st.__all__,
+        )
+        triggered = st.hf_finetune_geometry_guard_runtime_evidence_report(
+            active=True,
+            minimum_observations=3,
+            required_axes=["desire_stability", "psi_total"],
+            expected_axes=["desire_stability", "psi_total"],
+            armed_axes=["psi_total"],
+            pending_axes=["desire_stability"],
+            armed=False,
+            armed_transition_count=0,
+            arming_progress=5.0 / 6.0,
+            desire_observation_count=2,
+            psi_observation_count=3,
+            trigger_count=1,
+            status="stop_requested",
+            reason_codes=["psi_total_limit_exceeded"],
+            trigger_step=3,
+        )
+        forged_trigger = st.hf_finetune_geometry_guard_runtime_evidence_report(
+            active=True,
+            minimum_observations=3,
+            required_axes=["desire_stability", "psi_total"],
+            expected_axes=["desire_stability", "psi_total"],
+            armed_axes=["psi_total"],
+            pending_axes=["desire_stability"],
+            armed=False,
+            armed_transition_count=0,
+            arming_progress=5.0 / 6.0,
+            desire_observation_count=2,
+            psi_observation_count=3,
+            trigger_count=2,
+            status="stop_requested",
+            reason_codes=["psi_total_limit_exceeded"],
+            trigger_step=3,
+        )
+        forged_arming_state = (
+            st.hf_finetune_geometry_guard_runtime_evidence_report(
+                active=True,
+                minimum_observations=3,
+                required_axes=["desire_stability", "psi_total"],
+                expected_axes=["desire_stability", "psi_total"],
+                armed_axes=[],
+                pending_axes=["desire_stability", "psi_total"],
+                armed=False,
+                armed_transition_count=0,
+                arming_progress=5.0 / 6.0,
+                desire_observation_count=2,
+                psi_observation_count=3,
+                trigger_count=1,
+                status="stop_requested",
+                reason_codes=["psi_total_limit_exceeded"],
+                trigger_step=3,
+            )
+        )
+        self.assertTrue(triggered["ready"])
+        self.assertEqual(triggered["basis"], "guard_triggered")
+        self.assertTrue(triggered["trigger_receipt_ready"])
+        self.assertFalse(forged_trigger["ready"])
+        self.assertFalse(forged_trigger["trigger_receipt_ready"])
+        self.assertFalse(forged_arming_state["ready"])
+        self.assertFalse(forged_arming_state["arming_state_consistent"])
+
+    def test_trainer_geometry_guard_retains_unarmed_runtime_evidence(self) -> None:
+        fake_transformers = types.ModuleType("transformers")
+
+        class TrainerCallback:
+            pass
+
+        fake_transformers.TrainerCallback = TrainerCallback
+        args = types.SimpleNamespace(output_dir="runs/gpt2", logging_steps=1)
+        state = types.SimpleNamespace(
+            global_step=0,
+            epoch=0.0,
+            max_steps=5,
+            logging_steps=1,
+        )
+        control = types.SimpleNamespace()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/trace.jsonl"
+            with mock.patch.dict(sys.modules, {"transformers": fake_transformers}):
+                callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
+                    path,
+                    training_telemetry=True,
+                    stop_on_nonfinite_loss=False,
+                    min_desire_stability_guard=0.4,
+                    max_psi_total_guard=0.9,
+                )
+            for step, loss in enumerate((1.0, 1.1), 1):
+                state.global_step = step
+                callback.on_log(args, state, control, logs={"loss": loss})
+            callback.on_train_end(args, state, control)
+            rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+            summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
+
+        guard = rows[-1]["training_geometry_guard"]
+        self.assertTrue(guard["horizon"]["ready"])
+        self.assertEqual(guard["status"], "warming_up")
+        self.assertFalse(guard["armed"])
+        self.assertEqual(guard["arming_progress"], 0.5)
+        self.assertEqual(
+            guard["pending_axes"],
+            ["desire_stability", "psi_total"],
+        )
+        self.assertFalse(summary["trace_training_geometry_guard_ever_armed"])
+        self.assertEqual(
+            summary["trace_training_geometry_guard_armed_transition_count"],
+            0,
+        )
+        self.assertFalse(summary["trace_last_training_geometry_guard_armed"])
+        runtime_evidence = summary[
+            "trace_training_geometry_guard_runtime_evidence"
+        ]
+        self.assertEqual(runtime_evidence["status"], "incomplete")
+        self.assertFalse(runtime_evidence["ready"])
+        self.assertIsNone(runtime_evidence["basis"])
+        direct_evidence = st.hf_finetune_geometry_guard_runtime_evidence_report(
+            active=True,
+            minimum_observations=3,
+            required_axes=["desire_stability", "psi_total"],
+            expected_axes=["desire_stability", "psi_total"],
+            armed_axes=[],
+            pending_axes=["desire_stability", "psi_total"],
+            armed=False,
+            armed_transition_count=0,
+            arming_progress=0.5,
+            desire_observation_count=1,
+            psi_observation_count=2,
+            trigger_count=0,
+            status="warming_up",
+        )
+        self.assertEqual(
+            direct_evidence["row_type"],
+            "hf_finetune_geometry_guard_runtime_evidence",
+        )
+        self.assertFalse(direct_evidence["ready"])
 
     def test_trainer_geometry_guard_honors_default_warmup_and_patience(
         self,
@@ -13659,6 +13822,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 rows_before_stop[-1]["training_geometry_guard"]["breach_streak"],
                 1,
             )
+            self.assertTrue(
+                rows_before_stop[-1]["training_geometry_guard"]["armed"]
+            )
+            self.assertTrue(
+                rows_before_stop[-1]["training_geometry_guard"]["armed_now"]
+            )
             state.global_step = 5
             callback.on_log(args, state, control, logs={"loss": 40.0})
             rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
@@ -13676,6 +13845,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ["desire_stability_below_minimum"],
         )
         self.assertEqual(summary["trace_training_geometry_guard_trigger_count"], 1)
+        self.assertEqual(
+            summary["trace_training_geometry_guard_armed_transition_count"],
+            1,
+        )
 
     def test_generic_wait_launch_wrapper_writes_hf_ft_manifest(self) -> None:
         module = load_generic_wait_launch_example()

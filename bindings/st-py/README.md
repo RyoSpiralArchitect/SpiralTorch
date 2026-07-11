@@ -762,9 +762,17 @@ generation exits, executor postflight reads the
 exact trainer trace, requires at least one telemetry event and every configured
 desire/psi aggregate, cross-checks them against the audited chain node, and
 verifies that live guard frames match the sealed command before recording
-content-addressed trace and evidence IDs. Missing trace or guard evidence fails
-postflight, while present evidence outside a policy threshold remains a valid
-receipt and produces a normal continuation stop. Successful receipts are
+content-addressed trace and evidence IDs. A guard frame remains `warming_up`
+until every configured axis reaches its minimum observation count, then emits
+one `armed_now` transition. Adapter promotion and executor postflight require
+either that fully armed receipt or a consistent guard-trigger receipt with
+matching axis, reason, step, and observation evidence. Thus a planned-ready
+horizon that ends early cannot masquerade as a protected run. Missing trace or
+guard evidence fails postflight, while present evidence outside a policy
+threshold remains a valid receipt and produces a normal continuation stop.
+The same verifier is exposed as
+`hf_finetune_geometry_guard_runtime_evidence_report()` for custom Transformers
+callbacks and external run auditors. Successful receipts are
 digest-checked whenever executor state is loaded, so later trace mutation fails
 closed. Once a geometry gate is configured, missing or out-of-range evidence
 blocks continuation rather than silently passing. A depth-zero seed is allowed

@@ -91,6 +91,7 @@ __all__ = [
     "hf_finetune_summary_lines",
     "hf_finetune_training_telemetry_frame",
     "hf_finetune_geometry_guard_horizon_report",
+    "hf_finetune_geometry_guard_runtime_evidence_report",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
     "hf_finetune_zspace_probe",
@@ -119,6 +120,7 @@ __all__ = [
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_geometry_guard_horizon_report",
+    "hf_gpt2_finetune_geometry_guard_runtime_evidence_report",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
@@ -4326,6 +4328,14 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"auto={report.get('trainer_telemetry_auto_reason')} "
             f"prefix={report.get('trainer_telemetry_prefix')}"
         )
+    geometry_guard_runtime = report.get(
+        "trace_training_geometry_guard_runtime_evidence"
+    )
+    geometry_guard_runtime = (
+        geometry_guard_runtime
+        if isinstance(geometry_guard_runtime, Mapping)
+        else {}
+    )
     if report.get("trace_training_geometry_guard_count") is not None:
         lines.append(
             "hf_gpt2_ft_trainer_geometry_guard "
@@ -4334,6 +4344,12 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             "triggers="
             f"{report.get('trace_training_geometry_guard_trigger_count')} "
             f"status={report.get('trace_last_training_geometry_guard_status')} "
+            f"armed={report.get('trace_last_training_geometry_guard_armed')} "
+            "arming_progress="
+            f"{report.get('trace_last_training_geometry_guard_arming_progress')} "
+            "pending_axes="
+            f"{report.get('trace_last_training_geometry_guard_pending_axes')} "
+            f"runtime={geometry_guard_runtime.get('basis')} "
             f"horizon={report.get('trainer_geometry_guard_horizon_status')} "
             "log_events="
             f"{report.get('trainer_geometry_guard_available_log_events')}/"
@@ -4710,6 +4726,304 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
         "recommended_logging_steps": recommended_logging_steps,
         "auto_adjustment_possible": bool(active and horizon_sufficient),
         "minimum_max_steps": required_log_events if active else None,
+    }
+
+
+def _optional_non_negative_integer(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    number = _safe_number(value)
+    if number is None or not math.isfinite(float(number)):
+        return None
+    resolved = int(number)
+    if float(resolved) != float(number) or resolved < 0:
+        return None
+    return resolved
+
+
+def hf_gpt2_finetune_geometry_guard_runtime_evidence_report(
+    *,
+    active: object,
+    minimum_observations: object = None,
+    required_axes: object = None,
+    expected_axes: object = None,
+    armed_axes: object = None,
+    pending_axes: object = None,
+    armed: object = None,
+    armed_transition_count: object = None,
+    armed_at_step: object = None,
+    arming_progress: object = None,
+    desire_observation_count: object = None,
+    psi_observation_count: object = None,
+    trigger_count: object = None,
+    status: object = None,
+    reason_codes: object = None,
+    trigger_step: object = None,
+) -> dict[str, object]:
+    """Verify that a live guard armed or emitted a consistent stop receipt."""
+
+    active_value = active is True
+    required_axis_values = csv_values(required_axes)
+    expected_axis_values = csv_values(expected_axes)
+    armed_axis_values = csv_values(armed_axes)
+    pending_axis_values = csv_values(pending_axes)
+    reason_code_values = csv_values(reason_codes)
+    allowed_axes = {"desire_stability", "psi_total"}
+    required_axes_valid = bool(
+        required_axis_values
+        and len(set(required_axis_values)) == len(required_axis_values)
+        and set(required_axis_values).issubset(allowed_axes)
+    )
+    axes_match = bool(
+        required_axes_valid
+        and (
+            expected_axes is None
+            or required_axis_values == expected_axis_values
+        )
+    )
+    minimum = _optional_non_negative_integer(minimum_observations)
+    armed_transition_count_value = _optional_non_negative_integer(
+        armed_transition_count
+    )
+    desire_count = _optional_non_negative_integer(desire_observation_count)
+    psi_count = _optional_non_negative_integer(psi_observation_count)
+    trigger_count_value = _optional_non_negative_integer(trigger_count)
+    armed_at_step_value = _optional_non_negative_integer(armed_at_step)
+    trigger_step_value = _optional_non_negative_integer(trigger_step)
+    raw_arming_progress = _safe_number(arming_progress)
+    arming_progress_value = (
+        float(raw_arming_progress)
+        if raw_arming_progress is not None
+        and math.isfinite(float(raw_arming_progress))
+        else None
+    )
+    observation_counts = {
+        "desire_stability": desire_count,
+        "psi_total": psi_count,
+    }
+    observation_counts_complete = bool(
+        minimum is not None
+        and minimum > 0
+        and axes_match
+        and all(
+            observation_counts.get(axis) is not None
+            for axis in required_axis_values
+        )
+    )
+    expected_armed_axis_values = (
+        [
+            axis
+            for axis in required_axis_values
+            if int(observation_counts[axis]) >= minimum
+        ]
+        if observation_counts_complete and minimum is not None
+        else []
+    )
+    expected_pending_axis_values = (
+        [
+            axis
+            for axis in required_axis_values
+            if axis not in expected_armed_axis_values
+        ]
+        if observation_counts_complete
+        else []
+    )
+    expected_armed = bool(
+        observation_counts_complete and not expected_pending_axis_values
+    )
+    expected_arming_progress = (
+        sum(
+            min(int(observation_counts[axis]), minimum)
+            for axis in required_axis_values
+        )
+        / (len(required_axis_values) * minimum)
+        if observation_counts_complete
+        and minimum is not None
+        and required_axis_values
+        else None
+    )
+    arm_transition_consistent = bool(
+        (
+            expected_armed
+            and armed_transition_count_value == 1
+            and armed_at_step_value is not None
+        )
+        or (
+            not expected_armed
+            and armed_transition_count_value == 0
+            and armed_at_step_value is None
+        )
+    )
+    arming_state_consistent = bool(
+        active_value
+        and observation_counts_complete
+        and armed is expected_armed
+        and armed_axis_values == expected_armed_axis_values
+        and pending_axis_values == expected_pending_axis_values
+        and arming_progress_value is not None
+        and expected_arming_progress is not None
+        and math.isclose(
+            arming_progress_value,
+            expected_arming_progress,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+        and arm_transition_consistent
+    )
+    allowed_trigger_codes = {
+        code
+        for axis, code in (
+            ("desire_stability", "desire_stability_below_minimum"),
+            ("psi_total", "psi_total_limit_exceeded"),
+        )
+        if axis in required_axis_values
+    }
+    trigger_code_axes = {
+        "desire_stability_below_minimum": "desire_stability",
+        "psi_total_limit_exceeded": "psi_total",
+    }
+    trigger_axes_observed = bool(
+        minimum is not None
+        and minimum > 0
+        and reason_code_values
+        and all(
+            observation_counts.get(trigger_code_axes[code]) is not None
+            and int(observation_counts[trigger_code_axes[code]]) >= minimum
+            for code in reason_code_values
+            if code in trigger_code_axes
+        )
+    )
+    status_value = None if status is None else str(status)
+    reason_codes_valid = bool(
+        len(set(reason_code_values)) == len(reason_code_values)
+        and set(reason_code_values).issubset(allowed_trigger_codes)
+    )
+    trigger_receipt_ready = bool(
+        active_value
+        and arming_state_consistent
+        and trigger_count_value == 1
+        and status_value == "stop_requested"
+        and reason_code_values
+        and reason_codes_valid
+        and trigger_axes_observed
+        and trigger_step_value is not None
+    )
+    non_trigger_fields_consistent = bool(
+        trigger_count_value == 0
+        and status_value in {"observing", "warming_up", "within_limits", "breached"}
+        and reason_codes_valid
+        and trigger_step_value is None
+    )
+    trigger_fields_consistent = bool(
+        non_trigger_fields_consistent or trigger_receipt_ready
+    )
+    fully_armed_receipt_ready = bool(
+        active_value
+        and expected_armed
+        and arming_state_consistent
+        and trigger_fields_consistent
+    )
+    ready = bool(
+        not active_value
+        or fully_armed_receipt_ready
+        or trigger_receipt_ready
+    )
+    basis = (
+        "not_required"
+        if not active_value
+        else "fully_armed"
+        if fully_armed_receipt_ready
+        else "guard_triggered"
+        if trigger_receipt_ready
+        else None
+    )
+    issues: list[dict[str, object]] = []
+    if active_value and not required_axes_valid:
+        issues.append(
+            {
+                "field": "required_axes",
+                "observed": required_axis_values,
+                "message": "active guard required axes are missing or invalid",
+            }
+        )
+    elif active_value and not axes_match:
+        issues.append(
+            {
+                "field": "required_axes",
+                "observed": required_axis_values,
+                "threshold": expected_axis_values,
+                "message": "live guard axes do not match configured axes",
+            }
+        )
+    if active_value and not ready:
+        issues.append(
+            {
+                "field": "runtime_evidence",
+                "observed": {
+                    "armed": armed,
+                    "armed_transition_count": armed_transition_count_value,
+                    "armed_axes": armed_axis_values,
+                    "pending_axes": pending_axis_values,
+                    "arming_progress": arming_progress_value,
+                    "desire_observation_count": desire_count,
+                    "psi_observation_count": psi_count,
+                    "trigger_count": trigger_count_value,
+                    "status": status,
+                    "reason_codes": reason_code_values,
+                    "trigger_step": trigger_step_value,
+                },
+                "threshold": {
+                    "fully_armed": True,
+                    "or_consistent_trigger_receipt": True,
+                    "expected_armed": expected_armed,
+                    "expected_armed_axes": expected_armed_axis_values,
+                    "expected_pending_axes": expected_pending_axis_values,
+                    "expected_arming_progress": expected_arming_progress,
+                },
+                "message": (
+                    "live geometry guard neither fully armed nor emitted a "
+                    "consistent trigger receipt"
+                ),
+            }
+        )
+    return {
+        "row_type": "hf_gpt2_finetune_geometry_guard_runtime_evidence",
+        "status": (
+            "not_required"
+            if not active_value
+            else "ready"
+            if ready
+            else "incomplete"
+        ),
+        "active": active_value,
+        "ready": ready,
+        "basis": basis,
+        "minimum_observations": minimum,
+        "required_axes": required_axis_values,
+        "expected_axes": expected_axis_values,
+        "axes_match": axes_match,
+        "armed": armed if isinstance(armed, bool) else None,
+        "armed_transition_count": armed_transition_count_value,
+        "armed_at_step": armed_at_step_value,
+        "armed_axes": armed_axis_values,
+        "pending_axes": pending_axis_values,
+        "arming_progress": arming_progress_value,
+        "expected_armed": expected_armed,
+        "expected_armed_axes": expected_armed_axis_values,
+        "expected_pending_axes": expected_pending_axis_values,
+        "expected_arming_progress": expected_arming_progress,
+        "arming_state_consistent": arming_state_consistent,
+        "desire_observation_count": desire_count,
+        "psi_observation_count": psi_count,
+        "fully_armed_receipt_ready": fully_armed_receipt_ready,
+        "trigger_count": trigger_count_value,
+        "trigger_status": status_value,
+        "trigger_reason_codes": reason_code_values,
+        "trigger_step": trigger_step_value,
+        "trigger_receipt_ready": trigger_receipt_ready,
+        "trigger_fields_consistent": trigger_fields_consistent,
+        "issue_count": len(issues),
+        "issues": issues,
     }
 
 
@@ -5426,11 +5740,39 @@ def summarize_hf_gpt2_finetune_trainer_trace(
     triggered_geometry_guards = [
         guard for guard in geometry_guards if guard.get("triggered_now") is True
     ]
+    armed_geometry_guard_transitions = [
+        guard for guard in geometry_guards if guard.get("armed_now") is True
+    ]
     last_geometry_guard = geometry_guards[-1] if geometry_guards else {}
     last_geometry_guard_horizon = (
         dict(last_geometry_guard.get("horizon"))
         if isinstance(last_geometry_guard.get("horizon"), Mapping)
         else {}
+    )
+    geometry_guard_runtime_evidence = (
+        hf_gpt2_finetune_geometry_guard_runtime_evidence_report(
+            active=last_geometry_guard.get("active") is True,
+            minimum_observations=last_geometry_guard.get(
+                "minimum_observations"
+            ),
+            required_axes=last_geometry_guard.get("required_axes"),
+            armed_axes=last_geometry_guard.get("armed_axes"),
+            pending_axes=last_geometry_guard.get("pending_axes"),
+            armed=last_geometry_guard.get("armed"),
+            armed_transition_count=len(armed_geometry_guard_transitions),
+            armed_at_step=last_geometry_guard.get("armed_at_step"),
+            arming_progress=last_geometry_guard.get("arming_progress"),
+            desire_observation_count=last_geometry_guard.get(
+                "desire_observation_count"
+            ),
+            psi_observation_count=last_geometry_guard.get(
+                "psi_observation_count"
+            ),
+            trigger_count=len(triggered_geometry_guards),
+            status=last_geometry_guard.get("status"),
+            reason_codes=last_geometry_guard.get("reason_codes"),
+            trigger_step=last_geometry_guard.get("trigger_step"),
+        )
     )
     return {
         "row_type": "hf_gpt2_finetune_trainer_trace_summary",
@@ -5479,8 +5821,42 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_training_geometry_guard_triggered": bool(
             triggered_geometry_guards
         ),
+        "trace_training_geometry_guard_runtime_evidence": (
+            geometry_guard_runtime_evidence
+        ),
+        "trace_training_geometry_guard_ever_armed": bool(
+            armed_geometry_guard_transitions
+            or last_geometry_guard.get("armed") is True
+        ),
+        "trace_training_geometry_guard_armed_transition_count": len(
+            armed_geometry_guard_transitions
+        ),
         "trace_last_training_geometry_guard_status": last_geometry_guard.get(
             "status"
+        ),
+        "trace_last_training_geometry_guard_armed": last_geometry_guard.get(
+            "armed"
+        ),
+        "trace_last_training_geometry_guard_armed_at_step": _safe_number(
+            last_geometry_guard.get("armed_at_step")
+        ),
+        "trace_last_training_geometry_guard_required_axes": csv_label(
+            last_geometry_guard.get("required_axes")
+        ),
+        "trace_last_training_geometry_guard_armed_axes": csv_label(
+            last_geometry_guard.get("armed_axes")
+        ),
+        "trace_last_training_geometry_guard_pending_axes": csv_label(
+            last_geometry_guard.get("pending_axes")
+        ),
+        "trace_last_training_geometry_guard_arming_progress": _safe_number(
+            last_geometry_guard.get("arming_progress")
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": (
+            _safe_number(last_geometry_guard.get("desire_observation_count"))
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": (
+            _safe_number(last_geometry_guard.get("psi_observation_count"))
         ),
         "trace_last_training_geometry_guard_reason_codes": csv_label(
             last_geometry_guard.get("reason_codes")
@@ -10681,6 +11057,10 @@ def summarize_hf_gpt2_finetune_run_card(
     )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
+    trainer_geometry_guard_runtime_evidence = _mapping_item(
+        trainer_trace,
+        "trace_training_geometry_guard_runtime_evidence",
+    )
     trainer_geometry_guard_horizon = _mapping_item(
         card,
         "trainer_geometry_guard_horizon",
@@ -11533,8 +11913,50 @@ def summarize_hf_gpt2_finetune_run_card(
         "trace_training_geometry_guard_triggered": trainer_trace.get(
             "trace_training_geometry_guard_triggered"
         ),
+        "trace_training_geometry_guard_runtime_evidence": (
+            trainer_geometry_guard_runtime_evidence
+        ),
+        "trace_training_geometry_guard_ever_armed": trainer_trace.get(
+            "trace_training_geometry_guard_ever_armed"
+        ),
+        "trace_training_geometry_guard_armed_transition_count": _metric_number(
+            trainer_trace,
+            "trace_training_geometry_guard_armed_transition_count",
+        ),
         "trace_last_training_geometry_guard_status": trainer_trace.get(
             "trace_last_training_geometry_guard_status"
+        ),
+        "trace_last_training_geometry_guard_armed": trainer_trace.get(
+            "trace_last_training_geometry_guard_armed"
+        ),
+        "trace_last_training_geometry_guard_armed_at_step": _metric_number(
+            trainer_trace,
+            "trace_last_training_geometry_guard_armed_at_step",
+        ),
+        "trace_last_training_geometry_guard_required_axes": trainer_trace.get(
+            "trace_last_training_geometry_guard_required_axes"
+        ),
+        "trace_last_training_geometry_guard_armed_axes": trainer_trace.get(
+            "trace_last_training_geometry_guard_armed_axes"
+        ),
+        "trace_last_training_geometry_guard_pending_axes": trainer_trace.get(
+            "trace_last_training_geometry_guard_pending_axes"
+        ),
+        "trace_last_training_geometry_guard_arming_progress": _metric_number(
+            trainer_trace,
+            "trace_last_training_geometry_guard_arming_progress",
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_training_geometry_guard_desire_observation_count",
+            )
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_training_geometry_guard_psi_observation_count",
+            )
         ),
         "trace_last_training_geometry_guard_reason_codes": trainer_trace.get(
             "trace_last_training_geometry_guard_reason_codes"
@@ -13672,6 +14094,9 @@ def hf_gpt2_finetune_trainer_trace_callback(
             self.geometry_guard_triggered = False
             self.geometry_guard_trigger_codes: list[str] = []
             self.geometry_guard_trigger_step: int | float | None = None
+            self.geometry_guard_armed = False
+            self.geometry_guard_armed_at_step: int | float | None = None
+            self.geometry_guard_status = "observing"
             if reset:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text("", encoding="utf-8")
@@ -13724,6 +14149,48 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 if self.geometry_desire_stability_count
                 else None
             )
+            required_axes = [
+                axis
+                for axis, required in (
+                    ("desire_stability", min_desire_stability_value is not None),
+                    ("psi_total", max_psi_total_value is not None),
+                )
+                if required
+            ]
+            axis_observation_counts = {
+                "desire_stability": self.geometry_desire_stability_count,
+                "psi_total": self.geometry_psi_total_count,
+            }
+            armed_axes = [
+                axis
+                for axis in required_axes
+                if axis_observation_counts[axis] >= geometry_guard_min_events_value
+            ]
+            pending_axes = [
+                axis for axis in required_axes if axis not in armed_axes
+            ]
+            armed = not pending_axes
+            capped_observation_count = sum(
+                min(
+                    axis_observation_counts[axis],
+                    geometry_guard_min_events_value,
+                )
+                for axis in required_axes
+            )
+            required_observation_count = (
+                len(required_axes) * geometry_guard_min_events_value
+            )
+            arming_progress = (
+                capped_observation_count / required_observation_count
+                if required_observation_count
+                else 1.0
+            )
+            armed_now = bool(armed and not self.geometry_guard_armed)
+            if armed_now:
+                self.geometry_guard_armed = True
+                self.geometry_guard_armed_at_step = _safe_number(
+                    _safe_attr(state, "global_step")
+                )
             new_observation = bool(
                 desire_stability_value is not None or psi_total_value is not None
             )
@@ -13769,9 +14236,10 @@ def hf_gpt2_finetune_trainer_trace_callback(
                     status = "breached"
             elif new_observation:
                 self.geometry_guard_breach_streak = 0
-                status = "within_limits"
+                status = "within_limits" if armed else "warming_up"
             else:
-                status = "observing"
+                status = self.geometry_guard_status
+            self.geometry_guard_status = status
             horizon = hf_gpt2_finetune_geometry_guard_horizon_report(
                 max_steps=_safe_attr(
                     state,
@@ -13792,6 +14260,13 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 "row_type": "hf_gpt2_finetune_training_geometry_guard",
                 "status": status,
                 "active": True,
+                "armed": armed,
+                "armed_now": armed_now,
+                "armed_at_step": self.geometry_guard_armed_at_step,
+                "required_axes": required_axes,
+                "armed_axes": armed_axes,
+                "pending_axes": pending_axes,
+                "arming_progress": arming_progress,
                 "stop_requested": self.geometry_guard_triggered,
                 "triggered_now": triggered_now,
                 "reason_codes": reason_codes,
@@ -14273,6 +14748,17 @@ def hf_finetune_geometry_guard_horizon_report(
 ) -> dict[str, object]:
     return _generic_report_from(
         hf_gpt2_finetune_geometry_guard_horizon_report,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_geometry_guard_runtime_evidence_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_geometry_guard_runtime_evidence_report,
         *args,
         **kwargs,
     )

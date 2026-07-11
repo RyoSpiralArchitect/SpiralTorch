@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .hf_ft import summarize_hf_finetune_run_card
+from .hf_ft import (
+    hf_finetune_geometry_guard_runtime_evidence_report,
+    summarize_hf_finetune_run_card,
+)
 from .hf_peft import hf_causal_lm_artifact_report
 
 __all__ = [
@@ -1216,6 +1219,98 @@ def hf_adapter_promotion_report(
     )
     trainer_loss = _finite_number(summary.get("trainer_train_loss"))
     generation_changed = summary.get("generation_continuation_changed")
+    summarized_guard_runtime_evidence = summary.get(
+        "trace_training_geometry_guard_runtime_evidence"
+    )
+    geometry_guard_runtime_evidence_required = bool(
+        summary.get("trainer_geometry_guard_active") is True
+        or (
+            isinstance(summarized_guard_runtime_evidence, Mapping)
+            and summarized_guard_runtime_evidence.get("active") is True
+        )
+        or (_integer_number(summary.get("trace_training_geometry_guard_count")) or 0)
+        > 0
+    )
+    geometry_guard_expected_axes = [
+        axis
+        for axis, configured in (
+            (
+                "desire_stability",
+                summary.get("trainer_min_desire_stability_guard") is not None,
+            ),
+            (
+                "psi_total",
+                summary.get("trainer_max_psi_total_guard") is not None,
+            ),
+        )
+        if configured
+    ]
+    geometry_guard_runtime_evidence = (
+        hf_finetune_geometry_guard_runtime_evidence_report(
+            active=geometry_guard_runtime_evidence_required,
+            minimum_observations=(
+                summary.get("trainer_geometry_guard_min_events")
+                or (
+                    summarized_guard_runtime_evidence.get(
+                        "minimum_observations"
+                    )
+                    if isinstance(summarized_guard_runtime_evidence, Mapping)
+                    else None
+                )
+            ),
+            required_axes=summary.get(
+                "trace_last_training_geometry_guard_required_axes"
+            ),
+            expected_axes=geometry_guard_expected_axes or None,
+            armed_axes=summary.get(
+                "trace_last_training_geometry_guard_armed_axes"
+            ),
+            pending_axes=summary.get(
+                "trace_last_training_geometry_guard_pending_axes"
+            ),
+            armed=summary.get("trace_last_training_geometry_guard_armed"),
+            armed_transition_count=summary.get(
+                "trace_training_geometry_guard_armed_transition_count"
+            ),
+            armed_at_step=summary.get(
+                "trace_last_training_geometry_guard_armed_at_step"
+            ),
+            arming_progress=summary.get(
+                "trace_last_training_geometry_guard_arming_progress"
+            ),
+            desire_observation_count=summary.get(
+                "trace_last_training_geometry_guard_desire_observation_count"
+            ),
+            psi_observation_count=summary.get(
+                "trace_last_training_geometry_guard_psi_observation_count"
+            ),
+            trigger_count=summary.get(
+                "trace_training_geometry_guard_trigger_count"
+            ),
+            status=summary.get("trace_last_training_geometry_guard_status"),
+            reason_codes=summary.get(
+                "trace_last_training_geometry_guard_reason_codes"
+            ),
+            trigger_step=summary.get(
+                "trace_last_training_geometry_guard_trigger_step"
+            ),
+        )
+    )
+    geometry_guard_armed = (
+        geometry_guard_runtime_evidence.get("armed") is True
+    )
+    geometry_guard_triggered = (
+        summary.get("trace_training_geometry_guard_triggered") is True
+    )
+    geometry_guard_trigger_receipt_ready = (
+        geometry_guard_runtime_evidence.get("trigger_receipt_ready") is True
+    )
+    geometry_guard_runtime_evidence_ready = (
+        geometry_guard_runtime_evidence.get("ready") is True
+    )
+    geometry_guard_runtime_evidence_basis = (
+        geometry_guard_runtime_evidence.get("basis")
+    )
     artifact_probe, probed_artifact, probe_source_matches, probe_new_tokens = (
         _artifact_probe_evidence(card_payload, candidate_path)
     )
@@ -1375,6 +1470,24 @@ def hf_adapter_promotion_report(
             "trainer_loss_finite",
             passed=trainer_loss is not None,
             observed=trainer_loss,
+        ),
+        _check(
+            "geometry_guard_runtime_evidence",
+            passed=(
+                geometry_guard_runtime_evidence_ready
+                if geometry_guard_runtime_evidence_required
+                else None
+            ),
+            required=geometry_guard_runtime_evidence_required,
+            observed=geometry_guard_runtime_evidence,
+            threshold={
+                "fully_armed": True,
+                "or_consistent_trigger_receipt": True,
+            },
+            message=(
+                "active geometry guards must fully arm or emit a consistent "
+                "trigger receipt before adapter promotion"
+            ),
         ),
         _check(
             "eval_evidence",
@@ -1549,6 +1662,44 @@ def hf_adapter_promotion_report(
             summary.get("trace_mean_desire_stability")
         ),
         "trace_max_psi_total": _finite_number(summary.get("trace_max_psi_total")),
+        "geometry_guard_runtime_evidence_required": (
+            geometry_guard_runtime_evidence_required
+        ),
+        "geometry_guard_runtime_evidence_ready": (
+            geometry_guard_runtime_evidence_ready
+        ),
+        "geometry_guard_runtime_evidence": geometry_guard_runtime_evidence,
+        "geometry_guard_runtime_evidence_basis": (
+            geometry_guard_runtime_evidence_basis
+        ),
+        "geometry_guard_trigger_receipt_ready": (
+            geometry_guard_trigger_receipt_ready
+        ),
+        "trace_training_geometry_guard_triggered": geometry_guard_triggered,
+        "trace_last_training_geometry_guard_armed": geometry_guard_armed,
+        "trace_last_training_geometry_guard_armed_at_step": _finite_number(
+            summary.get("trace_last_training_geometry_guard_armed_at_step")
+        ),
+        "trace_last_training_geometry_guard_arming_progress": _finite_number(
+            summary.get("trace_last_training_geometry_guard_arming_progress")
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": (
+            _integer_number(
+                summary.get(
+                    "trace_last_training_geometry_guard_desire_observation_count"
+                )
+            )
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": (
+            _integer_number(
+                summary.get(
+                    "trace_last_training_geometry_guard_psi_observation_count"
+                )
+            )
+        ),
+        "trace_last_training_geometry_guard_pending_axes": summary.get(
+            "trace_last_training_geometry_guard_pending_axes"
+        ),
         "max_eval_loss_regression": regression_limit,
         "generation_changed": generation_changed,
         "artifact_probe_status": artifact_probe.get("status"),
@@ -1642,6 +1793,7 @@ def hf_adapter_promotion_lines(
             f"artifact_probe={report.get('artifact_probe_status')} "
             f"probe_process={report.get('artifact_probe_process_status')} "
             f"probe_pid={report.get('artifact_probe_process_pid')} "
+            f"guard_runtime={report.get('geometry_guard_runtime_evidence_basis')} "
             f"finetune_replay={report.get('finetune_replay_identity_status')} "
             "finetune_replay_verified="
             f"{report.get('finetune_replay_identity_verified')} "
@@ -2434,6 +2586,49 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "trace_max_psi_total": None
         if promotion_metrics is None
         else promotion_metrics.get("trace_max_psi_total"),
+        "geometry_guard_runtime_evidence_required": None
+        if promotion_metrics is None
+        else promotion_metrics.get("geometry_guard_runtime_evidence_required"),
+        "geometry_guard_runtime_evidence_ready": None
+        if promotion_metrics is None
+        else promotion_metrics.get("geometry_guard_runtime_evidence_ready"),
+        "geometry_guard_runtime_evidence": None
+        if promotion_metrics is None
+        else promotion_metrics.get("geometry_guard_runtime_evidence"),
+        "geometry_guard_runtime_evidence_basis": None
+        if promotion_metrics is None
+        else promotion_metrics.get("geometry_guard_runtime_evidence_basis"),
+        "trace_training_geometry_guard_triggered": None
+        if promotion_metrics is None
+        else promotion_metrics.get("trace_training_geometry_guard_triggered"),
+        "trace_last_training_geometry_guard_armed": None
+        if promotion_metrics is None
+        else promotion_metrics.get("trace_last_training_geometry_guard_armed"),
+        "trace_last_training_geometry_guard_armed_at_step": None
+        if promotion_metrics is None
+        else promotion_metrics.get(
+            "trace_last_training_geometry_guard_armed_at_step"
+        ),
+        "trace_last_training_geometry_guard_arming_progress": None
+        if promotion_metrics is None
+        else promotion_metrics.get(
+            "trace_last_training_geometry_guard_arming_progress"
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": None
+        if promotion_metrics is None
+        else promotion_metrics.get(
+            "trace_last_training_geometry_guard_desire_observation_count"
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": None
+        if promotion_metrics is None
+        else promotion_metrics.get(
+            "trace_last_training_geometry_guard_psi_observation_count"
+        ),
+        "trace_last_training_geometry_guard_pending_axes": None
+        if promotion_metrics is None
+        else promotion_metrics.get(
+            "trace_last_training_geometry_guard_pending_axes"
+        ),
         "artifact_probe_status": None
         if promotion is None
         else promotion.get("artifact_probe_status"),
@@ -2613,6 +2808,17 @@ def _chain_inferred_root_node(
         "trace_training_telemetry_count": None,
         "trace_mean_desire_stability": None,
         "trace_max_psi_total": None,
+        "geometry_guard_runtime_evidence_required": None,
+        "geometry_guard_runtime_evidence_ready": None,
+        "geometry_guard_runtime_evidence": None,
+        "geometry_guard_runtime_evidence_basis": None,
+        "trace_training_geometry_guard_triggered": None,
+        "trace_last_training_geometry_guard_armed": None,
+        "trace_last_training_geometry_guard_armed_at_step": None,
+        "trace_last_training_geometry_guard_arming_progress": None,
+        "trace_last_training_geometry_guard_desire_observation_count": None,
+        "trace_last_training_geometry_guard_psi_observation_count": None,
+        "trace_last_training_geometry_guard_pending_axes": None,
         "launch_command": None,
         "launch_command_display": None,
         "launch_command_source": None,
@@ -3254,6 +3460,22 @@ def _adapter_promotion_chain_transition(
         "child_trace_max_psi_total": _finite_number(
             child.get("trace_max_psi_total")
         ),
+        "child_geometry_guard_runtime_evidence_ready": child.get(
+            "geometry_guard_runtime_evidence_ready"
+        ),
+        "child_geometry_guard_runtime_evidence_basis": child.get(
+            "geometry_guard_runtime_evidence_basis"
+        ),
+        "child_trace_last_training_geometry_guard_armed": child.get(
+            "trace_last_training_geometry_guard_armed"
+        ),
+        "child_trace_last_training_geometry_guard_arming_progress": (
+            _finite_number(
+                child.get(
+                    "trace_last_training_geometry_guard_arming_progress"
+                )
+            )
+        ),
         "promotion_ready": child.get("promotion_ready") is True,
         "promotion_revalidated_ready": (
             child.get("promotion_revalidated_ready") is True
@@ -3449,6 +3671,22 @@ def hf_adapter_continuation_policy_report(
                     else desire_stability >= resolved_min_desire_stability
                 ),
                 "trace_max_psi_total": psi_total,
+                "geometry_guard_runtime_evidence_ready": node.get(
+                    "geometry_guard_runtime_evidence_ready"
+                ),
+                "geometry_guard_runtime_evidence_basis": node.get(
+                    "geometry_guard_runtime_evidence_basis"
+                ),
+                "trace_last_training_geometry_guard_armed": node.get(
+                    "trace_last_training_geometry_guard_armed"
+                ),
+                "trace_last_training_geometry_guard_arming_progress": (
+                    _finite_number(
+                        node.get(
+                            "trace_last_training_geometry_guard_arming_progress"
+                        )
+                    )
+                ),
                 "max_psi_total": resolved_max_psi,
                 "meets_max_psi_total": (
                     None
@@ -3490,6 +3728,16 @@ def hf_adapter_continuation_policy_report(
     )
     selected_psi_total = (
         _finite_number(selected_observation.get("trace_max_psi_total"))
+        if selected_observation is not None
+        else None
+    )
+    selected_geometry_guard_runtime_evidence_ready = (
+        selected_observation.get("geometry_guard_runtime_evidence_ready")
+        if selected_observation is not None
+        else None
+    )
+    selected_geometry_guard_runtime_evidence_basis = (
+        selected_observation.get("geometry_guard_runtime_evidence_basis")
         if selected_observation is not None
         else None
     )
@@ -3735,6 +3983,12 @@ def hf_adapter_continuation_policy_report(
         "selected_trace_training_telemetry_count": selected_telemetry_count,
         "selected_trace_mean_desire_stability": selected_desire_stability,
         "selected_trace_max_psi_total": selected_psi_total,
+        "selected_geometry_guard_runtime_evidence_ready": (
+            selected_geometry_guard_runtime_evidence_ready
+        ),
+        "selected_geometry_guard_runtime_evidence_basis": (
+            selected_geometry_guard_runtime_evidence_basis
+        ),
         "max_lineage_depth": resolved_max_depth,
         "target_eval_loss": resolved_target,
         "min_eval_improvement": resolved_min_improvement,
@@ -4326,6 +4580,8 @@ def hf_adapter_continuation_policy_lines(
             f"distortion={report.get('selected_distortion_pressure_index')} "
             f"desire_stability={report.get('selected_trace_mean_desire_stability')} "
             f"psi_max={report.get('selected_trace_max_psi_total')} "
+            "guard_runtime="
+            f"{report.get('selected_geometry_guard_runtime_evidence_basis')} "
             f"plateau={report.get('consecutive_below_min_eval_improvement')}/"
             f"{report.get('plateau_patience')} "
             f"reasons={reason_codes or '-'}"
@@ -4459,6 +4715,8 @@ def hf_adapter_promotion_chain_lines(
             f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
             f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
             f"eval_improvement={raw_transition.get('child_eval_improvement')} "
+            "guard_runtime="
+            f"{raw_transition.get('child_geometry_guard_runtime_evidence_basis')} "
             f"promotion_ready={raw_transition.get('promotion_ready')} "
             f"probe_process={raw_transition.get('artifact_probe_process_status')} "
             f"probe_pid={raw_transition.get('artifact_probe_process_pid')}"
@@ -4478,6 +4736,7 @@ def hf_adapter_promotion_chain_lines(
             f"probe_process={raw_node.get('artifact_probe_process_status')} "
             f"probe_pid={raw_node.get('artifact_probe_process_pid')} "
             f"eval_regression={raw_node.get('eval_loss_regression')} "
+            f"guard_runtime={raw_node.get('geometry_guard_runtime_evidence_basis')} "
             f"finetune_replay={raw_node.get('finetune_replay_identity_status')} "
             "finetune_replay_verified="
             f"{raw_node.get('finetune_replay_identity_verified')} "

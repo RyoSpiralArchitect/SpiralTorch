@@ -141,6 +141,24 @@ def _write_promoted_adapter(
         after=after,
         launch_command=command,
     )
+    if (
+        "--trainer-min-desire-stability-guard" in command
+        or "--trainer-max-psi-total-guard" in command
+    ):
+        card["trainer_geometry_guard_active"] = True
+        card["trainer_geometry_guard_min_events"] = int(
+            _flag(command, "--trainer-geometry-guard-min-events")
+        )
+        card["trainer_min_desire_stability_guard"] = (
+            float(_flag(command, "--trainer-min-desire-stability-guard"))
+            if "--trainer-min-desire-stability-guard" in command
+            else None
+        )
+        card["trainer_max_psi_total_guard"] = (
+            float(_flag(command, "--trainer-max-psi-total-guard"))
+            if "--trainer-max-psi-total-guard" in command
+            else None
+        )
     if "--trainer-trace-jsonl" in command:
         trace_path = Path(_flag(command, "--trainer-trace-jsonl"))
         card["trainer_trace_jsonl"] = str(trace_path)
@@ -453,11 +471,15 @@ class FakeFineTuneRunner:
         fail_returncode: int | None = None,
         weight_prefix: str = "generated",
         trainer_telemetry: Sequence[tuple[float, float] | None] | None = None,
+        trainer_geometry_guard_observations: int | None = None,
     ) -> None:
         self.improvements = list(improvements)
         self.fail_returncode = fail_returncode
         self.weight_prefix = weight_prefix
         self.trainer_telemetry = list(trainer_telemetry or [])
+        self.trainer_geometry_guard_observations = (
+            trainer_geometry_guard_observations
+        )
         self.commands: list[list[str]] = []
 
     def __call__(self, command: Sequence[str]) -> int:
@@ -504,42 +526,86 @@ class FakeFineTuneRunner:
                 if "--trainer-max-psi-total-guard" in values
                 else None
             )
-            trainer_trace_rows[0]["training_geometry_guard"] = {
-                "row_type": "hf_gpt2_finetune_training_geometry_guard",
-                "status": "within_limits",
-                "active": True,
-                "stop_requested": False,
-                "triggered_now": False,
-                "reason_codes": [],
-                "min_desire_stability": min_desire_guard,
-                "max_psi_total": max_psi_guard,
-                "minimum_observations": int(
-                    _flag(values, "--trainer-geometry-guard-min-events")
-                ),
-                "patience": int(
-                    _flag(values, "--trainer-geometry-guard-patience")
-                ),
-                "breach_streak": 0,
-                "current_desire_stability": telemetry[0],
-                "running_mean_desire_stability": telemetry[0],
-                "desire_observation_count": 1,
-                "current_psi_total": telemetry[1],
-                "observed_max_psi_total": telemetry[1],
-                "psi_observation_count": 1,
-                "trigger_step": None,
-                "horizon": st.hf_finetune_geometry_guard_horizon_report(
-                    max_steps=int(_flag(values, "--max-steps")),
-                    logging_steps=int(_flag(values, "--logging-steps")),
-                    min_desire_stability_guard=min_desire_guard,
-                    max_psi_total_guard=max_psi_guard,
-                    minimum_observations=int(
-                        _flag(values, "--trainer-geometry-guard-min-events")
-                    ),
-                    patience=int(
-                        _flag(values, "--trainer-geometry-guard-patience")
-                    ),
-                ),
-            }
+            minimum_observations = int(
+                _flag(values, "--trainer-geometry-guard-min-events")
+            )
+            patience = int(
+                _flag(values, "--trainer-geometry-guard-patience")
+            )
+            observation_count = (
+                minimum_observations
+                if self.trainer_geometry_guard_observations is None
+                else self.trainer_geometry_guard_observations
+            )
+            required_axes = [
+                axis
+                for axis, required in (
+                    ("desire_stability", min_desire_guard is not None),
+                    ("psi_total", max_psi_guard is not None),
+                )
+                if required
+            ]
+            horizon = st.hf_finetune_geometry_guard_horizon_report(
+                max_steps=int(_flag(values, "--max-steps")),
+                logging_steps=int(_flag(values, "--logging-steps")),
+                min_desire_stability_guard=min_desire_guard,
+                max_psi_total_guard=max_psi_guard,
+                minimum_observations=minimum_observations,
+                patience=patience,
+            )
+            trainer_trace_rows = []
+            for observation in range(1, observation_count + 1):
+                armed = observation >= minimum_observations
+                armed_axes = list(required_axes) if armed else []
+                pending_axes = [] if armed else list(required_axes)
+                trainer_trace_rows.append(
+                    {
+                        "event": "log",
+                        "global_step": observation,
+                        "training_telemetry": {
+                            "status": "ok",
+                            "desire": {"stability": telemetry[0]},
+                            "psi": {"total": telemetry[1]},
+                        },
+                        "training_geometry_guard": {
+                            "row_type": (
+                                "hf_gpt2_finetune_training_geometry_guard"
+                            ),
+                            "status": (
+                                "within_limits" if armed else "warming_up"
+                            ),
+                            "active": True,
+                            "armed": armed,
+                            "armed_now": observation == minimum_observations,
+                            "armed_at_step": (
+                                minimum_observations if armed else None
+                            ),
+                            "required_axes": required_axes,
+                            "armed_axes": armed_axes,
+                            "pending_axes": pending_axes,
+                            "arming_progress": min(
+                                1.0,
+                                observation / minimum_observations,
+                            ),
+                            "stop_requested": False,
+                            "triggered_now": False,
+                            "reason_codes": [],
+                            "min_desire_stability": min_desire_guard,
+                            "max_psi_total": max_psi_guard,
+                            "minimum_observations": minimum_observations,
+                            "patience": patience,
+                            "breach_streak": 0,
+                            "current_desire_stability": telemetry[0],
+                            "running_mean_desire_stability": telemetry[0],
+                            "desire_observation_count": observation,
+                            "current_psi_total": telemetry[1],
+                            "observed_max_psi_total": telemetry[1],
+                            "psi_observation_count": observation,
+                            "trigger_step": None,
+                            "horizon": horizon,
+                        },
+                    }
+                )
         _write_promoted_adapter(
             output,
             parent,
@@ -868,6 +934,47 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         for line in st.hf_adapter_continuation_executor_lines(missing)
     )
 
+    unarmed_source = tmp_path / "unarmed-source"
+    unarmed_source.mkdir()
+    _, unarmed_child = _seed_chain(
+        unarmed_source,
+        trainer_trace_summary=parent_telemetry,
+    )
+    unarmed_root = tmp_path / "unarmed-runs"
+    unarmed = st.run_hf_adapter_continuation_executor(
+        unarmed_child,
+        output_root=unarmed_root,
+        state_path=unarmed_root / "state.json",
+        run=True,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+        max_steps=8,
+        command_runner=FakeFineTuneRunner(
+            [0.05],
+            trainer_telemetry=[(0.75, 0.50)],
+            trainer_geometry_guard_observations=1,
+        ),
+    )
+
+    unarmed_attempt = unarmed["generations"][-1]
+    unarmed_evidence = unarmed_attempt["postflight"][
+        "trainer_telemetry_evidence"
+    ]
+    assert unarmed["status"] == "failed"
+    assert unarmed["reason"] == (
+        "generated_adapter_telemetry_evidence_not_ready"
+    )
+    assert unarmed_evidence["geometry_guard_runtime_evidence_ready"] is False
+    assert unarmed_evidence["geometry_guard_runtime_evidence_basis"] is None
+    assert unarmed_evidence["trace_last_training_geometry_guard_armed"] is False
+    assert unarmed_evidence[
+        "trace_last_training_geometry_guard_pending_axes"
+    ] == ["desire_stability", "psi_total"]
+    assert any(
+        issue["field"] == "trainer_geometry_guard_runtime_evidence"
+        for issue in unarmed_evidence["issues"]
+    )
+
     ready_source = tmp_path / "ready-source"
     ready_source.mkdir()
     _, ready_child = _seed_chain(
@@ -903,17 +1010,28 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
     assert ready_evidence["ready"] is True
     assert ready_evidence["required_axes"] == ["desire_stability", "psi_total"]
     assert ready_evidence["trace_exists"] is True
-    assert ready_evidence["trace_training_telemetry_count"] == 1
+    assert ready_evidence["trace_training_telemetry_count"] == 3
     assert ready_evidence["trace_mean_desire_stability"] == pytest.approx(0.65)
     assert ready_evidence["trace_max_psi_total"] == pytest.approx(0.70)
     assert ready_evidence["geometry_guard_required"] is True
     assert ready_evidence["geometry_guard_matches"] is True
     assert ready_evidence["geometry_guard_horizon_matches"] is True
-    assert ready_evidence["trace_training_geometry_guard_count"] == 1
+    assert ready_evidence["trace_training_geometry_guard_count"] == 3
     assert ready_evidence["trace_training_geometry_guard_trigger_count"] == 0
+    assert ready_evidence[
+        "trace_training_geometry_guard_armed_transition_count"
+    ] == 1
     assert ready_evidence["trace_last_training_geometry_guard_status"] == (
         "within_limits"
     )
+    assert ready_evidence["trace_last_training_geometry_guard_armed"] is True
+    assert ready_evidence["geometry_guard_axes_match"] is True
+    assert ready_evidence["geometry_guard_trigger_receipt_ready"] is False
+    assert ready_evidence["geometry_guard_runtime_evidence_ready"] is True
+    assert ready_evidence["geometry_guard_runtime_evidence_basis"] == (
+        "fully_armed"
+    )
+    assert ready_evidence["geometry_guard_node_matches"] is True
     assert ready_evidence["node_matches_trace"] is True
     assert str(ready_evidence["trace_sha256"]).startswith("sha256:")
     assert str(ready_evidence["evidence_id"]).startswith("sha256:")
@@ -922,8 +1040,10 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
     )
     assert any(
         "telemetry_evidence=ready" in line
-        and "telemetry_events=1" in line
+        and "telemetry_events=3" in line
         and "geometry_guard_triggers=0" in line
+        and "geometry_guard_armed=True" in line
+        and "guard_runtime=fully_armed" in line
         for line in st.hf_adapter_continuation_executor_lines(ready)
     )
 
@@ -940,7 +1060,20 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         st.load_hf_adapter_continuation_executor(ready_state)
     trace_path.write_text(original_trace, encoding="utf-8")
 
-    tampered_state = json.loads(ready_state.read_text(encoding="utf-8"))
+    original_state = ready_state.read_text(encoding="utf-8")
+    tampered_state = json.loads(original_state)
+    tampered_state["generations"][-1]["postflight"][
+        "trainer_telemetry_evidence"
+    ]["geometry_guard_runtime_evidence_basis"] = "guard_triggered"
+    ready_state.write_text(json.dumps(tampered_state), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="trainer telemetry evidence identity mismatch",
+    ):
+        st.load_hf_adapter_continuation_executor(ready_state)
+
+    ready_state.write_text(original_state, encoding="utf-8")
+    tampered_state = json.loads(original_state)
     tampered_state["generations"][-1]["postflight"][
         "trainer_telemetry_evidence"
     ]["trace_max_psi_total"] = 0.55
