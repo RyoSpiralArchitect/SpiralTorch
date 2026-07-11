@@ -81,7 +81,7 @@ impl JsonExpiry {
 
         let millis_u64 = millis as u64;
 
-        if millis % 1000 == 0 {
+        if millis.is_multiple_of(1000) {
             Self::Seconds((millis / 1000) as u64)
         } else {
             Self::Milliseconds(millis_u64)

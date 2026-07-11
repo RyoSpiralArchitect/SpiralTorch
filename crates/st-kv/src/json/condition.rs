@@ -6,18 +6,13 @@
 #![cfg(feature = "redis")]
 
 /// Controls conditional write behaviour for Redis `SET`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum JsonSetCondition {
     /// Always perform the write, regardless of key existence.
+    #[default]
     Always,
     /// Only write when the key does not yet exist (`NX`).
     Nx,
     /// Only write when the key already exists (`XX`).
     Xx,
-}
-
-impl Default for JsonSetCondition {
-    fn default() -> Self {
-        Self::Always
-    }
 }

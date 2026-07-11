@@ -3,6 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 mod error;
 pub use error::KvErr;
 
@@ -14,7 +19,7 @@ mod json;
 #[cfg(feature = "redis")]
 pub use json::{
     AutomatedJsonSetOptions, JsonExpiry, JsonSetCondition, JsonSetOptions, JsonSetOptionsBuilder,
-    PreparedJsonSetOptions,
+    PreparedJsonSetOptions, SharedPreparedJsonSetOptions,
 };
 
 #[cfg(feature = "redis")]
