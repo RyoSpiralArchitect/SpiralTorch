@@ -761,6 +761,15 @@ Trainer `global_step` becomes the horizon's `initial_step`; only
 `max_steps - initial_step` and the log boundaries still ahead can arm the new
 callback segment. Bridge launch and scale-up preflight therefore reject a
 resume that looked armable only when historical steps were counted again.
+Each exact resume also receives a distinct immutable trainer-trace segment such
+as `trainer-trace.resume-step-000000001000.jsonl`; the callback never truncates
+the prior segment. The run card seals both the parent and current JSONL digest,
+byte count, event count, lineage depth, and segment/receipt IDs. A repeated
+attempt gets an `.attempt-N` path, and the bridge reserves that path before
+Trainer construction so concurrent resumes cannot select the same segment.
+Adapter-chain audit and executor postflight reread these files and fail closed
+if either the prior receipt or the generated segment changed. Legacy run cards
+without a segment receipt remain readable.
 Guard configuration, horizon evidence, and stop reasons are written into the
 trainer trace and run card. After a gated generation exits, executor postflight
 reads the
@@ -1373,7 +1382,19 @@ resume = st.hf_finetune_checkpoint_resume_report(
 )
 print(st.hf_finetune_checkpoint_resume_lines(resume)[0])
 print(resume["recommendation"], resume["recommended_args"])
+
+segment = st.hf_finetune_trainer_trace_segment_plan(
+    "runs/qwen2-lora/trainer-trace.jsonl",
+    resume_from_checkpoint="runs/qwen2-lora/checkpoint-1000",
+    initial_step=1000,
+)
+print(st.hf_finetune_trainer_trace_segment_lines(segment)[0])
 ```
+
+The installed bridge writes the segment receipt automatically after training.
+Custom Trainer integrations can call
+`st.hf_finetune_trainer_trace_segment_receipt(segment)` after closing their
+JSONL writer to seal the current trace and reverify its parent.
 
 When `scheduler_extension_risk` is true, use that checkpoint as
 `--model-name ... --finetune-mode lora` without

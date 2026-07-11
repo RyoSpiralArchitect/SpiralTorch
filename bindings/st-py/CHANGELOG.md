@@ -63,6 +63,11 @@
   proves remaining steps and future log events rather than reusing the full
   historical horizon. Bridge launch, callback traces, scale-up artifacts, and
   execution preflight fail closed on a resume segment that cannot arm.
+- Immutable resume trace segments: exact checkpoint continuation now writes a
+  collision-safe `.resume-step-...attempt-N.jsonl` instead of truncating prior
+  Trainer telemetry. Run cards seal parent/current digests and segment lineage;
+  bridge preflight rejects a changed prior receipt, while adapter-chain and
+  executor audits revalidate the sealed files and keep legacy cards readable.
 - Live geometry-guard arming receipts: guard traces now distinguish warm-up
   from fully armed coverage per desire/psi axis and emit one arm transition.
   Adapter promotion, chain audit, and continuation postflight reject early

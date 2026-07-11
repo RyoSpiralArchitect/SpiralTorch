@@ -40,6 +40,7 @@ __all__ = [
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
@@ -94,6 +95,9 @@ __all__ = [
     "hf_finetune_geometry_guard_runtime_evidence_report",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
+    "hf_finetune_trainer_trace_segment_lines",
+    "hf_finetune_trainer_trace_segment_plan",
+    "hf_finetune_trainer_trace_segment_receipt",
     "hf_finetune_zspace_probe",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_corpus_file_report",
@@ -123,6 +127,9 @@ __all__ = [
     "hf_gpt2_finetune_geometry_guard_runtime_evidence_report",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
+    "hf_gpt2_finetune_trainer_trace_segment_lines",
+    "hf_gpt2_finetune_trainer_trace_segment_plan",
+    "hf_gpt2_finetune_trainer_trace_segment_receipt",
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_finetune_run_cards",
     "load_hf_finetune_model_configs",
@@ -158,6 +165,9 @@ HF_GPT2_FT_RUN_CARD_FILENAME = "spiraltorch-hf-gpt2-ft-run-card.json"
 HF_GPT2_FT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
 HF_FINETUNE_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
 HF_FINETUNE_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
+HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA = (
+    "spiraltorch.hf_finetune_trainer_trace_segment.v1"
+)
 _HF_FINETUNE_ENTRYPOINT_MODULE = "spiraltorch.hf_finetune_entrypoint"
 _HF_FINETUNE_BRIDGE_SCRIPT_NAMES = {
     "hf_finetune_bridge.py",
@@ -4290,6 +4300,17 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"python={report.get('hf_gpt2_ft_python_packages', 'none')}"
         ),
     ]
+    trainer_trace_segment = (
+        report.get("trainer_trace_segment_receipt")
+        or report.get("trainer_trace_segment")
+        or report.get("trainer_trace_segment_plan")
+    )
+    if isinstance(trainer_trace_segment, Mapping):
+        lines.extend(
+            hf_gpt2_finetune_trainer_trace_segment_lines(
+                trainer_trace_segment
+            )
+        )
     corpus = report.get("corpus_file_report")
     if isinstance(corpus, Mapping):
         lines.append(
@@ -5412,6 +5433,442 @@ def write_hf_gpt2_finetune_trainer_trace_event(
     with output_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(dict(row), ensure_ascii=False, sort_keys=True) + "\n")
     return str(output_path)
+
+
+def _trainer_trace_file_evidence(path: str | Path) -> dict[str, object]:
+    trace_path = Path(path).expanduser().resolve()
+    if not trace_path.is_file():
+        return {
+            "status": "missing",
+            "path": str(trace_path),
+            "sha256": None,
+            "bytes": None,
+            "event_count": 0,
+            "invalid_line_count": 0,
+            "invalid_lines": [],
+            "first_global_step": None,
+            "last_global_step": None,
+        }
+    digest = hashlib.sha256()
+    total_bytes = 0
+    event_count = 0
+    invalid_line_count = 0
+    invalid_lines: list[int] = []
+    first_global_step: int | float | None = None
+    last_global_step: int | float | None = None
+    try:
+        with trace_path.open("rb") as handle:
+            for line_number, raw_line in enumerate(handle, 1):
+                digest.update(raw_line)
+                total_bytes += len(raw_line)
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError):
+                    invalid_line_count += 1
+                    if len(invalid_lines) < 32:
+                        invalid_lines.append(line_number)
+                    continue
+                if not isinstance(row, Mapping):
+                    invalid_line_count += 1
+                    if len(invalid_lines) < 32:
+                        invalid_lines.append(line_number)
+                    continue
+                event_count += 1
+                step = _safe_number(row.get("global_step"))
+                if step is not None and math.isfinite(float(step)):
+                    if first_global_step is None:
+                        first_global_step = step
+                    last_global_step = step
+    except OSError as exc:
+        return {
+            "status": "unreadable",
+            "path": str(trace_path),
+            "sha256": None,
+            "bytes": None,
+            "event_count": 0,
+            "invalid_line_count": 0,
+            "invalid_lines": [],
+            "first_global_step": None,
+            "last_global_step": None,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    status = (
+        "invalid_jsonl"
+        if invalid_line_count
+        else "empty"
+        if event_count == 0
+        else "ready"
+    )
+    return {
+        "status": status,
+        "path": str(trace_path),
+        "sha256": f"sha256:{digest.hexdigest()}",
+        "bytes": total_bytes,
+        "event_count": event_count,
+        "invalid_line_count": invalid_line_count,
+        "invalid_lines": invalid_lines,
+        "first_global_step": first_global_step,
+        "last_global_step": last_global_step,
+    }
+
+
+def _trainer_trace_segment_id(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        dict(payload),
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _trainer_trace_resume_segment_path(
+    path: Path,
+    *,
+    initial_step: int,
+) -> tuple[Path, int]:
+    suffix = path.suffix or ".jsonl"
+    stem = path.name[: -len(suffix)] if path.suffix else path.name
+    attempt = 1
+    while True:
+        attempt_suffix = "" if attempt == 1 else f".attempt-{attempt}"
+        candidate = path.with_name(
+            f"{stem}.resume-step-{initial_step:012d}{attempt_suffix}{suffix}"
+        )
+        if not candidate.exists():
+            return candidate, attempt
+        attempt += 1
+
+
+def hf_gpt2_finetune_trainer_trace_segment_plan(
+    trace_path: str | Path,
+    *,
+    resume_from_checkpoint: str | Path | None = None,
+    initial_step: object = 0,
+    previous_segment: Mapping[str, object] | None = None,
+    previous_trace_path: str | Path | None = None,
+) -> dict[str, object]:
+    """Plan an immutable trace path for one fresh or resumed Trainer segment."""
+
+    resolved_initial_step = _optional_non_negative_integer(initial_step)
+    if resolved_initial_step is None:
+        raise ValueError("initial_step must be a non-negative integer")
+    canonical_path = Path(trace_path).expanduser().resolve()
+    resume_requested = bool(
+        resume_from_checkpoint is not None or resolved_initial_step > 0
+    )
+    previous = dict(previous_segment or {}) if resume_requested else {}
+    previous_receipt_required = bool(previous.get("receipt_id") is not None)
+    previous_trace_value = previous.get("trace_path")
+    if resume_requested and previous_receipt_required and previous_trace_value:
+        parent_path = Path(str(previous_trace_value)).expanduser().resolve()
+    elif resume_requested:
+        parent_candidates = [
+            previous_trace_value,
+            previous_trace_path,
+            canonical_path,
+        ]
+        parent_path = next(
+            (
+                Path(str(value)).expanduser().resolve()
+                for value in parent_candidates
+                if value is not None
+                and Path(str(value)).expanduser().resolve().is_file()
+            ),
+            None,
+        )
+    else:
+        parent_path = None
+    if resume_requested:
+        resolved_trace_path, attempt = _trainer_trace_resume_segment_path(
+            canonical_path,
+            initial_step=resolved_initial_step,
+        )
+    else:
+        resolved_trace_path = canonical_path
+        attempt = 1
+    parent_evidence = (
+        _trainer_trace_file_evidence(parent_path)
+        if parent_path is not None
+        else None
+    )
+    previous_depth = _optional_non_negative_integer(previous.get("lineage_depth"))
+    lineage_depth = (
+        previous_depth + 1
+        if previous_depth is not None
+        else 1
+        if parent_path is not None
+        else 0
+    )
+    parent_readable = bool(
+        parent_evidence is None
+        or parent_evidence.get("status") == "ready"
+    )
+    previous_revalidation = None
+    previous_revalidated_ready = None
+    if previous_receipt_required:
+        try:
+            previous_revalidation = (
+                hf_gpt2_finetune_trainer_trace_segment_receipt(previous)
+            )
+        except (OSError, TypeError, ValueError):
+            previous_revalidated_ready = False
+        else:
+            previous_revalidated_ready = bool(
+                previous_revalidation.get("ready") is True
+                and previous_revalidation.get("receipt_id")
+                == previous.get("receipt_id")
+            )
+    previous_trace_integrity_required = bool(
+        previous.get("trace_sha256") is not None
+        or previous.get("trace_bytes") is not None
+    )
+    previous_trace_integrity_ready = (
+        None
+        if not previous_trace_integrity_required
+        else bool(
+            parent_evidence is not None
+            and parent_evidence.get("sha256") == previous.get("trace_sha256")
+            and parent_evidence.get("bytes") == previous.get("trace_bytes")
+        )
+    )
+    trace_path_rewritten = resolved_trace_path != canonical_path
+    plan_identity = {
+        "schema": HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA,
+        "canonical_trace_path": str(canonical_path),
+        "trace_path": str(resolved_trace_path),
+        "resume_from_checkpoint": (
+            None
+            if resume_from_checkpoint is None
+            else str(Path(resume_from_checkpoint).expanduser().resolve())
+        ),
+        "initial_step": resolved_initial_step,
+        "attempt": attempt,
+        "lineage_depth": lineage_depth,
+        "parent_segment_id": previous.get("segment_id"),
+        "parent_segment_receipt_id": previous.get("receipt_id"),
+        "parent_trace_path": None if parent_path is None else str(parent_path),
+        "parent_trace_sha256": (
+            None if parent_evidence is None else parent_evidence.get("sha256")
+        ),
+        "parent_trace_bytes": (
+            None if parent_evidence is None else parent_evidence.get("bytes")
+        ),
+    }
+    segment_id = _trainer_trace_segment_id(plan_identity)
+    issues = []
+    if not parent_readable:
+        issues.append(
+            {
+                "field": "parent_trace",
+                "message": (
+                    "previous trainer trace is not valid non-empty JSONL and "
+                    "cannot be sealed"
+                ),
+                "observed": parent_evidence,
+            }
+        )
+    if previous_receipt_required and not previous_revalidated_ready:
+        issues.append(
+            {
+                "field": "previous_segment_receipt",
+                "message": (
+                    "previous trainer trace segment receipt no longer "
+                    "matches its sealed files"
+                ),
+                "observed": previous_revalidation,
+            }
+        )
+    if previous_trace_integrity_required and not previous_trace_integrity_ready:
+        issues.append(
+            {
+                "field": "previous_segment_trace",
+                "message": (
+                    "previous trainer trace no longer matches its sealed "
+                    "digest and byte count"
+                ),
+                "observed": parent_evidence,
+            }
+        )
+    ready = not issues
+    return {
+        "row_type": "hf_gpt2_finetune_trainer_trace_segment_plan",
+        "schema": HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA,
+        "status": (
+            "blocked"
+            if not ready
+            else "resume_segment"
+            if resume_requested and parent_path is not None
+            else "resume_without_prior_trace"
+            if resume_requested
+            else "fresh_segment"
+        ),
+        "ready": ready,
+        "segment_id": segment_id,
+        "resume_requested": resume_requested,
+        "resume_from_checkpoint": plan_identity["resume_from_checkpoint"],
+        "initial_step": resolved_initial_step,
+        "canonical_trace_path": str(canonical_path),
+        "trace_path": str(resolved_trace_path),
+        "trace_path_rewritten": trace_path_rewritten,
+        "attempt": attempt,
+        "collision_avoided": attempt > 1,
+        "lineage_depth": lineage_depth,
+        "parent_segment_id": previous.get("segment_id"),
+        "parent_segment_receipt_id": previous.get("receipt_id"),
+        "previous_segment_receipt": (
+            previous if previous_receipt_required else None
+        ),
+        "previous_segment_receipt_required": previous_receipt_required,
+        "previous_segment_revalidated_ready": previous_revalidated_ready,
+        "previous_segment_revalidation": previous_revalidation,
+        "previous_segment_trace_integrity_required": (
+            previous_trace_integrity_required
+        ),
+        "previous_segment_trace_integrity_ready": (
+            previous_trace_integrity_ready
+        ),
+        "parent_trace_path": None if parent_path is None else str(parent_path),
+        "parent_trace_status": (
+            None if parent_evidence is None else parent_evidence.get("status")
+        ),
+        "parent_trace_sha256": plan_identity["parent_trace_sha256"],
+        "parent_trace_bytes": plan_identity["parent_trace_bytes"],
+        "parent_trace_event_count": (
+            None
+            if parent_evidence is None
+            else parent_evidence.get("event_count")
+        ),
+        "preserves_parent_trace": bool(
+            parent_path is not None and resolved_trace_path != parent_path
+        ),
+        "issues": issues,
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_segment_receipt(
+    plan: Mapping[str, object],
+) -> dict[str, object]:
+    """Seal the current trace and reverify its immutable parent segment."""
+
+    payload = dict(plan)
+    trace_path = payload.get("trace_path")
+    if trace_path is None:
+        raise ValueError("trace segment plan is missing trace_path")
+    current_evidence = _trainer_trace_file_evidence(str(trace_path))
+    parent_path = payload.get("parent_trace_path")
+    parent_evidence = (
+        _trainer_trace_file_evidence(str(parent_path))
+        if parent_path is not None
+        else None
+    )
+    parent_integrity_ready = bool(
+        parent_evidence is None
+        or (
+            parent_evidence.get("sha256") == payload.get("parent_trace_sha256")
+            and parent_evidence.get("bytes") == payload.get("parent_trace_bytes")
+        )
+    )
+    raw_previous_receipt = payload.get("previous_segment_receipt")
+    previous_receipt_revalidation = None
+    previous_receipt_integrity_ready = None
+    if isinstance(raw_previous_receipt, Mapping):
+        try:
+            previous_receipt_revalidation = (
+                hf_gpt2_finetune_trainer_trace_segment_receipt(
+                    raw_previous_receipt
+                )
+            )
+        except (OSError, TypeError, ValueError, RecursionError):
+            previous_receipt_integrity_ready = False
+        else:
+            previous_receipt_integrity_ready = bool(
+                previous_receipt_revalidation.get("ready") is True
+                and previous_receipt_revalidation.get("receipt_id")
+                == raw_previous_receipt.get("receipt_id")
+            )
+    current_trace_ready = bool(current_evidence.get("status") == "ready")
+    plan_ready = payload.get("ready") is True
+    ready = bool(
+        plan_ready
+        and current_trace_ready
+        and parent_integrity_ready
+        and previous_receipt_integrity_ready is not False
+    )
+    receipt_identity = {
+        "schema": HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA,
+        "segment_id": payload.get("segment_id"),
+        "trace_sha256": current_evidence.get("sha256"),
+        "trace_bytes": current_evidence.get("bytes"),
+        "trace_event_count": current_evidence.get("event_count"),
+        "parent_trace_sha256": payload.get("parent_trace_sha256"),
+        "parent_integrity_ready": parent_integrity_ready,
+        "previous_segment_receipt_id": (
+            None
+            if not isinstance(raw_previous_receipt, Mapping)
+            else raw_previous_receipt.get("receipt_id")
+        ),
+        "previous_segment_integrity_ready": (
+            previous_receipt_integrity_ready
+        ),
+    }
+    return {
+        **payload,
+        "row_type": "hf_gpt2_finetune_trainer_trace_segment_receipt",
+        "status": "ready" if ready else "incomplete",
+        "ready": ready,
+        "receipt_id": _trainer_trace_segment_id(receipt_identity),
+        "trace_status": current_evidence.get("status"),
+        "trace_sha256": current_evidence.get("sha256"),
+        "trace_bytes": current_evidence.get("bytes"),
+        "trace_event_count": current_evidence.get("event_count"),
+        "trace_invalid_line_count": current_evidence.get("invalid_line_count"),
+        "trace_first_global_step": current_evidence.get("first_global_step"),
+        "trace_last_global_step": current_evidence.get("last_global_step"),
+        "parent_integrity_ready": parent_integrity_ready,
+        "previous_segment_integrity_ready": (
+            previous_receipt_integrity_ready
+        ),
+        "previous_segment_revalidation": previous_receipt_revalidation,
+        "parent_observed_sha256": (
+            None if parent_evidence is None else parent_evidence.get("sha256")
+        ),
+        "parent_observed_bytes": (
+            None if parent_evidence is None else parent_evidence.get("bytes")
+        ),
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_segment_lines(
+    report: Mapping[str, object],
+) -> list[str]:
+    """Render one concise immutable trainer-trace segment line."""
+
+    previous_integrity = report.get("previous_segment_integrity_ready")
+    if previous_integrity is None:
+        previous_integrity = report.get(
+            "previous_segment_revalidated_ready"
+        )
+    return [
+        (
+            "hf_gpt2_ft_trainer_trace_segment "
+            f"status={report.get('status')} "
+            f"ready={report.get('ready')} "
+            f"segment_id={report.get('segment_id')} "
+            f"depth={report.get('lineage_depth')} "
+            f"initial_step={report.get('initial_step')} "
+            f"path={report.get('trace_path')} "
+            f"parent={report.get('parent_trace_path')} "
+            f"parent_preserved={report.get('preserves_parent_trace')} "
+            f"parent_integrity={report.get('parent_integrity_ready')} "
+            f"previous_integrity={previous_integrity} "
+            f"events={report.get('trace_event_count')}"
+        )
+    ]
 
 
 def load_hf_gpt2_finetune_trainer_trace(path: str | Path) -> list[dict[str, object]]:
@@ -11176,6 +11633,10 @@ def summarize_hf_gpt2_finetune_run_card(
     )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
+    trainer_trace_segment = _mapping_item(
+        card,
+        "trainer_trace_segment_receipt",
+    ) or _mapping_item(card, "trainer_trace_segment")
     trainer_geometry_guard_runtime_evidence = _mapping_item(
         trainer_trace,
         "trace_training_geometry_guard_runtime_evidence",
@@ -11393,6 +11854,41 @@ def summarize_hf_gpt2_finetune_run_card(
         "row_type": "hf_gpt2_finetune_run_card_summary",
         "run_label": _run_label(card, source_path=source_path, run_label=run_label),
         "run_card_path": source_path,
+        "trainer_trace_jsonl": card.get("trainer_trace_jsonl"),
+        "trainer_trace_segment": trainer_trace_segment,
+        "trainer_trace_segment_status": trainer_trace_segment.get("status"),
+        "trainer_trace_segment_ready": trainer_trace_segment.get("ready"),
+        "trainer_trace_segment_id": trainer_trace_segment.get("segment_id"),
+        "trainer_trace_segment_receipt_id": trainer_trace_segment.get(
+            "receipt_id"
+        ),
+        "trainer_trace_segment_lineage_depth": _safe_number(
+            trainer_trace_segment.get("lineage_depth")
+        ),
+        "trainer_trace_segment_initial_step": _safe_number(
+            trainer_trace_segment.get("initial_step")
+        ),
+        "trainer_trace_segment_parent_id": trainer_trace_segment.get(
+            "parent_segment_id"
+        ),
+        "trainer_trace_segment_parent_path": trainer_trace_segment.get(
+            "parent_trace_path"
+        ),
+        "trainer_trace_segment_parent_sha256": trainer_trace_segment.get(
+            "parent_trace_sha256"
+        ),
+        "trainer_trace_segment_parent_integrity_ready": (
+            trainer_trace_segment.get("parent_integrity_ready")
+        ),
+        "trainer_trace_segment_previous_integrity_ready": (
+            trainer_trace_segment.get("previous_segment_integrity_ready")
+        ),
+        "trainer_trace_segment_sha256": trainer_trace_segment.get(
+            "trace_sha256"
+        ),
+        "trainer_trace_segment_event_count": _safe_number(
+            trainer_trace_segment.get("trace_event_count")
+        ),
         "launch_command": _json_safe(card.get("launch_command")),
         "launch_command_display": card.get("launch_command_display"),
         "launch_command_source": card.get("launch_command_source"),
@@ -12759,6 +13255,14 @@ def summarize_hf_gpt2_finetune_sweep_report(
         )
         selected_label = best_delta_label
     selected_run = _selected_sweep_run(runs, selected_label)
+    selected_summary = next(
+        (
+            summary
+            for summary in summaries
+            if summary.get("run_label") == selected_label
+        ),
+        {},
+    )
     scale_up_candidate_label = (
         None if scale_up_candidate is None else scale_up_candidate.get("run_label")
     )
@@ -13218,6 +13722,21 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "scale_up_candidate_trainer_trace_jsonl": scale_up_candidate_run.get(
             "trainer_trace_jsonl"
         ),
+        "scale_up_candidate_trainer_trace_segment_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_segment_id")
+        ),
+        "scale_up_candidate_trainer_trace_segment_receipt_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_segment_receipt_id")
+        ),
+        "scale_up_candidate_trainer_trace_segment_ready": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_segment_ready")
+        ),
         "scale_up_candidate_command_display": scale_up_candidate_run.get(
             "command_display"
         ),
@@ -13266,6 +13785,15 @@ def summarize_hf_gpt2_finetune_sweep_report(
         or selected_run.get("run_dir"),
         "selected_run_card": selected_run.get("run_card"),
         "selected_trainer_trace_jsonl": selected_run.get("trainer_trace_jsonl"),
+        "selected_trainer_trace_segment_id": selected_summary.get(
+            "trainer_trace_segment_id"
+        ),
+        "selected_trainer_trace_segment_receipt_id": selected_summary.get(
+            "trainer_trace_segment_receipt_id"
+        ),
+        "selected_trainer_trace_segment_ready": selected_summary.get(
+            "trainer_trace_segment_ready"
+        ),
         "selected_command_display": selected_run.get("command_display"),
         "selected_command": _sweep_run_command(selected_run),
         "inference_distortion_sweep_report": report.get(
@@ -14912,6 +15440,39 @@ def hf_finetune_trainer_trace_event(
     **kwargs: object,
 ) -> dict[str, object]:
     return _generic_report_from(hf_gpt2_finetune_trainer_trace_event, *args, **kwargs)
+
+
+def hf_finetune_trainer_trace_segment_plan(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_trainer_trace_segment_plan,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_trainer_trace_segment_receipt(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_trainer_trace_segment_receipt,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_trainer_trace_segment_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        hf_gpt2_finetune_trainer_trace_segment_lines,
+        *args,
+        **kwargs,
+    )
 
 
 def hf_finetune_zspace_probe(*args: object, **kwargs: object) -> dict[str, object]:
