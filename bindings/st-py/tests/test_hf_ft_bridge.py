@@ -3996,6 +3996,347 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_pins_tokenized_dataset_and_rejects_drift(self) -> None:
+        tokenized_id = f"sha256:{'a' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "tokenized-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_tokenized_dataset_identity_status": "ready",
+                "scale_up_candidate_tokenized_dataset_identity_verified": True,
+                "scale_up_candidate_tokenized_dataset_observed_id": tokenized_id,
+                "scale_up_candidate_tokenized_dataset_total_rows": 12,
+                "scale_up_candidate_tokenized_dataset_total_input_tokens": 768,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered = json.loads(json.dumps(scale_up))
+            flag_index = tampered["command"].index(
+                "--expected-tokenized-dataset-id"
+            )
+            del tampered["command"][flag_index : flag_index + 2]
+            blocked = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(tampered)
+            drifted_summary = dict(summary)
+            drifted_summary["scale_up_candidate_command"] = [
+                *command,
+                "--expected-tokenized-dataset-id",
+                tokenized_id,
+            ]
+            drifted_summary[
+                "scale_up_candidate_tokenized_dataset_observed_id"
+            ] = f"sha256:{'b' * 64}"
+            drifted = hf_ft.hf_gpt2_finetune_scale_up_command(
+                drifted_summary,
+                output_dir=root / "drifted",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            drifted_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                drifted
+            )
+
+        self.assertEqual(scale_up["tokenized_dataset_expected_id"], tokenized_id)
+        self.assertEqual(
+            scale_up["tokenized_dataset_identity_contract_status"],
+            "enforced",
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--expected-tokenized-dataset-id") + 1
+            ],
+            tokenized_id,
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(preflight["tokenized_dataset_expected_id"], tokenized_id)
+        self.assertFalse(blocked["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "--expected-tokenized-dataset-id"
+                for issue in blocked["issues"]
+            )
+        )
+        self.assertEqual(
+            drifted["tokenized_dataset_identity_contract_status"],
+            "blocked",
+        )
+        self.assertFalse(drifted_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "tokenized_dataset_identity_contract"
+                for issue in drifted_preflight["issues"]
+            )
+        )
+
+    def test_scale_up_reissues_dataset_identities_when_sample_shape_grows(
+        self,
+    ) -> None:
+        materialization_id = f"sha256:{'7' * 64}"
+        tokenized_id = f"sha256:{'a' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--max-steps",
+                "2",
+                "--max-train-samples",
+                "8",
+                "--expected-dataset-materialization-id",
+                materialization_id,
+                "--expected-tokenized-dataset-id",
+                tokenized_id,
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "shape-growth",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_dataset_materialization_identity_status": (
+                    "ready"
+                ),
+                "scale_up_candidate_dataset_materialization_identity_verified": True,
+                "scale_up_candidate_dataset_materialization_observed_id": (
+                    materialization_id
+                ),
+                "scale_up_candidate_tokenized_dataset_identity_status": "ready",
+                "scale_up_candidate_tokenized_dataset_identity_verified": True,
+                "scale_up_candidate_tokenized_dataset_observed_id": tokenized_id,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered = json.loads(json.dumps(scale_up))
+            sample_index = tampered["command"].index("--max-train-samples")
+            tampered["command"][sample_index + 1] = "8"
+            tampered_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered
+            )
+            undeclared = json.loads(json.dumps(scale_up))
+            undeclared["dataset_shape_override_changed"] = False
+            undeclared_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                undeclared
+            )
+            incomplete = json.loads(json.dumps(scale_up))
+            incomplete["command"].extend(["--max-eval-samples", "4"])
+            incomplete_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                incomplete
+            )
+
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--max-train-samples") + 1
+            ],
+            "16",
+        )
+        self.assertNotIn("--expected-dataset-materialization-id", scale_up["command"])
+        self.assertNotIn("--expected-tokenized-dataset-id", scale_up["command"])
+        self.assertIsNone(scale_up["dataset_materialization_expected_id"])
+        self.assertIsNone(scale_up["tokenized_dataset_expected_id"])
+        self.assertEqual(
+            scale_up["dataset_materialization_identity_contract_status"],
+            "reissued",
+        )
+        self.assertEqual(
+            scale_up["tokenized_dataset_identity_contract_status"],
+            "reissued",
+        )
+        self.assertTrue(scale_up["dataset_shape_override_changed"])
+        self.assertEqual(
+            scale_up["dataset_shape_changes"],
+            [
+                {
+                    "flag": "--max-train-samples",
+                    "source_value": "8",
+                    "target_value": "16",
+                }
+            ],
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertTrue(preflight["dataset_shape_reissue_verified"])
+        self.assertEqual(
+            preflight["dataset_shape_observed_changes"],
+            scale_up["dataset_shape_changes"],
+        )
+        self.assertFalse(tampered_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "dataset_shape_changes"
+                for issue in tampered_preflight["issues"]
+            )
+        )
+        self.assertFalse(undeclared_preflight["ready"])
+        self.assertFalse(undeclared_preflight["dataset_shape_reissue_verified"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "dataset_shape_override_changed"
+                for issue in undeclared_preflight["issues"]
+            )
+        )
+        self.assertFalse(incomplete_preflight["ready"])
+        self.assertFalse(incomplete_preflight["dataset_shape_reissue_verified"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "dataset_shape_changes"
+                for issue in incomplete_preflight["issues"]
+            )
+        )
+
+    def test_scale_up_reissues_only_tokenized_identity_for_eval_block_cap(
+        self,
+    ) -> None:
+        materialization_id = f"sha256:{'7' * 64}"
+        tokenized_id = f"sha256:{'a' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--max-steps",
+                "2",
+                "--max-train-samples",
+                "8",
+                "--max-eval-blocks",
+                "2",
+                "--expected-dataset-materialization-id",
+                materialization_id,
+                "--expected-tokenized-dataset-id",
+                tokenized_id,
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "eval-block-growth",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_dataset_materialization_identity_status": (
+                    "ready"
+                ),
+                "scale_up_candidate_dataset_materialization_identity_verified": True,
+                "scale_up_candidate_dataset_materialization_observed_id": (
+                    materialization_id
+                ),
+                "scale_up_candidate_tokenized_dataset_identity_status": "ready",
+                "scale_up_candidate_tokenized_dataset_identity_verified": True,
+                "scale_up_candidate_tokenized_dataset_observed_id": tokenized_id,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_train_samples_multiplier=1.0,
+                max_eval_blocks=4,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+
+        self.assertIn("--expected-dataset-materialization-id", scale_up["command"])
+        self.assertEqual(
+            scale_up["dataset_materialization_expected_id"],
+            materialization_id,
+        )
+        self.assertEqual(
+            scale_up["dataset_materialization_identity_contract_status"],
+            "enforced",
+        )
+        self.assertNotIn("--expected-tokenized-dataset-id", scale_up["command"])
+        self.assertIsNone(scale_up["tokenized_dataset_expected_id"])
+        self.assertEqual(
+            scale_up["tokenized_dataset_identity_contract_status"],
+            "reissued",
+        )
+        self.assertFalse(
+            scale_up["dataset_materialization_shape_override_changed"]
+        )
+        self.assertTrue(scale_up["tokenized_dataset_shape_override_changed"])
+        self.assertEqual(
+            scale_up["dataset_shape_changes"],
+            [
+                {
+                    "flag": "--max-eval-blocks",
+                    "source_value": "2",
+                    "target_value": "4",
+                }
+            ],
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertFalse(preflight["dataset_materialization_reissue_expected"])
+        self.assertTrue(preflight["tokenized_dataset_reissue_expected"])
+
+    def test_scale_up_canonicalizes_duplicate_singleton_flags_last_wins(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--max-train-samples",
+                "4",
+                "--max-train-samples=8",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                {
+                    "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                    "scale_up_candidate_label": "duplicate-flags",
+                    "scale_up_candidate_reason": "test",
+                    "scale_up_candidate_command": command,
+                    "scale_up_candidate_output_dir": str(output),
+                    "scale_up_candidate_run_card": str(output / "run-card.json"),
+                },
+                output_dir=root / "next",
+            )
+
+        resolved = scale_up["command"]
+        self.assertEqual(resolved.count("--max-train-samples"), 1)
+        self.assertFalse(
+            any(item.startswith("--max-train-samples=") for item in resolved)
+        )
+        self.assertEqual(
+            resolved[resolved.index("--max-train-samples") + 1],
+            "16",
+        )
+
     def test_scale_up_pins_execution_identity_and_rejects_flag_drift(
         self,
     ) -> None:
@@ -10683,11 +11024,92 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
 
+    def test_bridge_canonicalizes_tokenized_blocks_for_next_generation(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(["--tokenize-only"])
+        train = FakeDataset(
+            [
+                {
+                    "input_ids": [1, 2, 3],
+                    "attention_mask": [1, 1, 1],
+                    "labels": [1, 2, 3],
+                },
+                {
+                    "input_ids": [4, 5, 6],
+                    "attention_mask": [1, 1, 1],
+                    "labels": [4, 5, 6],
+                },
+            ]
+        )
+        evaluation = FakeDataset(
+            [{"input_ids": [7, 8], "attention_mask": [1, 1], "labels": [7, 8]}]
+        )
+        tokenized = module._tokenized_dataset_identity_report(
+            args,
+            train,
+            evaluation,
+        )
+
+        module._canonicalize_tokenized_dataset_launch_command(args, tokenized)
+        command = args._hf_finetune_launch_command
+        expected = tokenized["observed_identity_id"]
+
+        self.assertEqual(tokenized["status"], "ready")
+        self.assertEqual(tokenized["total_rows"], 3)
+        self.assertEqual(tokenized["total_input_tokens"], 8)
+        self.assertEqual(
+            command[command.index("--expected-tokenized-dataset-id") + 1],
+            expected,
+        )
+        self.assertIn("--train", command)
+        self.assertNotIn("--tokenize-only", command)
+        replay_args = module.parse_args(
+            ["--tokenize-only", "--expected-tokenized-dataset-id", expected]
+        )
+        replay = module._tokenized_dataset_identity_report(
+            replay_args,
+            train,
+            evaluation,
+        )
+        drift = module._tokenized_dataset_identity_report(
+            replay_args,
+            FakeDataset(
+                [
+                    {
+                        "input_ids": [1, 2, 3],
+                        "attention_mask": [1, 1, 1],
+                        "labels": [1, 2, 3],
+                    },
+                    {
+                        "input_ids": [4, 5, 9],
+                        "attention_mask": [1, 1, 1],
+                        "labels": [4, 5, 9],
+                    },
+                ]
+            ),
+            evaluation,
+        )
+        self.assertEqual(replay["status"], "ready")
+        self.assertTrue(replay["expected_identity_verified"])
+        self.assertEqual(drift["status"], "blocked")
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--expected-tokenized-dataset-id", expected, "--metadata-only"]
+            )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--train", "--expected-tokenized-dataset-id", "invalid"]
+            )
+
     def test_bridge_only_requires_remote_dataset_identity_when_loading(self) -> None:
         module = load_bridge_example()
 
         preflight_only = module.parse_args([])
         metadata = module.parse_args(["--metadata-only"])
+        tokenize = module.parse_args(["--tokenize-only"])
         training = module.parse_args(["--train"])
         expected = module.parse_args(
             ["--expected-dataset-input-id", f"sha256:{'e' * 64}"]
@@ -10701,7 +11123,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             module._requires_dataset_materialization_identity(preflight_only)
         )
         self.assertTrue(module._requires_dataset_materialization_identity(metadata))
+        self.assertTrue(module._requires_dataset_materialization_identity(tokenize))
         self.assertTrue(module._requires_dataset_materialization_identity(training))
+        self.assertFalse(module._requires_tokenized_dataset_identity(preflight_only))
+        self.assertFalse(module._requires_tokenized_dataset_identity(metadata))
+        self.assertTrue(module._requires_tokenized_dataset_identity(tokenize))
+        self.assertTrue(module._requires_tokenized_dataset_identity(training))
 
     def test_bridge_canonicalizes_execution_identity_for_next_generation(
         self,

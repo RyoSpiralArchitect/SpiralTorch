@@ -129,6 +129,27 @@ jobs:
         run: |
           python -m pip install -U pip wheel maturin
           maturin build --release --locked -m bindings/st-py/Cargo.toml --features "logic,kdsl"
+      - name: Verify wheel archive
+        run: |
+          python -P - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          wheels = list(Path("target/wheels").glob("spiraltorch-*.whl"))
+          if len(wheels) != 1:
+              raise RuntimeError(f"expected exactly one SpiralTorch wheel, found {wheels!r}")
+
+          with ZipFile(wheels[0]) as archive:
+              cache_entries = [
+                  name
+                  for name in archive.namelist()
+                  if "__pycache__" in PurePosixPath(name).parts
+                  or name.endswith((".pyc", ".pyo"))
+              ]
+          if cache_entries:
+              raise RuntimeError(f"wheel contains Python cache files: {cache_entries!r}")
+          print("wheel archive ok")
+          PY
       - name: Install wheel
         run: |
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
@@ -160,6 +181,20 @@ jobs:
               raise FileNotFoundError(py_typed)
           if not spiralk_pyi.exists():
               raise FileNotFoundError(spiralk_pyi)
+
+          stub = init_pyi.read_text(encoding="utf-8")
+          for symbol in (
+              "HF_TOKENIZED_DATASET_IDENTITY_SCHEMA",
+              "hf_tokenized_dataset_identity_report",
+          ):
+              if symbol not in stub:
+                  raise RuntimeError(f"packaged stub is missing {symbol}")
+
+          tokenized = spiraltorch.hf_tokenized_dataset_identity_report(
+              train_dataset=[{"input_ids": [1, 2], "labels": [1, 2]}]
+          )
+          if tokenized.get("status") != "ready":
+              raise RuntimeError(f"tokenized dataset identity unavailable: {tokenized!r}")
 
           submodules = [
               "spiraltorch.psi",

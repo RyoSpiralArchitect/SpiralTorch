@@ -1801,6 +1801,12 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "dataset_materialization_expected_id": preflight.get(
                 "dataset_materialization_expected_id"
             ),
+            "tokenized_dataset_identity_contract": command.get(
+                "tokenized_dataset_identity_contract"
+            ),
+            "tokenized_dataset_expected_id": preflight.get(
+                "tokenized_dataset_expected_id"
+            ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
             ),
@@ -1931,6 +1937,12 @@ def _run_hf_adapter_continuation_executor_unlocked(
             ),
             "dataset_materialization_expected_id": preflight.get(
                 "dataset_materialization_expected_id"
+            ),
+            "tokenized_dataset_identity_contract": command.get(
+                "tokenized_dataset_identity_contract"
+            ),
+            "tokenized_dataset_expected_id": preflight.get(
+                "tokenized_dataset_expected_id"
             ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
@@ -2208,6 +2220,14 @@ def hf_adapter_continuation_executor_lines(
             f"{selected_transition.get('dataset_materialization_identity_required')} "
             "dataset_materialization_identity="
             f"{selected_transition.get('dataset_materialization_identity_ready')} "
+            "dataset_materialization_reissued="
+            f"{selected_transition.get('dataset_materialization_reissued')} "
+            "tokenized_dataset_required="
+            f"{selected_transition.get('tokenized_dataset_identity_required')} "
+            "tokenized_dataset_identity="
+            f"{selected_transition.get('tokenized_dataset_identity_ready')} "
+            "tokenized_dataset_reissued="
+            f"{selected_transition.get('tokenized_dataset_reissued')} "
             "runtime_input_required="
             f"{selected_transition.get('runtime_input_identity_required')} "
             "runtime_input_identity="
@@ -2260,6 +2280,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(dataset_materialization_contract, Mapping)
             else None
         )
+        tokenized_dataset_contract = pending.get(
+            "tokenized_dataset_identity_contract"
+        )
+        tokenized_dataset_contract_status = (
+            tokenized_dataset_contract.get("status")
+            if isinstance(tokenized_dataset_contract, Mapping)
+            else None
+        )
         runtime_input_contract = pending.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2292,6 +2320,9 @@ def hf_adapter_continuation_executor_lines(
             f"{dataset_materialization_contract_status} "
             "dataset_materialization_expected="
             f"{pending.get('dataset_materialization_expected_id')} "
+            f"tokenized_dataset_contract={tokenized_dataset_contract_status} "
+            "tokenized_dataset_expected="
+            f"{pending.get('tokenized_dataset_expected_id')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={pending.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "
@@ -2345,6 +2376,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(dataset_materialization_contract, Mapping)
             else None
         )
+        tokenized_dataset_contract = raw_attempt.get(
+            "tokenized_dataset_identity_contract"
+        )
+        tokenized_dataset_contract_status = (
+            tokenized_dataset_contract.get("status")
+            if isinstance(tokenized_dataset_contract, Mapping)
+            else None
+        )
         runtime_input_contract = raw_attempt.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2381,6 +2420,9 @@ def hf_adapter_continuation_executor_lines(
             f"{dataset_materialization_contract_status} "
             "dataset_materialization_expected="
             f"{raw_attempt.get('dataset_materialization_expected_id')} "
+            f"tokenized_dataset_contract={tokenized_dataset_contract_status} "
+            "tokenized_dataset_expected="
+            f"{raw_attempt.get('tokenized_dataset_expected_id')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={raw_attempt.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "

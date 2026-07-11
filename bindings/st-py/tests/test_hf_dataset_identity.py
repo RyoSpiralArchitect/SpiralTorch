@@ -5,10 +5,13 @@ from types import SimpleNamespace
 from spiraltorch.hf_dataset_identity import (
     HF_DATASET_INPUT_IDENTITY_SCHEMA,
     HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
+    HF_TOKENIZED_DATASET_IDENTITY_SCHEMA,
     hf_dataset_input_identity_lines,
     hf_dataset_input_identity_report,
     hf_dataset_materialization_identity_lines,
     hf_dataset_materialization_identity_report,
+    hf_tokenized_dataset_identity_lines,
+    hf_tokenized_dataset_identity_report,
 )
 
 
@@ -195,3 +198,104 @@ def test_materialization_identity_contains_dataset_access_failures() -> None:
     assert report["status"] == "blocked"
     assert report["observed_identity_id"] is None
     assert "row 0 unavailable" in str(report["errors"])
+
+
+def test_tokenized_identity_hashes_every_block_column_and_split_in_order() -> None:
+    train = [
+        {
+            "input_ids": [10, 11, 12],
+            "attention_mask": [1, 1, 1],
+            "labels": [10, 11, 12],
+        },
+        {
+            "input_ids": [20, 21, 22],
+            "attention_mask": [1, 1, 1],
+            "labels": [20, 21, 22],
+        },
+    ]
+    evaluation = [
+        {
+            "input_ids": [30, 31],
+            "attention_mask": [1, 1],
+            "labels": [30, 31],
+        }
+    ]
+
+    first = hf_tokenized_dataset_identity_report(
+        train_dataset=train,
+        eval_dataset=evaluation,
+    )
+    replay = hf_tokenized_dataset_identity_report(
+        train_dataset=[dict(row) for row in train],
+        eval_dataset=[dict(row) for row in evaluation],
+        expected_identity_id=str(first["observed_identity_id"]),
+    )
+
+    assert first["schema"] == HF_TOKENIZED_DATASET_IDENTITY_SCHEMA
+    assert first["status"] == "ready"
+    assert first["tokenized_rows_verified"] is True
+    assert first["total_rows"] == 3
+    assert first["total_input_tokens"] == 8
+    assert first["total_label_tokens"] == 8
+    assert replay["status"] == "ready"
+    assert replay["expected_identity_verified"] is True
+    assert replay["observed_identity_id"] == first["observed_identity_id"]
+    line = hf_tokenized_dataset_identity_lines(replay)[0]
+    assert "status=ready" in line
+    assert "input_tokens=8" in line
+
+
+def test_tokenized_identity_rejects_value_order_column_and_split_drift() -> None:
+    train = [
+        {"input_ids": [1, 2], "attention_mask": [1, 1], "labels": [1, 2]},
+        {"input_ids": [3, 4], "attention_mask": [1, 1], "labels": [3, 4]},
+    ]
+    baseline = hf_tokenized_dataset_identity_report(train_dataset=train)
+    expected = str(baseline["observed_identity_id"])
+
+    value_drift = [dict(row) for row in train]
+    value_drift[1] = dict(value_drift[1], labels=[3, 9])
+    extra_column = [dict(row, token_type_ids=[0, 0]) for row in train]
+    reports = [
+        hf_tokenized_dataset_identity_report(
+            train_dataset=value_drift,
+            expected_identity_id=expected,
+        ),
+        hf_tokenized_dataset_identity_report(
+            train_dataset=list(reversed(train)),
+            expected_identity_id=expected,
+        ),
+        hf_tokenized_dataset_identity_report(
+            train_dataset=extra_column,
+            expected_identity_id=expected,
+        ),
+        hf_tokenized_dataset_identity_report(
+            train_dataset=train,
+            eval_dataset=[],
+            expected_identity_id=expected,
+        ),
+    ]
+
+    assert all(report["status"] == "blocked" for report in reports)
+
+
+def test_tokenized_identity_blocks_invalid_trainer_rows() -> None:
+    missing_labels = hf_tokenized_dataset_identity_report(
+        train_dataset=[{"input_ids": [1, 2]}],
+    )
+    non_integer_ids = hf_tokenized_dataset_identity_report(
+        train_dataset=[{"input_ids": [1, 2.5], "labels": [1, 2]}],
+    )
+    inconsistent_columns = hf_tokenized_dataset_identity_report(
+        train_dataset=[
+            {"input_ids": [1], "labels": [1]},
+            {"input_ids": [2], "labels": [2], "attention_mask": [1]},
+        ],
+    )
+
+    assert missing_labels["status"] == "blocked"
+    assert "missing required columns" in str(missing_labels["errors"])
+    assert non_integer_ids["status"] == "blocked"
+    assert "integer token id" in str(non_integer_ids["errors"])
+    assert inconsistent_columns["status"] == "blocked"
+    assert "columns changed" in str(inconsistent_columns["errors"])

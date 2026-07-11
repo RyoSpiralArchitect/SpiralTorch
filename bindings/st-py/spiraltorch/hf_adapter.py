@@ -620,6 +620,28 @@ def hf_adapter_lineage_report(
             errors.append("run-card dataset materialization identity is not ready")
         if observed_dataset_materialization_id != expected_dataset_materialization_id:
             errors.append("run-card dataset materialization identity does not match")
+    tokenized_dataset_identity = _run_card_input_identity(
+        card_payload,
+        "tokenized_dataset_identity",
+    )
+    tokenized_dataset_contract = _run_card_input_identity(
+        card_payload,
+        "tokenized_dataset_identity_contract",
+    )
+    expected_tokenized_dataset_id = (
+        tokenized_dataset_contract.get("expected_identity_id")
+        if tokenized_dataset_contract
+        else tokenized_dataset_identity.get("expected_identity_id")
+    )
+    tokenized_dataset_identity_required = expected_tokenized_dataset_id is not None
+    observed_tokenized_dataset_id = tokenized_dataset_identity.get(
+        "observed_identity_id"
+    )
+    if tokenized_dataset_identity_required:
+        if tokenized_dataset_identity.get("status") != "ready":
+            errors.append("run-card tokenized dataset identity is not ready")
+        if observed_tokenized_dataset_id != expected_tokenized_dataset_id:
+            errors.append("run-card tokenized dataset identity does not match")
     runtime_input_identity_pre_model = _run_card_input_identity(
         card_payload,
         "model_runtime_identity_pre_model",
@@ -845,6 +867,25 @@ def hf_adapter_lineage_report(
                 == expected_dataset_materialization_id
             )
         ),
+        "tokenized_dataset_identity_present": bool(tokenized_dataset_identity),
+        "tokenized_dataset_identity_required": tokenized_dataset_identity_required,
+        "tokenized_dataset_identity_status": tokenized_dataset_identity.get("status"),
+        "tokenized_dataset_expected_id": expected_tokenized_dataset_id,
+        "tokenized_dataset_observed_id": observed_tokenized_dataset_id,
+        "tokenized_dataset_total_rows": tokenized_dataset_identity.get("total_rows"),
+        "tokenized_dataset_total_input_tokens": tokenized_dataset_identity.get(
+            "total_input_tokens"
+        ),
+        "tokenized_dataset_identity_verified": (
+            None
+            if not tokenized_dataset_identity
+            else tokenized_dataset_identity.get("status") == "ready"
+            and tokenized_dataset_identity.get("identity_verified") is True
+            and (
+                not tokenized_dataset_identity_required
+                or observed_tokenized_dataset_id == expected_tokenized_dataset_id
+            )
+        ),
         "runtime_input_identity_present": bool(strongest_runtime_input_identity),
         "runtime_input_identity_required": runtime_input_identity_required,
         "runtime_input_identity_status": strongest_runtime_input_identity.get(
@@ -975,6 +1016,10 @@ def hf_adapter_lineage_lines(
             f"{report.get('dataset_materialization_identity_required')} "
             "dataset_materialization_status="
             f"{report.get('dataset_materialization_identity_status')} "
+            "tokenized_dataset_required="
+            f"{report.get('tokenized_dataset_identity_required')} "
+            "tokenized_dataset_status="
+            f"{report.get('tokenized_dataset_identity_status')} "
             "execution_input_required="
             f"{report.get('execution_input_identity_required')} "
             "execution_input_status="
@@ -1611,13 +1656,62 @@ def _chain_command(value: object) -> list[str] | None:
 
 def _chain_command_flag(command: Sequence[object], flag: str) -> str | None:
     values = [str(item) for item in command]
+    found = None
     for index, value in enumerate(values):
         if value == flag and index + 1 < len(values):
-            return values[index + 1]
+            found = values[index + 1]
         prefix = f"{flag}="
         if value.startswith(prefix):
-            return value[len(prefix) :]
-    return None
+            found = value[len(prefix) :]
+    return found
+
+
+_CHAIN_DATASET_SHAPE_FLAGS = (
+    "--max-train-samples",
+    "--max-eval-samples",
+    "--max-eval-blocks",
+    "--streaming-validation-samples",
+    "--block-size",
+    "--validation-fraction",
+    "--streaming-shuffle-buffer-size",
+    "--seed",
+    "--text-column",
+)
+_CHAIN_DATASET_MATERIALIZATION_SHAPE_FLAGS = frozenset(
+    {
+        "--max-train-samples",
+        "--max-eval-samples",
+        "--streaming-validation-samples",
+        "--validation-fraction",
+        "--streaming-shuffle-buffer-size",
+        "--seed",
+        "--text-column",
+    }
+)
+_CHAIN_TOKENIZED_DATASET_SHAPE_FLAGS = frozenset(_CHAIN_DATASET_SHAPE_FLAGS)
+
+
+def _chain_dataset_shape_changes(
+    parent_command: object,
+    child_command: object,
+) -> list[dict[str, object]]:
+    parent_values = _chain_command(parent_command)
+    child_values = _chain_command(child_command)
+    if parent_values is None or child_values is None:
+        return []
+    changes = []
+    for flag in _CHAIN_DATASET_SHAPE_FLAGS:
+        parent_value = _chain_command_flag(parent_values, flag)
+        child_value = _chain_command_flag(child_values, flag)
+        if parent_value != child_value:
+            changes.append(
+                {
+                    "flag": flag,
+                    "parent_value": parent_value,
+                    "child_value": child_value,
+                }
+            )
+    return changes
 
 
 def _chain_command_artifacts(
@@ -2035,6 +2129,30 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "dataset_materialization_identity_verified": lineage.get(
             "dataset_materialization_identity_verified"
         ),
+        "tokenized_dataset_identity_present": lineage.get(
+            "tokenized_dataset_identity_present"
+        ),
+        "tokenized_dataset_identity_required": lineage.get(
+            "tokenized_dataset_identity_required"
+        ),
+        "tokenized_dataset_identity_status": lineage.get(
+            "tokenized_dataset_identity_status"
+        ),
+        "tokenized_dataset_expected_id": lineage.get(
+            "tokenized_dataset_expected_id"
+        ),
+        "tokenized_dataset_observed_id": lineage.get(
+            "tokenized_dataset_observed_id"
+        ),
+        "tokenized_dataset_total_rows": lineage.get(
+            "tokenized_dataset_total_rows"
+        ),
+        "tokenized_dataset_total_input_tokens": lineage.get(
+            "tokenized_dataset_total_input_tokens"
+        ),
+        "tokenized_dataset_identity_verified": lineage.get(
+            "tokenized_dataset_identity_verified"
+        ),
         "runtime_input_identity_present": lineage.get(
             "runtime_input_identity_present"
         ),
@@ -2231,6 +2349,14 @@ def _chain_inferred_root_node(
         "dataset_materialization_total_rows": None,
         "dataset_materialization_total_utf8_bytes": None,
         "dataset_materialization_identity_verified": None,
+        "tokenized_dataset_identity_present": None,
+        "tokenized_dataset_identity_required": None,
+        "tokenized_dataset_identity_status": None,
+        "tokenized_dataset_expected_id": None,
+        "tokenized_dataset_observed_id": None,
+        "tokenized_dataset_total_rows": None,
+        "tokenized_dataset_total_input_tokens": None,
+        "tokenized_dataset_identity_verified": None,
         "runtime_input_identity_present": None,
         "runtime_input_identity_required": None,
         "runtime_input_identity_status": None,
@@ -2405,6 +2531,25 @@ def _adapter_promotion_chain_transition(
         if not dataset_input_continuity_observed
         else parent_dataset_input_id == dataset_input_observed_id
     )
+    dataset_shape_changes = _chain_dataset_shape_changes(
+        parent.get("launch_command"),
+        child.get("launch_command"),
+    )
+    dataset_shape_reissued = bool(dataset_shape_changes)
+    dataset_materialization_shape_changes = [
+        row
+        for row in dataset_shape_changes
+        if row.get("flag") in _CHAIN_DATASET_MATERIALIZATION_SHAPE_FLAGS
+    ]
+    tokenized_dataset_shape_changes = [
+        row
+        for row in dataset_shape_changes
+        if row.get("flag") in _CHAIN_TOKENIZED_DATASET_SHAPE_FLAGS
+    ]
+    dataset_materialization_shape_reissued = bool(
+        dataset_materialization_shape_changes
+    )
+    tokenized_dataset_shape_reissued = bool(tokenized_dataset_shape_changes)
     dataset_materialization_expected_id = child.get(
         "dataset_materialization_expected_id"
     )
@@ -2442,13 +2587,21 @@ def _adapter_promotion_chain_transition(
             )
         )
     else:
-        dataset_materialization_identity_ready = bool(
-            dataset_materialization_expected_id
-            == parent_dataset_materialization_id
-            and dataset_materialization_observed_id
-            == parent_dataset_materialization_id
-            and dataset_materialization_report_ready
-        )
+        if dataset_materialization_shape_reissued:
+            dataset_materialization_identity_ready = bool(
+                dataset_materialization_observed_id is not None
+                and dataset_materialization_expected_id
+                == dataset_materialization_observed_id
+                and dataset_materialization_report_ready
+            )
+        else:
+            dataset_materialization_identity_ready = bool(
+                dataset_materialization_expected_id
+                == parent_dataset_materialization_id
+                and dataset_materialization_observed_id
+                == parent_dataset_materialization_id
+                and dataset_materialization_report_ready
+            )
     dataset_materialization_adopted = bool(
         parent_dataset_materialization_id is None
         and dataset_materialization_observed_id is not None
@@ -2463,6 +2616,72 @@ def _adapter_promotion_chain_transition(
         if not dataset_materialization_continuity_observed
         else parent_dataset_materialization_id
         == dataset_materialization_observed_id
+    )
+    dataset_materialization_reissued = bool(
+        parent_dataset_materialization_id is not None
+        and dataset_materialization_shape_reissued
+        and dataset_materialization_identity_ready
+    )
+    tokenized_dataset_expected_id = child.get("tokenized_dataset_expected_id")
+    tokenized_dataset_observed_id = child.get("tokenized_dataset_observed_id")
+    parent_tokenized_dataset_id = parent.get("tokenized_dataset_observed_id")
+    tokenized_dataset_evidence_present = bool(
+        child.get("tokenized_dataset_identity_present") is True
+        or child.get("tokenized_dataset_identity_status") is not None
+        or tokenized_dataset_expected_id is not None
+        or tokenized_dataset_observed_id is not None
+    )
+    tokenized_dataset_report_ready = bool(
+        child.get("tokenized_dataset_identity_status") == "ready"
+        and child.get("tokenized_dataset_identity_verified") is True
+    )
+    tokenized_dataset_identity_required = bool(
+        parent_tokenized_dataset_id is not None
+        or tokenized_dataset_expected_id is not None
+    )
+    if parent_tokenized_dataset_id is None:
+        tokenized_dataset_identity_ready = bool(
+            tokenized_dataset_observed_id is None
+            and tokenized_dataset_expected_id is None
+            and not tokenized_dataset_evidence_present
+            or tokenized_dataset_observed_id is not None
+            and tokenized_dataset_report_ready
+            and (
+                tokenized_dataset_expected_id is None
+                or tokenized_dataset_expected_id == tokenized_dataset_observed_id
+            )
+        )
+    else:
+        if tokenized_dataset_shape_reissued:
+            tokenized_dataset_identity_ready = bool(
+                tokenized_dataset_observed_id is not None
+                and tokenized_dataset_expected_id == tokenized_dataset_observed_id
+                and tokenized_dataset_report_ready
+            )
+        else:
+            tokenized_dataset_identity_ready = bool(
+                tokenized_dataset_expected_id == parent_tokenized_dataset_id
+                and tokenized_dataset_observed_id == parent_tokenized_dataset_id
+                and tokenized_dataset_report_ready
+            )
+    tokenized_dataset_adopted = bool(
+        parent_tokenized_dataset_id is None
+        and tokenized_dataset_observed_id is not None
+        and tokenized_dataset_identity_ready
+    )
+    tokenized_dataset_continuity_observed = bool(
+        parent_tokenized_dataset_id is not None
+        and tokenized_dataset_observed_id is not None
+    )
+    tokenized_dataset_matches_parent = (
+        None
+        if not tokenized_dataset_continuity_observed
+        else parent_tokenized_dataset_id == tokenized_dataset_observed_id
+    )
+    tokenized_dataset_reissued = bool(
+        parent_tokenized_dataset_id is not None
+        and tokenized_dataset_shape_reissued
+        and tokenized_dataset_identity_ready
     )
     runtime_input_expected_id = child.get("runtime_input_expected_id")
     runtime_input_observed_id = child.get("runtime_input_observed_id")
@@ -2542,6 +2761,7 @@ def _adapter_promotion_chain_transition(
         and training_input_identity_ready
         and dataset_input_identity_ready
         and dataset_materialization_identity_ready
+        and tokenized_dataset_identity_ready
         and runtime_input_identity_ready
         and execution_input_identity_ready
         and child.get("parent_fingerprint_verified") is True
@@ -2647,6 +2867,32 @@ def _adapter_promotion_chain_transition(
         "dataset_materialization_matches_parent": (
             dataset_materialization_matches_parent
         ),
+        "dataset_materialization_reissued": dataset_materialization_reissued,
+        "dataset_shape_reissued": dataset_shape_reissued,
+        "dataset_shape_changes": dataset_shape_changes,
+        "dataset_materialization_shape_reissued": (
+            dataset_materialization_shape_reissued
+        ),
+        "dataset_materialization_shape_changes": (
+            dataset_materialization_shape_changes
+        ),
+        "tokenized_dataset_shape_reissued": tokenized_dataset_shape_reissued,
+        "tokenized_dataset_shape_changes": tokenized_dataset_shape_changes,
+        "tokenized_dataset_identity_required": tokenized_dataset_identity_required,
+        "tokenized_dataset_evidence_present": tokenized_dataset_evidence_present,
+        "tokenized_dataset_identity_ready": tokenized_dataset_identity_ready,
+        "tokenized_dataset_identity_status": child.get(
+            "tokenized_dataset_identity_status"
+        ),
+        "tokenized_dataset_expected_id": tokenized_dataset_expected_id,
+        "tokenized_dataset_observed_id": tokenized_dataset_observed_id,
+        "parent_tokenized_dataset_id": parent_tokenized_dataset_id,
+        "tokenized_dataset_adopted": tokenized_dataset_adopted,
+        "tokenized_dataset_continuity_observed": (
+            tokenized_dataset_continuity_observed
+        ),
+        "tokenized_dataset_matches_parent": tokenized_dataset_matches_parent,
+        "tokenized_dataset_reissued": tokenized_dataset_reissued,
         "runtime_input_identity_required": runtime_input_identity_required,
         "runtime_input_identity_ready": runtime_input_identity_ready,
         "runtime_input_identity_status": child.get(
@@ -3657,6 +3903,18 @@ def hf_adapter_promotion_chain_lines(
             f"{raw_transition.get('dataset_materialization_adopted')} "
             f"dataset_materialization_matches_parent="
             f"{raw_transition.get('dataset_materialization_matches_parent')} "
+            f"dataset_materialization_reissued="
+            f"{raw_transition.get('dataset_materialization_reissued')} "
+            f"tokenized_dataset_required="
+            f"{raw_transition.get('tokenized_dataset_identity_required')} "
+            f"tokenized_dataset_ready="
+            f"{raw_transition.get('tokenized_dataset_identity_ready')} "
+            f"tokenized_dataset_adopted="
+            f"{raw_transition.get('tokenized_dataset_adopted')} "
+            f"tokenized_dataset_matches_parent="
+            f"{raw_transition.get('tokenized_dataset_matches_parent')} "
+            f"tokenized_dataset_reissued="
+            f"{raw_transition.get('tokenized_dataset_reissued')} "
             f"runtime_input_required="
             f"{raw_transition.get('runtime_input_identity_required')} "
             f"runtime_input_ready="

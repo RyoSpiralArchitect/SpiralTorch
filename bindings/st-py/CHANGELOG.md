@@ -85,6 +85,25 @@
   transitions, scale-up, and executor state fail closed when actual row bytes
   drift even if the Hub repository commit is unchanged. Public Python reports
   expose split row/byte digests without retaining corpus text.
+- Exact tokenized Trainer-input identity: hash every post-grouping train/eval
+  block, column, typed value, split boundary, and row order after the eval block
+  cap is applied. Training launch commands adopt
+  `--expected-tokenized-dataset-id`; replay, adapter lineage, promotion
+  transitions, scale-up, and executor state fail before model preparation or
+  Trainer construction when `input_ids`, masks, labels, or block boundaries
+  drift despite unchanged raw rows and tokenizer references. New
+  `--tokenize-only` performs this full audit without constructing Trainer and
+  emits a canonical `--train` replay command carrying the adopted identity.
+- Audited dataset scale-up reissue: selection changes reissue raw-row and
+  tokenized identities instead of incorrectly enforcing the parent's smaller
+  materialization, while post-tokenization block-size/eval-block changes reissue
+  only the tokenized layer. Command artifacts record every changed flag/value;
+  preflight recomputes the exact source/target delta and rejects missing,
+  partial, or falsified reissue declarations. Promotion transitions apply the
+  same layer-specific boundary, while unchanged layers still require exact
+  parent identity continuity.
+- Python wheels now exclude `__pycache__`, `.pyc`, and `.pyo` files even when
+  local build trees contain them, and CI inspects the archive before install.
 - Content-addressed HF runtime inputs: fingerprint the effective base-model
   basis and tokenizer, pin remote config resolution to its observed Hub commit
   for tokenizer/model loading, and fail before model weights load when an

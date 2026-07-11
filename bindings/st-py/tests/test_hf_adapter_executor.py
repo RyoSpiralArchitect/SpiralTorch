@@ -121,6 +121,8 @@ def _write_promoted_adapter(
     expected_dataset_input_id: str | None = None,
     dataset_materialization_id: str | None = None,
     expected_dataset_materialization_id: str | None = None,
+    tokenized_dataset_id: str | None = None,
+    expected_tokenized_dataset_id: str | None = None,
     dataset_name: str = "org/corpus",
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
@@ -265,6 +267,38 @@ def _write_promoted_adapter(
         )
         card["launch_command"] = command
         card["launch_command_display"] = " ".join(command)
+    if tokenized_dataset_id is not None:
+        card["tokenized_dataset_identity"] = {
+            "status": "ready",
+            "phase": "after_tokenization",
+            "expected_identity_id": expected_tokenized_dataset_id,
+            "observed_identity_id": tokenized_dataset_id,
+            "identity_verified": True,
+            "tokenized_rows_verified": True,
+            "total_rows": 4,
+            "total_input_tokens": 32,
+        }
+        card["tokenized_dataset_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_tokenized_dataset_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": (
+                expected_tokenized_dataset_id or tokenized_dataset_id
+            ),
+            "observed_identity_id": tokenized_dataset_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
+        command.extend(
+            [
+                "--expected-tokenized-dataset-id",
+                expected_tokenized_dataset_id or tokenized_dataset_id,
+            ]
+        )
+        card["launch_command"] = command
+        card["launch_command_display"] = " ".join(command)
     lineage = st.write_hf_adapter_lineage(
         adapter,
         parent_adapter=parent,
@@ -290,6 +324,7 @@ def _seed_chain(
     execution_input_id: str | None = None,
     dataset_input_id: str | None = None,
     dataset_materialization_id: str | None = None,
+    tokenized_dataset_id: str | None = None,
 ) -> tuple[Path, Path]:
     root = _write_adapter(tmp_path / "root", b"root")
     st.write_hf_adapter_lineage(root)
@@ -306,6 +341,8 @@ def _seed_chain(
         expected_dataset_input_id=dataset_input_id,
         dataset_materialization_id=dataset_materialization_id,
         expected_dataset_materialization_id=dataset_materialization_id,
+        tokenized_dataset_id=tokenized_dataset_id,
+        expected_tokenized_dataset_id=tokenized_dataset_id,
     )
     return root, child
 
@@ -517,7 +554,7 @@ def test_executor_preserves_enforced_dataset_materialization_contract(
         output_root=tmp_path / "executor-runs",
         max_lineage_depth=3,
         max_steps=2,
-        max_train_samples=16,
+        max_train_samples=8,
     )
     pending = report["pending_generation"]
     contract = pending["dataset_materialization_identity_contract"]
@@ -533,6 +570,81 @@ def test_executor_preserves_enforced_dataset_materialization_contract(
     assert any(
         "dataset_materialization_contract=enforced" in line
         and f"dataset_materialization_expected={materialization_id}" in line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+    )
+
+
+def test_executor_preserves_enforced_tokenized_dataset_contract(
+    tmp_path: Path,
+) -> None:
+    tokenized_id = "sha256:" + "a" * 64
+    _, child = _seed_chain(tmp_path, tokenized_dataset_id=tokenized_id)
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "executor-runs",
+        max_lineage_depth=3,
+        max_steps=2,
+        max_train_samples=8,
+    )
+    pending = report["pending_generation"]
+    contract = pending["tokenized_dataset_identity_contract"]
+    command = pending["command"]["command"]
+
+    assert contract["status"] == "enforced"
+    assert contract["expected_identity_id"] == tokenized_id
+    assert pending["tokenized_dataset_expected_id"] == tokenized_id
+    assert _flag(command, "--expected-tokenized-dataset-id") == tokenized_id
+    assert any(
+        "tokenized_dataset_contract=enforced" in line
+        and f"tokenized_dataset_expected={tokenized_id}" in line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+    )
+
+
+def test_executor_reissues_post_selection_identities_for_shape_change(
+    tmp_path: Path,
+) -> None:
+    materialization_id = "sha256:" + "5" * 64
+    tokenized_id = "sha256:" + "a" * 64
+    _, child = _seed_chain(
+        tmp_path,
+        dataset_materialization_id=materialization_id,
+        tokenized_dataset_id=tokenized_id,
+    )
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "executor-runs",
+        max_lineage_depth=3,
+        max_steps=2,
+        max_train_samples=16,
+    )
+    pending = report["pending_generation"]
+    command_report = pending["command"]
+    command = command_report["command"]
+    materialization_contract = pending[
+        "dataset_materialization_identity_contract"
+    ]
+    tokenized_contract = pending["tokenized_dataset_identity_contract"]
+
+    assert command_report["dataset_shape_override_changed"] is True
+    assert command_report["dataset_shape_changes"] == [
+        {
+            "flag": "--max-train-samples",
+            "source_value": "8",
+            "target_value": "16",
+        }
+    ]
+    assert materialization_contract["status"] == "reissued"
+    assert tokenized_contract["status"] == "reissued"
+    assert pending["dataset_materialization_expected_id"] is None
+    assert pending["tokenized_dataset_expected_id"] is None
+    assert "--expected-dataset-materialization-id" not in command
+    assert "--expected-tokenized-dataset-id" not in command
+    assert any(
+        "dataset_materialization_contract=reissued" in line
+        and "tokenized_dataset_contract=reissued" in line
         for line in st.hf_adapter_continuation_executor_lines(report)
     )
 
