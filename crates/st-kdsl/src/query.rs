@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::Err;
 
@@ -58,10 +58,7 @@ impl QueryPlan {
             matches.sort_by(|a, b| {
                 let lhs = a.get(column).copied().unwrap_or_default();
                 let rhs = b.get(column).copied().unwrap_or_default();
-                match direction {
-                    OrderDirection::Asc => lhs.partial_cmp(&rhs).unwrap(),
-                    OrderDirection::Desc => rhs.partial_cmp(&lhs).unwrap(),
-                }
+                compare_order_values(lhs, rhs, direction)
             });
         }
 
@@ -82,6 +79,18 @@ impl QueryPlan {
                     .collect()
             })
             .collect()
+    }
+}
+
+fn compare_order_values(lhs: f64, rhs: f64, direction: &OrderDirection) -> Ordering {
+    match (lhs.is_nan(), rhs.is_nan()) {
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (true, true) => Ordering::Equal,
+        (false, false) => match direction {
+            OrderDirection::Asc => lhs.partial_cmp(&rhs).unwrap_or(Ordering::Equal),
+            OrderDirection::Desc => rhs.partial_cmp(&lhs).unwrap_or(Ordering::Equal),
+        },
     }
 }
 
@@ -344,5 +353,40 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].contains_key("score"));
         assert!(result[0].contains_key("weight"));
+    }
+
+    #[test]
+    fn execute_orders_non_nan_values_and_places_nan_last() {
+        let rows = vec![
+            BTreeMap::from([("id".to_string(), 1.0), ("score".to_string(), f64::NAN)]),
+            BTreeMap::from([
+                ("id".to_string(), 2.0),
+                ("score".to_string(), f64::INFINITY),
+            ]),
+            BTreeMap::from([("id".to_string(), 3.0), ("score".to_string(), -1.0)]),
+            BTreeMap::from([
+                ("id".to_string(), 4.0),
+                ("score".to_string(), f64::NEG_INFINITY),
+            ]),
+        ];
+
+        let mut plan = QueryPlan {
+            order: Some(("score".to_string(), OrderDirection::Asc)),
+            ..QueryPlan::default()
+        };
+        let ids = plan
+            .execute(&rows)
+            .into_iter()
+            .map(|row| row["id"])
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![4.0, 3.0, 2.0, 1.0]);
+
+        plan.order = Some(("score".to_string(), OrderDirection::Desc));
+        let ids = plan
+            .execute(&rows)
+            .into_iter()
+            .map(|row| row["id"])
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![2.0, 3.0, 4.0, 1.0]);
     }
 }
