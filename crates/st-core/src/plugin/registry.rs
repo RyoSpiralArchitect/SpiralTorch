@@ -6,9 +6,13 @@
 
 use super::context::PluginContext;
 use super::events::{PluginEvent, PluginEventBus};
+use super::sync::{lock_recover, read_recover, write_recover};
 use super::traits::{Plugin, PluginCapability, PluginMetadata};
 use crate::{PureResult, TensorError};
+use std::any::Any;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Summary of dependency issues among currently registered plugins.
@@ -36,17 +40,33 @@ impl PluginHandle {
     }
 
     /// Get the plugin's metadata.
+    ///
+    /// A panic from the plugin still propagates, but does not permanently lock the handle.
     pub fn metadata(&self) -> PluginMetadata {
-        self.plugin.lock().unwrap().metadata()
+        lock_recover(&self.plugin).metadata()
     }
 
     /// Execute a function with access to the plugin.
+    ///
+    /// A panic from the callback still propagates. The handle remains lockable afterwards,
+    /// while recovery of plugin-local state remains the plugin implementor's responsibility.
     pub fn with_plugin<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut dyn Plugin) -> R,
     {
-        let mut plugin = self.plugin.lock().unwrap();
+        let mut plugin = lock_recover(&self.plugin);
         f(&mut **plugin)
+    }
+}
+
+struct PluginTransition<'a> {
+    plugin_id: String,
+    transitions: &'a Mutex<HashSet<String>>,
+}
+
+impl Drop for PluginTransition<'_> {
+    fn drop(&mut self) {
+        lock_recover(self.transitions).remove(&self.plugin_id);
     }
 }
 
@@ -55,6 +75,7 @@ pub struct PluginRegistry {
     plugins: RwLock<HashMap<String, PluginHandle>>,
     context: Arc<Mutex<PluginContext>>,
     event_bus: PluginEventBus,
+    transitions: Mutex<HashSet<String>>,
 }
 
 impl PluginRegistry {
@@ -67,6 +88,7 @@ impl PluginRegistry {
             plugins: RwLock::new(HashMap::new()),
             context: Arc::new(Mutex::new(context)),
             event_bus,
+            transitions: Mutex::new(HashSet::new()),
         }
     }
 
@@ -74,11 +96,18 @@ impl PluginRegistry {
     ///
     /// This loads the plugin, validates dependencies, and calls its `on_load` hook.
     pub fn register(&self, mut plugin: Box<dyn Plugin>) -> PureResult<()> {
-        let metadata = plugin.metadata();
+        let metadata = catch_unwind(AssertUnwindSafe(|| plugin.metadata())).map_err(|payload| {
+            TensorError::Generic(format!(
+                "Plugin metadata() panicked: {}",
+                panic_payload_message(payload.as_ref())
+            ))
+        })?;
         let plugin_id = metadata.id.clone();
+        validate_metadata(&metadata)?;
+        let _transition = self.begin_transition(&plugin_id)?;
 
         // Check if already registered
-        if self.plugins.read().unwrap().contains_key(&plugin_id) {
+        if read_recover(&self.plugins).contains_key(&plugin_id) {
             return Err(TensorError::Generic(format!(
                 "Plugin '{}' is already registered",
                 plugin_id
@@ -89,15 +118,28 @@ impl PluginRegistry {
         self.validate_dependencies(&metadata)?;
 
         // Call on_load hook (avoid holding the registry context lock while executing plugin code)
-        let mut ctx = { self.context.lock().unwrap().clone() };
-        plugin.on_load(&mut ctx)?;
+        let mut ctx = self.context_snapshot();
+        catch_unwind(AssertUnwindSafe(|| plugin.on_load(&mut ctx)))
+            .map_err(|payload| lifecycle_panic(&plugin_id, "on_load", payload.as_ref()))??;
 
         // Store the plugin
         let handle = PluginHandle::new(plugin);
-        self.plugins
-            .write()
-            .unwrap()
-            .insert(plugin_id.clone(), handle);
+        let inserted = {
+            let mut plugins = write_recover(&self.plugins);
+            match plugins.entry(plugin_id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(handle.clone());
+                    true
+                }
+                Entry::Occupied(_) => false,
+            }
+        };
+        if !inserted {
+            return Err(TensorError::Generic(format!(
+                "Plugin '{}' became registered during on_load",
+                plugin_id
+            )));
+        }
 
         // Emit event
         self.event_bus
@@ -107,17 +149,27 @@ impl PluginRegistry {
     }
 
     /// Unregister a plugin by ID.
+    ///
+    /// The plugin is removed before its hook runs. A hook error or panic is returned to the
+    /// caller, but the partially torn-down plugin is not restored to the registry.
     pub fn unregister(&self, plugin_id: &str) -> PureResult<()> {
+        let _transition = self.begin_transition(plugin_id)?;
         let handle = {
-            let mut plugins = self.plugins.write().unwrap();
+            let mut plugins = write_recover(&self.plugins);
             plugins
                 .remove(plugin_id)
                 .ok_or_else(|| TensorError::Generic(format!("Plugin '{}' not found", plugin_id)))?
         };
 
         // Call on_unload hook
-        let mut ctx = { self.context.lock().unwrap().clone() };
-        handle.with_plugin(|plugin: &mut dyn Plugin| plugin.on_unload(&mut ctx))?;
+        let mut ctx = self.context_snapshot();
+        let unload_result = catch_unwind(AssertUnwindSafe(|| {
+            handle.with_plugin(|plugin: &mut dyn Plugin| plugin.on_unload(&mut ctx))
+        }))
+        .map_err(|payload| lifecycle_panic(plugin_id, "on_unload", payload.as_ref()))
+        .and_then(|result| result);
+
+        unload_result?;
 
         // Emit event
         self.event_bus.publish(&PluginEvent::PluginUnloaded {
@@ -129,52 +181,50 @@ impl PluginRegistry {
 
     /// Get a handle to a registered plugin.
     pub fn get(&self, plugin_id: &str) -> Option<PluginHandle> {
-        self.plugins.read().unwrap().get(plugin_id).cloned()
+        read_recover(&self.plugins).get(plugin_id).cloned()
     }
 
     /// Find plugins by capability.
     pub fn find_by_capability(&self, capability: &PluginCapability) -> Vec<PluginHandle> {
-        self.plugins
-            .read()
-            .unwrap()
-            .values()
+        let handles: Vec<PluginHandle> = read_recover(&self.plugins).values().cloned().collect();
+        handles
+            .into_iter()
             .filter(|handle| {
                 let meta = handle.metadata();
                 meta.capabilities.contains(capability)
             })
-            .cloned()
             .collect()
     }
 
     /// List all registered plugin IDs.
     pub fn list_plugins(&self) -> Vec<String> {
-        self.plugins.read().unwrap().keys().cloned().collect()
+        let mut plugin_ids: Vec<String> = read_recover(&self.plugins).keys().cloned().collect();
+        plugin_ids.sort();
+        plugin_ids
     }
 
     /// Return a dependency adjacency list for the currently registered plugins.
     ///
     /// When `internal_only` is true, dependencies that are not registered are omitted.
     pub fn dependency_graph(&self, internal_only: bool) -> HashMap<String, Vec<String>> {
-        let plugins = self.plugins.read().unwrap();
-        let mut ids: Vec<String> = plugins.keys().cloned().collect();
-        ids.sort();
+        let mut entries: Vec<(String, PluginHandle)> = read_recover(&self.plugins)
+            .iter()
+            .map(|(id, handle)| (id.clone(), handle.clone()))
+            .collect();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
 
-        let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
-        let mut graph = HashMap::with_capacity(ids.len());
+        let id_set: HashSet<String> = entries.iter().map(|(id, _)| id.clone()).collect();
+        let mut graph = HashMap::with_capacity(entries.len());
 
-        for id in &ids {
-            let Some(handle) = plugins.get(id) else {
-                graph.insert(id.clone(), Vec::new());
-                continue;
-            };
+        for (id, handle) in entries {
             let meta = handle.metadata();
             let mut deps: Vec<String> = meta.dependencies.keys().cloned().collect();
             if internal_only {
-                deps.retain(|dep| id_set.contains(dep.as_str()));
+                deps.retain(|dep| id_set.contains(dep));
             }
             deps.sort();
             deps.dedup();
-            graph.insert(id.clone(), deps);
+            graph.insert(id, deps);
         }
 
         graph
@@ -355,25 +405,25 @@ impl PluginRegistry {
         self.event_bus.publish(&PluginEvent::SystemShutdown);
 
         let (plugin_ids, deps_by_id) = {
-            let plugins = self.plugins.read().unwrap();
-            let mut ids: Vec<String> = plugins.keys().cloned().collect();
-            ids.sort();
+            let mut entries: Vec<(String, PluginHandle)> = read_recover(&self.plugins)
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            let ids: Vec<String> = entries.iter().map(|(id, _)| id.clone()).collect();
+            let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
 
             let mut deps_by_id = HashMap::new();
-            for id in &ids {
-                let Some(handle) = plugins.get(id) else {
-                    deps_by_id.insert(id.clone(), Vec::new());
-                    continue;
-                };
+            for (id, handle) in entries {
                 let meta = handle.metadata();
                 let mut deps: Vec<String> = meta
                     .dependencies
                     .keys()
-                    .filter(|dep| plugins.contains_key(*dep))
+                    .filter(|dep| id_set.contains(dep.as_str()))
                     .cloned()
                     .collect();
                 deps.sort();
-                deps_by_id.insert(id.clone(), deps);
+                deps_by_id.insert(id, deps);
             }
             (ids, deps_by_id)
         };
@@ -456,9 +506,17 @@ impl PluginRegistry {
         Arc::clone(&self.context)
     }
 
+    /// Clone the plugin context without exposing its outer coordination lock.
+    ///
+    /// Clones share the event bus, configuration, and service stores.
+    pub fn context_snapshot(&self) -> PluginContext {
+        lock_recover(&self.context).clone()
+    }
+
     fn validate_dependencies(&self, metadata: &PluginMetadata) -> PureResult<()> {
+        let plugins = read_recover(&self.plugins);
         for dep_id in metadata.dependencies.keys() {
-            if !self.plugins.read().unwrap().contains_key(dep_id) {
+            if !plugins.contains_key(dep_id) {
                 return Err(TensorError::Generic(format!(
                     "Plugin '{}' depends on '{}' which is not registered",
                     metadata.id, dep_id
@@ -467,6 +525,77 @@ impl PluginRegistry {
         }
         Ok(())
     }
+
+    fn begin_transition(&self, plugin_id: &str) -> PureResult<PluginTransition<'_>> {
+        let mut transitions = lock_recover(&self.transitions);
+        if !transitions.insert(plugin_id.to_string()) {
+            return Err(TensorError::Generic(format!(
+                "Plugin '{}' already has a lifecycle transition in progress",
+                plugin_id
+            )));
+        }
+        Ok(PluginTransition {
+            plugin_id: plugin_id.to_string(),
+            transitions: &self.transitions,
+        })
+    }
+}
+
+fn validate_metadata(metadata: &PluginMetadata) -> PureResult<()> {
+    if metadata.id.trim().is_empty() {
+        return Err(TensorError::Generic(
+            "Plugin ID must not be empty".to_string(),
+        ));
+    }
+    if metadata.id.trim() != metadata.id {
+        return Err(TensorError::Generic(format!(
+            "Plugin ID '{}' must not have leading or trailing whitespace",
+            metadata.id
+        )));
+    }
+    if metadata.version.trim().is_empty() {
+        return Err(TensorError::Generic(format!(
+            "Plugin '{}' version must not be empty",
+            metadata.id
+        )));
+    }
+    if metadata.dependencies.keys().any(|id| id.trim().is_empty()) {
+        return Err(TensorError::Generic(format!(
+            "Plugin '{}' dependency IDs must not be empty",
+            metadata.id
+        )));
+    }
+    if metadata.dependencies.keys().any(|id| id.trim() != id) {
+        return Err(TensorError::Generic(format!(
+            "Plugin '{}' dependency IDs must not have leading or trailing whitespace",
+            metadata.id
+        )));
+    }
+    if metadata.dependencies.contains_key(&metadata.id) {
+        return Err(TensorError::Generic(format!(
+            "Plugin '{}' must not depend on itself",
+            metadata.id
+        )));
+    }
+    Ok(())
+}
+
+fn lifecycle_panic(plugin_id: &str, hook: &str, payload: &(dyn Any + Send)) -> TensorError {
+    TensorError::Generic(format!(
+        "Plugin '{}' {hook}() panicked: {}",
+        plugin_id,
+        panic_payload_message(payload)
+    ))
+}
+
+fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "non-string panic payload".to_string()
 }
 
 fn canonical_cycle(nodes: &[String]) -> Vec<String> {
@@ -590,7 +719,9 @@ mod tests {
     use super::*;
     use crate::plugin::traits::{Plugin, PluginMetadata};
     use std::any::Any;
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
 
     struct TestPlugin {
         name: String,
@@ -599,6 +730,86 @@ mod tests {
     impl Plugin for TestPlugin {
         fn metadata(&self) -> PluginMetadata {
             PluginMetadata::new(&self.name, "1.0.0").with_capability(PluginCapability::Operators)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum UnloadBehavior {
+        Ok,
+        Error,
+        Panic,
+    }
+
+    struct LifecyclePlugin {
+        id: String,
+        load_gate: Option<(Arc<Barrier>, Arc<Barrier>)>,
+        panic_on_load: bool,
+        unload_behavior: UnloadBehavior,
+    }
+
+    impl LifecyclePlugin {
+        fn new(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                load_gate: None,
+                panic_on_load: false,
+                unload_behavior: UnloadBehavior::Ok,
+            }
+        }
+    }
+
+    impl Plugin for LifecyclePlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new(&self.id, "1.0.0")
+        }
+
+        fn on_load(&mut self, _ctx: &mut PluginContext) -> PureResult<()> {
+            if self.panic_on_load {
+                panic!("load panic");
+            }
+            if let Some((entered, release)) = &self.load_gate {
+                entered.wait();
+                release.wait();
+            }
+            Ok(())
+        }
+
+        fn on_unload(&mut self, _ctx: &mut PluginContext) -> PureResult<()> {
+            match self.unload_behavior {
+                UnloadBehavior::Ok => Ok(()),
+                UnloadBehavior::Error => Err(TensorError::Generic("unload failed".to_string())),
+                UnloadBehavior::Panic => panic!("unload panic"),
+            }
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    struct ToggleMetadataPlugin {
+        panic_metadata: Arc<AtomicBool>,
+    }
+
+    impl Plugin for ToggleMetadataPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            if self.panic_metadata.load(Ordering::SeqCst) {
+                panic!("metadata panic");
+            }
+            PluginMetadata::new("toggle-metadata", "1.0.0")
+                .with_capability(PluginCapability::Operators)
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -645,6 +856,116 @@ mod tests {
 
         let plugins = registry.find_by_capability(&PluginCapability::Operators);
         assert_eq!(plugins.len(), 1);
+    }
+
+    #[test]
+    fn test_same_id_registration_is_reserved_during_on_load() {
+        let registry = Arc::new(PluginRegistry::new());
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let mut first = LifecyclePlugin::new("shared-id");
+        first.load_gate = Some((Arc::clone(&entered), Arc::clone(&release)));
+
+        let worker_registry = Arc::clone(&registry);
+        let worker = thread::spawn(move || worker_registry.register(Box::new(first)));
+        entered.wait();
+
+        let error = registry
+            .register(Box::new(LifecyclePlugin::new("shared-id")))
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("lifecycle transition in progress"));
+
+        release.wait();
+        assert!(worker.join().unwrap().is_ok());
+        assert_eq!(registry.list_plugins(), vec!["shared-id".to_string()]);
+    }
+
+    #[test]
+    fn test_failed_unload_does_not_poison_registry() {
+        for unload_behavior in [UnloadBehavior::Error, UnloadBehavior::Panic] {
+            let registry = PluginRegistry::new();
+            let mut plugin = LifecyclePlugin::new("sticky");
+            plugin.unload_behavior = unload_behavior;
+            registry.register(Box::new(plugin)).unwrap();
+
+            let error = registry.unregister("sticky").unwrap_err();
+            assert!(error.to_string().contains("unload"));
+            assert!(registry.get("sticky").is_none());
+            assert!(registry
+                .register(Box::new(LifecyclePlugin::new("sticky")))
+                .is_ok());
+        }
+    }
+
+    #[test]
+    fn test_load_panic_releases_transition() {
+        let registry = PluginRegistry::new();
+        let mut plugin = LifecyclePlugin::new("retryable");
+        plugin.panic_on_load = true;
+
+        let error = registry.register(Box::new(plugin)).unwrap_err();
+        assert!(error.to_string().contains("on_load() panicked"));
+        assert!(registry
+            .register(Box::new(LifecyclePlugin::new("retryable")))
+            .is_ok());
+    }
+
+    #[test]
+    fn test_plugin_metadata_panic_does_not_poison_registry() {
+        let registry = PluginRegistry::new();
+        let panic_metadata = Arc::new(AtomicBool::new(false));
+        registry
+            .register(Box::new(ToggleMetadataPlugin {
+                panic_metadata: Arc::clone(&panic_metadata),
+            }))
+            .unwrap();
+        panic_metadata.store(true, Ordering::SeqCst);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            registry.find_by_capability(&PluginCapability::Operators)
+        }));
+        assert!(result.is_err());
+        assert!(!registry.plugins.is_poisoned());
+
+        panic_metadata.store(false, Ordering::SeqCst);
+        assert_eq!(
+            registry.get("toggle-metadata").unwrap().metadata().id,
+            "toggle-metadata"
+        );
+    }
+
+    #[test]
+    fn test_context_snapshot_recovers_outer_lock() {
+        let registry = PluginRegistry::new();
+        let raw_context = registry.context();
+        let poison_context = Arc::clone(&raw_context);
+        let _ = thread::spawn(move || {
+            let _guard = poison_context.lock().unwrap();
+            panic!("poison outer context");
+        })
+        .join();
+
+        let context = registry.context_snapshot();
+        context.set_config("runtime", "healthy");
+
+        assert_eq!(context.get_config("runtime"), Some("healthy".to_string()));
+        assert!(!raw_context.is_poisoned());
+    }
+
+    #[test]
+    fn test_invalid_plugin_metadata_is_rejected() {
+        let registry = PluginRegistry::new();
+
+        let error = registry
+            .register(Box::new(TestPlugin {
+                name: "  ".to_string(),
+            }))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("ID must not be empty"));
+        assert!(registry.list_plugins().is_empty());
     }
 
     #[test]

@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::sync::lock_recover;
+
 /// Events that can be emitted and handled by plugins.
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
@@ -87,7 +89,7 @@ impl PluginEventBus {
     pub fn subscribe(&self, event_type: impl Into<String>, listener: EventListener) -> usize {
         let event_type = event_type.into();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut listeners = self.listeners.lock().unwrap();
+        let mut listeners = lock_recover(&self.listeners);
         listeners
             .entry(event_type)
             .or_default()
@@ -99,23 +101,28 @@ impl PluginEventBus {
     ///
     /// Returns `true` when a subscription was found and removed.
     pub fn unsubscribe(&self, event_type: &str, id: usize) -> bool {
-        let mut listeners = self.listeners.lock().unwrap();
-        let Some(bucket) = listeners.get_mut(event_type) else {
-            return false;
+        let removed = {
+            let mut listeners = lock_recover(&self.listeners);
+            let Some(bucket) = listeners.get_mut(event_type) else {
+                return false;
+            };
+            let Some(position) = bucket.iter().position(|(existing, _)| *existing == id) else {
+                return false;
+            };
+            let (_, listener) = bucket.remove(position);
+            if bucket.is_empty() {
+                listeners.remove(event_type);
+            }
+            listener
         };
-        let before = bucket.len();
-        bucket.retain(|(existing, _)| *existing != id);
-        let removed = bucket.len() != before;
-        if bucket.is_empty() {
-            listeners.remove(event_type);
-        }
-        removed
+        drop(removed);
+        true
     }
 
     /// Returns true when there are listeners registered for the provided event type
     /// or for the wildcard `"*"`.
     pub fn has_listeners(&self, event_type: &str) -> bool {
-        let listeners = self.listeners.lock().unwrap();
+        let listeners = lock_recover(&self.listeners);
         listeners
             .get(event_type)
             .is_some_and(|bucket| !bucket.is_empty())
@@ -126,14 +133,14 @@ impl PluginEventBus {
     ///
     /// Returns the number of removed subscriptions.
     pub fn clear_listeners(&self, event_type: Option<&str>) -> usize {
-        let mut listeners = self.listeners.lock().unwrap();
-        match event_type {
-            Some(event_type) => listeners
-                .remove(event_type)
-                .map(|bucket| bucket.len())
-                .unwrap_or(0),
-            None => listeners.drain().map(|(_, bucket)| bucket.len()).sum(),
-        }
+        let removed: Vec<ListenerBucket> = {
+            let mut listeners = lock_recover(&self.listeners);
+            match event_type {
+                Some(event_type) => listeners.remove(event_type).into_iter().collect(),
+                None => listeners.drain().map(|(_, bucket)| bucket).collect(),
+            }
+        };
+        removed.iter().map(Vec::len).sum()
     }
 
     /// Publish an event to all interested listeners.
@@ -141,7 +148,7 @@ impl PluginEventBus {
         let event_type = self.event_type_name(event);
 
         let listeners: Vec<EventListener> = {
-            let listeners = self.listeners.lock().unwrap();
+            let listeners = lock_recover(&self.listeners);
             let mut collected = Vec::new();
             if let Some(specific_listeners) = listeners.get(&event_type) {
                 collected.extend(
@@ -191,7 +198,24 @@ impl Default for PluginEventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Weak;
+    use std::thread;
+
+    struct ListenerDropProbe {
+        listeners: Weak<Mutex<ListenerMap>>,
+        dropped_without_lock: Arc<AtomicBool>,
+    }
+
+    impl Drop for ListenerDropProbe {
+        fn drop(&mut self) {
+            let unlocked = self
+                .listeners
+                .upgrade()
+                .is_some_and(|listeners| listeners.try_lock().is_ok());
+            self.dropped_without_lock.store(unlocked, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn test_event_bus_subscription() {
@@ -266,5 +290,46 @@ mod tests {
         assert!(!bus.has_listeners("SystemInit"));
 
         assert_eq!(bus.clear_listeners(None), 0);
+    }
+
+    #[test]
+    fn test_event_bus_recovers_poisoned_listener_store() {
+        let bus = PluginEventBus::new();
+        let listeners = Arc::clone(&bus.listeners);
+        let _ = thread::spawn(move || {
+            let _guard = listeners.lock().unwrap();
+            panic!("poison listeners");
+        })
+        .join();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = Arc::clone(&calls);
+        bus.subscribe(
+            "SystemInit",
+            Arc::new(move |_| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        bus.publish(&PluginEvent::SystemInit);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(!bus.listeners.is_poisoned());
+    }
+
+    #[test]
+    fn test_listener_is_dropped_after_bus_lock_is_released() {
+        let bus = PluginEventBus::new();
+        let dropped_without_lock = Arc::new(AtomicBool::new(false));
+        let probe = ListenerDropProbe {
+            listeners: Arc::downgrade(&bus.listeners),
+            dropped_without_lock: Arc::clone(&dropped_without_lock),
+        };
+        let listener: EventListener = Arc::new(move |_| {
+            let _ = &probe;
+        });
+        let id = bus.subscribe("SystemInit", listener);
+
+        assert!(bus.unsubscribe("SystemInit", id));
+        assert!(dropped_without_lock.load(Ordering::SeqCst));
     }
 }
