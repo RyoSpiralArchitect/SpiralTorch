@@ -58,6 +58,11 @@
   `logging_steps` can emit enough telemetry to arm the callback. Scale-up
   automatically tightens sparse logging cadence, direct bridge use validates
   the horizon, and preflight fails closed when total steps are insufficient.
+- Resume-aware geometry-guard horizon: exact checkpoint continuation now uses
+  `trainer_state.json` `global_step` as the guarded segment's initial step and
+  proves remaining steps and future log events rather than reusing the full
+  historical horizon. Bridge launch, callback traces, scale-up artifacts, and
+  execution preflight fail closed on a resume segment that cannot arm.
 - Live geometry-guard arming receipts: guard traces now distinguish warm-up
   from fully armed coverage per desire/psi axis and emit one arm transition.
   Adapter promotion, chain audit, and continuation postflight reject early

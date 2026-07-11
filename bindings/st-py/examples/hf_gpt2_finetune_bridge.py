@@ -127,6 +127,54 @@ def _valid_adapter_id(value: object | None) -> bool:
     )
 
 
+def _trainer_geometry_guard_active(args: argparse.Namespace) -> bool:
+    return bool(
+        args.trainer_min_desire_stability_guard is not None
+        or args.trainer_max_psi_total_guard is not None
+    )
+
+
+def _trainer_geometry_guard_horizon_report(
+    args: argparse.Namespace,
+    *,
+    initial_step: int = 0,
+) -> dict[str, object]:
+    return hf_gpt2_finetune_geometry_guard_horizon_report(
+        max_steps=args.max_steps,
+        logging_steps=args.logging_steps,
+        initial_step=initial_step,
+        min_desire_stability_guard=(
+            args.trainer_min_desire_stability_guard
+        ),
+        max_psi_total_guard=args.trainer_max_psi_total_guard,
+        minimum_observations=args.trainer_geometry_guard_min_events,
+        patience=args.trainer_geometry_guard_patience,
+    )
+
+
+def _checkpoint_resume_initial_step(
+    report: Mapping[str, object] | None,
+) -> int:
+    if not isinstance(report, Mapping):
+        return 0
+    value = report.get("global_step")
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _apply_checkpoint_resume_geometry_guard_horizon(
+    args: argparse.Namespace,
+    report: Mapping[str, object] | None,
+) -> dict[str, object]:
+    initial_step = _checkpoint_resume_initial_step(report)
+    horizon = _trainer_geometry_guard_horizon_report(
+        args,
+        initial_step=initial_step,
+    )
+    args._trainer_geometry_guard_initial_step = initial_step
+    args._trainer_geometry_guard_horizon = horizon
+    return horizon
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -934,10 +982,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
-    geometry_guard_active = bool(
-        args.trainer_min_desire_stability_guard is not None
-        or args.trainer_max_psi_total_guard is not None
-    )
+    geometry_guard_active = _trainer_geometry_guard_active(args)
     if (args.trainer_telemetry or geometry_guard_active) and args.no_trainer_trace:
         parser.error("trainer telemetry and geometry guards require trainer tracing")
     if args.trainer_telemetry or geometry_guard_active:
@@ -962,16 +1007,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--trainer-geometry-guard-min-events must be positive")
     if args.trainer_geometry_guard_patience <= 0:
         parser.error("--trainer-geometry-guard-patience must be positive")
-    geometry_guard_horizon = hf_gpt2_finetune_geometry_guard_horizon_report(
-        max_steps=args.max_steps,
-        logging_steps=args.logging_steps,
-        min_desire_stability_guard=(
-            args.trainer_min_desire_stability_guard
-        ),
-        max_psi_total_guard=args.trainer_max_psi_total_guard,
-        minimum_observations=args.trainer_geometry_guard_min_events,
-        patience=args.trainer_geometry_guard_patience,
-    )
+    geometry_guard_horizon = _trainer_geometry_guard_horizon_report(args)
     args._trainer_geometry_guard_horizon = geometry_guard_horizon
     if geometry_guard_active and geometry_guard_horizon.get("ready") is not True:
         parser.error(
@@ -3789,10 +3825,12 @@ def _base_run_card(
             args.trainer_geometry_guard_min_events
         ),
         "trainer_geometry_guard_patience": args.trainer_geometry_guard_patience,
-        "trainer_geometry_guard_active": bool(
-            args.trainer_min_desire_stability_guard is not None
-            or args.trainer_max_psi_total_guard is not None
+        "trainer_geometry_guard_initial_step": getattr(
+            args,
+            "_trainer_geometry_guard_initial_step",
+            0,
         ),
+        "trainer_geometry_guard_active": _trainer_geometry_guard_active(args),
         "trainer_geometry_guard_horizon": dict(
             getattr(args, "_trainer_geometry_guard_horizon", {}) or {}
         ),
@@ -3906,6 +3944,10 @@ def _main_with_runtime_access(
         )
     )
     args._hf_checkpoint_resume_report = checkpoint_resume_report
+    _apply_checkpoint_resume_geometry_guard_horizon(
+        args,
+        checkpoint_resume_report,
+    )
     corpus_file_report = _corpus_file_report(args)
     corpus_scan_report = _corpus_scan_report(args)
     inference_distortion_source = (
@@ -4207,6 +4249,27 @@ def _main_with_runtime_access(
         checkpoint_resume_report is not None
         and checkpoint_resume_report.get("status") == "invalid"
     ):
+        _write_card(preflight, args)
+        return 1
+    geometry_guard_horizon = getattr(
+        args,
+        "_trainer_geometry_guard_horizon",
+        {},
+    )
+    if (
+        _trainer_geometry_guard_active(args)
+        and geometry_guard_horizon.get("ready") is not True
+    ):
+        preflight.update(
+            {
+                "failure_stage": "trainer_geometry_guard_horizon",
+                "failure_error": (
+                    "trainer geometry guard cannot arm in the remaining "
+                    "checkpoint-resume segment: "
+                    f"{geometry_guard_horizon.get('status')}"
+                ),
+            }
+        )
         _write_card(preflight, args)
         return 1
     if not preflight["runtime_import_preflight_passed"]:
@@ -5040,6 +5103,11 @@ def _main_with_runtime_access(
                     args.trainer_geometry_guard_min_events
                 ),
                 geometry_guard_patience=args.trainer_geometry_guard_patience,
+                geometry_guard_initial_step=getattr(
+                    args,
+                    "_trainer_geometry_guard_initial_step",
+                    0,
+                ),
                 inference_distortion_handoff=card.get("inference_distortion_handoff"),
             )
         )

@@ -4486,6 +4486,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "scale_up_candidate_adapter_promotion_report_path": None,
                 "adapter_promotion_required": True,
             }
+            resume_checkpoint = root / "checkpoint-96"
+            resume_checkpoint.mkdir()
+            (resume_checkpoint / "trainer_state.json").write_text(
+                json.dumps({"global_step": 96, "max_steps": 100}),
+                encoding="utf-8",
+            )
             unrequired_artifact = hf_ft.hf_finetune_scale_up_command(
                 summary,
                 output_dir=root / "unrequired-child-adapter",
@@ -4510,6 +4516,39 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             short_horizon_preflight = (
                 hf_ft.hf_finetune_scale_up_preflight_report(
                     short_horizon_artifact
+                )
+            )
+            resumed_short_horizon_artifact = (
+                hf_ft.hf_finetune_scale_up_command(
+                    summary,
+                    output_dir=root / "resumed-short-horizon-child-adapter",
+                    resume_from_checkpoint=resume_checkpoint,
+                    trainer_min_desire_stability_guard=0.70,
+                    max_steps=100,
+                )
+            )
+            resumed_short_horizon_preflight = (
+                hf_ft.hf_finetune_scale_up_preflight_report(
+                    resumed_short_horizon_artifact
+                )
+            )
+            resumed_short_horizon_preflight_lines = (
+                hf_ft.hf_finetune_scale_up_preflight_lines(
+                    resumed_short_horizon_preflight
+                )
+            )
+            missing_resume_command = list(
+                resumed_short_horizon_artifact["command"]
+            )
+            missing_resume_command[
+                missing_resume_command.index("--resume-from-checkpoint") + 1
+            ] = str(root / "checkpoint-missing")
+            missing_resume_preflight = (
+                hf_ft.hf_finetune_scale_up_preflight_report(
+                    {
+                        **resumed_short_horizon_artifact,
+                        "command": missing_resume_command,
+                    }
                 )
             )
             command = artifact["command"]
@@ -4747,6 +4786,51 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             any(
                 issue.get("field") == "trainer_geometry_guard_horizon"
                 for issue in short_horizon_preflight["issues"]
+            )
+        )
+        resumed_horizon = resumed_short_horizon_artifact[
+            "trainer_geometry_guard_horizon"
+        ]
+        self.assertEqual(
+            resumed_short_horizon_artifact[
+                "trainer_geometry_guard_initial_step"
+            ],
+            96,
+        )
+        self.assertEqual(resumed_horizon["initial_step"], 96)
+        self.assertEqual(resumed_horizon["remaining_steps"], 4)
+        self.assertEqual(resumed_horizon["status"], "horizon_too_short")
+        self.assertEqual(
+            resumed_short_horizon_preflight[
+                "trainer_geometry_guard_initial_step"
+            ],
+            96,
+        )
+        self.assertTrue(
+            resumed_short_horizon_preflight[
+                "trainer_geometry_guard_horizon_matches"
+            ]
+        )
+        self.assertFalse(resumed_short_horizon_preflight["ready"])
+        self.assertIn(
+            "guard_initial_step=96",
+            resumed_short_horizon_preflight_lines[0],
+        )
+        self.assertIn(
+            "guard_remaining_steps=4",
+            resumed_short_horizon_preflight_lines[0],
+        )
+        self.assertTrue(
+            any(
+                issue.get("field") == "trainer_geometry_guard_horizon"
+                for issue in resumed_short_horizon_preflight["issues"]
+            )
+        )
+        self.assertFalse(missing_resume_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "checkpoint_resume"
+                for issue in missing_resume_preflight["issues"]
             )
         )
         for field, preflight in tampered_preflights.items():
@@ -6200,6 +6284,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 invalid_checkpoint,
                 requested_max_steps=2,
             )
+            malformed_checkpoint = Path(tmp) / "checkpoint-malformed"
+            malformed_checkpoint.mkdir()
+            (malformed_checkpoint / "trainer_state.json").write_text(
+                json.dumps({"global_step": 1.5, "max_steps": 2}),
+                encoding="utf-8",
+            )
+            malformed = st.hf_finetune_checkpoint_resume_report(
+                malformed_checkpoint,
+                requested_max_steps=2,
+            )
 
         self.assertEqual(report["row_type"], "hf_finetune_checkpoint_resume_report")
         self.assertEqual(legacy["row_type"], "hf_gpt2_finetune_checkpoint_resume_report")
@@ -6214,6 +6308,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(invalid["status"], "invalid")
         self.assertEqual(invalid["recommendation"], "invalid_checkpoint")
         self.assertEqual(invalid["recommended_args"], [])
+        self.assertEqual(malformed["status"], "invalid")
+        self.assertTrue(
+            any("global_step" in error for error in malformed["errors"])
+        )
         self.assertIn("hf_finetune_checkpoint_resume_report", st.__all__)
 
     def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
@@ -13407,6 +13505,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     max_psi_total_guard=0.9,
                     geometry_guard_min_events=1,
                     geometry_guard_patience=1,
+                    geometry_guard_initial_step=1,
                 )
             callback.on_train_begin(args, state, control)
             callback.on_log(args, state, control, logs={"loss": 2.0})
@@ -13475,6 +13574,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             rows[2]["training_geometry_guard"]["horizon"]["logging_steps"],
             2,
+        )
+        self.assertEqual(
+            rows[2]["training_geometry_guard"]["horizon"]["initial_step"],
+            1,
+        )
+        self.assertEqual(
+            rows[2]["training_geometry_guard"]["horizon"]["remaining_steps"],
+            3,
         )
         self.assertEqual(
             rows[1]["telemetry"]["hf_ft.inference_distortion.desire_pressure"],
@@ -13592,6 +13699,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             args._trainer_geometry_guard_horizon["required_log_events"],
             7,
         )
+        resumed_horizon = (
+            module._apply_checkpoint_resume_geometry_guard_horizon(
+                args,
+                {"global_step": 8},
+            )
+        )
+        self.assertEqual(args._trainer_geometry_guard_initial_step, 8)
+        self.assertEqual(resumed_horizon["initial_step"], 8)
+        self.assertEqual(resumed_horizon["remaining_steps"], 6)
+        self.assertEqual(resumed_horizon["status"], "horizon_too_short")
+        self.assertFalse(resumed_horizon["ready"])
         invalid_args = (
             ["--trainer-min-desire-stability-guard", "1.1"],
             ["--trainer-max-psi-total-guard", "-0.1"],
@@ -13637,6 +13755,48 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             minimum_observations=3,
             patience=2,
         )
+        resumed_ready = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=110,
+            logging_steps=2,
+            initial_step=100,
+            min_desire_stability_guard=0.7,
+            minimum_observations=3,
+            patience=2,
+        )
+        resumed_short = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=100,
+            logging_steps=1,
+            initial_step=96,
+            min_desire_stability_guard=0.7,
+            minimum_observations=3,
+            patience=2,
+        )
+        resumed_past_end = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=100,
+            logging_steps=1,
+            initial_step=101,
+            min_desire_stability_guard=0.7,
+            minimum_observations=3,
+            patience=2,
+        )
+        resumed_summary_lines = hf_ft.hf_gpt2_finetune_summary_lines(
+            {
+                "trainer_geometry_guard_active": True,
+                "trainer_geometry_guard_horizon_status": resumed_ready["status"],
+                "trainer_geometry_guard_horizon_ready": resumed_ready["ready"],
+                "trainer_geometry_guard_initial_step": resumed_ready["initial_step"],
+                "trainer_geometry_guard_max_steps": resumed_ready["max_steps"],
+                "trainer_geometry_guard_remaining_steps": resumed_ready[
+                    "remaining_steps"
+                ],
+                "trainer_geometry_guard_available_log_events": resumed_ready[
+                    "available_log_events"
+                ],
+                "trainer_geometry_guard_required_log_events": resumed_ready[
+                    "required_log_events"
+                ],
+            }
+        )
 
         self.assertEqual(sparse["status"], "cadence_too_sparse")
         self.assertFalse(sparse["ready"])
@@ -13648,6 +13808,33 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(psi_only["status"], "ready")
         self.assertTrue(psi_only["ready"])
         self.assertEqual(psi_only["required_log_events"], 4)
+        self.assertEqual(resumed_ready["status"], "ready")
+        self.assertTrue(resumed_ready["resume_aware"])
+        self.assertEqual(resumed_ready["remaining_steps"], 10)
+        self.assertEqual(resumed_ready["available_log_events"], 5)
+        self.assertEqual(resumed_ready["minimum_max_steps"], 105)
+        self.assertEqual(resumed_short["status"], "horizon_too_short")
+        self.assertFalse(resumed_short["ready"])
+        self.assertEqual(resumed_short["remaining_steps"], 4)
+        self.assertEqual(resumed_short["minimum_max_steps"], 101)
+        self.assertEqual(
+            resumed_past_end["status"],
+            "initial_step_exceeds_max_steps",
+        )
+        self.assertIsNone(resumed_past_end["remaining_steps"])
+        self.assertTrue(
+            any(
+                "segment=100->110" in line and "remaining=10" in line
+                for line in resumed_summary_lines
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "initial_step"):
+            st.hf_finetune_geometry_guard_horizon_report(
+                max_steps=100,
+                logging_steps=1,
+                initial_step=-1,
+                min_desire_stability_guard=0.7,
+            )
         self.assertIn("hf_finetune_geometry_guard_horizon_report", st.__all__)
         self.assertIn(
             "hf_finetune_geometry_guard_runtime_evidence_report",

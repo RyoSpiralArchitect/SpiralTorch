@@ -756,9 +756,14 @@ aggregate direction. Guarded runs also require an explicit `max_steps` horizon
 with enough log events to arm: desire needs five events under the default
 warm-up/patience, while psi-only needs four. Scale-up automatically lowers
 `logging_steps` when cadence alone is too sparse; preflight blocks when the
-total step horizon itself is too short. Guard configuration, horizon evidence,
-and stop reasons are written into the trainer trace and run card. After a gated
-generation exits, executor postflight reads the
+total step horizon itself is too short. For exact checkpoint resume, the saved
+Trainer `global_step` becomes the horizon's `initial_step`; only
+`max_steps - initial_step` and the log boundaries still ahead can arm the new
+callback segment. Bridge launch and scale-up preflight therefore reject a
+resume that looked armable only when historical steps were counted again.
+Guard configuration, horizon evidence, and stop reasons are written into the
+trainer trace and run card. After a gated generation exits, executor postflight
+reads the
 exact trainer trace, requires at least one telemetry event and every configured
 desire/psi aggregate, cross-checks them against the audited chain node, and
 verifies that live guard frames match the sealed command before recording
@@ -1351,6 +1356,12 @@ should restore optimizer, scheduler, and RNG state. SpiralTorch audits
 `trainer_state.json` and those state files before loading. A checkpoint saved
 at its original `max_steps` may have an exhausted scheduler; extending that
 exact resume can advance `global_step` while keeping the learning rate at zero.
+Guarded resumes also recompute observability from the checkpoint's
+`global_step`: `max_steps` remains the total Trainer target, not a new-step
+budget. Inspect `initial_step`, `remaining_steps`, and `available_log_events`
+from `hf_finetune_geometry_guard_horizon_report(...)` when constructing custom
+resume flows.
+
 Inspect the decision from Python before launching:
 
 ```python

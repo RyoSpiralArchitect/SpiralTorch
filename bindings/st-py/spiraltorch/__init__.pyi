@@ -1831,6 +1831,7 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
     *,
     max_steps: object,
     logging_steps: object,
+    initial_step: object = ...,
     min_desire_stability_guard: object = ...,
     max_psi_total_guard: object = ...,
     minimum_observations: object = ...,
@@ -1841,6 +1842,7 @@ def hf_finetune_geometry_guard_horizon_report(
     *,
     max_steps: object,
     logging_steps: object,
+    initial_step: object = ...,
     min_desire_stability_guard: object = ...,
     max_psi_total_guard: object = ...,
     minimum_observations: object = ...,
@@ -1998,6 +2000,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
     max_psi_total_guard: float | None = ...,
     geometry_guard_min_events: int = ...,
     geometry_guard_patience: int = ...,
+    geometry_guard_initial_step: int = ...,
 ) -> object: ...
 
 def hf_gpt2_finetune_zspace_probe(
