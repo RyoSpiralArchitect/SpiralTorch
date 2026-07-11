@@ -3,10 +3,171 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 use crate::mellin_types::{ComplexScalar, MellinError, MellinResult, Scalar, ZSpaceError};
 use std::f32::consts::PI;
 
 pub type ZSpaceResult<T> = Result<T, ZSpaceError>;
+
+#[derive(Clone, Copy)]
+struct ValidatedSeries<'a> {
+    coefficients: &'a [ComplexScalar],
+    prefix: &'a [ComplexScalar],
+    head: ComplexScalar,
+    tail: ComplexScalar,
+}
+
+impl<'a> ValidatedSeries<'a> {
+    fn new(weighted: &'a [ComplexScalar]) -> MellinResult<Self> {
+        let Some((tail, prefix)) = weighted.split_last() else {
+            return Err(ZSpaceError::EmptySeries.into());
+        };
+        for (index, coefficient) in weighted.iter().enumerate() {
+            if !complex_is_finite(*coefficient) {
+                return Err(MellinError::NonFiniteSample { index });
+            }
+        }
+        let head = prefix.first().copied().unwrap_or(*tail);
+        Ok(Self {
+            coefficients: weighted,
+            prefix,
+            head,
+            tail: *tail,
+        })
+    }
+
+    fn direct(self, z: ComplexScalar) -> ComplexScalar {
+        let mut value = self.tail;
+        for coefficient in self.prefix.iter().rev() {
+            value = *coefficient + z * value;
+        }
+        value
+    }
+
+    fn direct_with_derivative(self, z: ComplexScalar) -> (ComplexScalar, ComplexScalar) {
+        let mut value = self.tail;
+        let mut derivative = ComplexScalar::new(0.0, 0.0);
+        for coefficient in self.prefix.iter().rev() {
+            derivative = derivative * z + value;
+            value = *coefficient + z * value;
+        }
+        (value, derivative)
+    }
+
+    fn inverse(self, z: ComplexScalar) -> ComplexScalar {
+        if self.coefficients.len() == 1 || z == ComplexScalar::new(0.0, 0.0) {
+            return self.head;
+        }
+
+        let inverse_z = ComplexScalar::new(1.0, 0.0) / z;
+        let mut value = self.head;
+        for coefficient in self.coefficients.iter().skip(1) {
+            value = *coefficient + inverse_z * value;
+        }
+
+        let mut z_power = ComplexScalar::new(1.0, 0.0);
+        for _ in 0..self.coefficients.len() - 1 {
+            z_power *= z;
+        }
+        z_power * value
+    }
+
+    fn inverse_with_derivative(self, z: ComplexScalar) -> (ComplexScalar, ComplexScalar) {
+        if self.coefficients.len() == 1 {
+            return (self.head, ComplexScalar::new(0.0, 0.0));
+        }
+        if z == ComplexScalar::new(0.0, 0.0) {
+            let derivative = self
+                .coefficients
+                .get(1)
+                .copied()
+                .unwrap_or_else(|| ComplexScalar::new(0.0, 0.0));
+            return (self.head, derivative);
+        }
+
+        let inverse_z = ComplexScalar::new(1.0, 0.0) / z;
+        let mut value = self.head;
+        let mut derivative_inverse = ComplexScalar::new(0.0, 0.0);
+        for coefficient in self.coefficients.iter().skip(1) {
+            derivative_inverse = derivative_inverse * inverse_z + value;
+            value = *coefficient + inverse_z * value;
+        }
+
+        let mut z_power = ComplexScalar::new(1.0, 0.0);
+        for _ in 0..self.coefficients.len() - 1 {
+            z_power *= z;
+        }
+        let transformed = z_power * value;
+        let degree = ComplexScalar::new((self.coefficients.len() - 1) as Scalar, 0.0);
+        let derivative = z_power * inverse_z * (degree * value - inverse_z * derivative_inverse);
+        (transformed, derivative)
+    }
+}
+
+#[inline]
+fn complex_is_finite(value: ComplexScalar) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+#[inline]
+fn validate_z(z: ComplexScalar) -> MellinResult<()> {
+    if complex_is_finite(z) {
+        Ok(())
+    } else {
+        Err(MellinError::NonFiniteZ { re: z.re, im: z.im })
+    }
+}
+
+#[inline]
+pub(crate) fn finite_output(
+    value: ComplexScalar,
+    quantity: &'static str,
+    index: usize,
+) -> MellinResult<ComplexScalar> {
+    if complex_is_finite(value) {
+        Ok(value)
+    } else {
+        Err(MellinError::NonFiniteOutput {
+            quantity,
+            index,
+            re: value.re,
+            im: value.im,
+        })
+    }
+}
+
+#[inline]
+pub(crate) fn finite_scalar_output(
+    value: Scalar,
+    quantity: &'static str,
+    index: usize,
+) -> MellinResult<Scalar> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(MellinError::NonFiniteScalarOutput {
+            quantity,
+            index,
+            value,
+        })
+    }
+}
+
+#[inline]
+fn finite_outputs(
+    value: ComplexScalar,
+    derivative: ComplexScalar,
+    index: usize,
+) -> MellinResult<(ComplexScalar, ComplexScalar)> {
+    Ok((
+        finite_output(value, "series value", index)?,
+        finite_output(derivative, "series derivative", index)?,
+    ))
+}
 
 /// Window functions applied to trapezoidal weights on a log lattice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -140,11 +301,14 @@ pub fn mellin_log_lattice_prefactor(
     if !log_start.is_finite() {
         return Err(MellinError::InvalidLogStart);
     }
+    if !complex_is_finite(s) {
+        return Err(MellinError::NonFiniteAbscissa { re: s.re, im: s.im });
+    }
 
     let step = ComplexScalar::new(log_step, 0.0);
     let start = ComplexScalar::new(log_start, 0.0);
-    let prefactor = (s * start).exp() * step;
-    let z = (s * step).exp();
+    let prefactor = finite_output((s * start).exp() * step, "Mellin prefactor", 0)?;
+    let z = finite_output((s * step).exp(), "Z-plane mapping", 0)?;
     Ok((prefactor, z))
 }
 
@@ -208,21 +372,31 @@ pub fn prepare_weighted_series(
         });
     }
 
-    // Robustness: validate finiteness of inputs before forming the weighted series
-    for (i, (sample, &w)) in samples.iter().zip(weights.iter()).enumerate() {
-        if !w.is_finite() {
-            return Err(ZSpaceError::NonFiniteWeight { index: i, value: w });
+    for (index, (sample, &weight)) in samples.iter().zip(weights.iter()).enumerate() {
+        if !weight.is_finite() {
+            return Err(ZSpaceError::NonFiniteWeight {
+                index,
+                value: weight,
+            });
         }
-        if !sample.re.is_finite() || !sample.im.is_finite() {
-            return Err(ZSpaceError::NonFiniteSampleCoeff { index: i });
+        if !complex_is_finite(*sample) {
+            return Err(ZSpaceError::NonFiniteSampleCoeff { index });
         }
     }
 
-    Ok(samples
-        .iter()
-        .zip(weights.iter())
-        .map(|(sample, &w)| *sample * ComplexScalar::new(w, 0.0))
-        .collect())
+    let mut weighted = Vec::with_capacity(samples.len());
+    for (index, (sample, &weight)) in samples.iter().zip(weights.iter()).enumerate() {
+        let coefficient = *sample * ComplexScalar::new(weight, 0.0);
+        if !complex_is_finite(coefficient) {
+            return Err(ZSpaceError::NonFiniteWeightedCoeff {
+                index,
+                re: coefficient.re,
+                im: coefficient.im,
+            });
+        }
+        weighted.push(coefficient);
+    }
+    Ok(weighted)
 }
 
 /// Evaluate a weighted power series using the precomputed coefficients.
@@ -230,26 +404,9 @@ pub fn evaluate_weighted_series(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<ComplexScalar> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-
-    // Validate coefficients and z are finite
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-
-    // Horner's method (stable & fewer multiplications):
-    let mut acc = *weighted.last().unwrap();
-    for coeff in weighted[..weighted.len() - 1].iter().rev() {
-        acc = *coeff + z * acc;
-    }
-    Ok(acc)
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    finite_output(series.direct(z), "series value", 0)
 }
 
 /// Evaluate a weighted power series and its derivative with respect to `z`.
@@ -259,38 +416,10 @@ pub fn evaluate_weighted_series_with_derivative(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-
-    // Validate coefficients and z are finite
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-
-    if weighted.len() == 1 {
-        return Ok((weighted[0], ComplexScalar::new(0.0, 0.0)));
-    }
-
-    // Horner's method with derivative accumulation.
-    // For P(z) = a_0 + a_1 z + ... + a_{n-1} z^{n-1}:
-    //   p  = a_{n-1}
-    //   dp = 0
-    //   for k = n-2..0:
-    //     dp = dp*z + p
-    //     p  = p*z + a_k
-    let mut p = *weighted.last().expect("weighted is non-empty");
-    let mut dp = ComplexScalar::new(0.0, 0.0);
-    for coeff in weighted[..weighted.len() - 1].iter().rev() {
-        dp = dp * z + p;
-        p = *coeff + z * p;
-    }
-    Ok((p, dp))
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    let (value, derivative) = series.direct_with_derivative(z);
+    finite_outputs(value, derivative, 0)
 }
 
 /// Evaluate the weighted power series at multiple `z` values.
@@ -304,27 +433,12 @@ pub fn evaluate_weighted_series_many(
     if z_values.is_empty() {
         return Err(ZSpaceError::EmptyZValues.into());
     }
-
-    // Validate coefficients once; `evaluate_weighted_series` would otherwise
-    // perform this check per-`z`.
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
+    let series = ValidatedSeries::new(weighted)?;
 
     let mut out = Vec::with_capacity(z_values.len());
-    let tail = *weighted.last().expect("checked non-empty");
-    for &z in z_values {
-        if !z.re.is_finite() || !z.im.is_finite() {
-            return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-        }
-
-        let mut acc = tail;
-        for coeff in weighted[..weighted.len() - 1].iter().rev() {
-            acc = *coeff + z * acc;
-        }
-        out.push(acc);
+    for (index, &z) in z_values.iter().enumerate() {
+        validate_z(z)?;
+        out.push(finite_output(series.direct(z), "series value", index)?);
     }
     Ok(out)
 }
@@ -342,110 +456,18 @@ pub fn evaluate_weighted_series_many_with_derivative(
     if z_values.is_empty() {
         return Err(ZSpaceError::EmptyZValues.into());
     }
-
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
+    let series = ValidatedSeries::new(weighted)?;
 
     let mut values = Vec::with_capacity(z_values.len());
     let mut derivatives = Vec::with_capacity(z_values.len());
-    if weighted.len() == 1 {
-        let value = weighted[0];
-        for &z in z_values {
-            if !z.re.is_finite() || !z.im.is_finite() {
-                return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-            }
-            values.push(value);
-            derivatives.push(ComplexScalar::new(0.0, 0.0));
-        }
-        return Ok((values, derivatives));
-    }
-
-    let tail = *weighted.last().expect("checked non-empty");
-    for &z in z_values {
-        if !z.re.is_finite() || !z.im.is_finite() {
-            return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-        }
-
-        let mut p = tail;
-        let mut dp = ComplexScalar::new(0.0, 0.0);
-        for coeff in weighted[..weighted.len() - 1].iter().rev() {
-            dp = dp * z + p;
-            p = *coeff + z * p;
-        }
-        values.push(p);
-        derivatives.push(dp);
+    for (index, &z) in z_values.iter().enumerate() {
+        validate_z(z)?;
+        let (value, derivative) = series.direct_with_derivative(z);
+        let (value, derivative) = finite_outputs(value, derivative, index)?;
+        values.push(value);
+        derivatives.push(derivative);
     }
     Ok((values, derivatives))
-}
-
-#[inline]
-fn evaluate_weighted_series_inverse_unchecked(
-    weighted: &[ComplexScalar],
-    z: ComplexScalar,
-) -> ComplexScalar {
-    debug_assert!(!weighted.is_empty());
-    if weighted.len() == 1 || (z.re == 0.0 && z.im == 0.0) {
-        return weighted[0];
-    }
-
-    let w = ComplexScalar::new(1.0, 0.0) / z;
-    let mut q = weighted[0];
-    for coeff in weighted.iter().skip(1) {
-        q = *coeff + w * q;
-    }
-
-    let mut z_pow = ComplexScalar::new(1.0, 0.0);
-    for _ in 0..weighted.len() - 1 {
-        z_pow *= z;
-    }
-
-    z_pow * q
-}
-
-#[inline]
-fn evaluate_weighted_series_with_derivative_inverse_unchecked(
-    weighted: &[ComplexScalar],
-    z: ComplexScalar,
-) -> (ComplexScalar, ComplexScalar) {
-    debug_assert!(!weighted.is_empty());
-    if weighted.len() == 1 {
-        return (weighted[0], ComplexScalar::new(0.0, 0.0));
-    }
-    if z.re == 0.0 && z.im == 0.0 {
-        return (
-            weighted[0],
-            weighted
-                .get(1)
-                .copied()
-                .unwrap_or_else(|| ComplexScalar::new(0.0, 0.0)),
-        );
-    }
-
-    let w = ComplexScalar::new(1.0, 0.0) / z;
-
-    // Q(w) = a_{n-1} + a_{n-2} w + ... + a_0 w^{n-1}
-    // We evaluate Q and dQ/dw without allocating reversed coefficients.
-    let mut q = weighted[0];
-    let mut dq = ComplexScalar::new(0.0, 0.0);
-    for coeff in weighted.iter().skip(1) {
-        dq = dq * w + q;
-        q = *coeff + w * q;
-    }
-
-    let mut z_pow = ComplexScalar::new(1.0, 0.0);
-    for _ in 0..weighted.len() - 1 {
-        z_pow *= z;
-    }
-    let value = z_pow * q;
-
-    // P(z) = z^{n-1} Q(1/z) => dP/dz = z^{n-2} [(n-1) Q(w) - w Q'(w)]
-    let z_pow_w = z_pow * w;
-    let n_minus_1 = ComplexScalar::new((weighted.len() - 1) as Scalar, 0.0);
-    let deriv = z_pow_w * (n_minus_1 * q - w * dq);
-    (value, deriv)
 }
 
 /// Evaluate a weighted power series using the inverse-polynomial representation.
@@ -456,18 +478,9 @@ pub fn evaluate_weighted_series_inverse(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<ComplexScalar> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-    Ok(evaluate_weighted_series_inverse_unchecked(weighted, z))
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    finite_output(series.inverse(z), "series value", 0)
 }
 
 /// Evaluate a weighted power series and its `d/dz` derivative using the inverse-polynomial representation.
@@ -477,20 +490,10 @@ pub fn evaluate_weighted_series_with_derivative_inverse(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-    Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(
-        weighted, z,
-    ))
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    let (value, derivative) = series.inverse_with_derivative(z);
+    finite_outputs(value, derivative, 0)
 }
 
 /// Evaluate a weighted power series using a stable strategy:
@@ -499,23 +502,14 @@ pub fn evaluate_weighted_series_stable(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<ComplexScalar> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-
-    if z.norm_sqr() <= 1.0 {
-        evaluate_weighted_series(weighted, z)
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    let value = if z.norm_sqr() <= 1.0 {
+        series.direct(z)
     } else {
-        Ok(evaluate_weighted_series_inverse_unchecked(weighted, z))
-    }
+        series.inverse(z)
+    };
+    finite_output(value, "series value", 0)
 }
 
 /// Evaluate a weighted power series and its derivative using the stable strategy.
@@ -525,25 +519,14 @@ pub fn evaluate_weighted_series_with_derivative_stable(
     weighted: &[ComplexScalar],
     z: ComplexScalar,
 ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
-    if weighted.is_empty() {
-        return Err(ZSpaceError::EmptySeries.into());
-    }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
-    if !z.re.is_finite() || !z.im.is_finite() {
-        return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-    }
-
-    if z.norm_sqr() <= 1.0 {
-        evaluate_weighted_series_with_derivative(weighted, z)
+    let series = ValidatedSeries::new(weighted)?;
+    validate_z(z)?;
+    let (value, derivative) = if z.norm_sqr() <= 1.0 {
+        series.direct_with_derivative(z)
     } else {
-        Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(
-            weighted, z,
-        ))
-    }
+        series.inverse_with_derivative(z)
+    };
+    finite_outputs(value, derivative, 0)
 }
 
 /// Evaluate the weighted power series at multiple `z` values using the stable strategy.
@@ -557,28 +540,17 @@ pub fn evaluate_weighted_series_many_stable(
     if z_values.is_empty() {
         return Err(ZSpaceError::EmptyZValues.into());
     }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
+    let series = ValidatedSeries::new(weighted)?;
 
     let mut out = Vec::with_capacity(z_values.len());
-    let tail = *weighted.last().expect("checked non-empty");
-    for &z in z_values {
-        if !z.re.is_finite() || !z.im.is_finite() {
-            return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-        }
+    for (index, &z) in z_values.iter().enumerate() {
+        validate_z(z)?;
         let value = if z.norm_sqr() <= 1.0 {
-            let mut acc = tail;
-            for coeff in weighted[..weighted.len() - 1].iter().rev() {
-                acc = *coeff + z * acc;
-            }
-            acc
+            series.direct(z)
         } else {
-            evaluate_weighted_series_inverse_unchecked(weighted, z)
+            series.inverse(z)
         };
-        out.push(value);
+        out.push(finite_output(value, "series value", index)?);
     }
     Ok(out)
 }
@@ -596,46 +568,20 @@ pub fn evaluate_weighted_series_many_with_derivative_stable(
     if z_values.is_empty() {
         return Err(ZSpaceError::EmptyZValues.into());
     }
-    for (i, coeff) in weighted.iter().enumerate() {
-        if !coeff.re.is_finite() || !coeff.im.is_finite() {
-            return Err(MellinError::NonFiniteSample { index: i });
-        }
-    }
+    let series = ValidatedSeries::new(weighted)?;
 
     let mut values = Vec::with_capacity(z_values.len());
     let mut derivatives = Vec::with_capacity(z_values.len());
-    if weighted.len() == 1 {
-        let value = weighted[0];
-        for &z in z_values {
-            if !z.re.is_finite() || !z.im.is_finite() {
-                return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-            }
-            values.push(value);
-            derivatives.push(ComplexScalar::new(0.0, 0.0));
-        }
-        return Ok((values, derivatives));
-    }
-
-    let tail = *weighted.last().expect("checked non-empty");
-    for &z in z_values {
-        if !z.re.is_finite() || !z.im.is_finite() {
-            return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
-        }
-
-        if z.norm_sqr() <= 1.0 {
-            let mut p = tail;
-            let mut dp = ComplexScalar::new(0.0, 0.0);
-            for coeff in weighted[..weighted.len() - 1].iter().rev() {
-                dp = dp * z + p;
-                p = *coeff + z * p;
-            }
-            values.push(p);
-            derivatives.push(dp);
+    for (index, &z) in z_values.iter().enumerate() {
+        validate_z(z)?;
+        let (value, derivative) = if z.norm_sqr() <= 1.0 {
+            series.direct_with_derivative(z)
         } else {
-            let (p, dp) = evaluate_weighted_series_with_derivative_inverse_unchecked(weighted, z);
-            values.push(p);
-            derivatives.push(dp);
-        }
+            series.inverse_with_derivative(z)
+        };
+        let (value, derivative) = finite_outputs(value, derivative, index)?;
+        values.push(value);
+        derivatives.push(derivative);
     }
 
     Ok((values, derivatives))
@@ -651,7 +597,7 @@ pub fn mellin_transform_via_z(
     let weights = trapezoidal_weights(samples.len())?;
     let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)?;
     let series = weighted_z_transform(samples, &weights, z)?;
-    Ok(prefactor * series)
+    finite_output(prefactor * series, "Mellin value", 0)
 }
 
 /// Evaluate the Mellin transform via Z-plane series and return `d/ds`.
@@ -672,14 +618,35 @@ pub fn mellin_transform_via_z_with_derivative(
     let start = ComplexScalar::new(log_start, 0.0);
     let step = ComplexScalar::new(log_step, 0.0);
 
-    let value = prefactor * series;
-    let d_value_ds = prefactor * (start * series + step * z * d_series_dz);
+    let value = finite_output(prefactor * series, "Mellin value", 0)?;
+    let d_value_ds = finite_output(
+        prefactor * (start * series + step * z * d_series_dz),
+        "Mellin derivative",
+        0,
+    )?;
     Ok((value, d_value_ds))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Debug;
+
+    fn assert_non_finite_output<T: Debug>(
+        result: MellinResult<T>,
+        expected_quantity: &'static str,
+        expected_index: usize,
+    ) {
+        match result {
+            Err(MellinError::NonFiniteOutput {
+                quantity, index, ..
+            }) => {
+                assert_eq!(quantity, expected_quantity);
+                assert_eq!(index, expected_index);
+            }
+            other => panic!("expected NonFiniteOutput, got {other:?}"),
+        }
+    }
 
     #[test]
     fn trapezoidal_weights_match_manual() {
@@ -737,6 +704,22 @@ mod tests {
         let (value, deriv) = evaluate_weighted_series_with_derivative(&weighted, z).unwrap();
         assert!((value - weighted[0]).norm() < 1e-6);
         assert!(deriv.norm() < 1e-6);
+    }
+
+    #[test]
+    fn inverse_derivative_at_zero_uses_first_two_coefficients() {
+        let weighted = [
+            ComplexScalar::new(1.0, 2.0),
+            ComplexScalar::new(3.0, 4.0),
+            ComplexScalar::new(5.0, 6.0),
+        ];
+        let (value, derivative) = evaluate_weighted_series_with_derivative_inverse(
+            &weighted,
+            ComplexScalar::new(0.0, 0.0),
+        )
+        .unwrap();
+        assert_eq!(value, weighted[0]);
+        assert_eq!(derivative, weighted[1]);
     }
 
     #[test]
@@ -930,7 +913,6 @@ mod tests {
         }
     }
 
-    // New: robustness tests
     #[test]
     fn evaluate_rejects_nonfinite_coeff() {
         let weighted = vec![
@@ -949,6 +931,31 @@ mod tests {
     }
 
     #[test]
+    fn every_series_evaluator_rejects_empty_coefficients() {
+        let z = ComplexScalar::new(1.0, 0.0);
+        assert!(evaluate_weighted_series(&[], z).is_err());
+        assert!(evaluate_weighted_series_with_derivative(&[], z).is_err());
+        assert!(evaluate_weighted_series_inverse(&[], z).is_err());
+        assert!(evaluate_weighted_series_with_derivative_inverse(&[], z).is_err());
+        assert!(evaluate_weighted_series_stable(&[], z).is_err());
+        assert!(evaluate_weighted_series_with_derivative_stable(&[], z).is_err());
+        assert!(evaluate_weighted_series_many(&[], &[z]).is_err());
+        assert!(evaluate_weighted_series_many_with_derivative(&[], &[z]).is_err());
+        assert!(evaluate_weighted_series_many_stable(&[], &[z]).is_err());
+        assert!(evaluate_weighted_series_many_with_derivative_stable(&[], &[z]).is_err());
+
+        let invalid = [ComplexScalar::new(Scalar::NAN, 0.0)];
+        assert!(matches!(
+            evaluate_weighted_series_many(&invalid, &[]),
+            Err(MellinError::ZSpace(ZSpaceError::EmptyZValues))
+        ));
+        assert!(matches!(
+            evaluate_weighted_series_many(&[], &[]),
+            Err(MellinError::ZSpace(ZSpaceError::EmptySeries))
+        ));
+    }
+
+    #[test]
     fn prepare_rejects_nonfinite_inputs() {
         // Non-finite weight
         let samples = vec![ComplexScalar::new(1.0, 0.0), ComplexScalar::new(2.0, 0.0)];
@@ -962,5 +969,142 @@ mod tests {
         ];
         let weights = vec![0.5, 0.5];
         assert!(prepare_weighted_series(&bad_samples, &weights).is_err());
+    }
+
+    #[test]
+    fn prepare_rejects_finite_inputs_that_overflow_weighted_coefficient() {
+        let error =
+            prepare_weighted_series(&[ComplexScalar::new(Scalar::MAX, 0.0)], &[2.0]).unwrap_err();
+        assert!(matches!(
+            error,
+            ZSpaceError::NonFiniteWeightedCoeff { index: 0, .. }
+        ));
+
+        let input_error = prepare_weighted_series(
+            &[
+                ComplexScalar::new(Scalar::MAX, 0.0),
+                ComplexScalar::new(Scalar::NAN, 0.0),
+            ],
+            &[2.0, 1.0],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            input_error,
+            ZSpaceError::NonFiniteSampleCoeff { index: 1 }
+        ));
+    }
+
+    #[test]
+    fn evaluators_reject_finite_inputs_that_overflow_value() {
+        let weighted = [
+            ComplexScalar::new(Scalar::MAX, 0.0),
+            ComplexScalar::new(Scalar::MAX, 0.0),
+        ];
+        let z = ComplexScalar::new(2.0, 0.0);
+
+        assert_non_finite_output(evaluate_weighted_series(&weighted, z), "series value", 0);
+        assert_non_finite_output(
+            evaluate_weighted_series_inverse(&weighted, z),
+            "series value",
+            0,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_stable(&weighted, z),
+            "series value",
+            0,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_with_derivative(&weighted, z),
+            "series value",
+            0,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_with_derivative_inverse(&weighted, z),
+            "series value",
+            0,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_with_derivative_stable(&weighted, z),
+            "series value",
+            0,
+        );
+    }
+
+    #[test]
+    fn derivative_evaluator_rejects_overflow_when_value_cancels() {
+        let weighted = [
+            ComplexScalar::new(0.0, 0.0),
+            ComplexScalar::new(Scalar::MAX, 0.0),
+            ComplexScalar::new(0.0, 0.0),
+            ComplexScalar::new(-Scalar::MAX, 0.0),
+        ];
+
+        assert_non_finite_output(
+            evaluate_weighted_series_with_derivative(&weighted, ComplexScalar::new(1.0, 0.0)),
+            "series derivative",
+            0,
+        );
+    }
+
+    #[test]
+    fn batch_evaluators_report_the_overflowing_z_index() {
+        let weighted = [
+            ComplexScalar::new(1.0, 0.0),
+            ComplexScalar::new(Scalar::MAX, 0.0),
+        ];
+        let z_values = [ComplexScalar::new(0.0, 0.0), ComplexScalar::new(2.0, 0.0)];
+
+        assert_non_finite_output(
+            evaluate_weighted_series_many(&weighted, &z_values),
+            "series value",
+            1,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_many_stable(&weighted, &z_values),
+            "series value",
+            1,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_many_with_derivative(&weighted, &z_values),
+            "series value",
+            1,
+        );
+        assert_non_finite_output(
+            evaluate_weighted_series_many_with_derivative_stable(&weighted, &z_values),
+            "series value",
+            1,
+        );
+    }
+
+    #[test]
+    fn mellin_mapping_rejects_non_finite_abscissa_and_overflow() {
+        assert!(matches!(
+            mellin_log_lattice_prefactor(0.0, 1.0, ComplexScalar::new(Scalar::NAN, 0.0)),
+            Err(MellinError::NonFiniteAbscissa { .. })
+        ));
+        assert_non_finite_output(
+            mellin_log_lattice_prefactor(100.0, 1.0, ComplexScalar::new(1.0, 0.0)),
+            "Mellin prefactor",
+            0,
+        );
+        assert_non_finite_output(
+            mellin_log_lattice_prefactor(0.0, 100.0, ComplexScalar::new(1.0, 0.0)),
+            "Z-plane mapping",
+            0,
+        );
+    }
+
+    #[test]
+    fn mellin_transform_rejects_finite_final_product_overflow() {
+        assert_non_finite_output(
+            mellin_transform_via_z(
+                1.0,
+                1.0,
+                &[ComplexScalar::new(Scalar::MAX, 0.0)],
+                ComplexScalar::new(1.0, 0.0),
+            ),
+            "Mellin value",
+            0,
+        );
     }
 }

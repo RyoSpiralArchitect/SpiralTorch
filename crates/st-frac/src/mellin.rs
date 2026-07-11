@@ -3,14 +3,19 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 use crate::mellin_types::{ComplexScalar, MellinError, MellinResult, Scalar, ZSpaceError};
 use crate::zspace::{
     evaluate_weighted_series, evaluate_weighted_series_many, evaluate_weighted_series_many_stable,
     evaluate_weighted_series_many_with_derivative,
     evaluate_weighted_series_many_with_derivative_stable, evaluate_weighted_series_stable,
     evaluate_weighted_series_with_derivative, evaluate_weighted_series_with_derivative_stable,
-    mellin_log_lattice_prefactor, prepare_weighted_series, trapezoidal_weights,
-    trapezoidal_weights_windowed, weighted_z_transform, LogLatticeWindow,
+    finite_output, finite_scalar_output, mellin_log_lattice_prefactor, prepare_weighted_series,
+    trapezoidal_weights, trapezoidal_weights_windowed, weighted_z_transform, LogLatticeWindow,
 };
 
 /// Change-of-variable helper for Mellin integrals.
@@ -276,11 +281,20 @@ impl MellinEvalPlan {
     }
 
     #[inline]
-    fn apply_prefactors(&self, series: Vec<ComplexScalar>) -> Vec<ComplexScalar> {
+    fn apply_prefactors(&self, series: Vec<ComplexScalar>) -> MellinResult<Vec<ComplexScalar>> {
+        if series.len() != self.prefactors.len() {
+            return Err(MellinError::SampleLengthMismatch {
+                expected: self.prefactors.len(),
+                got: series.len(),
+            });
+        }
         series
             .into_iter()
             .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| value * *prefactor)
+            .enumerate()
+            .map(|(index, (value, prefactor))| {
+                finite_output(value * *prefactor, "Mellin value", index)
+            })
             .collect()
     }
 
@@ -289,7 +303,19 @@ impl MellinEvalPlan {
         &self,
         series: Vec<ComplexScalar>,
         d_series_dz: Vec<ComplexScalar>,
-    ) -> (Vec<ComplexScalar>, Vec<ComplexScalar>) {
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        if series.len() != self.z_points.len() {
+            return Err(MellinError::SampleLengthMismatch {
+                expected: self.z_points.len(),
+                got: series.len(),
+            });
+        }
+        if d_series_dz.len() != self.z_points.len() {
+            return Err(MellinError::SampleLengthMismatch {
+                expected: self.z_points.len(),
+                got: d_series_dz.len(),
+            });
+        }
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
 
@@ -298,10 +324,14 @@ impl MellinEvalPlan {
         for (idx, (p, dpdz)) in series.into_iter().zip(d_series_dz).enumerate() {
             let prefactor = self.prefactors[idx];
             let z = self.z_points[idx];
-            values.push(p * prefactor);
-            derivatives.push(prefactor * (start * p + step * z * dpdz));
+            values.push(finite_output(p * prefactor, "Mellin value", idx)?);
+            derivatives.push(finite_output(
+                prefactor * (start * p + step * z * dpdz),
+                "Mellin derivative",
+                idx,
+            )?);
         }
-        (values, derivatives)
+        Ok((values, derivatives))
     }
 
     pub fn evaluate(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
@@ -309,7 +339,7 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
-        Ok(self.apply_prefactors(series))
+        self.apply_prefactors(series)
     }
 
     pub fn evaluate_stable(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
@@ -317,7 +347,7 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many_stable(weighted, &self.z_points)?;
-        Ok(self.apply_prefactors(series))
+        self.apply_prefactors(series)
     }
 
     pub fn evaluate_with_derivative(
@@ -330,7 +360,7 @@ impl MellinEvalPlan {
 
         let (series, d_series_dz) =
             evaluate_weighted_series_many_with_derivative(weighted, &self.z_points)?;
-        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
+        self.apply_prefactors_with_derivative(series, d_series_dz)
     }
 
     pub fn evaluate_with_derivative_stable(
@@ -343,7 +373,7 @@ impl MellinEvalPlan {
 
         let (series, d_series_dz) =
             evaluate_weighted_series_many_with_derivative_stable(weighted, &self.z_points)?;
-        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
+        self.apply_prefactors_with_derivative(series, d_series_dz)
     }
 
     pub fn evaluate_magnitude(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
@@ -351,11 +381,13 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
-        Ok(series
+        self.apply_prefactors(series)?
             .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| complex_magnitude(value) * complex_magnitude(*prefactor))
-            .collect())
+            .enumerate()
+            .map(|(index, value)| {
+                finite_scalar_output(complex_magnitude(value), "Mellin magnitude", index)
+            })
+            .collect()
     }
 
     pub fn evaluate_log_magnitude(
@@ -367,18 +399,20 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
-        Ok(series
+        self.apply_prefactors(series)?
             .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| {
-                let mag = complex_magnitude(value) * complex_magnitude(*prefactor);
-                if epsilon.is_finite() && epsilon > 0.0 {
-                    (mag + epsilon).ln()
+            .enumerate()
+            .map(|(index, value)| {
+                let magnitude =
+                    finite_scalar_output(complex_magnitude(value), "Mellin magnitude", index)?;
+                let log_magnitude = if epsilon.is_finite() && epsilon > 0.0 {
+                    (magnitude + epsilon).ln()
                 } else {
-                    mag.ln_1p()
-                }
+                    magnitude.ln_1p()
+                };
+                finite_scalar_output(log_magnitude, "Mellin log magnitude", index)
             })
-            .collect())
+            .collect()
     }
 
     #[cfg(feature = "wgpu")]
@@ -388,7 +422,7 @@ impl MellinEvalPlan {
         }
         let series =
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
-        Ok(self.apply_prefactors(series))
+        self.apply_prefactors(series)
     }
 
     #[cfg(feature = "wgpu")]
@@ -451,7 +485,7 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = self.evaluate_stable_series_gpu(weighted)?;
-        Ok(self.apply_prefactors(series))
+        self.apply_prefactors(series)
     }
 
     #[cfg(feature = "wgpu")]
@@ -472,7 +506,7 @@ impl MellinEvalPlan {
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&deriv_coeffs, &self.z_points)?
         };
 
-        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
+        self.apply_prefactors_with_derivative(series, d_series_dz)
     }
 
     #[cfg(feature = "wgpu")]
@@ -561,7 +595,7 @@ impl MellinEvalPlan {
             return Ok((Vec::new(), Vec::new()));
         }
         let (series, d_series_dz) = self.evaluate_stable_series_with_derivative_gpu(weighted)?;
-        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
+        self.apply_prefactors_with_derivative(series, d_series_dz)
     }
 
     #[cfg(feature = "wgpu")]
@@ -571,11 +605,13 @@ impl MellinEvalPlan {
         }
         let series =
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
-        Ok(series
+        self.apply_prefactors(series)?
             .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| complex_magnitude(value) * complex_magnitude(*prefactor))
-            .collect())
+            .enumerate()
+            .map(|(index, value)| {
+                finite_scalar_output(complex_magnitude(value), "Mellin magnitude", index)
+            })
+            .collect()
     }
 
     #[cfg(feature = "wgpu")]
@@ -589,18 +625,20 @@ impl MellinEvalPlan {
         }
         let series =
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
-        Ok(series
+        self.apply_prefactors(series)?
             .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| {
-                let mag = complex_magnitude(value) * complex_magnitude(*prefactor);
-                if epsilon.is_finite() && epsilon > 0.0 {
-                    (mag + epsilon).ln()
+            .enumerate()
+            .map(|(index, value)| {
+                let magnitude =
+                    finite_scalar_output(complex_magnitude(value), "Mellin magnitude", index)?;
+                let log_magnitude = if epsilon.is_finite() && epsilon > 0.0 {
+                    (magnitude + epsilon).ln()
                 } else {
-                    mag.ln_1p()
-                }
+                    magnitude.ln_1p()
+                };
+                finite_scalar_output(log_magnitude, "Mellin log magnitude", index)
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -692,14 +730,14 @@ impl MellinLogGrid {
     pub fn evaluate(&self, s: ComplexScalar) -> MellinResult<ComplexScalar> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
         let series = evaluate_weighted_series(&self.weighted, z)?;
-        Ok(prefactor * series)
+        finite_output(prefactor * series, "Mellin value", 0)
     }
 
     /// Evaluate the Mellin transform using stable Z-series evaluation for `|z|>1`.
     pub fn evaluate_stable(&self, s: ComplexScalar) -> MellinResult<ComplexScalar> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
         let series = evaluate_weighted_series_stable(&self.weighted, z)?;
-        Ok(prefactor * series)
+        finite_output(prefactor * series, "Mellin value", 0)
     }
 
     /// Evaluate the Mellin transform and return `d/ds`.
@@ -715,8 +753,12 @@ impl MellinLogGrid {
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
 
-        let value = prefactor * series;
-        let d_value_ds = prefactor * (start * series + step * z * d_series_dz);
+        let value = finite_output(prefactor * series, "Mellin value", 0)?;
+        let d_value_ds = finite_output(
+            prefactor * (start * series + step * z * d_series_dz),
+            "Mellin derivative",
+            0,
+        )?;
         Ok((value, d_value_ds))
     }
 
@@ -734,8 +776,12 @@ impl MellinLogGrid {
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
 
-        let value = prefactor * series;
-        let d_value_ds = prefactor * (start * series + step * z * d_series_dz);
+        let value = finite_output(prefactor * series, "Mellin value", 0)?;
+        let d_value_ds = finite_output(
+            prefactor * (start * series + step * z * d_series_dz),
+            "Mellin derivative",
+            0,
+        )?;
         Ok((value, d_value_ds))
     }
 
@@ -1000,13 +1046,19 @@ impl MellinLogGrid {
 
     /// Evaluate the magnitude `|M(s)|`.
     pub fn evaluate_magnitude(&self, s: ComplexScalar) -> MellinResult<Scalar> {
-        Ok(complex_magnitude(self.evaluate(s)?))
+        finite_scalar_output(complex_magnitude(self.evaluate(s)?), "Mellin magnitude", 0)
     }
 
     /// Evaluate the magnitude `|M(s)|` at multiple points.
     pub fn evaluate_many_magnitude(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
         let values = self.evaluate_many(s_values)?;
-        Ok(values.into_iter().map(complex_magnitude).collect())
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                finite_scalar_output(complex_magnitude(value), "Mellin magnitude", index)
+            })
+            .collect()
     }
 
     /// Evaluate the Mellin transform over a 2D mesh of `s = real + i * imag`.
@@ -1103,7 +1155,7 @@ impl MellinLogGrid {
         }
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
         let series = evaluate_weighted_series(weighted, z)?;
-        Ok(prefactor * series)
+        finite_output(prefactor * series, "Mellin value", 0)
     }
 
     /// Evaluate the Mellin transform using pre-weighted Z-series coefficients and return `d/ds`.
@@ -1127,8 +1179,12 @@ impl MellinLogGrid {
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
 
-        let value = prefactor * series;
-        let d_value_ds = prefactor * (start * series + step * z * d_series_dz);
+        let value = finite_output(prefactor * series, "Mellin value", 0)?;
+        let d_value_ds = finite_output(
+            prefactor * (start * series + step * z * d_series_dz),
+            "Mellin derivative",
+            0,
+        )?;
         Ok((value, d_value_ds))
     }
 
@@ -1156,11 +1212,14 @@ impl MellinLogGrid {
             z_points.push(z);
         }
         let series = evaluate_weighted_series_many(weighted, &z_points)?;
-        Ok(series
+        series
             .into_iter()
             .zip(prefactors)
-            .map(|(series, prefactor)| prefactor * series)
-            .collect())
+            .enumerate()
+            .map(|(index, (series, prefactor))| {
+                finite_output(prefactor * series, "Mellin value", index)
+            })
+            .collect()
     }
 
     /// Evaluate the Mellin transform and `d/ds` at multiple points using pre-weighted coefficients.
@@ -1305,7 +1364,11 @@ impl MellinLogGrid {
         {
             acc += lhs.conj() * *rhs * ComplexScalar::new(w, 0.0);
         }
-        Ok(acc * ComplexScalar::new(self.log_step, 0.0))
+        finite_output(
+            acc * ComplexScalar::new(self.log_step, 0.0),
+            "Hilbert inner product",
+            0,
+        )
     }
 
     /// Hilbert-space norm induced by the Mellin lattice.
@@ -1375,6 +1438,9 @@ where
         return Err(MellinError::InsufficientSamples);
     }
     let (log_a, log_b) = map_range_to_log(range)?;
+    if !(s.re.is_finite() && s.im.is_finite()) {
+        return Err(MellinError::NonFiniteAbscissa { re: s.re, im: s.im });
+    }
     let h = (log_b - log_a) / steps as Scalar;
 
     let mut acc = ComplexScalar::new(0.0, 0.0);
@@ -1387,10 +1453,11 @@ where
         if !(val.re.is_finite() && val.im.is_finite()) {
             return Err(MellinError::NonFiniteFunctionValue { x });
         }
-        acc += kernel * val * weight;
+        let term = finite_output(kernel * val * weight, "Mellin integrand", i)?;
+        acc = finite_output(acc + term, "Mellin accumulator", i)?;
     }
 
-    Ok(acc * ComplexScalar::new(h, 0.0))
+    finite_output(acc * ComplexScalar::new(h, 0.0), "Mellin value", 0)
 }
 
 /// Evaluate the Mellin transform from log-spaced samples.
@@ -1423,7 +1490,7 @@ pub fn mellin_transform_log_samples(
         }
     }
     let series = weighted_z_transform(samples, &weights, z)?;
-    Ok(prefactor * series)
+    finite_output(prefactor * series, "Mellin value", 0)
 }
 
 /// Inner product associated with the Hilbert space `L^2((0, \infty), dx/x)`.
@@ -1460,7 +1527,11 @@ where
         acc += val * weight;
     }
 
-    Ok(acc * ComplexScalar::new(h, 0.0))
+    finite_output(
+        acc * ComplexScalar::new(h, 0.0),
+        "Mellin L2 inner product",
+        0,
+    )
 }
 
 #[cfg(test)]
@@ -1468,6 +1539,39 @@ mod tests {
     use super::*;
     use crate::zspace::mellin_transform_via_z;
     use libm::tgammaf;
+    use std::fmt::Debug;
+
+    fn assert_non_finite_output<T: Debug>(
+        result: MellinResult<T>,
+        expected_quantity: &'static str,
+        expected_index: usize,
+    ) {
+        match result {
+            Err(MellinError::NonFiniteOutput {
+                quantity, index, ..
+            }) => {
+                assert_eq!(quantity, expected_quantity);
+                assert_eq!(index, expected_index);
+            }
+            other => panic!("expected NonFiniteOutput, got {other:?}"),
+        }
+    }
+
+    fn assert_non_finite_scalar_output<T: Debug>(
+        result: MellinResult<T>,
+        expected_quantity: &'static str,
+        expected_index: usize,
+    ) {
+        match result {
+            Err(MellinError::NonFiniteScalarOutput {
+                quantity, index, ..
+            }) => {
+                assert_eq!(quantity, expected_quantity);
+                assert_eq!(index, expected_index);
+            }
+            other => panic!("expected NonFiniteScalarOutput, got {other:?}"),
+        }
+    }
 
     fn exp_decay(x: Scalar) -> ComplexScalar {
         ComplexScalar::new((-x).exp(), 0.0)
@@ -1949,5 +2053,92 @@ mod tests {
             let diff = (*mag - value.norm()).abs();
             assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
         }
+    }
+
+    #[test]
+    fn mellin_eval_plan_reports_prefactor_overflow_index() {
+        let plan = MellinEvalPlan::many(
+            1.0,
+            1.0,
+            &[ComplexScalar::new(0.0, 0.0), ComplexScalar::new(1.0, 0.0)],
+        )
+        .unwrap();
+        let weighted = [ComplexScalar::new(Scalar::MAX, 0.0)];
+
+        assert_non_finite_output(plan.evaluate(&weighted), "Mellin value", 1);
+        assert_non_finite_output(plan.evaluate_stable(&weighted), "Mellin value", 1);
+    }
+
+    #[test]
+    fn mellin_eval_plan_rejects_internal_length_mismatch() {
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+        assert!(matches!(
+            plan.apply_prefactors(Vec::new()),
+            Err(MellinError::SampleLengthMismatch {
+                expected: 1,
+                got: 0
+            })
+        ));
+        assert!(matches!(
+            plan.apply_prefactors_with_derivative(vec![ComplexScalar::new(1.0, 0.0)], Vec::new()),
+            Err(MellinError::SampleLengthMismatch {
+                expected: 1,
+                got: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn mellin_grid_rejects_derivative_overflow_after_finite_series() {
+        let grid =
+            MellinLogGrid::new(Scalar::MAX, 1.0, vec![ComplexScalar::new(2.0, 0.0)]).unwrap();
+        let s = ComplexScalar::new(0.0, 0.0);
+
+        assert_eq!(grid.evaluate(s).unwrap(), ComplexScalar::new(2.0, 0.0));
+        assert_non_finite_output(grid.evaluate_with_derivative(s), "Mellin derivative", 0);
+        assert_non_finite_output(
+            grid.evaluate_with_derivative_stable(s),
+            "Mellin derivative",
+            0,
+        );
+    }
+
+    #[test]
+    fn mellin_grid_rejects_unrepresentable_magnitude() {
+        let grid = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(3.0e38, 3.0e38)]).unwrap();
+        let s = ComplexScalar::new(0.0, 0.0);
+
+        assert!(grid.evaluate(s).is_ok());
+        assert_non_finite_scalar_output(grid.evaluate_magnitude(s), "Mellin magnitude", 0);
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[s]).unwrap();
+        assert_non_finite_scalar_output(
+            plan.evaluate_log_magnitude(&grid.weighted, 1.0e-6),
+            "Mellin magnitude",
+            0,
+        );
+    }
+
+    #[test]
+    fn mellin_hilbert_product_rejects_overflow() {
+        let grid =
+            MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(Scalar::MAX, 0.0)]).unwrap();
+        assert_non_finite_output(
+            grid.hilbert_inner_product(&grid),
+            "Hilbert inner product",
+            0,
+        );
+    }
+
+    #[test]
+    fn direct_mellin_transform_rejects_non_finite_abscissa() {
+        assert!(matches!(
+            mellin_transform(
+                exp_decay,
+                ComplexScalar::new(Scalar::NAN, 0.0),
+                (0.1, 1.0),
+                8,
+            ),
+            Err(MellinError::NonFiniteAbscissa { .. })
+        ));
     }
 }
