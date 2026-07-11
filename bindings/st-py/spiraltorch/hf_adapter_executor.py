@@ -976,6 +976,11 @@ def _policy_kwargs(policy: Mapping[str, object]) -> dict[str, object]:
         "max_lineage_depth": policy.get("max_lineage_depth"),
         "target_eval_loss": policy.get("target_eval_loss"),
         "min_eval_improvement": policy.get("min_eval_improvement"),
+        "max_distortion_pressure_index": policy.get(
+            "max_distortion_pressure_index"
+        ),
+        "min_desire_stability": policy.get("min_desire_stability"),
+        "max_psi_total": policy.get("max_psi_total"),
         "plateau_patience": policy.get("plateau_patience", 1),
     }
 
@@ -2014,6 +2019,9 @@ def _validate_executor_arguments(
     max_lineage_depth: int | None,
     target_eval_loss: float | None,
     min_eval_improvement: float | None,
+    max_distortion_pressure_index: float | None,
+    min_desire_stability: float | None,
+    max_psi_total: float | None,
     plateau_patience: int,
     max_steps: int | None,
     max_steps_multiplier: float | None,
@@ -2033,6 +2041,14 @@ def _validate_executor_arguments(
         min_eval_improvement,
         minimum=0.0,
     )
+    for name, value in (
+        ("max_distortion_pressure_index", max_distortion_pressure_index),
+        ("min_desire_stability", min_desire_stability),
+        ("max_psi_total", max_psi_total),
+    ):
+        _validate_optional_float(name, value, minimum=0.0)
+        if value is not None and float(value) > 1.0:
+            raise ValueError(f"{name} must be finite and between 0.0 and 1.0")
     _validate_optional_int("plateau_patience", plateau_patience, minimum=1)
     _validate_optional_int("max_steps", max_steps, minimum=1)
     _validate_optional_float(
@@ -2085,6 +2101,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
     output_prefix: str = "generation",
     max_steps: int | None = None,
@@ -2106,6 +2125,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
         max_lineage_depth=max_lineage_depth,
         target_eval_loss=target_eval_loss,
         min_eval_improvement=min_eval_improvement,
+        max_distortion_pressure_index=max_distortion_pressure_index,
+        min_desire_stability=min_desire_stability,
+        max_psi_total=max_psi_total,
         plateau_patience=plateau_patience,
         max_steps=max_steps,
         max_steps_multiplier=max_steps_multiplier,
@@ -2149,8 +2171,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
         "max_lineage_depth": max_lineage_depth,
         "target_eval_loss": target_eval_loss,
         "min_eval_improvement": min_eval_improvement,
+        "max_distortion_pressure_index": max_distortion_pressure_index,
+        "min_desire_stability": min_desire_stability,
+        "max_psi_total": max_psi_total,
         "plateau_patience": plateau_patience,
     }
+    trainer_telemetry_required = bool(
+        min_desire_stability is not None or max_psi_total is not None
+    )
     scale_up = {
         "max_steps": max_steps,
         "max_steps_multiplier": max_steps_multiplier,
@@ -2159,6 +2187,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
         "max_eval_samples": max_eval_samples,
         "max_eval_blocks": max_eval_blocks,
         "streaming_validation_samples": streaming_validation_samples,
+        "require_trainer_telemetry": trainer_telemetry_required,
         "output_prefix": output_prefix,
     }
     resolved_command_cwd = (
@@ -2365,6 +2394,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 max_eval_samples=max_eval_samples,
                 max_eval_blocks=max_eval_blocks,
                 streaming_validation_samples=streaming_validation_samples,
+                require_trainer_telemetry=trainer_telemetry_required,
                 source_cwd=resolved_command_cwd,
             )
             preflight = hf_finetune_scale_up_preflight_report(command)
@@ -2386,6 +2416,10 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "output_dir": str(output_dir),
             "source_transition": _selected_transition(chain),
             "command_runtime": command.get("command_runtime"),
+            "trainer_telemetry_required": trainer_telemetry_required,
+            "trainer_telemetry_command_contract": command.get(
+                "trainer_telemetry_command_contract"
+            ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
             ),
@@ -2627,6 +2661,10 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "output_dir": str(output_dir),
             "source_transition": _selected_transition(chain),
             "command_runtime": command.get("command_runtime"),
+            "trainer_telemetry_required": trainer_telemetry_required,
+            "trainer_telemetry_command_contract": command.get(
+                "trainer_telemetry_command_contract"
+            ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
             ),
@@ -2868,6 +2906,9 @@ def run_hf_adapter_continuation_executor(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
     output_prefix: str = "generation",
     max_steps: int | None = None,
@@ -2902,6 +2943,9 @@ def run_hf_adapter_continuation_executor(
             max_lineage_depth=max_lineage_depth,
             target_eval_loss=target_eval_loss,
             min_eval_improvement=min_eval_improvement,
+            max_distortion_pressure_index=max_distortion_pressure_index,
+            min_desire_stability=min_desire_stability,
+            max_psi_total=max_psi_total,
             plateau_patience=plateau_patience,
             output_prefix=output_prefix,
             max_steps=max_steps,
@@ -3006,6 +3050,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(command_runtime, Mapping)
             else None
         )
+        trainer_telemetry_contract = pending.get(
+            "trainer_telemetry_command_contract"
+        )
+        trainer_telemetry_contract_status = (
+            trainer_telemetry_contract.get("status")
+            if isinstance(trainer_telemetry_contract, Mapping)
+            else None
+        )
         preflight = pending.get("preflight")
         preflight_status = (
             preflight.get("status") if isinstance(preflight, Mapping) else None
@@ -3088,6 +3140,7 @@ def hf_adapter_continuation_executor_lines(
             f"plan={generation_plan_status} "
             f"command={command_status} "
             f"runtime={runtime_status} "
+            f"trainer_telemetry={trainer_telemetry_contract_status} "
             f"preflight={preflight_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
@@ -3146,6 +3199,14 @@ def hf_adapter_continuation_executor_lines(
         runtime_status = (
             command_runtime.get("status")
             if isinstance(command_runtime, Mapping)
+            else None
+        )
+        trainer_telemetry_contract = raw_attempt.get(
+            "trainer_telemetry_command_contract"
+        )
+        trainer_telemetry_contract_status = (
+            trainer_telemetry_contract.get("status")
+            if isinstance(trainer_telemetry_contract, Mapping)
             else None
         )
         input_identity = raw_attempt.get("adapter_input_identity")
@@ -3222,6 +3283,7 @@ def hf_adapter_continuation_executor_lines(
             f"host={raw_attempt.get('hostname')} "
             f"adapter={raw_attempt.get('adapter_id')} "
             f"runtime={runtime_status} "
+            f"trainer_telemetry={trainer_telemetry_contract_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

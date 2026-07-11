@@ -5944,6 +5944,51 @@ def _adapter_promotion_command_contract(
     }
 
 
+def _trainer_telemetry_command_contract(
+    command: Sequence[object],
+    *,
+    required: bool,
+) -> dict[str, object]:
+    values = [str(item) for item in command]
+    telemetry_requested = "--trainer-telemetry" in values
+    trainer_trace_disabled = "--no-trainer-trace" in values
+    active = bool(required or telemetry_requested)
+    violations: list[dict[str, str]] = []
+    if required and not telemetry_requested:
+        violations.append(
+            {
+                "field": "--trainer-telemetry",
+                "message": "geometry policy requires trainer telemetry",
+            }
+        )
+    if telemetry_requested and trainer_trace_disabled:
+        violations.append(
+            {
+                "field": "--no-trainer-trace",
+                "message": "trainer telemetry cannot run with trainer tracing disabled",
+            }
+        )
+    ready = not violations
+    return {
+        "status": (
+            "not_applicable"
+            if not active
+            else "enforced"
+            if required and ready
+            else "observed"
+            if ready
+            else "blocked"
+        ),
+        "required": bool(required),
+        "active": active,
+        "ready": ready,
+        "telemetry_requested": telemetry_requested,
+        "trainer_trace_disabled": trainer_trace_disabled,
+        "trainer_trace_jsonl": _command_flag_value(values, "--trainer-trace-jsonl"),
+        "violations": violations,
+    }
+
+
 _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS = {
     "--model-configs",
     "--train-file",
@@ -6916,11 +6961,14 @@ def hf_gpt2_finetune_scale_up_command(
     run_card: str | Path | None = None,
     trainer_trace_jsonl: str | Path | None = None,
     trainer_trace_run_id: str | None = None,
+    require_trainer_telemetry: bool = False,
     adapter_continuation: str = "auto",
     source_cwd: str | Path | None = None,
 ) -> dict[str, object]:
     """Build a longer FT command from the distortion-adjusted scale-up candidate."""
 
+    if not isinstance(require_trainer_telemetry, bool):
+        raise ValueError("require_trainer_telemetry must be a boolean")
     continuation_policy = _scale_up_adapter_continuation_policy(
         adapter_continuation
     )
@@ -7766,6 +7814,23 @@ def hf_gpt2_finetune_scale_up_command(
     }
     command = _command_with_overrides(base_command, overrides)
     applied = {key: value for key, value in overrides.items() if value is not None}
+    source_trainer_telemetry_requested = "--trainer-telemetry" in base_command
+    source_trainer_trace_disabled = "--no-trainer-trace" in base_command
+    trainer_telemetry_auto_enabled = False
+    trainer_trace_auto_enabled = False
+    if require_trainer_telemetry:
+        if "--no-trainer-trace" in command:
+            command = _command_without_switch_flags(command, ("--no-trainer-trace",))
+            applied["--no-trainer-trace"] = False
+            trainer_trace_auto_enabled = True
+        if "--trainer-telemetry" not in command:
+            command.append("--trainer-telemetry")
+            applied["--trainer-telemetry"] = True
+            trainer_telemetry_auto_enabled = True
+    trainer_telemetry_command_contract = _trainer_telemetry_command_contract(
+        command,
+        required=require_trainer_telemetry,
+    )
     adapter_promotion_required = summary.get("adapter_promotion_required") is True
     if adapter_promotion_required:
         for flag in (
@@ -7935,6 +8000,15 @@ def hf_gpt2_finetune_scale_up_command(
         "adapter_promotion_command_contract": adapter_promotion_command_contract,
         "adapter_promotion_command_contract_status": (
             adapter_promotion_command_contract.get("status")
+        ),
+        "trainer_telemetry_required": require_trainer_telemetry,
+        "trainer_telemetry_source_requested": source_trainer_telemetry_requested,
+        "trainer_trace_source_disabled": source_trainer_trace_disabled,
+        "trainer_telemetry_auto_enabled": trainer_telemetry_auto_enabled,
+        "trainer_trace_auto_enabled": trainer_trace_auto_enabled,
+        "trainer_telemetry_command_contract": trainer_telemetry_command_contract,
+        "trainer_telemetry_command_contract_status": (
+            trainer_telemetry_command_contract.get("status")
         ),
         "scale_up_candidate_adapter_promotion_status": summary.get(
             "scale_up_candidate_adapter_promotion_status"
@@ -8435,6 +8509,78 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "verified": bool(
                 adapter_promotion_command_contract.get("ready")
                 and adapter_promotion_command_contract_matches
+            ),
+        }
+    )
+
+    trainer_telemetry_required = artifact.get("trainer_telemetry_required") is True
+    trainer_telemetry_command_contract = _trainer_telemetry_command_contract(
+        command,
+        required=trainer_telemetry_required,
+    )
+    for violation in trainer_telemetry_command_contract.get("violations") or []:
+        if not isinstance(violation, Mapping):
+            continue
+        issues.append(
+            {
+                "severity": "error",
+                "field": violation.get("field"),
+                "message": violation.get("message"),
+            }
+        )
+    declared_telemetry_contract = artifact.get(
+        "trainer_telemetry_command_contract"
+    )
+    trainer_telemetry_command_contract_matches = True
+    if isinstance(declared_telemetry_contract, Mapping):
+        contract_fields = (
+            "status",
+            "required",
+            "active",
+            "ready",
+            "telemetry_requested",
+            "trainer_trace_disabled",
+            "trainer_trace_jsonl",
+            "violations",
+        )
+        trainer_telemetry_command_contract_matches = all(
+            declared_telemetry_contract.get(field)
+            == trainer_telemetry_command_contract.get(field)
+            for field in contract_fields
+        )
+        if not trainer_telemetry_command_contract_matches:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "trainer_telemetry_command_contract",
+                    "message": (
+                        "trainer telemetry command metadata does not match the "
+                        "resolved command"
+                    ),
+                }
+            )
+    elif trainer_telemetry_required:
+        trainer_telemetry_command_contract_matches = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "trainer_telemetry_command_contract",
+                "message": "required trainer telemetry command metadata is missing",
+            }
+        )
+    inputs.append(
+        {
+            "field": "trainer_telemetry_command_contract",
+            "declared": (
+                dict(declared_telemetry_contract)
+                if isinstance(declared_telemetry_contract, Mapping)
+                else None
+            ),
+            "observed": trainer_telemetry_command_contract,
+            "metadata_matches": trainer_telemetry_command_contract_matches,
+            "verified": bool(
+                trainer_telemetry_command_contract.get("ready")
+                and trainer_telemetry_command_contract_matches
             ),
         }
     )
@@ -9522,6 +9668,11 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "adapter_promotion_command_contract_matches": (
             adapter_promotion_command_contract_matches
         ),
+        "trainer_telemetry_required": trainer_telemetry_required,
+        "trainer_telemetry_command_contract": trainer_telemetry_command_contract,
+        "trainer_telemetry_command_contract_matches": (
+            trainer_telemetry_command_contract_matches
+        ),
         "command_path_resolution": artifact.get("command_path_resolution"),
         "source_command_cwd": artifact.get("source_command_cwd"),
         "adapter_continuation_policy": artifact.get(
@@ -9626,6 +9777,10 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
     promotion_contract = (
         promotion_contract if isinstance(promotion_contract, Mapping) else {}
     )
+    telemetry_contract = report.get("trainer_telemetry_command_contract")
+    telemetry_contract = (
+        telemetry_contract if isinstance(telemetry_contract, Mapping) else {}
+    )
     lines = [
         (
             "hf_gpt2_ft_scale_up_preflight "
@@ -9639,7 +9794,11 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"promotion_contract={promotion_contract.get('status')} "
             f"promotion_contract_ready={promotion_contract.get('ready')} "
             "promotion_contract_matches="
-            f"{report.get('adapter_promotion_command_contract_matches')}"
+            f"{report.get('adapter_promotion_command_contract_matches')} "
+            f"telemetry_contract={telemetry_contract.get('status')} "
+            f"telemetry_contract_ready={telemetry_contract.get('ready')} "
+            "telemetry_contract_matches="
+            f"{report.get('trainer_telemetry_command_contract_matches')}"
         )
     ]
     if report.get("dataset_shape_reissue_declared") is True:
@@ -13006,6 +13165,23 @@ def hf_finetune_rust_dependency_report() -> dict[str, object]:
     return report
 
 
+def _refresh_scale_up_trainer_telemetry_contract(
+    report: dict[str, object],
+    command: Sequence[object],
+) -> None:
+    if (
+        "trainer_telemetry_command_contract" not in report
+        and report.get("trainer_telemetry_required") is not True
+    ):
+        return
+    contract = _trainer_telemetry_command_contract(
+        command,
+        required=report.get("trainer_telemetry_required") is True,
+    )
+    report["trainer_telemetry_command_contract"] = contract
+    report["trainer_telemetry_command_contract_status"] = contract.get("status")
+
+
 def _prefer_hf_finetune_scale_up_artifacts(
     report: dict[str, object],
     *,
@@ -13030,6 +13206,7 @@ def _prefer_hf_finetune_scale_up_artifacts(
         report["command"] = command
         report["command_display"] = _shell_join_args(command)
         report["command_preview"] = _cli_arg_preview(command)
+        _refresh_scale_up_trainer_telemetry_contract(report, command)
         return report
     overrides: dict[str, object] = {}
     current_run_card = _command_flag_value(command, "--run-card")
@@ -13051,11 +13228,13 @@ def _prefer_hf_finetune_scale_up_artifacts(
             report["command"] = command
             report["command_display"] = _shell_join_args(command)
             report["command_preview"] = _cli_arg_preview(command)
+            _refresh_scale_up_trainer_telemetry_contract(report, command)
         return report
     updated = _command_with_overrides(command, overrides)
     report["command"] = updated
     report["command_display"] = _shell_join_args(updated)
     report["command_preview"] = _cli_arg_preview(updated)
+    _refresh_scale_up_trainer_telemetry_contract(report, updated)
     applied = report.get("applied_overrides")
     if isinstance(applied, Mapping):
         applied = {str(key): value for key, value in applied.items()}

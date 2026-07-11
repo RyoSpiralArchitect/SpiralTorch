@@ -154,6 +154,7 @@ def _write_promoted_child(
     expected_tokenized_dataset_id: str | None = None,
     finetune_replay_id: str | None = None,
     expected_finetune_replay_id: str | None = None,
+    trainer_trace_summary: dict[str, object] | None = None,
     max_train_samples: int = 8,
     block_size: int = 128,
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
@@ -161,6 +162,8 @@ def _write_promoted_child(
     adapter = _write_adapter(child, weights)
     run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
     card = _run_card(parent, before=before, after=after)
+    if trainer_trace_summary is not None:
+        card["trainer_trace_summary"] = dict(trainer_trace_summary)
     if runtime_input_id is not None:
         card["model_runtime_identity_pre_model"] = {
             "row_type": "hf_causal_lm_runtime_identity",
@@ -1886,6 +1889,7 @@ def test_adapter_continuation_policy_depth_target_missing_evidence_and_cli(
     assert continuing["continuation_allowed"] is True
     assert missing["status"] == "needs_evidence"
     assert missing["continuation_allowed"] is False
+    assert missing["recommendation"] == "collect_eval_evidence"
     assert {row["field"] for row in missing["missing_evidence"]} == {
         "selected_eval_after_loss",
         "eval_improvement",
@@ -1900,12 +1904,124 @@ def test_adapter_continuation_policy_depth_target_missing_evidence_and_cli(
     assert "code=max_lineage_depth_reached" in output
 
 
+def test_adapter_continuation_policy_gates_selected_tip_geometry_telemetry(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    _, child_lineage, promotion = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+        trainer_trace_summary={
+            "trace_training_telemetry_count": 4,
+            "trace_mean_desire_stability": 0.72,
+            "trace_max_psi_total": 0.55,
+            "trace_last_inference_distortion_risk_score": 0.30,
+        },
+    )
+    promotion_path = tmp_path / "child" / st.HF_ADAPTER_PROMOTION_FILENAME
+    legacy_promotion = json.loads(promotion_path.read_text(encoding="utf-8"))
+    for field in (
+        "distortion_pressure_index",
+        "trace_training_telemetry_count",
+        "trace_mean_desire_stability",
+        "trace_max_psi_total",
+    ):
+        legacy_promotion.pop(field)
+    promotion_path.write_text(json.dumps(legacy_promotion), encoding="utf-8")
+
+    passing = st.hf_adapter_promotion_chain_report(
+        tmp_path,
+        max_distortion_pressure_index=0.40,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+    )
+    stopped = st.hf_adapter_continuation_policy_report(
+        passing,
+        max_distortion_pressure_index=0.20,
+        min_desire_stability=0.80,
+        max_psi_total=0.50,
+    )
+    missing_chain = json.loads(json.dumps(passing))
+    selected = next(
+        node
+        for node in missing_chain["nodes"]
+        if node["adapter_id"] == child_lineage["adapter_id"]
+    )
+    selected["distortion_pressure_index"] = -0.1
+    selected["trace_mean_desire_stability"] = 1.1
+    selected["trace_max_psi_total"] = 1.1
+    missing = st.hf_adapter_continuation_policy_report(
+        missing_chain,
+        max_distortion_pressure_index=0.40,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+    )
+    root_chain = st.hf_adapter_promotion_chain_report(
+        root,
+        max_distortion_pressure_index=0.40,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+    )
+    code = hf_cli.adapter_promotion_chain_main(
+        [
+            str(tmp_path),
+            "--max-distortion-pressure-index",
+            "0.20",
+            "--min-desire-stability",
+            "0.80",
+            "--max-psi-total",
+            "0.50",
+            "--require-continuation-ready",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert promotion["distortion_pressure_index"] == pytest.approx(0.30)
+    assert promotion["trace_training_telemetry_count"] == 4
+    assert promotion["trace_mean_desire_stability"] == pytest.approx(0.72)
+    assert promotion["trace_max_psi_total"] == pytest.approx(0.55)
+    assert passing["continuation_policy_status"] == "continue"
+    assert passing["continuation_ready"] is True
+    assert passing["continuation_policy"]["geometry_gate_active"] is True
+    assert passing["continuation_policy"][
+        "selected_distortion_pressure_index"
+    ] == pytest.approx(0.30)
+    assert passing["transitions"][0][
+        "child_trace_mean_desire_stability"
+    ] == pytest.approx(0.72)
+    assert stopped["status"] == "stop"
+    assert stopped["stop_reason_codes"] == [
+        "distortion_pressure_limit_exceeded",
+        "desire_stability_below_minimum",
+        "psi_total_limit_exceeded",
+    ]
+    assert missing["status"] == "needs_evidence"
+    assert missing["recommendation"] == "collect_policy_evidence"
+    assert {row["field"] for row in missing["missing_evidence"]} == {
+        "selected_distortion_pressure_index",
+        "selected_trace_mean_desire_stability",
+        "selected_trace_max_psi_total",
+    }
+    assert root_chain["continuation_policy_status"] == "continue"
+    assert code == 1
+    assert "code=distortion_pressure_limit_exceeded" in output
+    assert "code=desire_stability_below_minimum" in output
+    assert "code=psi_total_limit_exceeded" in output
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
         {"max_lineage_depth": -1},
         {"target_eval_loss": float("nan")},
         {"min_eval_improvement": -0.1},
+        {"max_distortion_pressure_index": 1.1},
+        {"min_desire_stability": -0.1},
+        {"max_psi_total": -0.1},
+        {"max_psi_total": 1.1},
         {"plateau_patience": 0},
     ],
 )

@@ -336,6 +336,24 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
         help="Minimum required before-minus-after eval-loss improvement.",
     )
     parser.add_argument(
+        "--max-distortion-pressure-index",
+        type=float,
+        default=None,
+        help="Stop when the selected adapter's distortion pressure exceeds this.",
+    )
+    parser.add_argument(
+        "--min-desire-stability",
+        type=float,
+        default=None,
+        help="Stop when selected-tip mean desire stability falls below this.",
+    )
+    parser.add_argument(
+        "--max-psi-total",
+        type=float,
+        default=None,
+        help="Stop when selected-tip maximum trainer psi exceeds this.",
+    )
+    parser.add_argument(
         "--plateau-patience",
         type=int,
         default=1,
@@ -362,6 +380,9 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
             max_lineage_depth=args.max_lineage_depth,
             target_eval_loss=args.target_eval_loss,
             min_eval_improvement=args.min_eval_improvement,
+            max_distortion_pressure_index=args.max_distortion_pressure_index,
+            min_desire_stability=args.min_desire_stability,
+            max_psi_total=args.max_psi_total,
             plateau_patience=args.plateau_patience,
         )
     except ValueError as exc:
@@ -428,6 +449,9 @@ def _adapter_continuation_executor_child_argv(
         "max_lineage_depth",
         "target_eval_loss",
         "min_eval_improvement",
+        "max_distortion_pressure_index",
+        "min_desire_stability",
+        "max_psi_total",
         "max_steps",
         "max_train_samples",
         "max_eval_samples",
@@ -512,6 +536,9 @@ def adapter_continuation_executor_main(
     parser.add_argument("--max-lineage-depth", type=int, default=None)
     parser.add_argument("--target-eval-loss", type=float, default=None)
     parser.add_argument("--min-eval-improvement", type=float, default=None)
+    parser.add_argument("--max-distortion-pressure-index", type=float, default=None)
+    parser.add_argument("--min-desire-stability", type=float, default=None)
+    parser.add_argument("--max-psi-total", type=float, default=None)
     parser.add_argument("--plateau-patience", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--max-steps-multiplier", type=float, default=1.0)
@@ -623,6 +650,9 @@ def adapter_continuation_executor_main(
             max_lineage_depth=args.max_lineage_depth,
             target_eval_loss=args.target_eval_loss,
             min_eval_improvement=args.min_eval_improvement,
+            max_distortion_pressure_index=args.max_distortion_pressure_index,
+            min_desire_stability=args.min_desire_stability,
+            max_psi_total=args.max_psi_total,
             plateau_patience=args.plateau_patience,
             output_prefix=args.output_prefix,
             max_steps=args.max_steps,

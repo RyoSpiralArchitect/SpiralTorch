@@ -1539,6 +1539,16 @@ def hf_adapter_promotion_report(
         "eval_before_loss": before_loss,
         "eval_after_loss": after_loss,
         "eval_loss_regression": eval_regression,
+        "distortion_pressure_index": _finite_number(
+            summary.get("distortion_pressure_index")
+        ),
+        "trace_training_telemetry_count": _integer_number(
+            summary.get("trace_training_telemetry_count")
+        ),
+        "trace_mean_desire_stability": _finite_number(
+            summary.get("trace_mean_desire_stability")
+        ),
+        "trace_max_psi_total": _finite_number(summary.get("trace_max_psi_total")),
         "max_eval_loss_regression": regression_limit,
         "generation_changed": generation_changed,
         "artifact_probe_status": artifact_probe.get("status"),
@@ -2150,6 +2160,17 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 for field in revalidation_fields
                 if promotion.get(field) != promotion_revalidation.get(field)
             ]
+            mismatched_fields.extend(
+                field
+                for field in (
+                    "distortion_pressure_index",
+                    "trace_training_telemetry_count",
+                    "trace_mean_desire_stability",
+                    "trace_max_psi_total",
+                )
+                if field in promotion
+                and promotion.get(field) != promotion_revalidation.get(field)
+            )
             if mismatched_fields:
                 issues.append(
                     _chain_issue(
@@ -2170,6 +2191,11 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                     )
                 )
 
+    promotion_metrics = (
+        promotion_revalidation
+        if isinstance(promotion_revalidation, Mapping)
+        else promotion
+    )
     launch_command = (
         None if run_card is None else _chain_command(run_card.get("launch_command"))
     )
@@ -2396,6 +2422,18 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "eval_loss_regression": None
         if promotion is None
         else promotion.get("eval_loss_regression"),
+        "distortion_pressure_index": None
+        if promotion_metrics is None
+        else promotion_metrics.get("distortion_pressure_index"),
+        "trace_training_telemetry_count": None
+        if promotion_metrics is None
+        else promotion_metrics.get("trace_training_telemetry_count"),
+        "trace_mean_desire_stability": None
+        if promotion_metrics is None
+        else promotion_metrics.get("trace_mean_desire_stability"),
+        "trace_max_psi_total": None
+        if promotion_metrics is None
+        else promotion_metrics.get("trace_max_psi_total"),
         "artifact_probe_status": None
         if promotion is None
         else promotion.get("artifact_probe_status"),
@@ -2571,6 +2609,10 @@ def _chain_inferred_root_node(
         "eval_before_loss": None,
         "eval_after_loss": None,
         "eval_loss_regression": None,
+        "distortion_pressure_index": None,
+        "trace_training_telemetry_count": None,
+        "trace_mean_desire_stability": None,
+        "trace_max_psi_total": None,
         "launch_command": None,
         "launch_command_display": None,
         "launch_command_source": None,
@@ -3200,6 +3242,18 @@ def _adapter_promotion_chain_transition(
         ),
         "eval_handoff_delta": eval_handoff_delta,
         "child_eval_improvement": child_eval_improvement,
+        "child_distortion_pressure_index": _finite_number(
+            child.get("distortion_pressure_index")
+        ),
+        "child_trace_training_telemetry_count": _integer_number(
+            child.get("trace_training_telemetry_count")
+        ),
+        "child_trace_mean_desire_stability": _finite_number(
+            child.get("trace_mean_desire_stability")
+        ),
+        "child_trace_max_psi_total": _finite_number(
+            child.get("trace_max_psi_total")
+        ),
         "promotion_ready": child.get("promotion_ready") is True,
         "promotion_revalidated_ready": (
             child.get("promotion_revalidated_ready") is True
@@ -3239,12 +3293,32 @@ def _continuation_policy_float(
     return parsed
 
 
+def _continuation_policy_unit_float(
+    name: str,
+    value: object | None,
+) -> float | None:
+    parsed = _continuation_policy_float(name, value, minimum=0.0)
+    if parsed is not None and parsed > 1.0:
+        raise ValueError(f"{name} must be finite and between 0.0 and 1.0")
+    return parsed
+
+
+def _continuation_policy_unit_metric(value: object) -> float | None:
+    parsed = _finite_number(value)
+    if parsed is None or parsed < 0.0 or parsed > 1.0:
+        return None
+    return parsed
+
+
 def hf_adapter_continuation_policy_report(
     chain_or_path: Mapping[str, object] | str | Path,
     *,
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
 ) -> dict[str, object]:
     """Decide whether an audited adapter chain should train another generation."""
@@ -3277,6 +3351,18 @@ def hf_adapter_continuation_policy_report(
         "min_eval_improvement",
         min_eval_improvement,
         minimum=0.0,
+    )
+    resolved_max_distortion = _continuation_policy_unit_float(
+        "max_distortion_pressure_index",
+        max_distortion_pressure_index,
+    )
+    resolved_min_desire_stability = _continuation_policy_unit_float(
+        "min_desire_stability",
+        min_desire_stability,
+    )
+    resolved_max_psi = _continuation_policy_unit_float(
+        "max_psi_total",
+        max_psi_total,
     )
     resolved_patience = _continuation_policy_int(
         "plateau_patience",
@@ -3322,6 +3408,13 @@ def hf_adapter_continuation_policy_report(
         before = _finite_number(node.get("eval_before_loss"))
         after = _finite_number(node.get("eval_after_loss"))
         improvement = None if before is None or after is None else before - after
+        distortion_pressure = _continuation_policy_unit_metric(
+            node.get("distortion_pressure_index")
+        )
+        desire_stability = _continuation_policy_unit_metric(
+            node.get("trace_mean_desire_stability")
+        )
+        psi_total = _continuation_policy_unit_metric(node.get("trace_max_psi_total"))
         meets_minimum = (
             None
             if resolved_min_improvement is None or improvement is None
@@ -3337,13 +3430,67 @@ def hf_adapter_continuation_policy_report(
                 "eval_improvement": improvement,
                 "min_eval_improvement": resolved_min_improvement,
                 "meets_min_eval_improvement": meets_minimum,
+                "distortion_pressure_index": distortion_pressure,
+                "max_distortion_pressure_index": resolved_max_distortion,
+                "meets_max_distortion_pressure_index": (
+                    None
+                    if resolved_max_distortion is None or distortion_pressure is None
+                    else distortion_pressure <= resolved_max_distortion
+                ),
+                "trace_training_telemetry_count": _integer_number(
+                    node.get("trace_training_telemetry_count")
+                ),
+                "trace_mean_desire_stability": desire_stability,
+                "min_desire_stability": resolved_min_desire_stability,
+                "meets_min_desire_stability": (
+                    None
+                    if resolved_min_desire_stability is None
+                    or desire_stability is None
+                    else desire_stability >= resolved_min_desire_stability
+                ),
+                "trace_max_psi_total": psi_total,
+                "max_psi_total": resolved_max_psi,
+                "meets_max_psi_total": (
+                    None
+                    if resolved_max_psi is None or psi_total is None
+                    else psi_total <= resolved_max_psi
+                ),
             }
         )
 
     selected_depth = _chain_depth(chain.get("selected_lineage_depth"))
+    selected_adapter_id = chain.get("selected_adapter_id")
+    selected_observation = next(
+        (
+            observation
+            for observation in reversed(observations)
+            if observation.get("adapter_id") == selected_adapter_id
+        ),
+        None,
+    )
     selected_after = (
-        _finite_number(observations[-1].get("eval_after_loss"))
-        if observations
+        _finite_number(selected_observation.get("eval_after_loss"))
+        if selected_observation is not None
+        else None
+    )
+    selected_distortion_pressure = (
+        _finite_number(selected_observation.get("distortion_pressure_index"))
+        if selected_observation is not None
+        else None
+    )
+    selected_telemetry_count = (
+        _integer_number(selected_observation.get("trace_training_telemetry_count"))
+        if selected_observation is not None
+        else None
+    )
+    selected_desire_stability = (
+        _finite_number(selected_observation.get("trace_mean_desire_stability"))
+        if selected_observation is not None
+        else None
+    )
+    selected_psi_total = (
+        _finite_number(selected_observation.get("trace_max_psi_total"))
+        if selected_observation is not None
         else None
     )
     path_start_loss = (
@@ -3402,6 +3549,36 @@ def hf_adapter_continuation_policy_report(
                     ),
                 }
             )
+    if selected_depth not in (0, None):
+        for threshold, observed, field, message in (
+            (
+                resolved_max_distortion,
+                selected_distortion_pressure,
+                "selected_distortion_pressure_index",
+                "max_distortion_pressure_index requires distortion evidence",
+            ),
+            (
+                resolved_min_desire_stability,
+                selected_desire_stability,
+                "selected_trace_mean_desire_stability",
+                "min_desire_stability requires trainer desire telemetry",
+            ),
+            (
+                resolved_max_psi,
+                selected_psi_total,
+                "selected_trace_max_psi_total",
+                "max_psi_total requires trainer psi telemetry",
+            ),
+        ):
+            if threshold is not None and observed is None:
+                missing_evidence.append(
+                    {
+                        "field": field,
+                        "adapter_id": selected_adapter_id,
+                        "lineage_depth": selected_depth,
+                        "message": message,
+                    }
+                )
     for adapter_id in missing_path_adapter_ids:
         missing_evidence.append(
             {
@@ -3453,13 +3630,63 @@ def hf_adapter_continuation_policy_report(
                 ),
             }
         )
+    if (
+        resolved_max_distortion is not None
+        and selected_distortion_pressure is not None
+        and selected_distortion_pressure > resolved_max_distortion
+    ):
+        stop_reasons.append(
+            {
+                "code": "distortion_pressure_limit_exceeded",
+                "observed": selected_distortion_pressure,
+                "threshold": resolved_max_distortion,
+                "message": "selected adapter exceeded the distortion pressure limit",
+            }
+        )
+    if (
+        resolved_min_desire_stability is not None
+        and selected_desire_stability is not None
+        and selected_desire_stability < resolved_min_desire_stability
+    ):
+        stop_reasons.append(
+            {
+                "code": "desire_stability_below_minimum",
+                "observed": selected_desire_stability,
+                "threshold": resolved_min_desire_stability,
+                "message": "selected adapter fell below the desire stability minimum",
+            }
+        )
+    if (
+        resolved_max_psi is not None
+        and selected_psi_total is not None
+        and selected_psi_total > resolved_max_psi
+    ):
+        stop_reasons.append(
+            {
+                "code": "psi_total_limit_exceeded",
+                "observed": selected_psi_total,
+                "threshold": resolved_max_psi,
+                "message": "selected adapter exceeded the psi total limit",
+            }
+        )
 
+    geometry_gate_active = any(
+        value is not None
+        for value in (
+            resolved_max_distortion,
+            resolved_min_desire_stability,
+            resolved_max_psi,
+        )
+    )
     policy_active = any(
         value is not None
         for value in (
             resolved_max_depth,
             resolved_target,
             resolved_min_improvement,
+            resolved_max_distortion,
+            resolved_min_desire_stability,
+            resolved_max_psi,
         )
     )
     if chain.get("chain_ready") is not True:
@@ -3470,7 +3697,11 @@ def hf_adapter_continuation_policy_report(
         recommendation = "stop_training"
     elif missing_evidence:
         status = "needs_evidence"
-        recommendation = "collect_eval_evidence"
+        recommendation = (
+            "collect_policy_evidence"
+            if geometry_gate_active
+            else "collect_eval_evidence"
+        )
     else:
         status = "continue"
         recommendation = "continue_training"
@@ -3499,9 +3730,17 @@ def hf_adapter_continuation_policy_report(
         "selected_path_eval_start_loss": path_start_loss,
         "selected_path_eval_end_loss": selected_after,
         "selected_path_eval_improvement": path_improvement,
+        "geometry_gate_active": geometry_gate_active,
+        "selected_distortion_pressure_index": selected_distortion_pressure,
+        "selected_trace_training_telemetry_count": selected_telemetry_count,
+        "selected_trace_mean_desire_stability": selected_desire_stability,
+        "selected_trace_max_psi_total": selected_psi_total,
         "max_lineage_depth": resolved_max_depth,
         "target_eval_loss": resolved_target,
         "min_eval_improvement": resolved_min_improvement,
+        "max_distortion_pressure_index": resolved_max_distortion,
+        "min_desire_stability": resolved_min_desire_stability,
+        "max_psi_total": resolved_max_psi,
         "plateau_patience": resolved_patience,
         "consecutive_below_min_eval_improvement": consecutive_below_minimum,
         "stop_reason_count": len(stop_reasons),
@@ -3523,6 +3762,9 @@ def hf_adapter_promotion_chain_report(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
 ) -> dict[str, object]:
     """Audit a local adapter DAG and select one promotion-ready continuation tip."""
@@ -3932,6 +4174,9 @@ def hf_adapter_promotion_chain_report(
         max_lineage_depth=max_lineage_depth,
         target_eval_loss=target_eval_loss,
         min_eval_improvement=min_eval_improvement,
+        max_distortion_pressure_index=max_distortion_pressure_index,
+        min_desire_stability=min_desire_stability,
+        max_psi_total=max_psi_total,
         plateau_patience=plateau_patience,
     )
     continuation_allowed = policy.get("continuation_allowed") is True
@@ -3962,6 +4207,9 @@ def write_hf_adapter_promotion_chain(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
 ) -> dict[str, object]:
     report = (
@@ -3976,6 +4224,9 @@ def write_hf_adapter_promotion_chain(
             max_lineage_depth=max_lineage_depth,
             target_eval_loss=target_eval_loss,
             min_eval_improvement=min_eval_improvement,
+            max_distortion_pressure_index=max_distortion_pressure_index,
+            min_desire_stability=min_desire_stability,
+            max_psi_total=max_psi_total,
             plateau_patience=plateau_patience,
         )
     )
@@ -4009,6 +4260,9 @@ def write_hf_adapter_continuation_policy(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
 ) -> dict[str, object]:
     report = (
@@ -4020,6 +4274,9 @@ def write_hf_adapter_continuation_policy(
             max_lineage_depth=max_lineage_depth,
             target_eval_loss=target_eval_loss,
             min_eval_improvement=min_eval_improvement,
+            max_distortion_pressure_index=max_distortion_pressure_index,
+            min_desire_stability=min_desire_stability,
+            max_psi_total=max_psi_total,
             plateau_patience=plateau_patience,
         )
     )
@@ -4066,6 +4323,9 @@ def hf_adapter_continuation_policy_lines(
             f"next_depth={report.get('next_lineage_depth')} "
             f"eval_loss={report.get('selected_path_eval_end_loss')} "
             f"path_improvement={report.get('selected_path_eval_improvement')} "
+            f"distortion={report.get('selected_distortion_pressure_index')} "
+            f"desire_stability={report.get('selected_trace_mean_desire_stability')} "
+            f"psi_max={report.get('selected_trace_max_psi_total')} "
             f"plateau={report.get('consecutive_below_min_eval_improvement')}/"
             f"{report.get('plateau_patience')} "
             f"reasons={reason_codes or '-'}"
