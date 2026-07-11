@@ -13,7 +13,45 @@ from typing import Sequence
 
 import pytest
 import spiraltorch as st
-from spiraltorch import hf_adapter_executor_launch, hf_cli
+from spiraltorch import hf_adapter_executor, hf_adapter_executor_launch, hf_cli
+
+
+def _sealed_pending_generation(
+    state_path: Path,
+    *,
+    lineage_depth: int = 2,
+) -> dict[str, object]:
+    output_dir = state_path.parent / f"generation-{lineage_depth:03d}"
+    pending: dict[str, object] = {
+        "status": "planned",
+        "parent_adapter_id": "sha256:" + "1" * 64,
+        "parent_adapter_path": str(state_path.parent / "parent-adapter"),
+        "lineage_depth": lineage_depth,
+        "output_dir": str(output_dir),
+        "source_transition": None,
+        "command": {
+            "command": [
+                sys.executable,
+                "-c",
+                "raise SystemExit(0)",
+                "--output-dir",
+                str(output_dir),
+            ]
+        },
+    }
+    hf_adapter_executor._seal_generation_plan(
+        pending,
+        policy={"status": "continue"},
+        scale_up={"max_steps": 1},
+        max_generations=1,
+        execution={
+            "command_cwd": str(state_path.parent),
+            "command_env_override_keys": [],
+            "command_env_override_count": 0,
+            "command_env_sha256": None,
+        },
+    )
+    return pending
 
 
 def _executor_state(
@@ -202,6 +240,8 @@ def _write_replayable_launch_state(
         if executor_action == "resume_executor"
         else "continuation_policy_stop"
     )
+    if executor_action == "resume_executor":
+        state["pending_generation"] = _sealed_pending_generation(state_path)
     state_path.write_text(json.dumps(state), encoding="utf-8")
     log_path = output_root / "launcher.log"
     log_path.write_text("completed\n", encoding="utf-8")
@@ -640,8 +680,7 @@ def test_launch_status_propagates_executor_health_failure(tmp_path: Path) -> Non
     assert quarantined_but_unresolved["status"] == "executor_unhealthy"
     assert quarantined_but_unresolved["healthy"] is False
     assert (
-        quarantined_but_unresolved["recommended_action"]
-        == "resolve_cancelled_output"
+        quarantined_but_unresolved["recommended_action"] == "resolve_cancelled_output"
     )
 
 
@@ -788,6 +827,7 @@ def test_durable_resume_replays_detached_executor_and_advances_invocation(
     terminal["status"] = "generation_limit_reached"
     terminal["action"] = "resume_executor"
     terminal["reason"] = "max_generations_per_invocation_reached"
+    terminal["pending_generation"] = _sealed_pending_generation(state_path)
     state_path.write_text(json.dumps(terminal), encoding="utf-8")
 
     plan = st.hf_adapter_continuation_executor_resume_report(first["launch_state_path"])
@@ -843,12 +883,45 @@ def test_resume_plan_validates_legacy_contract_and_rejects_tampering(
     assert legacy["ready"] is True
     assert legacy["resume_contract_source"] == "legacy_command_reconstructed"
 
+    recorded_legacy_path, recorded_legacy_state_path, recorded_legacy_argv = (
+        _write_replayable_launch_state(tmp_path / "recorded-legacy")
+    )
+    recorded_legacy_payload = json.loads(
+        recorded_legacy_path.read_text(encoding="utf-8")
+    )
+    recorded_legacy_payload["launches"][0]["resume_contract"] = (
+        hf_adapter_executor_launch._legacy_resume_contract(
+            recorded_legacy_argv,
+            output_root=recorded_legacy_state_path.parent.resolve(),
+            executor_state_path=recorded_legacy_state_path.resolve(),
+            command_cwd=(tmp_path / "recorded-legacy").resolve(),
+        )
+    )
+    recorded_legacy_path.write_text(
+        json.dumps(recorded_legacy_payload),
+        encoding="utf-8",
+    )
+    recorded_legacy = st.hf_adapter_continuation_executor_resume_report(
+        recorded_legacy_path
+    )
+    assert recorded_legacy["ready"] is True
+    assert recorded_legacy["resume_contract_source"] == "recorded_legacy"
+
     launch_path, _, _ = _write_replayable_launch_state(tmp_path / "tampered")
     payload = json.loads(launch_path.read_text(encoding="utf-8"))
     payload["launches"][0]["executor_argv"].extend(["--max-lineage-depth", "99"])
     launch_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(RuntimeError, match="resume contract is invalid"):
         st.hf_adapter_continuation_executor_resume_report(launch_path)
+
+    handoff_path, _, _ = _write_replayable_launch_state(tmp_path / "handoff")
+    handoff_payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    handoff_payload["launches"][0]["resumed_from_generation_plan_id"] = (
+        "sha256:" + "9" * 64
+    )
+    handoff_path.write_text(json.dumps(handoff_payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="generation plan handoff is invalid"):
+        st.hf_adapter_continuation_executor_resume_report(handoff_path)
 
     identity_path, identity_state_path, _ = _write_replayable_launch_state(
         tmp_path / "identity"
@@ -904,6 +977,155 @@ def test_resume_plan_validates_legacy_contract_and_rejects_tampering(
     malformed_path.write_text(json.dumps(malformed), encoding="utf-8")
     with pytest.raises(RuntimeError, match="invalid launch row"):
         st.hf_adapter_continuation_executor_resume_report(malformed_path)
+
+
+def test_resume_rebinds_only_generation_gate_and_rechecks_plan_under_lock(
+    tmp_path: Path,
+) -> None:
+    launch_path, state_path, source_argv = _write_replayable_launch_state(tmp_path)
+    source_plan_id = "sha256:" + "0" * 64
+    launch = json.loads(launch_path.read_text(encoding="utf-8"))
+    latest = launch["launches"][-1]
+    strict_source_argv = [
+        *source_argv,
+        "--expected-plan-id",
+        source_plan_id,
+        "--require-pending-plan",
+    ]
+    latest["executor_argv"] = strict_source_argv
+    latest["command"] = hf_adapter_executor_launch._executor_child_command(
+        strict_source_argv
+    )
+    latest["resume_contract"] = hf_adapter_executor_launch._resume_contract(
+        strict_source_argv,
+        output_root=state_path.parent.resolve(),
+        executor_state_path=state_path.resolve(),
+        command_cwd=tmp_path.resolve(),
+    )
+    launch_path.write_text(json.dumps(launch), encoding="utf-8")
+
+    plan = st.hf_adapter_continuation_executor_resume_report(launch_path)
+    expected_plan_id = plan["generation_plan_id"]
+
+    assert plan["ready"] is True
+    assert plan["generation_plan_required"] is True
+    assert plan["generation_plan_rebound"] is True
+    assert plan["source_executor_argv"][-3:] == [
+        "--expected-plan-id",
+        source_plan_id,
+        "--require-pending-plan",
+    ]
+    assert _flag(plan["executor_argv"], "--expected-plan-id") == expected_plan_id
+    assert plan["executor_argv"].count("--require-pending-plan") == 1
+    assert (
+        hf_adapter_executor_launch._generation_plan_gate_argv(plan["executor_argv"])[
+            "base_argv"
+        ]
+        == hf_adapter_executor_launch._generation_plan_gate_argv(strict_source_argv)[
+            "base_argv"
+        ]
+    )
+
+    changed_policy_argv = list(plan["executor_argv"])
+    changed_policy_argv[changed_policy_argv.index("--max-generations") + 1] = "2"
+    with pytest.raises(RuntimeError, match="policy argv changed"):
+        st.launch_hf_adapter_continuation_executor(
+            changed_policy_argv,
+            output_root=state_path.parent,
+            executor_state_path=state_path,
+            launch_state_path=launch_path,
+            command_cwd=tmp_path,
+            _resume_expectation={
+                "launch_id": plan["source_launch_id"],
+                "contract_sha256": plan["resume_contract"]["contract_sha256"],
+                "executor_run_id": plan["executor_run_id"],
+                "executor_invocation_count": plan["executor_invocation_count"],
+                "generation_plan_id": expected_plan_id,
+            },
+        )
+
+    changed_state = json.loads(state_path.read_text(encoding="utf-8"))
+    changed_state["pending_generation"] = _sealed_pending_generation(
+        state_path,
+        lineage_depth=3,
+    )
+    state_path.write_text(json.dumps(changed_state), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="generation plan changed"):
+        st.launch_hf_adapter_continuation_executor(
+            plan["executor_argv"],
+            output_root=state_path.parent,
+            executor_state_path=state_path,
+            launch_state_path=launch_path,
+            command_cwd=tmp_path,
+            _resume_expectation={
+                "launch_id": plan["source_launch_id"],
+                "contract_sha256": plan["resume_contract"]["contract_sha256"],
+                "executor_run_id": plan["executor_run_id"],
+                "executor_invocation_count": plan["executor_invocation_count"],
+                "generation_plan_id": expected_plan_id,
+            },
+        )
+
+
+def test_resume_blocks_legacy_generation_boundary_without_a_sealed_plan(
+    tmp_path: Path,
+) -> None:
+    launch_path, state_path, _ = _write_replayable_launch_state(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state.pop("pending_generation")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    report = st.hf_adapter_continuation_executor_resume_report(launch_path)
+
+    assert report["ready"] is False
+    assert report["issue"] == "pending_generation_plan_missing"
+    assert report["action"] == "seal_pending_generation_plan"
+
+
+def test_strict_operator_stop_reuses_sealed_pending_or_requires_replan(
+    tmp_path: Path,
+) -> None:
+    launch_path, state_path, source_argv = _write_replayable_launch_state(tmp_path)
+    old_plan_id = "sha256:" + "0" * 64
+    strict_argv = [
+        *source_argv,
+        "--expected-plan-id",
+        old_plan_id,
+        "--require-pending-plan",
+    ]
+    launch = json.loads(launch_path.read_text(encoding="utf-8"))
+    latest = launch["launches"][-1]
+    latest["executor_argv"] = strict_argv
+    latest["command"] = hf_adapter_executor_launch._executor_child_command(strict_argv)
+    latest["resume_contract"] = hf_adapter_executor_launch._resume_contract(
+        strict_argv,
+        output_root=state_path.parent.resolve(),
+        executor_state_path=state_path.resolve(),
+        command_cwd=tmp_path.resolve(),
+    )
+    launch_path.write_text(json.dumps(launch), encoding="utf-8")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["status"] = "stopped"
+    state["action"] = "resume_executor"
+    state["reason"] = "stop_requested"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    ready = st.hf_adapter_continuation_executor_resume_report(launch_path)
+
+    assert ready["ready"] is True
+    assert ready["generation_plan_required"] is True
+    assert ready["generation_plan_rebound"] is True
+    assert _flag(ready["executor_argv"], "--expected-plan-id") == ready[
+        "generation_plan_id"
+    ]
+
+    state.pop("pending_generation")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    missing = st.hf_adapter_continuation_executor_resume_report(launch_path)
+
+    assert missing["ready"] is False
+    assert missing["issue"] == "pending_generation_plan_missing"
+    assert missing["action"] == "seal_pending_generation_plan"
 
 
 def test_resume_plan_honors_terminal_action_and_cas_source_launch(

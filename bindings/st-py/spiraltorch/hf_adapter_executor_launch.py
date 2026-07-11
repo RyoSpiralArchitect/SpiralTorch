@@ -24,6 +24,8 @@ from .hf_adapter_executor import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
     _load_executor_lock,
     _terminate_owned_process,
+    _valid_generation_plan_id,
+    hf_adapter_continuation_executor_generation_plan_report,
     load_hf_adapter_continuation_executor,
 )
 from .hf_adapter_executor_status import (
@@ -469,10 +471,11 @@ def _launch_handoff_observation(
             if _is_new_executor_invocation(current, baseline)
             else "baseline_not_advanced"
         )
-    if (
-        latest.get("resume_contract") is None
-        and latest.get("status") in {"completed", "exited_observed", "handed_off"}
-    ):
+    if latest.get("resume_contract") is None and latest.get("status") in {
+        "completed",
+        "exited_observed",
+        "handed_off",
+    }:
         return "legacy_unverified"
     return "handoff_unverified"
 
@@ -497,6 +500,75 @@ def _single_argv_option(argv: Sequence[str], name: str) -> str:
     return values[0]
 
 
+def _generation_plan_gate_argv(
+    executor_argv: Sequence[str],
+) -> dict[str, object]:
+    argv = [str(value) for value in executor_argv]
+    base_argv: list[str] = []
+    expected_plan_ids: list[str] = []
+    require_pending_plan_count = 0
+    index = 0
+    while index < len(argv):
+        value = argv[index]
+        if value == "--expected-plan-id":
+            if index + 1 >= len(argv):
+                raise RuntimeError(
+                    "executor replay option is missing a value: --expected-plan-id"
+                )
+            expected_plan_ids.append(argv[index + 1])
+            index += 2
+            continue
+        if value.startswith("--expected-plan-id="):
+            expected_plan_ids.append(value.split("=", 1)[1])
+            index += 1
+            continue
+        if value == "--require-pending-plan":
+            require_pending_plan_count += 1
+            index += 1
+            continue
+        if value.startswith("--require-pending-plan="):
+            raise RuntimeError(
+                "executor replay flag does not accept a value: --require-pending-plan"
+            )
+        base_argv.append(value)
+        index += 1
+    if len(expected_plan_ids) > 1:
+        raise RuntimeError(
+            "executor replay contains duplicate --expected-plan-id options"
+        )
+    if require_pending_plan_count > 1:
+        raise RuntimeError(
+            "executor replay contains duplicate --require-pending-plan flags"
+        )
+    expected_plan_id = expected_plan_ids[0] if expected_plan_ids else None
+    if expected_plan_id is not None and not _valid_generation_plan_id(expected_plan_id):
+        raise RuntimeError("executor replay expected generation plan ID is invalid")
+    return {
+        "base_argv": base_argv,
+        "expected_plan_id": expected_plan_id,
+        "require_pending_plan": require_pending_plan_count == 1,
+    }
+
+
+def _generation_plan_rebound_argv(
+    executor_argv: Sequence[str],
+    *,
+    generation_plan_id: str,
+) -> list[str]:
+    if not _valid_generation_plan_id(generation_plan_id):
+        raise RuntimeError("executor resume generation plan ID is invalid")
+    gate = _generation_plan_gate_argv(executor_argv)
+    base_argv = gate["base_argv"]
+    if not isinstance(base_argv, list):
+        raise RuntimeError("executor replay base argv is invalid")
+    return [
+        *[str(value) for value in base_argv],
+        "--expected-plan-id",
+        generation_plan_id,
+        "--require-pending-plan",
+    ]
+
+
 def _resolved_argv_path(value: str, *, command_cwd: Path) -> Path:
     path = Path(value).expanduser()
     return (path if path.is_absolute() else command_cwd / path).resolve()
@@ -513,6 +585,27 @@ def _sha256_json(value: object) -> str:
 
 
 def _resume_contract(
+    executor_argv: Sequence[str],
+    *,
+    output_root: Path,
+    executor_state_path: Path,
+    command_cwd: Path,
+) -> dict[str, object]:
+    argv = [str(value) for value in executor_argv]
+    gate = _generation_plan_gate_argv(argv)
+    core = {
+        "row_type": "hf_adapter_continuation_executor_resume_contract",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA,
+        "executor_argv_sha256": _sha256_json(argv),
+        "replay_base_argv_sha256": _sha256_json(gate["base_argv"]),
+        "output_root": str(output_root),
+        "executor_state_path": str(executor_state_path),
+        "command_cwd": str(command_cwd),
+    }
+    return {**core, "contract_sha256": _sha256_json(core)}
+
+
+def _legacy_resume_contract(
     executor_argv: Sequence[str],
     *,
     output_root: Path,
@@ -594,6 +687,12 @@ def _validated_resume_contract(
         executor_state_path=executor_state_path,
         command_cwd=command_cwd,
     )
+    legacy_expected = _legacy_resume_contract(
+        argv,
+        output_root=output_root,
+        executor_state_path=executor_state_path,
+        command_cwd=command_cwd,
+    )
     recorded = latest.get("resume_contract")
     if recorded is None:
         raw_command = latest.get("command")
@@ -607,13 +706,27 @@ def _validated_resume_contract(
                 "legacy executor replay command does not match its recorded argv"
             )
         contract_source = "legacy_command_reconstructed"
-    elif not isinstance(recorded, Mapping) or dict(recorded) != expected:
-        raise RuntimeError("executor resume contract is invalid")
-    else:
+    elif isinstance(recorded, Mapping) and dict(recorded) == expected:
         contract_source = "recorded"
+    elif isinstance(recorded, Mapping) and dict(recorded) == legacy_expected:
+        contract_source = "recorded_legacy"
+    else:
+        raise RuntimeError("executor resume contract is invalid")
+    gate = _generation_plan_gate_argv(argv)
+    resumed_from_generation_plan_id = latest.get("resumed_from_generation_plan_id")
+    if resumed_from_generation_plan_id is not None and (
+        not _valid_generation_plan_id(resumed_from_generation_plan_id)
+        or gate.get("expected_plan_id") != resumed_from_generation_plan_id
+        or gate.get("require_pending_plan") is not True
+    ):
+        raise RuntimeError("executor resume generation plan handoff is invalid")
     return {
         "launch_id": launch_id,
         "executor_argv": argv,
+        "replay_base_argv": gate["base_argv"],
+        "expected_plan_id": gate["expected_plan_id"],
+        "require_pending_plan": gate["require_pending_plan"],
+        "resumed_from_generation_plan_id": resumed_from_generation_plan_id,
         "output_root": str(output_root),
         "executor_state_path": str(executor_state_path),
         "command_cwd": str(command_cwd),
@@ -649,11 +762,13 @@ def launch_hf_adapter_continuation_executor(
     resume_expectation = (
         None if _resume_expectation is None else dict(_resume_expectation)
     )
+    resume_generation_plan_id: str | None = None
     if resume_expectation is not None:
         resume_launch_id = resume_expectation.get("launch_id")
         resume_contract_sha256 = resume_expectation.get("contract_sha256")
         resume_run_id = resume_expectation.get("executor_run_id")
         resume_invocation_count = resume_expectation.get("executor_invocation_count")
+        raw_resume_generation_plan_id = resume_expectation.get("generation_plan_id")
         if (
             not isinstance(resume_launch_id, str)
             or not resume_launch_id
@@ -666,6 +781,12 @@ def launch_hf_adapter_continuation_executor(
             or resume_invocation_count <= 0
         ):
             raise ValueError("executor resume expectation is invalid")
+        if raw_resume_generation_plan_id is not None:
+            if not _valid_generation_plan_id(raw_resume_generation_plan_id):
+                raise ValueError(
+                    "executor resume generation plan expectation is invalid"
+                )
+            resume_generation_plan_id = raw_resume_generation_plan_id
     if not _argv_contains_option(argv, "--run"):
         raise ValueError("detached executor launch requires --run")
     forbidden = next(
@@ -725,6 +846,16 @@ def launch_hf_adapter_continuation_executor(
                 or contract.get("contract_sha256") != resume_contract_sha256
             ):
                 raise RuntimeError("executor resume contract changed before relaunch")
+            if resume_contract.get("command_cwd") != str(resolved_command_cwd):
+                raise RuntimeError(
+                    "executor resume command cwd changed before relaunch"
+                )
+            source_base_argv = resume_contract.get("replay_base_argv")
+            requested_gate = _generation_plan_gate_argv(argv)
+            if requested_gate.get("base_argv") != source_base_argv:
+                raise RuntimeError(
+                    "executor resume policy argv changed before relaunch"
+                )
             current_executor = load_hf_adapter_continuation_executor(
                 resolved_executor_state_path
             )
@@ -742,6 +873,32 @@ def launch_hf_adapter_continuation_executor(
                 or current_status.get("executor_action") != "resume_executor"
             ):
                 raise RuntimeError("executor resume action changed before relaunch")
+            if resume_generation_plan_id is None:
+                if argv != resume_contract.get("executor_argv"):
+                    raise RuntimeError(
+                        "executor resume argv changed without a generation plan"
+                    )
+            else:
+                generation_plan = (
+                    hf_adapter_continuation_executor_generation_plan_report(
+                        current_executor
+                    )
+                )
+                if (
+                    generation_plan.get("ready") is not True
+                    or generation_plan.get("generation_plan_id")
+                    != resume_generation_plan_id
+                ):
+                    raise RuntimeError(
+                        "executor resume generation plan changed before relaunch"
+                    )
+                if (
+                    requested_gate.get("expected_plan_id") != resume_generation_plan_id
+                    or requested_gate.get("require_pending_plan") is not True
+                ):
+                    raise RuntimeError(
+                        "executor resume argv is not bound to the pending generation plan"
+                    )
         if latest is not None:
             observation = _process_observation(latest)
             latest["process_liveness_observed_at"] = _now()
@@ -837,6 +994,7 @@ def launch_hf_adapter_continuation_executor(
             attempt["resumed_from_contract_sha256"] = resume_contract_sha256
             attempt["resumed_from_executor_run_id"] = resume_run_id
             attempt["resumed_from_executor_invocation_count"] = resume_invocation_count
+            attempt["resumed_from_generation_plan_id"] = resume_generation_plan_id
         launches.append(attempt)
         state["status"] = "launching"
         state["latest_launch_id"] = launch_id
@@ -1238,6 +1396,55 @@ def hf_adapter_continuation_executor_resume_report(
         if isinstance(executor_status, Mapping)
         else None
     )
+    executor_reason = (
+        executor_status.get("executor_reason")
+        if isinstance(executor_status, Mapping)
+        else None
+    )
+    executor_state_path_value = launch_state.get("executor_state_path")
+    current_executor = (
+        load_hf_adapter_continuation_executor(str(executor_state_path_value))
+        if executor_state_path_value is not None
+        else None
+    )
+    generation_plan = (
+        hf_adapter_continuation_executor_generation_plan_report(current_executor)
+        if isinstance(current_executor, Mapping)
+        else {
+            "status": "missing",
+            "ready": False,
+            "generation_plan_id": None,
+            "issues": ["executor_state_missing"],
+        }
+    )
+    source_generation_plan_gate = bool(
+        isinstance(replay, Mapping)
+        and (
+            replay.get("expected_plan_id") is not None
+            or replay.get("require_pending_plan") is True
+        )
+    )
+    generation_plan_required = bool(
+        executor_reason == "max_generations_per_invocation_reached"
+        or (executor_action == "resume_executor" and source_generation_plan_gate)
+    )
+    generation_plan_id = generation_plan.get("generation_plan_id")
+    source_executor_argv = (
+        replay.get("executor_argv") if isinstance(replay, Mapping) else None
+    )
+    rebound_executor_argv = source_executor_argv
+    generation_plan_rebound = False
+    if (
+        generation_plan_required
+        and generation_plan.get("ready") is True
+        and isinstance(generation_plan_id, str)
+        and isinstance(source_executor_argv, list)
+    ):
+        rebound_executor_argv = _generation_plan_rebound_argv(
+            source_executor_argv,
+            generation_plan_id=generation_plan_id,
+        )
+        generation_plan_rebound = rebound_executor_argv != source_executor_argv
     executor_healthy = launch_status.get("executor_healthy")
     executor_run_id = (
         executor_status.get("run_id") if isinstance(executor_status, Mapping) else None
@@ -1253,7 +1460,10 @@ def hf_adapter_continuation_executor_resume_report(
     )
     if recorded_run_id is None and recorded_invocation_count is None:
         baseline = latest.get("executor_baseline") if latest is not None else None
-        if replay is not None and replay.get("contract_source") == "legacy_command_reconstructed":
+        if (
+            replay is not None
+            and replay.get("contract_source") == "legacy_command_reconstructed"
+        ):
             executor_identity_source = "legacy_current_state_reconstructed"
             executor_identity_matches = bool(
                 isinstance(executor_run_id, str)
@@ -1322,6 +1532,13 @@ def hf_adapter_continuation_executor_resume_report(
     elif replay.get("command_cwd_exists") is not True:
         issue = "command_cwd_missing"
         action = "restore_command_cwd"
+    elif generation_plan_required and generation_plan.get("ready") is not True:
+        issue = (
+            "pending_generation_plan_missing"
+            if generation_plan.get("status") == "missing"
+            else "pending_generation_plan_invalid"
+        )
+        action = "seal_pending_generation_plan"
     else:
         issue = None
         action = "resume_executor"
@@ -1358,9 +1575,8 @@ def hf_adapter_continuation_executor_resume_report(
         "command_cwd_exists": (
             replay.get("command_cwd_exists") if isinstance(replay, Mapping) else None
         ),
-        "executor_argv": (
-            replay.get("executor_argv") if isinstance(replay, Mapping) else None
-        ),
+        "executor_argv": rebound_executor_argv,
+        "source_executor_argv": source_executor_argv,
         "resume_contract": None
         if not isinstance(contract, Mapping)
         else dict(contract),
@@ -1373,6 +1589,7 @@ def hf_adapter_continuation_executor_resume_report(
             else None
         ),
         "executor_action": executor_action,
+        "executor_reason": executor_reason,
         "executor_healthy": executor_healthy,
         "executor_run_id": executor_run_id,
         "executor_invocation_count": executor_invocation_count,
@@ -1381,6 +1598,12 @@ def hf_adapter_continuation_executor_resume_report(
         "executor_identity_source": executor_identity_source,
         "executor_identity_matches": executor_identity_matches,
         "executor_lock_status": lock_status,
+        "generation_plan_required": generation_plan_required,
+        "generation_plan_status": generation_plan.get("status"),
+        "generation_plan_ready": generation_plan.get("ready"),
+        "generation_plan_id": generation_plan_id,
+        "generation_plan_issues": generation_plan.get("issues"),
+        "generation_plan_rebound": generation_plan_rebound,
     }
 
 
@@ -1399,6 +1622,14 @@ def resume_hf_adapter_continuation_executor(
     contract = plan.get("resume_contract")
     if not isinstance(contract, Mapping):
         raise RuntimeError("executor resume contract is unavailable")
+    resume_expectation = {
+        "launch_id": plan["source_launch_id"],
+        "contract_sha256": contract["contract_sha256"],
+        "executor_run_id": plan["executor_run_id"],
+        "executor_invocation_count": plan["executor_invocation_count"],
+    }
+    if plan.get("generation_plan_required") is True:
+        resume_expectation["generation_plan_id"] = plan["generation_plan_id"]
     launch = launch_hf_adapter_continuation_executor(
         plan["executor_argv"],
         output_root=str(plan["output_root"]),
@@ -1406,12 +1637,7 @@ def resume_hf_adapter_continuation_executor(
         launch_state_path=str(plan["launch_state_path"]),
         command_cwd=str(plan["command_cwd"]),
         handoff_timeout_seconds=handoff_timeout_seconds,
-        _resume_expectation={
-            "launch_id": plan["source_launch_id"],
-            "contract_sha256": contract["contract_sha256"],
-            "executor_run_id": plan["executor_run_id"],
-            "executor_invocation_count": plan["executor_invocation_count"],
-        },
+        _resume_expectation=resume_expectation,
     )
     request_status = str(launch.get("request_status") or "unknown")
     successful = request_status in {"already_running", "completed", "handed_off"}
@@ -1441,6 +1667,11 @@ def resume_hf_adapter_continuation_executor(
                 if isinstance(latest, Mapping)
                 else None
             ),
+            "resumed_from_generation_plan_id": (
+                latest.get("resumed_from_generation_plan_id")
+                if isinstance(latest, Mapping)
+                else None
+            ),
         }
     )
     return result
@@ -1465,6 +1696,8 @@ def hf_adapter_continuation_executor_resume_lines(
         f"resumed_launch={report.get('resumed_launch_id')} "
         f"invocation={report.get('resumed_executor_invocation_count', report.get('executor_invocation_count'))} "
         f"contract={report.get('resume_contract_source')} "
+        f"plan_id={report.get('generation_plan_id')} "
+        f"plan_rebound={report.get('generation_plan_rebound')} "
         f"launch_state={report.get('launch_state_path')}"
     ]
 

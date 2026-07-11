@@ -1564,6 +1564,10 @@ def test_executor_honors_stop_during_preflight_without_launching(
     assert report["reason"] == "stop_requested"
     assert report["stop_request"]["reason"] == "stop during preflight"
     assert report["generation_attempt_count"] == 0
+    assert report["pending_generation"]["status"] == "planned"
+    assert report["pending_generation"]["generation_plan_verification"][
+        "ready"
+    ] is True
     assert runner.commands == []
     assert not (output_root / "generation-002").exists()
 
@@ -1717,11 +1721,19 @@ def test_executor_resumes_after_per_invocation_generation_limit(
     assert first["status"] == "generation_limit_reached"
     assert first["selected_lineage_depth"] == 2
     assert first["promoted_generation_count"] == 1
+    assert first["pending_generation"]["lineage_depth"] == 3
+    assert first["pending_generation"]["generation_plan_verification"][
+        "ready"
+    ] is True
+    assert first["pending_generation"]["generation_plan_id"].startswith("sha256:")
     assert second["status"] == "stopped"
     assert second["selected_lineage_depth"] == 3
     assert second["invocation_count"] == 2
     assert second["promoted_generation_count"] == 2
     assert [row["lineage_depth"] for row in second["generations"]] == [2, 3]
+    assert second["generations"][1]["generation_plan_id"] == first[
+        "pending_generation"
+    ]["generation_plan_id"]
     assert len(first_runner.commands) == 1
     assert len(second_runner.commands) == 1
 

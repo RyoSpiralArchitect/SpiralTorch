@@ -91,6 +91,19 @@ def test_runtime_report_unifies_unmanaged_and_terminal_layers(
             active_state.parent / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
         ).unlink(missing_ok=True)
 
+    resume_launch, _ = _write_launch_artifact(tmp_path / "resume")
+    resume_ready = runtime.hf_adapter_continuation_executor_runtime_report(
+        resume_launch
+    )
+    resume_lines = runtime.hf_adapter_continuation_executor_runtime_lines(
+        resume_ready
+    )
+
+    assert resume_ready["status"] == "unmanaged_resume_ready"
+    assert resume_ready["generation_plan_status"] == "ready"
+    assert str(resume_ready["generation_plan_id"]).startswith("sha256:")
+    assert f"plan_id={resume_ready['generation_plan_id']}" in resume_lines[0]
+
     terminal_launch, _ = _write_launch_artifact(
         tmp_path / "terminal",
         executor_status="stopped",

@@ -994,9 +994,11 @@ sealed by one plan-only invocation before execution. The Python API exposes the
 same check through
 `hf_adapter_continuation_executor_generation_plan_report(...)` and its concise
 line formatter. `require_pending_plan` and `expected_plan_id` apply to the first
-generation in one invocation; later generations remain bounded by
-`max_generations` and are sealed as they are derived from the newly promoted
-tip.
+generation in one invocation. When that invocation reaches `max_generations`,
+the executor audits the newly promoted tip, derives the next generation, and
+persists its sealed pending plan before returning `resume_executor`. A policy
+stop or failed preflight still ends without advertising an automatically
+resumable boundary.
 
 For a long run, use the same executor policy in a detached process:
 
@@ -1007,7 +1009,10 @@ spiral-hf-adapter-executor runs/qwen2-study \
   --max-lineage-depth 6 \
   --min-eval-improvement 0.002 \
   --plateau-patience 2 \
-  --run --max-generations 1 --detach --no-tee-output
+  --run --max-generations 1 \
+  --require-pending-plan \
+  --expected-plan-id sha256:<reviewed-plan-id> \
+  --detach --no-tee-output
 ```
 
 The command returns success only after it observes a new executor invocation
@@ -1034,16 +1039,30 @@ spiral-hf-adapter-executor-resume \
 ```
 
 The read-only plan requires a healthy terminal executor whose durable action is
-`resume_executor`, an absent or stale local executor lock, and the original
-working directory. Every new detached launch stores a SHA-256 replay contract
-binding its exact executor argv, output root, state path, and cwd. Execution
-rechecks the source launch ID and digest under the launch lock before appending
-the next launch, so concurrent or stale plans cannot start a different
-invocation. Existing launch artifacts without the new digest remain replayable
-only when their redundant stored child command exactly matches their argv and
-all bound paths. Policy-stopped, live, remote, unverified, modified, or
-cwd-missing histories fail closed. To intentionally change policy, issue a new
-full `spiral-hf-adapter-executor ... --detach` command instead of replaying.
+`resume_executor`, an absent or stale local executor lock, the original working
+directory, and a ready sealed pending generation. Every new detached launch
+stores a SHA-256 replay contract binding its exact executor argv, immutable
+policy argv, output root, state path, and cwd. At a generation boundary, resume
+removes only the old `--expected-plan-id` / `--require-pending-plan` gate,
+rebinds both to the pending generation's ID, and rechecks that ID under the
+launch lock immediately before process creation. The launched argv remains
+fully hashed, while all non-gate options must match the source launch exactly.
+Concurrent, stale, or policy-mutating plans therefore cannot start a different
+invocation. Existing launch artifacts without the newer replay digest remain
+readable when their redundant stored child command exactly matches their argv,
+but an old generation-limit state without a sealed pending plan is not resumed
+automatically. Re-run its original full executor command once without `--run`,
+`--detach`, `--expected-plan-id`, or `--require-pending-plan` to seal the pending
+generation, then request resume again. Policy-stopped, live, remote, unverified,
+modified, or cwd-missing histories fail closed. To
+intentionally change policy, issue a new full
+`spiral-hf-adapter-executor ... --detach` command instead of replaying.
+An operator stop observed after preflight but before a child process starts
+keeps its freshly verified planned generation, so a strict resume can bind to
+it directly. An earlier stop, a stop after a promotion boundary, or a cancelled
+partial child has no reusable pending plan;
+after resolving any output quarantine, seal a fresh plan-only invocation before
+resuming.
 
 For bounded unattended continuation, inspect one supervision decision and then
 detach the supervisor over the same launch artifact:
@@ -1125,10 +1144,13 @@ foreground controller is preferable.
 
 The supervisor waits while a healthy detached owner is running and automatically
 replays only an executor whose exact durable reason is
-`max_generations_per_invocation_reached`. A clean `stop_requested` exits as a
-healthy operator pause (cancelled partial output still blocks for quarantine),
-continuation-policy stop exits completed, and quarantined recovery requires an
-explicit manual resume. Failed/unhealthy launches, remote or unverified owners,
+`max_generations_per_invocation_reached` and whose next generation plan verifies
+as sealed. Its supervision decision, transition, detached launch, resume event,
+status line, and integrated runtime report all carry the rebound generation plan
+ID. A clean `stop_requested` exits as a healthy operator pause (cancelled
+partial output still blocks for quarantine), continuation-policy stop exits
+completed, and quarantined recovery requires an explicit manual resume.
+Failed/unhealthy launches, remote or unverified owners, missing/invalid plans,
 invalid handoff identity, and changed replay contracts fail closed.
 `--max-resumes` bounds launches per supervisor invocation (default `1`), while
 `--timeout-seconds 0` means no wall-clock timeout. A separate
