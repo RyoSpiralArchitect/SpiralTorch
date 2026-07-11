@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::distributed::st_distributed::{self, DistributedError};
 use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
@@ -86,6 +87,7 @@ impl AccumulatorSynchronizer for CpuDevice {
 pub struct DistributedDevice {
     session: Arc<st_distributed::RendezvousSession>,
     strategy: SyncStrategy,
+    collective_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,11 +107,18 @@ impl DistributedDevice {
         Ok(Self {
             session,
             strategy: SyncStrategy::AllReduce,
+            collective_timeout: st_distributed::DEFAULT_COLLECTIVE_TIMEOUT,
         })
     }
 
+    /// Overrides the maximum time each collective may wait for every rank.
+    pub fn with_collective_timeout(mut self, timeout: Duration) -> Self {
+        self.collective_timeout = timeout;
+        self
+    }
+
     fn all_reduce(&self, buffer: &mut [f32]) -> Result<(), TrainingDeviceError> {
-        st_distributed::all_reduce(&self.session, buffer)?;
+        st_distributed::all_reduce_with_timeout(&self.session, buffer, self.collective_timeout)?;
         if self.strategy == SyncStrategy::AllReduce && self.session.world_size() > 0 {
             let scale = 1.0 / self.session.world_size() as f32;
             buffer.iter_mut().for_each(|v| *v *= scale);
@@ -136,7 +145,7 @@ impl TrainingDevice for DistributedDevice {
         metrics: &mut [f32],
         reduce: MetricReduce,
     ) -> Result<(), TrainingDeviceError> {
-        st_distributed::all_reduce(&self.session, metrics)?;
+        st_distributed::all_reduce_with_timeout(&self.session, metrics, self.collective_timeout)?;
         if reduce == MetricReduce::Mean {
             let scale = 1.0 / TrainingDevice::world_size(self) as f32;
             metrics.iter_mut().for_each(|value| *value *= scale);
