@@ -3,6 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 use thiserror::Error;
 
 pub mod auto;
@@ -80,9 +85,35 @@ pub enum SoftRule {
     Segments { val: u32, w: f32 },
 }
 
+#[derive(Debug)]
 pub struct Out {
     pub hard: Hard,
     pub soft: Vec<SoftRule>,
+}
+
+/// Errors raised while evaluating a compiled SpiralK program.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum EvalError {
+    #[error("expected a numeric value, found a list")]
+    ExpectedNumber,
+    #[error("expected a boolean-compatible value, found a list")]
+    ExpectedBoolean,
+    #[error("expected a list value")]
+    ExpectedList,
+    #[error("encountered a non-finite numeric value")]
+    NonFiniteNumber,
+    #[error("list index {index} is out of bounds for length {len}")]
+    ListIndexOutOfBounds { index: i64, len: usize },
+    #[error("non-exhaustive match expression")]
+    NonExhaustiveMatch,
+    #[error("{kind} loop exceeded the {limit}-iteration limit")]
+    LoopIterationLimit { kind: &'static str, limit: usize },
+    #[error("function call depth exceeded the {limit}-call limit")]
+    RecursionLimit { limit: usize },
+    #[error("integer overflow while advancing a for loop")]
+    IntegerOverflow,
+    #[error("invalid compiled program: {0}")]
+    InvalidProgram(&'static str),
 }
 
 #[derive(Error, Debug)]
@@ -91,6 +122,8 @@ pub enum Err {
     Parse(usize),
     #[error("token")]
     Tok,
+    #[error(transparent)]
+    Eval(#[from] EvalError),
 }
 
 /// Compiles a program string into a reusable [`Program`].
@@ -100,7 +133,7 @@ pub fn compile_program(src: &str) -> Result<Program, Err> {
 
 /// Parses and evaluates a program for the provided context.
 pub fn eval_program(src: &str, ctx: &Ctx) -> Result<Out, Err> {
-    compile_program(src).map(|program| program.evaluate(ctx))
+    Ok(compile_program(src)?.evaluate(ctx)?)
 }
 
 /// Parses and evaluates a program for the provided context while recording a trace.
@@ -109,5 +142,5 @@ pub fn eval_program_with_trace(
     ctx: &Ctx,
     max_events: usize,
 ) -> Result<(Out, KdslEvaluationTrace), Err> {
-    compile_program(src).map(|program| program.evaluate_with_trace(ctx, max_events))
+    Ok(compile_program(src)?.evaluate_with_trace(ctx, max_events)?)
 }

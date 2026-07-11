@@ -92,6 +92,7 @@ pub(crate) fn spiralk_err_to_py(err: SpiralKErr) -> PyErr {
     match err {
         SpiralKErr::Parse(pos) => PyValueError::new_err(format!("parse error at pos {pos}")),
         SpiralKErr::Tok => PyValueError::new_err("unexpected token"),
+        SpiralKErr::Eval(err) => PyValueError::new_err(err.to_string()),
     }
 }
 
@@ -767,6 +768,32 @@ fn extract_python_hints(value: &Bound<'_, PyAny>) -> Result<Vec<HeuristicHint>, 
         hints.push(borrowed.inner().clone());
     }
     Ok(hints)
+}
+
+#[cfg(all(test, feature = "kdsl"))]
+mod tests {
+    use super::*;
+    use pyo3::exceptions::PyValueError;
+    use std::sync::Once;
+
+    fn ensure_python_initialized() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            std::env::set_var("PYTHONNOUSERSITE", "1");
+            pyo3::prepare_freethreaded_python();
+        });
+    }
+
+    #[test]
+    fn evaluation_errors_map_to_python_value_errors() {
+        ensure_python_initialized();
+        Python::with_gil(|py| {
+            let err = spiralk_err_to_py(SpiralKErr::Eval(st_kdsl::EvalError::ExpectedNumber));
+
+            assert!(err.is_instance_of::<PyValueError>(py));
+            assert!(err.to_string().contains("expected a numeric value"));
+        });
+    }
 }
 
 #[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKHint")]

@@ -562,17 +562,20 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
         Vec::new(),
         &defs,
         &context,
-    );
+    )
+    .ok();
     let store = Path::new(".spiraltorch/cache/autotune.json");
     if std::env::var("SPIRALTORCH_AUTOTUNE")
         .ok()
         .is_none_or(|v| v != "0")
     {
-        cfg = autotune_store::load_best_typed(store, &key, &context, cfg);
+        if let Some(key) = &key {
+            cfg = autotune_store::load_best_typed(store, key, &context, cfg);
+        }
     }
     eprintln!(
         "[autotune] key={} apply={}",
-        key,
+        key.as_deref().unwrap_or("<serialization-failed>"),
         std::env::var("SPIRALTORCH_AUTOTUNE").unwrap_or_default()
     );
 
@@ -609,7 +612,9 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
             max_depth,
         );
     }
-    let _ = autotune_store::record_best(store, &key, &context, f64::from(choice.score), &cfg);
+    if let Some(key) = &key {
+        let _ = autotune_store::record_best(store, key, &context, f64::from(choice.score), &cfg);
+    }
     choice
 }
 
