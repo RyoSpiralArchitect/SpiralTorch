@@ -1779,6 +1779,10 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 "adapter_continuation_identity_contract"
             ),
             "adapter_input_identity": preflight.get("adapter_input_identity"),
+            "training_input_identity_contract": command.get(
+                "training_input_identity_contract"
+            ),
+            "training_input_identity": preflight.get("training_input_identity"),
             "command": command,
             "preflight": preflight,
         }
@@ -1876,6 +1880,10 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 "adapter_continuation_identity_contract"
             ),
             "adapter_input_identity": preflight.get("adapter_input_identity"),
+            "training_input_identity_contract": command.get(
+                "training_input_identity_contract"
+            ),
+            "training_input_identity": preflight.get("training_input_identity"),
             "command": resolved_command,
             "command_display": shlex.join(resolved_command),
             "scale_up": command,
@@ -2130,6 +2138,8 @@ def hf_adapter_continuation_executor_lines(
             f"eval_handoff_delta={selected_transition.get('eval_handoff_delta')} "
             f"eval_improvement={selected_transition.get('child_eval_improvement')} "
             f"input_identity={selected_transition.get('input_identity_ready')} "
+            "training_input_identity="
+            f"{selected_transition.get('training_input_identity_ready')} "
             "probe_process="
             f"{selected_transition.get('artifact_probe_process_status')} "
             f"probe_pid={selected_transition.get('artifact_probe_process_pid')}"
@@ -2154,6 +2164,12 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(input_identity, Mapping)
             else None
         )
+        training_input_identity = pending.get("training_input_identity")
+        training_input_identity_status = (
+            training_input_identity.get("status")
+            if isinstance(training_input_identity, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_pending "
             f"status={pending.get('status')} "
@@ -2162,6 +2178,7 @@ def hf_adapter_continuation_executor_lines(
             f"runtime={runtime_status} "
             f"preflight={preflight_status} "
             f"input_identity={input_identity_status} "
+            f"training_input_identity={training_input_identity_status} "
             f"output={pending.get('output_dir')}"
         )
     for raw_attempt in report.get("generations") or []:
@@ -2190,6 +2207,12 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(input_identity, Mapping)
             else None
         )
+        training_input_identity = raw_attempt.get("training_input_identity")
+        training_input_identity_status = (
+            training_input_identity.get("status")
+            if isinstance(training_input_identity, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_generation "
             f"status={raw_attempt.get('status')} "
@@ -2200,6 +2223,7 @@ def hf_adapter_continuation_executor_lines(
             f"adapter={raw_attempt.get('adapter_id')} "
             f"runtime={runtime_status} "
             f"input_identity={input_identity_status} "
+            f"training_input_identity={training_input_identity_status} "
             "postflight="
             f"{postflight.get('status') if isinstance(postflight, Mapping) else None} "
             f"transition={postflight_transition_status} "

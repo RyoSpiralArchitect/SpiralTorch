@@ -774,6 +774,23 @@ touch the dataset or Trainer if either observation differs from the selected
 chain tip. Executor plan, pending, attempt, postflight, and status artifacts
 retain this input-identity contract and its observed evidence.
 
+Scale-up separately content-addresses every local training input: the model
+profile file, ordered train/validation files, inference-distortion probe or
+sweep report, and a recursively fingerprinted resume checkpoint. The bundle ID
+includes each input's role, order, content digest, byte size, and file count but
+not its absolute path, so an unchanged study can move as one tree without
+changing identity. The generated child command pins it with
+`--expected-training-input-id`; the bridge verifies the bundle during preflight
+and again after model load, before dataset materialization or Trainer work.
+Ordinary artifact replay preserves the prior expectation instead of silently
+accepting changed bytes, while an explicit resume-checkpoint override issues a
+new bundle contract. Run cards, lineage transitions, scale-up artifacts, and
+executor state/status retain both observations. Python can build or render the
+same report with `st.hf_finetune_input_identity_report(...)` and
+`st.hf_finetune_input_identity_lines(...)`. Hashing is intentionally fail-closed
+and reads all covered bytes at both phases, so very large corpora or checkpoints
+should budget that I/O rather than treating the gate as metadata-only.
+
 The continuation runtime entrypoint does not depend on the repository staying
 at its original absolute path. Known `hf_finetune_bridge.py`, legacy
 `hf_gpt2_finetune_bridge.py`, and `spiral-hf-finetune` prefixes are rewritten

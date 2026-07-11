@@ -70,6 +70,14 @@
   distortion, and checkpoint inputs portable across wheel-installed executor
   working directories. The Pythia 70M sample includes the real promoted fifth
   generation that passed both identity observations from a fresh wheel.
+- Content-addressed FT input bundles: fingerprint ordered local model-config,
+  train/validation, inference-distortion, and recursive resume-checkpoint
+  inputs without binding their absolute locations. Scale-up pins the bundle as
+  `--expected-training-input-id`; the bridge revalidates it before model load
+  and after load but before dataset/Trainer work, while run cards, lineage
+  transitions, executor state/status, and public Python reports retain the
+  evidence. The Pythia 70M sample now includes a sixth promoted generation
+  whose three-file bundle passed both observations from a fresh wheel.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,

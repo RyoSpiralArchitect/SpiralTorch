@@ -60,6 +60,11 @@ from spiraltorch.hf_generation import (
     hf_causal_lm_artifact_subprocess_probe_report,
     hf_generation_batch_size_compat,
 )
+from spiraltorch.hf_input_identity import (
+    HF_FINETUNE_INPUT_IDENTITY_SCHEMA,
+    hf_finetune_input_identity_lines,
+    hf_finetune_input_identity_report,
+)
 from spiraltorch.hf_peft import (
     hf_causal_lm_artifact_lines,
     hf_causal_lm_artifact_report,
@@ -143,6 +148,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--expected-root-adapter-id",
         default=None,
         help="Expected sha256 root identity for the continuation input lineage.",
+    )
+    parser.add_argument(
+        "--expected-training-input-id",
+        default=None,
+        help=(
+            "Fail before model loading unless local model-config, corpus, "
+            "distortion, and checkpoint inputs match this sha256 bundle identity."
+        ),
     )
     parser.add_argument(
         "--tokenizer-name",
@@ -596,6 +609,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--expected-parent-adapter-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_root_adapter_id):
         parser.error("--expected-root-adapter-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_training_input_id):
+        parser.error("--expected-training-input-id must be sha256:<64 lowercase hex>")
     if (
         args.expected_parent_lineage_depth is not None
         and args.expected_parent_lineage_depth < 0
@@ -2473,6 +2488,91 @@ def _adapter_input_identity_report(
         }
 
 
+def _training_input_identity_report(
+    args: argparse.Namespace,
+    *,
+    phase: str,
+    expected_input_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_input_id
+        if expected_input_id is not None
+        else getattr(args, "expected_training_input_id", None)
+    )
+    try:
+        return hf_finetune_input_identity_report(
+            model_configs=args.model_configs,
+            train_files=args.train_file,
+            validation_files=args.validation_file,
+            inference_distortion_sweep_report=(
+                args.inference_distortion_sweep_report
+            ),
+            inference_distortion_probe=args.inference_distortion_probe,
+            resume_from_checkpoint=args.resume_from_checkpoint,
+            expected_input_id=expected_id,
+            phase=phase,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_finetune_input_identity",
+            "schema": HF_FINETUNE_INPUT_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": phase,
+            "expected_input_id": expected_id,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
+def _canonicalize_training_input_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    if not command:
+        return
+    path_options: list[tuple[str, Sequence[object]]] = [
+        (
+            "--model-configs",
+            () if args.model_configs is None else (args.model_configs,),
+        ),
+        ("--train-file", tuple(args.train_file)),
+        ("--validation-file", tuple(args.validation_file)),
+        (
+            "--inference-distortion-sweep-report",
+            ()
+            if args.inference_distortion_sweep_report is None
+            else (args.inference_distortion_sweep_report,),
+        ),
+        (
+            "--inference-distortion-probe",
+            ()
+            if args.inference_distortion_probe is None
+            else (args.inference_distortion_probe,),
+        ),
+        (
+            "--resume-from-checkpoint",
+            ()
+            if args.resume_from_checkpoint is None
+            else (args.resume_from_checkpoint,),
+        ),
+    ]
+    for flag, values in path_options:
+        if not values or _argv_has_option(command, flag):
+            continue
+        for value in values:
+            command.extend([flag, str(value)])
+    observed_id = report.get("observed_input_id")
+    if (
+        report.get("status") == "ready"
+        and observed_id is not None
+        and not _argv_has_option(command, "--expected-training-input-id")
+    ):
+        command.extend(["--expected-training-input-id", str(observed_id)])
+    args._hf_finetune_launch_command = command
+
+
 def _finetune_start_report(
     args: argparse.Namespace,
     artifact_report: Mapping[str, object],
@@ -2482,6 +2582,9 @@ def _finetune_start_report(
     )
     input_identity = dict(
         getattr(args, "_hf_adapter_input_identity_report", {}) or {}
+    )
+    training_input_identity = dict(
+        getattr(args, "_hf_training_input_identity_report", {}) or {}
     )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
@@ -2518,6 +2621,13 @@ def _finetune_start_report(
             None
             if not input_identity
             else input_identity.get("identity_verified") is True
+        ),
+        "training_input_identity": training_input_identity or None,
+        "training_input_identity_verified": (
+            None
+            if not training_input_identity
+            or training_input_identity.get("status") == "not_applicable"
+            else training_input_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -2669,6 +2779,11 @@ def _base_run_card(
             or None
         ),
         "adapter_input_identity_after_load": None,
+        "training_input_identity": (
+            dict(getattr(args, "_hf_training_input_identity_report", {}) or {})
+            or None
+        ),
+        "training_input_identity_after_load": None,
         "adapter_lineage": None,
         "adapter_promotion": None,
         "tokenizer_save_report": None,
@@ -2856,6 +2971,12 @@ def _main_with_runtime_access(
         phase="preflight",
     )
     args._hf_adapter_input_identity_report = adapter_input_identity
+    training_input_identity = _training_input_identity_report(
+        args,
+        phase="preflight",
+    )
+    args._hf_training_input_identity_report = training_input_identity
+    _canonicalize_training_input_launch_command(args, training_input_identity)
     checkpoint_resume_report = (
         None
         if args.resume_from_checkpoint is None
@@ -2917,6 +3038,7 @@ def _main_with_runtime_access(
         if adapter_input_identity is None
         else dict(adapter_input_identity)
     )
+    preflight["training_input_identity"] = dict(training_input_identity)
     model_artifact_compatible = not (
         model_artifact_report.get("artifact_kind") == "peft_adapter"
         and args.finetune_mode != "lora"
@@ -3019,6 +3141,8 @@ def _main_with_runtime_access(
     if adapter_input_identity is not None:
         for line in hf_adapter_input_identity_lines(adapter_input_identity):
             print(line)
+    for line in hf_finetune_input_identity_lines(training_input_identity):
+        print(line)
     if checkpoint_resume_report is not None:
         for line in hf_gpt2_finetune_checkpoint_resume_lines(
             checkpoint_resume_report
@@ -3034,6 +3158,7 @@ def _main_with_runtime_access(
             adapter_input_identity is not None
             and adapter_input_identity.get("status") != "ready"
         )
+        or training_input_identity.get("status") == "blocked"
     ):
         if not model_artifact_compatible:
             preflight["model_artifact_error"] = (
@@ -3055,6 +3180,10 @@ def _main_with_runtime_access(
         ):
             preflight["model_artifact_error"] = (
                 "adapter continuation input identity verification failed"
+            )
+        if training_input_identity.get("status") == "blocked":
+            preflight["training_input_identity_error"] = (
+                "fine-tune local input identity verification failed"
             )
         _write_card(preflight, args)
         return 1
@@ -3119,6 +3248,18 @@ def _main_with_runtime_access(
             if adapter_input_identity_after_load is None
             else dict(adapter_input_identity_after_load)
         )
+        training_input_identity_after_load = _training_input_identity_report(
+            args,
+            phase="after_load",
+            expected_input_id=(
+                None
+                if training_input_identity.get("status") == "not_applicable"
+                else training_input_identity.get("observed_input_id")
+            ),
+        )
+        card["training_input_identity_after_load"] = dict(
+            training_input_identity_after_load
+        )
         card["tokenizer_name"] = model_artifact_load_report.get(
             "resolved_tokenizer_source"
         )
@@ -3147,6 +3288,18 @@ def _main_with_runtime_access(
                 "failure_stage": "adapter_input_identity_after_load",
                 "failure_error": (
                     "adapter continuation input identity changed during model load"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if training_input_identity_after_load.get("status") == "blocked":
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "training_input_identity_after_load",
+                "failure_error": (
+                    "fine-tune local inputs changed during model loading"
                 ),
             }
         )

@@ -19,6 +19,11 @@ from .hf_generation import (
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
 )
+from .hf_input_identity import (
+    HF_FINETUNE_INPUT_IDENTITY_SCHEMA,
+    hf_finetune_input_identity_lines,
+    hf_finetune_input_identity_report,
+)
 from .hf_peft import hf_finetune_adapter_config
 from .runtime_imports import (
     csv_label,
@@ -37,6 +42,7 @@ __all__ = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_RUN_CARD_FILENAME",
     "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
@@ -58,6 +64,8 @@ __all__ = [
     "hf_finetune_inference_distortion_request_kwargs",
     "hf_finetune_inference_distortion_runtime_adapter",
     "hf_finetune_inference_distortion_runtime_plan",
+    "hf_finetune_input_identity_lines",
+    "hf_finetune_input_identity_report",
     "hf_finetune_milestone_lines",
     "hf_finetune_milestone_report",
     "hf_finetune_model_profile_catalog",
@@ -5707,6 +5715,8 @@ def _command_flag_value(command: Sequence[object], flag: str) -> str | None:
     for index, item in enumerate(values):
         if item == flag and index + 1 < len(values):
             return values[index + 1]
+        if item.startswith(f"{flag}="):
+            return item.split("=", 1)[1]
     return None
 
 
@@ -5716,6 +5726,8 @@ def _command_flag_values(command: Sequence[object], flag: str) -> list[str]:
     for index, item in enumerate(values):
         if item == flag and index + 1 < len(values):
             found.append(values[index + 1])
+        elif item.startswith(f"{flag}="):
+            found.append(item.split("=", 1)[1])
     return found
 
 
@@ -5744,13 +5756,15 @@ def _replace_or_append_command_flag(
     values = [str(item) for item in command]
     replacement = str(value)
     for index, item in enumerate(values):
-        if item != flag:
-            continue
-        if index + 1 < len(values):
-            values[index + 1] = replacement
-        else:
-            values.append(replacement)
-        return values
+        if item == flag:
+            if index + 1 < len(values):
+                values[index + 1] = replacement
+            else:
+                values.append(replacement)
+            return values
+        if item.startswith(f"{flag}="):
+            values[index] = f"{flag}={replacement}"
+            return values
     values.extend([flag, replacement])
     return values
 
@@ -5827,11 +5841,24 @@ def _scale_up_resolve_input_paths(
     rows: list[dict[str, object]] = []
     index = 0
     while index < len(values):
-        flag = values[index]
-        if flag not in _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS:
+        item = values[index]
+        flag = (
+            item
+            if item in _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS
+            else next(
+                (
+                    candidate
+                    for candidate in _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS
+                    if item.startswith(f"{candidate}=")
+                ),
+                None,
+            )
+        )
+        if flag is None:
             index += 1
             continue
-        if index + 1 >= len(values):
+        inline = item.startswith(f"{flag}=")
+        if not inline and index + 1 >= len(values):
             rows.append(
                 {
                     "flag": flag,
@@ -5842,7 +5869,7 @@ def _scale_up_resolve_input_paths(
             )
             index += 1
             continue
-        source = values[index + 1]
+        source = item.split("=", 1)[1] if inline else values[index + 1]
         path = Path(source).expanduser()
         if path.is_absolute():
             rows.append(
@@ -5856,7 +5883,10 @@ def _scale_up_resolve_input_paths(
         else:
             candidate = (anchor / path).resolve()
             if candidate.exists():
-                values[index + 1] = str(candidate)
+                if inline:
+                    values[index] = f"{flag}={candidate}"
+                else:
+                    values[index + 1] = str(candidate)
                 rows.append(
                     {
                         "flag": flag,
@@ -5874,7 +5904,7 @@ def _scale_up_resolve_input_paths(
                         "status": "unresolved",
                     }
                 )
-        index += 2
+        index += 1 if inline else 2
     rewritten_count = sum(row["status"] == "rewritten_absolute" for row in rows)
     unresolved_count = sum(
         row["status"] in {"unresolved", "missing_value"} for row in rows
@@ -5886,6 +5916,36 @@ def _scale_up_resolve_input_paths(
         "unresolved_count": unresolved_count,
         "inputs": rows,
     }
+
+
+_HF_FINETUNE_EXPECTED_INPUT_ID_FLAG = "--expected-training-input-id"
+
+
+def _finetune_input_identity_from_command(
+    command: Sequence[object],
+    *,
+    expected_input_id: str | None = None,
+    phase: str,
+) -> dict[str, object]:
+    return hf_finetune_input_identity_report(
+        model_configs=_command_flag_value(command, "--model-configs"),
+        train_files=_command_flag_values(command, "--train-file"),
+        validation_files=_command_flag_values(command, "--validation-file"),
+        inference_distortion_sweep_report=_command_flag_value(
+            command,
+            "--inference-distortion-sweep-report",
+        ),
+        inference_distortion_probe=_command_flag_value(
+            command,
+            "--inference-distortion-probe",
+        ),
+        resume_from_checkpoint=_command_flag_value(
+            command,
+            "--resume-from-checkpoint",
+        ),
+        expected_input_id=expected_input_id,
+        phase=phase,
+    )
 
 
 def _nearest_existing_parent(path: Path) -> Path | None:
@@ -6501,6 +6561,18 @@ def _scale_up_promotion_chain_summary(
             "trainer_trace_jsonl"
         ),
         "scale_up_candidate_launch_cwd": candidate.get("launch_cwd"),
+        "scale_up_candidate_training_input_identity_status": candidate.get(
+            "training_input_identity_status"
+        ),
+        "scale_up_candidate_training_input_identity_verified": candidate.get(
+            "training_input_identity_verified"
+        ),
+        "scale_up_candidate_training_input_expected_id": candidate.get(
+            "training_input_expected_id"
+        ),
+        "scale_up_candidate_training_input_observed_id": candidate.get(
+            "training_input_observed_id"
+        ),
         "scale_up_candidate_finetune_mode": _command_flag_value(
             command,
             "--finetune-mode",
@@ -6777,6 +6849,64 @@ def hf_gpt2_finetune_scale_up_command(
             None if resolved_source_cwd is None else str(resolved_source_cwd)
         ),
     )
+    source_expected_training_input_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,
+    )
+    source_resume_checkpoint = _command_flag_value(
+        base_command,
+        "--resume-from-checkpoint",
+    )
+    resume_checkpoint_override_changed = bool(
+        resume_from_checkpoint is not None
+        and str(resume_from_checkpoint) != source_resume_checkpoint
+    )
+    if resume_checkpoint_override_changed:
+        source_expected_training_input_id = None
+    base_command = _command_without_value_flags(
+        base_command,
+        (_HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,),
+    )
+    identity_command = base_command
+    if resume_from_checkpoint is not None:
+        identity_command = _replace_or_append_command_flag(
+            identity_command,
+            "--resume-from-checkpoint",
+            resume_from_checkpoint,
+        )
+    training_input_identity = _finetune_input_identity_from_command(
+        identity_command,
+        expected_input_id=source_expected_training_input_id,
+        phase="scale_up_plan",
+    )
+    expected_training_input_id = source_expected_training_input_id
+    if (
+        expected_training_input_id is None
+        and training_input_identity.get("status") == "ready"
+    ):
+        expected_training_input_id = str(
+            training_input_identity["observed_input_id"]
+        )
+    training_input_identity_contract = {
+        "status": (
+            "blocked"
+            if training_input_identity.get("status") == "blocked"
+            else "enforced"
+            if expected_training_input_id is not None
+            else "not_applicable"
+        ),
+        "expected_input_id": expected_training_input_id,
+        "source_expected_input_id": source_expected_training_input_id,
+        "reissued_for_resume_checkpoint_override": (
+            resume_checkpoint_override_changed
+        ),
+        "observed_input_id": training_input_identity.get("observed_input_id"),
+        "identity_verified": training_input_identity.get("identity_verified"),
+        "input_count": training_input_identity.get("input_count"),
+        "file_count": training_input_identity.get("file_count"),
+        "path_independent": training_input_identity.get("path_independent"),
+        "fail_fast": expected_training_input_id is not None,
+    }
     source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
         source_base_command,
         "--run-card",
@@ -6946,6 +7076,7 @@ def hf_gpt2_finetune_scale_up_command(
         "--expected-parent-adapter-id": expected_parent_adapter_id,
         "--expected-parent-lineage-depth": expected_parent_lineage_depth,
         "--expected-root-adapter-id": expected_root_adapter_id,
+        _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG: expected_training_input_id,
         "--output-dir": resolved_output_dir,
         "--run-card": resolved_run_card,
         "--trainer-trace-jsonl": resolved_trace,
@@ -6974,6 +7105,18 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_distortion_pressure_index": summary.get(
             "scale_up_candidate_distortion_pressure_index"
+        ),
+        "scale_up_candidate_training_input_identity_status": summary.get(
+            "scale_up_candidate_training_input_identity_status"
+        ),
+        "scale_up_candidate_training_input_identity_verified": summary.get(
+            "scale_up_candidate_training_input_identity_verified"
+        ),
+        "scale_up_candidate_training_input_expected_id": summary.get(
+            "scale_up_candidate_training_input_expected_id"
+        ),
+        "scale_up_candidate_training_input_observed_id": summary.get(
+            "scale_up_candidate_training_input_observed_id"
         ),
         "adapter_promotion_required": summary.get("adapter_promotion_required"),
         "scale_up_candidate_adapter_promotion_status": summary.get(
@@ -7080,6 +7223,12 @@ def hf_gpt2_finetune_scale_up_command(
             expected_parent_lineage_depth
         ),
         "adapter_continuation_expected_root_adapter_id": expected_root_adapter_id,
+        "training_input_identity_contract": training_input_identity_contract,
+        "training_input_identity_contract_status": (
+            training_input_identity_contract.get("status")
+        ),
+        "training_input_expected_id": expected_training_input_id,
+        "training_input_identity": training_input_identity,
         "command_runtime": command_runtime,
         "command_runtime_status": command_runtime.get("status"),
         "command_path_resolution": command_path_resolution,
@@ -7343,6 +7492,73 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                         "message": "portable fine-tune module is not importable",
                     }
                 )
+
+    training_input_identity: dict[str, object] | None = None
+    command_expected_training_input_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,
+    )
+    artifact_training_contract = artifact.get("training_input_identity_contract")
+    artifact_expected_training_input_id = artifact.get(
+        "training_input_expected_id"
+    )
+    if (
+        artifact_expected_training_input_id is None
+        and isinstance(artifact_training_contract, Mapping)
+    ):
+        artifact_expected_training_input_id = artifact_training_contract.get(
+            "expected_input_id"
+        )
+    if (
+        artifact_expected_training_input_id is not None
+        and command_expected_training_input_id
+        != str(artifact_expected_training_input_id)
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,
+                "path": command_expected_training_input_id,
+                "message": (
+                    "training input identity command does not match scale-up metadata"
+                ),
+            }
+        )
+    verification_expected_input_id = (
+        command_expected_training_input_id
+        or (
+            None
+            if artifact_expected_training_input_id is None
+            else str(artifact_expected_training_input_id)
+        )
+    )
+    try:
+        training_input_identity = _finetune_input_identity_from_command(
+            command,
+            expected_input_id=verification_expected_input_id,
+            phase="scale_up_preflight",
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        issues.append(
+            {
+                "severity": "error",
+                "field": "training_input_identity_contract",
+                "message": f"training input identity verification failed: {exc}",
+            }
+        )
+    else:
+        if (
+            training_input_identity.get("status") == "blocked"
+            and verification_expected_input_id is not None
+        ):
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "training_input_identity_contract",
+                    "path": training_input_identity.get("observed_input_id"),
+                    "message": "fine-tune local inputs do not match expected identity",
+                }
+            )
 
     for flag in (
         "--model-configs",
@@ -7857,6 +8073,9 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "adapter_continuation_identity_contract"
         ),
         "adapter_input_identity": adapter_input_identity,
+        "training_input_identity_contract": artifact_training_contract,
+        "training_input_expected_id": verification_expected_input_id,
+        "training_input_identity": training_input_identity,
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
         ),
@@ -7908,6 +8127,9 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             "expected_child_depth="
             f"{report.get('adapter_continuation_expected_child_lineage_depth')}"
         )
+    training_input_identity = report.get("training_input_identity")
+    if isinstance(training_input_identity, Mapping):
+        lines.extend(hf_finetune_input_identity_lines(training_input_identity))
     disk_plan = report.get("disk_plan")
     if isinstance(disk_plan, Mapping):
         lines.append(
@@ -7963,6 +8185,17 @@ def summarize_hf_gpt2_finetune_run_card(
     adapter_config = _mapping_item(card, "adapter_config")
     adapter_lineage = _mapping_item(card, "adapter_lineage")
     adapter_promotion = _mapping_item(card, "adapter_promotion")
+    training_input_identity_preflight = _mapping_item(
+        card,
+        "training_input_identity",
+    )
+    training_input_identity_after_load = _mapping_item(
+        card,
+        "training_input_identity_after_load",
+    )
+    training_input_identity = (
+        training_input_identity_after_load or training_input_identity_preflight
+    )
     tokenizer_save = _mapping_item(card, "tokenizer_save_report")
     adapter_artifact_probe = _mapping_item(card, "adapter_artifact_probe")
     adapter_artifact_probe_artifact = _mapping_item(
@@ -8085,6 +8318,31 @@ def summarize_hf_gpt2_finetune_run_card(
         "launch_command_display": card.get("launch_command_display"),
         "launch_command_source": card.get("launch_command_source"),
         "launch_cwd": card.get("launch_cwd"),
+        "training_input_identity_status": training_input_identity.get("status"),
+        "training_input_identity_verified": training_input_identity.get(
+            "identity_verified"
+        ),
+        "training_input_expected_id": training_input_identity.get(
+            "expected_input_id"
+        ),
+        "training_input_observed_id": training_input_identity.get(
+            "observed_input_id"
+        ),
+        "training_input_preflight_status": training_input_identity_preflight.get(
+            "status"
+        ),
+        "training_input_after_load_status": training_input_identity_after_load.get(
+            "status"
+        ),
+        "training_input_count": _safe_number(
+            training_input_identity.get("input_count")
+        ),
+        "training_input_file_count": _safe_number(
+            training_input_identity.get("file_count")
+        ),
+        "training_input_total_bytes": _safe_number(
+            training_input_identity.get("total_bytes")
+        ),
         "model_profile_id": card.get("model_profile_id"),
         "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
         "model_profile": card.get("model_profile"),
@@ -9427,6 +9685,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("launch_cwd")
+        ),
+        "scale_up_candidate_training_input_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_input_identity_status")
+        ),
+        "scale_up_candidate_training_input_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_input_identity_verified")
+        ),
+        "scale_up_candidate_training_input_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_input_expected_id")
+        ),
+        "scale_up_candidate_training_input_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_input_observed_id")
         ),
         "scale_up_candidate_trainer_trace_jsonl": scale_up_candidate_run.get(
             "trainer_trace_jsonl"

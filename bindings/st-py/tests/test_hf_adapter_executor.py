@@ -253,12 +253,20 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     ] is True
     identity_contract = report["pending_generation"]["parent_identity_contract"]
     input_identity = report["pending_generation"]["adapter_input_identity"]
+    training_input_contract = report["pending_generation"][
+        "training_input_identity_contract"
+    ]
+    training_input_identity = report["pending_generation"][
+        "training_input_identity"
+    ]
     assert identity_contract["status"] == "enforced"
     assert identity_contract["expected_parent_adapter_id"] == (
         report["selected_adapter_id"]
     )
     assert input_identity["status"] == "ready"
     assert input_identity["observed_adapter_id"] == report["selected_adapter_id"]
+    assert training_input_contract["status"] == "not_applicable"
+    assert training_input_identity["status"] == "not_applicable"
     resolved_command = report["pending_generation"]["command"]["command"]
     assert _flag(resolved_command, "--expected-parent-adapter-id") == (
         report["selected_adapter_id"]

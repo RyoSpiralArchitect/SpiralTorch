@@ -908,6 +908,13 @@ from .hf_peft import (
     summarize_hf_causal_lm_artifact,
 )
 
+from . import hf_input_identity as hf_input_identity
+from .hf_input_identity import (
+    HF_FINETUNE_INPUT_IDENTITY_SCHEMA,
+    hf_finetune_input_identity_lines,
+    hf_finetune_input_identity_report,
+)
+
 from . import hf_adapter as hf_adapter
 from .hf_adapter import (
     HF_ADAPTER_LINEAGE_FILENAME,
@@ -1275,6 +1282,7 @@ _EXTRAS = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_ADAPTER_LINEAGE_FILENAME",
     "HF_ADAPTER_LINEAGE_SCHEMA",
@@ -1325,6 +1333,7 @@ _EXTRAS = [
     "hf_adapter_executor_status",
     "hf_adapter_executor_supervisor",
     "hf_adapter_executor_supervisor_launch",
+    "hf_input_identity",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",
@@ -1353,6 +1362,8 @@ _EXTRAS = [
     "hf_adapter_fingerprint",
     "hf_adapter_input_identity_lines",
     "hf_adapter_input_identity_report",
+    "hf_finetune_input_identity_lines",
+    "hf_finetune_input_identity_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",
