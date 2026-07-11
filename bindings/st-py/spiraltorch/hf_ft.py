@@ -5824,6 +5824,126 @@ def _command_without_value_flags(
     return updated
 
 
+def _command_without_switch_flags(
+    command: Sequence[object],
+    flags: Sequence[str],
+) -> list[str]:
+    removed = {str(flag) for flag in flags}
+    return [str(item) for item in command if str(item) not in removed]
+
+
+def _adapter_promotion_command_contract(
+    command: Sequence[object],
+    *,
+    required: bool,
+) -> dict[str, object]:
+    values = [str(item) for item in command]
+    gate_requested = "--adapter-promotion-gate" in values
+    generation_change_required = (
+        "--adapter-promotion-require-generation-change" in values
+    )
+    active = bool(required or gate_requested or generation_change_required)
+    train_requested = "--train" in values
+    conflicting_execution_modes = [
+        flag
+        for flag in ("--metadata-only", "--tokenize-only", "--training-recipe-only")
+        if flag in values
+    ]
+    finetune_mode = _command_flag_value(values, "--finetune-mode")
+    eval_before_train = "--eval-before-train" in values
+    no_eval_after_train = "--no-eval-after-train" in values
+    eval_after_train_policy = (
+        _command_flag_value(values, "--eval-after-train-policy") or "always"
+    )
+    eval_after_train_enabled = bool(
+        not no_eval_after_train and eval_after_train_policy != "never"
+    )
+    generation_prompt = _command_flag_value(values, "--generation-prompt")
+    violations: list[dict[str, str]] = []
+
+    def reject(field: str, message: str) -> None:
+        if not any(row.get("field") == field for row in violations):
+            violations.append({"field": field, "message": message})
+
+    if required and not gate_requested:
+        reject(
+            "--adapter-promotion-gate",
+            "promotion-required scale-up command is missing the promotion gate",
+        )
+    if gate_requested:
+        if not train_requested:
+            reject(
+                "--train",
+                "adapter promotion gate requires a training launch",
+            )
+        for flag in conflicting_execution_modes:
+            reject(
+                flag,
+                "adapter promotion gate cannot use a non-training execution mode",
+            )
+        if finetune_mode != "lora":
+            reject(
+                "--finetune-mode",
+                "adapter promotion gate requires LoRA fine-tuning",
+            )
+        if not eval_before_train:
+            reject(
+                "--eval-before-train",
+                "adapter promotion gate requires before-train evaluation",
+            )
+        if no_eval_after_train:
+            reject(
+                "--no-eval-after-train",
+                "adapter promotion gate forbids disabling after-train evaluation",
+            )
+        if eval_after_train_policy not in {
+            "always",
+            "never",
+            "skip-if-final-step-eval",
+        }:
+            reject(
+                "--eval-after-train-policy",
+                "adapter promotion gate has an invalid after-train evaluation policy",
+            )
+        elif eval_after_train_policy == "never":
+            reject(
+                "--eval-after-train-policy",
+                "adapter promotion gate requires after-train evaluation",
+            )
+    if generation_change_required:
+        if not gate_requested:
+            reject(
+                "--adapter-promotion-gate",
+                "generation-change qualification requires the promotion gate",
+            )
+        if generation_prompt is None or not str(generation_prompt).strip():
+            reject(
+                "--generation-prompt",
+                "generation-change qualification requires a generation prompt",
+            )
+
+    ready = not violations
+    return {
+        "status": (
+            "not_applicable" if not active else "enforced" if ready else "blocked"
+        ),
+        "required": bool(required),
+        "active": active,
+        "ready": ready,
+        "gate_requested": gate_requested,
+        "train_requested": train_requested,
+        "conflicting_execution_modes": conflicting_execution_modes,
+        "finetune_mode": finetune_mode,
+        "eval_before_train": eval_before_train,
+        "no_eval_after_train": no_eval_after_train,
+        "eval_after_train_policy": eval_after_train_policy,
+        "eval_after_train_enabled": eval_after_train_enabled,
+        "generation_change_required": generation_change_required,
+        "generation_prompt": generation_prompt,
+        "violations": violations,
+    }
+
+
 _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS = {
     "--model-configs",
     "--train-file",
@@ -7646,12 +7766,49 @@ def hf_gpt2_finetune_scale_up_command(
     }
     command = _command_with_overrides(base_command, overrides)
     applied = {key: value for key, value in overrides.items() if value is not None}
-    if (
-        summary.get("adapter_promotion_required") is True
-        and "--adapter-promotion-gate" not in command
-    ):
-        command.append("--adapter-promotion-gate")
-        applied["--adapter-promotion-gate"] = True
+    adapter_promotion_required = summary.get("adapter_promotion_required") is True
+    if adapter_promotion_required:
+        for flag in (
+            "--metadata-only",
+            "--tokenize-only",
+            "--training-recipe-only",
+        ):
+            if flag in command:
+                command = _command_without_switch_flags(command, (flag,))
+                applied[flag] = False
+        if "--train" not in command:
+            command.append("--train")
+            applied["--train"] = True
+        if _command_flag_value(command, "--finetune-mode") != "lora":
+            command = _replace_or_append_command_flag(
+                command,
+                "--finetune-mode",
+                "lora",
+            )
+            applied["--finetune-mode"] = "lora"
+        if "--eval-before-train" not in command:
+            command.append("--eval-before-train")
+            applied["--eval-before-train"] = True
+        if "--no-eval-after-train" in command:
+            command = _command_without_switch_flags(
+                command,
+                ("--no-eval-after-train",),
+            )
+            applied["--no-eval-after-train"] = False
+        if _command_flag_value(command, "--eval-after-train-policy") == "never":
+            command = _replace_or_append_command_flag(
+                command,
+                "--eval-after-train-policy",
+                "always",
+            )
+            applied["--eval-after-train-policy"] = "always"
+        if "--adapter-promotion-gate" not in command:
+            command.append("--adapter-promotion-gate")
+            applied["--adapter-promotion-gate"] = True
+    adapter_promotion_command_contract = _adapter_promotion_command_contract(
+        command,
+        required=adapter_promotion_required,
+    )
     return {
         "row_type": "hf_gpt2_finetune_scale_up_command",
         "status": "ok",
@@ -7774,7 +7931,11 @@ def hf_gpt2_finetune_scale_up_command(
         "scale_up_candidate_finetune_replay_observed_id": summary.get(
             "scale_up_candidate_finetune_replay_observed_id"
         ),
-        "adapter_promotion_required": summary.get("adapter_promotion_required"),
+        "adapter_promotion_required": adapter_promotion_required,
+        "adapter_promotion_command_contract": adapter_promotion_command_contract,
+        "adapter_promotion_command_contract_status": (
+            adapter_promotion_command_contract.get("status")
+        ),
         "scale_up_candidate_adapter_promotion_status": summary.get(
             "scale_up_candidate_adapter_promotion_status"
         ),
@@ -8207,6 +8368,76 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                         "message": "portable fine-tune module is not importable",
                     }
                 )
+
+    adapter_promotion_required = artifact.get("adapter_promotion_required") is True
+    adapter_promotion_command_contract = _adapter_promotion_command_contract(
+        command,
+        required=adapter_promotion_required,
+    )
+    for violation in adapter_promotion_command_contract.get("violations") or []:
+        if not isinstance(violation, Mapping):
+            continue
+        issues.append(
+            {
+                "severity": "error",
+                "field": violation.get("field"),
+                "message": violation.get("message"),
+            }
+        )
+    declared_promotion_contract = artifact.get(
+        "adapter_promotion_command_contract"
+    )
+    adapter_promotion_command_contract_matches = True
+    if isinstance(declared_promotion_contract, Mapping):
+        contract_fields = (
+            "status",
+            "required",
+            "active",
+            "ready",
+            "gate_requested",
+            "train_requested",
+            "conflicting_execution_modes",
+            "finetune_mode",
+            "eval_before_train",
+            "no_eval_after_train",
+            "eval_after_train_policy",
+            "eval_after_train_enabled",
+            "generation_change_required",
+            "generation_prompt",
+            "violations",
+        )
+        adapter_promotion_command_contract_matches = all(
+            declared_promotion_contract.get(field)
+            == adapter_promotion_command_contract.get(field)
+            for field in contract_fields
+        )
+        if not adapter_promotion_command_contract_matches:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "adapter_promotion_command_contract",
+                    "message": (
+                        "adapter promotion command metadata does not match the "
+                        "resolved command"
+                    ),
+                }
+            )
+    inputs.append(
+        {
+            "field": "adapter_promotion_command_contract",
+            "declared": (
+                dict(declared_promotion_contract)
+                if isinstance(declared_promotion_contract, Mapping)
+                else None
+            ),
+            "observed": adapter_promotion_command_contract,
+            "metadata_matches": adapter_promotion_command_contract_matches,
+            "verified": bool(
+                adapter_promotion_command_contract.get("ready")
+                and adapter_promotion_command_contract_matches
+            ),
+        }
+    )
 
     training_input_identity: dict[str, object] | None = None
     command_expected_training_recipe_id = _command_flag_value(
@@ -9284,6 +9515,13 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "command_runtime_status": command_runtime_status,
         "command_runtime_module": runtime_module,
         "command_runtime_module_importable": runtime_module_importable,
+        "adapter_promotion_required": adapter_promotion_required,
+        "adapter_promotion_command_contract": (
+            adapter_promotion_command_contract
+        ),
+        "adapter_promotion_command_contract_matches": (
+            adapter_promotion_command_contract_matches
+        ),
         "command_path_resolution": artifact.get("command_path_resolution"),
         "source_command_cwd": artifact.get("source_command_cwd"),
         "adapter_continuation_policy": artifact.get(
@@ -9384,6 +9622,10 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
         and report_or_command.get("row_type") == "hf_gpt2_finetune_scale_up_preflight"
         else hf_gpt2_finetune_scale_up_preflight_report(report_or_command)
     )
+    promotion_contract = report.get("adapter_promotion_command_contract")
+    promotion_contract = (
+        promotion_contract if isinstance(promotion_contract, Mapping) else {}
+    )
     lines = [
         (
             "hf_gpt2_ft_scale_up_preflight "
@@ -9393,7 +9635,11 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"executable={report.get('executable_resolved') or report.get('executable')} "
             f"runtime={report.get('command_runtime_status')} "
             f"module={report.get('command_runtime_module')} "
-            f"module_importable={report.get('command_runtime_module_importable')}"
+            f"module_importable={report.get('command_runtime_module_importable')} "
+            f"promotion_contract={promotion_contract.get('status')} "
+            f"promotion_contract_ready={promotion_contract.get('ready')} "
+            "promotion_contract_matches="
+            f"{report.get('adapter_promotion_command_contract_matches')}"
         )
     ]
     if report.get("dataset_shape_reissue_declared") is True:

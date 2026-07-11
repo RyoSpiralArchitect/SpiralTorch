@@ -4461,6 +4461,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(train_path),
                 "--output-dir",
                 str(adapter_dir),
+                "--metadata-only",
+                "--no-eval-after-train",
+                "--eval-after-train-policy",
+                "never",
             ]
             summary = {
                 "row_type": "hf_finetune_sweep_report_summary",
@@ -4485,8 +4489,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 summary,
                 output_dir=root / "child-adapter",
             )
+            command = artifact["command"]
+            bridge_argv = (
+                command[3:]
+                if command[1:3] == ["-m", "spiraltorch.hf_finetune_entrypoint"]
+                else command[2:]
+            )
+            bridge_args = load_bridge_example().parse_args(bridge_argv)
 
             root_preflight = hf_ft.hf_finetune_scale_up_preflight_report(artifact)
+            root_preflight_lines = (
+                hf_ft.hf_finetune_scale_up_preflight_lines(root_preflight)
+            )
+            tampered_cases = {
+                "--adapter-promotion-gate": [
+                    item
+                    for item in artifact["command"]
+                    if item != "--adapter-promotion-gate"
+                ],
+                "--eval-before-train": [
+                    item
+                    for item in artifact["command"]
+                    if item != "--eval-before-train"
+                ],
+                "--no-eval-after-train": [
+                    *artifact["command"],
+                    "--no-eval-after-train",
+                ],
+                "--eval-after-train-policy": [
+                    *artifact["command"],
+                    "--eval-after-train-policy",
+                    "never",
+                ],
+                "--metadata-only": [
+                    *artifact["command"],
+                    "--metadata-only",
+                ],
+                "--generation-prompt": [
+                    *artifact["command"],
+                    "--adapter-promotion-require-generation-change",
+                ],
+            }
+            tampered_preflights = {
+                field: hf_ft.hf_finetune_scale_up_preflight_report(
+                    {**artifact, "command": command}
+                )
+                for field, command in tampered_cases.items()
+            }
             child_lineage = dict(root_lineage)
             child_lineage.update(
                 {
@@ -4508,9 +4557,48 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
 
         self.assertEqual(artifact["status"], "ok")
+        self.assertTrue(bridge_args.train)
+        self.assertTrue(bridge_args.eval_before_train)
+        self.assertTrue(bridge_args.adapter_promotion_gate)
+        self.assertEqual(bridge_args.finetune_mode, "lora")
+        self.assertIn("--train", artifact["command"])
+        self.assertIn("--eval-before-train", artifact["command"])
         self.assertIn("--adapter-promotion-gate", artifact["command"])
+        self.assertNotIn("--metadata-only", artifact["command"])
+        self.assertNotIn("--no-eval-after-train", artifact["command"])
+        self.assertEqual(
+            artifact["command"][
+                artifact["command"].index("--eval-after-train-policy") + 1
+            ],
+            "always",
+        )
+        self.assertEqual(
+            artifact["adapter_promotion_command_contract_status"],
+            "enforced",
+        )
+        self.assertTrue(artifact["adapter_promotion_command_contract"]["ready"])
+        self.assertFalse(artifact["applied_overrides"]["--metadata-only"])
+        self.assertTrue(artifact["applied_overrides"]["--train"])
+        self.assertTrue(artifact["applied_overrides"]["--eval-before-train"])
+        self.assertFalse(artifact["applied_overrides"]["--no-eval-after-train"])
+        self.assertEqual(
+            artifact["applied_overrides"]["--eval-after-train-policy"],
+            "always",
+        )
         self.assertTrue(artifact["applied_overrides"]["--adapter-promotion-gate"])
         self.assertTrue(root_preflight["ready"])
+        self.assertTrue(
+            root_preflight["adapter_promotion_command_contract_matches"]
+        )
+        self.assertIn("promotion_contract=enforced", root_preflight_lines[0])
+        self.assertIn("promotion_contract_ready=True", root_preflight_lines[0])
+        self.assertIn("promotion_contract_matches=True", root_preflight_lines[0])
+        for field, preflight in tampered_preflights.items():
+            self.assertFalse(preflight["ready"], field)
+            self.assertTrue(
+                any(issue.get("field") == field for issue in preflight["issues"]),
+                field,
+            )
         self.assertFalse(child_preflight["ready"])
         self.assertTrue(
             any(
