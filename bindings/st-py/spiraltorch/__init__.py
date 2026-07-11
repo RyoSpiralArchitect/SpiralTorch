@@ -896,6 +896,7 @@ from .hf_peft import (
     HF_CAUSAL_LM_ARTIFACT_KINDS,
     HF_FINETUNE_LORA_TARGET_MODULES,
     HF_FINETUNE_MODES,
+    HfCausalLmRuntimeIdentityError,
     export_hf_merged_causal_lm,
     hf_causal_lm_artifact_lines,
     hf_causal_lm_artifact_report,
@@ -906,6 +907,13 @@ from .hf_peft import (
     load_hf_causal_lm_artifact,
     prepare_hf_finetune_model,
     summarize_hf_causal_lm_artifact,
+)
+
+from . import hf_runtime_identity as hf_runtime_identity
+from .hf_runtime_identity import (
+    HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA,
+    hf_causal_lm_runtime_identity_lines,
+    hf_causal_lm_runtime_identity_report,
 )
 
 from . import hf_input_identity as hf_input_identity
@@ -1284,6 +1292,7 @@ _EXTRAS = [
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
+    "HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA",
     "HF_ADAPTER_LINEAGE_FILENAME",
     "HF_ADAPTER_LINEAGE_SCHEMA",
     "HF_ADAPTER_PROMOTION_FILENAME",
@@ -1322,9 +1331,12 @@ _EXTRAS = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
+    "HfCausalLmRuntimeIdentityError",
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
+    "hf_causal_lm_runtime_identity_lines",
+    "hf_causal_lm_runtime_identity_report",
     "hf_adapter",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
@@ -1334,6 +1346,7 @@ _EXTRAS = [
     "hf_adapter_executor_supervisor",
     "hf_adapter_executor_supervisor_launch",
     "hf_input_identity",
+    "hf_runtime_identity",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",

@@ -137,10 +137,42 @@ def _write_promoted_child(
     launch_command: bool = True,
     before: float = 1.0,
     after: float = 0.9,
+    runtime_input_id: str | None = None,
+    expected_runtime_input_id: str | None = None,
 ) -> tuple[Path, dict, dict]:
     adapter = _write_adapter(child, weights)
     run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
     card = _run_card(parent, before=before, after=after)
+    if runtime_input_id is not None:
+        card["model_runtime_identity_pre_model"] = {
+            "row_type": "hf_causal_lm_runtime_identity",
+            "status": "ready",
+            "phase": "pre_model_load",
+            "expected_identity_id": expected_runtime_input_id,
+            "observed_identity_id": runtime_input_id,
+            "identity_verified": True,
+        }
+        card["model_runtime_identity_after_model"] = {
+            "row_type": "hf_causal_lm_runtime_identity",
+            "status": "ready",
+            "phase": "after_model_load",
+            "expected_identity_id": (
+                expected_runtime_input_id or runtime_input_id
+            ),
+            "observed_identity_id": runtime_input_id,
+            "identity_verified": True,
+        }
+        card["model_runtime_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_runtime_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_runtime_input_id,
+            "observed_identity_id": runtime_input_id,
+            "identity_verified": True,
+            "fail_fast": expected_runtime_input_id is not None,
+        }
     if launch_command:
         card["launch_command"] = _adapter_launch_command(
             parent,
@@ -389,6 +421,89 @@ def test_adapter_lineage_and_transition_require_declared_input_identity(
             child,
             parent_adapter=parent,
             run_card=bad_training_card,
+        )
+
+
+def test_adapter_chain_adopts_then_requires_runtime_input_identity(
+    tmp_path: Path,
+) -> None:
+    runtime_input_id = "sha256:" + "7" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, adopted_lineage, _ = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        runtime_input_id=runtime_input_id,
+    )
+    enforced, enforced_lineage, _ = _write_promoted_child(
+        tmp_path / "enforced",
+        adopted,
+        b"enforced",
+        runtime_input_id=runtime_input_id,
+        expected_runtime_input_id=runtime_input_id,
+    )
+    _, dropped_lineage, _ = _write_promoted_child(
+        tmp_path / "dropped",
+        enforced,
+        b"dropped",
+        runtime_input_id=runtime_input_id,
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    root_to_adopted, adopted_to_enforced, enforced_to_dropped = chain[
+        "transitions"
+    ]
+
+    assert adopted_lineage["runtime_input_identity_required"] is False
+    assert adopted_lineage["runtime_input_identity_verified"] is True
+    assert adopted_lineage["runtime_input_observed_id"] == runtime_input_id
+    assert root_to_adopted["runtime_input_identity_required"] is False
+    assert root_to_adopted["runtime_input_identity_ready"] is True
+    assert root_to_adopted["runtime_input_matches_parent"] is None
+    assert root_to_adopted["status"] == "ready"
+
+    assert enforced_lineage["runtime_input_identity_required"] is True
+    assert enforced_lineage["runtime_input_expected_id"] == runtime_input_id
+    assert adopted_to_enforced["runtime_input_identity_required"] is True
+    assert adopted_to_enforced["runtime_input_identity_ready"] is True
+    assert adopted_to_enforced["runtime_input_matches_parent"] is True
+    assert adopted_to_enforced["status"] == "ready"
+
+    assert dropped_lineage["runtime_input_identity_required"] is False
+    assert enforced_to_dropped["runtime_input_identity_required"] is True
+    assert enforced_to_dropped["runtime_input_identity_ready"] is False
+    assert enforced_to_dropped["runtime_input_expected_id"] is None
+    assert enforced_to_dropped["runtime_input_matches_parent"] is True
+    assert enforced_to_dropped["lineage_ready"] is False
+    assert enforced_to_dropped["status"] == "rejected"
+    transition_lines = [
+        line
+        for line in st.hf_adapter_promotion_chain_lines(chain)
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "runtime_input_ready=False" in transition_lines[-1]
+
+    incomplete = _write_adapter(tmp_path / "incomplete", b"incomplete")
+    incomplete_card = _run_card(enforced)
+    incomplete_card["model_runtime_identity_after_model"] = {
+        "status": "ready",
+        "phase": "after_model_load",
+        "expected_identity_id": runtime_input_id,
+        "observed_identity_id": runtime_input_id,
+        "identity_verified": True,
+    }
+    incomplete_card["model_runtime_identity_contract"] = {
+        "status": "adopted",
+        "expected_identity_id": None,
+        "observed_identity_id": runtime_input_id,
+        "identity_verified": True,
+    }
+    with pytest.raises(ValueError, match="pre-model identity is not ready"):
+        st.write_hf_adapter_lineage(
+            incomplete,
+            parent_adapter=enforced,
+            run_card=incomplete_card,
         )
 
 

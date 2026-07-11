@@ -11,10 +11,13 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .hf_runtime_identity import hf_causal_lm_runtime_identity_report
+
 __all__ = [
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_FINETUNE_MODES",
+    "HfCausalLmRuntimeIdentityError",
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
@@ -85,6 +88,15 @@ _MODEL_FAMILY_ALIASES = {
 }
 
 
+class HfCausalLmRuntimeIdentityError(ValueError):
+    """Raised before training when the loaded model basis changed identity."""
+
+    def __init__(self, report: Mapping[str, object]) -> None:
+        self.report = dict(report)
+        errors = "; ".join(str(item) for item in report.get("errors", []))
+        super().__init__(errors or "causal-LM runtime identity verification failed")
+
+
 def _normalise_model_family(value: object) -> str | None:
     if value is None:
         return None
@@ -92,6 +104,17 @@ def _normalise_model_family(value: object) -> str | None:
     if not family:
         return None
     return _MODEL_FAMILY_ALIASES.get(family, family)
+
+
+def _hub_commit_hash(value: object | None) -> str | None:
+    if value is None:
+        return None
+    commit = str(value).strip().lower()
+    if 7 <= len(commit) <= 64 and all(
+        character in "0123456789abcdef" for character in commit
+    ):
+        return commit
+    return None
 
 
 def _string_values(value: object) -> list[str]:
@@ -637,6 +660,7 @@ def load_hf_causal_lm_artifact(
     tokenizer_kwargs: Mapping[str, object] | None = None,
     model_kwargs: Mapping[str, object] | None = None,
     adapter_kwargs: Mapping[str, object] | None = None,
+    expected_runtime_identity_id: str | None = None,
 ) -> tuple[Any, Any, Any, dict[str, object]]:
     """Load a full causal LM or reconstruct a PEFT adapter over its base model.
 
@@ -706,12 +730,33 @@ def load_hf_causal_lm_artifact(
     if base_revision is not None:
         base_options.setdefault("revision", base_revision)
     resolved_config_options = _loader_options(base_options, config_kwargs)
-    resolved_tokenizer_options = _loader_options(base_options, tokenizer_kwargs)
-    resolved_model_options = _loader_options(base_options, model_kwargs)
     config = transformers.AutoConfig.from_pretrained(
         str(base_source),
         **resolved_config_options,
     )
+    observed_base_commit = _hub_commit_hash(getattr(config, "_commit_hash", None))
+    effective_base_commit = observed_base_commit or _hub_commit_hash(base_revision)
+    base_source_is_local = Path(str(base_source)).expanduser().is_dir()
+    commit_pin_applied = bool(
+        not base_source_is_local
+        and effective_base_commit is not None
+    )
+    pinned_base_options = dict(base_options)
+    if commit_pin_applied:
+        pinned_base_options["revision"] = effective_base_commit
+    resolved_tokenizer_options = _loader_options(
+        (
+            pinned_base_options
+            if tokenizer_source == str(base_source)
+            else common_options
+        ),
+        tokenizer_kwargs,
+    )
+    resolved_model_options = _loader_options(pinned_base_options, model_kwargs)
+    if commit_pin_applied:
+        resolved_model_options["revision"] = effective_base_commit
+        if tokenizer_source == str(base_source):
+            resolved_tokenizer_options["revision"] = effective_base_commit
     tokenizer = (
         transformers.AutoTokenizer.from_pretrained(
             tokenizer_source,
@@ -720,6 +765,24 @@ def load_hf_causal_lm_artifact(
         if load_tokenizer
         else None
     )
+    runtime_identity_pre_model = hf_causal_lm_runtime_identity_report(
+        base_model_source=str(base_source),
+        base_model_revision=(
+            effective_base_commit
+            if commit_pin_applied
+            else base_revision
+        ),
+        tokenizer_source=tokenizer_source,
+        tokenizer_source_kind=tokenizer_source_kind,
+        config=config,
+        tokenizer=tokenizer,
+        expected_identity_id=expected_runtime_identity_id,
+        phase="pre_model_load",
+    )
+    if expected_runtime_identity_id is not None and runtime_identity_pre_model.get(
+        "status"
+    ) != "ready":
+        raise HfCausalLmRuntimeIdentityError(runtime_identity_pre_model)
 
     model = None
     base_parameter_report = None
@@ -765,6 +828,31 @@ def load_hf_causal_lm_artifact(
                 adapter_merged = True
         loaded_parameter_report = hf_finetune_parameter_report(model)
 
+    runtime_identity_after_model = None
+    if load_model:
+        runtime_identity_after_model = hf_causal_lm_runtime_identity_report(
+            base_model_source=str(base_source),
+            base_model_revision=(
+                effective_base_commit
+                if commit_pin_applied
+                else base_revision
+            ),
+            tokenizer_source=tokenizer_source,
+            tokenizer_source_kind=tokenizer_source_kind,
+            config=config,
+            tokenizer=tokenizer,
+            expected_identity_id=(
+                expected_runtime_identity_id
+                or runtime_identity_pre_model.get("observed_identity_id")
+            ),
+            phase="after_model_load",
+        )
+        if (
+            runtime_identity_pre_model.get("status") == "ready"
+            and runtime_identity_after_model.get("status") != "ready"
+        ):
+            raise HfCausalLmRuntimeIdentityError(runtime_identity_after_model)
+
     report = dict(artifact_report)
     report.update(
         {
@@ -772,6 +860,13 @@ def load_hf_causal_lm_artifact(
             "status": "loaded",
             "resolved_base_model_name_or_path": str(base_source),
             "resolved_base_model_revision": base_revision,
+            "resolved_base_model_commit": effective_base_commit,
+            "base_model_commit_pin_applied": commit_pin_applied,
+            "base_model_effective_revision": (
+                effective_base_commit
+                if commit_pin_applied
+                else base_revision
+            ),
             "resolved_tokenizer_source": tokenizer_source,
             "resolved_tokenizer_source_kind": tokenizer_source_kind,
             "load_model_requested": bool(load_model),
@@ -796,6 +891,8 @@ def load_hf_causal_lm_artifact(
                 None if peft is None else getattr(peft, "__version__", None)
             ),
             "runtime_adapter_config": runtime_adapter_config,
+            "runtime_identity_pre_model": runtime_identity_pre_model,
+            "runtime_identity_after_model": runtime_identity_after_model,
             "base_parameter_report": base_parameter_report,
             "loaded_parameter_report": loaded_parameter_report,
         }
@@ -810,6 +907,21 @@ def summarize_hf_causal_lm_artifact(
 
     parameters = report.get("loaded_parameter_report")
     parameter_report = dict(parameters) if isinstance(parameters, Mapping) else {}
+    runtime_identity_pre_model = report.get("runtime_identity_pre_model")
+    runtime_identity_pre_model_payload = (
+        dict(runtime_identity_pre_model)
+        if isinstance(runtime_identity_pre_model, Mapping)
+        else {}
+    )
+    runtime_identity_after_model = report.get("runtime_identity_after_model")
+    runtime_identity_after_model_payload = (
+        dict(runtime_identity_after_model)
+        if isinstance(runtime_identity_after_model, Mapping)
+        else {}
+    )
+    runtime_identity = (
+        runtime_identity_after_model_payload or runtime_identity_pre_model_payload
+    )
     return {
         "row_type": "hf_causal_lm_artifact_summary",
         "status": report.get("status"),
@@ -824,6 +936,13 @@ def summarize_hf_causal_lm_artifact(
         "base_model_revision": (
             report.get("resolved_base_model_revision")
             or report.get("base_model_revision")
+        ),
+        "base_model_commit": report.get("resolved_base_model_commit"),
+        "base_model_commit_pin_applied": report.get(
+            "base_model_commit_pin_applied"
+        ),
+        "base_model_effective_revision": report.get(
+            "base_model_effective_revision"
         ),
         "tokenizer_source": (
             report.get("resolved_tokenizer_source") or report.get("tokenizer_source")
@@ -843,6 +962,20 @@ def summarize_hf_causal_lm_artifact(
         "trainable_parameter_ratio": parameter_report.get("trainable_parameter_ratio"),
         "adapter_weight_files": report.get("adapter_weight_files"),
         "runtime_resolution_required": report.get("runtime_resolution_required"),
+        "runtime_identity_status": runtime_identity.get("status"),
+        "runtime_identity_verified": runtime_identity.get("identity_verified"),
+        "runtime_identity_expected_id": runtime_identity.get(
+            "expected_identity_id"
+        ),
+        "runtime_identity_observed_id": runtime_identity.get(
+            "observed_identity_id"
+        ),
+        "runtime_identity_pre_model_status": runtime_identity_pre_model_payload.get(
+            "status"
+        ),
+        "runtime_identity_after_model_status": (
+            runtime_identity_after_model_payload.get("status")
+        ),
     }
 
 

@@ -175,6 +175,10 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
             "training_input_identity_contract"
         ),
         "training_input_identity": attempt.get("training_input_identity"),
+        "runtime_input_identity_contract": attempt.get(
+            "runtime_input_identity_contract"
+        ),
+        "runtime_input_expected_id": attempt.get("runtime_input_expected_id"),
         "source_transition": attempt.get("source_transition"),
         "postflight_transition": (
             postflight.get("transition") if isinstance(postflight, Mapping) else None
@@ -560,6 +564,10 @@ def hf_adapter_continuation_executor_status_lines(
             f"input_identity={transition.get('input_identity_ready')} "
             "training_input_identity="
             f"{transition.get('training_input_identity_ready')} "
+            "runtime_input_required="
+            f"{transition.get('runtime_input_identity_required')} "
+            "runtime_input_identity="
+            f"{transition.get('runtime_input_identity_ready')} "
             f"probe_process={transition.get('artifact_probe_process_status')} "
             f"probe_pid={transition.get('artifact_probe_process_pid')}"
         )
@@ -568,6 +576,7 @@ def hf_adapter_continuation_executor_status_lines(
         command_runtime = attempt.get("command_runtime")
         adapter_input_identity = attempt.get("adapter_input_identity")
         training_input_identity = attempt.get("training_input_identity")
+        runtime_input_contract = attempt.get("runtime_input_identity_contract")
         log = report.get("log")
         output = report.get("output")
         lock = report.get("lock")
@@ -583,6 +592,9 @@ def hf_adapter_continuation_executor_status_lines(
             f"{adapter_input_identity.get('status') if isinstance(adapter_input_identity, Mapping) else None} "
             "training_input_identity="
             f"{training_input_identity.get('status') if isinstance(training_input_identity, Mapping) else None} "
+            "runtime_input_contract="
+            f"{runtime_input_contract.get('status') if isinstance(runtime_input_contract, Mapping) else None} "
+            f"runtime_input_expected={attempt.get('runtime_input_expected_id')} "
             f"stop_scope={attempt.get('stop_scope')} "
             f"host={attempt.get('hostname')} "
             f"pid={attempt.get('pid')} "

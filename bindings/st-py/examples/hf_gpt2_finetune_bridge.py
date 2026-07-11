@@ -66,6 +66,7 @@ from spiraltorch.hf_input_identity import (
     hf_finetune_input_identity_report,
 )
 from spiraltorch.hf_peft import (
+    HfCausalLmRuntimeIdentityError,
     hf_causal_lm_artifact_lines,
     hf_causal_lm_artifact_report,
     hf_finetune_adapter_config,
@@ -73,6 +74,7 @@ from spiraltorch.hf_peft import (
     prepare_hf_finetune_model,
     summarize_hf_causal_lm_artifact,
 )
+from spiraltorch.hf_runtime_identity import hf_causal_lm_runtime_identity_lines
 
 
 DEFAULT_MODEL = "gpt2"
@@ -155,6 +157,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Fail before model loading unless local model-config, corpus, "
             "distortion, and checkpoint inputs match this sha256 bundle identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-runtime-input-id",
+        default=None,
+        help=(
+            "Fail before model weight loading unless the resolved base-model "
+            "commit/content and tokenizer semantics match this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -611,6 +621,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--expected-root-adapter-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_training_input_id):
         parser.error("--expected-training-input-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_runtime_input_id):
+        parser.error("--expected-runtime-input-id must be sha256:<64 lowercase hex>")
     if (
         args.expected_parent_lineage_depth is not None
         and args.expected_parent_lineage_depth < 0
@@ -2573,6 +2585,31 @@ def _canonicalize_training_input_launch_command(
     args._hf_finetune_launch_command = command
 
 
+def _canonicalize_runtime_input_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if (
+        command
+        and report.get("status") == "ready"
+        and observed_id is not None
+        and not _argv_has_option(command, "--expected-runtime-input-id")
+    ):
+        command.extend(["--expected-runtime-input-id", str(observed_id)])
+        args._hf_finetune_launch_command = command
+
+
+def _refresh_card_launch_command(
+    card: dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    card["launch_command"] = command or None
+    card["launch_command_display"] = shlex.join(command) if command else None
+
+
 def _finetune_start_report(
     args: argparse.Namespace,
     artifact_report: Mapping[str, object],
@@ -2585,6 +2622,9 @@ def _finetune_start_report(
     )
     training_input_identity = dict(
         getattr(args, "_hf_training_input_identity_report", {}) or {}
+    )
+    runtime_input_identity = dict(
+        getattr(args, "_hf_runtime_input_identity_report", {}) or {}
     )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
@@ -2628,6 +2668,12 @@ def _finetune_start_report(
             if not training_input_identity
             or training_input_identity.get("status") == "not_applicable"
             else training_input_identity.get("identity_verified") is True
+        ),
+        "runtime_input_identity": runtime_input_identity or None,
+        "runtime_input_identity_verified": (
+            None
+            if not runtime_input_identity
+            else runtime_input_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -2784,6 +2830,17 @@ def _base_run_card(
             or None
         ),
         "training_input_identity_after_load": None,
+        "model_runtime_identity_pre_model": None,
+        "model_runtime_identity_after_model": None,
+        "model_runtime_identity_contract": {
+            "status": (
+                "enforced"
+                if args.expected_runtime_input_id is not None
+                else "observe"
+            ),
+            "expected_identity_id": args.expected_runtime_input_id,
+            "fail_fast": args.expected_runtime_input_id is not None,
+        },
         "adapter_lineage": None,
         "adapter_promotion": None,
         "tokenizer_save_report": None,
@@ -3039,6 +3096,14 @@ def _main_with_runtime_access(
         else dict(adapter_input_identity)
     )
     preflight["training_input_identity"] = dict(training_input_identity)
+    preflight["model_runtime_identity_contract"] = {
+        "status": (
+            "enforced" if args.expected_runtime_input_id is not None else "observe"
+        ),
+        "expected_identity_id": args.expected_runtime_input_id,
+        "fail_fast": args.expected_runtime_input_id is not None,
+        "verification_phase": "model_load",
+    }
     model_artifact_compatible = not (
         model_artifact_report.get("artifact_kind") == "peft_adapter"
         and args.finetune_mode != "lora"
@@ -3230,6 +3295,7 @@ def _main_with_runtime_access(
                 ),
                 transformers_module=transformers,
                 loader_kwargs=_loader_kwargs(args),
+                expected_runtime_identity_id=args.expected_runtime_input_id,
             )
         )
         card["model_artifact_load_report"] = summarize_hf_causal_lm_artifact(
@@ -3237,6 +3303,54 @@ def _main_with_runtime_access(
         )
         card["model_artifact_kind"] = model_artifact_load_report.get(
             "artifact_kind"
+        )
+        runtime_identity_pre_model = model_artifact_load_report.get(
+            "runtime_identity_pre_model"
+        )
+        runtime_identity_after_model = model_artifact_load_report.get(
+            "runtime_identity_after_model"
+        )
+        card["model_runtime_identity_pre_model"] = (
+            dict(runtime_identity_pre_model)
+            if isinstance(runtime_identity_pre_model, Mapping)
+            else None
+        )
+        card["model_runtime_identity_after_model"] = (
+            dict(runtime_identity_after_model)
+            if isinstance(runtime_identity_after_model, Mapping)
+            else None
+        )
+        strongest_runtime_identity = (
+            card["model_runtime_identity_after_model"]
+            or card["model_runtime_identity_pre_model"]
+            or {}
+        )
+        args._hf_runtime_input_identity_report = strongest_runtime_identity
+        _canonicalize_runtime_input_launch_command(
+            args,
+            strongest_runtime_identity,
+        )
+        _refresh_card_launch_command(card, args)
+        card["model_runtime_identity_contract"] = {
+            "status": (
+                "enforced"
+                if args.expected_runtime_input_id is not None
+                else "adopted"
+                if strongest_runtime_identity.get("status") == "ready"
+                else "evidence_incomplete"
+            ),
+            "expected_identity_id": args.expected_runtime_input_id,
+            "observed_identity_id": strongest_runtime_identity.get(
+                "observed_identity_id"
+            ),
+            "identity_verified": strongest_runtime_identity.get(
+                "identity_verified"
+            ),
+            "fail_fast": args.expected_runtime_input_id is not None,
+        }
+        card["finetune_start_report"] = _finetune_start_report(
+            args,
+            model_artifact_load_report,
         )
         adapter_input_identity_after_load = _adapter_input_identity_report(
             args,
@@ -3268,6 +3382,24 @@ def _main_with_runtime_access(
         card["model_dtype_report"] = _prepare_model_train_dtype(model, args)
         if getattr(tokenizer, "pad_token_id", None) is not None:
             model.config.pad_token_id = tokenizer.pad_token_id
+    except HfCausalLmRuntimeIdentityError as exc:
+        identity = dict(exc.report)
+        phase = str(identity.get("phase") or "model_load")
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": f"model_runtime_identity_{phase}",
+                "failure_error": f"{exc.__class__.__name__}: {exc}",
+                "model_runtime_identity_pre_model": (
+                    identity if phase == "pre_model_load" else None
+                ),
+                "model_runtime_identity_after_model": (
+                    identity if phase == "after_model_load" else None
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
     except Exception as exc:
         card.update(
             {
@@ -3305,6 +3437,13 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    for runtime_identity in (
+        card.get("model_runtime_identity_pre_model"),
+        card.get("model_runtime_identity_after_model"),
+    ):
+        if isinstance(runtime_identity, Mapping):
+            for line in hf_causal_lm_runtime_identity_lines(runtime_identity):
+                print(line)
     card["load_status"] = "ok"
     card["generation_before_train"] = _generation_sample(
         torch,
