@@ -22,11 +22,16 @@ pub enum ZSpaceError {
     EmptySeries,
     #[error("z-values must not be empty")]
     EmptyZValues,
-    // New: explicit finiteness checks for robustness
     #[error("weight[{index}] is not finite: {value}")]
     NonFiniteWeight { index: usize, value: Scalar },
     #[error("sample[{index}] coefficient is not finite")]
     NonFiniteSampleCoeff { index: usize },
+    #[error("weighted coefficient[{index}] is not finite: re={re}, im={im}")]
+    NonFiniteWeightedCoeff {
+        index: usize,
+        re: Scalar,
+        im: Scalar,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -57,9 +62,23 @@ pub enum MellinError {
     TargetLengthMismatch { expected: usize, got: usize },
     #[error("hilbert inner product became negative: {value}")]
     NegativeInnerProduct { value: ComplexScalar },
-    // New: explicit invalid z
     #[error("z value is not finite: re={re}, im={im}")]
     NonFiniteZ { re: Scalar, im: Scalar },
+    #[error("Mellin abscissa is not finite: re={re}, im={im}")]
+    NonFiniteAbscissa { re: Scalar, im: Scalar },
+    #[error("{quantity}[{index}] became non-finite: re={re}, im={im}")]
+    NonFiniteOutput {
+        quantity: &'static str,
+        index: usize,
+        re: Scalar,
+        im: Scalar,
+    },
+    #[error("{quantity}[{index}] became non-finite: {value}")]
+    NonFiniteScalarOutput {
+        quantity: &'static str,
+        index: usize,
+        value: Scalar,
+    },
     #[error(transparent)]
     ZSpace(#[from] ZSpaceError),
     #[cfg(feature = "wgpu")]
