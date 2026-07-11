@@ -11,4 +11,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 st-text = { path = "../../crates/st-text" }
-st-tensor = { path = "../../crates/st-tensor" }
+st-tensor = { path = "../../crates/st-tensor", default-features = false, features = ["cpu", "faer"] }

@@ -60,6 +60,9 @@ jobs:
         run: |
           rustup toolchain install nightly-2026-04-15 --profile minimal --component rustfmt
           cargo +nightly-2026-04-15 fmt --all -- --check
+      - name: CPU feature isolation
+        if: matrix.run_lints
+        run: bash scripts/check_cpu_feature_isolation.sh
       - name: clippy (workspace)
         if: matrix.run_lints
         run: cargo clippy --workspace --all-targets

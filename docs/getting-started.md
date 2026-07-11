@@ -52,7 +52,7 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
 
 # CPU-only (drop the default WGPU route but keep the standard Python surface)
-maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cpu
 
 # Install the wheel
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl

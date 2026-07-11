@@ -8,13 +8,13 @@ license = "AGPL-3.0-or-later"
 
 [features]
 default = ["nn"]
-wgpu = ["dep:st-backend-wgpu"]
+wgpu = ["dep:st-backend-wgpu", "st-tensor/wgpu"]
 nerf = ["nn"]
 nn = ["dep:st-nn"]
 
 [dependencies]
-st-core = { path = "../st-core" }
-st-tensor = { path = "../st-tensor" }
+st-core = { path = "../st-core", default-features = false }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 st-logic = { path = "../st-logic" }
 st-nn = { path = "../st-nn", optional = true }
 spiral-config = { path = "../spiral-config" }
