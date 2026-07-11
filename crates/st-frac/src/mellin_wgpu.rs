@@ -250,7 +250,7 @@ impl MellinGpuExecutor {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (z_values.len() as u32 + 63) / 64;
+            let workgroups = (z_values.len() as u32).div_ceil(64);
             pass.dispatch_workgroups(workgroups.max(1), 1, 1);
         }
         encoder.copy_buffer_to_buffer(
@@ -386,8 +386,8 @@ fn to_pod_vec(values: &[ComplexScalar]) -> Result<Vec<ComplexPod>, MellinGpuErro
     Ok(values
         .iter()
         .map(|value| ComplexPod {
-            re: value.re as f32,
-            im: value.im as f32,
+            re: value.re,
+            im: value.im,
         })
         .collect())
 }
