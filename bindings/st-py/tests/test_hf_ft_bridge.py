@@ -4494,6 +4494,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 summary,
                 output_dir=root / "child-adapter",
                 require_trainer_telemetry=True,
+                trainer_min_desire_stability_guard=0.70,
+                trainer_max_psi_total_guard=0.60,
+                trainer_geometry_guard_min_events=3,
+                trainer_geometry_guard_patience=2,
             )
             command = artifact["command"]
             bridge_argv = (
@@ -4544,6 +4548,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     *artifact["command"],
                     "--no-trainer-trace",
                 ],
+                "--trainer-min-desire-stability-guard": [
+                    item
+                    for item in artifact["command"]
+                    if item not in {
+                        "--trainer-min-desire-stability-guard",
+                        "0.7",
+                    }
+                ],
+                "--trainer-geometry-guard-patience": [
+                    *artifact["command"],
+                    "--trainer-geometry-guard-patience",
+                    "9",
+                ],
             }
             tampered_preflights = {
                 field: hf_ft.hf_finetune_scale_up_preflight_report(
@@ -4575,6 +4592,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(bridge_args.train)
         self.assertTrue(bridge_args.trainer_telemetry)
         self.assertFalse(bridge_args.no_trainer_trace)
+        self.assertEqual(
+            bridge_args.trainer_min_desire_stability_guard,
+            0.70,
+        )
+        self.assertEqual(bridge_args.trainer_max_psi_total_guard, 0.60)
+        self.assertEqual(bridge_args.trainer_geometry_guard_min_events, 3)
+        self.assertEqual(bridge_args.trainer_geometry_guard_patience, 2)
         self.assertTrue(bridge_args.eval_before_train)
         self.assertTrue(bridge_args.adapter_promotion_gate)
         self.assertEqual(bridge_args.finetune_mode, "lora")
@@ -4604,6 +4628,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "enforced",
         )
         self.assertTrue(artifact["trainer_telemetry_command_contract"]["ready"])
+        self.assertTrue(artifact["trainer_geometry_guard_active"])
+        self.assertEqual(
+            artifact["trainer_geometry_guard_command_contract_status"],
+            "enforced",
+        )
+        self.assertTrue(
+            artifact["trainer_geometry_guard_command_contract"]["ready"]
+        )
         self.assertNotIn("--trainer-telemetry", unrequired_artifact["command"])
         self.assertIn("--no-trainer-trace", unrequired_artifact["command"])
         self.assertEqual(
@@ -4627,12 +4659,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             root_preflight["trainer_telemetry_command_contract_matches"]
         )
+        self.assertTrue(root_preflight["trainer_geometry_guard_active"])
+        self.assertTrue(
+            root_preflight["trainer_geometry_guard_command_contract_matches"]
+        )
         self.assertIn("promotion_contract=enforced", root_preflight_lines[0])
         self.assertIn("promotion_contract_ready=True", root_preflight_lines[0])
         self.assertIn("promotion_contract_matches=True", root_preflight_lines[0])
         self.assertIn("telemetry_contract=enforced", root_preflight_lines[0])
         self.assertIn("telemetry_contract_ready=True", root_preflight_lines[0])
         self.assertIn("telemetry_contract_matches=True", root_preflight_lines[0])
+        self.assertIn("geometry_guard=enforced", root_preflight_lines[0])
+        self.assertIn("geometry_guard_ready=True", root_preflight_lines[0])
+        self.assertIn("geometry_guard_matches=True", root_preflight_lines[0])
         for field, preflight in tampered_preflights.items():
             self.assertFalse(preflight["ready"], field)
             self.assertTrue(
@@ -13279,6 +13318,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     training_telemetry=True,
                     desire_gain=1.2,
                     psi_gain=0.8,
+                    min_desire_stability_guard=0.8,
+                    max_psi_total_guard=0.9,
+                    geometry_guard_min_events=1,
+                    geometry_guard_patience=1,
                 )
             callback.on_train_begin(args, state, control)
             callback.on_log(args, state, control, logs={"loss": 2.0})
@@ -13289,10 +13332,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 control,
                 logs={"loss": 2.0e6, "grad_norm": float("nan")},
             )
+            callback.on_train_end(args, state, control)
             rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
             summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
 
-        self.assertEqual([row["event"] for row in rows], ["train_begin", "log", "log"])
+        self.assertEqual(
+            [row["event"] for row in rows],
+            ["train_begin", "log", "log", "train_end"],
+        )
         self.assertEqual(rows[0]["run_id"], "fake-run")
         self.assertEqual(
             rows[0]["inference_distortion_handoff"]["recommended_probe"],
@@ -13303,6 +13350,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("telemetry", rows[1])
         self.assertIn("desire", rows[1])
         self.assertIn("psi", rows[1])
+        self.assertEqual(
+            rows[1]["training_geometry_guard"]["status"],
+            "within_limits",
+        )
         self.assertIn("hf_ft.psi.total", rows[1]["telemetry"])
         self.assertTrue(getattr(control, "should_training_stop", False))
         self.assertEqual(
@@ -13315,6 +13366,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("loss_exceeds_threshold", guard_kinds)
         self.assertIn("nonfinite_metric", guard_kinds)
         self.assertEqual(
+            rows[2]["training_geometry_guard"]["status"],
+            "stop_requested",
+        )
+        self.assertTrue(rows[2]["training_geometry_guard"]["triggered_now"])
+        self.assertEqual(
+            rows[2]["training_geometry_guard"]["reason_codes"],
+            ["desire_stability_below_minimum"],
+        )
+        self.assertEqual(
             rows[1]["telemetry"]["hf_ft.inference_distortion.desire_pressure"],
             0.8,
         )
@@ -13324,8 +13384,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             "distort-002",
         )
-        self.assertEqual(summary["trace_training_telemetry_count"], 3)
-        self.assertEqual(summary["trace_inference_distortion_telemetry_count"], 3)
+        self.assertEqual(summary["trace_training_telemetry_count"], 4)
+        self.assertEqual(summary["trace_training_geometry_guard_count"], 4)
+        self.assertEqual(
+            summary["trace_training_geometry_guard_trigger_count"],
+            1,
+        )
+        self.assertTrue(summary["trace_training_geometry_guard_triggered"])
+        self.assertEqual(
+            summary["trace_last_training_geometry_guard_status"],
+            "stop_requested",
+        )
+        self.assertEqual(summary["trace_inference_distortion_telemetry_count"], 4)
         self.assertEqual(
             summary["trace_last_inference_distortion_desire_pressure"],
             0.8,
@@ -13370,7 +13440,99 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])
-        self.assertEqual(callback.event_count, 3)
+        self.assertEqual(callback.event_count, 4)
+
+    def test_bridge_geometry_guard_auto_enables_telemetry_and_validates_cli(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(
+            [
+                "--metadata-only",
+                "--trainer-min-desire-stability-guard",
+                "0.7",
+                "--trainer-max-psi-total-guard",
+                "0.6",
+                "--trainer-geometry-guard-min-events",
+                "4",
+                "--trainer-geometry-guard-patience",
+                "3",
+            ]
+        )
+
+        self.assertFalse(args.trainer_telemetry)
+        self.assertTrue(module._trainer_telemetry_enabled(args, None))
+        self.assertEqual(
+            module._trainer_telemetry_auto_reason(args, None),
+            "geometry_guard",
+        )
+        self.assertEqual(args.trainer_geometry_guard_min_events, 4)
+        self.assertEqual(args.trainer_geometry_guard_patience, 3)
+        invalid_args = (
+            ["--trainer-min-desire-stability-guard", "1.1"],
+            ["--trainer-max-psi-total-guard", "-0.1"],
+            ["--trainer-geometry-guard-min-events", "0"],
+            ["--trainer-geometry-guard-patience", "0"],
+            [
+                "--trainer-min-desire-stability-guard",
+                "0.7",
+                "--no-trainer-trace",
+            ],
+        )
+        for extra in invalid_args:
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                module.parse_args(["--metadata-only", *extra])
+
+    def test_trainer_geometry_guard_honors_default_warmup_and_patience(
+        self,
+    ) -> None:
+        fake_transformers = types.ModuleType("transformers")
+
+        class TrainerCallback:
+            pass
+
+        fake_transformers.TrainerCallback = TrainerCallback
+        args = types.SimpleNamespace(output_dir="runs/gpt2")
+        state = types.SimpleNamespace(global_step=0, epoch=0.0, max_steps=5)
+        control = types.SimpleNamespace()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/trace.jsonl"
+            with mock.patch.dict(sys.modules, {"transformers": fake_transformers}):
+                callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
+                    path,
+                    training_telemetry=True,
+                    stop_on_nonfinite_loss=False,
+                    min_desire_stability_guard=0.8,
+                )
+            for step, loss in enumerate((1.0, 10.0, 20.0, 30.0), 1):
+                state.global_step = step
+                callback.on_log(args, state, control, logs={"loss": loss})
+            rows_before_stop = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+            self.assertFalse(getattr(control, "should_training_stop", False))
+            self.assertEqual(
+                rows_before_stop[-1]["training_geometry_guard"]["status"],
+                "breached",
+            )
+            self.assertEqual(
+                rows_before_stop[-1]["training_geometry_guard"]["breach_streak"],
+                1,
+            )
+            state.global_step = 5
+            callback.on_log(args, state, control, logs={"loss": 40.0})
+            rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+            summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
+
+        self.assertTrue(getattr(control, "should_training_stop", False))
+        self.assertEqual(
+            rows[-1]["training_geometry_guard"]["status"],
+            "stop_requested",
+        )
+        self.assertTrue(rows[-1]["training_geometry_guard"]["triggered_now"])
+        self.assertEqual(
+            rows[-1]["training_geometry_guard"]["reason_codes"],
+            ["desire_stability_below_minimum"],
+        )
+        self.assertEqual(summary["trace_training_geometry_guard_trigger_count"], 1)
 
     def test_generic_wait_launch_wrapper_writes_hf_ft_manifest(self) -> None:
         module = load_generic_wait_launch_example()

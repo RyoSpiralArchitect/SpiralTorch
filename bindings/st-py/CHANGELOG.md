@@ -49,6 +49,11 @@
   aggregates, cross-checks chain-node metrics, and records trace/evidence
   digests. Missing evidence fails postflight, policy-limit evidence remains an
   auditable stop, and later trace mutation is rejected when state is loaded.
+- Live trainer geometry guard: desire/psi continuation thresholds now flow into
+  the Transformers callback, where running-mean desire stability and maximum
+  psi can request a graceful early stop after a bounded observation warm-up and
+  breach patience. Scale-up/preflight seal the guard command, traces retain its
+  decisions, and postflight requires matching live guard frames.
 - Adapter generation-transition audit: promotion chains now expose explicit
   parent-to-child rows for depth/root/base continuity, parent fingerprints,
   changed weights, eval handoff and improvement, promotion revalidation, and

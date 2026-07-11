@@ -86,6 +86,8 @@ _GENERATION_PLAN_COMPONENT_NAMES = (
 _PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
 _PROCESS_STOP_POLL_INTERVAL_SECONDS = 0.2
 _PROCESS_STOP_GRACE_SECONDS = 5.0
+_TRAINER_GEOMETRY_GUARD_MIN_EVENTS = 3
+_TRAINER_GEOMETRY_GUARD_PATIENCE = 2
 
 
 CommandRunner = Callable[[Sequence[str]], object]
@@ -128,6 +130,9 @@ def _trainer_trace_snapshot(
     desire_stability_total = 0.0
     desire_stability_count = 0
     max_psi_total: float | None = None
+    geometry_guard_count = 0
+    geometry_guard_trigger_count = 0
+    last_geometry_guard: dict[str, object] = {}
     with path.open("rb") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             digest.update(raw_line)
@@ -164,6 +169,12 @@ def _trainer_trace_snapshot(
                     max_psi_total is None or psi_total > max_psi_total
                 ):
                     max_psi_total = psi_total
+            geometry_guard = row.get("training_geometry_guard")
+            if isinstance(geometry_guard, Mapping):
+                geometry_guard_count += 1
+                last_geometry_guard = dict(geometry_guard)
+                if geometry_guard.get("triggered_now") is True:
+                    geometry_guard_trigger_count += 1
     return (
         f"sha256:{digest.hexdigest()}",
         total_bytes,
@@ -176,6 +187,31 @@ def _trainer_trace_snapshot(
                 else None
             ),
             "trace_max_psi_total": max_psi_total,
+            "trace_training_geometry_guard_count": geometry_guard_count,
+            "trace_training_geometry_guard_trigger_count": (
+                geometry_guard_trigger_count
+            ),
+            "trace_last_training_geometry_guard_status": last_geometry_guard.get(
+                "status"
+            ),
+            "trace_last_training_geometry_guard_reason_codes": list(
+                last_geometry_guard.get("reason_codes") or []
+            ),
+            "trace_last_training_geometry_guard_trigger_step": _finite_float(
+                last_geometry_guard.get("trigger_step")
+            ),
+            "trace_last_training_geometry_guard_min_desire_stability": (
+                _finite_float(last_geometry_guard.get("min_desire_stability"))
+            ),
+            "trace_last_training_geometry_guard_max_psi_total": _finite_float(
+                last_geometry_guard.get("max_psi_total")
+            ),
+            "trace_last_training_geometry_guard_minimum_observations": (
+                _integer_value(last_geometry_guard.get("minimum_observations"))
+            ),
+            "trace_last_training_geometry_guard_patience": _integer_value(
+                last_geometry_guard.get("patience")
+            ),
         },
     )
 
@@ -531,20 +567,45 @@ def _validate_trainer_telemetry_evidence_rows(
                 "executor trainer telemetry evidence digest mismatch at "
                 f"{location}: {trace_path}"
             )
-        expected_evidence_id = _canonical_sha256(
-            {
-                "trace_sha256": expected_sha256,
-                "trace_event_count": evidence.get("trace_event_count"),
-                "trace_training_telemetry_count": evidence.get(
-                    "trace_training_telemetry_count"
-                ),
-                "trace_mean_desire_stability": evidence.get(
-                    "trace_mean_desire_stability"
-                ),
-                "trace_max_psi_total": evidence.get("trace_max_psi_total"),
-                "required_axes": evidence.get("required_axes"),
-            }
-        )
+        evidence_identity_payload = {
+            "trace_sha256": expected_sha256,
+            "trace_event_count": evidence.get("trace_event_count"),
+            "trace_training_telemetry_count": evidence.get(
+                "trace_training_telemetry_count"
+            ),
+            "trace_mean_desire_stability": evidence.get(
+                "trace_mean_desire_stability"
+            ),
+            "trace_max_psi_total": evidence.get("trace_max_psi_total"),
+            "required_axes": evidence.get("required_axes"),
+        }
+        if "geometry_guard_required" in evidence:
+            evidence_identity_payload.update(
+                {
+                    "trace_training_geometry_guard_count": evidence.get(
+                        "trace_training_geometry_guard_count"
+                    ),
+                    "trace_training_geometry_guard_trigger_count": evidence.get(
+                        "trace_training_geometry_guard_trigger_count"
+                    ),
+                    "trace_last_training_geometry_guard_status": evidence.get(
+                        "trace_last_training_geometry_guard_status"
+                    ),
+                    "trace_last_training_geometry_guard_reason_codes": evidence.get(
+                        "trace_last_training_geometry_guard_reason_codes"
+                    ),
+                    "trace_last_training_geometry_guard_trigger_step": evidence.get(
+                        "trace_last_training_geometry_guard_trigger_step"
+                    ),
+                    "geometry_guard_required": evidence.get(
+                        "geometry_guard_required"
+                    ),
+                    "geometry_guard_matches": evidence.get(
+                        "geometry_guard_matches"
+                    ),
+                }
+            )
+        expected_evidence_id = _canonical_sha256(evidence_identity_payload)
         if evidence.get("evidence_id") != expected_evidence_id:
             raise ValueError(
                 "executor trainer telemetry evidence identity mismatch at "
@@ -1191,15 +1252,24 @@ def _trainer_telemetry_evidence_contract(
     node: Mapping[str, object] | None,
     policy: Mapping[str, object] | None,
     command_contract: Mapping[str, object] | None,
+    geometry_guard_command_contract: Mapping[str, object] | None,
     command_cwd: str | Path | None,
 ) -> dict[str, object]:
     resolved_policy = dict(policy) if isinstance(policy, Mapping) else {}
     resolved_command_contract = (
         dict(command_contract) if isinstance(command_contract, Mapping) else {}
     )
+    resolved_geometry_guard_contract = (
+        dict(geometry_guard_command_contract)
+        if isinstance(geometry_guard_command_contract, Mapping)
+        else {}
+    )
     desire_required = resolved_policy.get("min_desire_stability") is not None
     psi_required = resolved_policy.get("max_psi_total") is not None
     command_required = resolved_command_contract.get("required") is True
+    geometry_guard_required = (
+        resolved_geometry_guard_contract.get("active") is True
+    )
     required = bool(desire_required or psi_required or command_required)
     required_axes = [
         name
@@ -1217,6 +1287,10 @@ def _trainer_telemetry_evidence_contract(
             "ready": True,
             "required_axes": [],
             "command_contract_status": resolved_command_contract.get("status"),
+            "geometry_guard_contract_status": (
+                resolved_geometry_guard_contract.get("status")
+            ),
+            "geometry_guard_required": False,
             "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
             "trace_exists": None,
             "trace_sha256": None,
@@ -1225,6 +1299,9 @@ def _trainer_telemetry_evidence_contract(
             "trace_training_telemetry_count": None,
             "trace_mean_desire_stability": None,
             "trace_max_psi_total": None,
+            "trace_training_geometry_guard_count": None,
+            "trace_training_geometry_guard_trigger_count": None,
+            "trace_last_training_geometry_guard_status": None,
             "node_matches_trace": None,
             "evidence_id": None,
             "issues": [],
@@ -1246,6 +1323,17 @@ def _trainer_telemetry_evidence_contract(
             {
                 "field": "trainer_telemetry_command_contract",
                 "message": "trainer telemetry command contract is not enforced",
+            }
+        )
+
+    if geometry_guard_required and (
+        resolved_geometry_guard_contract.get("status") != "enforced"
+        or resolved_geometry_guard_contract.get("ready") is not True
+    ):
+        issues.append(
+            {
+                "field": "trainer_geometry_guard_command_contract",
+                "message": "trainer geometry guard command contract is not enforced",
             }
         )
 
@@ -1303,6 +1391,21 @@ def _trainer_telemetry_evidence_contract(
         trace_summary.get("trace_mean_desire_stability")
     )
     psi_total = _finite_float(trace_summary.get("trace_max_psi_total"))
+    geometry_guard_count = _integer_value(
+        trace_summary.get("trace_training_geometry_guard_count")
+    )
+    geometry_guard_trigger_count = _integer_value(
+        trace_summary.get("trace_training_geometry_guard_trigger_count")
+    )
+    geometry_guard_status = trace_summary.get(
+        "trace_last_training_geometry_guard_status"
+    )
+    geometry_guard_reason_codes = list(
+        trace_summary.get("trace_last_training_geometry_guard_reason_codes") or []
+    )
+    geometry_guard_trigger_step = _finite_float(
+        trace_summary.get("trace_last_training_geometry_guard_trigger_step")
+    )
     if telemetry_count is None or telemetry_count < 1:
         issues.append(
             {
@@ -1332,6 +1435,50 @@ def _trainer_telemetry_evidence_contract(
                 "message": "psi total evidence is missing or out of range",
             }
         )
+    geometry_guard_matches = True
+    if geometry_guard_required:
+        observed_guard_contract = {
+            "min_desire_stability": trace_summary.get(
+                "trace_last_training_geometry_guard_min_desire_stability"
+            ),
+            "max_psi_total": trace_summary.get(
+                "trace_last_training_geometry_guard_max_psi_total"
+            ),
+            "minimum_observations": trace_summary.get(
+                "trace_last_training_geometry_guard_minimum_observations"
+            ),
+            "patience": trace_summary.get(
+                "trace_last_training_geometry_guard_patience"
+            ),
+        }
+        expected_guard_contract = {
+            key: resolved_geometry_guard_contract.get(key)
+            for key in (
+                "min_desire_stability",
+                "max_psi_total",
+                "minimum_observations",
+                "patience",
+            )
+        }
+        geometry_guard_matches = observed_guard_contract == expected_guard_contract
+        if geometry_guard_count is None or geometry_guard_count < 1:
+            issues.append(
+                {
+                    "field": "trace_training_geometry_guard_count",
+                    "observed": geometry_guard_count,
+                    "threshold": 1,
+                    "message": "trainer trace contains no live geometry guard frames",
+                }
+            )
+        if not geometry_guard_matches:
+            issues.append(
+                {
+                    "field": "trainer_geometry_guard_trace_contract",
+                    "observed": observed_guard_contract,
+                    "threshold": expected_guard_contract,
+                    "message": "live geometry guard trace does not match the command",
+                }
+            )
 
     node_telemetry_count = (
         None
@@ -1384,6 +1531,17 @@ def _trainer_telemetry_evidence_contract(
         "trace_training_telemetry_count": telemetry_count,
         "trace_mean_desire_stability": desire_stability,
         "trace_max_psi_total": psi_total,
+        "trace_training_geometry_guard_count": geometry_guard_count,
+        "trace_training_geometry_guard_trigger_count": geometry_guard_trigger_count,
+        "trace_last_training_geometry_guard_status": geometry_guard_status,
+        "trace_last_training_geometry_guard_reason_codes": (
+            geometry_guard_reason_codes
+        ),
+        "trace_last_training_geometry_guard_trigger_step": (
+            geometry_guard_trigger_step
+        ),
+        "geometry_guard_required": geometry_guard_required,
+        "geometry_guard_matches": geometry_guard_matches,
         "required_axes": required_axes,
     }
     ready = not issues
@@ -1394,6 +1552,10 @@ def _trainer_telemetry_evidence_contract(
         "ready": ready,
         "required_axes": required_axes,
         "command_contract_status": resolved_command_contract.get("status"),
+        "geometry_guard_contract_status": (
+            resolved_geometry_guard_contract.get("status")
+        ),
+        "geometry_guard_required": geometry_guard_required,
         "trace_path": None if trace_path is None else str(trace_path),
         "trace_exists": trace_exists,
         "trace_sha256": trace_sha256,
@@ -1402,6 +1564,16 @@ def _trainer_telemetry_evidence_contract(
         "trace_training_telemetry_count": telemetry_count,
         "trace_mean_desire_stability": desire_stability,
         "trace_max_psi_total": psi_total,
+        "trace_training_geometry_guard_count": geometry_guard_count,
+        "trace_training_geometry_guard_trigger_count": geometry_guard_trigger_count,
+        "trace_last_training_geometry_guard_status": geometry_guard_status,
+        "trace_last_training_geometry_guard_reason_codes": (
+            geometry_guard_reason_codes
+        ),
+        "trace_last_training_geometry_guard_trigger_step": (
+            geometry_guard_trigger_step
+        ),
+        "geometry_guard_matches": geometry_guard_matches,
         "node_trace_training_telemetry_count": node_telemetry_count,
         "node_trace_mean_desire_stability": None
         if node is None
@@ -1465,6 +1637,7 @@ def _postflight_report(
     expected_lineage_depth: int,
     policy: Mapping[str, object] | None = None,
     trainer_telemetry_command_contract: Mapping[str, object] | None = None,
+    trainer_geometry_guard_command_contract: Mapping[str, object] | None = None,
     command_cwd: str | Path | None = None,
 ) -> dict[str, object]:
     node = _node_for_path(chain, output_dir)
@@ -1480,6 +1653,9 @@ def _postflight_report(
         node=node,
         policy=policy,
         command_contract=trainer_telemetry_command_contract,
+        geometry_guard_command_contract=(
+            trainer_geometry_guard_command_contract
+        ),
         command_cwd=command_cwd,
     )
     checks = [
@@ -2001,6 +2177,14 @@ def _recover_running_attempts(
                 raw_attempt.get("trainer_telemetry_command_contract")
                 if isinstance(
                     raw_attempt.get("trainer_telemetry_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            trainer_geometry_guard_command_contract=(
+                raw_attempt.get("trainer_geometry_guard_command_contract")
+                if isinstance(
+                    raw_attempt.get("trainer_geometry_guard_command_contract"),
                     Mapping,
                 )
                 else None
@@ -2631,6 +2815,10 @@ def _run_hf_adapter_continuation_executor_unlocked(
         "max_eval_blocks": max_eval_blocks,
         "streaming_validation_samples": streaming_validation_samples,
         "require_trainer_telemetry": trainer_telemetry_required,
+        "trainer_min_desire_stability_guard": min_desire_stability,
+        "trainer_max_psi_total_guard": max_psi_total,
+        "trainer_geometry_guard_min_events": _TRAINER_GEOMETRY_GUARD_MIN_EVENTS,
+        "trainer_geometry_guard_patience": _TRAINER_GEOMETRY_GUARD_PATIENCE,
         "output_prefix": output_prefix,
     }
     resolved_command_cwd = (
@@ -2838,6 +3026,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 max_eval_blocks=max_eval_blocks,
                 streaming_validation_samples=streaming_validation_samples,
                 require_trainer_telemetry=trainer_telemetry_required,
+                trainer_min_desire_stability_guard=min_desire_stability,
+                trainer_max_psi_total_guard=max_psi_total,
+                trainer_geometry_guard_min_events=(
+                    _TRAINER_GEOMETRY_GUARD_MIN_EVENTS
+                ),
+                trainer_geometry_guard_patience=(
+                    _TRAINER_GEOMETRY_GUARD_PATIENCE
+                ),
                 source_cwd=resolved_command_cwd,
             )
             preflight = hf_finetune_scale_up_preflight_report(command)
@@ -2862,6 +3058,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "trainer_telemetry_required": trainer_telemetry_required,
             "trainer_telemetry_command_contract": command.get(
                 "trainer_telemetry_command_contract"
+            ),
+            "trainer_geometry_guard_command_contract": command.get(
+                "trainer_geometry_guard_command_contract"
             ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
@@ -3108,6 +3307,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "trainer_telemetry_command_contract": command.get(
                 "trainer_telemetry_command_contract"
             ),
+            "trainer_geometry_guard_command_contract": command.get(
+                "trainer_geometry_guard_command_contract"
+            ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
             ),
@@ -3311,6 +3513,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 attempt.get("trainer_telemetry_command_contract")
                 if isinstance(
                     attempt.get("trainer_telemetry_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            trainer_geometry_guard_command_contract=(
+                attempt.get("trainer_geometry_guard_command_contract")
+                if isinstance(
+                    attempt.get("trainer_geometry_guard_command_contract"),
                     Mapping,
                 )
                 else None
@@ -3521,6 +3731,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(trainer_telemetry_contract, Mapping)
             else None
         )
+        trainer_geometry_guard_contract = pending.get(
+            "trainer_geometry_guard_command_contract"
+        )
+        trainer_geometry_guard_contract_status = (
+            trainer_geometry_guard_contract.get("status")
+            if isinstance(trainer_geometry_guard_contract, Mapping)
+            else None
+        )
         preflight = pending.get("preflight")
         preflight_status = (
             preflight.get("status") if isinstance(preflight, Mapping) else None
@@ -3604,6 +3822,7 @@ def hf_adapter_continuation_executor_lines(
             f"command={command_status} "
             f"runtime={runtime_status} "
             f"trainer_telemetry={trainer_telemetry_contract_status} "
+            f"geometry_guard={trainer_geometry_guard_contract_status} "
             f"preflight={preflight_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
@@ -3673,6 +3892,13 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(telemetry_evidence, Mapping)
             else None
         )
+        telemetry_geometry_guard_trigger_count = (
+            telemetry_evidence.get(
+                "trace_training_geometry_guard_trigger_count"
+            )
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
         command_runtime = raw_attempt.get("command_runtime")
         runtime_status = (
             command_runtime.get("status")
@@ -3685,6 +3911,14 @@ def hf_adapter_continuation_executor_lines(
         trainer_telemetry_contract_status = (
             trainer_telemetry_contract.get("status")
             if isinstance(trainer_telemetry_contract, Mapping)
+            else None
+        )
+        trainer_geometry_guard_contract = raw_attempt.get(
+            "trainer_geometry_guard_command_contract"
+        )
+        trainer_geometry_guard_contract_status = (
+            trainer_geometry_guard_contract.get("status")
+            if isinstance(trainer_geometry_guard_contract, Mapping)
             else None
         )
         input_identity = raw_attempt.get("adapter_input_identity")
@@ -3762,8 +3996,10 @@ def hf_adapter_continuation_executor_lines(
             f"adapter={raw_attempt.get('adapter_id')} "
             f"runtime={runtime_status} "
             f"trainer_telemetry={trainer_telemetry_contract_status} "
+            f"geometry_guard={trainer_geometry_guard_contract_status} "
             f"telemetry_evidence={telemetry_evidence_status} "
             f"telemetry_events={telemetry_evidence_count} "
+            f"geometry_guard_triggers={telemetry_geometry_guard_trigger_count} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

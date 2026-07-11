@@ -748,10 +748,16 @@ are active, the continuation executor automatically adds that switch and
 removes a conflicting `--no-trainer-trace` from the next scale-up command. The
 resulting telemetry command contract is sealed into the generation plan and
 recomputed by preflight; a distortion-only gate leaves trainer telemetry
-unchanged. After a gated generation exits, executor postflight reads the exact
-trainer trace, requires at least one telemetry event and every configured
+unchanged. The same desire/psi thresholds are installed in the Trainer callback
+as a live geometry guard. After three metric observations, two consecutive
+breached frames request a graceful Transformers stop; psi uses the observed
+maximum and desire uses its running mean, matching the continuation policy's
+aggregate direction. Guard configuration and stop reasons are written into the
+trainer trace. After a gated generation exits, executor postflight reads the
+exact trainer trace, requires at least one telemetry event and every configured
 desire/psi aggregate, cross-checks them against the audited chain node, and
-records content-addressed trace and evidence IDs. Missing trace evidence fails
+verifies that live guard frames match the sealed command before recording
+content-addressed trace and evidence IDs. Missing trace or guard evidence fails
 postflight, while present evidence outside a policy threshold remains a valid
 receipt and produces a normal continuation stop. Successful receipts are
 digest-checked whenever executor state is loaded, so later trace mutation fails
