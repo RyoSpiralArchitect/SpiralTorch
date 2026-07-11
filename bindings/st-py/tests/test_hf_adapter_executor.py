@@ -542,6 +542,7 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert code == 0
     assert "status=ready" in output
     assert "depth=2" in output
+    assert "plan_id=sha256:" in output
     assert "hf_adapter_executor" in st.__all__
     lines = st.hf_adapter_continuation_executor_lines(report)
     assert "status=ready" in lines[0]
@@ -552,6 +553,279 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     )
     assert any("runtime=portable_module" in line for line in lines)
     assert any("input_identity=ready" in line for line in lines)
+    pending = report["pending_generation"]
+    plan_id = pending["generation_plan_id"]
+    plan = st.hf_adapter_continuation_executor_generation_plan_report(report)
+    assert plan_id.startswith("sha256:")
+    assert len(plan_id) == 71
+    assert pending["generation_plan_contract"]["schema"] == (
+        st.HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA
+    )
+    assert pending["generation_plan_verification"]["ready"] is True
+    assert plan["ready"] is True
+    assert plan["generation_plan_id"] == plan_id
+    assert "status=ready" in (
+        st.hf_adapter_continuation_executor_generation_plan_lines(plan)[0]
+    )
+
+
+def test_executor_blocks_plan_drift_until_explicit_replan(tmp_path: Path) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    planned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+        max_steps=2,
+    )
+    planned_id = planned["pending_generation"]["generation_plan_id"]
+    runner = FakeFineTuneRunner([0.05], weight_prefix="sealed")
+
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=2,
+        max_steps=3,
+        command_runner=runner,
+    )
+
+    candidate = blocked["pending_generation_candidate"]
+    gate = blocked["generation_plan_gate"]
+    assert blocked["status"] == "blocked"
+    assert blocked["action"] == "review_generation_plan"
+    assert blocked["reason"] == "pending_generation_plan_changed"
+    assert blocked["pending_generation"]["generation_plan_id"] == planned_id
+    assert candidate["generation_plan_id"] != planned_id
+    assert gate["pending_generation_plan_id"] == planned_id
+    assert gate["candidate_generation_plan_id"] == candidate[
+        "generation_plan_id"
+    ]
+    assert gate["pending_component_ids"]["scale_up"] != gate[
+        "candidate_component_ids"
+    ]["scale_up"]
+    assert runner.commands == []
+    status = st.hf_adapter_continuation_executor_status_report(blocked)
+    assert status["recommended_action"] == "review_generation_plan"
+    assert status["pending_generation_candidate"]["generation_plan_id"] == (
+        candidate["generation_plan_id"]
+    )
+    status_lines = st.hf_adapter_continuation_executor_status_lines(status)
+    assert any(
+        line.startswith(
+            "hf_adapter_continuation_executor_status_plan_candidate "
+        )
+        and candidate["generation_plan_id"] in line
+        for line in status_lines
+    )
+
+    replanned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+        max_steps=3,
+    )
+    replanned_id = replanned["pending_generation"]["generation_plan_id"]
+    assert replanned["status"] == "ready"
+    assert replanned_id == candidate["generation_plan_id"]
+    assert "pending_generation_candidate" not in replanned
+    assert "generation_plan_gate" not in replanned
+    assert replanned["generation_plan_history"][-1]["previous"][
+        "generation_plan_id"
+    ] == planned_id
+    assert replanned["generation_plan_history"][-1]["current"][
+        "generation_plan_id"
+    ] == replanned_id
+    assert replanned["generation_plan_gate_history"][-1]["reason"] == (
+        "pending_generation_plan_changed"
+    )
+    assert len(replanned["scale_up_history"]) == 1
+
+    promoted = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        expected_plan_id=replanned_id,
+        require_pending_plan=True,
+        max_lineage_depth=2,
+        max_steps=3,
+        command_runner=runner,
+    )
+    attempt = promoted["generations"][-1]
+    assert promoted["status"] == "stopped"
+    assert attempt["status"] == "promoted"
+    assert attempt["generation_plan_id"] == replanned_id
+    assert attempt["generation_plan_verification"]["ready"] is True
+    assert attempt["generation_plan_verification"]["launch_status"] == (
+        "matched_pending"
+    )
+    assert len(runner.commands) == 1
+
+
+def test_executor_strict_plan_controls_and_env_digest_fail_closed(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    runner = FakeFineTuneRunner([0.05], weight_prefix="strict")
+
+    with pytest.raises(ValueError, match="expected_plan_id requires run=True"):
+        st.run_hf_adapter_continuation_executor(
+            child,
+            output_root=output_root,
+            state_path=state_path,
+            expected_plan_id="sha256:" + "0" * 64,
+        )
+    with pytest.raises(ValueError, match="require_pending_plan requires run=True"):
+        st.run_hf_adapter_continuation_executor(
+            child,
+            output_root=output_root,
+            state_path=state_path,
+            require_pending_plan=True,
+        )
+
+    required = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        require_pending_plan=True,
+        max_lineage_depth=2,
+        command_env={"PRIVATE_TOKEN": "first-secret"},
+        command_runner=runner,
+    )
+    assert required["reason"] == "pending_generation_plan_required"
+    assert runner.commands == []
+
+    planned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+        command_env={"PRIVATE_TOKEN": "first-secret"},
+    )
+    plan_id = planned["pending_generation"]["generation_plan_id"]
+    serialized = state_path.read_text(encoding="utf-8")
+    assert "PRIVATE_TOKEN" in serialized
+    assert "first-secret" not in serialized
+
+    changed_env = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=2,
+        command_env={"PRIVATE_TOKEN": "second-secret"},
+        command_runner=runner,
+    )
+    assert changed_env["reason"] == "pending_generation_plan_changed"
+    assert runner.commands == []
+
+    expected_mismatch = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        expected_plan_id="sha256:" + "0" * 64,
+        max_lineage_depth=2,
+        command_env={"PRIVATE_TOKEN": "first-secret"},
+        command_runner=runner,
+    )
+    assert expected_mismatch["reason"] == "expected_generation_plan_mismatch"
+    assert expected_mismatch["pending_generation"]["generation_plan_id"] == plan_id
+    assert runner.commands == []
+
+
+def test_executor_requires_legacy_pending_plan_to_be_sealed(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    pending = state["pending_generation"]
+    pending.pop("generation_plan_id")
+    pending.pop("generation_plan_contract")
+    pending.pop("generation_plan_verification")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    runner = FakeFineTuneRunner([0.05], weight_prefix="legacy")
+
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=2,
+        command_runner=runner,
+    )
+    assert blocked["reason"] == "pending_generation_plan_unsealed"
+    assert blocked["pending_generation"].get("generation_plan_id") is None
+    assert blocked["pending_generation_candidate"]["generation_plan_id"].startswith(
+        "sha256:"
+    )
+    assert runner.commands == []
+
+    sealed = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    assert sealed["status"] == "ready"
+    assert sealed["generation_plan_history"][-1]["reason"] == (
+        "legacy_generation_plan_sealed"
+    )
+
+
+def test_executor_generation_plan_reports_tampering_before_load(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    state_path = tmp_path / "executor-runs" / "state.json"
+    st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=state_path.parent,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    original_state = json.loads(state_path.read_text(encoding="utf-8"))
+    state = json.loads(json.dumps(original_state))
+    state["pending_generation"]["command"]["command"].append("--tampered")
+    state["pending_generation"]["generation_plan_contract"]["component_ids"][
+        "policy"
+    ] = None
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    plan = st.hf_adapter_continuation_executor_generation_plan_report(state_path)
+    assert plan["status"] == "invalid"
+    assert plan["ready"] is False
+    assert "generation_plan_command_changed" in plan["issues"]
+    assert "generation_plan_policy_component_id_invalid" in plan["issues"]
+    with pytest.raises(ValueError, match="generation plan is invalid"):
+        st.load_hf_adapter_continuation_executor(state_path)
+
+    original_state["pending_generation"]["generation_plan_verification"][
+        "ready"
+    ] = False
+    state_path.write_text(json.dumps(original_state), encoding="utf-8")
+    independent = st.hf_adapter_continuation_executor_generation_plan_report(
+        state_path
+    )
+    assert independent["ready"] is True
+    with pytest.raises(ValueError, match="verification metadata is invalid"):
+        st.load_hf_adapter_continuation_executor(state_path)
 
 
 def test_executor_preserves_enforced_runtime_input_contract(tmp_path: Path) -> None:

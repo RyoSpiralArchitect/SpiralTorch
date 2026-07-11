@@ -36,10 +36,13 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "hf_adapter_continuation_executor_lines",
+    "hf_adapter_continuation_executor_generation_plan_lines",
+    "hf_adapter_continuation_executor_generation_plan_report",
     "hf_adapter_continuation_executor_stop_request_lines",
     "load_hf_adapter_continuation_executor",
     "load_hf_adapter_continuation_executor_stop_request",
@@ -68,6 +71,18 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA = (
 HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA = (
     "spiraltorch.hf_adapter_continuation_executor_interruption_claim.v1"
 )
+HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_generation_plan.v1"
+)
+_GENERATION_PLAN_COMPONENT_NAMES = (
+    "command",
+    "identity",
+    "source_transition",
+    "policy",
+    "scale_up",
+    "invocation",
+    "execution",
+)
 _PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
 _PROCESS_STOP_POLL_INTERVAL_SECONDS = 0.2
 _PROCESS_STOP_GRACE_SECONDS = 5.0
@@ -82,6 +97,295 @@ StopRequestLoader = Callable[[], Mapping[str, object] | None]
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _canonical_sha256(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _valid_generation_plan_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    prefix = "sha256:"
+    if not value.startswith(prefix):
+        return False
+    digest = value[len(prefix) :]
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
+    )
+
+
+def _command_argv(row: Mapping[str, object]) -> list[str] | None:
+    command = row.get("command")
+    if isinstance(command, Mapping):
+        command = command.get("command")
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        scale_up = row.get("scale_up")
+        command = scale_up.get("command") if isinstance(scale_up, Mapping) else None
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        return None
+    return [str(value) for value in command]
+
+
+def _stable_source_transition(
+    transition: object,
+) -> dict[str, object] | None:
+    if not isinstance(transition, Mapping):
+        return None
+    return {
+        key: transition.get(key)
+        for key in (
+            "status",
+            "transition_ready",
+            "parent_adapter_id",
+            "child_adapter_id",
+            "root_adapter_id",
+            "parent_lineage_depth",
+            "child_lineage_depth",
+        )
+    }
+
+
+def _command_env_contract(
+    command_env: Mapping[str, str] | None,
+) -> dict[str, object]:
+    normalized = {
+        str(key): str(value)
+        for key, value in sorted(
+            (command_env or {}).items(),
+            key=lambda row: str(row[0]),
+        )
+    }
+    keys = list(normalized)
+    return {
+        "command_env_override_keys": keys,
+        "command_env_override_count": len(keys),
+        "command_env_sha256": _canonical_sha256(normalized),
+    }
+
+
+def _generation_plan_component_payloads(
+    *,
+    command_argv: Sequence[str],
+    parent_adapter_id: object,
+    parent_adapter_path: object,
+    lineage_depth: object,
+    output_dir: object,
+    source_transition: object,
+    policy: Mapping[str, object],
+    scale_up: Mapping[str, object],
+    max_generations: int,
+    execution: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "command": {"argv": [str(value) for value in command_argv]},
+        "identity": {
+            "parent_adapter_id": parent_adapter_id,
+            "parent_adapter_path": parent_adapter_path,
+            "lineage_depth": lineage_depth,
+            "output_dir": output_dir,
+        },
+        "source_transition": _stable_source_transition(source_transition),
+        "policy": dict(policy),
+        "scale_up": dict(scale_up),
+        "invocation": {"max_generations": max_generations},
+        "execution": dict(execution),
+    }
+
+
+def _generation_plan_contract(
+    *,
+    command_argv: Sequence[str],
+    parent_adapter_id: object,
+    parent_adapter_path: object,
+    lineage_depth: object,
+    output_dir: object,
+    source_transition: object,
+    policy: Mapping[str, object],
+    scale_up: Mapping[str, object],
+    max_generations: int,
+    execution: Mapping[str, object],
+) -> dict[str, object]:
+    components = _generation_plan_component_payloads(
+        command_argv=command_argv,
+        parent_adapter_id=parent_adapter_id,
+        parent_adapter_path=parent_adapter_path,
+        lineage_depth=lineage_depth,
+        output_dir=output_dir,
+        source_transition=source_transition,
+        policy=policy,
+        scale_up=scale_up,
+        max_generations=max_generations,
+        execution=execution,
+    )
+    component_ids = {
+        name: _canonical_sha256(payload) for name, payload in components.items()
+    }
+    plan_id = _canonical_sha256(
+        {
+            "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+            "component_ids": component_ids,
+        }
+    )
+    return {
+        "row_type": "hf_adapter_continuation_executor_generation_plan_contract",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+        "status": "sealed",
+        "generation_plan_id": plan_id,
+        "components": components,
+        "component_ids": component_ids,
+    }
+
+
+def _generation_plan_verification(
+    row: Mapping[str, object],
+) -> dict[str, object]:
+    contract = row.get("generation_plan_contract")
+    recorded_plan_id = row.get("generation_plan_id")
+    if not isinstance(contract, Mapping):
+        return {
+            "status": "unsealed",
+            "ready": False,
+            "generation_plan_id": recorded_plan_id,
+            "observed_generation_plan_id": None,
+            "issues": ["generation_plan_contract_missing"],
+        }
+    issues: list[str] = []
+    if contract.get("schema") != HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA:
+        issues.append("generation_plan_schema_mismatch")
+    if contract.get("row_type") != (
+        "hf_adapter_continuation_executor_generation_plan_contract"
+    ):
+        issues.append("generation_plan_row_type_mismatch")
+    if contract.get("status") != "sealed":
+        issues.append("generation_plan_contract_not_sealed")
+    components = contract.get("components")
+    expected_component_ids = contract.get("component_ids")
+    if not isinstance(components, Mapping):
+        issues.append("generation_plan_components_missing")
+        components = {}
+    if not isinstance(expected_component_ids, Mapping):
+        issues.append("generation_plan_component_ids_missing")
+        expected_component_ids = {}
+    for name in _GENERATION_PLAN_COMPONENT_NAMES:
+        if name not in components:
+            issues.append(f"generation_plan_{name}_component_missing")
+        if name not in expected_component_ids:
+            issues.append(f"generation_plan_{name}_component_id_missing")
+        elif not _valid_generation_plan_id(expected_component_ids.get(name)):
+            issues.append(f"generation_plan_{name}_component_id_invalid")
+    for name in components:
+        if name not in _GENERATION_PLAN_COMPONENT_NAMES:
+            issues.append(f"generation_plan_{name}_component_unexpected")
+    for name in expected_component_ids:
+        if name not in _GENERATION_PLAN_COMPONENT_NAMES:
+            issues.append(f"generation_plan_{name}_component_id_unexpected")
+    command_argv = _command_argv(row)
+    command_component = components.get("command")
+    if command_argv is None:
+        issues.append("generation_plan_command_missing")
+        command_argv = []
+    elif not isinstance(command_component, Mapping):
+        issues.append("generation_plan_command_component_missing")
+    elif command_component.get("argv") != command_argv:
+        issues.append("generation_plan_command_changed")
+    actual_components = {
+        name: components.get(name) for name in _GENERATION_PLAN_COMPONENT_NAMES
+    }
+    actual_components["command"] = {"argv": command_argv}
+    actual_components["identity"] = {
+        "parent_adapter_id": row.get("parent_adapter_id"),
+        "parent_adapter_path": row.get("parent_adapter_path"),
+        "lineage_depth": row.get("lineage_depth"),
+        "output_dir": row.get("output_dir"),
+    }
+    actual_components["source_transition"] = _stable_source_transition(
+        row.get("source_transition")
+    )
+    observed_component_ids = {
+        name: _canonical_sha256(payload)
+        for name, payload in actual_components.items()
+    }
+    for name in _GENERATION_PLAN_COMPONENT_NAMES:
+        expected = expected_component_ids.get(name)
+        if observed_component_ids.get(name) != expected:
+            issues.append(f"generation_plan_{name}_component_changed")
+    observed_plan_id = _canonical_sha256(
+        {
+            "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+            "component_ids": observed_component_ids,
+        }
+    )
+    contract_plan_id = contract.get("generation_plan_id")
+    if not _valid_generation_plan_id(contract_plan_id):
+        issues.append("generation_plan_contract_id_invalid")
+    if contract_plan_id != observed_plan_id:
+        issues.append("generation_plan_contract_id_mismatch")
+    if not _valid_generation_plan_id(recorded_plan_id):
+        issues.append("generation_plan_record_id_invalid")
+    if recorded_plan_id != observed_plan_id:
+        issues.append("generation_plan_record_id_mismatch")
+    return {
+        "status": "ready" if not issues else "invalid",
+        "ready": not issues,
+        "generation_plan_id": recorded_plan_id,
+        "observed_generation_plan_id": observed_plan_id,
+        "component_ids": dict(expected_component_ids),
+        "observed_component_ids": observed_component_ids,
+        "issues": issues,
+    }
+
+
+def _validate_generation_plan_rows(
+    state: Mapping[str, object],
+    *,
+    path: Path,
+) -> None:
+    rows: list[tuple[str, Mapping[str, object]]] = []
+    for name in ("pending_generation", "pending_generation_candidate"):
+        row = state.get(name)
+        if isinstance(row, Mapping):
+            rows.append((name, row))
+    for index, row in enumerate(state.get("generations") or []):
+        if isinstance(row, Mapping):
+            rows.append((f"generations[{index}]", row))
+    for name, row in rows:
+        if (
+            row.get("generation_plan_id") is None
+            and row.get("generation_plan_contract") is None
+        ):
+            continue
+        verification = _generation_plan_verification(row)
+        if verification.get("ready") is not True:
+            raise ValueError(
+                f"executor generation plan is invalid at {name}: {path}: "
+                f"{verification.get('issues')}"
+            )
+        recorded_verification = row.get("generation_plan_verification")
+        verification_fields = (
+            "status",
+            "ready",
+            "generation_plan_id",
+            "observed_generation_plan_id",
+            "component_ids",
+            "observed_component_ids",
+            "issues",
+        )
+        if not isinstance(recorded_verification, Mapping) or any(
+            recorded_verification.get(field) != verification.get(field)
+            for field in verification_fields
+        ):
+            raise ValueError(
+                "executor generation plan verification metadata is invalid at "
+                f"{name}: {path}"
+            )
 
 
 def _source_paths(
@@ -225,9 +529,102 @@ def load_hf_adapter_continuation_executor(
             "unsupported HF adapter continuation executor row type: "
             f"{payload.get('row_type')}"
         )
+    _validate_generation_plan_rows(payload, path=path)
     report = dict(payload)
     report["state_path"] = str(path.resolve())
     return report
+
+
+def hf_adapter_continuation_executor_generation_plan_report(
+    report_or_path: Mapping[str, object] | str | Path,
+    *,
+    candidate: bool = False,
+) -> dict[str, object]:
+    """Verify the sealed pending generation command without mutating state."""
+
+    if isinstance(report_or_path, Mapping):
+        state = dict(report_or_path)
+        state_path = state.get("state_path")
+    else:
+        path = Path(report_or_path).expanduser()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"executor state must contain a JSON object: {path}")
+        if payload.get("schema") != HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA:
+            raise ValueError(
+                "unsupported HF adapter continuation executor schema: "
+                f"{payload.get('schema')}"
+            )
+        if payload.get("row_type") != "hf_adapter_continuation_executor":
+            raise ValueError(
+                "unsupported HF adapter continuation executor row type: "
+                f"{payload.get('row_type')}"
+            )
+        state = dict(payload)
+        state_path = str(path.resolve())
+    field = "pending_generation_candidate" if candidate else "pending_generation"
+    row = state.get(field)
+    if not isinstance(row, Mapping):
+        return {
+            "row_type": "hf_adapter_continuation_executor_generation_plan",
+            "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+            "status": "missing",
+            "ready": False,
+            "source_field": field,
+            "state_path": state_path,
+            "generation_plan_id": None,
+            "observed_generation_plan_id": None,
+            "issues": [f"{field}_missing"],
+        }
+    verification = _generation_plan_verification(row)
+    return {
+        "row_type": "hf_adapter_continuation_executor_generation_plan",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+        "status": verification.get("status"),
+        "ready": verification.get("ready"),
+        "source_field": field,
+        "state_path": state_path,
+        "generation_plan_id": verification.get("generation_plan_id"),
+        "observed_generation_plan_id": verification.get(
+            "observed_generation_plan_id"
+        ),
+        "component_ids": verification.get("component_ids"),
+        "observed_component_ids": verification.get("observed_component_ids"),
+        "issues": verification.get("issues"),
+        "parent_adapter_id": row.get("parent_adapter_id"),
+        "lineage_depth": row.get("lineage_depth"),
+        "output_dir": row.get("output_dir"),
+    }
+
+
+def hf_adapter_continuation_executor_generation_plan_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+    *,
+    candidate: bool = False,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type")
+        == "hf_adapter_continuation_executor_generation_plan"
+        else hf_adapter_continuation_executor_generation_plan_report(
+            report_or_path,
+            candidate=candidate,
+        )
+    )
+    return [
+        (
+            "hf_adapter_continuation_executor_generation_plan "
+            f"status={report.get('status')} "
+            f"ready={report.get('ready')} "
+            f"source={report.get('source_field')} "
+            f"plan_id={report.get('generation_plan_id')} "
+            f"observed_plan_id={report.get('observed_generation_plan_id')} "
+            f"depth={report.get('lineage_depth')} "
+            f"issues={len(report.get('issues') or [])} "
+            f"output={report.get('output_dir')}"
+        )
+    ]
 
 
 def _stop_request_path(
@@ -479,6 +876,8 @@ def _new_state(
         "promoted_generation_count": 0,
         "generations": [],
         "policy_history": [],
+        "scale_up_history": [],
+        "generation_plan_history": [],
     }
 
 
@@ -519,10 +918,34 @@ def _state_for_invocation(
                 }
             )
     state["policy"] = dict(policy)
+    previous_scale_up = state.get("scale_up")
+    if isinstance(previous_scale_up, Mapping) and dict(previous_scale_up) != dict(
+        scale_up
+    ):
+        history = state.setdefault("scale_up_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    "changed_at": _now(),
+                    "previous": dict(previous_scale_up),
+                    "current": dict(scale_up),
+                }
+            )
     state["scale_up"] = dict(scale_up)
     state["execution"] = dict(execution)
     state["mode"] = "run" if run else "plan"
     state["max_generations_per_invocation"] = max_generations
+    previous_plan_gate = state.pop("generation_plan_gate", None)
+    state.pop("pending_generation_candidate", None)
+    if isinstance(previous_plan_gate, Mapping):
+        history = state.setdefault("generation_plan_gate_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    **dict(previous_plan_gate),
+                    "cleared_at": _now(),
+                }
+            )
     previous_stop_request = state.pop("stop_request", None)
     if isinstance(previous_stop_request, Mapping):
         history = state.setdefault("stop_request_history", [])
@@ -1440,6 +1863,141 @@ def _validate_optional_float(
         raise ValueError(f"{name} must be finite and >= {minimum}")
 
 
+def _seal_generation_plan(
+    pending: dict[str, object],
+    *,
+    policy: Mapping[str, object],
+    scale_up: Mapping[str, object],
+    max_generations: int,
+    execution: Mapping[str, object],
+) -> None:
+    command = _command_argv(pending)
+    if command is None:
+        return
+    execution_contract = {
+        key: execution.get(key)
+        for key in (
+            "command_cwd",
+            "command_env_override_keys",
+            "command_env_override_count",
+            "command_env_sha256",
+        )
+    }
+    contract = _generation_plan_contract(
+        command_argv=command,
+        parent_adapter_id=pending.get("parent_adapter_id"),
+        parent_adapter_path=pending.get("parent_adapter_path"),
+        lineage_depth=pending.get("lineage_depth"),
+        output_dir=pending.get("output_dir"),
+        source_transition=pending.get("source_transition"),
+        policy=policy,
+        scale_up=scale_up,
+        max_generations=max_generations,
+        execution=execution_contract,
+    )
+    pending["generation_plan_id"] = contract["generation_plan_id"]
+    pending["generation_plan_contract"] = contract
+    pending["generation_plan_verification"] = _generation_plan_verification(
+        pending
+    )
+
+
+def _generation_plan_summary(row: Mapping[str, object]) -> dict[str, object]:
+    contract = row.get("generation_plan_contract")
+    components = (
+        contract.get("components") if isinstance(contract, Mapping) else None
+    )
+    component_ids = (
+        contract.get("component_ids") if isinstance(contract, Mapping) else None
+    )
+    command = _command_argv(row)
+    return {
+        "generation_plan_id": row.get("generation_plan_id"),
+        "command_id": (
+            component_ids.get("command")
+            if isinstance(component_ids, Mapping)
+            else (
+                _canonical_sha256({"argv": command})
+                if command is not None
+                else None
+            )
+        ),
+        "policy": (
+            components.get("policy") if isinstance(components, Mapping) else None
+        ),
+        "scale_up": (
+            components.get("scale_up") if isinstance(components, Mapping) else None
+        ),
+        "lineage_depth": row.get("lineage_depth"),
+        "output_dir": row.get("output_dir"),
+    }
+
+
+def _record_generation_replan(
+    state: dict[str, object],
+    *,
+    previous: Mapping[str, object],
+    current: Mapping[str, object],
+) -> None:
+    previous_summary = _generation_plan_summary(previous)
+    current_summary = _generation_plan_summary(current)
+    if previous_summary == current_summary:
+        return
+    history = state.setdefault("generation_plan_history", [])
+    if isinstance(history, list):
+        history.append(
+            {
+                "changed_at": _now(),
+                "reason": (
+                    "generation_plan_replanned"
+                    if previous_summary.get("generation_plan_id") is not None
+                    else "legacy_generation_plan_sealed"
+                ),
+                "previous": previous_summary,
+                "current": current_summary,
+            }
+        )
+
+
+def _generation_plan_gate(
+    *,
+    reason: str,
+    pending: Mapping[str, object] | None,
+    candidate: Mapping[str, object],
+    expected_plan_id: str | None,
+) -> dict[str, object]:
+    pending_contract = (
+        pending.get("generation_plan_contract")
+        if isinstance(pending, Mapping)
+        else None
+    )
+    candidate_contract = candidate.get("generation_plan_contract")
+    return {
+        "row_type": "hf_adapter_continuation_executor_generation_plan_gate",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+        "status": "blocked",
+        "reason": reason,
+        "created_at": _now(),
+        "expected_plan_id": expected_plan_id,
+        "pending_generation_plan_id": (
+            pending.get("generation_plan_id")
+            if isinstance(pending, Mapping)
+            else None
+        ),
+        "candidate_generation_plan_id": candidate.get("generation_plan_id"),
+        "pending_component_ids": (
+            pending_contract.get("component_ids")
+            if isinstance(pending_contract, Mapping)
+            else None
+        ),
+        "candidate_component_ids": (
+            candidate_contract.get("component_ids")
+            if isinstance(candidate_contract, Mapping)
+            else None
+        ),
+    }
+
+
 def _validate_executor_arguments(
     *,
     max_generations: int,
@@ -1455,6 +2013,7 @@ def _validate_executor_arguments(
     max_eval_blocks: int | None,
     streaming_validation_samples: int | None,
     output_prefix: str,
+    expected_plan_id: str | None,
 ) -> None:
     _validate_optional_int("max_generations", max_generations, minimum=1)
     _validate_optional_int("max_lineage_depth", max_lineage_depth, minimum=0)
@@ -1493,6 +2052,10 @@ def _validate_executor_arguments(
     )
     if not output_prefix or Path(output_prefix).name != output_prefix:
         raise ValueError("output_prefix must be one path-safe name")
+    if expected_plan_id is not None and not _valid_generation_plan_id(
+        expected_plan_id
+    ):
+        raise ValueError("expected_plan_id must be a lowercase sha256 identity")
 
 
 def _run_hf_adapter_continuation_executor_unlocked(
@@ -1502,6 +2065,8 @@ def _run_hf_adapter_continuation_executor_unlocked(
     state_path: str | Path | None = None,
     run: bool = False,
     max_generations: int = 1,
+    expected_plan_id: str | None = None,
+    require_pending_plan: bool = False,
     retry_interrupted: bool = False,
     recursive: bool = True,
     allow_inferred_roots: bool = True,
@@ -1540,7 +2105,12 @@ def _run_hf_adapter_continuation_executor_unlocked(
         max_eval_blocks=max_eval_blocks,
         streaming_validation_samples=streaming_validation_samples,
         output_prefix=output_prefix,
+        expected_plan_id=expected_plan_id,
     )
+    if not run and expected_plan_id is not None:
+        raise ValueError("expected_plan_id requires run=True")
+    if not run and require_pending_plan:
+        raise ValueError("require_pending_plan requires run=True")
     source_paths = _source_paths(sources)
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_state_path = (
@@ -1598,6 +2168,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
         "process_group_isolated": command_runner is None,
         "stop_scope": "process_group" if command_runner is None else "runner_boundary",
         "tee_output": bool(tee_output),
+        **_command_env_contract(command_env),
     }
     state = _state_for_invocation(
         source_paths=source_paths,
@@ -1880,7 +2451,77 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "command": command,
             "preflight": preflight,
         }
-        state["pending_generation"] = pending
+        _seal_generation_plan(
+            pending,
+            policy=policy,
+            scale_up=scale_up,
+            max_generations=max_generations,
+            execution=execution,
+        )
+        existing_pending_value = state.get("pending_generation")
+        existing_pending = (
+            existing_pending_value
+            if isinstance(existing_pending_value, Mapping)
+            and existing_pending_value.get("status") == "planned"
+            else None
+        )
+        generation_plan_launch_status = (
+            "generated_in_invocation" if executed > 0 else "direct_plan"
+        )
+        if not run:
+            if existing_pending is not None:
+                _record_generation_replan(
+                    state,
+                    previous=existing_pending,
+                    current=pending,
+                )
+            state["pending_generation"] = pending
+            state.pop("pending_generation_candidate", None)
+            state.pop("generation_plan_gate", None)
+        elif executed == 0:
+            gate_reason = None
+            if existing_pending is not None:
+                existing_verification = _generation_plan_verification(
+                    existing_pending
+                )
+                if existing_verification.get("status") == "unsealed":
+                    gate_reason = "pending_generation_plan_unsealed"
+                elif existing_verification.get("ready") is not True:
+                    gate_reason = "pending_generation_plan_invalid"
+                elif existing_pending.get("generation_plan_id") != pending.get(
+                    "generation_plan_id"
+                ):
+                    gate_reason = "pending_generation_plan_changed"
+                else:
+                    generation_plan_launch_status = "matched_pending"
+            elif require_pending_plan:
+                gate_reason = "pending_generation_plan_required"
+            if (
+                gate_reason is None
+                and expected_plan_id is not None
+                and pending.get("generation_plan_id") != expected_plan_id
+            ):
+                gate_reason = "expected_generation_plan_mismatch"
+            if gate_reason is not None:
+                state["pending_generation_candidate"] = pending
+                state["generation_plan_gate"] = _generation_plan_gate(
+                    reason=gate_reason,
+                    pending=existing_pending,
+                    candidate=pending,
+                    expected_plan_id=expected_plan_id,
+                )
+                return _finish(
+                    state,
+                    resolved_state_path,
+                    status="blocked",
+                    action="review_generation_plan",
+                    reason=gate_reason,
+                )
+            state["pending_generation"] = pending
+            state.pop("pending_generation_candidate", None)
+            state.pop("generation_plan_gate", None)
+        else:
+            state["pending_generation"] = pending
         _write_state(resolved_state_path, state)
         if output_dir.exists():
             return _finish(
@@ -1929,6 +2570,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 action="run_generation",
                 reason="dry_run_ready",
             )
+
+        generation_plan_verification = _generation_plan_verification(pending)
+        generation_plan_verification["launch_status"] = (
+            generation_plan_launch_status
+        )
+        generation_plan_verification["expected_plan_id"] = (
+            expected_plan_id if executed == 0 else None
+        )
 
         command_values = command.get("command")
         if not isinstance(command_values, Sequence) or isinstance(
@@ -2032,6 +2681,11 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "finetune_replay_expected_id": preflight.get(
                 "finetune_replay_expected_id"
             ),
+            "generation_plan_id": pending.get("generation_plan_id"),
+            "generation_plan_contract": pending.get(
+                "generation_plan_contract"
+            ),
+            "generation_plan_verification": generation_plan_verification,
             "command": resolved_command,
             "command_display": shlex.join(resolved_command),
             "scale_up": command,
@@ -2074,7 +2728,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             returncode = _execute_command(
                 resolved_command,
                 command_runner=command_runner,
-                command_cwd=command_cwd,
+                command_cwd=resolved_command_cwd,
                 command_env=command_env,
                 log_path=attempt_log_path,
                 tee_output=tee_output,
@@ -2196,6 +2850,8 @@ def run_hf_adapter_continuation_executor(
     state_path: str | Path | None = None,
     run: bool = False,
     max_generations: int = 1,
+    expected_plan_id: str | None = None,
+    require_pending_plan: bool = False,
     retry_interrupted: bool = False,
     recursive: bool = True,
     allow_inferred_roots: bool = True,
@@ -2228,6 +2884,8 @@ def run_hf_adapter_continuation_executor(
             state_path=state_path,
             run=run,
             max_generations=max_generations,
+            expected_plan_id=expected_plan_id,
+            require_pending_plan=require_pending_plan,
             retry_interrupted=retry_interrupted,
             recursive=recursive,
             allow_inferred_roots=allow_inferred_roots,
@@ -2260,6 +2918,12 @@ def hf_adapter_continuation_executor_lines(
         if isinstance(report_or_path, Mapping)
         else load_hf_adapter_continuation_executor(report_or_path)
     )
+    generation_plan_gate = report.get("generation_plan_gate")
+    generation_plan_gate_reason = (
+        generation_plan_gate.get("reason")
+        if isinstance(generation_plan_gate, Mapping)
+        else None
+    )
     lines = [
         (
             "hf_adapter_continuation_executor "
@@ -2269,6 +2933,8 @@ def hf_adapter_continuation_executor_lines(
             f"depth={report.get('selected_lineage_depth')} "
             f"attempts={report.get('generation_attempt_count')} "
             f"promoted={report.get('promoted_generation_count')} "
+            f"plan_history={len(report.get('generation_plan_history') or [])} "
+            f"plan_gate={generation_plan_gate_reason} "
             f"transitions={report.get('ready_transition_count')}/"
             f"{report.get('transition_count')} "
             f"state={report.get('state_path')}"
@@ -2398,10 +3064,20 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(finetune_replay_contract, Mapping)
             else None
         )
+        generation_plan_verification = pending.get(
+            "generation_plan_verification"
+        )
+        generation_plan_status = (
+            generation_plan_verification.get("status")
+            if isinstance(generation_plan_verification, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_pending "
             f"status={pending.get('status')} "
             f"depth={pending.get('lineage_depth')} "
+            f"plan_id={pending.get('generation_plan_id')} "
+            f"plan={generation_plan_status} "
             f"command={command_status} "
             f"runtime={runtime_status} "
             f"preflight={preflight_status} "
@@ -2435,6 +3111,14 @@ def hf_adapter_continuation_executor_lines(
             "finetune_replay_expected="
             f"{pending.get('finetune_replay_expected_id')} "
             f"output={pending.get('output_dir')}"
+        )
+    candidate = report.get("pending_generation_candidate")
+    if isinstance(candidate, Mapping):
+        lines.append(
+            "hf_adapter_continuation_executor_plan_candidate "
+            f"plan_id={candidate.get('generation_plan_id')} "
+            f"depth={candidate.get('lineage_depth')} "
+            f"output={candidate.get('output_dir')}"
         )
     for raw_attempt in report.get("generations") or []:
         if not isinstance(raw_attempt, Mapping):
@@ -2524,6 +3208,7 @@ def hf_adapter_continuation_executor_lines(
             "hf_adapter_continuation_executor_generation "
             f"status={raw_attempt.get('status')} "
             f"depth={raw_attempt.get('lineage_depth')} "
+            f"plan_id={raw_attempt.get('generation_plan_id')} "
             f"returncode={raw_attempt.get('returncode')} "
             f"pid={raw_attempt.get('pid')} "
             f"host={raw_attempt.get('hostname')} "
