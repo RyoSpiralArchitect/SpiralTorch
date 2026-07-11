@@ -567,6 +567,7 @@ HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_INPUT_IDENTITY_SCHEMA: str
 HF_DATASET_INPUT_IDENTITY_SCHEMA: str
 HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA: str
+HF_TOKENIZED_DATASET_IDENTITY_SCHEMA: str
 HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA: str
@@ -681,6 +682,16 @@ def hf_dataset_materialization_identity_report(
     phase: str = ...,
 ) -> Dict[str, object]: ...
 def hf_dataset_materialization_identity_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+def hf_tokenized_dataset_identity_report(
+    *,
+    train_dataset: object,
+    eval_dataset: object | None = ...,
+    expected_identity_id: str | None = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_tokenized_dataset_identity_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
 def hf_finetune_execution_identity_report(

@@ -826,6 +826,35 @@ will actually reach the tokenizer. Use
 contract; hashing cost is linear in the selected text bytes and is bounded by
 the configured sample caps for streaming runs.
 
+Training runs add a third, downstream dataset contract after tokenization,
+block grouping, and `--max-eval-blocks` are complete. SpiralTorch hashes every
+train/eval block in order, including all typed values in `input_ids`, `labels`,
+`attention_mask`, and any model-specific columns. The report retains only
+per-split digests and aggregate row/token/value counts. The first run adds
+`--expected-tokenized-dataset-id` to its canonical launch command; replay and
+adapter continuations verify it before model preparation or Trainer
+construction. This catches tokenizer-library, special-token, grouping, mask,
+label, and block-boundary drift even when the selected raw text identity and
+model/tokenizer source identity are unchanged. Inspect or build the same report
+with `st.hf_tokenized_dataset_identity_report(...)` and
+`st.hf_tokenized_dataset_identity_lines(...)`. Use `--tokenize-only` to run the
+whole dataset/tokenization audit without constructing Trainer; the resulting
+run card rewrites its canonical replay command to `--train` and carries the
+newly adopted tokenized identity into the real launch.
+
+Scale-up keeps these contracts strict without making corpus growth impossible.
+If sample/eval shape stays unchanged, the child must reproduce both parent
+dataset identities exactly. Selection changes such as `--max-train-samples`,
+`--max-eval-samples`, or streaming validation size reissue both the selected
+text and tokenized identities. A post-tokenization-only change such as
+`--max-eval-blocks` or `--block-size` reissues only the tokenized identity and
+continues enforcing the parent's raw-row digest. The planner records each
+source/target flag value, and preflight independently recomputes the complete
+command delta rather than trusting its reissue boolean. After the child run,
+promotion-chain validation applies the same layer-specific boundary and exposes
+each reissue on the transition. Content drift with no corresponding
+command-shape change remains rejected.
+
 The model basis and tokenizer now form a second content-addressed runtime
 contract. Remote base models record the resolved Hub commit plus stable config
 and tokenizer semantics; tokenizer files shipped with an adapter and local

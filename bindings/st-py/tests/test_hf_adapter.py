@@ -106,6 +106,9 @@ def _adapter_launch_command(
     parent: Path,
     child: Path,
     run_card_path: Path,
+    *,
+    max_train_samples: int = 8,
+    block_size: int = 128,
 ) -> list[str]:
     bridge = Path(__file__).resolve().parents[1] / "examples" / "hf_finetune_bridge.py"
     return [
@@ -125,7 +128,9 @@ def _adapter_launch_command(
         "--max-steps",
         "1",
         "--max-train-samples",
-        "8",
+        str(max_train_samples),
+        "--block-size",
+        str(block_size),
     ]
 
 
@@ -145,6 +150,10 @@ def _write_promoted_child(
     expected_dataset_input_id: str | None = None,
     dataset_materialization_id: str | None = None,
     expected_dataset_materialization_id: str | None = None,
+    tokenized_dataset_id: str | None = None,
+    expected_tokenized_dataset_id: str | None = None,
+    max_train_samples: int = 8,
+    block_size: int = 128,
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> tuple[Path, dict, dict]:
     adapter = _write_adapter(child, weights)
@@ -267,11 +276,38 @@ def _write_promoted_child(
             "identity_verified": True,
             "fail_fast": True,
         }
+    if tokenized_dataset_id is not None:
+        card["tokenized_dataset_identity"] = {
+            "row_type": "hf_tokenized_dataset_identity",
+            "status": "ready",
+            "phase": "after_tokenization",
+            "expected_identity_id": expected_tokenized_dataset_id,
+            "observed_identity_id": tokenized_dataset_id,
+            "identity_verified": True,
+            "tokenized_rows_verified": True,
+            "total_rows": 4,
+            "total_input_tokens": 32,
+        }
+        card["tokenized_dataset_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_tokenized_dataset_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": (
+                expected_tokenized_dataset_id or tokenized_dataset_id
+            ),
+            "observed_identity_id": tokenized_dataset_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
     if launch_command:
         card["launch_command"] = _adapter_launch_command(
             parent,
             adapter,
             run_card_path,
+            max_train_samples=max_train_samples,
+            block_size=block_size,
         )
         if dataset_materialization_id is not None:
             card["launch_command"].extend(
@@ -279,6 +315,13 @@ def _write_promoted_child(
                     "--expected-dataset-materialization-id",
                     expected_dataset_materialization_id
                     or dataset_materialization_id,
+                ]
+            )
+        if tokenized_dataset_id is not None:
+            card["launch_command"].extend(
+                [
+                    "--expected-tokenized-dataset-id",
+                    expected_tokenized_dataset_id or tokenized_dataset_id,
                 ]
             )
         card["launch_command_display"] = " ".join(card["launch_command"])
@@ -721,6 +764,156 @@ def test_adapter_chain_adopts_then_requires_dataset_materialization_identity(
         if line.startswith("hf_adapter_promotion_chain_transition ")
     ]
     assert "dataset_materialization_ready=False" in transition_lines[-1]
+
+
+def test_adapter_chain_adopts_then_requires_tokenized_dataset_identity(
+    tmp_path: Path,
+) -> None:
+    tokenized_dataset_id = "sha256:" + "a" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, adopted_lineage, _ = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        tokenized_dataset_id=tokenized_dataset_id,
+    )
+    enforced, enforced_lineage, _ = _write_promoted_child(
+        tmp_path / "enforced",
+        adopted,
+        b"enforced",
+        tokenized_dataset_id=tokenized_dataset_id,
+        expected_tokenized_dataset_id=tokenized_dataset_id,
+    )
+    _, dropped_lineage, _ = _write_promoted_child(
+        tmp_path / "dropped",
+        enforced,
+        b"dropped",
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    root_to_adopted, adopted_to_enforced, enforced_to_dropped = chain[
+        "transitions"
+    ]
+
+    assert adopted_lineage["tokenized_dataset_identity_verified"] is True
+    assert adopted_lineage["tokenized_dataset_observed_id"] == tokenized_dataset_id
+    assert root_to_adopted["tokenized_dataset_identity_ready"] is True
+    assert root_to_adopted["tokenized_dataset_adopted"] is True
+    assert root_to_adopted["status"] == "ready"
+
+    assert enforced_lineage["tokenized_dataset_identity_required"] is True
+    assert enforced_lineage["tokenized_dataset_expected_id"] == tokenized_dataset_id
+    assert adopted_to_enforced["tokenized_dataset_identity_ready"] is True
+    assert adopted_to_enforced["tokenized_dataset_matches_parent"] is True
+    assert adopted_to_enforced["status"] == "ready"
+
+    assert dropped_lineage["tokenized_dataset_identity_present"] is False
+    assert enforced_to_dropped["tokenized_dataset_identity_required"] is True
+    assert enforced_to_dropped["tokenized_dataset_identity_ready"] is False
+    assert enforced_to_dropped["status"] == "rejected"
+    transition_lines = [
+        line
+        for line in st.hf_adapter_promotion_chain_lines(chain)
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "tokenized_dataset_ready=False" in transition_lines[-1]
+
+
+def test_adapter_chain_reissues_dataset_identities_for_explicit_shape_change(
+    tmp_path: Path,
+) -> None:
+    parent_materialization_id = "sha256:" + "5" * 64
+    child_materialization_id = "sha256:" + "6" * 64
+    parent_tokenized_id = "sha256:" + "a" * 64
+    child_tokenized_id = "sha256:" + "b" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    parent, _, _ = _write_promoted_child(
+        tmp_path / "parent",
+        root,
+        b"parent",
+        dataset_materialization_id=parent_materialization_id,
+        tokenized_dataset_id=parent_tokenized_id,
+        max_train_samples=8,
+    )
+    _, child_lineage, _ = _write_promoted_child(
+        tmp_path / "child",
+        parent,
+        b"child",
+        dataset_materialization_id=child_materialization_id,
+        expected_dataset_materialization_id=child_materialization_id,
+        tokenized_dataset_id=child_tokenized_id,
+        expected_tokenized_dataset_id=child_tokenized_id,
+        max_train_samples=16,
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    transition = chain["transitions"][-1]
+
+    assert child_lineage["dataset_materialization_observed_id"] == (
+        child_materialization_id
+    )
+    assert child_lineage["tokenized_dataset_observed_id"] == child_tokenized_id
+    assert transition["status"] == "ready"
+    assert transition["dataset_shape_reissued"] is True
+    assert transition["dataset_materialization_reissued"] is True
+    assert transition["tokenized_dataset_reissued"] is True
+    assert transition["dataset_materialization_matches_parent"] is False
+    assert transition["tokenized_dataset_matches_parent"] is False
+    assert transition["dataset_shape_changes"] == [
+        {
+            "flag": "--max-train-samples",
+            "parent_value": "8",
+            "child_value": "16",
+        }
+    ]
+
+
+def test_adapter_chain_reissues_only_tokenized_identity_for_block_size_change(
+    tmp_path: Path,
+) -> None:
+    materialization_id = "sha256:" + "5" * 64
+    parent_tokenized_id = "sha256:" + "a" * 64
+    child_tokenized_id = "sha256:" + "b" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    parent, _, _ = _write_promoted_child(
+        tmp_path / "parent",
+        root,
+        b"parent",
+        dataset_materialization_id=materialization_id,
+        tokenized_dataset_id=parent_tokenized_id,
+        block_size=128,
+    )
+    _write_promoted_child(
+        tmp_path / "child",
+        parent,
+        b"child",
+        dataset_materialization_id=materialization_id,
+        expected_dataset_materialization_id=materialization_id,
+        tokenized_dataset_id=child_tokenized_id,
+        expected_tokenized_dataset_id=child_tokenized_id,
+        block_size=256,
+    )
+
+    transition = st.hf_adapter_promotion_chain_report(tmp_path)["transitions"][-1]
+
+    assert transition["status"] == "ready"
+    assert transition["dataset_shape_reissued"] is True
+    assert transition["dataset_materialization_shape_reissued"] is False
+    assert transition["dataset_materialization_reissued"] is False
+    assert transition["dataset_materialization_matches_parent"] is True
+    assert transition["tokenized_dataset_shape_reissued"] is True
+    assert transition["tokenized_dataset_reissued"] is True
+    assert transition["tokenized_dataset_matches_parent"] is False
+    assert transition["dataset_shape_changes"] == [
+        {
+            "flag": "--block-size",
+            "parent_value": "128",
+            "child_value": "256",
+        }
+    ]
 
 
 def test_adapter_chain_adopts_then_requires_execution_input_identity(

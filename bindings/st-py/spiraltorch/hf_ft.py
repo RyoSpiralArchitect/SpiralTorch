@@ -5712,12 +5712,13 @@ def _shell_join_args(args: Sequence[object]) -> str:
 
 def _command_flag_value(command: Sequence[object], flag: str) -> str | None:
     values = [str(item) for item in command]
+    found = None
     for index, item in enumerate(values):
         if item == flag and index + 1 < len(values):
-            return values[index + 1]
-        if item.startswith(f"{flag}="):
-            return item.split("=", 1)[1]
-    return None
+            found = values[index + 1]
+        elif item.startswith(f"{flag}="):
+            found = item.split("=", 1)[1]
+    return found
 
 
 def _command_flag_values(command: Sequence[object], flag: str) -> list[str]:
@@ -5754,19 +5755,29 @@ def _replace_or_append_command_flag(
     value: object,
 ) -> list[str]:
     values = [str(item) for item in command]
+    updated: list[str] = []
     replacement = str(value)
-    for index, item in enumerate(values):
+    inserted = False
+    index = 0
+    while index < len(values):
+        item = values[index]
         if item == flag:
-            if index + 1 < len(values):
-                values[index + 1] = replacement
-            else:
-                values.append(replacement)
-            return values
+            if not inserted:
+                updated.extend([flag, replacement])
+                inserted = True
+            index += 2
+            continue
         if item.startswith(f"{flag}="):
-            values[index] = f"{flag}={replacement}"
-            return values
-    values.extend([flag, replacement])
-    return values
+            if not inserted:
+                updated.extend([flag, replacement])
+                inserted = True
+            index += 1
+            continue
+        updated.append(item)
+        index += 1
+    if not inserted:
+        updated.extend([flag, replacement])
+    return updated
 
 
 def _path_with_suffix(path: object, suffix: str) -> str | None:
@@ -5923,9 +5934,28 @@ _HF_FINETUNE_EXPECTED_DATASET_INPUT_ID_FLAG = "--expected-dataset-input-id"
 _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG = (
     "--expected-dataset-materialization-id"
 )
+_HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG = (
+    "--expected-tokenized-dataset-id"
+)
 _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG = "--expected-runtime-input-id"
 _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG = (
     "--expected-execution-input-id"
+)
+_HF_FINETUNE_DATASET_SHAPE_FLAGS = (
+    "--max-train-samples",
+    "--max-eval-samples",
+    "--max-eval-blocks",
+    "--streaming-validation-samples",
+)
+_HF_FINETUNE_DATASET_MATERIALIZATION_SHAPE_FLAGS = frozenset(
+    {
+        "--max-train-samples",
+        "--max-eval-samples",
+        "--streaming-validation-samples",
+    }
+)
+_HF_FINETUNE_TOKENIZED_DATASET_SHAPE_FLAGS = frozenset(
+    _HF_FINETUNE_DATASET_SHAPE_FLAGS
 )
 
 
@@ -6614,6 +6644,24 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_dataset_materialization_total_rows": candidate.get(
             "dataset_materialization_total_rows"
         ),
+        "scale_up_candidate_tokenized_dataset_identity_status": candidate.get(
+            "tokenized_dataset_identity_status"
+        ),
+        "scale_up_candidate_tokenized_dataset_identity_verified": candidate.get(
+            "tokenized_dataset_identity_verified"
+        ),
+        "scale_up_candidate_tokenized_dataset_expected_id": candidate.get(
+            "tokenized_dataset_expected_id"
+        ),
+        "scale_up_candidate_tokenized_dataset_observed_id": candidate.get(
+            "tokenized_dataset_observed_id"
+        ),
+        "scale_up_candidate_tokenized_dataset_total_rows": candidate.get(
+            "tokenized_dataset_total_rows"
+        ),
+        "scale_up_candidate_tokenized_dataset_total_input_tokens": candidate.get(
+            "tokenized_dataset_total_input_tokens"
+        ),
         "scale_up_candidate_runtime_input_identity_status": candidate.get(
             "runtime_input_identity_status"
         ),
@@ -6914,6 +6962,65 @@ def hf_gpt2_finetune_scale_up_command(
             None if resolved_source_cwd is None else str(resolved_source_cwd)
         ),
     )
+    source_max_train_samples = _command_flag_value(
+        base_command,
+        "--max-train-samples",
+    )
+    resolved_max_train_samples = _scaled_int_flag_value(
+        base_command,
+        "--max-train-samples",
+        explicit=max_train_samples,
+        multiplier=max_train_samples_multiplier,
+    )
+    dataset_shape_changes: list[dict[str, object]] = []
+    for flag, source_value, target_value in (
+        (
+            "--max-train-samples",
+            source_max_train_samples,
+            resolved_max_train_samples,
+        ),
+        (
+            "--max-eval-samples",
+            _command_flag_value(base_command, "--max-eval-samples"),
+            max_eval_samples,
+        ),
+        (
+            "--max-eval-blocks",
+            _command_flag_value(base_command, "--max-eval-blocks"),
+            max_eval_blocks,
+        ),
+        (
+            "--streaming-validation-samples",
+            _command_flag_value(base_command, "--streaming-validation-samples"),
+            streaming_validation_samples,
+        ),
+    ):
+        effective_target = source_value if target_value is None else str(target_value)
+        if source_value != effective_target:
+            dataset_shape_changes.append(
+                {
+                    "flag": flag,
+                    "source_value": source_value,
+                    "target_value": effective_target,
+                }
+            )
+    dataset_shape_override_changed = bool(dataset_shape_changes)
+    dataset_materialization_shape_changes = [
+        row
+        for row in dataset_shape_changes
+        if row.get("flag") in _HF_FINETUNE_DATASET_MATERIALIZATION_SHAPE_FLAGS
+    ]
+    tokenized_dataset_shape_changes = [
+        row
+        for row in dataset_shape_changes
+        if row.get("flag") in _HF_FINETUNE_TOKENIZED_DATASET_SHAPE_FLAGS
+    ]
+    dataset_materialization_shape_override_changed = bool(
+        dataset_materialization_shape_changes
+    )
+    tokenized_dataset_shape_override_changed = bool(
+        tokenized_dataset_shape_changes
+    )
     source_expected_training_input_id = _command_flag_value(
         base_command,
         _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,
@@ -7077,7 +7184,9 @@ def hf_gpt2_finetune_scale_up_command(
         and candidate_dataset_materialization_id is not None
     )
     expected_dataset_materialization_id = (
-        source_expected_dataset_materialization_id
+        None
+        if dataset_materialization_shape_override_changed
+        else source_expected_dataset_materialization_id
         or (
             str(candidate_dataset_materialization_id)
             if candidate_dataset_materialization_ready
@@ -7096,7 +7205,9 @@ def hf_gpt2_finetune_scale_up_command(
     )
     dataset_materialization_identity_contract = {
         "status": (
-            "blocked"
+            "reissued"
+            if dataset_materialization_shape_override_changed
+            else "blocked"
             if not dataset_materialization_continuity_matches
             else "enforced"
             if expected_dataset_materialization_id is not None
@@ -7119,10 +7230,82 @@ def hf_gpt2_finetune_scale_up_command(
             "scale_up_candidate_dataset_materialization_total_rows"
         ),
         "identity_continuity_matches": (
-            dataset_materialization_continuity_matches
+            None
+            if dataset_materialization_shape_override_changed
+            else dataset_materialization_continuity_matches
         ),
+        "reissued_for_dataset_shape_override": (
+            dataset_materialization_shape_override_changed
+        ),
+        "dataset_shape_changes": dataset_materialization_shape_changes,
         "fail_fast": expected_dataset_materialization_id is not None,
         "verification_phase": "after_selection",
+    }
+    source_expected_tokenized_dataset_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG,
+    )
+    candidate_tokenized_dataset_id = summary.get(
+        "scale_up_candidate_tokenized_dataset_observed_id"
+    )
+    candidate_tokenized_dataset_ready = bool(
+        summary.get("scale_up_candidate_tokenized_dataset_identity_status")
+        == "ready"
+        and summary.get("scale_up_candidate_tokenized_dataset_identity_verified")
+        is True
+        and candidate_tokenized_dataset_id is not None
+    )
+    expected_tokenized_dataset_id = source_expected_tokenized_dataset_id or (
+        str(candidate_tokenized_dataset_id) if candidate_tokenized_dataset_ready else None
+    )
+    if tokenized_dataset_shape_override_changed:
+        expected_tokenized_dataset_id = None
+    tokenized_dataset_continuity_matches = bool(
+        source_expected_tokenized_dataset_id is None
+        or candidate_tokenized_dataset_id is None
+        or str(source_expected_tokenized_dataset_id)
+        == str(candidate_tokenized_dataset_id)
+    )
+    base_command = _command_without_value_flags(
+        base_command,
+        (_HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG,),
+    )
+    tokenized_dataset_identity_contract = {
+        "status": (
+            "reissued"
+            if tokenized_dataset_shape_override_changed
+            else "blocked"
+            if not tokenized_dataset_continuity_matches
+            else "enforced"
+            if expected_tokenized_dataset_id is not None
+            else "observe"
+        ),
+        "expected_identity_id": expected_tokenized_dataset_id,
+        "source_expected_identity_id": source_expected_tokenized_dataset_id,
+        "candidate_observed_identity_id": candidate_tokenized_dataset_id,
+        "candidate_identity_status": summary.get(
+            "scale_up_candidate_tokenized_dataset_identity_status"
+        ),
+        "candidate_identity_verified": summary.get(
+            "scale_up_candidate_tokenized_dataset_identity_verified"
+        ),
+        "candidate_total_rows": summary.get(
+            "scale_up_candidate_tokenized_dataset_total_rows"
+        ),
+        "candidate_total_input_tokens": summary.get(
+            "scale_up_candidate_tokenized_dataset_total_input_tokens"
+        ),
+        "identity_continuity_matches": (
+            None
+            if tokenized_dataset_shape_override_changed
+            else tokenized_dataset_continuity_matches
+        ),
+        "reissued_for_dataset_shape_override": (
+            tokenized_dataset_shape_override_changed
+        ),
+        "dataset_shape_changes": tokenized_dataset_shape_changes,
+        "fail_fast": expected_tokenized_dataset_id is not None,
+        "verification_phase": "after_tokenization",
     }
     source_expected_runtime_input_id = _command_flag_value(
         base_command,
@@ -7268,12 +7451,6 @@ def hf_gpt2_finetune_scale_up_command(
         explicit=max_steps,
         multiplier=max_steps_multiplier,
     )
-    resolved_max_train_samples = _scaled_int_flag_value(
-        base_command,
-        "--max-train-samples",
-        explicit=max_train_samples,
-        multiplier=max_train_samples_multiplier,
-    )
     continuation = _scale_up_adapter_continuation_plan(
         summary,
         base_command,
@@ -7389,6 +7566,9 @@ def hf_gpt2_finetune_scale_up_command(
         _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG: (
             expected_dataset_materialization_id
         ),
+        _HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG: (
+            expected_tokenized_dataset_id
+        ),
         "--dataset-name": effective_dataset_name,
         "--dataset-revision": effective_dataset_revision,
         _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG: expected_runtime_input_id,
@@ -7468,6 +7648,24 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_dataset_materialization_total_rows": summary.get(
             "scale_up_candidate_dataset_materialization_total_rows"
+        ),
+        "scale_up_candidate_tokenized_dataset_identity_status": summary.get(
+            "scale_up_candidate_tokenized_dataset_identity_status"
+        ),
+        "scale_up_candidate_tokenized_dataset_identity_verified": summary.get(
+            "scale_up_candidate_tokenized_dataset_identity_verified"
+        ),
+        "scale_up_candidate_tokenized_dataset_expected_id": summary.get(
+            "scale_up_candidate_tokenized_dataset_expected_id"
+        ),
+        "scale_up_candidate_tokenized_dataset_observed_id": summary.get(
+            "scale_up_candidate_tokenized_dataset_observed_id"
+        ),
+        "scale_up_candidate_tokenized_dataset_total_rows": summary.get(
+            "scale_up_candidate_tokenized_dataset_total_rows"
+        ),
+        "scale_up_candidate_tokenized_dataset_total_input_tokens": summary.get(
+            "scale_up_candidate_tokenized_dataset_total_input_tokens"
         ),
         "scale_up_candidate_runtime_input_identity_status": summary.get(
             "scale_up_candidate_runtime_input_identity_status"
@@ -7620,6 +7818,23 @@ def hf_gpt2_finetune_scale_up_command(
         "dataset_materialization_expected_id": (
             expected_dataset_materialization_id
         ),
+        "dataset_shape_override_changed": dataset_shape_override_changed,
+        "dataset_shape_changes": dataset_shape_changes,
+        "dataset_materialization_shape_override_changed": (
+            dataset_materialization_shape_override_changed
+        ),
+        "dataset_materialization_shape_changes": (
+            dataset_materialization_shape_changes
+        ),
+        "tokenized_dataset_shape_override_changed": (
+            tokenized_dataset_shape_override_changed
+        ),
+        "tokenized_dataset_shape_changes": tokenized_dataset_shape_changes,
+        "tokenized_dataset_identity_contract": tokenized_dataset_identity_contract,
+        "tokenized_dataset_identity_contract_status": (
+            tokenized_dataset_identity_contract.get("status")
+        ),
+        "tokenized_dataset_expected_id": expected_tokenized_dataset_id,
         "runtime_input_identity_contract": runtime_input_identity_contract,
         "runtime_input_identity_contract_status": (
             runtime_input_identity_contract.get("status")
@@ -8085,6 +8300,219 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 "message": "source dataset materialization continuity is blocked",
             }
         )
+
+    command_expected_tokenized_dataset_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG,
+    )
+    artifact_tokenized_dataset_contract = artifact.get(
+        "tokenized_dataset_identity_contract"
+    )
+    artifact_expected_tokenized_dataset_id = artifact.get(
+        "tokenized_dataset_expected_id"
+    )
+    if (
+        artifact_expected_tokenized_dataset_id is None
+        and isinstance(artifact_tokenized_dataset_contract, Mapping)
+    ):
+        artifact_expected_tokenized_dataset_id = (
+            artifact_tokenized_dataset_contract.get("expected_identity_id")
+        )
+    if (
+        artifact_expected_tokenized_dataset_id is not None
+        and command_expected_tokenized_dataset_id
+        != str(artifact_expected_tokenized_dataset_id)
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_TOKENIZED_DATASET_ID_FLAG,
+                "path": command_expected_tokenized_dataset_id,
+                "message": (
+                    "tokenized dataset identity command does not match "
+                    "scale-up metadata"
+                ),
+            }
+        )
+    if (
+        isinstance(artifact_tokenized_dataset_contract, Mapping)
+        and artifact_tokenized_dataset_contract.get("status") == "blocked"
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "tokenized_dataset_identity_contract",
+                "message": "source tokenized dataset continuity is blocked",
+            }
+        )
+
+    dataset_shape_reissue_declared = (
+        artifact.get("dataset_shape_override_changed") is True
+    )
+    raw_dataset_shape_changes = artifact.get("dataset_shape_changes")
+    dataset_shape_changes = (
+        [dict(row) for row in raw_dataset_shape_changes if isinstance(row, Mapping)]
+        if isinstance(raw_dataset_shape_changes, Sequence)
+        and not isinstance(raw_dataset_shape_changes, (str, bytes))
+        else []
+    )
+    source_command = artifact.get("source_base_command")
+    source_values = (
+        [str(item) for item in source_command]
+        if isinstance(source_command, Sequence)
+        and not isinstance(source_command, (str, bytes))
+        else []
+    )
+    dataset_shape_observed_changes: list[dict[str, object]] = []
+    if source_values:
+        for flag in _HF_FINETUNE_DATASET_SHAPE_FLAGS:
+            source_value = _command_flag_value(source_values, flag)
+            target_value = _command_flag_value(command, flag)
+            if source_value != target_value:
+                dataset_shape_observed_changes.append(
+                    {
+                        "flag": flag,
+                        "source_value": source_value,
+                        "target_value": target_value,
+                    }
+                )
+
+    dataset_shape_reissue_verified = True
+    if dataset_shape_reissue_declared != bool(dataset_shape_changes):
+        dataset_shape_reissue_verified = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "dataset_shape_override_changed",
+                "message": (
+                    "dataset shape reissue declaration does not match its change metadata"
+                ),
+            }
+        )
+    if dataset_shape_reissue_declared and not source_values:
+        dataset_shape_reissue_verified = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "source_base_command",
+                "message": "dataset shape reissue cannot verify its source command",
+            }
+        )
+    if source_values and dataset_shape_reissue_declared != bool(
+        dataset_shape_observed_changes
+    ):
+        dataset_shape_reissue_verified = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "dataset_shape_override_changed",
+                "message": (
+                    "dataset shape reissue declaration does not match the source and "
+                    "target commands"
+                ),
+            }
+        )
+    if source_values and dataset_shape_changes != dataset_shape_observed_changes:
+        dataset_shape_reissue_verified = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "dataset_shape_changes",
+                "message": (
+                    "dataset shape change metadata does not exactly match the source "
+                    "and target commands"
+                ),
+            }
+        )
+
+    seen_shape_flags: set[str] = set()
+    for row in dataset_shape_changes:
+        flag = str(row.get("flag") or "")
+        source_value = row.get("source_value")
+        target_value = row.get("target_value")
+        command_value = _command_flag_value(command, flag) if flag else None
+        source_command_value = (
+            _command_flag_value(source_values, flag) if flag and source_values else None
+        )
+        row_ready = bool(
+            flag in _HF_FINETUNE_DATASET_SHAPE_FLAGS
+            and flag not in seen_shape_flags
+            and row in dataset_shape_observed_changes
+        )
+        seen_shape_flags.add(flag)
+        inputs.append(
+            {
+                "field": "dataset_shape_reissue",
+                "flag": flag,
+                "source_value": source_value,
+                "source_command_value": source_command_value,
+                "target_value": target_value,
+                "command_value": command_value,
+                "verified": row_ready,
+            }
+        )
+        if not row_ready:
+            dataset_shape_reissue_verified = False
+
+    dataset_materialization_reissue_expected = any(
+        row.get("flag") in _HF_FINETUNE_DATASET_MATERIALIZATION_SHAPE_FLAGS
+        for row in dataset_shape_observed_changes
+    )
+    tokenized_dataset_reissue_expected = any(
+        row.get("flag") in _HF_FINETUNE_TOKENIZED_DATASET_SHAPE_FLAGS
+        for row in dataset_shape_observed_changes
+    )
+    for field, expected in (
+        (
+            "dataset_materialization_shape_override_changed",
+            dataset_materialization_reissue_expected,
+        ),
+        (
+            "tokenized_dataset_shape_override_changed",
+            tokenized_dataset_reissue_expected,
+        ),
+    ):
+        declared = artifact.get(field)
+        if declared is not None and (declared is True) != expected:
+            dataset_shape_reissue_verified = False
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": field,
+                    "message": (
+                        "identity-specific reissue declaration does not match the "
+                        "source and target commands"
+                    ),
+                }
+            )
+
+    for contract_name, contract, reissue_expected in (
+        (
+            "dataset_materialization_identity_contract",
+            artifact_dataset_materialization_contract,
+            dataset_materialization_reissue_expected,
+        ),
+        (
+            "tokenized_dataset_identity_contract",
+            artifact_tokenized_dataset_contract,
+            tokenized_dataset_reissue_expected,
+        ),
+    ):
+        contract_reissued = bool(
+            isinstance(contract, Mapping) and contract.get("status") == "reissued"
+        )
+        if contract_reissued != reissue_expected:
+            dataset_shape_reissue_verified = False
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": contract_name,
+                    "message": (
+                        "post-selection identity reissue must match the verified "
+                        "dataset shape change"
+                    ),
+                }
+            )
 
     command_expected_runtime_input_id = _command_flag_value(
         command,
@@ -8705,6 +9133,21 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             command_expected_dataset_materialization_id
             or artifact_expected_dataset_materialization_id
         ),
+        "tokenized_dataset_identity_contract": (
+            artifact_tokenized_dataset_contract
+        ),
+        "tokenized_dataset_expected_id": (
+            command_expected_tokenized_dataset_id
+            or artifact_expected_tokenized_dataset_id
+        ),
+        "dataset_shape_reissue_declared": dataset_shape_reissue_declared,
+        "dataset_shape_reissue_verified": dataset_shape_reissue_verified,
+        "dataset_shape_changes": dataset_shape_changes,
+        "dataset_shape_observed_changes": dataset_shape_observed_changes,
+        "dataset_materialization_reissue_expected": (
+            dataset_materialization_reissue_expected
+        ),
+        "tokenized_dataset_reissue_expected": tokenized_dataset_reissue_expected,
         "runtime_input_identity_contract": artifact_runtime_contract,
         "runtime_input_expected_id": (
             command_expected_runtime_input_id
@@ -8754,6 +9197,12 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"module_importable={report.get('command_runtime_module_importable')}"
         )
     ]
+    if report.get("dataset_shape_reissue_declared") is True:
+        lines.append(
+            "hf_gpt2_ft_scale_up_dataset_shape_reissue "
+            f"verified={report.get('dataset_shape_reissue_verified')} "
+            f"changes={len(report.get('dataset_shape_changes') or [])}"
+        )
     if report.get("adapter_continuation_policy") is not None:
         lines.append(
             "hf_gpt2_ft_scale_up_adapter_continuation "
@@ -8801,6 +9250,21 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"{dataset_materialization_contract.get('identity_continuity_matches')} "
             f"rows={dataset_materialization_contract.get('candidate_total_rows')} "
             f"fail_fast={dataset_materialization_contract.get('fail_fast')}"
+        )
+    tokenized_dataset_contract = report.get("tokenized_dataset_identity_contract")
+    if isinstance(tokenized_dataset_contract, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_tokenized_dataset_identity "
+            f"status={tokenized_dataset_contract.get('status')} "
+            f"expected={report.get('tokenized_dataset_expected_id')} "
+            "candidate="
+            f"{tokenized_dataset_contract.get('candidate_observed_identity_id')} "
+            "continuity="
+            f"{tokenized_dataset_contract.get('identity_continuity_matches')} "
+            f"rows={tokenized_dataset_contract.get('candidate_total_rows')} "
+            "input_tokens="
+            f"{tokenized_dataset_contract.get('candidate_total_input_tokens')} "
+            f"fail_fast={tokenized_dataset_contract.get('fail_fast')}"
         )
     runtime_input_contract = report.get("runtime_input_identity_contract")
     if isinstance(runtime_input_contract, Mapping):
@@ -8911,6 +9375,14 @@ def summarize_hf_gpt2_finetune_run_card(
     dataset_materialization_identity_contract = _mapping_item(
         card,
         "dataset_materialization_identity_contract",
+    )
+    tokenized_dataset_identity = _mapping_item(
+        card,
+        "tokenized_dataset_identity",
+    )
+    tokenized_dataset_identity_contract = _mapping_item(
+        card,
+        "tokenized_dataset_identity_contract",
     )
     runtime_input_identity_pre_model = _mapping_item(
         card,
@@ -9138,6 +9610,29 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "dataset_materialization_contract_status": (
             dataset_materialization_identity_contract.get("status")
+        ),
+        "tokenized_dataset_identity_status": tokenized_dataset_identity.get(
+            "status"
+        ),
+        "tokenized_dataset_identity_verified": tokenized_dataset_identity.get(
+            "identity_verified"
+        ),
+        "tokenized_dataset_expected_id": (
+            tokenized_dataset_identity_contract.get("expected_identity_id")
+            if tokenized_dataset_identity_contract
+            else tokenized_dataset_identity.get("expected_identity_id")
+        ),
+        "tokenized_dataset_observed_id": tokenized_dataset_identity.get(
+            "observed_identity_id"
+        ),
+        "tokenized_dataset_total_rows": _safe_number(
+            tokenized_dataset_identity.get("total_rows")
+        ),
+        "tokenized_dataset_total_input_tokens": _safe_number(
+            tokenized_dataset_identity.get("total_input_tokens")
+        ),
+        "tokenized_dataset_contract_status": tokenized_dataset_identity_contract.get(
+            "status"
         ),
         "runtime_input_identity_status": runtime_input_identity.get("status"),
         "runtime_input_identity_verified": runtime_input_identity.get(
@@ -10593,6 +11088,36 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("dataset_materialization_total_rows")
+        ),
+        "scale_up_candidate_tokenized_dataset_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_identity_status")
+        ),
+        "scale_up_candidate_tokenized_dataset_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_identity_verified")
+        ),
+        "scale_up_candidate_tokenized_dataset_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_expected_id")
+        ),
+        "scale_up_candidate_tokenized_dataset_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_observed_id")
+        ),
+        "scale_up_candidate_tokenized_dataset_total_rows": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_total_rows")
+        ),
+        "scale_up_candidate_tokenized_dataset_total_input_tokens": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("tokenized_dataset_total_input_tokens")
         ),
         "scale_up_candidate_runtime_input_identity_status": (
             None

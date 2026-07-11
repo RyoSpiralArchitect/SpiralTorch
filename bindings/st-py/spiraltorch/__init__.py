@@ -920,10 +920,13 @@ from . import hf_dataset_identity as hf_dataset_identity
 from .hf_dataset_identity import (
     HF_DATASET_INPUT_IDENTITY_SCHEMA,
     HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
+    HF_TOKENIZED_DATASET_IDENTITY_SCHEMA,
     hf_dataset_input_identity_lines,
     hf_dataset_input_identity_report,
     hf_dataset_materialization_identity_lines,
     hf_dataset_materialization_identity_report,
+    hf_tokenized_dataset_identity_lines,
+    hf_tokenized_dataset_identity_report,
 )
 
 from . import hf_execution_identity as hf_execution_identity
@@ -1310,6 +1313,7 @@ _EXTRAS = [
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_DATASET_INPUT_IDENTITY_SCHEMA",
     "HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA",
+    "HF_TOKENIZED_DATASET_IDENTITY_SCHEMA",
     "HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA",
@@ -1405,6 +1409,8 @@ _EXTRAS = [
     "hf_dataset_input_identity_report",
     "hf_dataset_materialization_identity_lines",
     "hf_dataset_materialization_identity_report",
+    "hf_tokenized_dataset_identity_lines",
+    "hf_tokenized_dataset_identity_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",

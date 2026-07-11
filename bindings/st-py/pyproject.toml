@@ -32,6 +32,11 @@ python-packages = ["spiral", "spiraltorch"]
 include = [
   { path = "examples/*.py", format = ["sdist", "wheel"] },
 ]
+exclude = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/*.pyo",
+]
 
 [project.scripts]
 spiral-train = "spiral.cli:main"

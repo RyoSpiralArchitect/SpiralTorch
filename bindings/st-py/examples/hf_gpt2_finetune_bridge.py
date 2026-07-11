@@ -41,10 +41,13 @@ from spiraltorch.hf_execution_identity import (
 from spiraltorch.hf_dataset_identity import (
     HF_DATASET_INPUT_IDENTITY_SCHEMA,
     HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
+    HF_TOKENIZED_DATASET_IDENTITY_SCHEMA,
     hf_dataset_input_identity_lines,
     hf_dataset_input_identity_report,
     hf_dataset_materialization_identity_lines,
     hf_dataset_materialization_identity_report,
+    hf_tokenized_dataset_identity_lines,
+    hf_tokenized_dataset_identity_report,
 )
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
@@ -187,6 +190,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Fail after dataset selection and before tokenization unless every "
             "selected train/eval text row matches this sha256 identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-tokenized-dataset-id",
+        default=None,
+        help=(
+            "Fail after tokenization and before model preparation unless every "
+            "training/eval block and column matches this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -412,6 +423,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--metadata-only",
         action="store_true",
         help="Load model/tokenizer/dataset metadata but do not run Trainer.train().",
+    )
+    parser.add_argument(
+        "--tokenize-only",
+        action="store_true",
+        help=(
+            "Load and tokenize the selected dataset, verify exact Trainer-input "
+            "identity, then stop before model preparation or Trainer construction."
+        ),
     )
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
@@ -667,6 +686,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--expected-dataset-materialization-id must be "
             "sha256:<64 lowercase hex>"
         )
+    if not _valid_adapter_id(args.expected_tokenized_dataset_id):
+        parser.error(
+            "--expected-tokenized-dataset-id must be sha256:<64 lowercase hex>"
+        )
     if not _valid_adapter_id(args.expected_runtime_input_id):
         parser.error("--expected-runtime-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_execution_input_id):
@@ -889,16 +912,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     if args.generation_from_inference_distortion and not args.generation_prompt:
         parser.error("--generation-from-inference-distortion requires --generation-prompt")
-    if args.metadata_only and args.train:
-        parser.error("--metadata-only and --train are mutually exclusive")
+    if sum(bool(value) for value in (args.train, args.metadata_only, args.tokenize_only)) > 1:
+        parser.error(
+            "--train, --metadata-only, and --tokenize-only are mutually exclusive"
+        )
     if (
         args.expected_dataset_materialization_id is not None
         and not args.train
         and not args.metadata_only
+        and not args.tokenize_only
     ):
         parser.error(
             "--expected-dataset-materialization-id requires --train or "
-            "--metadata-only"
+            "--metadata-only or --tokenize-only"
+        )
+    if (
+        args.expected_tokenized_dataset_id is not None
+        and not args.train
+        and not args.tokenize_only
+    ):
+        parser.error(
+            "--expected-tokenized-dataset-id requires --train or --tokenize-only"
         )
     if args.validation_file and not args.train_file:
         parser.error("--validation-file requires --train-file")
@@ -1393,6 +1427,7 @@ def _requires_remote_dataset_identity(args: argparse.Namespace) -> bool:
         and (
             args.train
             or args.metadata_only
+            or args.tokenize_only
             or args.expected_dataset_input_id is not None
         )
     )
@@ -1402,7 +1437,16 @@ def _requires_dataset_materialization_identity(args: argparse.Namespace) -> bool
     return bool(
         args.train
         or args.metadata_only
+        or args.tokenize_only
         or args.expected_dataset_materialization_id is not None
+    )
+
+
+def _requires_tokenized_dataset_identity(args: argparse.Namespace) -> bool:
+    return bool(
+        args.train
+        or args.tokenize_only
+        or args.expected_tokenized_dataset_id is not None
     )
 
 
@@ -2708,6 +2752,40 @@ def _dataset_materialization_identity_report(
         }
 
 
+def _tokenized_dataset_identity_report(
+    args: argparse.Namespace,
+    train_dataset: Any,
+    eval_dataset: Any | None,
+    *,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_tokenized_dataset_id", None)
+    )
+    try:
+        return hf_tokenized_dataset_identity_report(
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            expected_identity_id=expected_id,
+            phase="after_tokenization",
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_tokenized_dataset_identity",
+            "schema": HF_TOKENIZED_DATASET_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": "after_tokenization",
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "tokenized_rows_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
 def _canonicalize_dataset_input_launch_command(
     args: argparse.Namespace,
     report: Mapping[str, object],
@@ -2759,6 +2837,26 @@ def _canonicalize_dataset_materialization_launch_command(
             ["--expected-dataset-materialization-id", str(observed_id)]
         )
         args._hf_finetune_launch_command = command
+
+
+def _canonicalize_tokenized_dataset_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if (
+        command
+        and report.get("status") == "ready"
+        and observed_id is not None
+        and not _argv_has_option(command, "--expected-tokenized-dataset-id")
+    ):
+        command.extend(["--expected-tokenized-dataset-id", str(observed_id)])
+    if getattr(args, "tokenize_only", False):
+        command = [item for item in command if item != "--tokenize-only"]
+        if "--train" not in command:
+            command.append("--train")
+    args._hf_finetune_launch_command = command
 
 
 def _canonicalize_training_input_launch_command(
@@ -2909,6 +3007,9 @@ def _finetune_start_report(
     dataset_materialization_identity = dict(
         getattr(args, "_hf_dataset_materialization_identity_report", {}) or {}
     )
+    tokenized_dataset_identity = dict(
+        getattr(args, "_hf_tokenized_dataset_identity_report", {}) or {}
+    )
     runtime_input_identity = dict(
         getattr(args, "_hf_runtime_input_identity_report", {}) or {}
     )
@@ -2972,6 +3073,12 @@ def _finetune_start_report(
             None
             if not dataset_materialization_identity
             else dataset_materialization_identity.get("identity_verified") is True
+        ),
+        "tokenized_dataset_identity": tokenized_dataset_identity or None,
+        "tokenized_dataset_identity_verified": (
+            None
+            if not tokenized_dataset_identity
+            else tokenized_dataset_identity.get("identity_verified") is True
         ),
         "runtime_input_identity": runtime_input_identity or None,
         "runtime_input_identity_verified": (
@@ -3175,6 +3282,19 @@ def _base_run_card(
             "fail_fast": _requires_dataset_materialization_identity(args),
             "verification_phase": "after_selection",
         },
+        "tokenized_dataset_identity": None,
+        "tokenized_dataset_identity_contract": {
+            "status": (
+                "pending"
+                if _requires_tokenized_dataset_identity(args)
+                else "not_requested"
+            ),
+            "expected_identity_id": args.expected_tokenized_dataset_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "fail_fast": _requires_tokenized_dataset_identity(args),
+            "verification_phase": "after_tokenization",
+        },
         "model_runtime_identity_pre_model": None,
         "model_runtime_identity_after_model": None,
         "model_runtime_identity_contract": {
@@ -3285,8 +3405,11 @@ def _base_run_card(
         "zspace_probe": None,
         "train_requested": bool(args.train),
         "metadata_only": bool(args.metadata_only),
+        "tokenize_only": bool(args.tokenize_only),
         "trainer_trace_jsonl": (
-            None if args.metadata_only else str(_trainer_trace_path(args))
+            None
+            if args.metadata_only or args.tokenize_only
+            else str(_trainer_trace_path(args))
         ),
         "trainer_telemetry_requested": bool(args.trainer_telemetry),
         "trainer_telemetry_enabled": _trainer_telemetry_enabled(
@@ -3499,6 +3622,19 @@ def _main_with_runtime_access(
         "fail_fast": _requires_dataset_materialization_identity(args),
         "verification_phase": "after_selection",
     }
+    preflight["tokenized_dataset_identity"] = None
+    preflight["tokenized_dataset_identity_contract"] = {
+        "status": (
+            "pending"
+            if _requires_tokenized_dataset_identity(args)
+            else "not_requested"
+        ),
+        "expected_identity_id": args.expected_tokenized_dataset_id,
+        "observed_identity_id": None,
+        "identity_verified": False,
+        "fail_fast": _requires_tokenized_dataset_identity(args),
+        "verification_phase": "after_tokenization",
+    }
     preflight["model_runtime_identity_contract"] = {
         "status": (
             "enforced" if args.expected_runtime_input_id is not None else "observe"
@@ -3678,7 +3814,7 @@ def _main_with_runtime_access(
     if preflight["disk_report"].get("status") != "ok":
         _write_card(preflight, args)
         return 1
-    if not args.train and not args.metadata_only:
+    if not args.train and not args.metadata_only and not args.tokenize_only:
         _write_card(preflight, args)
         return 0
 
@@ -4182,6 +4318,8 @@ def _main_with_runtime_access(
         tokenized_eval_rows=tokenized_eval_rows,
         block_size=args.block_size,
     )
+    if dataset_fit_report["eval_dropped_empty"] is True:
+        eval_dataset = None
     card.update(
         {
             "tokenized_train_rows": tokenized_train_rows,
@@ -4192,6 +4330,64 @@ def _main_with_runtime_access(
             "dataset_fit_report": dataset_fit_report,
         }
     )
+    tokenized_dataset_identity = _tokenized_dataset_identity_report(
+        args,
+        train_dataset,
+        eval_dataset,
+    )
+    args._hf_tokenized_dataset_identity_report = tokenized_dataset_identity
+    _canonicalize_tokenized_dataset_launch_command(
+        args,
+        tokenized_dataset_identity,
+    )
+    _refresh_card_launch_command(card, args)
+    card["tokenized_dataset_identity"] = dict(tokenized_dataset_identity)
+    card["tokenized_dataset_identity_contract"] = {
+        "status": (
+            "blocked"
+            if tokenized_dataset_identity.get("status") != "ready"
+            else "enforced"
+            if args.expected_tokenized_dataset_id is not None
+            else "adopted"
+        ),
+        "expected_identity_id": (
+            args.expected_tokenized_dataset_id
+            or tokenized_dataset_identity.get("observed_identity_id")
+        ),
+        "observed_identity_id": tokenized_dataset_identity.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": tokenized_dataset_identity.get("identity_verified"),
+        "total_rows": tokenized_dataset_identity.get("total_rows"),
+        "total_input_tokens": tokenized_dataset_identity.get("total_input_tokens"),
+        "fail_fast": True,
+        "verification_phase": "after_tokenization",
+    }
+    nested_preflight = card.get("preflight")
+    if isinstance(nested_preflight, dict):
+        nested_preflight["tokenized_dataset_identity"] = dict(
+            tokenized_dataset_identity
+        )
+        nested_preflight["tokenized_dataset_identity_contract"] = dict(
+            card["tokenized_dataset_identity_contract"]
+        )
+    card["finetune_start_report"] = _finetune_start_report(
+        args,
+        model_artifact_load_report,
+    )
+    for line in hf_tokenized_dataset_identity_lines(tokenized_dataset_identity):
+        print(line)
+    if tokenized_dataset_identity.get("status") != "ready":
+        card.update(
+            {
+                "failure_stage": "tokenized_dataset_identity_after_tokenization",
+                "failure_error": (
+                    "tokenized training blocks do not match the required identity"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
     if dataset_fit_report["train_ready"] is not True:
         card.update(
             {
@@ -4204,9 +4400,9 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
-    if dataset_fit_report["eval_dropped_empty"] is True:
-        eval_dataset = None
-        card["tokenized_eval_rows"] = tokenized_eval_rows
+    if args.tokenize_only:
+        _write_card(card, args)
+        return 0
     try:
         model, model_prepare_report = prepare_hf_finetune_model(
             model,
