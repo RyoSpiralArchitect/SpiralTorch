@@ -25,6 +25,9 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 import spiraltorch as st
 from spiraltorch.hf_adapter import (
+    HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+    hf_adapter_input_identity_lines,
+    hf_adapter_input_identity_report,
     hf_adapter_lineage_lines,
     hf_adapter_promotion_lines,
     write_hf_adapter_lineage,
@@ -78,6 +81,18 @@ HF_OFFLINE_ENV_VARS = (
 HF_ADAPTER_ARTIFACT_PROBE_FILENAME = "spiraltorch-hf-artifact-probe.json"
 
 
+def _valid_adapter_id(value: object | None) -> bool:
+    if value is None:
+        return True
+    adapter_id = str(value).strip()
+    digest = adapter_id.removeprefix("sha256:")
+    return bool(
+        adapter_id.startswith("sha256:")
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+    )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -109,6 +124,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "detects local adapter_config.json artifacts; remote adapters must "
             "use peft-adapter."
         ),
+    )
+    parser.add_argument(
+        "--expected-parent-adapter-id",
+        default=None,
+        help=(
+            "Fail before model loading unless a local PEFT continuation input "
+            "matches this sha256 adapter identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-parent-lineage-depth",
+        type=int,
+        default=None,
+        help="Expected lineage depth recorded by the continuation input manifest.",
+    )
+    parser.add_argument(
+        "--expected-root-adapter-id",
+        default=None,
+        help="Expected sha256 root identity for the continuation input lineage.",
     )
     parser.add_argument(
         "--tokenizer-name",
@@ -558,6 +592,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     if args.model_artifact_kind == "peft-adapter" and args.finetune_mode != "lora":
         parser.error("--model-artifact-kind peft-adapter requires --finetune-mode lora")
+    if not _valid_adapter_id(args.expected_parent_adapter_id):
+        parser.error("--expected-parent-adapter-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_root_adapter_id):
+        parser.error("--expected-root-adapter-id must be sha256:<64 lowercase hex>")
+    if (
+        args.expected_parent_lineage_depth is not None
+        and args.expected_parent_lineage_depth < 0
+    ):
+        parser.error("--expected-parent-lineage-depth must be non-negative")
+    if (
+        args.expected_parent_adapter_id is None
+        and (
+            args.expected_parent_lineage_depth is not None
+            or args.expected_root_adapter_id is not None
+        )
+    ):
+        parser.error(
+            "--expected-parent-lineage-depth/--expected-root-adapter-id require "
+            "--expected-parent-adapter-id"
+        )
+    if args.expected_parent_adapter_id is not None and args.finetune_mode != "lora":
+        parser.error("--expected-parent-adapter-id requires --finetune-mode lora")
     if not math.isfinite(args.adapter_promotion_max_eval_loss_regression):
         parser.error("--adapter-promotion-max-eval-loss-regression must be finite")
     if args.adapter_promotion_gate:
@@ -793,6 +849,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         *raw_argv,
     ]
     args._hf_finetune_launch_command_source = "hf_gpt2_finetune_bridge"
+    args._hf_finetune_launch_cwd = str(Path.cwd().resolve())
     return args
 
 
@@ -2357,12 +2414,74 @@ def _model_artifact_report(args: argparse.Namespace) -> dict[str, object]:
     )
 
 
+def _adapter_input_identity_report(
+    args: argparse.Namespace,
+    artifact_report: Mapping[str, object],
+    *,
+    phase: str,
+) -> dict[str, object] | None:
+    expected_id = getattr(args, "expected_parent_adapter_id", None)
+    expected_depth = getattr(args, "expected_parent_lineage_depth", None)
+    expected_root_id = getattr(args, "expected_root_adapter_id", None)
+    expected = expected_id is not None
+    if artifact_report.get("artifact_kind") != "peft_adapter":
+        if not expected:
+            return None
+        return {
+            "row_type": "hf_adapter_input_identity",
+            "schema": HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": phase,
+            "expected_adapter_id": expected_id,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": ["expected parent identity requires a PEFT adapter input"],
+        }
+    adapter_path = artifact_report.get("artifact_local_path")
+    if adapter_path is None:
+        if not expected:
+            return None
+        return {
+            "row_type": "hf_adapter_input_identity",
+            "schema": HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": phase,
+            "expected_adapter_id": expected_id,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": ["expected parent identity requires a local adapter input"],
+        }
+    try:
+        return hf_adapter_input_identity_report(
+            str(adapter_path),
+            expected_adapter_id=expected_id,
+            expected_lineage_depth=expected_depth,
+            expected_root_adapter_id=expected_root_id,
+            require_lineage=expected,
+            phase=phase,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "row_type": "hf_adapter_input_identity",
+            "schema": HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": phase,
+            "expected_adapter_id": expected_id,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
 def _finetune_start_report(
     args: argparse.Namespace,
     artifact_report: Mapping[str, object],
 ) -> dict[str, object]:
     resume_report = dict(
         getattr(args, "_hf_checkpoint_resume_report", {}) or {}
+    )
+    input_identity = dict(
+        getattr(args, "_hf_adapter_input_identity_report", {}) or {}
     )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
@@ -2388,6 +2507,17 @@ def _finetune_start_report(
         "adapter_preloaded": adapter_preloaded,
         "adapter_weights_source": (
             artifact_report.get("artifact_source") if adapter_preloaded else None
+        ),
+        "adapter_input_identity": input_identity or None,
+        "expected_parent_adapter_id": getattr(
+            args,
+            "expected_parent_adapter_id",
+            None,
+        ),
+        "parent_adapter_identity_verified": (
+            None
+            if not input_identity
+            else input_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -2500,6 +2630,7 @@ def _base_run_card(
             "_hf_finetune_launch_command_source",
             None,
         ),
+        "launch_cwd": getattr(args, "_hf_finetune_launch_cwd", None),
         "preflight": preflight,
         "disk_report": dict(preflight.get("disk_report") or {}),
         "disk_headroom_plan": dict(preflight.get("disk_headroom_plan") or {}),
@@ -2533,6 +2664,11 @@ def _base_run_card(
         ),
         "model_artifact_load_report": None,
         "finetune_start_report": _finetune_start_report(args, artifact_report),
+        "adapter_input_identity": (
+            dict(getattr(args, "_hf_adapter_input_identity_report", {}) or {})
+            or None
+        ),
+        "adapter_input_identity_after_load": None,
         "adapter_lineage": None,
         "adapter_promotion": None,
         "tokenizer_save_report": None,
@@ -2714,6 +2850,12 @@ def _main_with_runtime_access(
 ) -> int:
     model_artifact_report = _model_artifact_report(args)
     args._hf_causal_lm_artifact_report = model_artifact_report
+    adapter_input_identity = _adapter_input_identity_report(
+        args,
+        model_artifact_report,
+        phase="preflight",
+    )
+    args._hf_adapter_input_identity_report = adapter_input_identity
     checkpoint_resume_report = (
         None
         if args.resume_from_checkpoint is None
@@ -2769,6 +2911,11 @@ def _main_with_runtime_access(
     preflight["model_artifact_report"] = dict(model_artifact_report)
     preflight["model_artifact_summary"] = summarize_hf_causal_lm_artifact(
         model_artifact_report
+    )
+    preflight["adapter_input_identity"] = (
+        None
+        if adapter_input_identity is None
+        else dict(adapter_input_identity)
     )
     model_artifact_compatible = not (
         model_artifact_report.get("artifact_kind") == "peft_adapter"
@@ -2843,6 +2990,7 @@ def _main_with_runtime_access(
         "_hf_finetune_launch_command_source",
         None,
     )
+    preflight["launch_cwd"] = getattr(args, "_hf_finetune_launch_cwd", None)
     preflight["dataset_revision"] = args.dataset_revision
     preflight["dataset_streaming"] = bool(args.dataset_streaming)
     preflight["streaming_shuffle_buffer_size"] = args.streaming_shuffle_buffer_size
@@ -2868,6 +3016,9 @@ def _main_with_runtime_access(
             print(line)
     for line in hf_causal_lm_artifact_lines(model_artifact_report):
         print(line)
+    if adapter_input_identity is not None:
+        for line in hf_adapter_input_identity_lines(adapter_input_identity):
+            print(line)
     if checkpoint_resume_report is not None:
         for line in hf_gpt2_finetune_checkpoint_resume_lines(
             checkpoint_resume_report
@@ -2879,6 +3030,10 @@ def _main_with_runtime_access(
         model_artifact_report.get("status") != "ready"
         or not model_artifact_compatible
         or adapter_output_collision
+        or (
+            adapter_input_identity is not None
+            and adapter_input_identity.get("status") != "ready"
+        )
     ):
         if not model_artifact_compatible:
             preflight["model_artifact_error"] = (
@@ -2894,6 +3049,13 @@ def _main_with_runtime_access(
                     "run_card_skipped adapter input and run-card output overlap"
                 )
                 return 1
+        if (
+            adapter_input_identity is not None
+            and adapter_input_identity.get("status") != "ready"
+        ):
+            preflight["model_artifact_error"] = (
+                "adapter continuation input identity verification failed"
+            )
         _write_card(preflight, args)
         return 1
     if (
@@ -2947,6 +3109,16 @@ def _main_with_runtime_access(
         card["model_artifact_kind"] = model_artifact_load_report.get(
             "artifact_kind"
         )
+        adapter_input_identity_after_load = _adapter_input_identity_report(
+            args,
+            model_artifact_load_report,
+            phase="after_load",
+        )
+        card["adapter_input_identity_after_load"] = (
+            None
+            if adapter_input_identity_after_load is None
+            else dict(adapter_input_identity_after_load)
+        )
         card["tokenizer_name"] = model_artifact_load_report.get(
             "resolved_tokenizer_source"
         )
@@ -2961,6 +3133,21 @@ def _main_with_runtime_access(
                 "load_status": "error",
                 "failure_stage": "model_tokenizer_load",
                 "failure_error": f"{exc.__class__.__name__}: {exc}",
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if (
+        adapter_input_identity_after_load is not None
+        and adapter_input_identity_after_load.get("status") != "ready"
+    ):
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "adapter_input_identity_after_load",
+                "failure_error": (
+                    "adapter continuation input identity changed during model load"
+                ),
             }
         )
         _write_card(card, args)
