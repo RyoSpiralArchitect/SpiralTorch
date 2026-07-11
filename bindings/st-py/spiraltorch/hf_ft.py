@@ -5944,6 +5944,7 @@ _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG = (
 _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG = (
     "--expected-training-recipe-id"
 )
+_HF_FINETUNE_EXPECTED_REPLAY_ID_FLAG = "--expected-finetune-replay-id"
 _HF_FINETUNE_DATASET_SHAPE_FLAGS = (
     "--max-train-samples",
     "--max-eval-samples",
@@ -6677,6 +6678,18 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_training_recipe_observed_id": candidate.get(
             "training_recipe_observed_id"
         ),
+        "scale_up_candidate_finetune_replay_identity_status": candidate.get(
+            "finetune_replay_identity_status"
+        ),
+        "scale_up_candidate_finetune_replay_identity_verified": candidate.get(
+            "finetune_replay_identity_verified"
+        ),
+        "scale_up_candidate_finetune_replay_expected_id": candidate.get(
+            "finetune_replay_expected_id"
+        ),
+        "scale_up_candidate_finetune_replay_observed_id": candidate.get(
+            "finetune_replay_observed_id"
+        ),
         "scale_up_candidate_runtime_input_identity_status": candidate.get(
             "runtime_input_identity_status"
         ),
@@ -6981,15 +6994,30 @@ def hf_gpt2_finetune_scale_up_command(
         base_command,
         _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,
     )
+    source_expected_finetune_replay_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_REPLAY_ID_FLAG,
+    )
     base_command = _command_without_value_flags(
         base_command,
-        (_HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,),
+        (
+            _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,
+            _HF_FINETUNE_EXPECTED_REPLAY_ID_FLAG,
+        ),
     )
     training_recipe_identity_contract = {
         "status": "reissued",
         "source_expected_identity_id": source_expected_training_recipe_id,
         "expected_identity_id": None,
         "reason": "intentional_scale_up_recipe_change",
+        "fail_fast": False,
+        "verification_phase": "before_trainer_init",
+    }
+    finetune_replay_identity_contract = {
+        "status": "reissued",
+        "source_expected_identity_id": source_expected_finetune_replay_id,
+        "expected_identity_id": None,
+        "reason": "intentional_scale_up_run_change",
         "fail_fast": False,
         "verification_phase": "before_trainer_init",
     }
@@ -7734,6 +7762,18 @@ def hf_gpt2_finetune_scale_up_command(
         "scale_up_candidate_training_recipe_observed_id": summary.get(
             "scale_up_candidate_training_recipe_observed_id"
         ),
+        "scale_up_candidate_finetune_replay_identity_status": summary.get(
+            "scale_up_candidate_finetune_replay_identity_status"
+        ),
+        "scale_up_candidate_finetune_replay_identity_verified": summary.get(
+            "scale_up_candidate_finetune_replay_identity_verified"
+        ),
+        "scale_up_candidate_finetune_replay_expected_id": summary.get(
+            "scale_up_candidate_finetune_replay_expected_id"
+        ),
+        "scale_up_candidate_finetune_replay_observed_id": summary.get(
+            "scale_up_candidate_finetune_replay_observed_id"
+        ),
         "adapter_promotion_required": summary.get("adapter_promotion_required"),
         "scale_up_candidate_adapter_promotion_status": summary.get(
             "scale_up_candidate_adapter_promotion_status"
@@ -7896,6 +7936,14 @@ def hf_gpt2_finetune_scale_up_command(
             source_expected_training_recipe_id
         ),
         "training_recipe_expected_id": None,
+        "finetune_replay_identity_contract": finetune_replay_identity_contract,
+        "finetune_replay_identity_contract_status": (
+            finetune_replay_identity_contract.get("status")
+        ),
+        "finetune_replay_source_expected_id": (
+            source_expected_finetune_replay_id
+        ),
+        "finetune_replay_expected_id": None,
         "command_runtime": command_runtime,
         "command_runtime_status": command_runtime.get("status"),
         "command_path_resolution": command_path_resolution,
@@ -8204,6 +8252,51 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 else None
             ),
             "verified": command_expected_training_recipe_id is None,
+        }
+    )
+    command_expected_finetune_replay_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_REPLAY_ID_FLAG,
+    )
+    artifact_finetune_replay_contract = artifact.get(
+        "finetune_replay_identity_contract"
+    )
+    if command_expected_finetune_replay_id is not None:
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_REPLAY_ID_FLAG,
+                "path": command_expected_finetune_replay_id,
+                "message": (
+                    "scale-up must recompute its complete fine-tune replay "
+                    "identity instead of inheriting the source run identity"
+                ),
+            }
+        )
+    if (
+        isinstance(artifact_finetune_replay_contract, Mapping)
+        and artifact_finetune_replay_contract.get("status") != "reissued"
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "finetune_replay_identity_contract",
+                "message": "scale-up fine-tune replay identity must be reissued",
+            }
+        )
+    inputs.append(
+        {
+            "field": "finetune_replay_identity_reissue",
+            "source_expected_identity_id": artifact.get(
+                "finetune_replay_source_expected_id"
+            ),
+            "command_expected_identity_id": command_expected_finetune_replay_id,
+            "status": (
+                artifact_finetune_replay_contract.get("status")
+                if isinstance(artifact_finetune_replay_contract, Mapping)
+                else None
+            ),
+            "verified": command_expected_finetune_replay_id is None,
         }
     )
     command_expected_training_input_id = _command_flag_value(
@@ -9259,6 +9352,11 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "training_recipe_source_expected_id"
         ),
         "training_recipe_expected_id": command_expected_training_recipe_id,
+        "finetune_replay_identity_contract": artifact_finetune_replay_contract,
+        "finetune_replay_source_expected_id": artifact.get(
+            "finetune_replay_source_expected_id"
+        ),
+        "finetune_replay_expected_id": command_expected_finetune_replay_id,
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
         ),
@@ -9376,6 +9474,16 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"expected={report.get('training_recipe_expected_id')} "
             f"reason={training_recipe_contract.get('reason')} "
             f"fail_fast={training_recipe_contract.get('fail_fast')}"
+        )
+    finetune_replay_contract = report.get("finetune_replay_identity_contract")
+    if isinstance(finetune_replay_contract, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_finetune_replay_identity "
+            f"status={finetune_replay_contract.get('status')} "
+            f"source={report.get('finetune_replay_source_expected_id')} "
+            f"expected={report.get('finetune_replay_expected_id')} "
+            f"reason={finetune_replay_contract.get('reason')} "
+            f"fail_fast={finetune_replay_contract.get('fail_fast')}"
         )
     runtime_input_contract = report.get("runtime_input_identity_contract")
     if isinstance(runtime_input_contract, Mapping):
@@ -9502,6 +9610,14 @@ def summarize_hf_gpt2_finetune_run_card(
     training_recipe_identity_contract = _mapping_item(
         card,
         "training_recipe_identity_contract",
+    )
+    finetune_replay_identity = _mapping_item(
+        card,
+        "finetune_replay_identity",
+    )
+    finetune_replay_identity_contract = _mapping_item(
+        card,
+        "finetune_replay_identity_contract",
     )
     runtime_input_identity_pre_model = _mapping_item(
         card,
@@ -9769,6 +9885,32 @@ def summarize_hf_gpt2_finetune_run_card(
             training_recipe_identity.get("training_argument_count")
         ),
         "training_recipe_contract_status": training_recipe_identity_contract.get(
+            "status"
+        ),
+        "finetune_replay_identity_status": finetune_replay_identity.get(
+            "status"
+        ),
+        "finetune_replay_identity_verified": finetune_replay_identity.get(
+            "identity_verified"
+        ),
+        "finetune_replay_expected_id": (
+            finetune_replay_identity_contract.get("expected_identity_id")
+            if finetune_replay_identity_contract
+            else finetune_replay_identity.get("expected_identity_id")
+        ),
+        "finetune_replay_observed_id": finetune_replay_identity.get(
+            "observed_identity_id"
+        ),
+        "finetune_replay_component_count": _safe_number(
+            finetune_replay_identity.get("component_count")
+        ),
+        "finetune_replay_applicable_component_count": _safe_number(
+            finetune_replay_identity.get("applicable_component_count")
+        ),
+        "finetune_replay_ready_component_count": _safe_number(
+            finetune_replay_identity.get("ready_component_count")
+        ),
+        "finetune_replay_contract_status": finetune_replay_identity_contract.get(
             "status"
         ),
         "runtime_input_identity_status": runtime_input_identity.get("status"),
@@ -11275,6 +11417,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("training_recipe_observed_id")
+        ),
+        "scale_up_candidate_finetune_replay_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("finetune_replay_identity_status")
+        ),
+        "scale_up_candidate_finetune_replay_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("finetune_replay_identity_verified")
+        ),
+        "scale_up_candidate_finetune_replay_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("finetune_replay_expected_id")
+        ),
+        "scale_up_candidate_finetune_replay_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("finetune_replay_observed_id")
         ),
         "scale_up_candidate_runtime_input_identity_status": (
             None

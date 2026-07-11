@@ -943,6 +943,13 @@ from .hf_training_identity import (
     hf_finetune_training_recipe_identity_report,
 )
 
+from . import hf_replay_identity as hf_replay_identity
+from .hf_replay_identity import (
+    HF_FINETUNE_REPLAY_IDENTITY_SCHEMA,
+    hf_finetune_replay_identity_lines,
+    hf_finetune_replay_identity_report,
+)
+
 from . import hf_input_identity as hf_input_identity
 from .hf_input_identity import (
     HF_FINETUNE_INPUT_IDENTITY_SCHEMA,
@@ -1323,6 +1330,7 @@ _EXTRAS = [
     "HF_TOKENIZED_DATASET_IDENTITY_SCHEMA",
     "HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA",
     "HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA",
+    "HF_FINETUNE_REPLAY_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA",
     "HF_ADAPTER_LINEAGE_FILENAME",
@@ -1382,6 +1390,7 @@ _EXTRAS = [
     "hf_input_identity",
     "hf_execution_identity",
     "hf_training_identity",
+    "hf_replay_identity",
     "hf_runtime_identity",
     "hf_dataset_identity",
     "hf_adapter_continuation_executor_launch_lines",
@@ -1422,6 +1431,8 @@ _EXTRAS = [
     "hf_tokenized_dataset_identity_report",
     "hf_finetune_training_recipe_identity_lines",
     "hf_finetune_training_recipe_identity_report",
+    "hf_finetune_replay_identity_lines",
+    "hf_finetune_replay_identity_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",

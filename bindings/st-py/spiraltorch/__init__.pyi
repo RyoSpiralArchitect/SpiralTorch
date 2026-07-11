@@ -14,6 +14,7 @@ hf_peft: ModuleType
 hf_input_identity: ModuleType
 hf_execution_identity: ModuleType
 hf_training_identity: ModuleType
+hf_replay_identity: ModuleType
 hf_runtime_identity: ModuleType
 hf_dataset_identity: ModuleType
 hf_adapter: ModuleType
@@ -571,6 +572,7 @@ HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA: str
 HF_TOKENIZED_DATASET_IDENTITY_SCHEMA: str
 HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA: str
 HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA: str
+HF_FINETUNE_REPLAY_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA: str
 HF_ADAPTER_LINEAGE_FILENAME: str
@@ -724,6 +726,23 @@ def hf_finetune_training_recipe_identity_report(
     phase: str = ...,
 ) -> Dict[str, object]: ...
 def hf_finetune_training_recipe_identity_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+def hf_finetune_replay_identity_report(
+    *,
+    adapter_input_identity: Mapping[str, object] | None = ...,
+    adapter_input_required: bool = ...,
+    training_input_identity: Mapping[str, object] | None,
+    dataset_input_identity: Mapping[str, object] | None,
+    dataset_materialization_identity: Mapping[str, object] | None,
+    tokenized_dataset_identity: Mapping[str, object] | None,
+    model_runtime_identity: Mapping[str, object] | None,
+    execution_identity: Mapping[str, object] | None,
+    training_recipe_identity: Mapping[str, object] | None,
+    expected_identity_id: str | None = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_finetune_replay_identity_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
 def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
