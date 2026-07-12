@@ -9,9 +9,9 @@ use pyo3::exceptions::PyValueError;
 
 #[cfg(feature = "text")]
 use crate::{
-    psi_synchro::PyZPulse,
     scale_stack::PyScaleStack,
     tensor::{tensor_err_to_py, PyTensor},
+    zpulse::PyZPulse,
 };
 
 #[cfg(feature = "text")]

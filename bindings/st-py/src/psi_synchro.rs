@@ -5,12 +5,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::{wrap_pyfunction, Bound};
 
+use crate::zpulse::PyZPulse;
 use st_core::telemetry::atlas::{AtlasFragment, ConceptSense};
 use st_core::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
 use st_core::telemetry::maintainer::MaintainerStatus;
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::PsiReading;
-use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 #[cfg(feature = "golden")]
 use st_nn::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective};
 #[cfg(feature = "psi")]
@@ -41,26 +41,6 @@ fn vec3_or_default(values: Option<Vec<f64>>, default: [f64; 3], name: &str) -> P
 
 fn array_to_tuple(values: [f64; 3]) -> (f64, f64, f64) {
     (values[0], values[1], values[2])
-}
-
-fn zsource_to_str(source: ZSource) -> &'static str {
-    match source {
-        ZSource::Microlocal => "microlocal",
-        ZSource::Maxwell => "maxwell",
-        ZSource::Graph => "graph",
-        ZSource::Desire => "desire",
-        ZSource::GW => "gw",
-        ZSource::RealGrad => "realgrad",
-        ZSource::Other(tag) => tag,
-    }
-}
-
-fn support_to_tuple(support: ZSupport) -> (f32, f32, f32) {
-    (support.leading, support.central, support.trailing)
-}
-
-fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
-    scale.map(|s| (s.physical_radius, s.log_radius))
 }
 
 fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
@@ -918,81 +898,6 @@ impl PyHeatmapResult {
 
     pub fn to_zpulse(&self, ts: u64) -> PyZPulse {
         PyZPulse::from_pulse(self.inner.to_zpulse(ts))
-    }
-}
-
-#[pyclass(module = "spiraltorch.psi", name = "ZPulseSnapshot")]
-#[derive(Clone)]
-pub(crate) struct PyZPulse {
-    inner: ZPulse,
-}
-
-impl PyZPulse {
-    pub(crate) fn from_pulse(inner: ZPulse) -> Self {
-        Self { inner }
-    }
-}
-
-#[pymethods]
-impl PyZPulse {
-    #[getter]
-    pub fn source(&self) -> &'static str {
-        zsource_to_str(self.inner.source)
-    }
-
-    #[getter]
-    pub fn ts(&self) -> u64 {
-        self.inner.ts
-    }
-
-    #[getter]
-    pub fn tempo(&self) -> f32 {
-        self.inner.tempo
-    }
-
-    #[getter]
-    pub fn band_energy(&self) -> (f32, f32, f32) {
-        self.inner.band_energy
-    }
-
-    #[getter]
-    pub fn drift(&self) -> f32 {
-        self.inner.drift
-    }
-
-    #[getter]
-    pub fn z_bias(&self) -> f32 {
-        self.inner.z_bias
-    }
-
-    #[getter]
-    pub fn density_fluctuation(&self) -> f32 {
-        self.inner.density_fluctuation
-    }
-
-    #[getter]
-    pub fn support(&self) -> (f32, f32, f32) {
-        support_to_tuple(self.inner.support)
-    }
-
-    #[getter]
-    pub fn scale(&self) -> Option<(f32, f32)> {
-        scale_to_tuple(self.inner.scale)
-    }
-
-    #[getter]
-    pub fn quality(&self) -> f32 {
-        self.inner.quality
-    }
-
-    #[getter]
-    pub fn stderr(&self) -> f32 {
-        self.inner.stderr
-    }
-
-    #[getter]
-    pub fn latency_ms(&self) -> f32 {
-        self.inner.latency_ms
     }
 }
 
