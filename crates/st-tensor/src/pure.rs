@@ -31,9 +31,10 @@ pub use self::topos::{
     GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard, ModalityProfile, MultiModalAtlas,
     MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlSignal,
-    ToposInferenceHints, ToposInferencePlan, ToposRuntimeMode, ToposRuntimeProfile,
-    ToposRuntimeProfileInput, ToposRuntimeRoute, ToposRuntimeRouteScores, ToposTrainingHints,
-    ToposTrainingPlan, ZBox, ZBoxSite, TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
+    ToposControlSignalInput, ToposInferenceHints, ToposInferencePlan, ToposRuntimeMode,
+    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute, ToposRuntimeRouteScores,
+    ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
+    TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER, TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
     TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 

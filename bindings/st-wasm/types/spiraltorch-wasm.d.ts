@@ -75,6 +75,87 @@ declare module "spiraltorch-wasm" {
         runtime_profile: ToposRuntimeProfile;
     };
 
+    export type ToposControlSignalInput = {
+        curvature?: number;
+        tolerance?: number;
+        saturation?: number;
+        porosity?: number;
+        max_depth?: number;
+        max_volume?: number;
+        observed_depth?: number;
+        visited_volume?: number;
+    };
+
+    export type ToposTrainingHints = {
+        learning_rate_scale: number;
+        regularization_scale: number;
+        step_damping: number;
+        gradient_bias_scale: number;
+        clip_scale: number;
+        momentum_damping: number;
+        vector: number[];
+    };
+
+    export type ToposTrainingPlan = ToposTrainingHints & {
+        gain: number;
+        raw_rate_scale: number;
+        rate_scale: number;
+        effective_gradient_bias_scale: number;
+        effective_momentum_damping: number;
+    };
+
+    export type ToposInferenceHints = {
+        temperature_scale: number;
+        top_p_scale: number;
+        sampling_focus: number;
+        frequency_penalty_bias: number;
+        presence_penalty_bias: number;
+        context_weight: number;
+        vector: number[];
+    };
+
+    export type ToposInferencePlan = {
+        gain: number;
+        temperature: number;
+        top_p: number;
+        frequency_penalty: number;
+        presence_penalty: number;
+        context_weight: number;
+        temperature_scale: number;
+        top_p_scale: number;
+        sampling_focus: number;
+        vector: number[];
+    };
+
+    export type ToposControlSignal = Required<ToposControlSignalInput> & {
+        kind: "spiraltorch.topos_control_signal";
+        contract_version: "spiraltorch.topos_control_signal.v1";
+        semantic_owner: "st-tensor::pure::topos";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        remaining_volume: number;
+        depth_pressure: number;
+        volume_pressure: number;
+        closure_pressure: number;
+        openness: number;
+        guard_strength: number;
+        stability_hint: number;
+        exploration_hint: number;
+        learning_rate_scale: number;
+        temperature_scale: number;
+        regularization_scale: number;
+        step_damping: number;
+        sampling_focus: number;
+        runtime_hints: number[];
+        gradient: number[];
+        training_hints: ToposTrainingHints;
+        training_plan: ToposTrainingPlan;
+        inference_hints: ToposInferenceHints;
+        inference_plan: ToposInferencePlan;
+        runtime_profile: ToposRuntimeProfile;
+        runtime_route: ToposRuntimeRoute;
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -411,6 +492,10 @@ declare module "spiraltorch-wasm" {
     export function toposRuntimeRouteObject(
         profile: ToposRuntimeProfileInput,
     ): ToposRuntimeRoute;
+    export function toposControlSignalJson(inputJson: string): string;
+    export function toposControlSignalObject(
+        input: ToposControlSignalInput,
+    ): ToposControlSignal;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

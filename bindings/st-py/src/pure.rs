@@ -12,9 +12,10 @@ use st_tensor::measure::{
 use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposInferenceHints,
-    ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
-    ToposRuntimeRouteScores, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposControlSignalInput,
+    ToposInferenceHints, ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeProfileInput,
+    ToposRuntimeRoute, ToposRuntimeRouteScores, ToposTrainingHints, ToposTrainingPlan, ZBox,
+    ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
     TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 
@@ -37,6 +38,10 @@ fn topos_control_signal_to_pydict(
     signal: ToposControlSignal,
 ) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
+    dict.set_item("kind", "spiraltorch.topos_control_signal")?;
+    dict.set_item("contract_version", TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION)?;
+    dict.set_item("semantic_owner", TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER)?;
+    dict.set_item("semantic_backend", "rust")?;
     dict.set_item("curvature", signal.curvature())?;
     dict.set_item("tolerance", signal.tolerance())?;
     dict.set_item("saturation", signal.saturation())?;
@@ -249,6 +254,34 @@ fn py_topos_runtime_route_from_profile(
         learning_inference_balance,
     });
     topos_runtime_route_to_pydict(py, profile.route())
+}
+
+#[pyfunction(name = "_topos_control_signal_from_observation")]
+#[pyo3(signature = (curvature=-1.0, tolerance=1e-3, saturation=1.0, porosity=0.2, max_depth=64, max_volume=512, observed_depth=0, visited_volume=0))]
+#[allow(clippy::too_many_arguments)]
+fn py_topos_control_signal_from_observation(
+    py: Python<'_>,
+    curvature: f32,
+    tolerance: f32,
+    saturation: f32,
+    porosity: f32,
+    max_depth: usize,
+    max_volume: usize,
+    observed_depth: usize,
+    visited_volume: usize,
+) -> PyResult<PyObject> {
+    let signal = ToposControlSignal::from_input(ToposControlSignalInput {
+        curvature,
+        tolerance,
+        saturation,
+        porosity,
+        max_depth,
+        max_volume,
+        observed_depth,
+        visited_volume,
+    })
+    .map_err(tensor_err_to_py)?;
+    topos_control_signal_to_pydict(py, signal)
 }
 
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
@@ -1721,6 +1754,10 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        py_topos_control_signal_from_observation,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(py_topos_runtime_route_from_profile, m)?)?;
     Ok(())
 }

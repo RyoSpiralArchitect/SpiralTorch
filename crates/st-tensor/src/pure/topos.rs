@@ -34,7 +34,19 @@ pub const TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.topos_runtim
 /// Crate/module that owns the runtime-route normalization and decision semantics.
 pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER: &str = "st-tensor::pure::topos";
 
+/// Stable contract identifier shared by Rust, Python, and WASM control-signal clients.
+pub const TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION: &str = "spiraltorch.topos_control_signal.v1";
+
+/// Crate/module that owns open-topos control-signal semantics.
+pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER: &str = TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER;
+
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
+    if !permeability.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label,
+            value: permeability,
+        });
+    }
     if !(0.0..=1.0).contains(&permeability) {
         return Err(TensorError::InvalidValue { label });
     }
@@ -130,6 +142,46 @@ pub struct ToposControlSignal {
     regularization_scale: f32,
     step_damping: f32,
     sampling_focus: f32,
+}
+
+/// External topology and traversal inputs used to construct a canonical control signal.
+///
+/// Unlike the normalized runtime-profile ingress, these values define the topology itself.
+/// Invalid or non-finite geometry is rejected rather than silently rewritten.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposControlSignalInput {
+    /// Strictly negative hyperbolic curvature.
+    pub curvature: f32,
+    /// Strictly positive numerical tolerance.
+    pub tolerance: f32,
+    /// Strictly positive saturation limit.
+    pub saturation: f32,
+    /// Topology permeability in `[0, 1]`.
+    pub porosity: f32,
+    /// Non-zero traversal-depth horizon.
+    pub max_depth: usize,
+    /// Non-zero visited-volume horizon.
+    pub max_volume: usize,
+    /// Observed traversal depth.
+    pub observed_depth: usize,
+    /// Observed visited volume.
+    pub visited_volume: usize,
+}
+
+impl Default for ToposControlSignalInput {
+    fn default() -> Self {
+        Self {
+            curvature: -1.0,
+            tolerance: 1e-3,
+            saturation: 1.0,
+            porosity: 0.2,
+            max_depth: 64,
+            max_volume: 512,
+            observed_depth: 0,
+            visited_volume: 0,
+        }
+    }
 }
 
 /// Named optimizer controls projected from an open-topos pressure signal.
@@ -845,6 +897,23 @@ impl ToposRuntimeProfile {
 }
 
 impl ToposControlSignal {
+    /// Validates external topology inputs and derives the canonical control signal.
+    pub fn from_input(input: ToposControlSignalInput) -> PureResult<Self> {
+        let topos = OpenCartesianTopos::new(
+            input.curvature,
+            input.tolerance,
+            input.saturation,
+            input.max_depth,
+            input.max_volume,
+        )?
+        .with_porosity(input.porosity)?;
+        Ok(Self::from_observation(
+            &topos,
+            input.observed_depth,
+            input.visited_volume,
+        ))
+    }
+
     /// Builds a signal from a topos and optional traversal observations.
     pub fn from_observation(
         topos: &OpenCartesianTopos,
@@ -1481,6 +1550,15 @@ pub struct ZBoxSite {
 impl ZBoxSite {
     /// Builds the default κ-box site for the provided curvature.
     pub fn default_for(curvature: f32) -> PureResult<Self> {
+        if !curvature.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zbox_site_curvature",
+                value: curvature,
+            });
+        }
+        if curvature >= 0.0 {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
         let guard = LawvereTierneyGuard::new(1e-6, 1e3, 1e-5)?;
         Ok(Self {
             curvature,
@@ -1681,6 +1759,24 @@ impl OpenCartesianTopos {
         max_depth: usize,
         max_volume: usize,
     ) -> PureResult<Self> {
+        if !curvature.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_curvature",
+                value: curvature,
+            });
+        }
+        if !tolerance.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_tolerance",
+                value: tolerance,
+            });
+        }
+        if !saturation.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_saturation",
+                value: saturation,
+            });
+        }
         if curvature >= 0.0 {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
@@ -1758,6 +1854,12 @@ impl OpenCartesianTopos {
 
     /// Replaces the porosity used during saturation.
     pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_porosity",
+                value: porosity,
+            });
+        }
         if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
@@ -3618,6 +3720,73 @@ mod tests {
         assert_eq!(profile.inference_top_p(), 0.05);
         assert_eq!(profile.inference_context_weight(), 0.25);
         assert_eq!(profile.learning_inference_balance(), 2.0);
+    }
+
+    #[test]
+    fn control_signal_input_derives_canonical_pressure_and_hints() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            curvature: -0.9,
+            tolerance: 1e-4,
+            saturation: 2.0,
+            porosity: 0.25,
+            max_depth: 10,
+            max_volume: 100,
+            observed_depth: 4,
+            visited_volume: 25,
+        }));
+
+        assert!((signal.closure_pressure() - 0.4).abs() < 1e-6);
+        assert!((signal.openness() - 0.6).abs() < 1e-6);
+        assert!((signal.step_damping() - 0.258).abs() < 1e-6);
+        assert!((signal.training_hints().gradient_bias_scale() - 0.0786561).abs() < 1e-6);
+        assert_eq!(
+            signal.runtime_route(1.0, 1.0, 1.0, 1.0, 0.0, 0.0).mode(),
+            ToposRuntimeMode::Contextual
+        );
+    }
+
+    #[test]
+    fn control_signal_input_accepts_partial_serde_payloads() {
+        let input = serde_json::from_str::<ToposControlSignalInput>(
+            r#"{"max_depth":10,"max_volume":100,"observed_depth":4}"#,
+        )
+        .expect("partial control-signal input");
+        let signal = unwrap_ok(ToposControlSignal::from_input(input));
+
+        assert_eq!(signal.curvature(), -1.0);
+        assert_eq!(signal.porosity(), 0.2);
+        assert_eq!(signal.observed_depth(), 4);
+        assert_eq!(signal.visited_volume(), 0);
+        assert!((signal.depth_pressure() - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn open_topos_rejects_non_finite_geometry_at_ingress() {
+        for (curvature, tolerance, saturation, expected_label) in [
+            (f32::NAN, 1e-3, 1.0, "topos_curvature"),
+            (-1.0, f32::INFINITY, 1.0, "topos_tolerance"),
+            (-1.0, 1e-3, f32::NEG_INFINITY, "topos_saturation"),
+        ] {
+            let error = unwrap_err(OpenCartesianTopos::new(
+                curvature, tolerance, saturation, 64, 512,
+            ));
+            assert!(matches!(
+                error,
+                TensorError::NonFiniteValue { label, .. } if label == expected_label
+            ));
+        }
+
+        let error = unwrap_err(ToposControlSignal::from_input(ToposControlSignalInput {
+            porosity: f32::NAN,
+            ..ToposControlSignalInput::default()
+        }));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "topos_porosity",
+                ..
+            }
+        ));
     }
 
     #[test]

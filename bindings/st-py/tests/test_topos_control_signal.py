@@ -20,6 +20,10 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
         visited_volume=25,
     )
 
+    assert signal["kind"] == "spiraltorch.topos_control_signal"
+    assert signal["contract_version"] == "spiraltorch.topos_control_signal.v1"
+    assert signal["semantic_owner"] == "st-tensor::pure::topos"
+    assert signal["semantic_backend"] in {"rust", "python_compat"}
     assert signal["observed_depth"] == 4
     assert signal["visited_volume"] == 25
     assert signal["remaining_volume"] == 75
@@ -59,6 +63,65 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["runtime_route"]["scores"]["context"] == pytest.approx(
         signal["runtime_route"]["score"]
     )
+
+
+def test_raw_topos_control_input_prefers_native_semantic_owner(monkeypatch) -> None:
+    native = getattr(st, "_rs", None)
+    native_signal = getattr(native, "_topos_control_signal_from_observation", None)
+    if not callable(native_signal):
+        pytest.skip("native control-signal ingress requires a freshly built extension")
+
+    def fail_python_fallback(*_args, **_kwargs):
+        raise AssertionError("Python control-signal semantics should not run")
+
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_normalise_topos_control_signal",
+        fail_python_fallback,
+    )
+    signal = st.topos_control_signal(
+        {
+            "curvature": -0.9,
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+        },
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert signal["semantic_backend"] == "rust"
+    assert signal["semantic_owner"] == "st-tensor::pure::topos"
+    assert signal["closure_pressure"] == pytest.approx(0.4)
+
+
+def test_derived_topos_overrides_remain_explicitly_exploratory() -> None:
+    signal = st.topos_control_signal(
+        {
+            "contract_version": "spiraltorch.topos_control_signal.v1",
+            "semantic_owner": "st-tensor::pure::topos",
+            "semantic_backend": "rust",
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+            "observed_depth": 4,
+            "visited_volume": 25,
+            "guard_strength": 0.99,
+        }
+    )
+
+    assert signal["semantic_backend"] == "python_exploratory"
+    assert signal["guard_strength"] == pytest.approx(0.99)
+
+
+def test_raw_topos_control_input_rejects_non_finite_geometry() -> None:
+    native = getattr(st, "_rs", None)
+    native_signal = getattr(native, "_topos_control_signal_from_observation", None)
+    if not callable(native_signal):
+        pytest.skip("native control-signal ingress requires a freshly built extension")
+
+    with pytest.raises(ValueError, match="non-finite value detected for topos_curvature"):
+        st.topos_control_signal({"curvature": float("nan")})
 
 
 def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
