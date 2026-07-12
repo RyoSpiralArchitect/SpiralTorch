@@ -63,6 +63,9 @@ jobs:
       - name: CPU feature isolation
         if: matrix.run_lints
         run: bash scripts/check_cpu_feature_isolation.sh
+      - name: Python text feature isolation
+        if: matrix.run_lints
+        run: cargo check --locked -p spiraltorch-py --no-default-features --features extension-module,text
       - name: clippy (workspace)
         if: matrix.run_lints
         run: cargo clippy --workspace --all-targets

@@ -45,19 +45,24 @@ mod trainer;
 mod vision;
 mod wgpu;
 mod zspace;
+mod zpulse;
 
 #[cfg(not(feature = "nn"))]
 mod psi_synchro {
+    use crate::zpulse::PyZPulse;
     use pyo3::prelude::*;
     use pyo3::types::PyModule;
 
     pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         let module = PyModule::new(py, "psi")?;
+        module.add_class::<PyZPulse>()?;
+        module.add("__all__", vec!["ZPulseSnapshot"])?;
         module.add(
             "__doc__",
-            "Psychoid synchronization helpers (compiled without the 'nn' feature).",
+            "Core Z-pulse snapshots (psychoid synchronization compiled without the 'nn' feature).",
         )?;
         parent.add_submodule(&module)?;
+        parent.add("ZPulseSnapshot", module.getattr("ZPulseSnapshot")?)?;
         Ok(())
     }
 }
@@ -331,6 +336,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "TensorBiome",
         "GradientSummary",
         "NonCollapseSnapshot",
+        "ZPulseSnapshot",
         "ZSpaceBarycenter",
         "BarycenterIntermediate",
         "z_space_barycenter",
