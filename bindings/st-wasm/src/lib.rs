@@ -5,6 +5,7 @@ mod cosmology;
 mod fractal_field;
 mod reports;
 mod scale_stack;
+mod topos_route;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas;
@@ -32,5 +33,6 @@ pub use fractal_field::*;
 pub use mellin::*;
 pub use reports::*;
 pub use scale_stack::*;
+pub use topos_route::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;

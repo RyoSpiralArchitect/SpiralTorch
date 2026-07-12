@@ -28,6 +28,12 @@ use core::{cmp, f64::consts::PI as PI64};
 const DEFAULT_MODALITY_PERMEABILITY: f32 = 0.12;
 const DEFAULT_GRAPH_PERMEABILITY: f32 = 0.08;
 
+/// Stable contract identifier shared by Rust, Python, and WASM runtime-route clients.
+pub const TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.topos_runtime_route.v1";
+
+/// Crate/module that owns the runtime-route normalization and decision semantics.
+pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER: &str = "st-tensor::pure::topos";
+
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
     if !(0.0..=1.0).contains(&permeability) {
         return Err(TensorError::InvalidValue { label });
@@ -308,6 +314,56 @@ pub struct ToposRuntimeProfile {
     inference_top_p: f32,
     inference_context_weight: f32,
     learning_inference_balance: f32,
+}
+
+/// External inputs used to construct a normalized [`ToposRuntimeProfile`].
+///
+/// The defaults describe a neutral runtime profile. [`ToposRuntimeProfile::from_input`]
+/// rewrites non-finite values to these defaults and clamps every bounded component, making
+/// this the shared profile-ingress contract for native, Python, and WASM callers.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposRuntimeProfileInput {
+    /// Non-negative gain applied to learning controls.
+    pub training_gain: f32,
+    /// Non-negative gain applied to inference controls.
+    pub inference_gain: f32,
+    /// Estimated closure risk in `[0, 1]`.
+    pub closure_risk: f32,
+    /// Available exploration budget in `[0, 1]`.
+    pub exploration_budget: f32,
+    /// Aggregate control energy in `[0, 1]`.
+    pub control_energy: f32,
+    /// Effective training-rate scale, clamped to `[0.01, 2]`.
+    pub training_rate_scale: f32,
+    /// Effective gradient-bias scale, clamped to `[0, 0.35]`.
+    pub training_gradient_bias_scale: f32,
+    /// Hosted-inference temperature, clamped to `[0, 2]`.
+    pub inference_temperature: f32,
+    /// Hosted-inference nucleus probability, clamped to `[0.05, 1]`.
+    pub inference_top_p: f32,
+    /// Context contribution weight, clamped to `[0.25, 1.25]`.
+    pub inference_context_weight: f32,
+    /// Training-to-inference balance, clamped to `[0, 2]`.
+    pub learning_inference_balance: f32,
+}
+
+impl Default for ToposRuntimeProfileInput {
+    fn default() -> Self {
+        Self {
+            training_gain: 1.0,
+            inference_gain: 1.0,
+            closure_risk: 0.0,
+            exploration_budget: 0.0,
+            control_energy: 0.0,
+            training_rate_scale: 1.0,
+            training_gradient_bias_scale: 0.0,
+            inference_temperature: 1.0,
+            inference_top_p: 1.0,
+            inference_context_weight: 1.0,
+            learning_inference_balance: 1.0,
+        }
+    }
 }
 
 /// Named runtime posture selected from a joint learning/inference profile.
@@ -652,6 +708,44 @@ impl ToposInferencePlan {
 }
 
 impl ToposRuntimeProfile {
+    /// Normalize an external profile input into the canonical runtime-route domain.
+    pub fn from_input(input: ToposRuntimeProfileInput) -> Self {
+        let defaults = ToposRuntimeProfileInput::default();
+        Self {
+            training_gain: finite_or(input.training_gain, defaults.training_gain).max(0.0),
+            inference_gain: finite_or(input.inference_gain, defaults.inference_gain).max(0.0),
+            closure_risk: finite_or(input.closure_risk, defaults.closure_risk).clamp(0.0, 1.0),
+            exploration_budget: finite_or(input.exploration_budget, defaults.exploration_budget)
+                .clamp(0.0, 1.0),
+            control_energy: finite_or(input.control_energy, defaults.control_energy)
+                .clamp(0.0, 1.0),
+            training_rate_scale: finite_or(input.training_rate_scale, defaults.training_rate_scale)
+                .clamp(0.01, 2.0),
+            training_gradient_bias_scale: finite_or(
+                input.training_gradient_bias_scale,
+                defaults.training_gradient_bias_scale,
+            )
+            .clamp(0.0, 0.35),
+            inference_temperature: finite_or(
+                input.inference_temperature,
+                defaults.inference_temperature,
+            )
+            .clamp(0.0, 2.0),
+            inference_top_p: finite_or(input.inference_top_p, defaults.inference_top_p)
+                .clamp(0.05, 1.0),
+            inference_context_weight: finite_or(
+                input.inference_context_weight,
+                defaults.inference_context_weight,
+            )
+            .clamp(0.25, 1.25),
+            learning_inference_balance: finite_or(
+                input.learning_inference_balance,
+                defaults.learning_inference_balance,
+            )
+            .clamp(0.0, 2.0),
+        }
+    }
+
     fn from_parts(
         signal: &ToposControlSignal,
         training_plan: ToposTrainingPlan,
@@ -674,7 +768,7 @@ impl ToposRuntimeProfile {
             .clamp(0.0, 1.0);
         let learning_inference_balance =
             (training_plan.rate_scale() / inference_plan.temperature().max(1e-6)).clamp(0.0, 2.0);
-        Self {
+        Self::from_input(ToposRuntimeProfileInput {
             training_gain: training_plan.gain(),
             inference_gain: inference_plan.gain(),
             closure_risk,
@@ -686,7 +780,7 @@ impl ToposRuntimeProfile {
             inference_top_p: inference_plan.top_p(),
             inference_context_weight: inference_plan.context_weight(),
             learning_inference_balance,
-        }
+        })
     }
 
     pub fn training_gain(&self) -> f32 {
@@ -3495,6 +3589,122 @@ mod tests {
         let porous_value = porous.saturate(sample);
         assert!(porous_value.abs() < rigid_value.abs());
         assert!(porous_value.abs() > rigid.saturation() * 0.8);
+    }
+
+    #[test]
+    fn runtime_profile_input_normalizes_external_values() {
+        let profile = ToposRuntimeProfile::from_input(ToposRuntimeProfileInput {
+            training_gain: f32::NAN,
+            inference_gain: f32::INFINITY,
+            closure_risk: -1.0,
+            exploration_budget: 2.0,
+            control_energy: f32::NAN,
+            training_rate_scale: 0.0,
+            training_gradient_bias_scale: 1.0,
+            inference_temperature: 3.0,
+            inference_top_p: 0.0,
+            inference_context_weight: 0.0,
+            learning_inference_balance: 3.0,
+        });
+
+        assert_eq!(profile.training_gain(), 1.0);
+        assert_eq!(profile.inference_gain(), 1.0);
+        assert_eq!(profile.closure_risk(), 0.0);
+        assert_eq!(profile.exploration_budget(), 1.0);
+        assert_eq!(profile.control_energy(), 0.0);
+        assert_eq!(profile.training_rate_scale(), 0.01);
+        assert_eq!(profile.training_gradient_bias_scale(), 0.35);
+        assert_eq!(profile.inference_temperature(), 2.0);
+        assert_eq!(profile.inference_top_p(), 0.05);
+        assert_eq!(profile.inference_context_weight(), 0.25);
+        assert_eq!(profile.learning_inference_balance(), 2.0);
+    }
+
+    #[test]
+    fn runtime_route_modes_are_reachable_with_bounded_scores() {
+        let cases = [
+            (
+                ToposRuntimeMode::TrainingFirst,
+                ToposRuntimeProfileInput {
+                    training_rate_scale: 0.01,
+                    inference_temperature: 0.0,
+                    inference_top_p: 0.05,
+                    inference_context_weight: 0.25,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+            (
+                ToposRuntimeMode::Contextual,
+                ToposRuntimeProfileInput {
+                    training_rate_scale: 0.01,
+                    inference_temperature: 0.0,
+                    inference_top_p: 0.05,
+                    inference_context_weight: 0.85,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+            (
+                ToposRuntimeMode::Balanced,
+                ToposRuntimeProfileInput {
+                    training_rate_scale: 0.01,
+                    inference_temperature: 0.5,
+                    inference_top_p: 1.0,
+                    inference_context_weight: 0.8,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+            (
+                ToposRuntimeMode::InferenceFirst,
+                ToposRuntimeProfileInput {
+                    training_rate_scale: 0.01,
+                    training_gradient_bias_scale: 0.1,
+                    inference_temperature: 1.5,
+                    inference_top_p: 1.0,
+                    inference_context_weight: 0.8,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+            (
+                ToposRuntimeMode::Exploratory,
+                ToposRuntimeProfileInput {
+                    exploration_budget: 0.6,
+                    training_rate_scale: 0.01,
+                    inference_temperature: 0.5,
+                    inference_top_p: 1.0,
+                    inference_context_weight: 0.25,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+            (
+                ToposRuntimeMode::Guarded,
+                ToposRuntimeProfileInput {
+                    closure_risk: 0.2,
+                    control_energy: 1.0,
+                    training_rate_scale: 0.01,
+                    training_gradient_bias_scale: 0.35,
+                    inference_temperature: 0.0,
+                    inference_top_p: 0.05,
+                    inference_context_weight: 0.25,
+                    learning_inference_balance: 0.0,
+                    ..ToposRuntimeProfileInput::default()
+                },
+            ),
+        ];
+
+        for (expected_mode, input) in cases {
+            let route = ToposRuntimeProfile::from_input(input).route();
+            assert_eq!(route.mode(), expected_mode);
+            assert!((0.0..=1.0).contains(&route.score()));
+            for score in route.scores().vector() {
+                assert!(score.is_finite());
+                assert!((0.0..=1.0).contains(&score));
+            }
+        }
     }
 
     #[test]

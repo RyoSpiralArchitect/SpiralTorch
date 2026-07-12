@@ -13,8 +13,9 @@ use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposInferenceHints,
-    ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeRoute, ToposRuntimeRouteScores,
-    ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
+    ToposRuntimeRouteScores, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -197,6 +198,9 @@ fn topos_runtime_route_scores_to_pydict(
 fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     dict.set_item("kind", "spiraltorch.topos_runtime_route")?;
+    dict.set_item("contract_version", TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION)?;
+    dict.set_item("semantic_owner", TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER)?;
+    dict.set_item("semantic_backend", "rust")?;
     dict.set_item("mode", route.mode_label())?;
     dict.set_item("mode_id", route.mode_id())?;
     dict.set_item("score", route.score())?;
@@ -212,6 +216,39 @@ fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> Py
         topos_runtime_profile_to_pydict(py, route.profile())?,
     )?;
     Ok(dict.into_py(py))
+}
+
+#[pyfunction(name = "_topos_runtime_route_from_profile")]
+#[pyo3(signature = (training_gain=1.0, inference_gain=1.0, closure_risk=0.0, exploration_budget=0.0, control_energy=0.0, training_rate_scale=1.0, training_gradient_bias_scale=0.0, inference_temperature=1.0, inference_top_p=1.0, inference_context_weight=1.0, learning_inference_balance=1.0))]
+#[allow(clippy::too_many_arguments)]
+fn py_topos_runtime_route_from_profile(
+    py: Python<'_>,
+    training_gain: f32,
+    inference_gain: f32,
+    closure_risk: f32,
+    exploration_budget: f32,
+    control_energy: f32,
+    training_rate_scale: f32,
+    training_gradient_bias_scale: f32,
+    inference_temperature: f32,
+    inference_top_p: f32,
+    inference_context_weight: f32,
+    learning_inference_balance: f32,
+) -> PyResult<PyObject> {
+    let profile = ToposRuntimeProfile::from_input(ToposRuntimeProfileInput {
+        training_gain,
+        inference_gain,
+        closure_risk,
+        exploration_budget,
+        control_energy,
+        training_rate_scale,
+        training_gradient_bias_scale,
+        inference_temperature,
+        inference_top_p,
+        inference_context_weight,
+        learning_inference_balance,
+    });
+    topos_runtime_route_to_pydict(py, profile.route())
 }
 
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
@@ -1684,5 +1721,6 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
     m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
+    m.add_function(wrap_pyfunction!(py_topos_runtime_route_from_profile, m)?)?;
     Ok(())
 }

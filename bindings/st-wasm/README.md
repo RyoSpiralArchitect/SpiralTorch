@@ -30,6 +30,29 @@ builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_P
 - Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
 
+## Shared Topos runtime routing
+
+Browser clients can project a runtime profile through the same `st-tensor::pure::topos`
+contract used by native Rust and Python. WASM only converts the object/JSON boundary; it
+does not maintain a separate score formula or route policy:
+
+```ts
+import { toposRuntimeRouteObject } from "spiraltorch-wasm";
+
+const route = toposRuntimeRouteObject({
+    closure_risk: 0.2,
+    exploration_budget: 0.6,
+    inference_temperature: 1.2,
+    inference_top_p: 0.95,
+});
+
+console.log(route.mode, route.score, route.semantic_owner);
+```
+
+`toposRuntimeRouteJson` exposes the same contract for storage and worker-message flows.
+Both results carry `contract_version`, `semantic_owner`, and normalized profile values so
+Python, browser, and direct Rust runs can be audited against one semantic core.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

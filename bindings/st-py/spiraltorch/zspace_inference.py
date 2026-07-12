@@ -730,7 +730,7 @@ def _looks_like_topos_runtime_profile(payload: Mapping[str, Any]) -> bool:
     )
 
 
-def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+def _topos_runtime_route_from_profile_python(profile: Mapping[str, Any]) -> dict[str, Any]:
     closure_risk = _unit_interval(profile.get("closure_risk", 0.0))
     exploration_budget = _unit_interval(profile.get("exploration_budget", 0.0))
     control_energy = _unit_interval(profile.get("control_energy", 0.0))
@@ -836,6 +836,14 @@ def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, A
     else:
         score = scores[mode_score_key]
 
+    scores["vector"] = [
+        scores["training"],
+        scores["inference"],
+        scores["guard"],
+        scores["exploration"],
+        scores["context"],
+    ]
+
     if mode == "guarded":
         learning_action = "dampen_steps"
         inference_action = "tighten_sampling"
@@ -857,6 +865,9 @@ def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, A
 
     return {
         "kind": "spiraltorch.topos_runtime_route",
+        "contract_version": "spiraltorch.topos_runtime_route.v1",
+        "semantic_owner": "st-tensor::pure::topos",
+        "semantic_backend": "python_compat",
         "mode": mode,
         "mode_id": _TOPOS_RUNTIME_ROUTE_MODE_IDS[mode],
         "score": score,
@@ -866,6 +877,42 @@ def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, A
         "scores": scores,
         "runtime_profile": dict(profile),
     }
+
+
+def _native_topos_runtime_route_from_profile(
+    profile: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    route_from_profile = getattr(native, "_topos_runtime_route_from_profile", None)
+    if not callable(route_from_profile):
+        return None
+
+    route = route_from_profile(
+        float(profile.get("training_gain", 1.0)),
+        float(profile.get("inference_gain", 1.0)),
+        float(profile.get("closure_risk", 0.0)),
+        float(profile.get("exploration_budget", 0.0)),
+        float(profile.get("control_energy", 0.0)),
+        float(profile.get("training_rate_scale", 1.0)),
+        float(profile.get("training_gradient_bias_scale", 0.0)),
+        float(profile.get("inference_temperature", 1.0)),
+        float(profile.get("inference_top_p", 1.0)),
+        float(profile.get("inference_context_weight", 1.0)),
+        float(profile.get("learning_inference_balance", 1.0)),
+    )
+    if not isinstance(route, MappingABC):
+        raise RuntimeError(
+            "native Topos runtime router returned a non-mapping contract payload"
+        )
+    return dict(route)
+
+
+def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    native = _native_topos_runtime_route_from_profile(profile)
+    if native is not None:
+        return native
+    return _topos_runtime_route_from_profile_python(profile)
 
 
 def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1297,7 +1344,7 @@ def topos_runtime_route(
     base_presence_penalty: float = 0.0,
     **signal_options: Any,
 ) -> dict[str, Any]:
-    """Name the safest learning/inference route implied by an open-topos profile."""
+    """Name the safest route using the shared Rust contract when it is available."""
 
     if runtime_profile is not None:
         profile = _normalise_topos_runtime_profile(

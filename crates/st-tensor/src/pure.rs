@@ -32,8 +32,9 @@ pub use self::topos::{
     MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlSignal,
     ToposInferenceHints, ToposInferencePlan, ToposRuntimeMode, ToposRuntimeProfile,
-    ToposRuntimeRoute, ToposRuntimeRouteScores, ToposTrainingHints, ToposTrainingPlan, ZBox,
-    ZBoxSite,
+    ToposRuntimeProfileInput, ToposRuntimeRoute, ToposRuntimeRouteScores, ToposTrainingHints,
+    ToposTrainingPlan, ZBox, ZBoxSite, TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
+    TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 
 #[cfg(feature = "hip")]
