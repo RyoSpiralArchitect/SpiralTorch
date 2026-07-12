@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -75,11 +75,19 @@ fn runtime_slot() -> &'static Mutex<Option<Arc<HipRuntime>>> {
     RUNTIME.get_or_init(|| Mutex::new(None))
 }
 
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            mutex.clear_poison();
+            guard
+        }
+    }
+}
+
 pub fn runtime() -> Option<Arc<HipRuntime>> {
-    runtime_slot()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(Arc::clone))
+    lock_recover(runtime_slot()).as_ref().map(Arc::clone)
 }
 
 pub fn init() -> Result<Arc<HipRuntime>, HipErr> {
@@ -89,9 +97,7 @@ pub fn init() -> Result<Arc<HipRuntime>, HipErr> {
 
     let runtime = Arc::new(build_runtime()?);
 
-    let mut guard = runtime_slot()
-        .lock()
-        .map_err(|_| HipErr::Other("failed to lock HIP runtime slot".into()))?;
+    let mut guard = lock_recover(runtime_slot());
     if let Some(existing) = guard.as_ref() {
         return Ok(existing.clone());
     }
@@ -101,9 +107,7 @@ pub fn init() -> Result<Arc<HipRuntime>, HipErr> {
 
 #[cfg(test)]
 fn reset_runtime_for_tests() {
-    if let Ok(mut guard) = runtime_slot().lock() {
-        guard.take();
-    }
+    lock_recover(runtime_slot()).take();
 }
 
 pub fn probe() -> HipProbe {
@@ -536,6 +540,7 @@ pub fn device_info() -> Vec<DeviceInfo> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -630,6 +635,78 @@ mod tests {
         assert!(runtime.device_count() >= 1);
         assert!(runtime.devices().iter().any(|device| device.id == 0));
 
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn runtime_survives_poisoned_slot() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+        let initialized = super::init().expect("runtime should initialise when forced");
+
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _runtime_guard = super::runtime_slot().lock().unwrap();
+            panic!("poison HIP runtime slot");
+        }));
+        assert!(poisoned.is_err());
+        assert!(super::runtime_slot().is_poisoned());
+
+        let recovered = super::runtime().expect("poisoned runtime slot should recover");
+
+        assert!(Arc::ptr_eq(&initialized, &recovered));
+        assert!(!super::runtime_slot().is_poisoned());
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn init_recovers_after_empty_slot_poison() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _runtime_guard = super::runtime_slot().lock().unwrap();
+            panic!("poison empty HIP runtime slot");
+        }));
+        assert!(poisoned.is_err());
+
+        let runtime = super::init().expect("initialization should recover a poisoned slot");
+
+        assert!(runtime.device_count() >= 1);
+        assert!(!super::runtime_slot().is_poisoned());
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn concurrent_init_converges_on_one_runtime() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let workers = (0..8)
+            .map(|_| std::thread::spawn(super::init))
+            .collect::<Vec<_>>();
+        let runtimes = workers
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .expect("initialization worker panicked")
+                    .expect("runtime initialization failed")
+            })
+            .collect::<Vec<_>>();
+
+        assert!(runtimes
+            .iter()
+            .skip(1)
+            .all(|runtime| Arc::ptr_eq(&runtimes[0], runtime)));
         restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
         super::reset_runtime_for_tests();
     }
