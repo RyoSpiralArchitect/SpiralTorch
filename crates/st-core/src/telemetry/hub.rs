@@ -52,6 +52,28 @@ use crate::engine::collapse_drive::DriveCmd;
 use crate::ops::realgrad::{GradientSummary, TransparencySummary};
 use std::collections::VecDeque;
 
+fn read_recover<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
+
+fn write_recover<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
+
 #[cfg(feature = "psi")]
 static LAST_PSI: Lazy<RwLock<Option<PsiReading>>> = Lazy::new(|| RwLock::new(None));
 
@@ -329,27 +351,11 @@ fn atlas_observers_cell() -> &'static RwLock<Vec<AtlasFrameObserverEntry>> {
 }
 
 fn read_atlas_observers() -> RwLockReadGuard<'static, Vec<AtlasFrameObserverEntry>> {
-    let observers = atlas_observers_cell();
-    match observers.read() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            let guard = poisoned.into_inner();
-            observers.clear_poison();
-            guard
-        }
-    }
+    read_recover(atlas_observers_cell())
 }
 
 fn write_atlas_observers() -> RwLockWriteGuard<'static, Vec<AtlasFrameObserverEntry>> {
-    let observers = atlas_observers_cell();
-    match observers.write() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            let guard = poisoned.into_inner();
-            observers.clear_poison();
-            guard
-        }
-    }
+    write_recover(atlas_observers_cell())
 }
 
 #[cfg(test)]
@@ -879,17 +885,12 @@ fn dashboard_ring() -> &'static RwLock<DashboardRing> {
 
 /// Pushes a dashboard frame onto the rolling ring buffer.
 pub fn push_dashboard_frame(frame: DashboardFrame) {
-    if let Ok(mut guard) = dashboard_ring().write() {
-        guard.push(frame);
-    }
+    write_recover(dashboard_ring()).push(frame);
 }
 
 /// Returns the latest dashboard frame if one has been recorded.
 pub fn latest_dashboard_frame() -> Option<DashboardFrame> {
-    dashboard_ring()
-        .read()
-        .ok()
-        .and_then(|guard| guard.latest().cloned())
+    read_recover(dashboard_ring()).latest().cloned()
 }
 
 /// Returns up to `limit` frames from the ring, newest first.
@@ -898,10 +899,12 @@ pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
         emit_dashboard_snapshot_export_meta(0, &[]);
         return Vec::new();
     }
-    let frames = dashboard_ring()
-        .read()
-        .map(|guard| guard.iter().rev().take(limit).cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+    let frames = read_recover(dashboard_ring())
+        .iter()
+        .rev()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
     emit_dashboard_snapshot_export_meta(limit, &frames);
     frames
 }
@@ -940,61 +943,59 @@ fn push_atlas_route(frame: &AtlasFrame) {
     if frame.timestamp <= 0.0 {
         return;
     }
-    if let Ok(mut guard) = atlas_route_cell().write() {
+    let evicted = {
+        let mut guard = write_recover(atlas_route_cell());
         guard.push_back(frame.clone());
+        let mut evicted = Vec::new();
         while guard.len() > ATLAS_ROUTE_CAPACITY {
-            guard.pop_front();
+            if let Some(frame) = guard.pop_front() {
+                evicted.push(frame);
+            }
         }
-    }
+        evicted
+    };
+    drop(evicted);
 }
 
 /// Replaces the stored atlas frame with the provided snapshot.
 pub fn set_atlas_frame(frame: AtlasFrame) {
-    if let Ok(mut guard) = atlas_cell().write() {
-        *guard = Some(frame.clone());
-    }
+    let previous = write_recover(atlas_cell()).replace(frame.clone());
+    drop(previous);
     push_atlas_route(&frame);
     notify_atlas_frame_observers(&frame);
 }
 
 /// Clears the stored atlas frame and route history.
 pub fn clear_atlas() {
-    if let Ok(mut guard) = atlas_cell().write() {
-        *guard = None;
-    }
+    let previous = write_recover(atlas_cell()).take();
+    drop(previous);
     clear_atlas_route();
 }
 
 /// Clears the stored atlas route.
 pub fn clear_atlas_route() {
-    if let Ok(mut guard) = atlas_route_cell().write() {
-        guard.clear();
-    }
+    let previous = {
+        let mut guard = write_recover(atlas_route_cell());
+        std::mem::take(&mut *guard)
+    };
+    drop(previous);
 }
 
 /// Returns the latest atlas frame if one has been recorded.
 pub fn get_atlas_frame() -> Option<AtlasFrame> {
-    atlas_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(atlas_cell()).as_ref().cloned()
 }
 
 /// Returns the chronological atlas route up to the requested limit.
 pub fn get_atlas_route(limit: Option<usize>) -> AtlasRoute {
     let mut route = AtlasRoute::new();
-    if let Ok(guard) = atlas_route_cell().read() {
-        let limit = limit.unwrap_or(usize::MAX);
-        if limit == 0 {
-            return route;
-        }
-        let mut frames: Vec<AtlasFrame> = guard.iter().cloned().collect();
-        if frames.len() > limit {
-            let start = frames.len() - limit;
-            frames.drain(0..start);
-        }
-        route.frames = frames;
+    let limit = limit.unwrap_or(usize::MAX);
+    if limit == 0 {
+        return route;
     }
+    let guard = read_recover(atlas_route_cell());
+    let start = guard.len().saturating_sub(limit);
+    route.frames = guard.iter().skip(start).cloned().collect();
     route
 }
 
@@ -1008,45 +1009,41 @@ pub fn merge_atlas_fragment(fragment: AtlasFragment) {
     if fragment.is_empty() {
         return;
     }
-    let mut updated: Option<AtlasFrame> = None;
-    if let Ok(mut guard) = atlas_cell().write() {
+    let updated = {
+        let mut guard = write_recover(atlas_cell());
         if let Some(frame) = guard.as_mut() {
             frame.merge_fragment(fragment);
-            push_atlas_route(frame);
-            updated = Some(frame.clone());
+            Some(frame.clone())
         } else if let Some(frame) = AtlasFrame::from_fragment(fragment) {
-            push_atlas_route(&frame);
-            updated = Some(frame.clone());
-            *guard = Some(frame);
+            *guard = Some(frame.clone());
+            Some(frame)
+        } else {
+            None
         }
-    }
+    };
     if let Some(frame) = updated {
+        push_atlas_route(&frame);
         notify_atlas_frame_observers(&frame);
     }
 }
 
 /// Stores the latest maintainer report emitted by the temporal maintainer heuristics.
 pub fn set_maintainer_report(report: MaintainerReport) {
-    if let Ok(mut guard) = maintainer_cell().write() {
-        *guard = Some(report.clone());
-    }
+    let previous = write_recover(maintainer_cell()).replace(report.clone());
+    drop(previous);
     let fragment = fragment_from_maintainer_report(&report);
     merge_atlas_fragment(fragment);
 }
 
 /// Returns the latest maintainer report, if one has been recorded.
 pub fn get_maintainer_report() -> Option<MaintainerReport> {
-    maintainer_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(maintainer_cell()).as_ref().cloned()
 }
 
 #[cfg(test)]
 pub(crate) fn clear_maintainer_report_for_test() {
-    if let Ok(mut guard) = maintainer_cell().write() {
-        *guard = None;
-    }
+    let previous = write_recover(maintainer_cell()).take();
+    drop(previous);
 }
 
 /// Stores the most recent SoftLogic Z feedback sample.
@@ -2122,6 +2119,18 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
 
+    fn poison_rwlock<T>(lock: &'static RwLock<T>) {
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _write = lock
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison telemetry state");
+        }));
+
+        assert!(poisoned.is_err());
+        assert!(lock.is_poisoned());
+    }
+
     struct AtlasObserverDropProbe {
         dropped_without_lock: Arc<AtomicBool>,
     }
@@ -2217,6 +2226,60 @@ mod tests {
 
         assert!(!observers.is_poisoned());
         assert_eq!(atlas_observer_count_for_test(), baseline);
+    }
+
+    #[test]
+    fn atlas_frame_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        clear_atlas();
+        poison_rwlock(atlas_cell());
+
+        set_atlas_frame(AtlasFrame::new(7.0));
+
+        assert!(!atlas_cell().is_poisoned());
+        assert_eq!(
+            get_atlas_frame().expect("atlas frame recovered").timestamp,
+            7.0
+        );
+        clear_atlas();
+    }
+
+    #[test]
+    fn atlas_route_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        clear_atlas();
+        poison_rwlock(atlas_route_cell());
+
+        set_atlas_frame(AtlasFrame::new(8.0));
+
+        assert!(!atlas_route_cell().is_poisoned());
+        let route = get_atlas_route(None);
+        assert_eq!(
+            route
+                .frames
+                .last()
+                .expect("atlas route recovered")
+                .timestamp,
+            8.0
+        );
+        clear_atlas();
+    }
+
+    #[test]
+    fn dashboard_ring_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        poison_rwlock(dashboard_ring());
+        let mut frame = DashboardFrame::new(SystemTime::now());
+        frame.push_metric(DashboardMetric::new("poison.recovery", 1.0));
+
+        push_dashboard_frame(frame);
+
+        assert!(!dashboard_ring().is_poisoned());
+        let latest = latest_dashboard_frame().expect("dashboard frame recovered");
+        assert!(latest
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "poison.recovery" && metric.value == 1.0));
     }
 
     #[test]
