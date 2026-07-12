@@ -1,7 +1,7 @@
 [package]
 authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-logic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Soft-logic, temporal dynamics, and quantum-reality helpers for SpiralTorch"
 license = "AGPL-3.0-or-later"
@@ -9,7 +9,7 @@ license = "AGPL-3.0-or-later"
 [features]
 default = ["soft"]
 soft = ["st-softlogic/soft"]
-learn_store = ["dep:serde", "dep:serde_json", "st-softlogic/learn_store"]
+learn_store = ["st-softlogic/learn_store"]
 nerf = []
 
 [dependencies]
@@ -19,8 +19,6 @@ num-complex = "0.4"
 nalgebra = "0.32"
 st-softlogic = { path = "../st-softlogic" }
 st-core = { path = "../st-core", default-features = false }
-serde = { version = "1", optional = true, features = ["derive"] }
-serde_json = { version = "1", optional = true }
 st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 
 [package.metadata.spiraltorch]

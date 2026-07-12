@@ -337,7 +337,7 @@ impl BlackCatRuntime {
         false
     }
 
-    /// Returns the duration since the last [`begin_step`] call.
+    /// Returns the duration since the last [`Self::begin_step`] call.
     pub fn elapsed_since_begin(&self) -> Option<Duration> {
         self.last_step_start.map(|start| start.elapsed())
     }
@@ -347,7 +347,7 @@ impl BlackCatRuntime {
         &self.last_context
     }
 
-    /// Returns the picks that were selected during the last [`choose`] call.
+    /// Returns the picks that were selected during the last [`Self::choose`] call.
     pub fn last_picks(&self) -> &HashMap<String, String> {
         &self.last_picks
     }

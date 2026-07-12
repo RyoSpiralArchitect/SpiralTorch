@@ -23,7 +23,7 @@
 
 //! Maintainer heuristics that monitor temporal resonance and trigger self-rewrite flows.
 //!
-//! The maintainer inspects [`ChronoFrame`](super::chrono::ChronoFrame) samples to estimate
+//! The maintainer inspects [`ChronoFrame`] samples to estimate
 //! curvature jitter, energy trends, and dormancy so higher level tooling can decide when to
 //! tighten geometry clamps or escalate into a full self-rewrite cycle.
 

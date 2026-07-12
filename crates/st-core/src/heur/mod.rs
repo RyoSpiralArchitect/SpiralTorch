@@ -4,7 +4,8 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod free_energy;
-pub mod self_rewrite;
 
 #[cfg(feature = "logic")]
 pub mod soft_learning;
+
+// `self_rewrite` stays quarantined until its multi-file persistence is transactional.

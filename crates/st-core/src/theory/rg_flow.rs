@@ -224,7 +224,7 @@ impl RgFlowLattice {
         Ok(prefactor * series)
     }
 
-    /// Batch variant of [`evaluate_mellin`].
+    /// Batch variant of [`Self::evaluate_mellin`].
     pub fn evaluate_mellin_many(
         &self,
         s_values: &[ComplexScalar],

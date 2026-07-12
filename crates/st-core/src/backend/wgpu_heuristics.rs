@@ -17,8 +17,10 @@ use crate::ecosystem::{
 };
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 #[cfg(feature = "logic-learn")]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+#[cfg(feature = "logic-learn")]
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
@@ -433,11 +435,14 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     let mut radix_vote = NumericVote::default();
     let mut segments_vote = NumericVote::default();
 
+    #[cfg(feature = "logic-learn")]
+    let learned_weights = soft_weights_snapshot();
+
     for rule in rules {
         let weight = rule.weight.max(0.0);
         let score = rule.score;
         #[cfg(feature = "logic-learn")]
-        let (weight, score) = adjust_soft_rule(rule.name, weight, score);
+        let (weight, score) = adjust_soft_rule(&learned_weights, rule.name, weight, score);
         if weight <= 0.0 {
             continue;
         }
@@ -508,22 +513,25 @@ fn apply_numeric_vote_u8(field: &mut u8, vote: &NumericVote, min: u8, max: u8) -
 }
 
 #[cfg(feature = "logic-learn")]
-fn adjust_soft_rule(name: &str, weight: f32, score: f32) -> (f32, f32) {
+fn adjust_soft_rule(
+    weights: &learn::SoftWeights,
+    name: &str,
+    weight: f32,
+    score: f32,
+) -> (f32, f32) {
     let mut adj_weight = weight;
     let mut adj_score = score;
-    if let Ok(weights) = soft_weights_store().lock() {
-        let blend = bandit_blend_factor();
-        let bandit = learn::weight_from_bandit(&*weights, name);
-        let baseline = 0.5f32;
-        let target = blend * bandit + (1.0 - blend) * baseline;
-        if weight > 0.0 {
-            let scale = (target / baseline.max(1e-6)).clamp(0.25, 4.0);
-            adj_weight = weight * scale;
-        }
-        if let Some(bias) = weights.base_coef.get(name) {
-            let bias = bias.clamp(-4.0, 4.0);
-            adj_score = score + bias;
-        }
+    let blend = bandit_blend_factor();
+    let bandit = learn::weight_from_bandit(weights, name);
+    let baseline = 0.5f32;
+    let target = blend * bandit + (1.0 - blend) * baseline;
+    if weight > 0.0 {
+        let scale = (target / baseline.max(1e-6)).clamp(0.25, 4.0);
+        adj_weight = weight * scale;
+    }
+    if let Some(bias) = weights.base_coef.get(name) {
+        let bias = bias.clamp(-4.0, 4.0);
+        adj_score = score + bias;
     }
     (adj_weight, adj_score)
 }
@@ -535,15 +543,56 @@ fn bandit_blend_factor() -> f32 {
         std::env::var("SPIRAL_SOFT_BANDIT_BLEND")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite())
             .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.5)
     })
 }
 
 #[cfg(feature = "logic-learn")]
-fn soft_weights_store() -> &'static Mutex<learn::SoftWeights> {
-    static STORE: std::sync::OnceLock<Mutex<learn::SoftWeights>> = std::sync::OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(learn::load()))
+fn soft_weights_snapshot() -> Arc<learn::SoftWeights> {
+    const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+    struct CachedWeights {
+        loaded_at: Instant,
+        weights: Arc<learn::SoftWeights>,
+    }
+
+    static CACHE: std::sync::OnceLock<Mutex<Option<CachedWeights>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cached) = cache.as_ref() {
+        if cached.loaded_at.elapsed() < REFRESH_INTERVAL {
+            return Arc::clone(&cached.weights);
+        }
+    }
+
+    match learn::try_load() {
+        Ok(weights) => {
+            let weights = Arc::new(weights);
+            *cache = Some(CachedWeights {
+                loaded_at: Instant::now(),
+                weights: Arc::clone(&weights),
+            });
+            weights
+        }
+        Err(error) => {
+            tracing::warn!(%error, "soft-weight store refresh failed; retaining prior weights");
+            if let Some(cached) = cache.as_mut() {
+                cached.loaded_at = Instant::now();
+                Arc::clone(&cached.weights)
+            } else {
+                let weights = Arc::new(learn::SoftWeights::default());
+                *cache = Some(CachedWeights {
+                    loaded_at: Instant::now(),
+                    weights: Arc::clone(&weights),
+                });
+                weights
+            }
+        }
+    }
 }
 
 pub fn choose_kind(
