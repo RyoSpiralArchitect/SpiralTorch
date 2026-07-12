@@ -52,7 +52,7 @@ pub mod traits;
 
 mod sync;
 
-pub use context::{PluginContext, PluginDependency};
+pub use context::{PluginContext, PluginDependency, PluginServiceRegistration};
 pub use events::{
     EventListener, PluginEvent, PluginEventBus, PluginEventDispatchReport,
     PluginEventListenerFailure,
