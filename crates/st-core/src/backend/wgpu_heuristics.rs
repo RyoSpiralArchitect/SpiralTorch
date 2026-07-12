@@ -7,6 +7,8 @@ use super::consensus;
 use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
 #[cfg(feature = "logic-learn")]
+use super::lock_recover;
+#[cfg(feature = "logic-learn")]
 use super::soft_logic::learn;
 #[cfg(feature = "logic")]
 use super::soft_logic::SoftRule;
@@ -21,6 +23,22 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 #[cfg(feature = "logic-learn")]
 use std::time::{Duration, Instant};
+
+#[cfg(feature = "logic-learn")]
+const SOFT_WEIGHTS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+#[cfg(feature = "logic-learn")]
+struct CachedSoftWeights {
+    loaded_at: Instant,
+    weights: Arc<learn::SoftWeights>,
+}
+
+#[cfg(feature = "logic-learn")]
+fn soft_weights_cache() -> &'static Mutex<Option<CachedSoftWeights>> {
+    static CACHE: std::sync::OnceLock<Mutex<Option<CachedSoftWeights>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
@@ -551,28 +569,43 @@ fn bandit_blend_factor() -> f32 {
 
 #[cfg(feature = "logic-learn")]
 fn soft_weights_snapshot() -> Arc<learn::SoftWeights> {
-    const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+    refresh_soft_weights(
+        soft_weights_cache(),
+        SOFT_WEIGHTS_REFRESH_INTERVAL,
+        learn::try_load,
+    )
+}
 
-    struct CachedWeights {
-        loaded_at: Instant,
-        weights: Arc<learn::SoftWeights>,
+#[cfg(feature = "logic-learn")]
+fn refresh_soft_weights<E>(
+    cache: &Mutex<Option<CachedSoftWeights>>,
+    refresh_interval: Duration,
+    loader: impl FnOnce() -> Result<learn::SoftWeights, E>,
+) -> Arc<learn::SoftWeights>
+where
+    E: std::fmt::Display,
+{
+    {
+        let cache = lock_recover(cache);
+        if let Some(cached) = cache.as_ref() {
+            if cached.loaded_at.elapsed() < refresh_interval {
+                return Arc::clone(&cached.weights);
+            }
+        }
     }
 
-    static CACHE: std::sync::OnceLock<Mutex<Option<CachedWeights>>> = std::sync::OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(None));
-    let mut cache = cache
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let loaded = loader();
+    let mut cache = lock_recover(cache);
     if let Some(cached) = cache.as_ref() {
-        if cached.loaded_at.elapsed() < REFRESH_INTERVAL {
+        if cached.loaded_at.elapsed() < refresh_interval {
             return Arc::clone(&cached.weights);
         }
     }
 
-    match learn::try_load() {
+    match loaded {
         Ok(weights) => {
             let weights = Arc::new(weights);
-            *cache = Some(CachedWeights {
+            *cache = Some(CachedSoftWeights {
                 loaded_at: Instant::now(),
                 weights: Arc::clone(&weights),
             });
@@ -585,7 +618,7 @@ fn soft_weights_snapshot() -> Arc<learn::SoftWeights> {
                 Arc::clone(&cached.weights)
             } else {
                 let weights = Arc::new(learn::SoftWeights::default());
-                *cache = Some(CachedWeights {
+                *cache = Some(CachedSoftWeights {
                     loaded_at: Instant::now(),
                     weights: Arc::clone(&weights),
                 });
@@ -717,6 +750,62 @@ mod tests {
     use super::*;
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "logic-learn")]
+    #[test]
+    fn soft_weight_refresh_runs_outside_cache_lock() {
+        let cache = Mutex::new(None);
+
+        let weights = refresh_soft_weights(&cache, Duration::ZERO, || {
+            assert!(
+                cache.try_lock().is_ok(),
+                "loader ran while cache was locked"
+            );
+            Ok::<_, &'static str>(learn::SoftWeights::default())
+        });
+
+        assert!(weights.base_coef.is_empty());
+    }
+
+    #[cfg(feature = "logic-learn")]
+    #[test]
+    fn soft_weight_loader_panic_does_not_poison_cache() {
+        let cache = Mutex::new(None);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            refresh_soft_weights(
+                &cache,
+                Duration::ZERO,
+                || -> Result<learn::SoftWeights, &'static str> {
+                    panic!("soft-weight loader failed");
+                },
+            );
+        }));
+
+        assert!(result.is_err());
+        assert!(!cache.is_poisoned());
+    }
+
+    #[cfg(feature = "logic-learn")]
+    #[test]
+    fn soft_weight_cache_recovers_after_poison() {
+        let cache = Mutex::new(None);
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison soft-weight cache");
+        }));
+        assert!(poisoned.is_err());
+        assert!(cache.is_poisoned());
+
+        let weights = refresh_soft_weights(&cache, Duration::ZERO, || {
+            Ok::<_, &'static str>(learn::SoftWeights::default())
+        });
+
+        assert!(weights.base_coef.is_empty());
+        assert!(!cache.is_poisoned());
+    }
 
     fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
         let previous = std::env::var(name).ok();
