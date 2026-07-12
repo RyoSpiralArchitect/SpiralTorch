@@ -15,8 +15,9 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::f64::consts::PI;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -30,6 +31,17 @@ use st_core::telemetry::hub::set_last_psi;
 use st_core::telemetry::psi::{PsiComponent, PsiReading};
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
+
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            mutex.clear_poison();
+            guard
+        }
+    }
+}
 
 fn finite_nonnegative_strength(value: f64) -> f64 {
     if value.is_finite() {
@@ -125,7 +137,7 @@ pub enum SynchroEvent {
 #[derive(Clone)]
 pub struct SynchroBus {
     state: Arc<Mutex<SyncState>>,
-    subscribers: Arc<Mutex<Vec<Sender<SynchroEvent>>>>,
+    subscribers: Arc<Mutex<Vec<Arc<Sender<SynchroEvent>>>>>,
 }
 
 impl SynchroBus {
@@ -138,22 +150,28 @@ impl SynchroBus {
 
     pub fn subscribe(&self) -> Receiver<SynchroEvent> {
         let (tx, rx) = mpsc::channel();
-        self.subscribers.lock().unwrap().push(tx);
+        lock_recover(&self.subscribers).push(Arc::new(tx));
         rx
     }
 
     pub fn publish(&self, event: SynchroEvent) {
-        let mut failed = Vec::new();
-        let mut guard = self.subscribers.lock().unwrap();
-        for (idx, sub) in guard.iter().enumerate() {
-            if sub.send(event.clone()).is_err() {
-                failed.push(idx);
-            }
-        }
+        self.publish_with(event, |subscriber, event| {
+            subscriber.send(event.clone()).is_ok()
+        });
+    }
+
+    fn publish_with<F>(&self, event: SynchroEvent, mut deliver: F)
+    where
+        F: FnMut(&Sender<SynchroEvent>, &SynchroEvent) -> bool,
+    {
+        let subscribers = lock_recover(&self.subscribers).clone();
+        let failed = subscribers
+            .into_iter()
+            .filter(|subscriber| !deliver(subscriber.as_ref(), &event))
+            .collect::<Vec<_>>();
         if !failed.is_empty() {
-            for idx in failed.into_iter().rev() {
-                guard.remove(idx);
-            }
+            lock_recover(&self.subscribers)
+                .retain(|subscriber| !failed.iter().any(|failed| Arc::ptr_eq(subscriber, failed)));
         }
     }
 
@@ -162,16 +180,23 @@ impl SynchroBus {
         F: FnMut(&mut SyncState),
     {
         let snapshot = {
-            let mut guard = self.state.lock().unwrap();
-            f(&mut guard);
-            guard.clone()
+            let mut guard = lock_recover(&self.state);
+            let previous = guard.clone();
+            match catch_unwind(AssertUnwindSafe(|| f(&mut guard))) {
+                Ok(()) => guard.clone(),
+                Err(payload) => {
+                    *guard = previous;
+                    drop(guard);
+                    resume_unwind(payload);
+                }
+            }
         };
         self.publish(SynchroEvent::State(snapshot));
     }
 
     pub fn insert_branch(&self, branch: PsiBranchState) {
         {
-            let mut guard = self.state.lock().unwrap();
+            let mut guard = lock_recover(&self.state);
             guard
                 .branches
                 .insert(branch.branch_id.clone(), branch.clone());
@@ -180,7 +205,7 @@ impl SynchroBus {
     }
 
     pub fn snapshot(&self) -> SyncState {
-        self.state.lock().unwrap().clone()
+        lock_recover(&self.state).clone()
     }
 }
 
@@ -200,7 +225,7 @@ impl Ticker {
         let handle = thread::spawn(move || {
             for index in 0..steps {
                 let (tau, step) = {
-                    let mut guard = bus.state.lock().unwrap();
+                    let mut guard = lock_recover(&bus.state);
                     let tau = guard.tau;
                     let step = guard.step;
                     guard.tau += step;
@@ -1144,10 +1169,7 @@ impl HeatmapCollector {
             while let Ok(event) = rx.recv() {
                 match event {
                     SynchroEvent::HeatmapUpdate(result) => {
-                        results_clone
-                            .lock()
-                            .unwrap()
-                            .insert(result.branch_id.clone(), result);
+                        lock_recover(&results_clone).insert(result.branch_id.clone(), result);
                     }
                     SynchroEvent::Shutdown => break,
                     _ => {}
@@ -1164,7 +1186,7 @@ impl HeatmapCollector {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
-        self.results.lock().unwrap().values().cloned().collect()
+        lock_recover(&self.results).values().cloned().collect()
     }
 }
 
@@ -1373,6 +1395,114 @@ mod tests {
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
+    }
+
+    #[test]
+    fn publish_recovers_after_subscriber_registry_poison() {
+        let bus = SynchroBus::new();
+        let receiver = bus.subscribe();
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = bus.subscribers.lock().unwrap();
+            panic!("poison subscriber registry");
+        }));
+        assert!(poisoned.is_err());
+        assert!(bus.subscribers.is_poisoned());
+
+        bus.publish(SynchroEvent::Shutdown);
+
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(1)),
+            Ok(SynchroEvent::Shutdown)
+        ));
+        assert!(!bus.subscribers.is_poisoned());
+    }
+
+    #[test]
+    fn update_state_rolls_back_after_callback_panic() {
+        let bus = SynchroBus::new();
+        let panicked = catch_unwind(AssertUnwindSafe(|| {
+            bus.update_state(|state| {
+                state.epoch = 99;
+                panic!("abort synchronization state update");
+            });
+        }));
+        assert!(panicked.is_err());
+        assert!(!bus.state.is_poisoned());
+        assert_eq!(bus.snapshot().epoch, 0);
+
+        bus.update_state(|state| state.epoch = 7);
+
+        assert_eq!(bus.snapshot().epoch, 7);
+    }
+
+    #[test]
+    fn state_recovers_after_external_lock_poison() {
+        let bus = SynchroBus::new();
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = bus.state.lock().unwrap();
+            panic!("poison synchronization state");
+        }));
+        assert!(poisoned.is_err());
+        assert!(bus.state.is_poisoned());
+
+        bus.update_state(|state| state.epoch = 7);
+
+        assert_eq!(bus.snapshot().epoch, 7);
+        assert!(!bus.state.is_poisoned());
+    }
+
+    #[test]
+    fn publish_delivers_outside_subscriber_registry_lock() {
+        let bus = SynchroBus::new();
+        let _receiver = bus.subscribe();
+        let mut delivered = false;
+
+        bus.publish_with(SynchroEvent::Shutdown, |_, _| {
+            assert!(
+                bus.subscribers.try_lock().is_ok(),
+                "subscriber delivery ran while the registry was locked"
+            );
+            delivered = true;
+            true
+        });
+
+        assert!(delivered);
+    }
+
+    #[test]
+    fn publish_delivery_panic_does_not_poison_registry() {
+        let bus = SynchroBus::new();
+        let receiver = bus.subscribe();
+        let panicked = catch_unwind(AssertUnwindSafe(|| {
+            bus.publish_with(SynchroEvent::Shutdown, |_, _| {
+                panic!("subscriber delivery panicked")
+            });
+        }));
+        assert!(panicked.is_err());
+        assert!(!bus.subscribers.is_poisoned());
+
+        bus.publish(SynchroEvent::Shutdown);
+
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(1)),
+            Ok(SynchroEvent::Shutdown)
+        ));
+    }
+
+    #[test]
+    fn publish_prunes_disconnected_subscribers_by_identity() {
+        let bus = SynchroBus::new();
+        let disconnected = bus.subscribe();
+        let receiver = bus.subscribe();
+        drop(disconnected);
+
+        bus.publish(SynchroEvent::Shutdown);
+
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(1)),
+            Ok(SynchroEvent::Shutdown)
+        ));
+        assert_eq!(lock_recover(&bus.subscribers).len(), 1);
     }
 
     #[test]
