@@ -154,36 +154,16 @@ fn psi_metric_subscribers_cell() -> &'static RwLock<Vec<PsiMetricsSubscriber>> {
 
 #[cfg(all(test, feature = "psi"))]
 fn psi_metric_subscriber_count_for_test() -> usize {
-    let subscribers = psi_metric_subscribers_cell();
-    match subscribers.read() {
-        Ok(guard) => guard.len(),
-        Err(poisoned) => {
-            let count = poisoned.into_inner().len();
-            subscribers.clear_poison();
-            count
-        }
-    }
+    read_recover(psi_metric_subscribers_cell()).len()
 }
 
 #[cfg(feature = "psi")]
 fn current_psi_metrics_frame() -> PsiMetricsFrame {
     let _guard = psi_lock().lock();
-    let reading = LAST_PSI
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned());
-    let events = LAST_PSI_EVENTS
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
-    let spiral = LAST_PSI_SPIRAL
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned());
-    let tuning = LAST_PSI_SPIRAL_TUNING
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned());
+    let reading = read_recover(&LAST_PSI).as_ref().cloned();
+    let events = read_recover(&LAST_PSI_EVENTS).clone();
+    let spiral = read_recover(&LAST_PSI_SPIRAL).as_ref().cloned();
+    let tuning = read_recover(&LAST_PSI_SPIRAL_TUNING).as_ref().cloned();
     PsiMetricsFrame {
         reading,
         events,
@@ -197,30 +177,12 @@ fn update_psi_metric_subscribers<F>(mut apply: F)
 where
     F: FnMut(&mut PsiMetricsFrame),
 {
-    let subscribers = psi_metric_subscribers_cell();
-    let frames: Vec<Arc<RwLock<PsiMetricsFrame>>> = match subscribers.read() {
-        Ok(guard) => guard
-            .iter()
-            .map(|subscriber| subscriber.frame.clone())
-            .collect(),
-        Err(poisoned) => {
-            let guard = poisoned.into_inner();
-            subscribers.clear_poison();
-            guard
-                .iter()
-                .map(|subscriber| subscriber.frame.clone())
-                .collect()
-        }
-    };
+    let frames: Vec<Arc<RwLock<PsiMetricsFrame>>> = read_recover(psi_metric_subscribers_cell())
+        .iter()
+        .map(|subscriber| subscriber.frame.clone())
+        .collect();
     for frame in frames {
-        match frame.write() {
-            Ok(mut guard) => apply(&mut guard),
-            Err(poisoned) => {
-                let mut guard = poisoned.into_inner();
-                frame.clear_poison();
-                apply(&mut guard);
-            }
-        }
+        apply(&mut write_recover(&frame));
     }
 }
 
@@ -261,14 +223,7 @@ impl PsiMetricsSubscription {
     }
 
     pub fn snapshot(&self) -> PsiMetricsFrame {
-        match self.inner.frame.read() {
-            Ok(guard) => guard.clone(),
-            Err(poisoned) => {
-                let snapshot = poisoned.into_inner().clone();
-                self.inner.frame.clear_poison();
-                snapshot
-            }
-        }
+        read_recover(&self.inner.frame).clone()
     }
 }
 
@@ -278,15 +233,14 @@ impl Drop for PsiMetricsSubscriptionInner {
         let Some(id) = self.id else {
             return;
         };
-        let subscribers = psi_metric_subscribers_cell();
-        match subscribers.write() {
-            Ok(mut guard) => guard.retain(|subscriber| subscriber.id != id),
-            Err(poisoned) => {
-                let mut guard = poisoned.into_inner();
-                subscribers.clear_poison();
-                guard.retain(|subscriber| subscriber.id != id);
-            }
-        }
+        let removed = {
+            let mut subscribers = write_recover(psi_metric_subscribers_cell());
+            subscribers
+                .iter()
+                .position(|subscriber| subscriber.id == id)
+                .map(|position| subscribers.remove(position))
+        };
+        drop(removed);
     }
 }
 
@@ -298,15 +252,7 @@ pub fn subscribe_psi_metrics() -> PsiMetricsSubscription {
         id,
         frame: frame.clone(),
     };
-    let subscribers = psi_metric_subscribers_cell();
-    match subscribers.write() {
-        Ok(mut guard) => guard.push(entry),
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            subscribers.clear_poison();
-            guard.push(entry);
-        }
-    }
+    write_recover(psi_metric_subscribers_cell()).push(entry);
     PsiMetricsSubscription {
         inner: Arc::new(PsiMetricsSubscriptionInner {
             id: Some(id),
@@ -445,12 +391,11 @@ pub struct ConfigDiffEvent {
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
     let reading_snapshot = reading.clone();
-    {
+    let previous = {
         let _guard = psi_lock().lock();
-        if let Ok(mut guard) = LAST_PSI.write() {
-            *guard = Some(reading.clone());
-        }
-    }
+        write_recover(&LAST_PSI).replace(reading.clone())
+    };
+    drop(previous);
     #[cfg(feature = "psi")]
     update_psi_metric_subscribers(|frame| {
         frame.reading = Some(reading_snapshot.clone());
@@ -468,18 +413,16 @@ pub fn set_last_psi(reading: &PsiReading) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi() -> Option<PsiReading> {
     let _guard = psi_lock().lock();
-    LAST_PSI
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(&LAST_PSI).as_ref().cloned()
 }
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi() {
-    let _guard = psi_lock().lock();
-    if let Ok(mut guard) = LAST_PSI.write() {
-        *guard = None;
-    }
+    let previous = {
+        let _guard = psi_lock().lock();
+        write_recover(&LAST_PSI).take()
+    };
+    drop(previous);
     update_psi_metric_subscribers(|frame| {
         frame.reading = None;
     });
@@ -488,13 +431,14 @@ pub fn clear_last_psi() {
 #[cfg(feature = "psi")]
 pub fn set_last_psi_events(events: &[PsiEvent]) {
     let events_snapshot: Vec<PsiEvent> = events.to_vec();
-    {
+    let previous = {
         let _guard = psi_lock().lock();
-        if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
-            guard.clear();
-            guard.extend(events.iter().cloned());
-        }
-    }
+        std::mem::replace(
+            &mut *write_recover(&LAST_PSI_EVENTS),
+            events_snapshot.clone(),
+        )
+    };
+    drop(previous);
     #[cfg(feature = "psi")]
     update_psi_metric_subscribers(|frame| {
         frame.events = events_snapshot.clone();
@@ -512,18 +456,16 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi_events() -> Vec<PsiEvent> {
     let _guard = psi_lock().lock();
-    LAST_PSI_EVENTS
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
+    read_recover(&LAST_PSI_EVENTS).clone()
 }
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi_events() {
-    let _guard = psi_lock().lock();
-    if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
-        guard.clear();
-    }
+    let previous = {
+        let _guard = psi_lock().lock();
+        std::mem::take(&mut *write_recover(&LAST_PSI_EVENTS))
+    };
+    drop(previous);
     update_psi_metric_subscribers(|frame| {
         frame.events.clear();
     });
@@ -532,12 +474,10 @@ pub fn clear_last_psi_events() {
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
     let advisory_snapshot = advisory.clone();
-    {
+    let _previous = {
         let _guard = psi_lock().lock();
-        if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
-            *guard = Some(advisory.clone());
-        }
-    }
+        write_recover(&LAST_PSI_SPIRAL).replace(advisory.clone())
+    };
     #[cfg(feature = "psi")]
     update_psi_metric_subscribers(|frame| {
         frame.spiral = Some(advisory_snapshot.clone());
@@ -563,21 +503,17 @@ pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi_spiral() -> Option<PsiSpiralAdvisory> {
     let _guard = psi_lock().lock();
-    LAST_PSI_SPIRAL
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(&LAST_PSI_SPIRAL).as_ref().cloned()
 }
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
     let tuning_snapshot = tuning.clone();
-    {
+    let previous = {
         let _guard = psi_lock().lock();
-        if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
-            *guard = Some(tuning.clone());
-        }
-    }
+        write_recover(&LAST_PSI_SPIRAL_TUNING).replace(tuning.clone())
+    };
+    drop(previous);
     #[cfg(feature = "psi")]
     update_psi_metric_subscribers(|frame| {
         frame.tuning = Some(tuning_snapshot.clone());
@@ -608,18 +544,15 @@ pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
 #[cfg(feature = "psi")]
 pub fn get_last_psi_spiral_tuning() -> Option<PsiSpiralTuning> {
     let _guard = psi_lock().lock();
-    LAST_PSI_SPIRAL_TUNING
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(&LAST_PSI_SPIRAL_TUNING).as_ref().cloned()
 }
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi_spiral() {
-    let _guard = psi_lock().lock();
-    if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
-        *guard = None;
-    }
+    let _previous = {
+        let _guard = psi_lock().lock();
+        write_recover(&LAST_PSI_SPIRAL).take()
+    };
     update_psi_metric_subscribers(|frame| {
         frame.spiral = None;
     });
@@ -627,10 +560,11 @@ pub fn clear_last_psi_spiral() {
 
 #[cfg(feature = "psi")]
 pub fn clear_last_psi_spiral_tuning() {
-    let _guard = psi_lock().lock();
-    if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
-        *guard = None;
-    }
+    let previous = {
+        let _guard = psi_lock().lock();
+        write_recover(&LAST_PSI_SPIRAL_TUNING).take()
+    };
+    drop(previous);
     update_psi_metric_subscribers(|frame| {
         frame.tuning = None;
     });
@@ -639,10 +573,8 @@ pub fn clear_last_psi_spiral_tuning() {
 /// Records the most recent configuration diff events produced when loading
 /// layered configuration files.
 pub fn record_config_events(events: &[ConfigDiffEvent]) {
-    if let Ok(mut guard) = config_events_cell().write() {
-        guard.clear();
-        guard.extend(events.iter().cloned());
-    }
+    let previous = std::mem::replace(&mut *write_recover(config_events_cell()), events.to_vec());
+    drop(previous);
     if events.is_empty() {
         return;
     }
@@ -652,10 +584,7 @@ pub fn record_config_events(events: &[ConfigDiffEvent]) {
 
 /// Returns the last recorded configuration diff events.
 pub fn get_config_events() -> Vec<ConfigDiffEvent> {
-    config_events_cell()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
+    read_recover(config_events_cell()).clone()
 }
 
 #[cfg(feature = "psychoid")]
@@ -663,19 +592,15 @@ static LAST_PSYCHOID: Lazy<RwLock<Option<PsychoidReading>>> = Lazy::new(|| RwLoc
 
 #[cfg(feature = "psychoid")]
 pub fn set_last_psychoid(reading: &PsychoidReading) {
-    if let Ok(mut guard) = LAST_PSYCHOID.write() {
-        *guard = Some(reading.clone());
-    }
+    let previous = write_recover(&LAST_PSYCHOID).replace(reading.clone());
+    drop(previous);
     let fragment = fragment_from_psychoid_reading(reading);
     merge_atlas_fragment(fragment);
 }
 
 #[cfg(feature = "psychoid")]
 pub fn get_last_psychoid() -> Option<PsychoidReading> {
-    LAST_PSYCHOID
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(&LAST_PSYCHOID).as_ref().cloned()
 }
 
 /// Latest SoftLogic-derived telemetry that has been fed back into the "Z" control space.
@@ -1048,21 +973,12 @@ pub(crate) fn clear_maintainer_report_for_test() {
 
 /// Stores the most recent SoftLogic Z feedback sample.
 pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
-    #[cfg(feature = "psi")]
-    let _psi_guard = psi_lock().lock();
-
-    match softlogic_z_cell().write() {
-        Ok(mut guard) => {
-            *guard = Some(feedback.clone());
-        }
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            *guard = Some(feedback.clone());
-        }
-    }
-
-    #[cfg(feature = "psi")]
-    drop(_psi_guard);
+    let previous = {
+        #[cfg(feature = "psi")]
+        let _psi_guard = psi_lock().lock();
+        write_recover(softlogic_z_cell()).replace(feedback.clone())
+    };
+    drop(previous);
 
     let fragment = fragment_from_softlogic(&feedback);
     merge_atlas_fragment(fragment);
@@ -1076,30 +992,19 @@ pub fn set_region_loss_report(report: AttributionReport) {
         "loss",
         &report,
     );
-    match region_report_cell().write() {
-        Ok(mut guard) => {
-            *guard = Some(report);
-        }
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            *guard = Some(report);
-        }
-    }
+    let previous = write_recover(region_report_cell()).replace(report);
+    drop(previous);
 }
 
 /// Clears the stored region-weighted loss report.
 pub fn clear_region_loss_report() {
-    if let Ok(mut guard) = region_report_cell().write() {
-        guard.take();
-    }
+    let previous = write_recover(region_report_cell()).take();
+    drop(previous);
 }
 
 /// Returns the last stored region heatmap report, if any.
 pub fn get_region_loss_report() -> Option<AttributionReport> {
-    region_report_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(region_report_cell()).as_ref().cloned()
 }
 
 /// Stores the latest region-weighted delta heatmap.
@@ -1110,30 +1015,19 @@ pub fn set_region_loss_trend_report(report: AttributionReport) {
         "trend",
         &report,
     );
-    match region_trend_report_cell().write() {
-        Ok(mut guard) => {
-            *guard = Some(report);
-        }
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            *guard = Some(report);
-        }
-    }
+    let previous = write_recover(region_trend_report_cell()).replace(report);
+    drop(previous);
 }
 
 /// Clears the stored region delta heatmap.
 pub fn clear_region_loss_trend_report() {
-    if let Ok(mut guard) = region_trend_report_cell().write() {
-        guard.take();
-    }
+    let previous = write_recover(region_trend_report_cell()).take();
+    drop(previous);
 }
 
 /// Returns the latest region delta heatmap, if available.
 pub fn get_region_loss_trend_report() -> Option<AttributionReport> {
-    region_trend_report_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(region_trend_report_cell()).as_ref().cloned()
 }
 
 /// Stores the latest region volatility heatmap derived from the history window.
@@ -1144,30 +1038,21 @@ pub fn set_region_loss_volatility_report(report: AttributionReport) {
         "volatility",
         &report,
     );
-    match region_volatility_report_cell().write() {
-        Ok(mut guard) => {
-            *guard = Some(report);
-        }
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            *guard = Some(report);
-        }
-    }
+    let previous = write_recover(region_volatility_report_cell()).replace(report);
+    drop(previous);
 }
 
 /// Clears the stored region volatility heatmap.
 pub fn clear_region_loss_volatility_report() {
-    if let Ok(mut guard) = region_volatility_report_cell().write() {
-        guard.take();
-    }
+    let previous = write_recover(region_volatility_report_cell()).take();
+    drop(previous);
 }
 
 /// Returns the latest region volatility heatmap, if present.
 pub fn get_region_loss_volatility_report() -> Option<AttributionReport> {
-    region_volatility_report_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(region_volatility_report_cell())
+        .as_ref()
+        .cloned()
 }
 
 fn emit_region_report_store_meta(
@@ -1230,10 +1115,7 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
     #[cfg(feature = "psi")]
     let _psi_guard = psi_lock().lock();
 
-    let result = match softlogic_z_cell().read() {
-        Ok(guard) => guard.as_ref().cloned(),
-        Err(poisoned) => poisoned.into_inner().as_ref().cloned(),
-    };
+    let result = read_recover(softlogic_z_cell()).as_ref().cloned();
 
     #[cfg(feature = "psi")]
     drop(_psi_guard);
@@ -1243,16 +1125,11 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
 
 #[cfg(feature = "psi")]
 pub fn clear_softlogic_z() {
-    let _guard = psi_lock().lock();
-    match softlogic_z_cell().write() {
-        Ok(mut guard) => {
-            *guard = None;
-        }
-        Err(poisoned) => {
-            let mut guard = poisoned.into_inner();
-            *guard = None;
-        }
-    }
+    let previous = {
+        let _guard = psi_lock().lock();
+        write_recover(softlogic_z_cell()).take()
+    };
+    drop(previous);
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.
@@ -1338,26 +1215,19 @@ fn realgrad_cell() -> &'static RwLock<Option<RealGradPulse>> {
 
 /// Stores the latest RealGrad pulse emitted by the engine.
 pub fn set_last_realgrad(pulse: &RealGradPulse) {
-    if let Ok(mut guard) = realgrad_cell().write() {
-        *guard = Some(*pulse);
-    }
+    let _ = write_recover(realgrad_cell()).replace(*pulse);
     let fragment = fragment_from_realgrad(pulse);
     merge_atlas_fragment(fragment);
 }
 
 /// Returns the most recent RealGrad pulse, if one has been recorded.
 pub fn get_last_realgrad() -> Option<RealGradPulse> {
-    realgrad_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().copied())
+    read_recover(realgrad_cell()).as_ref().copied()
 }
 
 #[cfg(test)]
 pub(crate) fn clear_last_realgrad_for_test() {
-    if let Ok(mut guard) = realgrad_cell().write() {
-        *guard = None;
-    }
+    let _ = write_recover(realgrad_cell()).take();
 }
 
 #[cfg_attr(
@@ -1366,9 +1236,8 @@ pub(crate) fn clear_last_realgrad_for_test() {
 )]
 #[cfg(feature = "psi")]
 pub fn set_last_desire_step(step: DesireStepTelemetry) {
-    if let Ok(mut guard) = desire_step_cell().write() {
-        *guard = Some(step.clone());
-    }
+    let previous = write_recover(desire_step_cell()).replace(step.clone());
+    drop(previous);
     let mut fragment = fragment_from_desire_step(&step);
     if let Some(feedback) = &step.z_feedback {
         populate_softlogic_metrics(&mut fragment, "desire.z_feedback", feedback);
@@ -1391,9 +1260,8 @@ pub fn set_last_desire_step(step: DesireStepTelemetry) {
 )]
 #[cfg(feature = "psi")]
 pub fn clear_last_desire_step() {
-    if let Ok(mut guard) = desire_step_cell().write() {
-        *guard = None;
-    }
+    let previous = write_recover(desire_step_cell()).take();
+    drop(previous);
 }
 
 #[cfg_attr(
@@ -1402,10 +1270,7 @@ pub fn clear_last_desire_step() {
 )]
 #[cfg(feature = "psi")]
 pub fn get_last_desire_step() -> Option<DesireStepTelemetry> {
-    desire_step_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(desire_step_cell()).as_ref().cloned()
 }
 
 static LAST_CHRONO_LOOP: OnceLock<RwLock<Option<ChronoLoopSignal>>> = OnceLock::new();
@@ -1416,17 +1281,13 @@ fn chrono_loop_cell() -> &'static RwLock<Option<ChronoLoopSignal>> {
 
 /// Stores the most recent chrono loop signal so other nodes can consume it.
 pub fn set_chrono_loop(signal: ChronoLoopSignal) {
-    if let Ok(mut guard) = chrono_loop_cell().write() {
-        *guard = Some(signal);
-    }
+    let previous = write_recover(chrono_loop_cell()).replace(signal);
+    drop(previous);
 }
 
 /// Returns the latest chrono loop signal, if any has been recorded.
 pub fn get_chrono_loop() -> Option<ChronoLoopSignal> {
-    chrono_loop_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(chrono_loop_cell()).as_ref().cloned()
 }
 
 /// Envelope combining chrono loop telemetry with collapse/Z feedback so other nodes can replay it.
@@ -1502,12 +1363,18 @@ fn loopback_cell() -> &'static RwLock<VecDeque<LoopbackEnvelope>> {
 
 /// Pushes a new loopback envelope into the global queue, keeping the buffer bounded.
 pub fn push_loopback_envelope(envelope: LoopbackEnvelope) {
-    if let Ok(mut guard) = loopback_cell().write() {
+    let evicted = {
+        let mut guard = write_recover(loopback_cell());
         guard.push_back(envelope.clone());
+        let mut evicted = Vec::new();
         while guard.len() > 64 {
-            guard.pop_front();
+            if let Some(envelope) = guard.pop_front() {
+                evicted.push(envelope);
+            }
         }
-    }
+        evicted
+    };
+    drop(evicted);
     merge_atlas_fragment(fragment_from_loopback(&envelope));
 }
 
@@ -2036,19 +1903,16 @@ pub fn drain_loopback_envelopes(limit: usize) -> Vec<LoopbackEnvelope> {
     if limit == 0 {
         return Vec::new();
     }
-    if let Ok(mut guard) = loopback_cell().write() {
-        let mut drained = Vec::new();
-        for _ in 0..limit {
-            if let Some(envelope) = guard.pop_front() {
-                drained.push(envelope);
-            } else {
-                break;
-            }
+    let mut guard = write_recover(loopback_cell());
+    let mut drained = Vec::new();
+    for _ in 0..limit {
+        if let Some(envelope) = guard.pop_front() {
+            drained.push(envelope);
+        } else {
+            break;
         }
-        drained
-    } else {
-        Vec::new()
     }
+    drained
 }
 
 /// Returns up to `limit` envelopes without mutating the queue.
@@ -2056,11 +1920,11 @@ pub fn peek_loopback_envelopes(limit: usize) -> Vec<LoopbackEnvelope> {
     if limit == 0 {
         return Vec::new();
     }
-    if let Ok(guard) = loopback_cell().read() {
-        guard.iter().take(limit).cloned().collect()
-    } else {
-        Vec::new()
-    }
+    read_recover(loopback_cell())
+        .iter()
+        .take(limit)
+        .cloned()
+        .collect()
 }
 
 #[cfg(feature = "collapse")]
@@ -2087,9 +1951,8 @@ fn collapse_cell() -> &'static RwLock<Option<CollapsePulse>> {
 #[cfg(feature = "collapse")]
 /// Stores the most recent collapse command pulse.
 pub fn set_collapse_pulse(pulse: CollapsePulse) {
-    if let Ok(mut guard) = collapse_cell().write() {
-        *guard = Some(pulse.clone());
-    }
+    let previous = write_recover(collapse_cell()).replace(pulse.clone());
+    drop(previous);
     let fragment = fragment_from_collapse_pulse(&pulse);
     merge_atlas_fragment(fragment);
 }
@@ -2097,10 +1960,7 @@ pub fn set_collapse_pulse(pulse: CollapsePulse) {
 #[cfg(feature = "collapse")]
 /// Returns the most recent collapse pulse, if any.
 pub fn get_collapse_pulse() -> Option<CollapsePulse> {
-    collapse_cell()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+    read_recover(collapse_cell()).as_ref().cloned()
 }
 
 #[cfg(test)]
@@ -2280,6 +2140,94 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "poison.recovery" && metric.value == 1.0));
+    }
+
+    #[test]
+    fn realgrad_cache_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        clear_last_realgrad_for_test();
+        poison_rwlock(realgrad_cell());
+        let pulse = RealGradPulse {
+            iterations: 17,
+            converged: true,
+            ..RealGradPulse::default()
+        };
+
+        set_last_realgrad(&pulse);
+
+        assert!(!realgrad_cell().is_poisoned());
+        assert_eq!(get_last_realgrad(), Some(pulse));
+        clear_last_realgrad_for_test();
+    }
+
+    #[test]
+    fn region_report_cache_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        clear_region_loss_report();
+        poison_rwlock(region_report_cell());
+        let report = sample_attribution_report("poison-recovery", vec![0.1, 0.2, 0.3, 0.4]);
+
+        set_region_loss_report(report.clone());
+
+        assert!(!region_report_cell().is_poisoned());
+        let stored = get_region_loss_report().expect("region report recovered");
+        assert_eq!(stored.metadata.algorithm, report.metadata.algorithm);
+        assert_eq!(stored.values, report.values);
+        clear_region_loss_report();
+    }
+
+    #[test]
+    fn config_events_recover_after_poison() {
+        let _guard = hub_test_guard();
+        record_config_events(&[]);
+        poison_rwlock(config_events_cell());
+        let events = vec![ConfigDiffEvent {
+            layer: ConfigLayer::Run,
+            path: "poison-recovery.toml".into(),
+            previous: None,
+            current: Some(serde_json::json!({"recovered": true})),
+        }];
+
+        record_config_events(&events);
+
+        assert!(!config_events_cell().is_poisoned());
+        let stored = get_config_events();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].path, events[0].path);
+        record_config_events(&[]);
+    }
+
+    #[test]
+    fn loopback_queue_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        let _ = drain_loopback_envelopes(usize::MAX);
+        poison_rwlock(loopback_cell());
+        let envelope = LoopbackEnvelope::new(ChronoLoopSignal::new(sample_summary(11.0), None));
+
+        push_loopback_envelope(envelope);
+
+        assert!(!loopback_cell().is_poisoned());
+        assert_eq!(peek_loopback_envelopes(1).len(), 1);
+        let _ = drain_loopback_envelopes(usize::MAX);
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_reading_cache_recovers_after_poison() {
+        let _guard = hub_test_guard();
+        clear_last_psi();
+        poison_rwlock(&LAST_PSI);
+        let reading = PsiReading {
+            total: 0.75,
+            breakdown: HashMap::new(),
+            step: 91,
+        };
+
+        set_last_psi(&reading);
+
+        assert!(!LAST_PSI.is_poisoned());
+        assert_eq!(get_last_psi().expect("PSI reading recovered").step, 91);
+        clear_last_psi();
     }
 
     #[test]
