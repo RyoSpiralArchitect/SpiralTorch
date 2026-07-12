@@ -173,7 +173,7 @@ impl PsiConfig {
     }
 
     /// Applies the Spiral advisory by first converting it into a tuning plan
-    /// and then forwarding to [`apply_spiral_tuning`].
+    /// and then forwarding to [`Self::apply_spiral_tuning`].
     pub fn apply_spiral_advisory(&mut self, advisory: &PsiSpiralAdvisory) {
         let tuning = advisory.tuning();
         self.apply_spiral_tuning(&tuning);

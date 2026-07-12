@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 //! Engine/Optimizer hook points (registration + no-op safe calls)
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed};
 
@@ -13,6 +13,17 @@ type PartHookFn = fn(params: &[f32], rank: u32, world: u32) -> Vec<f32>;
 
 static GRAD_HOOK: OnceLock<Mutex<Option<GradHookFn>>> = OnceLock::new();
 static PART_HOOK: OnceLock<Mutex<Option<PartHookFn>>> = OnceLock::new();
+
+fn lock_hook<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
 
 fn finite_meta_f32(value: f32) -> serde_json::Value {
     serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
@@ -27,30 +38,26 @@ fn l2_norm(values: &[f32]) -> f32 {
         .sqrt()
 }
 
+/// Replaces the process-global one-bit all-reduce callback.
 pub fn register_onebit_allreduce(h: GradHookFn) {
-    GRAD_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .unwrap()
-        .replace(h);
-}
-pub fn register_zero_partition(h: PartHookFn) {
-    PART_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .unwrap()
-        .replace(h);
+    lock_hook(GRAD_HOOK.get_or_init(|| Mutex::new(None))).replace(h);
 }
 
+/// Replaces the process-global zero-partition callback.
+pub fn register_zero_partition(h: PartHookFn) {
+    lock_hook(PART_HOOK.get_or_init(|| Mutex::new(None))).replace(h);
+}
+
+/// Invokes a snapshot of the registered callback without holding its registry lock.
+/// Callback panics propagate to the caller without poisoning hook registration.
 pub fn call_onebit_allreduce(grad: &mut [f32], world: u32) {
     let capture_meta = tensor_op_meta_observer_installed();
     let before_l2 = if capture_meta { l2_norm(grad) } else { 0.0 };
     let mut registered = false;
-    if let Some(guard) = GRAD_HOOK.get() {
-        if let Some(h) = *guard.lock().unwrap() {
-            registered = true;
-            (h)(grad, world);
-        }
+    let hook = GRAD_HOOK.get().and_then(|slot| *lock_hook(slot));
+    if let Some(hook) = hook {
+        registered = true;
+        hook(grad, world);
     }
     emit_tensor_op("onebit_allreduce_hook", &[grad.len()], &[grad.len()]);
     if capture_meta {
@@ -81,38 +88,39 @@ pub fn call_onebit_allreduce(grad: &mut [f32], world: u32) {
     // no-op
 }
 
+/// Invokes a snapshot of the registered callback without holding its registry lock.
+/// Callback panics propagate to the caller without poisoning hook registration.
 pub fn call_zero_partition(params: &[f32], rank: u32, world: u32) -> Vec<f32> {
     let capture_meta = tensor_op_meta_observer_installed();
     let input_l2 = if capture_meta { l2_norm(params) } else { 0.0 };
-    if let Some(guard) = PART_HOOK.get() {
-        if let Some(h) = *guard.lock().unwrap() {
-            let output = (h)(params, rank, world);
-            emit_tensor_op("zero_partition_hook", &[params.len()], &[output.len()]);
-            if capture_meta {
-                let output_l2 = l2_norm(&output);
-                emit_tensor_op_meta("zero_partition_hook", || {
-                    serde_json::json!({
-                        "backend": "cpu",
-                        "requested_backend": "auto",
-                        "kind": "st_core_zero_partition_hook",
-                        "hook_dispatch_backend": "cpu_callback",
-                        "partition_backend": "registered_host_callback",
-                        "hook_mode": "opaque_parameter_partition_callback",
-                        "route_blocker": "opaque_registered_host_callback",
-                        "registered": true,
-                        "rank": rank,
-                        "world": world,
-                        "param_len": params.len(),
-                        "partition_len": output.len(),
-                        "input_l2": finite_meta_f32(input_l2),
-                        "output_l2": finite_meta_f32(output_l2),
-                        "estimated_parameter_values": params.len(),
-                        "estimated_partition_values": output.len(),
-                    })
-                });
-            }
-            return output;
+    let hook = PART_HOOK.get().and_then(|slot| *lock_hook(slot));
+    if let Some(hook) = hook {
+        let output = hook(params, rank, world);
+        emit_tensor_op("zero_partition_hook", &[params.len()], &[output.len()]);
+        if capture_meta {
+            let output_l2 = l2_norm(&output);
+            emit_tensor_op_meta("zero_partition_hook", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": "auto",
+                    "kind": "st_core_zero_partition_hook",
+                    "hook_dispatch_backend": "cpu_callback",
+                    "partition_backend": "registered_host_callback",
+                    "hook_mode": "opaque_parameter_partition_callback",
+                    "route_blocker": "opaque_registered_host_callback",
+                    "registered": true,
+                    "rank": rank,
+                    "world": world,
+                    "param_len": params.len(),
+                    "partition_len": output.len(),
+                    "input_l2": finite_meta_f32(input_l2),
+                    "output_l2": finite_meta_f32(output_l2),
+                    "estimated_parameter_values": params.len(),
+                    "estimated_partition_values": output.len(),
+                })
+            });
         }
+        return output;
     }
     let output = params.to_vec();
     emit_tensor_op("zero_partition_hook", &[params.len()], &[output.len()]);
@@ -145,16 +153,17 @@ pub fn call_zero_partition(params: &[f32], rank: u32, world: u32) -> Vec<f32> {
 #[cfg(test)]
 fn clear_hooks_for_test() {
     if let Some(guard) = GRAD_HOOK.get() {
-        *guard.lock().unwrap() = None;
+        *lock_hook(guard) = None;
     }
     if let Some(guard) = PART_HOOK.get() {
-        *guard.lock().unwrap() = None;
+        *lock_hook(guard) = None;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::{Arc, Mutex, OnceLock};
 
     fn hook_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -177,6 +186,75 @@ mod tests {
             .filter(|(idx, _)| (*idx as u32) % world == rank)
             .map(|(_, value)| *value)
             .collect()
+    }
+
+    fn grad_callback_observes_unlocked_registry(grad: &mut [f32], _world: u32) {
+        grad[0] = if GRAD_HOOK.get().unwrap().try_lock().is_ok() {
+            1.0
+        } else {
+            -1.0
+        };
+    }
+
+    fn part_callback_observes_unlocked_registry(
+        _params: &[f32],
+        _rank: u32,
+        _world: u32,
+    ) -> Vec<f32> {
+        vec![if PART_HOOK.get().unwrap().try_lock().is_ok() {
+            1.0
+        } else {
+            -1.0
+        }]
+    }
+
+    fn panicking_grad_hook(_grad: &mut [f32], _world: u32) {
+        panic!("gradient hook panic");
+    }
+
+    fn panicking_part_hook(_params: &[f32], _rank: u32, _world: u32) -> Vec<f32> {
+        panic!("partition hook panic");
+    }
+
+    #[test]
+    fn callbacks_run_without_holding_registration_locks() {
+        let _hook_guard = hook_guard();
+        clear_hooks_for_test();
+        register_onebit_allreduce(grad_callback_observes_unlocked_registry);
+        register_zero_partition(part_callback_observes_unlocked_registry);
+
+        let mut grad = vec![0.0];
+        call_onebit_allreduce(&mut grad, 1);
+        let partition = call_zero_partition(&[0.0], 0, 1);
+        clear_hooks_for_test();
+
+        assert_eq!(grad, vec![1.0]);
+        assert_eq!(partition, vec![1.0]);
+    }
+
+    #[test]
+    fn panicking_callbacks_do_not_poison_hook_registration() {
+        let _hook_guard = hook_guard();
+        clear_hooks_for_test();
+
+        register_onebit_allreduce(panicking_grad_hook);
+        let mut grad = vec![2.0];
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            call_onebit_allreduce(&mut grad, 1);
+        }))
+        .is_err());
+        register_onebit_allreduce(halve_gradient);
+        call_onebit_allreduce(&mut grad, 1);
+        assert_eq!(grad, vec![1.0]);
+
+        register_zero_partition(panicking_part_hook);
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            call_zero_partition(&[1.0, 2.0], 0, 1);
+        }))
+        .is_err());
+        register_zero_partition(stride_partition);
+        assert_eq!(call_zero_partition(&[1.0, 2.0], 0, 1), vec![1.0, 2.0]);
+        clear_hooks_for_test();
     }
 
     #[test]

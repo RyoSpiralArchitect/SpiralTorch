@@ -332,9 +332,6 @@ impl Default for PsiCoherenceDiagnostics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use st_core::telemetry::hub::{
-        clear_last_psi, clear_last_psi_events, set_last_psi, set_last_psi_events,
-    };
     use st_core::telemetry::psi::{PsiEvent, PsiReading};
     use std::collections::HashMap;
 
@@ -355,10 +352,6 @@ mod tests {
 
     #[test]
     fn diagnostics_track_modulation_from_events() {
-        clear_last_psi();
-        clear_last_psi_events();
-        let subscription = subscribe_psi_metrics();
-        let mut adaptor = PsiCoherenceAdaptor::with_subscription(Some(subscription));
         let mut breakdown = HashMap::new();
         breakdown.insert(PsiComponent::ACT_DRIFT, 0.35);
         breakdown.insert(PsiComponent::BAND_ENERGY, 0.8);
@@ -370,7 +363,6 @@ mod tests {
             breakdown,
             step: 42,
         };
-        set_last_psi(&reading);
         let events = vec![
             PsiEvent::ThresholdCross {
                 component: PsiComponent::ACT_DRIFT,
@@ -387,7 +379,12 @@ mod tests {
                 step: 42,
             },
         ];
-        set_last_psi_events(&events);
+        let subscription = PsiMetricsSubscription::detached(PsiMetricsFrame {
+            reading: Some(reading),
+            events,
+            ..PsiMetricsFrame::default()
+        });
+        let mut adaptor = PsiCoherenceAdaptor::with_subscription(Some(subscription));
         let base = vec![0.4, 0.6, 0.2];
         let adjusted = adaptor.cohere_weights(base.clone());
         let diagnostics = adaptor.last_diagnostics().clone();
@@ -398,7 +395,5 @@ mod tests {
         assert!(diagnostics.history_std.unwrap() >= 0.0);
         let adjusted_mass: f32 = adjusted.iter().map(|w| w.abs()).sum();
         assert!((adjusted_mass - 1.0).abs() < 1.0e-5);
-        clear_last_psi_events();
-        clear_last_psi();
     }
 }

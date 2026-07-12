@@ -88,6 +88,21 @@ pub fn psi_telemetry_guard() -> ReentrantMutexGuard<'static, ()> {
     psi_lock().lock()
 }
 
+#[cfg(test)]
+pub(crate) fn hub_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    // Tests needing the tensor observer lock must acquire this guard first.
+    static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    let lock = LOCK.get_or_init(|| std::sync::Mutex::new(()));
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
+
 #[cfg(feature = "psi")]
 #[derive(Clone, Debug, Default)]
 pub struct PsiMetricsFrame {
@@ -113,6 +128,19 @@ static NEXT_PSI_METRIC_SUBSCRIBER_ID: AtomicUsize = AtomicUsize::new(1);
 #[cfg(feature = "psi")]
 fn psi_metric_subscribers_cell() -> &'static RwLock<Vec<PsiMetricsSubscriber>> {
     PSI_METRIC_SUBSCRIBERS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+#[cfg(all(test, feature = "psi"))]
+fn psi_metric_subscriber_count_for_test() -> usize {
+    let subscribers = psi_metric_subscribers_cell();
+    match subscribers.read() {
+        Ok(guard) => guard.len(),
+        Err(poisoned) => {
+            let count = poisoned.into_inner().len();
+            subscribers.clear_poison();
+            count
+        }
+    }
 }
 
 #[cfg(feature = "psi")]
@@ -147,13 +175,15 @@ fn update_psi_metric_subscribers<F>(mut apply: F)
 where
     F: FnMut(&mut PsiMetricsFrame),
 {
-    let frames: Vec<Arc<RwLock<PsiMetricsFrame>>> = match psi_metric_subscribers_cell().read() {
+    let subscribers = psi_metric_subscribers_cell();
+    let frames: Vec<Arc<RwLock<PsiMetricsFrame>>> = match subscribers.read() {
         Ok(guard) => guard
             .iter()
             .map(|subscriber| subscriber.frame.clone())
             .collect(),
         Err(poisoned) => {
             let guard = poisoned.into_inner();
+            subscribers.clear_poison();
             guard
                 .iter()
                 .map(|subscriber| subscriber.frame.clone())
@@ -161,8 +191,13 @@ where
         }
     };
     for frame in frames {
-        if let Ok(mut guard) = frame.write() {
-            apply(&mut guard);
+        match frame.write() {
+            Ok(mut guard) => apply(&mut guard),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                frame.clear_poison();
+                apply(&mut guard);
+            }
         }
     }
 }
@@ -170,7 +205,12 @@ where
 #[cfg(feature = "psi")]
 #[derive(Clone)]
 pub struct PsiMetricsSubscription {
-    id: usize,
+    inner: Arc<PsiMetricsSubscriptionInner>,
+}
+
+#[cfg(feature = "psi")]
+struct PsiMetricsSubscriptionInner {
+    id: Option<usize>,
     frame: Arc<RwLock<PsiMetricsFrame>>,
 }
 
@@ -178,26 +218,52 @@ pub struct PsiMetricsSubscription {
 impl fmt::Debug for PsiMetricsSubscription {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PsiMetricsSubscription")
-            .field("id", &self.id)
+            .field("id", &self.inner.id)
             .finish()
     }
 }
 
 #[cfg(feature = "psi")]
 impl PsiMetricsSubscription {
+    /// Creates a fixed local frame that does not receive global telemetry updates.
+    ///
+    /// Detached subscriptions are useful for deterministic replay, tests, and
+    /// adaptors driven by an explicitly captured telemetry frame.
+    pub fn detached(frame: PsiMetricsFrame) -> Self {
+        Self {
+            inner: Arc::new(PsiMetricsSubscriptionInner {
+                id: None,
+                frame: Arc::new(RwLock::new(frame)),
+            }),
+        }
+    }
+
     pub fn snapshot(&self) -> PsiMetricsFrame {
-        self.frame
-            .read()
-            .map(|guard| guard.clone())
-            .unwrap_or_default()
+        match self.inner.frame.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                let snapshot = poisoned.into_inner().clone();
+                self.inner.frame.clear_poison();
+                snapshot
+            }
+        }
     }
 }
 
 #[cfg(feature = "psi")]
-impl Drop for PsiMetricsSubscription {
+impl Drop for PsiMetricsSubscriptionInner {
     fn drop(&mut self) {
-        if let Ok(mut guard) = psi_metric_subscribers_cell().write() {
-            guard.retain(|subscriber| subscriber.id != self.id);
+        let Some(id) = self.id else {
+            return;
+        };
+        let subscribers = psi_metric_subscribers_cell();
+        match subscribers.write() {
+            Ok(mut guard) => guard.retain(|subscriber| subscriber.id != id),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                subscribers.clear_poison();
+                guard.retain(|subscriber| subscriber.id != id);
+            }
         }
     }
 }
@@ -210,11 +276,21 @@ pub fn subscribe_psi_metrics() -> PsiMetricsSubscription {
         id,
         frame: frame.clone(),
     };
-    match psi_metric_subscribers_cell().write() {
+    let subscribers = psi_metric_subscribers_cell();
+    match subscribers.write() {
         Ok(mut guard) => guard.push(entry),
-        Err(poisoned) => poisoned.into_inner().push(entry),
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            subscribers.clear_poison();
+            guard.push(entry);
+        }
     }
-    PsiMetricsSubscription { id, frame }
+    PsiMetricsSubscription {
+        inner: Arc::new(PsiMetricsSubscriptionInner {
+            id: Some(id),
+            frame,
+        }),
+    }
 }
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
@@ -2010,13 +2086,8 @@ mod tests {
     use crate::theory::spiral_dynamics::HopfRegime;
     #[cfg(feature = "psi")]
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
-
-    fn atlas_test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn sample_summary(timestamp: f32) -> ChronoSummary {
         ChronoSummary {
@@ -2045,7 +2116,7 @@ mod tests {
 
     #[test]
     fn loopback_queue_drains_in_order() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         // Ensure the buffer starts empty for the test.
         let _ = drain_loopback_envelopes(usize::MAX);
         clear_atlas();
@@ -2091,7 +2162,7 @@ mod tests {
 
     #[test]
     fn loopback_updates_atlas_snapshot() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         let _ = drain_loopback_envelopes(usize::MAX);
         let signal = ChronoLoopSignal::new(sample_summary(2.5), None);
@@ -2116,7 +2187,7 @@ mod tests {
 
     #[test]
     fn atlas_route_retains_recent_frames() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         for idx in 0..6 {
@@ -2132,7 +2203,7 @@ mod tests {
 
     #[test]
     fn atlas_route_summary_exposes_recent_activity() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         for idx in 0..3 {
@@ -2165,7 +2236,7 @@ mod tests {
 
     #[test]
     fn softlogic_feedback_populates_atlas() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         let feedback = SoftlogicZFeedback {
@@ -2195,7 +2266,7 @@ mod tests {
 
     #[test]
     fn realgrad_pulse_enriches_atlas_metrics() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         clear_last_realgrad_for_test();
@@ -2243,7 +2314,7 @@ mod tests {
 
     #[test]
     fn config_diff_events_surface_in_atlas() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         let events = vec![
@@ -2274,7 +2345,7 @@ mod tests {
 
     #[test]
     fn realgrad_pulse_roundtrips_through_cache() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
         let pulse = RealGradPulse {
@@ -2322,7 +2393,7 @@ mod tests {
 
     #[test]
     fn dashboard_ring_records_frames() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         let baseline = snapshot_dashboard_frames(usize::MAX).len();
 
         let mut frame_a = DashboardFrame::new(SystemTime::now());
@@ -2349,7 +2420,7 @@ mod tests {
 
     #[test]
     fn dashboard_snapshot_export_emits_backend_meta() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
@@ -2387,7 +2458,7 @@ mod tests {
 
     #[test]
     fn region_report_stores_emit_backend_meta() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         clear_region_loss_report();
         clear_region_loss_trend_report();
@@ -2464,7 +2535,7 @@ mod tests {
 
     #[test]
     fn maintainer_report_merges_into_atlas() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_atlas();
         clear_atlas_route();
         clear_maintainer_report_for_test();
@@ -2534,13 +2605,24 @@ mod tests {
     #[cfg(feature = "psi")]
     #[test]
     fn psi_subscription_tracks_updates() {
-        let _guard = atlas_test_lock().lock().unwrap();
+        let _guard = hub_test_guard();
         clear_last_psi();
         clear_last_psi_events();
         clear_last_psi_spiral();
         clear_last_psi_spiral_tuning();
 
+        let subscribers_before = psi_metric_subscriber_count_for_test();
         let subscription = subscribe_psi_metrics();
+        assert_eq!(
+            psi_metric_subscriber_count_for_test(),
+            subscribers_before + 1
+        );
+        let subscription_clone = subscription.clone();
+        drop(subscription_clone);
+        assert_eq!(
+            psi_metric_subscriber_count_for_test(),
+            subscribers_before + 1
+        );
         let initial = subscription.snapshot();
         assert!(initial.reading.is_none());
         assert!(initial.events.is_empty());
@@ -2599,6 +2681,9 @@ mod tests {
         } else {
             panic!("missing spiral tuning in snapshot");
         }
+
+        drop(subscription);
+        assert_eq!(psi_metric_subscriber_count_for_test(), subscribers_before);
 
         clear_last_psi();
         clear_last_psi_events();
