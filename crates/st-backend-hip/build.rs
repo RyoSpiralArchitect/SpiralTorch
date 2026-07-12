@@ -3,91 +3,71 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::{env, path::PathBuf, process::Command};
+#[path = "build_support.rs"]
+mod build_support;
+
+use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
+use std::process::Command;
+
+use build_support::{archive_kernels_with, compile_kernels_with, CommandReport, HIP_KERNELS};
 
 fn main() {
-    if env::var("CARGO_FEATURE_HIP_REAL").is_ok() {
-        let out = match env::var("OUT_DIR") {
-            Ok(out) => PathBuf::from(out),
-            Err(err) => {
-                println!("cargo:warning=missing OUT_DIR for HIP build: {err}");
-                return;
-            }
-        };
-        if let Ok(rocm) = env::var("ROCM_PATH").or_else(|_| env::var("HIP_PATH")) {
-            println!("cargo:rustc-link-search=native={}/lib", rocm);
-            println!("cargo:rustc-link-search=native={}/lib64", rocm);
-        }
-        println!("cargo:rustc-link-lib=dylib=amdhip64");
-        println!("cargo:rustc-link-lib=dylib=rccl");
-
-        let hipcc = env::var("HIPCC").unwrap_or_else(|_| "hipcc".into());
-        let kernels = [
-            "src/hip_kernels/topk_pass1.cu",
-            "src/hip_kernels/hip_kway_merge_bitonic_f32.cu",
-            "src/hip_kernels/hip_kway_merge_bitonic_u64.cu",
-            "src/hip_kernels/hip_kway_merge_shared_heap_real_keepk_u64.cu",
-            "src/hip_kernels/hip_kway_merge_warp_coop_keepk_u64.cu",
-            "src/hip_kernels/hip_topk_tile_bitonic_u64.cu",
-            "src/hip_kernels/pack_vals_idx_u64.cu",
-            "src/hip_kernels/hip_compaction_1ce.cu",
-            "src/hip_kernels/hip_compaction_scan.cu",
-            "src/hip_kernels/hip_compaction_scan_pass.cu",
-            "src/hip_kernels/hip_compaction_apply.cu",
-            "src/hip_kernels/hip_compaction_apply_pass.cu",
-        ];
-        let mut objs = Vec::new();
-        for src in kernels {
-            let Some(stem) = std::path::Path::new(src).file_stem() else {
-                println!("cargo:warning=unable to derive kernel stem from {}", src);
-                continue;
-            };
-            let obj = out.join(format!("{}.o", stem.to_string_lossy()));
-            let st = Command::new(&hipcc)
-                .args([
-                    "-O3",
-                    "--std=c++17",
-                    "-ffast-math",
-                    "-fPIC",
-                    "-DNDEBUG",
-                    "-c",
-                    src,
-                    "-o",
-                ])
-                .arg(&obj)
-                .status();
-            let st = match st {
-                Ok(status) => status,
-                Err(err) => {
-                    println!("cargo:warning=failed to run hipcc for {}: {}", src, err);
-                    continue;
-                }
-            };
-            if st.success() {
-                objs.push(obj);
-            } else {
-                println!("cargo:warning=hipcc failed for {}", src);
-            }
-        }
-        if !objs.is_empty() {
-            let lib = out.join("libsthipkernels.a");
-            let ar_status = std::process::Command::new("ar")
-                .arg("crus")
-                .arg(&lib)
-                .args(&objs)
-                .status();
-            match ar_status {
-                Ok(status) if status.success() => {
-                    println!("cargo:rustc-link-lib=static=sthipkernels");
-                    println!("cargo:rustc-link-search=native={}", out.display());
-                }
-                Ok(_) => {
-                    println!("cargo:warning=ar failed while archiving HIP kernels");
-                }
-                Err(err) => {
-                    println!("cargo:warning=failed to run ar for HIP kernels: {}", err);
-                }
-            }
-        }
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_support.rs");
+    for kernel in HIP_KERNELS {
+        println!("cargo:rerun-if-changed={kernel}");
     }
+    for variable in ["HIPCC", "AR", "ROCM_PATH", "HIP_PATH"] {
+        println!("cargo:rerun-if-env-changed={variable}");
+    }
+
+    if std::env::var_os("CARGO_FEATURE_HIP_REAL").is_none() {
+        return;
+    }
+    if let Err(err) = build_real_backend() {
+        panic!("hip-real native build failed: {err}");
+    }
+}
+
+fn build_real_backend() -> Result<(), String> {
+    let out_dir = std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Cargo did not provide OUT_DIR for the hip-real build".to_string())?;
+    let hipcc = std::env::var_os("HIPCC").unwrap_or_else(|| OsString::from("hipcc"));
+    let objects = compile_kernels_with(&hipcc, &out_dir, HIP_KERNELS, execute_command)?;
+
+    let archive = out_dir.join("libsthipkernels.a");
+    let archiver = std::env::var_os("AR").unwrap_or_else(|| OsString::from("ar"));
+    archive_kernels_with(&archiver, &archive, &objects, execute_command)?;
+
+    if let Some(rocm) = std::env::var_os("ROCM_PATH").or_else(|| std::env::var_os("HIP_PATH")) {
+        let rocm = PathBuf::from(rocm);
+        println!(
+            "cargo:rustc-link-search=native={}",
+            rocm.join("lib").display()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            rocm.join("lib64").display()
+        );
+    }
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=sthipkernels");
+    println!("cargo:rustc-link-lib=dylib=amdhip64");
+    println!("cargo:rustc-link-lib=dylib=rccl");
+    Ok(())
+}
+
+fn execute_command(program: &OsStr, args: &[OsString]) -> Result<CommandReport, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|err| err.to_string())?;
+    Ok(CommandReport {
+        success: output.status.success(),
+        code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
 }

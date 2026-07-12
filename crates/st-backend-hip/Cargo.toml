@@ -10,9 +10,6 @@ description = "HIP (ROCm) backend for SpiralTorch"
 default = []
 hip-real = ["libloading"]
 
-[build-dependencies]
-cc = "1"
-
 [dependencies]
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
