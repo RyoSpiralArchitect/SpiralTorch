@@ -608,8 +608,8 @@ impl PyZBox {
         self.inner.density()
     }
 
-    pub fn factor_dimension(&self, index: usize) -> usize {
-        self.inner.factor_dimension(index)
+    pub fn factor_dimension(&self, index: usize) -> PyResult<usize> {
+        self.inner.factor_dimension(index).map_err(tensor_err_to_py)
     }
 
     pub fn hyperbolic_volume(&self, curvature: f32) -> PyResult<f32> {
@@ -664,6 +664,14 @@ impl PyZBoxSite {
 
     pub fn curvature(&self) -> f32 {
         self.inner.curvature()
+    }
+
+    pub fn radius_min(&self) -> f32 {
+        self.inner.radius_min()
+    }
+
+    pub fn radius_max(&self) -> f32 {
+        self.inner.radius_max()
     }
 
     pub fn guard_box(&self, zbox: &PyZBox) -> PyResult<()> {
