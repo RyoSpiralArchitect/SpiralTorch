@@ -33,7 +33,7 @@ use parking_lot::{ReentrantMutex, ReentrantMutexGuard};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[cfg(feature = "psi")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -328,6 +328,35 @@ fn atlas_observers_cell() -> &'static RwLock<Vec<AtlasFrameObserverEntry>> {
     ATLAS_FRAME_OBSERVERS.get_or_init(|| RwLock::new(Vec::new()))
 }
 
+fn read_atlas_observers() -> RwLockReadGuard<'static, Vec<AtlasFrameObserverEntry>> {
+    let observers = atlas_observers_cell();
+    match observers.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            observers.clear_poison();
+            guard
+        }
+    }
+}
+
+fn write_atlas_observers() -> RwLockWriteGuard<'static, Vec<AtlasFrameObserverEntry>> {
+    let observers = atlas_observers_cell();
+    match observers.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            observers.clear_poison();
+            guard
+        }
+    }
+}
+
+#[cfg(test)]
+fn atlas_observer_count_for_test() -> usize {
+    read_atlas_observers().len()
+}
+
 /// Guard that keeps an atlas frame observer registered until dropped.
 #[must_use]
 pub struct AtlasFrameSubscription {
@@ -336,13 +365,21 @@ pub struct AtlasFrameSubscription {
 
 impl Drop for AtlasFrameSubscription {
     fn drop(&mut self) {
-        if let Ok(mut guard) = atlas_observers_cell().write() {
-            guard.retain(|entry| entry.id != self.id);
-        }
+        let removed = {
+            let mut observers = write_atlas_observers();
+            observers
+                .iter()
+                .position(|entry| entry.id == self.id)
+                .map(|position| observers.remove(position))
+        };
+        drop(removed);
     }
 }
 
 /// Registers a new observer that will be notified after each atlas frame update.
+///
+/// When an atlas frame already exists, it is replayed before this function returns. If that
+/// callback panics, the panic propagates and the new observer is unregistered during unwinding.
 pub fn register_atlas_frame_observer(
     observer: impl AtlasFrameObserver + 'static,
 ) -> AtlasFrameSubscription {
@@ -353,26 +390,20 @@ pub fn register_atlas_frame_observer(
             id,
             callback: callback.clone(),
         };
-        match atlas_observers_cell().write() {
-            Ok(mut guard) => guard.push(entry),
-            Err(poisoned) => poisoned.into_inner().push(entry),
-        }
+        write_atlas_observers().push(entry);
     }
+    let subscription = AtlasFrameSubscription { id };
     if let Some(frame) = get_atlas_frame() {
         callback.on_frame(&frame);
     }
-    AtlasFrameSubscription { id }
+    subscription
 }
 
 fn notify_atlas_frame_observers(frame: &AtlasFrame) {
-    let callbacks: Vec<Arc<dyn AtlasFrameObserver>> = match atlas_observers_cell().read() {
-        Ok(guard) => guard.iter().map(|entry| entry.callback.clone()).collect(),
-        Err(poisoned) => poisoned
-            .into_inner()
-            .iter()
-            .map(|entry| entry.callback.clone())
-            .collect(),
-    };
+    let callbacks: Vec<Arc<dyn AtlasFrameObserver>> = read_atlas_observers()
+        .iter()
+        .map(|entry| entry.callback.clone())
+        .collect();
     for callback in callbacks {
         callback.on_frame(frame);
     }
@@ -2086,8 +2117,22 @@ mod tests {
     use crate::theory::spiral_dynamics::HopfRegime;
     #[cfg(feature = "psi")]
     use std::collections::HashMap;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
     use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
+
+    struct AtlasObserverDropProbe {
+        dropped_without_lock: Arc<AtomicBool>,
+    }
+
+    impl Drop for AtlasObserverDropProbe {
+        fn drop(&mut self) {
+            let unlocked = atlas_observers_cell().try_write().is_ok();
+            self.dropped_without_lock
+                .store(unlocked, AtomicOrdering::SeqCst);
+        }
+    }
 
     fn sample_summary(timestamp: f32) -> ChronoSummary {
         ChronoSummary {
@@ -2112,6 +2157,66 @@ mod tests {
         metadata.steps = Some(4);
         metadata.insert_extra_number("global_loss_ema", 0.25);
         AttributionReport::new(metadata, 2, 2, values)
+    }
+
+    #[test]
+    fn atlas_initial_replay_panic_does_not_leak_observer() {
+        let _guard = hub_test_guard();
+        clear_atlas();
+        set_atlas_frame(AtlasFrame::new(1.0));
+        let baseline = atlas_observer_count_for_test();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _subscription = register_atlas_frame_observer(|_: &AtlasFrame| {
+                panic!("initial atlas replay failed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(atlas_observer_count_for_test(), baseline);
+        clear_atlas();
+    }
+
+    #[test]
+    fn atlas_subscription_drops_callback_outside_observer_lock() {
+        let _guard = hub_test_guard();
+        clear_atlas();
+        let baseline = atlas_observer_count_for_test();
+        let dropped_without_lock = Arc::new(AtomicBool::new(false));
+        let probe = AtlasObserverDropProbe {
+            dropped_without_lock: Arc::clone(&dropped_without_lock),
+        };
+
+        let subscription = register_atlas_frame_observer(move |_: &AtlasFrame| {
+            let _ = &probe;
+        });
+        assert_eq!(atlas_observer_count_for_test(), baseline + 1);
+        drop(subscription);
+
+        assert!(dropped_without_lock.load(AtomicOrdering::SeqCst));
+        assert_eq!(atlas_observer_count_for_test(), baseline);
+    }
+
+    #[test]
+    fn atlas_subscription_drop_recovers_poisoned_observer_store() {
+        let _guard = hub_test_guard();
+        clear_atlas();
+        let baseline = atlas_observer_count_for_test();
+        let subscription = register_atlas_frame_observer(|_: &AtlasFrame| {});
+        let observers = atlas_observers_cell();
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _write = observers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison atlas observer store");
+        }));
+
+        assert!(poisoned.is_err());
+        assert!(observers.is_poisoned());
+        drop(subscription);
+
+        assert!(!observers.is_poisoned());
+        assert_eq!(atlas_observer_count_for_test(), baseline);
     }
 
     #[test]
