@@ -417,14 +417,7 @@ pub fn project_tempered_and_calibrate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
-
-    fn telemetry_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("lock telemetry guard")
-    }
+    use std::sync::{Arc, Mutex};
 
     fn assert_close(label: &str, lhs: f32, rhs: f32) {
         let diff = (lhs - rhs).abs();
@@ -437,7 +430,7 @@ mod tests {
 
     #[test]
     fn engine_projects_and_calibrates() {
-        let _guard = telemetry_guard();
+        let _guard = crate::telemetry::hub::hub_test_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![0.5f32, -0.25, 0.75, -0.5];
@@ -479,7 +472,7 @@ mod tests {
 
     #[test]
     fn engine_handles_tempered_sequences() {
-        let _guard = telemetry_guard();
+        let _guard = crate::telemetry::hub::hub_test_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut members = Vec::new();
         for scale in [1.0f32, 2.0] {
@@ -502,8 +495,8 @@ mod tests {
 
     #[test]
     fn engine_projection_emits_backend_meta() {
+        let _guard = crate::telemetry::hub::hub_test_guard();
         let _observer_lock = crate::telemetry::tensor_observer_lock();
-        let _guard = telemetry_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
@@ -551,7 +544,7 @@ mod tests {
 
     #[test]
     fn engine_project_with_pulse_roundtrips() {
-        let _guard = telemetry_guard();
+        let _guard = crate::telemetry::hub::hub_test_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![1.0f32, 0.5, -0.25, -0.75];
@@ -571,7 +564,7 @@ mod tests {
 
     #[test]
     fn engine_allows_history_reset() {
-        let _guard = telemetry_guard();
+        let _guard = crate::telemetry::hub::hub_test_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let mut engine = RealGradEngine::new(RealGradConfig::default());
         let values = vec![0.1f32, 0.2, 0.3, 0.4];
@@ -598,7 +591,7 @@ mod tests {
 
     #[test]
     fn engine_emits_transparency_summary_with_optics() {
-        let _guard = telemetry_guard();
+        let _guard = crate::telemetry::hub::hub_test_guard();
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let optics = TransparentGradientOpticsConfig {
             refractive_index: 1.5,
