@@ -30,14 +30,24 @@ builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_P
 - Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
 
-## Shared Topos runtime routing
+## Shared Topos control and runtime routing
 
-Browser clients can project a runtime profile through the same `st-tensor::pure::topos`
-contract used by native Rust and Python. WASM only converts the object/JSON boundary; it
-does not maintain a separate score formula or route policy:
+Browser clients can derive a topology control signal and project a runtime profile through
+the same `st-tensor::pure::topos` contract used by native Rust and Python. WASM only
+converts the object/JSON boundary; it does not maintain separate pressure, hint, or route
+formulas:
 
 ```ts
-import { toposRuntimeRouteObject } from "spiraltorch-wasm";
+import { toposControlSignalObject, toposRuntimeRouteObject } from "spiraltorch-wasm";
+
+const signal = toposControlSignalObject({
+    curvature: -1.0,
+    porosity: 0.25,
+    max_depth: 64,
+    max_volume: 512,
+    observed_depth: 12,
+    visited_volume: 96,
+});
 
 const route = toposRuntimeRouteObject({
     closure_risk: 0.2,
@@ -46,12 +56,13 @@ const route = toposRuntimeRouteObject({
     inference_top_p: 0.95,
 });
 
-console.log(route.mode, route.score, route.semantic_owner);
+console.log(signal.closure_pressure, route.mode, route.semantic_owner);
 ```
 
-`toposRuntimeRouteJson` exposes the same contract for storage and worker-message flows.
-Both results carry `contract_version`, `semantic_owner`, and normalized profile values so
-Python, browser, and direct Rust runs can be audited against one semantic core.
+`toposControlSignalJson` and `toposRuntimeRouteJson` expose the same contracts for storage
+and worker-message flows. Results carry `contract_version`, `semantic_owner`, and
+`semantic_backend` so Python, browser, and direct Rust runs can be audited against one
+semantic core.
 
 ## High-level Canvas utilities
 

@@ -706,6 +706,21 @@ _TOPOS_RUNTIME_ROUTE_MODE_IDS = MappingProxyType(
     }
 )
 
+_TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
+_TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
+_TOPOS_CONTROL_SIGNAL_INPUT_KEYS = frozenset(
+    {
+        "curvature",
+        "tolerance",
+        "saturation",
+        "porosity",
+        "max_depth",
+        "max_volume",
+        "observed_depth",
+        "visited_volume",
+    }
+)
+
 
 def _looks_like_topos_runtime_profile(payload: Mapping[str, Any]) -> bool:
     profile_keys = {
@@ -915,7 +930,49 @@ def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, A
     return _topos_runtime_route_from_profile_python(profile)
 
 
-def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _native_topos_control_signal_from_observation(
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    signal_from_observation = getattr(
+        native,
+        "_topos_control_signal_from_observation",
+        None,
+    )
+    if not callable(signal_from_observation):
+        return None
+
+    signal = signal_from_observation(
+        float(payload.get("curvature", -1.0)),
+        float(payload.get("tolerance", 1e-3)),
+        float(payload.get("saturation", 1.0)),
+        float(payload.get("porosity", 0.2)),
+        int(payload.get("max_depth", 64)),
+        int(payload.get("max_volume", 512)),
+        int(payload.get("observed_depth", 0)),
+        int(payload.get("visited_volume", 0)),
+    )
+    if not isinstance(signal, MappingABC):
+        raise RuntimeError(
+            "native Topos control signal returned a non-mapping contract payload"
+        )
+    return dict(signal)
+
+
+def _is_native_topos_control_signal(payload: Mapping[str, Any]) -> bool:
+    return (
+        payload.get("contract_version") == _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION
+        and payload.get("semantic_owner") == _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER
+        and payload.get("semantic_backend") == "rust"
+    )
+
+
+def _normalise_topos_control_signal(
+    payload: Mapping[str, Any],
+    *,
+    semantic_backend: str = "python_exploratory",
+) -> dict[str, Any]:
     curvature = float(payload.get("curvature", -1.0))
     tolerance = float(payload.get("tolerance", 1e-3))
     saturation = float(payload.get("saturation", 1.0))
@@ -1063,6 +1120,10 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
     )
     runtime_route = _topos_runtime_route_from_profile(runtime_profile)
     return {
+        "kind": "spiraltorch.topos_control_signal",
+        "contract_version": _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
+        "semantic_owner": _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
+        "semantic_backend": semantic_backend,
         "curvature": curvature,
         "tolerance": tolerance,
         "saturation": saturation,
@@ -1116,7 +1177,10 @@ def _topos_signal_from_getters(
         "observed_depth": observed_depth,
         "visited_volume": visited_volume,
     }
-    return _normalise_topos_control_signal(payload)
+    native = _native_topos_control_signal_from_observation(payload)
+    if native is not None:
+        return native
+    return _normalise_topos_control_signal(payload, semantic_backend="python_compat")
 
 
 def _default_open_topos(
@@ -1152,7 +1216,11 @@ def topos_control_signal(
     observed_depth: int = 0,
     visited_volume: int = 0,
 ) -> dict[str, Any]:
-    """Return a normalized open-topos pressure signal for training or inference."""
+    """Derive an open-topos pressure signal for training or inference.
+
+    Raw topology inputs use the Rust semantic core when available. Mappings that
+    override derived fields remain an explicitly exploratory Python policy.
+    """
 
     if isinstance(topos, MappingABC):
         payload = dict(topos)
@@ -1165,7 +1233,18 @@ def topos_control_signal(
             payload.setdefault("porosity", porosity)
         payload.setdefault("observed_depth", observed_depth)
         payload.setdefault("visited_volume", visited_volume)
-        return _normalise_topos_control_signal(payload)
+        if payload.keys() <= _TOPOS_CONTROL_SIGNAL_INPUT_KEYS:
+            native = _native_topos_control_signal_from_observation(payload)
+            if native is not None:
+                return native
+            return _normalise_topos_control_signal(
+                payload,
+                semantic_backend="python_compat",
+            )
+        return _normalise_topos_control_signal(
+            payload,
+            semantic_backend="python_exploratory",
+        )
 
     guard = topos
     if guard is None:
@@ -1177,17 +1256,22 @@ def topos_control_signal(
             max_volume=max_volume,
         )
         if guard is None:
+            payload = {
+                "curvature": curvature,
+                "tolerance": tolerance,
+                "saturation": saturation,
+                "porosity": 0.2 if porosity is None else porosity,
+                "max_depth": max_depth,
+                "max_volume": max_volume,
+                "observed_depth": observed_depth,
+                "visited_volume": visited_volume,
+            }
+            native = _native_topos_control_signal_from_observation(payload)
+            if native is not None:
+                return native
             return _normalise_topos_control_signal(
-                {
-                    "curvature": curvature,
-                    "tolerance": tolerance,
-                    "saturation": saturation,
-                    "porosity": 0.2 if porosity is None else porosity,
-                    "max_depth": max_depth,
-                    "max_volume": max_volume,
-                    "observed_depth": observed_depth,
-                    "visited_volume": visited_volume,
-                }
+                payload,
+                semantic_backend="python_compat",
             )
     if porosity is not None:
         with_porosity = getattr(guard, "with_porosity", None)
@@ -1201,6 +1285,8 @@ def topos_control_signal(
         except TypeError:
             payload = control_signal()
         if isinstance(payload, MappingABC):
+            if _is_native_topos_control_signal(payload):
+                return dict(payload)
             normalised = _normalise_topos_control_signal(payload)
             if porosity is not None and "porosity" not in payload:
                 normalised["porosity"] = _unit_interval(porosity, default=0.2)

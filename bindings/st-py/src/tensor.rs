@@ -1622,6 +1622,17 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
         TensorError::InvalidDimensions { .. }
         | TensorError::DataLength { .. }
         | TensorError::EmptyInput(_)
+        | TensorError::NonHyperbolicCurvature { .. }
+        | TensorError::NonPositiveTemperature { .. }
+        | TensorError::NonPositiveLearningRate { .. }
+        | TensorError::NonPositiveCoherence { .. }
+        | TensorError::NonPositiveTension { .. }
+        | TensorError::NonPositiveTolerance { .. }
+        | TensorError::NonPositiveSaturation { .. }
+        | TensorError::NonPositiveWeight { .. }
+        | TensorError::NonFiniteValue { .. }
+        | TensorError::PorosityOutOfRange { .. }
+        | TensorError::InvalidValue { .. }
         | TensorError::DlpackError { .. } => PyValueError::new_err(err.to_string()),
         _ => PyRuntimeError::new_err(err.to_string()),
     }

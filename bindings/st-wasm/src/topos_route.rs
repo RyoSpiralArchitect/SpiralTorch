@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use st_tensor::{
-    ToposRuntimeProfile, ToposRuntimeProfileInput, TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
-    TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
+    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
+    TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +21,10 @@ fn to_json_compatible_js(value: &Value) -> Result<JsValue, JsValue> {
 
 /// Build the shared Topos runtime-route payload without introducing WASM-specific semantics.
 pub fn topos_runtime_route_value(input: ToposRuntimeProfileInput) -> Value {
-    let route = ToposRuntimeProfile::from_input(input).route();
+    topos_runtime_route_from_route_value(ToposRuntimeProfile::from_input(input).route())
+}
+
+pub(crate) fn topos_runtime_route_from_route_value(route: ToposRuntimeRoute) -> Value {
     let profile = route.profile();
     let scores = route.scores();
     json!({
