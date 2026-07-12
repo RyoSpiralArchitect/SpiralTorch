@@ -14,7 +14,7 @@ pub enum PadMode {
 }
 
 /// Grünwald–Letnikov の 1D fractional difference（軽量CPU実装）
-/// y[n] = Σ_{k=0..K-1} c_k · x[n-k],  c_k = (-1)^k · C(α, k)
+/// `y[n] = Σ_{k=0..K-1} c_k · x[n-k], c_k = (-1)^k · C(α, k)`
 /// C(α,k) は一般化二項係数。K は kernel_len で打ち切り。
 pub fn fracdiff_gl_1d(
     xs: &[f32],
@@ -79,7 +79,7 @@ fn nan_to_num(x: f32) -> f32 {
     }
 }
 
-/// Grünwald–Letnikov coefficients w[k].
+/// Grünwald–Letnikov coefficients `w[k]`.
 pub fn gl_coeffs(alpha: f32, m: usize) -> PureResult<Vec<f32>> {
     if !(0.0..=1.0).contains(&alpha) || alpha <= 0.0 {
         return Err(TensorError::InvalidValue {
@@ -100,7 +100,7 @@ pub fn gl_coeffs(alpha: f32, m: usize) -> PureResult<Vec<f32>> {
 }
 
 /// Left-sided GL 1D derivative (forward form) with zero-extension boundaries.
-/// y[i] ≈ (1/h^α) * Σ_{k=0..min(i,m)} w[k]*x[i-k]
+/// `y[i] ≈ (1/h^α) * Σ_{k=0..min(i,m)} w[k]*x[i-k]`
 pub fn fracdiff1d_gl(x: &[f32], alpha: f32, h: f32, m: usize) -> PureResult<Vec<f32>> {
     let n = x.len();
     if n == 0 {
@@ -122,7 +122,7 @@ pub fn fracdiff1d_gl(x: &[f32], alpha: f32, h: f32, m: usize) -> PureResult<Vec<
     Ok(y)
 }
 
-/// Backward pass (VJP): ∂L/∂x[j] += Σ_k w[k] * ∂L/∂y[j+k] / h^α.
+/// Backward pass (VJP): `∂L/∂x[j] += Σ_k w[k] * ∂L/∂y[j+k] / h^α`.
 pub fn fracdiff1d_gl_vjp(gy: &[f32], alpha: f32, h: f32, m: usize) -> PureResult<Vec<f32>> {
     let n = gy.len();
     if n == 0 {

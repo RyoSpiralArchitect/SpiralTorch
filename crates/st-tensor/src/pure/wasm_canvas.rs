@@ -597,7 +597,7 @@ impl ColorVectorField {
         Ok(out)
     }
 
-    /// Convenience wrapper around [`fft_rows_interleaved`] that returns the
+    /// Convenience wrapper around [`Self::fft_rows_interleaved`] that returns the
     /// spectrum as a tensor with shape `(height, width * 8)`.
     pub fn fft_rows_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_rows_interleaved(inverse)?;
@@ -622,7 +622,7 @@ impl ColorVectorField {
         Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// Row-wise FFT power helper mirroring [`fft_rows_interleaved`]. The
+    /// Row-wise FFT power helper mirroring [`Self::fft_rows_interleaved`]. The
     /// returned tensor has shape `(height, width * 4)` storing the squared
     /// magnitude per channel so WASM integrations can directly sample spectral
     /// energy without recomputing it on the JavaScript side.
@@ -660,9 +660,9 @@ impl ColorVectorField {
         Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// Row-wise FFT log-power helper mirroring [`fft_rows_power_tensor`]. The
+    /// Row-wise FFT log-power helper mirroring [`Self::fft_rows_power_tensor`]. The
     /// returned tensor has shape `(height, width * 4)` storing the decibel-scaled
-    /// magnitude with a floor at [`Self::POWER_DB_FLOOR`] to keep zeros finite.
+    /// magnitude with a floor at `-160 dB` to keep zeros finite.
     pub fn fft_rows_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_rows_interleaved(inverse)?;
         Self::power_db_tensor_from_interleaved(self.height, self.width, &spectrum)
@@ -678,7 +678,7 @@ impl ColorVectorField {
         Self::power_db_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// Row-wise FFT phase helper mirroring [`fft_rows_magnitude_tensor`]. The
+    /// Row-wise FFT phase helper mirroring [`Self::fft_rows_magnitude_tensor`]. The
     /// returned tensor has shape `(height, width * 4)` and stores phases in
     /// radians using `atan2(im, re)` for each channel.
     pub fn fft_rows_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -716,7 +716,7 @@ impl ColorVectorField {
 
     /// Compute a column-wise FFT over the energy + chroma channels and expose
     /// the result as interleaved `[re, im]` floats for each component. This is
-    /// the vertical counterpart to [`fft_rows_interleaved`] so WASM callers can
+    /// the vertical counterpart to [`Self::fft_rows_interleaved`] so WASM callers can
     /// analyse spectra along either axis without bouncing back to native Rust
     /// helpers.
     pub fn fft_cols_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
@@ -814,7 +814,7 @@ impl ColorVectorField {
         Ok(out)
     }
 
-    /// Convenience wrapper around [`fft_cols_interleaved`] that returns the
+    /// Convenience wrapper around [`Self::fft_cols_interleaved`] that returns the
     /// spectrum as a tensor with shape `(width, height * 8)` laid out in column
     /// order (one row per column with interleaved complex components).
     pub fn fft_cols_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -823,7 +823,7 @@ impl ColorVectorField {
     }
 
     /// Column-wise FFT magnitude helper mirroring
-    /// [`fft_rows_magnitude_tensor`]. The returned tensor has shape
+    /// [`Self::fft_rows_magnitude_tensor`]. The returned tensor has shape
     /// `(width, height * 4)` where each row corresponds to a column in the
     /// original canvas.
     pub fn fft_cols_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -841,7 +841,7 @@ impl ColorVectorField {
         Self::magnitude_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
-    /// Column-wise FFT power helper mirroring [`fft_cols_interleaved`]. The
+    /// Column-wise FFT power helper mirroring [`Self::fft_cols_interleaved`]. The
     /// returned tensor has shape `(width, height * 4)` storing squared
     /// magnitudes per channel for direct spectral energy sampling.
     pub fn fft_cols_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -877,7 +877,7 @@ impl ColorVectorField {
         Self::power_and_power_db_tensors_from_interleaved(self.width, self.height, &spectrum)
     }
 
-    /// Column-wise FFT log-power helper that mirrors [`fft_cols_power_tensor`].
+    /// Column-wise FFT log-power helper that mirrors [`Self::fft_cols_power_tensor`].
     /// The returned tensor has shape `(width, height * 4)` storing decibel-scaled
     /// spectral energy for each channel.
     pub fn fft_cols_power_db_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -895,7 +895,7 @@ impl ColorVectorField {
         Self::power_db_tensor_from_interleaved(self.width, self.height, &spectrum)
     }
 
-    /// Column-wise FFT phase helper mirroring [`fft_rows_phase_tensor`].
+    /// Column-wise FFT phase helper mirroring [`Self::fft_rows_phase_tensor`].
     pub fn fft_cols_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_cols_interleaved(inverse)?;
         Self::phase_tensor_from_interleaved(self.width, self.height, &spectrum)
@@ -1091,14 +1091,14 @@ impl ColorVectorField {
         Ok(out)
     }
 
-    /// Convenience wrapper around [`fft_2d_interleaved`] that returns the
+    /// Convenience wrapper around [`Self::fft_2d_interleaved`] that returns the
     /// spectrum as a tensor with shape `(height, width * 8)`.
     pub fn fft_2d_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let data = self.fft_2d_interleaved(inverse)?;
         Tensor::from_vec(self.height, self.width * Self::FFT_INTERLEAVED_STRIDE, data)
     }
 
-    /// 2D FFT magnitude helper mirroring [`fft_2d_interleaved`]. The returned
+    /// 2D FFT magnitude helper mirroring [`Self::fft_2d_interleaved`]. The returned
     /// tensor has shape `(height, width * 4)` with magnitudes for each channel.
     pub fn fft_2d_magnitude_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
@@ -1115,7 +1115,7 @@ impl ColorVectorField {
         Self::magnitude_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// 2D FFT power helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// 2D FFT power helper mirroring [`Self::fft_2d_interleaved`]. The returned tensor
     /// has shape `(height, width * 4)` storing squared magnitudes per channel so
     /// integrators can probe energy across both axes without recomputing.
     pub fn fft_2d_power_tensor(&self, inverse: bool) -> PureResult<Tensor> {
@@ -1151,7 +1151,7 @@ impl ColorVectorField {
         Self::power_and_power_db_tensors_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// 2D FFT log-power helper mirroring [`fft_2d_power_tensor`]. Returns a
+    /// 2D FFT log-power helper mirroring [`Self::fft_2d_power_tensor`]. Returns a
     /// tensor with shape `(height, width * 4)` packed with decibel-scaled
     /// spectral energy for each channel so WASM integrations can visualise
     /// logarithmic energy without extra processing.
@@ -1170,7 +1170,7 @@ impl ColorVectorField {
         Self::power_db_tensor_from_interleaved(self.height, self.width, &spectrum)
     }
 
-    /// 2D FFT phase helper mirroring [`fft_2d_interleaved`]. The returned tensor
+    /// 2D FFT phase helper mirroring [`Self::fft_2d_interleaved`]. The returned tensor
     /// has shape `(height, width * 4)` storing per-channel phase angles.
     pub fn fft_2d_phase_tensor(&self, inverse: bool) -> PureResult<Tensor> {
         let spectrum = self.fft_2d_interleaved(inverse)?;
@@ -2062,7 +2062,7 @@ impl CanvasProjector {
 
     /// Refresh the canvas and expose the interleaved FFT spectrum for each
     /// column (energy + chroma channels). This mirrors
-    /// [`refresh_vector_fft`] but operates along the vertical axis so WASM
+    /// [`Self::refresh_vector_fft`] but operates along the vertical axis so WASM
     /// consumers can probe anisotropic structures without reshaping data on the
     /// JavaScript side.
     pub fn refresh_vector_fft_columns(&mut self, inverse: bool) -> PureResult<Vec<f32>> {
@@ -2471,7 +2471,7 @@ impl CanvasProjector {
     }
 
     /// Access the last computed column-wise FFT spectrum without forcing a
-    /// refresh. The returned buffer mirrors [`refresh_vector_fft_columns`]
+    /// refresh. The returned buffer mirrors [`Self::refresh_vector_fft_columns`]
     /// layout (columns laid out sequentially with interleaved `[re, im]`
     /// components).
     pub fn vector_fft_columns(&self, inverse: bool) -> PureResult<Vec<f32>> {
@@ -2569,7 +2569,7 @@ impl CanvasProjector {
     }
 
     /// Access the last computed 2D FFT spectrum without forcing a refresh. The
-    /// returned buffer matches [`refresh_vector_fft_2d`] and can be fed
+    /// returned buffer matches [`Self::refresh_vector_fft_2d`] and can be fed
     /// directly into GPU upload pipelines.
     pub fn vector_fft_2d(&self, inverse: bool) -> PureResult<Vec<f32>> {
         self.vectors.fft_2d_interleaved(inverse)
@@ -2660,7 +2660,7 @@ impl CanvasProjector {
             .fft_2d_polar_tensors_with_window(window, inverse)
     }
 
-    /// Uniform parameters expected by [`vector_fft_wgsl`]. The layout mirrors
+    /// Uniform parameters expected by [`Self::vector_fft_wgsl`]. The layout mirrors
     /// the WGSL `CanvasFftParams` struct and includes padding so the buffer
     /// occupies 16 bytes.
     pub fn vector_fft_uniform(&self, inverse: bool) -> [u32; 4] {
@@ -2673,7 +2673,7 @@ impl CanvasProjector {
     }
 
     /// Byte layout metadata that mirrors the WGSL buffers emitted by
-    /// [`vector_fft_wgsl`]. Callers can size storage/uniform buffers directly
+    /// [`Self::vector_fft_wgsl`]. Callers can size storage/uniform buffers directly
     /// from the returned values without hard-coding struct sizes.
     pub fn vector_fft_layout(&self) -> CanvasFftLayout {
         const FIELD_STRIDE: usize = 4 * core::mem::size_of::<f32>();
@@ -2692,7 +2692,7 @@ impl CanvasProjector {
         }
     }
 
-    /// Suggested dispatch dimensions for [`vector_fft_wgsl`]. The kernel
+    /// Suggested dispatch dimensions for [`Self::vector_fft_wgsl`]. The kernel
     /// operates over the full canvas grid, so we pack the height into the
     /// `y`-dimension while the `x`-dimension is chunked by the workgroup size.
     /// Consumers can feed the returned triplet directly into
@@ -2770,7 +2770,7 @@ impl CanvasProjector {
         )
     }
 
-    /// Emit a WGSL kernel that mirrors [`refresh_vector_fft`] so GPU/WebGPU
+    /// Emit a WGSL kernel that mirrors [`Self::refresh_vector_fft`] so GPU/WebGPU
     /// callers can reproduce the spectrum without leaving the browser. The
     /// shader expects the following bindings:
     ///
@@ -2800,7 +2800,7 @@ impl CanvasProjector {
 
     /// Refresh the canvas and return the column-wise FFT spectrum as a tensor.
     /// The resulting tensor has shape `(width, height * 8)` and matches the
-    /// interleaved layout returned by [`refresh_vector_fft_columns`].
+    /// interleaved layout returned by [`Self::refresh_vector_fft_columns`].
     pub fn refresh_vector_fft_columns_tensor(&mut self, inverse: bool) -> PureResult<Tensor> {
         self.render()?;
         self.vectors.fft_cols_tensor(inverse)

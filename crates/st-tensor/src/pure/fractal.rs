@@ -132,7 +132,7 @@ impl UringFractalScheduler {
         Ok(())
     }
 
-    /// Async-friendly wrapper over [`push`].
+    /// Async-friendly wrapper over [`Self::push`].
     pub async fn push_async(&self, patch: FractalPatch) -> PureResult<()> {
         self.push(patch)
     }
@@ -147,7 +147,7 @@ impl UringFractalScheduler {
         patch
     }
 
-    /// Async-friendly wrapper over [`pop`].
+    /// Async-friendly wrapper over [`Self::pop`].
     pub async fn pop_async(&self) -> Option<FractalPatch> {
         self.pop()
     }
