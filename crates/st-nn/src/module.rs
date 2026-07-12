@@ -482,7 +482,7 @@ impl Parameter {
     ///
     /// Hypergrad and realgrad tapes are synchronized independently when present.
     /// The Euclidean fallback buffer is synchronized only when no tape is active,
-    /// matching the update path used by [`apply_step`].
+    /// matching the update path used by [`Self::apply_step`].
     pub fn synchronize_accumulators_with<F>(&mut self, mut synchronize: F) -> PureResult<usize>
     where
         F: FnMut(&mut [f32]) -> PureResult<()>,
@@ -668,7 +668,8 @@ pub trait Module {
     /// [`Parameter::absorb_text`].
     ///
     /// The default implementation is a no-op so callers can broadcast a single
-    /// infusion signal through composite modules (such as [`Sequential`])
+    /// infusion signal through composite modules (such as
+    /// [`crate::layers::sequential::Sequential`])
     /// without needing per-layer feature checks.
     fn infuse_text(&mut self, _text: &str) -> PureResult<()> {
         Ok(())

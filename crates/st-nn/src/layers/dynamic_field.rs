@@ -828,7 +828,7 @@ impl Module for HamiltonJacobiFlow {
 
 /// Layer that models semantic interference through a stochastic Schrödinger
 /// style update. It keeps track of decoherence factors that can later be
-/// surfaced through [`NarrativeHint`] quantum metadata.
+/// surfaced through [`crate::language::NarrativeHint`] quantum metadata.
 #[derive(Debug)]
 pub struct StochasticSchrodingerLayer {
     coherence: Parameter,

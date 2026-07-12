@@ -91,7 +91,7 @@ impl GradScaler {
         })
     }
 
-    /// Configures the minimum/maximum scaling range enforced by [`update_scale`].
+    /// Configures the minimum/maximum scaling range enforced by [`Self::update`].
     pub fn with_limits(mut self, min_scale: f32, max_scale: f32) -> Self {
         if min_scale > 0.0 && min_scale.is_finite() {
             self.min_scale = min_scale;
