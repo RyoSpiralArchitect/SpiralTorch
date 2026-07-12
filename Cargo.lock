@@ -3375,7 +3375,6 @@ name = "st-backend-hip"
 version = "0.4.0"
 dependencies = [
  "base64 0.21.7",
- "cc",
  "libloading 0.8.9",
  "serde",
  "tempfile",
