@@ -496,7 +496,7 @@ impl ZSpaceOptimizer {
 pub trait LrScheduler {
     /// Advances the schedule returning the new learning rate.
     fn step(&mut self) -> f32;
-    /// Returns the most recent learning rate produced by [`step`].
+    /// Returns the most recent learning rate produced by [`Self::step`].
     fn current_lr(&self) -> f32;
     /// Resets the scheduler to its initial state.
     fn reset(&mut self);

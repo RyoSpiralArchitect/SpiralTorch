@@ -7451,7 +7451,7 @@ impl CurvatureGradientAccumulator {
 
 /// Helper trait that allows [`ModuleTrainer::train_epoch`] to accept both raw
 /// `(Tensor, Tensor)` batches and fallible [`PureResult`] batches produced by
-/// the [`dataset::DataLoader`] surface.
+/// the [`crate::dataset::DataLoader`] surface.
 pub trait IntoBatch {
     fn into_batch(self) -> PureResult<(Tensor, Tensor)>;
 }
