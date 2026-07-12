@@ -3,6 +3,19 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use std::sync::{Mutex, MutexGuard};
+
+pub(super) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            mutex.clear_poison();
+            guard
+        }
+    }
+}
+
 pub mod cpu_dense;
 pub mod faer_dense;
 
