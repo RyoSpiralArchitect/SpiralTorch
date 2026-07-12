@@ -55,7 +55,7 @@ impl TemporalSpectralFusion {
         &self.temporal
     }
 
-    /// Returns the truncated spectral magnitudes (up to [`MAX_HARMONICS`]).
+    /// Returns the truncated spectral magnitudes (up to `MAX_HARMONICS`).
     pub fn spectral(&self) -> &[f32] {
         &self.spectral
     }

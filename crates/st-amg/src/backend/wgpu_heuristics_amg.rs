@@ -7,7 +7,7 @@
 //! AMG heuristics overlay: SpiralK/generated table → SoftRule blend → base score.
 //! Environment variables:
 //!   SPIRAL_SOFT_MODE = {Sum|Normalize|Softmax|Prob}
-//!   SPIRAL_BEAM_K = <usize>
+//!   SPIRAL_BEAM_K = `<usize>`
 //!   SPIRAL_SOFT_BANDIT_BLEND = <0..1>  (mixing weight for bandit feedback)
 use crate::profile::{AspectClass, DensityClass, ProblemProfile};
 
@@ -55,7 +55,7 @@ fn default_cfg() -> SolveCfg {
 }
 
 #[cfg(feature = "learn_store")]
-use st_logic::learn::{load, weight_from_bandit};
+use st_logic::learn::{try_load, weight_from_bandit, SoftWeights};
 
 // Use your existing Choice/initial_choice/base_score/soft_rules_from_spiralk implementations.
 #[derive(Clone, Debug)]
@@ -585,7 +585,10 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
     // Blend in bandit weights when the feature is enabled.
     #[cfg(feature = "learn_store")]
     {
-        let sw = load();
+        let sw = try_load().unwrap_or_else(|error| {
+            eprintln!("[amg] learn_store load failed: {error}");
+            SoftWeights::default()
+        });
         let lambda = std::env::var("SPIRAL_SOFT_BANDIT_BLEND")
             .ok()
             .and_then(|s| s.parse::<f32>().ok())

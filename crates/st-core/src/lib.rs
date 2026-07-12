@@ -29,6 +29,7 @@ pub mod config;
 pub mod distributed;
 pub mod ecosystem;
 pub mod engine;
+pub mod heur;
 pub mod ops;
 pub mod runtime;
 pub mod theory;

@@ -228,11 +228,11 @@ pub fn on_abc_conversation(
 
     #[cfg(feature = "learn_store")]
     {
-        use st_logic::learn::{load, save, update_bandit};
-        let mut sw = load();
-        update_bandit(&mut sw, consensus_rules, &dissent_rules);
-        if let Err(err) = save(&sw) {
-            eprintln!("[sr] learn_store save failed: {err}");
+        use st_logic::learn::{update_bandit, update_store};
+        if let Err(err) = update_store(|weights| {
+            update_bandit(weights, consensus_rules, &dissent_rules);
+        }) {
+            eprintln!("[sr] learn_store update failed: {err}");
         }
     }
 }
