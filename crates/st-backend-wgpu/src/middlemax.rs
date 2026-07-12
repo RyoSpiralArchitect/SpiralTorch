@@ -5,12 +5,13 @@
 
 //! Convenience wrappers that focus the MidK/BottomK compaction family on the
 //! `middlemax` reduction stage. The goal is to mirror the high-level ergonomics
-//! provided by [`softmax`](crate::softmax) and the tensor-level [`hardmax`]
+//! provided by [`softmax`](crate::softmax) and the backend-level
+//! [`hardmax`](crate::hardmax)
 //! module so the Rank-K family exposes "soft/middle/hard" entry points with a
 //! consistent surface.
 //!
 //! The underlying implementation reuses the compaction pipelines defined in
-//! [`midk_bottomk`](crate::midk_bottomk). This module constrains the dispatch
+//! [`midk_bottomk`]. This module constrains the dispatch
 //! arguments so the optional `out_middlemax` buffer becomes mandatory, forwards
 //! the encode/dispatch helpers, and offers conversion utilities to safely adapt
 //! a broader MidK/BottomK call-site when the middlemax reduction is required.
