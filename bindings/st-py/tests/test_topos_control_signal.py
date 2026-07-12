@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 st = pytest.importorskip("spiraltorch")
+zspace_inference_module = pytest.importorskip("spiraltorch.zspace_inference")
 
 
 def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
@@ -134,6 +135,8 @@ def test_topos_runtime_route_names_profile_for_learning_and_inference() -> None:
     )
 
     assert route["kind"] == "spiraltorch.topos_runtime_route"
+    assert route["contract_version"] == "spiraltorch.topos_runtime_route.v1"
+    assert route["semantic_owner"] == "st-tensor::pure::topos"
     assert route["mode"] == "contextual"
     assert route["mode_id"] == 3
     assert route["score"] == pytest.approx(0.6956782798030483)
@@ -146,6 +149,95 @@ def test_topos_runtime_route_names_profile_for_learning_and_inference() -> None:
     profile_route = st.topos_runtime_route(route["runtime_profile"])
     assert profile_route["mode"] == route["mode"]
     assert profile_route["score"] == pytest.approx(route["score"])
+
+
+def test_topos_runtime_profile_route_prefers_native_semantic_owner(monkeypatch) -> None:
+    native = getattr(st, "_rs", None)
+    native_route = getattr(native, "_topos_runtime_route_from_profile", None)
+    if not callable(native_route):
+        pytest.skip("native profile router requires a freshly built extension")
+
+    def fail_python_fallback(_profile):
+        raise AssertionError("Python route semantics should not run when Rust is available")
+
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_topos_runtime_route_from_profile_python",
+        fail_python_fallback,
+    )
+    route = st.topos_runtime_route(
+        runtime_profile={
+            "closure_risk": 0.2,
+            "exploration_budget": 0.6,
+            "control_energy": 0.1,
+            "training_rate_scale": 0.5,
+            "training_gradient_bias_scale": 0.05,
+            "inference_temperature": 1.4,
+            "inference_top_p": 0.95,
+            "inference_context_weight": 0.7,
+            "learning_inference_balance": 0.6,
+        }
+    )
+
+    assert route["semantic_backend"] == "rust"
+    assert route["semantic_owner"] == "st-tensor::pure::topos"
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {
+            "training_rate_scale": 0.01,
+            "inference_temperature": 0.0,
+            "inference_top_p": 0.05,
+            "inference_context_weight": 0.25,
+            "learning_inference_balance": 0.0,
+        },
+        {
+            "training_rate_scale": 0.01,
+            "inference_temperature": 0.5,
+            "inference_top_p": 1.0,
+            "inference_context_weight": 0.8,
+            "learning_inference_balance": 0.0,
+        },
+        {
+            "exploration_budget": 0.6,
+            "training_rate_scale": 0.01,
+            "inference_temperature": 0.5,
+            "inference_top_p": 1.0,
+            "inference_context_weight": 0.25,
+            "learning_inference_balance": 0.0,
+        },
+        {
+            "closure_risk": 0.2,
+            "control_energy": 1.0,
+            "training_rate_scale": 0.01,
+            "training_gradient_bias_scale": 0.35,
+            "inference_temperature": 0.0,
+            "inference_top_p": 0.05,
+            "inference_context_weight": 0.25,
+            "learning_inference_balance": 0.0,
+        },
+    ],
+)
+def test_python_compat_route_conforms_to_rust_contract(profile) -> None:
+    route = st.topos_runtime_route(runtime_profile=profile)
+    if route.get("semantic_backend") != "rust":
+        pytest.skip("Rust profile router requires a freshly built extension")
+
+    compat = zspace_inference_module._topos_runtime_route_from_profile_python(
+        route["runtime_profile"]
+    )
+    assert compat["mode"] == route["mode"]
+    assert compat["score_key"] == route["score_key"]
+    assert compat["learning_action"] == route["learning_action"]
+    assert compat["inference_action"] == route["inference_action"]
+    assert compat["score"] == pytest.approx(route["score"], abs=1e-6)
+    for key in ("training", "inference", "guard", "exploration", "context"):
+        assert compat["scores"][key] == pytest.approx(route["scores"][key], abs=1e-6)
+    assert compat["scores"]["vector"] == pytest.approx(
+        route["scores"]["vector"], abs=1e-6
+    )
 
 
 def test_topos_control_partial_feeds_zspace_inference() -> None:

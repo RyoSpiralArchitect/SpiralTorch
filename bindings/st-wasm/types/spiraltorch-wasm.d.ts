@@ -24,6 +24,57 @@ declare module "spiraltorch-wasm" {
 
     export type WasmReportAuditStatus = "ready" | "usable" | "needs_attention";
 
+    export type ToposRuntimeMode =
+        | "balanced"
+        | "guarded"
+        | "exploratory"
+        | "contextual"
+        | "training_first"
+        | "inference_first";
+
+    export type ToposRuntimeProfileInput = {
+        training_gain?: number;
+        inference_gain?: number;
+        closure_risk?: number;
+        exploration_budget?: number;
+        control_energy?: number;
+        training_rate_scale?: number;
+        training_gradient_bias_scale?: number;
+        inference_temperature?: number;
+        inference_top_p?: number;
+        inference_context_weight?: number;
+        learning_inference_balance?: number;
+    };
+
+    export type ToposRuntimeProfile = Required<ToposRuntimeProfileInput> & {
+        vector: number[];
+    };
+
+    export type ToposRuntimeRouteScores = {
+        training: number;
+        inference: number;
+        guard: number;
+        exploration: number;
+        context: number;
+        vector: number[];
+    };
+
+    export type ToposRuntimeRoute = {
+        kind: "spiraltorch.topos_runtime_route";
+        contract_version: "spiraltorch.topos_runtime_route.v1";
+        semantic_owner: "st-tensor::pure::topos";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        mode: ToposRuntimeMode;
+        mode_id: number;
+        score: number;
+        score_key: "training" | "inference" | "guard" | "exploration" | "context";
+        learning_action: string;
+        inference_action: string;
+        scores: ToposRuntimeRouteScores;
+        runtime_profile: ToposRuntimeProfile;
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -356,6 +407,10 @@ declare module "spiraltorch-wasm" {
     export function auditWasmReportObject(report: unknown): WasmReportAudit;
     export function compareWasmReportsJson(reportsJson: string): string;
     export function compareWasmReportsObject(reports: unknown): WasmReportComparison;
+    export function toposRuntimeRouteJson(profileJson: string): string;
+    export function toposRuntimeRouteObject(
+        profile: ToposRuntimeProfileInput,
+    ): ToposRuntimeRoute;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,
