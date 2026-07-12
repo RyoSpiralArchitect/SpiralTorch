@@ -1837,7 +1837,7 @@ mod summary_tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1871,7 +1871,7 @@ mod summary_tests {
         route.push_bounded(AtlasFrame::from_fragment(first).expect("frame a"), 8);
         route.push_bounded(AtlasFrame::from_fragment(second).expect("frame b"), 8);
         let summary = route.summary();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(summary.frames, 2);
         let events = events.lock().unwrap();

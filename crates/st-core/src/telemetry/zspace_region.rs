@@ -251,7 +251,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -259,7 +259,7 @@ mod tests {
         })));
 
         let descriptor = ZSpaceRegionDescriptor::from_elliptic(&sample(-0.8, 0.9));
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(descriptor.key().spin, ZSpaceSpinBand::Trailing);
         assert_eq!(descriptor.key().radius, ZSpaceRadiusBand::Edge);

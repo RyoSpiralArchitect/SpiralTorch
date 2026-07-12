@@ -63,6 +63,11 @@ pub fn set_tensor_op_observer(observer: Option<TensorOpObserver>) -> Option<Tens
 
 /// Install (or clear) the global tensor operation metadata observer.
 ///
+/// This process-wide slot is intended for long-lived integrations such as the
+/// plugin event bridge. Temporary captures and tests should prefer
+/// [`set_thread_meta_observer`] so concurrent callers cannot replace each
+/// other's callback.
+///
 /// Returns the previously installed observer, if any.
 pub fn set_tensor_op_meta_observer(
     observer: Option<TensorOpMetaObserver>,
@@ -77,8 +82,9 @@ pub fn set_tensor_op_meta_observer(
 /// Install (or clear) a tensor operation metadata observer for the current thread.
 ///
 /// Thread observers receive events before the process-global observer and are
-/// useful for isolating concurrent training or diagnostic sessions. Returns
-/// the previously installed observer for this thread so callers can restore it.
+/// useful for isolating concurrent training, diagnostic sessions, and tests.
+/// Returns the previously installed observer for this thread so callers can
+/// restore it.
 pub fn set_thread_meta_observer(
     observer: Option<TensorOpMetaObserver>,
 ) -> Option<TensorOpMetaObserver> {

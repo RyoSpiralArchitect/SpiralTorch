@@ -507,7 +507,7 @@ mod tests {
         crate::telemetry::hub::clear_last_realgrad_for_test();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -528,7 +528,7 @@ mod tests {
         .with_optics(optics);
         let mut engine = RealGradEngine::new(config);
         let projection = engine.project(&[0.75, -0.3, 0.45, -0.6, 0.15]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(projection.optics_trace().is_some());
         let events = events.lock().unwrap();

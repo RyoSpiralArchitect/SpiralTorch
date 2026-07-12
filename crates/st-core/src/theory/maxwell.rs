@@ -1284,7 +1284,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1306,7 +1306,7 @@ mod tests {
         let pulse = projector
             .project(&tracker)
             .expect("pulse should be emitted");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(pulse.z_bias.abs() > 0.0);
         let events = events.lock().unwrap();
@@ -1412,7 +1412,7 @@ mod tests {
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let meta_events = Arc::new(Mutex::new(Vec::new()));
         let captured = meta_events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1443,7 +1443,7 @@ mod tests {
         assert_eq!(stored_events.len(), events.len());
 
         let legacy_feedback = bridge.publish(&pulse, 42);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         assert_eq!(legacy_feedback.psi_total, feedback.psi_total);
         assert_eq!(legacy_feedback.weighted_loss, feedback.weighted_loss);
 

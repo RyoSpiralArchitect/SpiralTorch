@@ -186,7 +186,7 @@ mod tests {
         clear_hooks_for_test();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -198,7 +198,7 @@ mod tests {
         let mut grad = vec![2.0, -2.0, 1.0, -1.0];
         call_onebit_allreduce(&mut grad, 2);
         let partition = call_zero_partition(&[1.0, 2.0, 3.0, 4.0], 1, 2);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         clear_hooks_for_test();
 
         assert_eq!(grad, vec![1.0, -1.0, 0.5, -0.5]);

@@ -924,7 +924,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -939,7 +939,7 @@ mod tests {
             .collect::<Vec<_>>();
         let summary = ChronoSummary::from_frames(&frames).expect("summary");
         let harmonics = ChronoHarmonics::from_frames(&frames, 8).expect("harmonics");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(summary.frames, 16);
         assert_eq!(harmonics.frames, 16);

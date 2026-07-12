@@ -354,7 +354,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -389,7 +389,7 @@ mod tests {
             latency_ms: 4.0,
         };
         let z_snapshot = NonCollapseSnapshot::from(&pulse);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(merged.phase, Some(NonCollapsePhase::Integration));
         assert!(hypergrad.hypergrad_l2.unwrap_or_default() > 0.0);

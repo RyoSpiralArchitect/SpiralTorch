@@ -415,13 +415,7 @@ mod geometry_bias_tests {
     use st_core::config::self_rewrite::SelfRewriteCfg;
     use st_core::ecosystem::EcosystemRegistry;
     use std::collections::HashSet;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant, SystemTime};
-
-    fn registry_guard() -> &'static Mutex<()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(()))
-    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -532,7 +526,6 @@ mod geometry_bias_tests {
 
     #[test]
     fn language_pipeline_records_geometry_bias_metrics() {
-        let _lock = registry_guard().lock().unwrap();
         let registry = Box::leak(Box::new(EcosystemRegistry::default()));
         let pipeline = LanguagePipeline::builder("geometry-metrics")
             .with_registry_for_tests(registry)
@@ -2678,7 +2671,7 @@ mod language_pipeline {
         use std::collections::HashMap;
         use std::collections::HashSet;
         use std::sync::mpsc::channel;
-        use std::sync::{Arc, Mutex, OnceLock};
+        use std::sync::{Arc, Mutex};
         use std::time::{Duration, Instant, SystemTime};
         use tempfile::tempdir;
 
@@ -2687,20 +2680,18 @@ mod language_pipeline {
         #[cfg(feature = "psi")]
         use st_core::telemetry::psi::{PsiComponent, PsiEvent, PsiReading};
 
-        fn registry_guard() -> &'static Mutex<()> {
-            static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-            GUARD.get_or_init(|| Mutex::new(()))
+        fn isolated_registry() -> &'static EcosystemRegistry {
+            Box::leak(Box::new(EcosystemRegistry::default()))
         }
 
         #[test]
         fn encode_wave_records_metrics_and_connector() {
-            let _lock = registry_guard().lock().unwrap();
-            let registry = EcosystemRegistry::global();
-            registry.drain();
+            let registry = isolated_registry();
             let encoder = LanguageWaveEncoder::new(-1.0, 0.7).unwrap();
             let pipeline = LanguagePipeline::builder("language-test")
                 .with_tag("tenant", "demo")
                 .with_encoder(encoder)
+                .with_registry_for_tests(registry)
                 .build();
             let wave = pipeline.encode_wave("spiral torch").unwrap();
             assert_eq!(wave.shape().0, 1);
@@ -2732,14 +2723,13 @@ mod language_pipeline {
 
         #[test]
         fn encode_z_space_records_geodesic_metrics() {
-            let _lock = registry_guard().lock().unwrap();
-            let registry = EcosystemRegistry::global();
-            registry.drain();
+            let registry = isolated_registry();
             let encoder = LanguageWaveEncoder::new(-0.5, 0.5).unwrap();
             let pipeline = LanguagePipeline::builder("language-z")
                 .with_encoder(encoder)
                 .with_leech_lattice(12, 0.8)
                 .with_ramanujan_iterations(4)
+                .with_registry_for_tests(registry)
                 .build();
             let tensor = pipeline.encode_z_space("pi leech spiral").unwrap();
             assert_eq!(tensor.shape().0, 1);
@@ -2759,10 +2749,10 @@ mod language_pipeline {
 
         #[test]
         fn roundtable_records_summary_and_metrics() {
-            let _lock = registry_guard().lock().unwrap();
-            let registry = EcosystemRegistry::global();
-            registry.drain();
-            let pipeline = LanguagePipeline::builder("trainer").build();
+            let registry = isolated_registry();
+            let pipeline = LanguagePipeline::builder("trainer")
+                .with_registry_for_tests(registry)
+                .build();
             let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
             let config = RoundtableConfig::default();
             let schedule = RoundtableSchedule::new(&planner, 16, 32, config);
@@ -2788,10 +2778,10 @@ mod language_pipeline {
 
         #[test]
         fn roundtable_connector_exposes_cloud_targets() {
-            let _lock = registry_guard().lock().unwrap();
-            let registry = EcosystemRegistry::global();
-            registry.drain();
-            let pipeline = LanguagePipeline::builder("trainer-cloud").build();
+            let registry = isolated_registry();
+            let pipeline = LanguagePipeline::builder("trainer-cloud")
+                .with_registry_for_tests(registry)
+                .build();
             let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
             let config = RoundtableConfig::default();
             let schedule = RoundtableSchedule::new(&planner, 8, 16, config);

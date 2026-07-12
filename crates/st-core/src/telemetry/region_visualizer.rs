@@ -668,7 +668,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -692,7 +692,7 @@ mod tests {
         history.push(2, snapshot);
         let delta = history.delta_report().expect("delta report");
         let volatility = history.volatility_report().expect("volatility report");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(report.shape(), (3, 3));
         assert_eq!(delta.shape(), (3, 3));

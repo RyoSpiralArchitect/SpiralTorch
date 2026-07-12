@@ -1225,7 +1225,7 @@ mod conductor_tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1242,7 +1242,7 @@ mod conductor_tests {
         conductor.ingest(pulse(ZSource::Microlocal, 10, 0.4, 1.0));
         conductor.ingest(pulse(ZSource::Maxwell, 10, 0.8, 0.9));
         let fused = conductor.step(10);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(fused.support > 0.0);
         assert!(fused.z > 0.0);
