@@ -18,17 +18,24 @@
 //! what it should speak about next.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ops::Deref;
 
 use crate::quantum_reality::ZSpace;
 use st_core::maxwell::MaxwellZPulse;
 use thiserror::Error;
 
 /// Error emitted when a causal relation cannot be established.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum CausalError {
+    /// Event identifiers must contain at least one non-whitespace character.
+    #[error("causal event identifier cannot be empty")]
+    EmptyEventId,
     /// The provided identifier is already registered inside the set.
     #[error("causal event `{0}` is already registered")]
     DuplicateEvent(String),
+    /// Resolved identifiers are immutable history and cannot be registered again.
+    #[error("causal event `{0}` has already been resolved")]
+    ResolvedEvent(String),
     /// Either the source or the destination event is missing.
     #[error("causal event `{0}` is not registered")]
     UnknownEvent(String),
@@ -38,6 +45,37 @@ pub enum CausalError {
     /// An event cannot depend on itself.
     #[error("causal event cannot depend on itself")]
     SelfDependency,
+}
+
+/// Structural inconsistency detected inside a causal set or temporal frontier.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum CausalInvariantError {
+    #[error("causal node key `{key}` does not match embedded identifier `{node_id}`")]
+    NodeIdMismatch { key: String, node_id: String },
+    #[error("resolved causal event `{0}` is still live")]
+    ResolvedNode(String),
+    #[error("live causal event `{0}` has no successor index")]
+    MissingSuccessorIndex(String),
+    #[error("successor index exists for non-live event `{0}`")]
+    UnknownSuccessorIndex(String),
+    #[error("causal successor `{parent}` -> `{child}` points to a non-live child")]
+    UnknownSuccessor { parent: String, child: String },
+    #[error("causal successor `{parent}` -> `{child}` is missing from the child parent set")]
+    MissingParentLink { parent: String, child: String },
+    #[error("causal event `{child}` references unknown parent `{parent}`")]
+    DanglingParent { parent: String, child: String },
+    #[error("causal event `{child}` references live parent `{parent}` without a successor link")]
+    MissingSuccessorLink { parent: String, child: String },
+    #[error("causal graph contains a dependency cycle")]
+    CyclicGraph,
+    #[error("causal frontier contains duplicate event `{0}`")]
+    DuplicateFrontierEvent(String),
+    #[error("causal frontier contains non-live event `{0}`")]
+    UnknownFrontierEvent(String),
+    #[error("causal frontier contains blocked event `{0}`")]
+    BlockedFrontierEvent(String),
+    #[error("ready causal event `{0}` is missing from the frontier")]
+    MissingFrontierEvent(String),
 }
 
 /// Node stored inside the [`CausalSet`].
@@ -57,9 +95,24 @@ impl<T> CausalNode<T> {
         }
     }
 
-    /// Returns true when all parent identifiers appear inside `emitted`.
-    fn is_ready(&self, emitted: &BTreeSet<String>) -> bool {
-        self.parents.iter().all(|parent| emitted.contains(parent))
+    /// Returns the event identifier.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the event payload.
+    pub fn payload(&self) -> &T {
+        &self.payload
+    }
+
+    /// Iterates over predecessor identifiers in deterministic order.
+    pub fn parent_ids(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.parents.iter().map(String::as_str)
+    }
+
+    /// Returns true when all parent identifiers have been resolved.
+    fn is_ready(&self, resolved: &BTreeSet<String>) -> bool {
+        self.parents.iter().all(|parent| resolved.contains(parent))
     }
 }
 
@@ -69,6 +122,7 @@ impl<T> CausalNode<T> {
 pub struct CausalSet<T> {
     nodes: BTreeMap<String, CausalNode<T>>,
     successors: BTreeMap<String, BTreeSet<String>>,
+    resolved: BTreeSet<String>,
 }
 
 impl<T> CausalSet<T> {
@@ -87,11 +141,27 @@ impl<T> CausalSet<T> {
         self.nodes.is_empty()
     }
 
+    /// Returns the number of event identifiers retained as resolved history.
+    pub fn resolved_len(&self) -> usize {
+        self.resolved.len()
+    }
+
+    /// Returns true when an identifier has already been resolved.
+    pub fn was_resolved(&self, id: &str) -> bool {
+        self.resolved.contains(id)
+    }
+
     /// Inserts a new event into the causal set.
     pub fn insert(&mut self, id: impl Into<String>, payload: T) -> Result<(), CausalError> {
         let id = id.into();
+        if id.trim().is_empty() {
+            return Err(CausalError::EmptyEventId);
+        }
         if self.nodes.contains_key(&id) {
             return Err(CausalError::DuplicateEvent(id));
+        }
+        if self.resolved.contains(&id) {
+            return Err(CausalError::ResolvedEvent(id));
         }
         self.successors.entry(id.clone()).or_default();
         self.nodes.insert(id.clone(), CausalNode::new(id, payload));
@@ -99,6 +169,7 @@ impl<T> CausalSet<T> {
     }
 
     /// Registers that `earlier` must precede `later`.
+    /// A resolved predecessor is accepted as already-satisfied history.
     pub fn add_dependency(
         &mut self,
         earlier: impl AsRef<str>,
@@ -109,27 +180,30 @@ impl<T> CausalSet<T> {
         if earlier == later {
             return Err(CausalError::SelfDependency);
         }
-        if !self.nodes.contains_key(earlier) {
+        let earlier_is_live = if self.nodes.contains_key(earlier) {
+            true
+        } else if self.resolved.contains(earlier) {
+            false
+        } else {
             return Err(CausalError::UnknownEvent(earlier.to_string()));
-        }
-        if !self.nodes.contains_key(later) {
-            return Err(CausalError::UnknownEvent(later.to_string()));
-        }
-        if self.would_create_cycle(earlier, later) {
+        };
+        self.ensure_live(later)?;
+        if earlier_is_live && self.would_create_cycle(earlier, later) {
             return Err(CausalError::CyclicDependency(
                 earlier.to_string(),
                 later.to_string(),
             ));
         }
-        let later_node = self
-            .nodes
-            .get_mut(later)
-            .expect("later node exists after earlier validation");
+        let Some(later_node) = self.nodes.get_mut(later) else {
+            return Err(CausalError::UnknownEvent(later.to_string()));
+        };
         later_node.parents.insert(earlier.to_string());
-        self.successors
-            .entry(earlier.to_string())
-            .or_default()
-            .insert(later.to_string());
+        if earlier_is_live {
+            self.successors
+                .entry(earlier.to_string())
+                .or_default()
+                .insert(later.to_string());
+        }
         Ok(())
     }
 
@@ -138,20 +212,151 @@ impl<T> CausalSet<T> {
         self.nodes.get(id)
     }
 
-    /// Removes an event from the causal set, returning its payload.
-    pub fn take(&mut self, id: &str) -> Option<(String, T)> {
+    /// Returns true when a live event is ready to resolve.
+    pub fn is_ready(&self, id: &str) -> bool {
+        self.nodes
+            .get(id)
+            .is_some_and(|node| node.is_ready(&self.resolved))
+    }
+
+    /// Resolves an event and retains its identifier as immutable history.
+    pub fn resolve(&mut self, id: &str) -> Option<(String, T)> {
         let node = self.nodes.remove(id)?;
         self.successors.remove(id);
-        for successors in self.successors.values_mut() {
-            successors.remove(id);
+        for parent in &node.parents {
+            if let Some(successors) = self.successors.get_mut(parent) {
+                successors.remove(id);
+            }
         }
+        self.resolved.insert(node.id.clone());
         Some((node.id, node.payload))
     }
 
-    fn ready_ids(&self, emitted: &BTreeSet<String>) -> Vec<String> {
+    /// Compatibility alias for [`Self::resolve`].
+    pub fn take(&mut self, id: &str) -> Option<(String, T)> {
+        self.resolve(id)
+    }
+
+    /// Verifies the bidirectional DAG index and resolution history.
+    pub fn validate(&self) -> Result<(), CausalInvariantError> {
+        for (id, node) in &self.nodes {
+            if id != &node.id {
+                return Err(CausalInvariantError::NodeIdMismatch {
+                    key: id.clone(),
+                    node_id: node.id.clone(),
+                });
+            }
+            if self.resolved.contains(id) {
+                return Err(CausalInvariantError::ResolvedNode(id.clone()));
+            }
+            if !self.successors.contains_key(id) {
+                return Err(CausalInvariantError::MissingSuccessorIndex(id.clone()));
+            }
+            for parent in &node.parents {
+                if self.resolved.contains(parent) {
+                    continue;
+                }
+                if !self.nodes.contains_key(parent) {
+                    return Err(CausalInvariantError::DanglingParent {
+                        parent: parent.clone(),
+                        child: id.clone(),
+                    });
+                }
+                if !self
+                    .successors
+                    .get(parent)
+                    .is_some_and(|children| children.contains(id))
+                {
+                    return Err(CausalInvariantError::MissingSuccessorLink {
+                        parent: parent.clone(),
+                        child: id.clone(),
+                    });
+                }
+            }
+        }
+
+        for (parent, children) in &self.successors {
+            if !self.nodes.contains_key(parent) {
+                return Err(CausalInvariantError::UnknownSuccessorIndex(parent.clone()));
+            }
+            for child in children {
+                let Some(child_node) = self.nodes.get(child) else {
+                    return Err(CausalInvariantError::UnknownSuccessor {
+                        parent: parent.clone(),
+                        child: child.clone(),
+                    });
+                };
+                if !child_node.parents.contains(parent) {
+                    return Err(CausalInvariantError::MissingParentLink {
+                        parent: parent.clone(),
+                        child: child.clone(),
+                    });
+                }
+            }
+        }
+        self.validate_acyclic()?;
+        Ok(())
+    }
+
+    fn validate_acyclic(&self) -> Result<(), CausalInvariantError> {
+        let mut indegree = self
+            .nodes
+            .iter()
+            .map(|(id, node)| {
+                let live_parents = node
+                    .parents
+                    .iter()
+                    .filter(|parent| self.nodes.contains_key(parent.as_str()))
+                    .count();
+                (id.as_str(), live_parents)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+            .collect::<VecDeque<_>>();
+        let mut visited = 0usize;
+
+        while let Some(parent) = ready.pop_front() {
+            visited += 1;
+            let Some(children) = self.successors.get(parent) else {
+                continue;
+            };
+            for child in children {
+                let Some(degree) = indegree.get_mut(child.as_str()) else {
+                    continue;
+                };
+                if *degree == 0 {
+                    continue;
+                }
+                *degree -= 1;
+                if *degree == 0 {
+                    ready.push_back(child);
+                }
+            }
+        }
+
+        if visited == self.nodes.len() {
+            Ok(())
+        } else {
+            Err(CausalInvariantError::CyclicGraph)
+        }
+    }
+
+    fn ensure_live(&self, id: &str) -> Result<(), CausalError> {
+        if self.nodes.contains_key(id) {
+            Ok(())
+        } else if self.resolved.contains(id) {
+            Err(CausalError::ResolvedEvent(id.to_string()))
+        } else {
+            Err(CausalError::UnknownEvent(id.to_string()))
+        }
+    }
+
+    fn ready_ids(&self) -> Vec<String> {
         self.nodes
             .iter()
-            .filter(|(id, node)| !emitted.contains(id.as_str()) && node.is_ready(emitted))
+            .filter(|(_, node)| node.is_ready(&self.resolved))
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -182,6 +387,7 @@ impl<T> Default for CausalSet<T> {
         Self {
             nodes: BTreeMap::new(),
             successors: BTreeMap::new(),
+            resolved: BTreeSet::new(),
         }
     }
 }
@@ -190,7 +396,6 @@ impl<T> Default for CausalSet<T> {
 #[derive(Clone, Debug)]
 pub struct TemporalLogicEngine<T> {
     causal: CausalSet<T>,
-    emitted: BTreeSet<String>,
     frontier: VecDeque<String>,
 }
 
@@ -199,7 +404,6 @@ impl<T> TemporalLogicEngine<T> {
     pub fn from_causal_set(causal: CausalSet<T>) -> Self {
         let mut engine = Self {
             frontier: VecDeque::new(),
-            emitted: BTreeSet::new(),
             causal,
         };
         engine.refresh_frontier();
@@ -216,9 +420,14 @@ impl<T> TemporalLogicEngine<T> {
         self.causal.len()
     }
 
-    /// Returns a mutable reference to the underlying causal set.
-    pub fn causal_mut(&mut self) -> &mut CausalSet<T> {
-        &mut self.causal
+    /// Returns the underlying causal set.
+    pub fn causal(&self) -> &CausalSet<T> {
+        &self.causal
+    }
+
+    /// Returns a mutation guard that refreshes the frontier when dropped.
+    pub fn causal_mut(&mut self) -> CausalSetMut<'_, T> {
+        CausalSetMut { engine: self }
     }
 
     /// Registers a new event.
@@ -235,9 +444,21 @@ impl<T> TemporalLogicEngine<T> {
         later: impl AsRef<str>,
     ) -> Result<(), CausalError> {
         self.causal.add_dependency(earlier, later)?;
-        self.retain_frontier();
         self.refresh_frontier();
         Ok(())
+    }
+
+    /// Resolves an event without returning it through the normal frontier.
+    /// Descendants that depended on it become eligible immediately.
+    pub fn discard_event(&mut self, id: &str) -> Option<(String, T)> {
+        let resolved = self.causal.resolve(id);
+        self.refresh_frontier();
+        resolved
+    }
+
+    /// Returns true when an identifier has already left the live causal set.
+    pub fn was_resolved(&self, id: &str) -> bool {
+        self.causal.was_resolved(id)
     }
 
     /// Returns the next ready event if one exists.
@@ -251,43 +472,103 @@ impl<T> TemporalLogicEngine<T> {
         F: FnMut(&T) -> bool,
     {
         self.refresh_frontier();
-        for idx in 0..self.frontier.len() {
-            if let Some(id) = self.frontier.get(idx).cloned() {
-                if let Some(node) = self.causal.get(&id) {
-                    if !predicate(&node.payload) {
-                        continue;
-                    }
-                    let id = self.frontier.remove(idx).unwrap_or(id);
-                    let (id, payload) = self.causal.take(&id).expect("node exists at removal time");
-                    self.emitted.insert(id.clone());
-                    self.refresh_frontier();
-                    return Some((id, payload));
-                } else {
-                    // Remove stale identifiers.
-                    self.frontier.remove(idx);
-                }
-            }
-        }
-        None
+        let index = self.frontier.iter().position(|id| {
+            self.causal
+                .get(id)
+                .is_some_and(|node| self.causal.is_ready(id) && predicate(&node.payload))
+        })?;
+        let id = self.frontier.remove(index)?;
+        let resolved = self.causal.resolve(&id);
+        self.refresh_frontier();
+        resolved
     }
 
     fn refresh_frontier(&mut self) {
-        let ready = self.causal.ready_ids(&self.emitted);
+        self.frontier.retain(|id| self.causal.is_ready(id));
+        let ready = self.causal.ready_ids();
         for id in ready {
-            if self.emitted.contains(&id) {
-                continue;
-            }
             if self.frontier.iter().any(|existing| existing == &id) {
                 continue;
             }
             self.frontier.push_back(id);
         }
-        self.retain_frontier();
     }
 
-    fn retain_frontier(&mut self) {
-        self.frontier
-            .retain(|id| self.causal.get(id.as_str()).is_some() && !self.emitted.contains(id));
+    /// Verifies both the causal graph and the derived ready frontier.
+    pub fn validate(&self) -> Result<(), CausalInvariantError> {
+        self.causal.validate()?;
+        let mut seen = BTreeSet::new();
+        for id in &self.frontier {
+            if !seen.insert(id.as_str()) {
+                return Err(CausalInvariantError::DuplicateFrontierEvent(id.clone()));
+            }
+            if self.causal.get(id).is_none() {
+                return Err(CausalInvariantError::UnknownFrontierEvent(id.clone()));
+            }
+            if !self.causal.is_ready(id) {
+                return Err(CausalInvariantError::BlockedFrontierEvent(id.clone()));
+            }
+        }
+        for id in self.causal.ready_ids() {
+            if !seen.contains(id.as_str()) {
+                return Err(CausalInvariantError::MissingFrontierEvent(id));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Mutable causal-set view that re-derives the engine frontier on drop.
+pub struct CausalSetMut<'a, T> {
+    engine: &'a mut TemporalLogicEngine<T>,
+}
+
+impl<T> CausalSetMut<'_, T> {
+    /// Inserts a live event through the guarded causal set.
+    pub fn insert(&mut self, id: impl Into<String>, payload: T) -> Result<(), CausalError> {
+        self.engine.causal.insert(id, payload)
+    }
+
+    /// Adds a dependency through the guarded causal set.
+    pub fn add_dependency(
+        &mut self,
+        earlier: impl AsRef<str>,
+        later: impl AsRef<str>,
+    ) -> Result<(), CausalError> {
+        self.engine.causal.add_dependency(earlier, later)
+    }
+
+    /// Resolves a live event through the guarded causal set.
+    pub fn resolve(&mut self, id: &str) -> Option<(String, T)> {
+        self.engine.causal.resolve(id)
+    }
+
+    /// Compatibility alias for [`Self::resolve`].
+    pub fn take(&mut self, id: &str) -> Option<(String, T)> {
+        self.resolve(id)
+    }
+
+    /// Returns mutable access to a live payload without exposing graph indices.
+    pub fn payload_mut(&mut self, id: &str) -> Option<&mut T> {
+        self.engine
+            .causal
+            .nodes
+            .get_mut(id)
+            .map(|node| &mut node.payload)
+    }
+}
+
+impl<T> Deref for CausalSetMut<'_, T> {
+    type Target = CausalSet<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.engine.causal
+    }
+}
+
+impl<T> Drop for CausalSetMut<'_, T> {
+    fn drop(&mut self) {
+        self.engine.refresh_frontier();
     }
 }
 
@@ -722,6 +1003,206 @@ mod tests {
         let second = engine.next_ready().expect("bridge ready");
         assert_eq!(second.0, "bridge");
         assert!(engine.next_ready().is_none());
+    }
+
+    #[test]
+    fn engine_respects_dependencies_added_after_reverse_insertion() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("later", "later").unwrap();
+        engine.insert_event("earlier", "earlier").unwrap();
+        engine.add_dependency("earlier", "later").unwrap();
+
+        assert_eq!(engine.next_ready(), Some(("earlier".into(), "earlier")));
+        assert_eq!(engine.next_ready(), Some(("later".into(), "later")));
+    }
+
+    #[test]
+    fn reverse_inserted_dense_dag_stays_valid_while_draining() {
+        const EVENTS: usize = 32;
+        let mut engine = TemporalLogicEngine::new();
+        for index in (0..EVENTS).rev() {
+            engine
+                .insert_event(format!("event-{index:02}"), index)
+                .unwrap();
+        }
+        for index in 1..EVENTS {
+            engine
+                .add_dependency(
+                    format!("event-{:02}", index - 1),
+                    format!("event-{index:02}"),
+                )
+                .unwrap();
+            if index >= 3 {
+                engine
+                    .add_dependency(
+                        format!("event-{:02}", index - 3),
+                        format!("event-{index:02}"),
+                    )
+                    .unwrap();
+            }
+        }
+
+        for expected in 0..EVENTS {
+            assert_eq!(engine.validate(), Ok(()));
+            let (id, payload) = engine.next_ready().expect("next DAG event");
+            assert_eq!(id, format!("event-{expected:02}"));
+            assert_eq!(payload, expected);
+        }
+        assert_eq!(engine.validate(), Ok(()));
+        assert!(engine.next_ready().is_none());
+    }
+
+    #[test]
+    fn causal_set_resolution_is_first_class_history() {
+        let mut set = CausalSet::new();
+        set.insert("child", "child").unwrap();
+        set.insert("parent", "parent").unwrap();
+        set.add_dependency("parent", "child").unwrap();
+        assert!(!set.is_ready("child"));
+
+        assert_eq!(set.resolve("parent"), Some(("parent".into(), "parent")));
+
+        assert!(set.was_resolved("parent"));
+        assert_eq!(set.resolved_len(), 1);
+        assert!(set.is_ready("child"));
+        assert_eq!(set.validate(), Ok(()));
+    }
+
+    #[test]
+    fn resolved_event_identifiers_cannot_be_reused() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("once", 1).unwrap();
+        assert_eq!(engine.next_ready(), Some(("once".into(), 1)));
+
+        let error = engine.insert_event("once", 2).unwrap_err();
+
+        assert_eq!(error, CausalError::ResolvedEvent("once".into()));
+        assert_eq!(engine.pending(), 0);
+        assert_eq!(engine.validate(), Ok(()));
+    }
+
+    #[test]
+    fn resolved_history_can_parent_a_late_arriving_event() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("parent", 1).unwrap();
+        assert_eq!(engine.next_ready(), Some(("parent".into(), 1)));
+        engine.insert_event("child", 2).unwrap();
+
+        engine.add_dependency("parent", "child").unwrap();
+        assert_eq!(
+            engine.add_dependency("child", "parent"),
+            Err(CausalError::ResolvedEvent("parent".into()))
+        );
+
+        assert_eq!(engine.validate(), Ok(()));
+        assert_eq!(engine.next_ready(), Some(("child".into(), 2)));
+    }
+
+    #[test]
+    fn causal_mutation_guard_refreshes_blocked_frontier_entries() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("later", 2).unwrap();
+        engine.insert_event("earlier", 1).unwrap();
+        {
+            let mut causal = engine.causal_mut();
+            causal.add_dependency("earlier", "later").unwrap();
+        }
+
+        assert_eq!(engine.validate(), Ok(()));
+        assert_eq!(engine.next_ready(), Some(("earlier".into(), 1)));
+        assert_eq!(engine.next_ready(), Some(("later".into(), 2)));
+    }
+
+    #[test]
+    fn causal_mutation_guard_updates_payload_without_exposing_graph_indices() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("ready", 1).unwrap();
+        {
+            let mut causal = engine.causal_mut();
+            *causal.payload_mut("ready").unwrap() = 2;
+            assert!(causal.payload_mut("missing").is_none());
+        }
+
+        assert_eq!(engine.validate(), Ok(()));
+        assert_eq!(engine.next_ready(), Some(("ready".into(), 2)));
+    }
+
+    #[test]
+    fn discarding_an_event_unblocks_its_descendants() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("child", 2).unwrap();
+        engine.insert_event("parent", 1).unwrap();
+        engine.add_dependency("parent", "child").unwrap();
+
+        assert_eq!(engine.discard_event("parent"), Some(("parent".into(), 1)));
+
+        assert!(engine.was_resolved("parent"));
+        assert_eq!(engine.next_ready(), Some(("child".into(), 2)));
+        assert_eq!(engine.validate(), Ok(()));
+    }
+
+    #[test]
+    fn failed_cycle_insertion_leaves_graph_unchanged() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("a", 1).unwrap();
+        engine.insert_event("b", 2).unwrap();
+        engine.add_dependency("a", "b").unwrap();
+
+        let error = engine.add_dependency("b", "a").unwrap_err();
+
+        assert_eq!(error, CausalError::CyclicDependency("b".into(), "a".into()));
+        assert_eq!(engine.validate(), Ok(()));
+        assert_eq!(engine.next_ready(), Some(("a".into(), 1)));
+        assert_eq!(engine.next_ready(), Some(("b".into(), 2)));
+    }
+
+    #[test]
+    fn validation_detects_an_internally_corrupted_cycle() {
+        let mut set = CausalSet::new();
+        set.insert("a", 1).unwrap();
+        set.insert("b", 2).unwrap();
+        set.add_dependency("a", "b").unwrap();
+        set.nodes.get_mut("a").unwrap().parents.insert("b".into());
+        set.successors.get_mut("b").unwrap().insert("a".into());
+
+        assert_eq!(set.validate(), Err(CausalInvariantError::CyclicGraph));
+    }
+
+    #[test]
+    fn predicate_panic_does_not_consume_a_ready_event() {
+        let mut engine = TemporalLogicEngine::new();
+        engine.insert_event("ready", 1).unwrap();
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.next_matching::<_>(|_| panic!("predicate failed"));
+        }));
+
+        assert!(panic.is_err());
+        assert_eq!(engine.pending(), 1);
+        assert_eq!(engine.validate(), Ok(()));
+        assert_eq!(engine.next_ready(), Some(("ready".into(), 1)));
+    }
+
+    #[test]
+    fn event_ids_and_nodes_are_inspectable_without_mutation() {
+        let mut set = CausalSet::new();
+        set.insert("parent", 1).unwrap();
+        set.insert("child", 2).unwrap();
+        set.add_dependency("parent", "child").unwrap();
+
+        let node = set.get("child").expect("child node");
+        assert_eq!(node.id(), "child");
+        assert_eq!(node.payload(), &2);
+        assert_eq!(node.parent_ids().collect::<Vec<_>>(), vec!["parent"]);
+    }
+
+    #[test]
+    fn empty_event_ids_are_rejected_without_mutation() {
+        let mut set = CausalSet::new();
+
+        assert_eq!(set.insert("  ", 1), Err(CausalError::EmptyEventId));
+        assert!(set.is_empty());
+        assert_eq!(set.validate(), Ok(()));
     }
 
     #[test]

@@ -3,6 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 pub use st_softlogic::{apply_softmode, beam_select, Ctx, SoftMode, SoftRule, SolveCfg};
 
 #[cfg(feature = "learn_store")]
