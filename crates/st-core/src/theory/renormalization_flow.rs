@@ -576,7 +576,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -589,7 +589,7 @@ mod tests {
         model
             .register_operator(RGOperator::new("nonlinear", 4.2, 0.2).with_nonlinear_feedback(0.5));
         let solution = model.propagate().unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(solution.lattice().len(), 5);
         assert_eq!(solution.iter().count(), 2);

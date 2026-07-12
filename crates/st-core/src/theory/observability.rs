@@ -614,7 +614,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -625,7 +625,7 @@ mod tests {
             .with_color_action(ColorAction::new(4, ColorSymmetry::Symmetric));
         let mut coalgebra = ObservationalCoalgebra::new(config);
         let assessment = coalgebra.assess(&[3, 12, 120]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(assessment.expected.len(), 3);
         let events = events.lock().unwrap();

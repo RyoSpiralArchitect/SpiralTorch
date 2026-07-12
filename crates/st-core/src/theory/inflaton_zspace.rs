@@ -494,7 +494,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -521,7 +521,7 @@ mod tests {
             epsilon_z,
             2.435e18,
         );
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(projection.len(), 2);
         let events = events.lock().unwrap();

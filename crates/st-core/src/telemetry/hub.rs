@@ -2353,7 +2353,7 @@ mod tests {
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2368,7 +2368,7 @@ mod tests {
         });
         push_dashboard_frame(frame);
         let snapshot = snapshot_dashboard_frames(3);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(!snapshot.is_empty());
         let events = events.lock().unwrap();
@@ -2395,7 +2395,7 @@ mod tests {
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2414,7 +2414,7 @@ mod tests {
             "region-loss-volatility",
             vec![0.05, 0.0, 0.1, 0.2],
         ));
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(get_region_loss_report().is_some());
         assert!(get_region_loss_trend_report().is_some());

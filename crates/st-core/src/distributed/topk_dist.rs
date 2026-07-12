@@ -105,7 +105,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -121,7 +121,7 @@ mod tests {
             idxs: vec![7, 100, -1],
         };
         let merged = merge_two_shards_f32(&a, &b, 3);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(merged.vals, vec![0.7, 0.5, 0.2]);
         assert_eq!(merged.idxs, vec![7, 5, 2]);

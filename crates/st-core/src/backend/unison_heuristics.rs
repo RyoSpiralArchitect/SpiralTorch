@@ -2168,7 +2168,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2177,7 +2177,7 @@ mod tests {
 
         let caps = DeviceCaps::wgpu(32, true, 256);
         let out = choose_unified_rank_with_realgrad(64, 4_096, 48, caps, RankKind::MidK, None);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(out.ctile > 0);
         let events = events.lock().unwrap();
@@ -2214,7 +2214,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2223,7 +2223,7 @@ mod tests {
 
         let caps = DeviceCaps::wgpu(32, true, 256);
         let out = choose_unified_rank_with_realgrad(2, 69, 1, caps, RankKind::MidK, None);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(out.wg, 64);
         let events = events.lock().unwrap();
@@ -2259,7 +2259,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2285,7 +2285,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let meta = events

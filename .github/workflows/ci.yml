@@ -66,6 +66,9 @@ jobs:
       - name: Python text feature isolation
         if: matrix.run_lints
         run: cargo check --locked -p spiraltorch-py --no-default-features --features extension-module,text
+      - name: Core metadata observer isolation
+        if: matrix.run_lints
+        run: bash scripts/check_core_meta_observer_isolation.sh
       - name: clippy (workspace)
         if: matrix.run_lints
         run: cargo clippy --workspace --all-targets

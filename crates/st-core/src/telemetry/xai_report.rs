@@ -170,7 +170,7 @@ mod tests {
         let _lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -183,7 +183,7 @@ mod tests {
         metadata.steps = Some(12);
         metadata.insert_extra_number("loss", 0.25);
         let report = AttributionReport::new(metadata, 2, 3, vec![0.0, 0.25, -0.5, 1.0, 0.0, 0.75]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(report.shape(), (2, 3));
         let events = events.lock().unwrap();

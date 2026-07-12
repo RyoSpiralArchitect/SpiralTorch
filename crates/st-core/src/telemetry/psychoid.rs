@@ -1123,7 +1123,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1131,7 +1131,7 @@ mod tests {
         })));
 
         let distribution = softmax(&[0.1, 0.2, 0.3, 0.4]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(distribution.len(), 4);
         assert!((distribution.iter().sum::<f32>() - 1.0).abs() < 1e-6);
@@ -1155,7 +1155,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1167,7 +1167,7 @@ mod tests {
             "Yes, however this cosmic spiral bridge says I cannot cross the lantern threshold.",
         );
         let (reading, _events) = meter.observe(sample).expect("psychoid reading");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(reading.cti >= 0.0 && reading.cti <= 1.0);
         let events = events.lock().unwrap();
@@ -1219,7 +1219,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1236,7 +1236,7 @@ mod tests {
         let cti = cti_score(&motif, &z_vec, &z_scores, &CTIParams::default());
         let replay = dream_replay(&["i cannot".to_string(), "safety policy".to_string()])
             .expect("dream replay");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!((0.0..=1.0).contains(&cti));
         assert_eq!(replay.symbols.len(), 2);

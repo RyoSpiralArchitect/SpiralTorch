@@ -752,7 +752,7 @@ mod tests {
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -762,7 +762,7 @@ mod tests {
         let (hard, soft, overrides) = with_spiral_heur_k(Some("not valid kdsl program"), || {
             parse_env_dsl_plus_kind(32, 4096, 128, true, "topk")
         });
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(hard.is_none());
         assert!(soft.is_empty());
@@ -801,7 +801,7 @@ mod tests {
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -809,7 +809,7 @@ mod tests {
         })));
 
         let choice = with_env_var("REDIS_URL", None, || choose_from_kv(64, 8192, 32, false));
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(choice.is_none());
 
