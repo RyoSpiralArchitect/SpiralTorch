@@ -161,34 +161,33 @@ fn build_runtime() -> Result<HipRuntime, HipErr> {
         ));
     }
 
-    #[allow(unused_mut)]
-    let mut devices = finalize_devices(collect_env_devices(), true);
-
     #[cfg(feature = "hip-real")]
-    if devices.is_empty() {
-        match crate::real::enumerate_devices() {
-            Ok(runtime_devices) if !runtime_devices.is_empty() => {
-                devices = runtime_devices;
-            }
-            Ok(_) => {
-                devices.push(DeviceInfo::new(
-                    0,
-                    std::borrow::Cow::Borrowed("hip-runtime"),
-                    true,
-                ));
-            }
-            Err(err) => {
-                eprintln!("[hip] failed to enumerate runtime devices: {err}");
-                devices.push(DeviceInfo::new(
-                    0,
-                    std::borrow::Cow::Borrowed("hip-runtime"),
-                    true,
-                ));
-            }
-        }
-    }
+    let devices = resolve_runtime_devices(collect_env_devices(), crate::real::enumerate_devices)?;
+    #[cfg(not(feature = "hip-real"))]
+    let devices = finalize_devices(collect_env_devices(), true);
 
     Ok(HipRuntime::new(devices))
+}
+
+#[cfg(any(feature = "hip-real", test))]
+fn resolve_runtime_devices<F>(
+    environment_devices: Vec<DeviceInfo>,
+    enumerate: F,
+) -> Result<Vec<DeviceInfo>, HipErr>
+where
+    F: FnOnce() -> Result<Vec<DeviceInfo>, HipErr>,
+{
+    if !environment_devices.is_empty() {
+        return Ok(environment_devices);
+    }
+
+    let runtime_devices = enumerate()?;
+    if runtime_devices.is_empty() {
+        return Err(HipErr::Other(
+            "HIP runtime reported no available devices".into(),
+        ));
+    }
+    Ok(runtime_devices)
 }
 
 fn hip_env_available() -> bool {
@@ -709,6 +708,46 @@ mod tests {
             .all(|runtime| Arc::ptr_eq(&runtimes[0], runtime)));
         restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
         super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn runtime_device_resolution_uses_real_enumeration_without_hints() {
+        let devices = super::resolve_runtime_devices(Vec::new(), || {
+            Ok(vec![DeviceInfo::new(2, "gfx-test", false)])
+        })
+        .expect("real device enumeration should succeed");
+
+        assert_eq!(devices, vec![DeviceInfo::new(2, "gfx-test", false)]);
+    }
+
+    #[test]
+    fn runtime_device_resolution_prefers_environment_hints() {
+        let hinted = vec![DeviceInfo::new(4, "visible-device-4", false)];
+
+        let devices = super::resolve_runtime_devices(hinted.clone(), || {
+            panic!("real enumeration should not run when environment hints are present")
+        })
+        .expect("environment device hints should resolve");
+
+        assert_eq!(devices, hinted);
+    }
+
+    #[test]
+    fn runtime_device_resolution_rejects_empty_enumeration() {
+        let err = super::resolve_runtime_devices(Vec::new(), || Ok(Vec::new()))
+            .expect_err("an empty real runtime must not report initialized");
+
+        assert!(err.to_string().contains("no available devices"));
+    }
+
+    #[test]
+    fn runtime_device_resolution_propagates_enumeration_failure() {
+        let err = super::resolve_runtime_devices(Vec::new(), || {
+            Err(HipErr::Other("enumeration failed".into()))
+        })
+        .expect_err("real runtime enumeration failures must remain visible");
+
+        assert!(err.to_string().contains("enumeration failed"));
     }
 
     #[test]
