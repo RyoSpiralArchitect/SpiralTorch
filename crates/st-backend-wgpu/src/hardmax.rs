@@ -6,7 +6,7 @@
 //! Convenience helpers that configure the row-wise softmax kernels to operate
 //! in "hardmax" mode.
 //!
-//! The [`softmax`](crate::softmax) module exposes the low level pipeline
+//! The [`softmax`] module exposes the low level pipeline
 //! assembly logic that powers both the probability and argmax style reductions.
 //! This wrapper layers a small amount of ergonomics so the WGPU backend offers
 //! "soft/middle/hard" entry points mirroring the tensor API. The helpers mutate

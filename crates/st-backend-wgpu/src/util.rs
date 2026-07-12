@@ -11,7 +11,10 @@ use std::{
     hash::{Hash, Hasher},
     panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering as AtomicOrdering},
+        Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
 };
 
 use once_cell::sync::OnceCell;
@@ -20,6 +23,39 @@ use thiserror::Error;
 use wgpu::{
     ComputePipeline, ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource,
 };
+
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            mutex.clear_poison();
+            guard
+        }
+    }
+}
+
+fn read_recover<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
+
+fn write_recover<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            lock.clear_poison();
+            guard
+        }
+    }
+}
 
 pub(crate) fn device_supports_subgroup(device: &Device) -> bool {
     device.features().contains(wgpu::Features::SUBGROUP)
@@ -109,6 +145,14 @@ fn module_cache() -> &'static Mutex<HashMap<ModuleCacheKey, Arc<ModuleCacheEntry
     SHADER_MODULE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn module_cache_entry(key: ModuleCacheKey) -> Arc<ModuleCacheEntry> {
+    Arc::clone(
+        lock_recover(module_cache())
+            .entry(key)
+            .or_insert_with(|| Arc::new(ModuleCacheEntry::default())),
+    )
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct PipelineCacheKey {
     module: ModuleCacheKey,
@@ -174,14 +218,7 @@ where
     F: Fn() -> Result<Arc<str>, ShaderLoadError>,
 {
     let context = context.unwrap_or_else(|| "inline".to_string());
-    let entry = {
-        let mut cache = module_cache().lock().unwrap();
-        Arc::clone(
-            cache
-                .entry(key)
-                .or_insert_with(|| Arc::new(ModuleCacheEntry::default())),
-        )
-    };
+    let entry = module_cache_entry(key);
 
     if let Some(module) = entry.get() {
         return Ok(module);
@@ -277,6 +314,7 @@ pub struct ShaderCache {
 #[derive(Default)]
 struct ShaderCacheInner {
     shader_dir: PathBuf,
+    source_generation: AtomicU64,
     sources: RwLock<HashMap<PathBuf, Arc<str>>>,
     pipelines: Mutex<HashMap<PipelineCacheKey, Arc<PipelineCacheEntry>>>,
 }
@@ -305,6 +343,7 @@ impl ShaderCache {
         Self {
             inner: Arc::new(ShaderCacheInner {
                 shader_dir: shader_dir.into(),
+                source_generation: AtomicU64::new(0),
                 sources: RwLock::new(HashMap::new()),
                 pipelines: Mutex::new(HashMap::new()),
             }),
@@ -316,31 +355,54 @@ impl ShaderCache {
         &self.inner.shader_dir
     }
 
-    /// Drop all cached shader sources.
+    /// Drop all cached shader sources and compute pipelines.
     pub fn clear(&self) {
-        self.inner.sources.write().unwrap().clear();
-        self.inner.pipelines.lock().unwrap().clear();
+        let sources = {
+            let mut sources = write_recover(&self.inner.sources);
+            let previous = std::mem::take(&mut *sources);
+            self.inner
+                .source_generation
+                .fetch_add(1, AtomicOrdering::AcqRel);
+            previous
+        };
+        let pipelines = {
+            let mut pipelines = lock_recover(&self.inner.pipelines);
+            std::mem::take(&mut *pipelines)
+        };
+        drop(sources);
+        drop(pipelines);
     }
 
     /// Retrieve the WGSL source for `file`, reading it from disk if necessary.
     pub fn source(&self, file: &str) -> Result<Arc<str>, ShaderLoadError> {
         let path = self.inner.shader_dir.join(file);
 
-        if let Some(source) = self.inner.sources.read().unwrap().get(&path) {
+        self.source_with(path, |path| {
+            let source = fs::read_to_string(path).map_err(|source| ShaderLoadError::Io {
+                source,
+                path: path.to_path_buf(),
+            })?;
+            Ok(Arc::from(source))
+        })
+    }
+
+    fn source_with<F>(&self, path: PathBuf, loader: F) -> Result<Arc<str>, ShaderLoadError>
+    where
+        F: FnOnce(&Path) -> Result<Arc<str>, ShaderLoadError>,
+    {
+        let generation = self.inner.source_generation.load(AtomicOrdering::Acquire);
+        if let Some(source) = read_recover(&self.inner.sources).get(&path) {
             return Ok(Arc::clone(source));
         }
 
-        let mut sources = self.inner.sources.write().unwrap();
+        let source = loader(&path)?;
+        let mut sources = write_recover(&self.inner.sources);
+        if self.inner.source_generation.load(AtomicOrdering::Acquire) != generation {
+            return Ok(source);
+        }
         match sources.entry(path.clone()) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
-            Entry::Vacant(entry) => {
-                let source = fs::read_to_string(&path).map_err(|source| ShaderLoadError::Io {
-                    source,
-                    path: path.clone(),
-                })?;
-                let source: Arc<str> = Arc::from(source);
-                Ok(Arc::clone(entry.insert(source)))
-            }
+            Entry::Vacant(entry) => Ok(Arc::clone(entry.insert(source))),
         }
     }
 
@@ -388,7 +450,7 @@ impl ShaderCache {
         let pipeline_key = PipelineCacheKey::new(module_key.clone(), entry_point, layout);
 
         let entry = {
-            let mut pipelines = self.inner.pipelines.lock().unwrap();
+            let mut pipelines = lock_recover(&self.inner.pipelines);
             Arc::clone(pipelines.entry(pipeline_key).or_default())
         };
 
@@ -446,20 +508,15 @@ impl ShaderCache {
 
 impl fmt::Debug for ShaderCache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sources = read_recover(&self.inner.sources)
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let pipelines = lock_recover(&self.inner.pipelines).len();
         f.debug_struct("ShaderCache")
             .field("shader_dir", &self.inner.shader_dir)
-            .field(
-                "sources",
-                &self
-                    .inner
-                    .sources
-                    .read()
-                    .unwrap()
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )
-            .field("pipelines", &self.inner.pipelines.lock().unwrap().len())
+            .field("sources", &sources)
+            .field("pipelines", &pipelines)
             .finish()
     }
 }
@@ -558,6 +615,7 @@ fn apply_overrides(
 mod tests {
     use super::*;
     use std::fs;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -609,6 +667,125 @@ mod tests {
         temp.write("example.wgsl", "// second pass\n");
         let cached = cache.source("example.wgsl").expect("cached read");
         assert_eq!(cached.as_ref(), "// first pass\n");
+    }
+
+    #[test]
+    fn source_cache_recovers_after_poison() {
+        let temp = TempShaderDir::new();
+        temp.write("recovery.wgsl", "// recovered\n");
+        let cache = ShaderCache::new(temp.path());
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = cache
+                .inner
+                .sources
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison shader source cache");
+        }));
+        assert!(poisoned.is_err());
+        assert!(cache.inner.sources.is_poisoned());
+
+        let source = cache
+            .source("recovery.wgsl")
+            .expect("source cache recovered");
+
+        assert_eq!(source.as_ref(), "// recovered\n");
+        assert!(!cache.inner.sources.is_poisoned());
+    }
+
+    #[test]
+    fn source_loader_runs_outside_cache_lock() {
+        let cache = ShaderCache::new(".");
+        let path = PathBuf::from("injected.wgsl");
+
+        let source = cache
+            .source_with(path, |_| {
+                assert!(
+                    cache.inner.sources.try_write().is_ok(),
+                    "source loader ran while cache was locked"
+                );
+                Ok(Arc::from("// injected\n"))
+            })
+            .expect("injected source");
+
+        assert_eq!(source.as_ref(), "// injected\n");
+    }
+
+    #[test]
+    fn source_loader_panic_does_not_poison_cache() {
+        let cache = ShaderCache::new(".");
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            cache
+                .source_with(
+                    PathBuf::from("panicking-loader.wgsl"),
+                    |_| -> Result<Arc<str>, ShaderLoadError> {
+                        panic!("source loader failed");
+                    },
+                )
+                .expect("loader should panic before returning");
+        }));
+
+        assert!(result.is_err());
+        assert!(!cache.inner.sources.is_poisoned());
+    }
+
+    #[test]
+    fn clear_prevents_inflight_source_from_repopulating_cache() {
+        let cache = ShaderCache::new(".");
+        let path = PathBuf::from("cleared-inflight.wgsl");
+
+        let source = cache
+            .source_with(path.clone(), |_| {
+                cache.clear();
+                Ok(Arc::from("// loaded before clear completed\n"))
+            })
+            .expect("inflight source result");
+
+        assert_eq!(source.as_ref(), "// loaded before clear completed\n");
+        assert!(!read_recover(&cache.inner.sources).contains_key(&path));
+    }
+
+    #[test]
+    fn clear_recovers_poisoned_pipeline_cache() {
+        let cache = ShaderCache::new(".");
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = cache
+                .inner
+                .pipelines
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison pipeline cache");
+        }));
+        assert!(poisoned.is_err());
+        assert!(cache.inner.pipelines.is_poisoned());
+
+        cache.clear();
+
+        assert!(!cache.inner.pipelines.is_poisoned());
+    }
+
+    #[test]
+    fn module_registry_recovers_after_poison() {
+        let cache = module_cache();
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison shader module registry");
+        }));
+        assert!(poisoned.is_err());
+        assert!(cache.is_poisoned());
+        let unique = NEXT_DIR_ID.fetch_add(1, Ordering::Relaxed);
+        let key = ModuleCacheKey {
+            device: usize::MAX,
+            key: format!("poison-recovery-{unique}"),
+        };
+
+        let _entry = module_cache_entry(key.clone());
+
+        assert!(!cache.is_poisoned());
+        let removed = lock_recover(cache).remove(&key);
+        drop(removed);
     }
 
     #[test]
