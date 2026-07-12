@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::unison_heuristics::RankKind;
@@ -380,46 +381,69 @@ impl EcosystemRegistry {
         REGISTRY.get_or_init(EcosystemRegistry::default)
     }
 
+    fn lock_state(&self) -> MutexGuard<'_, EcosystemState> {
+        match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                let state = poisoned.into_inner();
+                self.state.clear_poison();
+                state
+            }
+        }
+    }
+
     pub fn record_heuristic(&self, decision: HeuristicDecision) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         state.heuristics.push_back(decision);
         state.enforce_capacities();
     }
 
     pub fn record_roundtable(&self, summary: RoundtableSummary) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         state.roundtables.push_back(summary);
         state.enforce_capacities();
     }
 
     pub fn record_connector(&self, event: ConnectorEvent) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         state.connectors.push_back(event);
         state.enforce_capacities();
     }
 
     pub fn record_metric(&self, sample: MetricSample) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         state.metrics.push_back(sample);
         state.enforce_capacities();
     }
 
+    /// Updates queue capacities transactionally.
+    ///
+    /// If `mutator` panics, the previous capacities are restored and the panic
+    /// resumes after the registry lock has been released.
     pub fn configure<F>(&self, mutator: F)
     where
         F: FnOnce(&mut EcosystemCapacity),
     {
-        let mut state = self.state.lock().unwrap();
-        mutator(&mut state.capacity);
-        state.enforce_capacities();
+        let mut state = self.lock_state();
+        let previous = state.capacity;
+        let result = catch_unwind(AssertUnwindSafe(|| mutator(&mut state.capacity)));
+        match result {
+            Ok(()) => state.enforce_capacities(),
+            Err(payload) => {
+                state.capacity = previous;
+                drop(state);
+                resume_unwind(payload);
+            }
+        }
     }
 
     pub fn capacity(&self) -> EcosystemCapacity {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state();
         state.capacity
     }
 
     pub fn snapshot(&self) -> EcosystemReport {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state();
         EcosystemReport {
             heuristics: state.heuristics.iter().cloned().collect(),
             roundtables: state.roundtables.iter().cloned().collect(),
@@ -430,7 +454,7 @@ impl EcosystemRegistry {
     }
 
     pub fn drain(&self) -> EcosystemReport {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         let metrics: Vec<MetricSample> = state.metrics.drain(..).collect();
         let metric_digests = summarise_metrics(metrics.iter());
         EcosystemReport {
@@ -562,6 +586,7 @@ fn summarise_metrics<'a>(samples: impl Iterator<Item = &'a MetricSample>) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     #[test]
     fn metric_digest_accumulates_stats() {
@@ -679,5 +704,38 @@ mod tests {
         assert_eq!(report.roundtables.len(), 1);
         assert_eq!(report.connectors.len(), 1);
         assert_eq!(report.metrics.len(), 1);
+    }
+
+    #[test]
+    fn panicking_capacity_update_is_transactional_and_keeps_registry_live() {
+        let registry = EcosystemRegistry::default();
+        let original = registry.capacity();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            registry.configure(|capacity| {
+                capacity.metrics = 0;
+                panic!("capacity update failed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(registry.capacity(), original);
+        registry.record_metric(MetricSample::new("after_panic", 1.0));
+        assert_eq!(registry.snapshot().metrics.len(), 1);
+    }
+
+    #[test]
+    fn registry_recovers_from_an_already_poisoned_state_lock() {
+        let registry = EcosystemRegistry::default();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _state = registry.state.lock().unwrap();
+            panic!("poison registry state");
+        }));
+
+        assert!(result.is_err());
+        assert!(registry.state.is_poisoned());
+        registry.record_metric(MetricSample::new("recovered", 1.0));
+        assert!(!registry.state.is_poisoned());
+        assert_eq!(registry.drain().metrics.len(), 1);
     }
 }
