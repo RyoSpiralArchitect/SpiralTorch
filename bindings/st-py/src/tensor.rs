@@ -1633,6 +1633,7 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
         | TensorError::NonFiniteValue { .. }
         | TensorError::PorosityOutOfRange { .. }
         | TensorError::InvalidValue { .. }
+        | TensorError::ProbabilityProjectionInfeasible { .. }
         | TensorError::DlpackError { .. } => PyValueError::new_err(err.to_string()),
         _ => PyRuntimeError::new_err(err.to_string()),
     }

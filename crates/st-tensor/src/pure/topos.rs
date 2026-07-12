@@ -1201,18 +1201,22 @@ impl LawvereTierneyGuard {
     /// Creates a new guard ensuring densities stay within the provided window and
     /// that normalisations land within `mass_tolerance` of unit mass.
     pub fn new(density_min: f32, density_max: f32, mass_tolerance: f32) -> PureResult<Self> {
-        if !density_min.is_finite() || !density_max.is_finite() || !mass_tolerance.is_finite() {
-            return Err(TensorError::NonFiniteValue {
-                label: "lawvere_tierney_params",
-                value: f32::NAN,
-            });
+        for (label, value) in [
+            ("lawvere_tierney_density_min", density_min),
+            ("lawvere_tierney_density_max", density_max),
+            ("lawvere_tierney_mass_tolerance", mass_tolerance),
+        ] {
+            if value.is_finite() {
+                continue;
+            }
+            return Err(TensorError::NonFiniteValue { label, value });
         }
         if density_min <= 0.0 || density_max < density_min {
             return Err(TensorError::InvalidValue {
                 label: "lawvere_tierney_density_window",
             });
         }
-        if mass_tolerance <= 0.0 || mass_tolerance >= 1.0 {
+        if !(f32::EPSILON..1.0).contains(&mass_tolerance) {
             return Err(TensorError::InvalidValue {
                 label: "lawvere_tierney_mass_tolerance",
             });
@@ -1305,8 +1309,11 @@ impl LawvereTierneyGuard {
         Ok(())
     }
 
-    /// Projects a probability slice to the guarded subtopos by clipping
-    /// non-finite values, enforcing the density window, and re-normalising.
+    /// Projects a probability slice to the guarded subtopos.
+    ///
+    /// The bounded proportional projection preserves zero support and relative
+    /// mass wherever neither density bound is active. It commits only after the
+    /// density window and unit-mass invariant hold simultaneously.
     pub fn project_slice(
         &self,
         label: &'static str,
@@ -1316,16 +1323,26 @@ impl LawvereTierneyGuard {
         if slice.is_empty() {
             return Err(TensorError::EmptyInput(label));
         }
-        let mut sum = 0.0f32;
-        let mut raw_sum = 0.0f32;
+        if !saturation.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "lawvere_tierney_saturation",
+                value: saturation,
+            });
+        }
+        if saturation <= 0.0 {
+            return Err(TensorError::NonPositiveSaturation { saturation });
+        }
+
+        let effective_density_max = self.density_max.min(saturation);
+        let mut projected = Vec::with_capacity(slice.len());
+        let mut raw_sum = 0.0f64;
         let mut repaired_non_finite = 0usize;
         let mut repaired_negative = 0usize;
         let mut clipped_saturation = 0usize;
         let mut clipped_density_max = 0usize;
-        for value in slice.iter_mut() {
-            let original = *value;
+        for &original in slice.iter() {
             if original.is_finite() {
-                raw_sum += original;
+                raw_sum += original as f64;
             } else {
                 repaired_non_finite = repaired_non_finite.saturating_add(1);
             }
@@ -1342,56 +1359,99 @@ impl LawvereTierneyGuard {
                 clipped_density_max = clipped_density_max.saturating_add(1);
                 guarded = self.density_max;
             }
-            *value = guarded;
-            sum += *value;
+            projected.push(guarded);
         }
-        let guarded_sum = sum;
-        if sum <= 0.0 {
-            return Err(TensorError::NonFiniteValue { label, value: sum });
-        }
-        let mut lifted_density_min = 0usize;
-        for value in slice.iter_mut() {
-            *value /= sum;
-            if *value > 0.0 && *value < self.density_min {
-                lifted_density_min = lifted_density_min.saturating_add(1);
-                *value = self.density_min;
-            }
-        }
-        let renorm_sum: f32 = slice.iter().sum();
-        if renorm_sum <= 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label,
-                value: renorm_sum,
+
+        let guarded_sum = projected.iter().map(|&value| value as f64).sum::<f64>();
+        let active_indices = projected
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &value)| (value > 0.0).then_some(index))
+            .collect::<Vec<_>>();
+        let active_values = active_indices.len();
+        let active = active_values as f64;
+        let density_min = self.density_min as f64;
+        let density_max = effective_density_max as f64;
+        let tolerance = self.mass_tolerance as f64;
+        if active_values == 0
+            || active * density_min > 1.0 + tolerance
+            || active * density_max < 1.0 - tolerance
+        {
+            return Err(TensorError::ProbabilityProjectionInfeasible {
+                active_values,
+                density_min: self.density_min,
+                density_max: effective_density_max,
             });
         }
-        for value in slice.iter_mut() {
-            *value /= renorm_sum;
-            if *value > self.density_max {
-                *value = self.density_max;
+
+        let lifted_density_min = active_indices
+            .iter()
+            .filter(|&&index| projected[index] < self.density_min)
+            .count();
+        let mut scale_low = 0.0f64;
+        let mut scale_high = active_indices
+            .iter()
+            .map(|&index| density_max / projected[index] as f64)
+            .fold(0.0f64, f64::max);
+        const PROJECTION_ITERATIONS: usize = 80;
+        for _ in 0..PROJECTION_ITERATIONS {
+            let scale = 0.5 * (scale_low + scale_high);
+            let mass = active_indices
+                .iter()
+                .map(|&index| (projected[index] as f64 * scale).clamp(density_min, density_max))
+                .sum::<f64>();
+            if mass < 1.0 {
+                scale_low = scale;
+            } else {
+                scale_high = scale;
             }
-            if *value > 0.0 && *value + self.mass_tolerance < self.density_min {
+        }
+        let scale = 0.5 * (scale_low + scale_high);
+        for &index in &active_indices {
+            projected[index] =
+                (projected[index] as f64 * scale).clamp(density_min, density_max) as f32;
+        }
+
+        let renorm_sum = projected.iter().map(|&value| value as f64).sum::<f64>();
+        for _ in 0..4 {
+            let mass = projected.iter().map(|&value| value as f64).sum::<f64>();
+            let mut delta = 1.0 - mass;
+            if delta.abs() <= tolerance * 0.25 {
+                break;
+            }
+            for &index in &active_indices {
+                let current = projected[index] as f64;
+                let adjustment = if delta > 0.0 {
+                    delta.min(density_max - current)
+                } else {
+                    delta.max(density_min - current)
+                };
+                projected[index] = (current + adjustment) as f32;
+                delta -= adjustment;
+                if delta.abs() <= tolerance * 0.25 {
+                    break;
+                }
+            }
+        }
+
+        for &index in &active_indices {
+            let value = projected[index];
+            if value + self.mass_tolerance < self.density_min
+                || value > effective_density_max + self.mass_tolerance
+            {
                 return Err(TensorError::InvalidValue {
-                    label: "lawvere_tierney_probability_density_floor",
+                    label: "lawvere_tierney_probability_density_window",
                 });
             }
         }
-        let final_sum: f32 = slice.iter().sum();
+        let final_sum = projected.iter().map(|&value| value as f64).sum::<f64>();
         let deviation = (final_sum - 1.0).abs();
-        let mut final_rescaled = false;
-        if deviation > self.mass_tolerance {
-            let scale = 1.0 / final_sum;
-            for value in slice.iter_mut() {
-                *value *= scale;
-            }
-            final_rescaled = true;
-        }
-        let final_sum: f32 = slice.iter().sum();
-        let deviation = (final_sum - 1.0).abs();
-        if deviation > self.mass_tolerance {
+        if deviation > tolerance {
             return Err(TensorError::InvalidValue {
                 label: "lawvere_tierney_probability_mass",
             });
         }
+        slice.copy_from_slice(&projected);
         crate::emit_tensor_op(
             "lawvere_guard_probability_slice",
             &[slice.len()],
@@ -1406,6 +1466,7 @@ impl LawvereTierneyGuard {
                 "values": slice.len(),
                 "density_min": self.density_min,
                 "density_max": self.density_max,
+                "effective_density_max": effective_density_max,
                 "mass_tolerance": self.mass_tolerance,
                 "saturation": saturation,
                 "raw_sum": raw_sum,
@@ -1418,12 +1479,15 @@ impl LawvereTierneyGuard {
                 "clipped_saturation": clipped_saturation,
                 "clipped_density_max": clipped_density_max,
                 "lifted_density_min": lifted_density_min,
+                "active_values": active_values,
+                "projection_method": "bounded_proportional_bisection",
+                "projection_iterations": PROJECTION_ITERATIONS,
                 "repaired_values": repaired_non_finite
                     .saturating_add(repaired_negative)
                     .saturating_add(clipped_saturation)
                     .saturating_add(clipped_density_max)
                     .saturating_add(lifted_density_min),
-                "final_rescaled": final_rescaled,
+                "final_rescaled": false,
             })
         });
         Ok(())
@@ -1480,6 +1544,11 @@ impl ZBox {
                 value: density,
             });
         }
+        if density <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "zbox_density_non_positive",
+            });
+        }
         Ok(Self {
             centers,
             radii,
@@ -1498,27 +1567,51 @@ impl ZBox {
     }
 
     /// Returns the dimension of the ambient Z-space for the i-th factor.
-    pub fn factor_dimension(&self, index: usize) -> usize {
-        self.centers[index].len()
+    pub fn factor_dimension(&self, index: usize) -> PureResult<usize> {
+        self.centers
+            .get(index)
+            .map(Vec::len)
+            .ok_or(TensorError::InvalidValue {
+                label: "zbox_factor_index",
+            })
     }
 
     /// Computes the total hyperbolic volume of the κ-box.
     pub fn hyperbolic_volume(&self, curvature: f32) -> PureResult<f32> {
+        if !curvature.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zbox_curvature",
+                value: curvature,
+            });
+        }
         if curvature >= 0.0 {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
-        let mut volume = 1.0f32;
+        let mut volume = 1.0f64;
         for (i, radius) in self.radii.iter().enumerate() {
-            let dim = self.factor_dimension(i);
+            let dim = self.factor_dimension(i)?;
             let factor = hyperbolic_ball_volume(curvature, *radius, dim)?;
-            volume *= factor.max(0.0);
+            volume *= factor as f64;
+            if !volume.is_finite() || volume > f32::MAX as f64 {
+                return Err(TensorError::NonFiniteValue {
+                    label: "zbox_hyperbolic_volume",
+                    value: f32::INFINITY,
+                });
+            }
         }
-        Ok(volume)
+        Ok(volume as f32)
     }
 
     /// Returns the probability mass assigned to this κ-box.
     pub fn probability_mass(&self, curvature: f32) -> PureResult<f32> {
-        Ok(self.density * self.hyperbolic_volume(curvature)?)
+        let mass = self.density as f64 * self.hyperbolic_volume(curvature)? as f64;
+        if !mass.is_finite() || mass > f32::MAX as f64 {
+            return Err(TensorError::NonFiniteValue {
+                label: "zbox_probability_mass",
+                value: f32::INFINITY,
+            });
+        }
+        Ok(mass as f32)
     }
 
     fn validate_radius_window(&self, min: f32, max: f32) -> PureResult<()> {
@@ -1570,11 +1663,10 @@ impl ZBoxSite {
 
     /// Adjusts the admissible radius window.
     pub fn with_radius_window(mut self, min: f32, max: f32) -> PureResult<Self> {
-        if !min.is_finite() || !max.is_finite() {
-            return Err(TensorError::NonFiniteValue {
-                label: "zbox_radius_window",
-                value: f32::NAN,
-            });
+        for (label, value) in [("zbox_radius_min", min), ("zbox_radius_max", max)] {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue { label, value });
+            }
         }
         if min <= 0.0 || max <= 0.0 || max < min {
             return Err(TensorError::InvalidValue {
@@ -1597,6 +1689,16 @@ impl ZBoxSite {
         self.curvature
     }
 
+    /// Returns the minimum admissible κ-box radius.
+    pub fn radius_min(&self) -> f32 {
+        self.radius_min
+    }
+
+    /// Returns the maximum admissible κ-box radius.
+    pub fn radius_max(&self) -> f32 {
+        self.radius_max
+    }
+
     /// Returns the Lawvere–Tierney guard used by the site.
     pub fn guard(&self) -> &LawvereTierneyGuard {
         &self.guard
@@ -1604,11 +1706,15 @@ impl ZBoxSite {
 
     /// Ensures a single κ-box is admissible.
     pub fn guard_box(&self, zbox: &ZBox) -> PureResult<()> {
+        self.guarded_box_mass(zbox).map(|_| ())
+    }
+
+    fn guarded_box_mass(&self, zbox: &ZBox) -> PureResult<f32> {
         zbox.validate_radius_window(self.radius_min, self.radius_max)?;
         self.guard.guard_density(zbox.density())?;
         let mass = zbox.probability_mass(self.curvature)?;
         self.guard.guard_mass(mass)?;
-        Ok(())
+        Ok(mass)
     }
 
     /// Ensures a cover of κ-boxes is admissible and mass-preserving.
@@ -1616,12 +1722,12 @@ impl ZBoxSite {
         if cover.is_empty() {
             return Err(TensorError::EmptyInput("zbox_cover"));
         }
-        let mut mass = 0.0f32;
+        let mut mass = 0.0f64;
         for zbox in cover.iter() {
-            self.guard_box(zbox)?;
-            mass += zbox.probability_mass(self.curvature)?;
+            mass += self.guarded_box_mass(zbox)? as f64;
         }
-        self.guard.guard_cover_mass(mass)
+        self.guard
+            .guard_cover_mass(checked_f64_to_f32("lawvere_tierney_cover_mass", mass)?)
     }
 }
 
@@ -1629,13 +1735,35 @@ fn hyperbolic_ball_volume(curvature: f32, radius: f32, dimension: usize) -> Pure
     if dimension == 0 {
         return Err(TensorError::EmptyInput("hyperbolic_dimension"));
     }
+    if !curvature.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "hyperbolic_curvature",
+            value: curvature,
+        });
+    }
+    if !radius.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "hyperbolic_radius",
+            value: radius,
+        });
+    }
+    if radius <= 0.0 {
+        return Err(TensorError::InvalidValue {
+            label: "hyperbolic_radius_non_positive",
+        });
+    }
     let kappa = curvature;
     if kappa >= 0.0 {
         return Err(TensorError::NonHyperbolicCurvature { curvature: kappa });
     }
     let lambda = (-kappa).sqrt();
-    let n = dimension as i32;
-    let omega = unit_sphere_surface((dimension - 1) as i32);
+    let n = i32::try_from(dimension).map_err(|_| TensorError::InvalidValue {
+        label: "hyperbolic_dimension_too_large",
+    })?;
+    let sphere_dimension = i32::try_from(dimension - 1).map_err(|_| TensorError::InvalidValue {
+        label: "hyperbolic_dimension_too_large",
+    })?;
+    let omega = unit_sphere_surface(sphere_dimension);
     let steps = 64;
     let h = radius / steps as f32;
     let mut integral = 0.0f64;
@@ -1663,7 +1791,14 @@ fn hyperbolic_ball_volume(curvature: f32, radius: f32, dimension: usize) -> Pure
             label: "hyperbolic_volume",
         });
     }
-    Ok(volume as f32)
+    let volume = volume as f32;
+    if !volume.is_finite() || volume <= 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: "hyperbolic_volume_f32",
+            value: volume,
+        });
+    }
+    Ok(volume)
 }
 
 fn unit_sphere_surface(dimension: i32) -> f64 {
@@ -3555,6 +3690,12 @@ impl<'a> ConjugateGradientSolver<'a> {
         tolerance: f32,
         max_iterations: usize,
     ) -> PureResult<Self> {
+        if !tolerance.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "conjugate_gradient_tolerance",
+                value: tolerance,
+            });
+        }
         if tolerance <= 0.0 {
             return Err(TensorError::NonPositiveTolerance { tolerance });
         }
@@ -3573,11 +3714,17 @@ impl<'a> ConjugateGradientSolver<'a> {
         self.tolerance
     }
 
+    /// Returns the hard iteration cap.
+    pub fn max_iterations(&self) -> usize {
+        self.max_iterations
+    }
+
     /// Solves a linear system `Ax = b` using repeated matrix-vector products.
     ///
-    /// The callback receives the candidate vector and must write `A * src` into
-    /// `dst`. The solver enforces explicit tolerances so hyperbolic Jacobians do
-    /// not diverge.
+    /// The callback receives the candidate vector and must write every component
+    /// of `A * src` into `dst`. Callback output is checked for completeness and
+    /// finiteness. The caller's `x` is committed only after the true residual of
+    /// the guarded candidate reaches tolerance, so every failure is transactional.
     pub fn solve<F>(&self, mut matvec: F, b: &[f32], x: &mut [f32]) -> PureResult<usize>
     where
         F: FnMut(&[f32], &mut [f32]),
@@ -3593,45 +3740,74 @@ impl<'a> ConjugateGradientSolver<'a> {
         }
         self.topos.guard_slice("cg_rhs", b)?;
         self.topos.guard_slice("cg_initial", x)?;
+        let mut solution = x.to_vec();
         let mut r = vec![0.0f32; b.len()];
         let mut p = vec![0.0f32; b.len()];
         let mut ap = vec![0.0f32; b.len()];
-        matvec(x, &mut ap);
-        for ((r_i, p_i), (&b_i, &ap_i)) in
-            r.iter_mut().zip(p.iter_mut()).zip(b.iter().zip(ap.iter()))
-        {
-            *r_i = b_i - ap_i;
-            *p_i = *r_i;
+        self.guarded_matvec(&mut matvec, &solution, &mut ap, "cg_initial_matvec")?;
+        for index in 0..b.len() {
+            r[index] =
+                checked_f64_to_f32("cg_initial_residual", b[index] as f64 - ap[index] as f64)?;
+            p[index] = r[index];
         }
-        let mut rsold = dot(&r, &r);
-        let tol = self.tolerance.max(self.topos.tolerance());
+        let mut rsold = dot_f64("cg_initial_residual_norm", &r, &r)?;
+        let tol = self.tolerance.max(self.topos.tolerance()) as f64;
         if rsold.sqrt() <= tol {
             return Ok(0);
         }
         for iter in 0..self.max_iterations {
-            matvec(&p, &mut ap);
-            let denom = dot(&p, &ap);
-            if denom.abs() <= tol {
-                return Err(TensorError::ConjugateGradientDiverged {
-                    residual: rsold.sqrt(),
-                    tolerance: tol,
+            self.guarded_matvec(&mut matvec, &p, &mut ap, "cg_direction_matvec")?;
+            let denominator = dot_f64("cg_direction_curvature", &p, &ap)?;
+            if denominator <= 0.0 {
+                return Err(TensorError::ConjugateGradientBreakdown {
+                    iteration: iter,
+                    denominator,
                 });
             }
-            let alpha = rsold / denom;
-            for (x_i, p_i) in x.iter_mut().zip(p.iter()) {
-                *x_i = self.topos.saturate(*x_i + alpha * *p_i);
+            let alpha = rsold / denominator;
+            if !alpha.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "conjugate_gradient_alpha",
+                    value: alpha as f32,
+                });
             }
-            for (r_i, ap_i) in r.iter_mut().zip(ap.iter()) {
-                *r_i -= alpha * *ap_i;
+            let mut projected_step = false;
+            for index in 0..solution.len() {
+                let raw = checked_f64_to_f32(
+                    "cg_candidate",
+                    solution[index] as f64 + alpha * p[index] as f64,
+                )?;
+                let guarded = self.topos.saturate(raw);
+                projected_step |= guarded != raw;
+                solution[index] = guarded;
             }
-            let rsnew = dot(&r, &r);
+            self.guarded_matvec(&mut matvec, &solution, &mut ap, "cg_solution_matvec")?;
+            for index in 0..r.len() {
+                r[index] =
+                    checked_f64_to_f32("cg_true_residual", b[index] as f64 - ap[index] as f64)?;
+            }
+            let rsnew = dot_f64("cg_true_residual_norm", &r, &r)?;
             if rsnew.sqrt() <= tol {
-                self.topos.guard_slice("cg_solution", x)?;
+                self.topos.guard_slice("cg_solution", &solution)?;
+                x.copy_from_slice(&solution);
                 return Ok(iter + 1);
             }
-            let beta = rsnew / rsold.max(tol * tol);
-            for (p_i, r_i) in p.iter_mut().zip(r.iter()) {
-                *p_i = self.topos.saturate(*r_i + beta * *p_i);
+            if projected_step {
+                p.copy_from_slice(&r);
+            } else {
+                let beta = rsnew / rsold;
+                if !beta.is_finite() {
+                    return Err(TensorError::NonFiniteValue {
+                        label: "conjugate_gradient_beta",
+                        value: beta as f32,
+                    });
+                }
+                for index in 0..p.len() {
+                    p[index] = checked_f64_to_f32(
+                        "cg_direction",
+                        r[index] as f64 + beta * p[index] as f64,
+                    )?;
+                }
             }
             rsold = rsnew;
         }
@@ -3640,10 +3816,50 @@ impl<'a> ConjugateGradientSolver<'a> {
             tolerance: tol,
         })
     }
+
+    fn guarded_matvec<F>(
+        &self,
+        matvec: &mut F,
+        src: &[f32],
+        dst: &mut [f32],
+        label: &'static str,
+    ) -> PureResult<()>
+    where
+        F: FnMut(&[f32], &mut [f32]),
+    {
+        dst.fill(f32::NAN);
+        matvec(src, dst);
+        self.topos.guard_slice(label, dst)
+    }
 }
 
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+fn checked_f64_to_f32(label: &'static str, value: f64) -> PureResult<f32> {
+    if !value.is_finite() || value.abs() > f32::MAX as f64 {
+        let value = if value.is_nan() {
+            f32::NAN
+        } else if value.is_sign_negative() {
+            f32::NEG_INFINITY
+        } else {
+            f32::INFINITY
+        };
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(value as f32)
+}
+
+fn dot_f64(label: &'static str, a: &[f32], b: &[f32]) -> PureResult<f64> {
+    let value = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&left, &right)| left as f64 * right as f64)
+        .sum::<f64>();
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label,
+            value: value as f32,
+        });
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -3988,6 +4204,98 @@ mod tests {
         let profile = unwrap_ok(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)));
         let err = unwrap_err(profile.with_porosity(1.5));
         assert!(matches!(err, TensorError::PorosityOutOfRange { .. }));
+    }
+
+    #[test]
+    fn lawvere_guard_reports_precise_non_finite_parameters() {
+        let error = unwrap_err(LawvereTierneyGuard::new(f32::NAN, 1.0, 1e-5));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "lawvere_tierney_density_min",
+                ..
+            }
+        ));
+
+        let error = unwrap_err(LawvereTierneyGuard::new(1e-6, 1.0, 0.0));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+    }
+
+    #[test]
+    fn lawvere_projection_preserves_mass_and_density_window_together() {
+        let guard = unwrap_ok(LawvereTierneyGuard::new(0.1, 0.4, 1e-5));
+        let mut slice = [0.9f32, 0.1, 0.1];
+        unwrap_ok(guard.project_slice("bounded_simplex", &mut slice, 1.0));
+
+        assert!((slice.iter().sum::<f32>() - 1.0).abs() <= guard.mass_tolerance());
+        assert!(slice
+            .iter()
+            .all(|&value| (guard.density_min()..=guard.density_max()).contains(&value)));
+        assert!((slice[0] - 0.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn lawvere_projection_preserves_support_ratios_and_is_idempotent() {
+        let guard = unwrap_ok(LawvereTierneyGuard::new(0.01, 0.8, 1e-5));
+        let mut slice = [0.0f32, 0.4, 0.2, 0.1];
+        unwrap_ok(guard.project_slice("proportional_simplex", &mut slice, 1.0));
+        let once = slice;
+        unwrap_ok(guard.project_slice("proportional_simplex", &mut slice, 1.0));
+
+        assert_eq!(slice[0], 0.0);
+        assert!((slice[1] / slice[2] - 2.0).abs() < 1e-5);
+        assert!((slice[2] / slice[3] - 2.0).abs() < 1e-5);
+        for (left, right) in slice.iter().zip(once.iter()) {
+            assert!((left - right).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn lawvere_projection_is_transactional_when_support_is_infeasible() {
+        let guard = unwrap_ok(LawvereTierneyGuard::new(0.05, 0.2, 1e-5));
+        let mut slice = [0.5f32, 0.3, 0.2];
+        let original = slice;
+        let error = unwrap_err(guard.project_slice("infeasible_simplex", &mut slice, 1.0));
+
+        assert!(matches!(
+            error,
+            TensorError::ProbabilityProjectionInfeasible {
+                active_values: 3,
+                ..
+            }
+        ));
+        assert_eq!(slice, original);
+    }
+
+    #[test]
+    fn lawvere_projection_rejects_invalid_saturation_without_mutation() {
+        let guard = unwrap_ok(LawvereTierneyGuard::new(0.1, 1.0, 1e-5));
+        let mut slice = [0.6f32, 0.4];
+        let original = slice;
+        let error = unwrap_err(guard.project_slice("invalid_saturation", &mut slice, f32::NAN));
+
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "lawvere_tierney_saturation",
+                ..
+            }
+        ));
+        assert_eq!(slice, original);
+    }
+
+    #[test]
+    fn zbox_rejects_invalid_density_index_and_overflowing_volume() {
+        let error = unwrap_err(ZBox::new(vec![vec![0.0]], vec![1.0], 0.0));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+
+        let zbox = unwrap_ok(ZBox::new(vec![vec![0.0, 0.0, 0.0]], vec![64.0], 1.0));
+        let error = unwrap_err(zbox.factor_dimension(1));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+        let error = unwrap_err(zbox.hyperbolic_volume(f32::NAN));
+        assert!(matches!(error, TensorError::NonFiniteValue { .. }));
+        let error = unwrap_err(zbox.hyperbolic_volume(-1.0));
+        assert!(matches!(error, TensorError::NonFiniteValue { .. }));
     }
 
     #[test]
@@ -4502,6 +4810,90 @@ mod tests {
         }
         let norm: f32 = residual.iter().map(|v| v * v).sum();
         assert!(norm.sqrt() <= solver.tolerance().max(topos.tolerance()));
+    }
+
+    #[test]
+    fn conjugate_gradient_rejects_non_finite_tolerance() {
+        let topos = demo_topos();
+        let error = unwrap_err(ConjugateGradientSolver::new(&topos, f32::NAN, 8));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "conjugate_gradient_tolerance",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn conjugate_gradient_rejects_partial_matvec_without_mutating_solution() {
+        let topos = demo_topos();
+        let solver = unwrap_ok(ConjugateGradientSolver::new(&topos, 1e-5, 8));
+        let b = [1.0f32, 2.0];
+        let mut x = [0.25f32, 0.5];
+        let original = x;
+        let error = unwrap_err(solver.solve(
+            |_src, dst| {
+                dst[0] = 1.0;
+            },
+            &b,
+            &mut x,
+        ));
+
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "cg_initial_matvec",
+                ..
+            }
+        ));
+        assert_eq!(x, original);
+    }
+
+    #[test]
+    fn conjugate_gradient_reports_non_spd_breakdown_transactionally() {
+        let topos = demo_topos();
+        let solver = unwrap_ok(ConjugateGradientSolver::new(&topos, 1e-5, 8));
+        let b = [1.0f32, 1.0];
+        let mut x = [0.0f32, 0.0];
+        let original = x;
+        let error = unwrap_err(solver.solve(
+            |src, dst| {
+                dst[0] = src[0];
+                dst[1] = -src[1];
+            },
+            &b,
+            &mut x,
+        ));
+
+        assert!(matches!(
+            error,
+            TensorError::ConjugateGradientBreakdown { iteration: 0, .. }
+        ));
+        assert_eq!(x, original);
+    }
+
+    #[test]
+    fn conjugate_gradient_rolls_back_when_guarded_solution_cannot_converge() {
+        let topos = demo_topos();
+        let solver = unwrap_ok(ConjugateGradientSolver::new(&topos, 1e-5, 2));
+        assert_eq!(solver.max_iterations(), 2);
+        let b = [100.0f32];
+        let mut x = [1.0f32];
+        let original = x;
+        let error = unwrap_err(solver.solve(
+            |src, dst| {
+                dst.copy_from_slice(src);
+            },
+            &b,
+            &mut x,
+        ));
+
+        assert!(matches!(
+            error,
+            TensorError::ConjugateGradientDiverged { .. }
+        ));
+        assert_eq!(x, original);
     }
 
     #[test]

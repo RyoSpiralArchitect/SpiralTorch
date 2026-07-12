@@ -124,8 +124,16 @@ pub enum TensorError {
     },
     /// Loop detection tripped for an open-cartesian topos traversal.
     LoopDetected { depth: usize, max_depth: usize },
+    /// A bounded probability projection cannot place unit mass on the active support.
+    ProbabilityProjectionInfeasible {
+        active_values: usize,
+        density_min: f32,
+        density_max: f32,
+    },
+    /// The conjugate-gradient operator violated the positive-definite contract.
+    ConjugateGradientBreakdown { iteration: usize, denominator: f64 },
     /// Conjugate gradient solver could not reach the requested tolerance.
-    ConjugateGradientDiverged { residual: f32, tolerance: f32 },
+    ConjugateGradientDiverged { residual: f64, tolerance: f64 },
     /// Execution failed on an accelerator backend.
     BackendFailure {
         backend: &'static str,
@@ -205,10 +213,7 @@ impl fmt::Display for TensorError {
                 )
             }
             TensorError::NonFiniteValue { label, value } => {
-                write!(
-                    f,
-                    "non-finite value detected for {label}; rewrite monad absorbed {value}"
-                )
+                write!(f, "non-finite value detected for {label}: {value}")
             }
             TensorError::MissingParameter { name } => {
                 write!(f, "missing parameter '{name}' while loading module state")
@@ -236,6 +241,25 @@ impl fmt::Display for TensorError {
                 write!(
                     f,
                     "topos traversal depth {depth} exceeded loop-free ceiling {max_depth}"
+                )
+            }
+            TensorError::ProbabilityProjectionInfeasible {
+                active_values,
+                density_min,
+                density_max,
+            } => {
+                write!(
+                    f,
+                    "cannot project unit probability mass across {active_values} active values within [{density_min}, {density_max}]"
+                )
+            }
+            TensorError::ConjugateGradientBreakdown {
+                iteration,
+                denominator,
+            } => {
+                write!(
+                    f,
+                    "conjugate gradient lost its positive-definite direction at iteration {iteration} (p^T A p = {denominator})"
                 )
             }
             TensorError::ConjugateGradientDiverged {
