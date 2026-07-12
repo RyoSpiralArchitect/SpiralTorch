@@ -9370,7 +9370,7 @@ impl AmegaHypergrad {
         DesireGradientControl::from_interpretation_with_gain(self.desire_interpretation(real), gain)
     }
 
-    /// Convenience wrapper over [`desire_control_with_gain`] that applies the
+    /// Convenience wrapper over [`Self::desire_control_with_gain`] that applies the
     /// recommended gain of `1.0`.
     pub fn desire_control(&self, real: GradientSummary) -> DesireGradientControl {
         self.desire_control_with_gain(real, 1.0)
@@ -9951,7 +9951,7 @@ impl AmegaRealgrad {
         })
     }
 
-    /// Returns the learning rate applied during [`apply`].
+    /// Returns the learning rate applied during [`Self::apply`].
     pub fn learning_rate(&self) -> f32 {
         self.learning_rate
     }
