@@ -7,7 +7,10 @@
 use super::events::{EventListener, PluginEventBus};
 use super::sync::lock_recover;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+
+type ErasedPluginService = Arc<dyn std::any::Any + Send + Sync>;
+type PluginServiceMap = HashMap<String, ErasedPluginService>;
 
 /// Dependency specification for a plugin.
 #[derive(Debug, Clone)]
@@ -16,6 +19,47 @@ pub struct PluginDependency {
     pub plugin_id: String,
     /// Version requirement (semver-compatible string)
     pub version_req: String,
+}
+
+/// Ownership token for a service registered in a [`PluginContext`].
+///
+/// Dropping the token unregisters the service only when the same registration is still current.
+/// A newer service installed under the same name is left intact.
+#[must_use = "dropping the token unregisters the owned plugin service"]
+pub struct PluginServiceRegistration {
+    name: String,
+    service: Weak<dyn std::any::Any + Send + Sync>,
+    services: Weak<Mutex<PluginServiceMap>>,
+}
+
+impl PluginServiceRegistration {
+    /// Returns the registered service name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Drop for PluginServiceRegistration {
+    fn drop(&mut self) {
+        let Some(services) = self.services.upgrade() else {
+            return;
+        };
+        let Some(service) = self.service.upgrade() else {
+            return;
+        };
+        let removed = {
+            let mut services = lock_recover(&services);
+            let owns_current = services
+                .get(&self.name)
+                .is_some_and(|current| Arc::ptr_eq(current, &service));
+            if owns_current {
+                services.remove(&self.name)
+            } else {
+                None
+            }
+        };
+        drop(removed);
+    }
 }
 
 /// Context provided to plugins during lifecycle events.
@@ -27,7 +71,7 @@ pub struct PluginContext {
     /// Shared configuration key-value store
     config: Arc<Mutex<HashMap<String, String>>>,
     /// Registry of services provided by plugins
-    services: Arc<Mutex<HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>>,
+    services: Arc<Mutex<PluginServiceMap>>,
 }
 
 impl PluginContext {
@@ -105,12 +149,36 @@ impl PluginContext {
         service: T,
     ) {
         let name = name.into();
-        let service: Arc<dyn std::any::Any + Send + Sync> = Arc::new(service);
+        let service: ErasedPluginService = Arc::new(service);
         let previous = {
             let mut services = lock_recover(&self.services);
             services.insert(name, service)
         };
         drop(previous);
+    }
+
+    /// Registers a service whose lifetime is owned by the returned token.
+    ///
+    /// Dropping the token removes this service when it is still current. If another component
+    /// replaces the same name first, dropping the older token preserves the replacement.
+    pub fn register_owned_service<T: std::any::Any + Send + Sync + 'static>(
+        &self,
+        name: impl Into<String>,
+        service: T,
+    ) -> PluginServiceRegistration {
+        let name = name.into();
+        let service: ErasedPluginService = Arc::new(service);
+        let registration = PluginServiceRegistration {
+            name: name.clone(),
+            service: Arc::downgrade(&service),
+            services: Arc::downgrade(&self.services),
+        };
+        let previous = {
+            let mut services = lock_recover(&self.services);
+            services.insert(name, service)
+        };
+        drop(previous);
+        registration
     }
 
     /// Get a service registered by another plugin.
@@ -228,6 +296,55 @@ mod tests {
         assert!(ctx.unregister_service("test_service"));
         assert!(ctx.get_service::<i32>("test_service").is_none());
         assert!(!ctx.unregister_service("test_service"));
+    }
+
+    #[test]
+    fn test_owned_service_registration_tracks_identity() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+        let registration = ctx.register_owned_service("answer", 41i32);
+
+        assert_eq!(registration.name(), "answer");
+        assert_eq!(*ctx.get_service::<i32>("answer").unwrap(), 41);
+
+        ctx.register_service("answer", 42i32);
+        drop(registration);
+
+        assert_eq!(*ctx.get_service::<i32>("answer").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_owned_service_is_removed_and_dropped_outside_store_lock() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+        let dropped_without_lock = Arc::new(AtomicBool::new(false));
+        let registration = ctx.register_owned_service(
+            "owned_probe",
+            ServiceDropProbe {
+                services: Arc::downgrade(&ctx.services),
+                dropped_without_lock: Arc::clone(&dropped_without_lock),
+            },
+        );
+
+        drop(registration);
+
+        assert!(ctx.get_service::<ServiceDropProbe>("owned_probe").is_none());
+        assert!(dropped_without_lock.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_owned_service_drop_recovers_poisoned_store() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+        let registration = ctx.register_owned_service("owned_answer", 42i32);
+        let services = Arc::clone(&ctx.services);
+        let _ = thread::spawn(move || {
+            let _guard = services.lock().unwrap();
+            panic!("poison owned service store");
+        })
+        .join();
+
+        drop(registration);
+
+        assert!(!ctx.services.is_poisoned());
+        assert!(ctx.get_service::<i32>("owned_answer").is_none());
     }
 
     #[test]

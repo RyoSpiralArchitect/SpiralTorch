@@ -8,7 +8,9 @@
 //! plugin registry, enabling organic ecosystem integration.
 
 use crate::zspace_coherence::ZSpaceSequencerPlugin;
-use st_core::plugin::{Plugin, PluginCapability, PluginContext, PluginMetadata};
+use st_core::plugin::{
+    Plugin, PluginCapability, PluginContext, PluginMetadata, PluginServiceRegistration,
+};
 use st_core::PureResult;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
@@ -17,6 +19,7 @@ use std::sync::{Arc, Mutex};
 pub struct ZSpacePluginAdapter {
     inner: Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>,
     metadata: PluginMetadata,
+    service_registration: Option<PluginServiceRegistration>,
 }
 
 impl ZSpacePluginAdapter {
@@ -25,6 +28,7 @@ impl ZSpacePluginAdapter {
         Self {
             inner: Arc::new(Mutex::new(plugin)),
             metadata,
+            service_registration: None,
         }
     }
 
@@ -43,6 +47,11 @@ impl ZSpacePluginAdapter {
     pub fn inner(&self) -> Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>> {
         Arc::clone(&self.inner)
     }
+
+    /// Returns the shared-service key derived from this adapter's plugin ID.
+    pub fn service_name(&self) -> String {
+        format!("zspace_sequencer_{}", self.metadata.id)
+    }
 }
 
 impl Plugin for ZSpacePluginAdapter {
@@ -52,14 +61,16 @@ impl Plugin for ZSpacePluginAdapter {
 
     fn on_load(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
         // Register the sequencer plugin as a service so others can access it
-        let service_name = format!("zspace_sequencer_{}", self.metadata.id);
-        ctx.register_service(&service_name, Arc::clone(&self.inner));
+        let registration = ctx.register_owned_service(self.service_name(), Arc::clone(&self.inner));
+        let previous = self.service_registration.replace(registration);
+        drop(previous);
 
         println!("✅ Loaded ZSpace sequencer plugin: {}", self.metadata.id);
         Ok(())
     }
 
     fn on_unload(&mut self, _ctx: &mut PluginContext) -> PureResult<()> {
+        drop(self.service_registration.take());
         println!("👋 Unloading ZSpace sequencer plugin: {}", self.metadata.id);
         Ok(())
     }
@@ -131,6 +142,7 @@ impl ZSpacePluginRegistry {
 mod tests {
     use super::*;
     use crate::zspace_coherence::{ZSpaceSequencerPlugin, ZSpaceSequencerStage};
+    use st_core::plugin::{PluginEventBus, PluginRegistry};
 
     struct TestSequencerPlugin;
 
@@ -151,5 +163,73 @@ mod tests {
 
         let meta = adapter.metadata();
         assert!(meta.id.contains("test_sequencer"));
+    }
+
+    #[test]
+    fn adapter_unregisters_shared_service_on_unload() {
+        let plugin = Box::new(TestSequencerPlugin);
+        let mut adapter = ZSpacePluginAdapter::with_auto_metadata(plugin);
+        let service_name = adapter.service_name();
+        let mut context = PluginContext::new(PluginEventBus::new());
+
+        adapter.on_load(&mut context).unwrap();
+        assert!(context
+            .get_service::<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>>(&service_name)
+            .is_some());
+
+        adapter.on_unload(&mut context).unwrap();
+        assert!(context
+            .get_service::<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>>(&service_name)
+            .is_none());
+    }
+
+    #[test]
+    fn adapter_drop_unregisters_shared_service_without_explicit_unload() {
+        let plugin = Box::new(TestSequencerPlugin);
+        let mut adapter = ZSpacePluginAdapter::with_auto_metadata(plugin);
+        let service_name = adapter.service_name();
+        let mut context = PluginContext::new(PluginEventBus::new());
+
+        adapter.on_load(&mut context).unwrap();
+        drop(adapter);
+
+        assert!(context
+            .get_service::<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>>(&service_name)
+            .is_none());
+    }
+
+    #[test]
+    fn adapter_unload_preserves_newer_service_replacement() {
+        let plugin = Box::new(TestSequencerPlugin);
+        let mut adapter = ZSpacePluginAdapter::with_auto_metadata(plugin);
+        let service_name = adapter.service_name();
+        let mut context = PluginContext::new(PluginEventBus::new());
+
+        adapter.on_load(&mut context).unwrap();
+        context.register_service(&service_name, 42i32);
+        adapter.on_unload(&mut context).unwrap();
+
+        assert_eq!(*context.get_service::<i32>(&service_name).unwrap(), 42);
+    }
+
+    #[test]
+    fn registry_unregister_cleans_adapter_service() {
+        let plugin = Box::new(TestSequencerPlugin);
+        let adapter = ZSpacePluginAdapter::with_auto_metadata(plugin);
+        let plugin_id = adapter.metadata.id.clone();
+        let service_name = adapter.service_name();
+        let registry = PluginRegistry::new();
+
+        registry.register(Box::new(adapter)).unwrap();
+        assert!(registry
+            .context_snapshot()
+            .get_service::<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>>(&service_name)
+            .is_some());
+
+        registry.unregister(&plugin_id).unwrap();
+        assert!(registry
+            .context_snapshot()
+            .get_service::<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>>(&service_name)
+            .is_none());
     }
 }
