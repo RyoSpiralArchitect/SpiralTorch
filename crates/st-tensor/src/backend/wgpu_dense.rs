@@ -29,6 +29,8 @@ use wgpu::{
     AdapterInfo, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
 };
 
+use super::lock_recover;
+
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
@@ -220,10 +222,7 @@ impl PipelineCache {
         key: PipelineKey,
         layout: &PipelineLayout,
     ) -> Result<Arc<ComputePipeline>, anyhow::Error> {
-        let mut guard = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = lock_recover(&self.entries);
         let entry = guard
             .entry(key)
             .or_insert_with(|| Arc::new(PipelineEntry::new()))
@@ -1638,12 +1637,9 @@ impl GpuContext {
         sample: TelemetrySample,
     ) {
         let registry_key = self.softmax_registry_key(bucket_rows, bucket_cols, layout);
-        if let Ok(mut map) = self.softmax_telemetry_keys.lock() {
-            map.insert(cache_key.to_string(), registry_key.clone());
-        }
-        if let Ok(mut registry) = global_autotune_registry().lock() {
-            registry.record(registry_key, sample);
-        }
+        lock_recover(&self.softmax_telemetry_keys)
+            .insert(cache_key.to_string(), registry_key.clone());
+        lock_recover(global_autotune_registry()).record(registry_key, sample);
     }
 
     fn select_softmax_pipeline(
@@ -1672,11 +1668,10 @@ impl GpuContext {
         let key = softmax_cache_key(self, bucket_rows, bucket_cols, layout);
         let store_path = autotune_store_path();
 
-        if let Ok(cache) = self.softmax_variants.lock() {
-            if let Some(&variant) = cache.get(&key) {
-                if let Some(pipeline) = self.softmax_pipeline_variant(variant) {
-                    return Ok((pipeline, variant));
-                }
+        let cached_variant = lock_recover(&self.softmax_variants).get(&key).copied();
+        if let Some(variant) = cached_variant {
+            if let Some(pipeline) = self.softmax_pipeline_variant(variant) {
+                return Ok((pipeline, variant));
             }
         }
 
@@ -1695,9 +1690,7 @@ impl GpuContext {
             {
                 if let Some(stored_variant) = SoftmaxVariant::from_str(&stored.variant) {
                     if let Some(pipeline) = self.softmax_pipeline_variant(stored_variant) {
-                        if let Ok(mut cache) = self.softmax_variants.lock() {
-                            cache.insert(key.clone(), stored_variant);
-                        }
+                        lock_recover(&self.softmax_variants).insert(key.clone(), stored_variant);
                         return Ok((pipeline, stored_variant));
                     }
                 }
@@ -1794,15 +1787,14 @@ impl GpuContext {
             .softmax_pipeline_variant(variant)
             .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
 
-        if let Ok(mut cache) = self.softmax_variants.lock() {
-            cache.insert(key.clone(), variant);
-        }
+        lock_recover(&self.softmax_variants).insert(key.clone(), variant);
 
         if measured {
             if let Some(sample) = make_softmax_telemetry_sample(rows, cols, score_s) {
                 self.record_softmax_telemetry(&key, bucket_rows, bucket_cols, layout, sample);
             }
-            if let Ok(mut history) = self.softmax_history.lock() {
+            let evicted = {
+                let mut history = lock_recover(&self.softmax_history);
                 history.push(SoftmaxSelectionRecord {
                     key: key.clone(),
                     variant,
@@ -1817,9 +1809,12 @@ impl GpuContext {
                 let len = history.len();
                 if len > SOFTMAX_HISTORY_LIMIT {
                     let remove = len - SOFTMAX_HISTORY_LIMIT;
-                    history.drain(0..remove);
+                    history.drain(0..remove).collect::<Vec<_>>()
+                } else {
+                    Vec::new()
                 }
-            }
+            };
+            drop(evicted);
 
             if let (true, Some(path)) = (autotune_enabled, store_path.as_ref()) {
                 let stored = StoredSoftmaxVariant {
@@ -2026,13 +2021,10 @@ impl GpuContext {
             WeightDType::F32
         };
         let key = RhsCacheKey::new(packed, tile, dtype.to_scalar());
-        if let Some(existing) = self
-            .weights_cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        let existing = lock_recover(&self.weights_cache)
             .get(&key)
-            .and_then(|weak| weak.upgrade())
-        {
+            .and_then(|weak| weak.upgrade());
+        if let Some(existing) = existing {
             return Ok(existing);
         }
 
@@ -2077,10 +2069,7 @@ impl GpuContext {
             _inner: packed.inner(),
         });
 
-        self.weights_cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key, Arc::downgrade(&prepared));
+        lock_recover(&self.weights_cache).insert(key, Arc::downgrade(&prepared));
         Ok(prepared)
     }
 
@@ -2452,7 +2441,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxBayesEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let mut weight = 0.0f64;
         let mut sum = 0.0f64;
         let mut sum_sq = 0.0f64;
@@ -2532,7 +2521,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxMetropolisEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let candidate_focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let candidate_flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         if history.is_empty() {
@@ -2616,7 +2605,7 @@ impl GpuContext {
         bayes: Option<&SoftmaxBayesEvidence>,
         metropolis: Option<&SoftmaxMetropolisEvidence>,
     ) -> Option<SoftmaxSpiralAnnealEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let base_ms = bayes.map(|b| b.posterior_ms).unwrap_or(raw_ms);
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
@@ -2717,7 +2706,7 @@ impl GpuContext {
         metropolis: Option<&SoftmaxMetropolisEvidence>,
         anneal: Option<&SoftmaxSpiralAnnealEvidence>,
     ) -> Option<SoftmaxSpiralConsensusEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
@@ -2866,10 +2855,7 @@ impl GpuContext {
     }
 
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
-        let mut pipelines = self
-            .fused_conv_pipelines
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut pipelines = lock_recover(&self.fused_conv_pipelines);
         if let Some(pipeline) = pipelines.get(&config) {
             return Ok(pipeline.clone());
         }
@@ -3039,7 +3025,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxBayesEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let mut weight = 0.0f64;
         let mut sum = 0.0f64;
         let mut sum_sq = 0.0f64;
@@ -3121,7 +3107,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxMetropolisEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let candidate_focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let candidate_flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         if history.is_empty() {
@@ -3207,7 +3193,7 @@ impl GpuContext {
         bayes: Option<&SoftmaxBayesEvidence>,
         metropolis: Option<&SoftmaxMetropolisEvidence>,
     ) -> Option<SoftmaxSpiralAnnealEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let base_ms = bayes.map(|b| b.posterior_ms).unwrap_or(raw_ms);
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
@@ -3310,7 +3296,7 @@ impl GpuContext {
         metropolis: Option<&SoftmaxMetropolisEvidence>,
         anneal: Option<&SoftmaxSpiralAnnealEvidence>,
     ) -> Option<SoftmaxSpiralConsensusEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
@@ -3404,7 +3390,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxBayesEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let mut weight = 0.0f64;
         let mut sum = 0.0f64;
         let mut sum_sq = 0.0f64;
@@ -3486,7 +3472,7 @@ impl GpuContext {
         raw_ms: f64,
         projection: Option<&SoftmaxZProjectMetrics>,
     ) -> Option<SoftmaxMetropolisEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let candidate_focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let candidate_flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         if history.is_empty() {
@@ -3572,7 +3558,7 @@ impl GpuContext {
         bayes: Option<&SoftmaxBayesEvidence>,
         metropolis: Option<&SoftmaxMetropolisEvidence>,
     ) -> Option<SoftmaxSpiralAnnealEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let base_ms = bayes.map(|b| b.posterior_ms).unwrap_or(raw_ms);
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
@@ -3675,7 +3661,7 @@ impl GpuContext {
         metropolis: Option<&SoftmaxMetropolisEvidence>,
         anneal: Option<&SoftmaxSpiralAnnealEvidence>,
     ) -> Option<SoftmaxSpiralConsensusEvidence> {
-        let history = self.softmax_history.lock().ok()?.clone();
+        let history = lock_recover(&self.softmax_history).clone();
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
@@ -3828,10 +3814,7 @@ impl GpuContext {
 
     #[cfg(any())]
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
-        let mut pipelines = self
-            .fused_conv_pipelines
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut pipelines = lock_recover(&self.fused_conv_pipelines);
         if let Some(pipeline) = pipelines.get(&config) {
             return Ok(pipeline.clone());
         }
@@ -9374,24 +9357,15 @@ pub fn supports_row_hardmax(rows: usize, cols: usize) -> bool {
 
 pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
     let ctx = dense_context().ok()?;
-    let history = ctx.softmax_history.lock().ok()?.clone();
-    let key_map = ctx
-        .softmax_telemetry_keys
-        .lock()
-        .ok()
-        .map(|guard| guard.clone());
-    let registry_guard = global_autotune_registry().lock().ok();
+    let history = lock_recover(&ctx.softmax_history).clone();
+    let key_map = lock_recover(&ctx.softmax_telemetry_keys).clone();
+    let registry_guard = lock_recover(global_autotune_registry());
 
     let mut snapshots = Vec::with_capacity(history.len());
     for record in history.into_iter() {
         let telemetry = key_map
-            .as_ref()
-            .and_then(|map| map.get(&record.key))
-            .and_then(|autokey| {
-                registry_guard
-                    .as_ref()
-                    .and_then(|registry| registry.summary(autokey))
-            })
+            .get(&record.key)
+            .and_then(|autokey| registry_guard.summary(autokey))
             .map(SoftmaxTelemetrySummary::from);
         snapshots.push(SoftmaxSelectionSnapshot::from_record(record, telemetry));
     }
@@ -10430,12 +10404,7 @@ fn autotune_tile_config(
     let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
     let (key, path) = matmul_autotune_key(ctx, bucket_rows, bucket_inner, bucket_cols)?;
 
-    if let Some(tile) = ctx
-        .autotune_cache
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&key).copied())
-    {
+    if let Some(tile) = lock_recover(&ctx.autotune_cache).get(&key).copied() {
         return Some(tile);
     }
 
@@ -10467,9 +10436,7 @@ fn autotune_tile_config(
         if let Some(stored) = stored {
             let tile: TileConfig = stored.into();
             if tile_supported(ctx.device(), tile) {
-                if let Ok(mut cache) = ctx.autotune_cache.lock() {
-                    cache.insert(key.clone(), tile);
-                }
+                lock_recover(&ctx.autotune_cache).insert(key.clone(), tile);
                 return Some(tile);
             }
         }
@@ -10525,9 +10492,7 @@ fn autotune_tile_config(
     }
 
     if let Some((tile, score)) = best {
-        if let Ok(mut cache) = ctx.autotune_cache.lock() {
-            cache.insert(key.clone(), tile);
-        }
+        lock_recover(&ctx.autotune_cache).insert(key.clone(), tile);
         if autotune_enabled {
             let stored: StoredTileConfig = tile.into();
             let _ = record_best(path.as_path(), &key, &context, score, &stored);
@@ -10536,9 +10501,7 @@ fn autotune_tile_config(
     } else {
         let tile = fallback_tile_config(bucket_rows, bucket_inner, bucket_cols);
         if tile_supported(ctx.device(), tile) {
-            if let Ok(mut cache) = ctx.autotune_cache.lock() {
-                cache.insert(key.clone(), tile);
-            }
+            lock_recover(&ctx.autotune_cache).insert(key.clone(), tile);
             Some(tile)
         } else {
             None

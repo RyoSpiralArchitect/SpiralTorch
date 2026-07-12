@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use super::lock_recover;
 use spiral_config::determinism;
 
 const L2_TARGET_BYTES: usize = 64 * 1024;
@@ -68,6 +69,18 @@ type Simd4 = Simd<f32, M4N16_TM>;
 const DEFAULT_KERNEL_INDEX: usize = 0;
 
 static CPU_AUTOTUNE_CACHE: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+
+fn cpu_autotune_cache() -> &'static Mutex<HashMap<String, usize>> {
+    CPU_AUTOTUNE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_microkernel_index(key: &str) -> Option<usize> {
+    lock_recover(cpu_autotune_cache()).get(key).copied()
+}
+
+fn cache_microkernel_index(key: &str, index: usize) {
+    lock_recover(cpu_autotune_cache()).insert(key.to_owned(), index);
+}
 
 #[inline(always)]
 fn row_tile_size(rows: usize, inner: usize, tm: usize) -> usize {
@@ -705,12 +718,7 @@ fn autotune_microkernel(
     let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
     let (key, path) = cpu_autotune_key(bucket_rows, bucket_inner, bucket_cols)?;
 
-    if let Some(index) = CPU_AUTOTUNE_CACHE
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&key).copied())
-    {
+    if let Some(index) = cached_microkernel_index(&key) {
         return MICROKERNELS.get(index);
     }
 
@@ -745,12 +753,7 @@ fn autotune_microkernel(
                 .iter()
                 .position(|spec| spec.name == stored.kernel)
             {
-                if let Ok(mut cache) = CPU_AUTOTUNE_CACHE
-                    .get_or_init(|| Mutex::new(HashMap::new()))
-                    .lock()
-                {
-                    cache.insert(key.clone(), index);
-                }
+                cache_microkernel_index(&key, index);
                 return MICROKERNELS.get(index);
             }
         }
@@ -794,12 +797,7 @@ fn autotune_microkernel(
     }
 
     if let Some((index, score)) = best {
-        if let Ok(mut cache) = CPU_AUTOTUNE_CACHE
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-        {
-            cache.insert(key.clone(), index);
-        }
+        cache_microkernel_index(&key, index);
         if autotune_enabled {
             let stored = StoredCpuKernel {
                 kernel: MICROKERNELS[index].name.to_string(),
@@ -991,6 +989,26 @@ fn cpu_feature_tag() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn autotune_cache_recovers_after_poison() {
+        let cache = cpu_autotune_cache();
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            panic!("poison CPU autotune cache");
+        }));
+        assert!(poisoned.is_err());
+        assert!(cache.is_poisoned());
+
+        cache_microkernel_index("poison.recovery", 1);
+
+        assert!(!cache.is_poisoned());
+        assert_eq!(cached_microkernel_index("poison.recovery"), Some(1));
+        lock_recover(cache).remove("poison.recovery");
+    }
 
     fn reference_matmul(
         lhs: &[f32],
