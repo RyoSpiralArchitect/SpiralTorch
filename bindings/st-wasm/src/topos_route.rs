@@ -1,8 +1,8 @@
-use serde_json::{json, Value};
-use st_tensor::{
-    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
-    TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
-};
+use serde_json::Value;
+use st_tensor::{ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute};
+
+#[cfg(test)]
+use st_tensor::{TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER};
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -25,43 +25,16 @@ pub fn topos_runtime_route_value(input: ToposRuntimeProfileInput) -> Value {
 }
 
 pub(crate) fn topos_runtime_route_from_route_value(route: ToposRuntimeRoute) -> Value {
-    let profile = route.profile();
-    let scores = route.scores();
-    json!({
-        "kind": "spiraltorch.topos_runtime_route",
-        "contract_version": TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
-        "semantic_owner": TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
-        "semantic_backend": "rust",
-        "execution_client": "wasm",
-        "mode": route.mode_label(),
-        "mode_id": route.mode_id(),
-        "score": route.score(),
-        "score_key": route.score_key(),
-        "learning_action": route.learning_action(),
-        "inference_action": route.inference_action(),
-        "scores": {
-            "training": scores.training_score(),
-            "inference": scores.inference_score(),
-            "guard": scores.guard_score(),
-            "exploration": scores.exploration_score(),
-            "context": scores.context_score(),
-            "vector": scores.vector(),
-        },
-        "runtime_profile": {
-            "training_gain": profile.training_gain(),
-            "inference_gain": profile.inference_gain(),
-            "closure_risk": profile.closure_risk(),
-            "exploration_budget": profile.exploration_budget(),
-            "control_energy": profile.control_energy(),
-            "training_rate_scale": profile.training_rate_scale(),
-            "training_gradient_bias_scale": profile.training_gradient_bias_scale(),
-            "inference_temperature": profile.inference_temperature(),
-            "inference_top_p": profile.inference_top_p(),
-            "inference_context_weight": profile.inference_context_weight(),
-            "learning_inference_balance": profile.learning_inference_balance(),
-            "vector": profile.vector(),
-        },
-    })
+    let mut payload =
+        serde_json::to_value(route.payload()).expect("Topos runtime route payload is serializable");
+    let object = payload
+        .as_object_mut()
+        .expect("Topos runtime route payload is an object");
+    object.insert(
+        "execution_client".to_owned(),
+        Value::String("wasm".to_owned()),
+    );
+    payload
 }
 
 #[cfg(target_arch = "wasm32")]

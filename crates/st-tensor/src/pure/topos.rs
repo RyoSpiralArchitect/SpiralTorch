@@ -31,8 +31,14 @@ const DEFAULT_GRAPH_PERMEABILITY: f32 = 0.08;
 /// Stable contract identifier shared by Rust, Python, and WASM runtime-route clients.
 pub const TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.topos_runtime_route.v1";
 
+/// Stable payload kind shared by Rust, Python, and WASM runtime-route clients.
+pub const TOPOS_RUNTIME_ROUTE_KIND: &str = "spiraltorch.topos_runtime_route";
+
 /// Crate/module that owns the runtime-route normalization and decision semantics.
 pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER: &str = "st-tensor::pure::topos";
+
+/// Backend label used when the canonical Rust runtime-route semantics produced a payload.
+pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND: &str = "rust";
 
 /// Stable contract identifier shared by Rust, Python, and WASM control-signal clients.
 pub const TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION: &str = "spiraltorch.topos_control_signal.v1";
@@ -468,6 +474,51 @@ pub struct ToposRuntimeRoute {
     scores: ToposRuntimeRouteScores,
 }
 
+/// Stable serialized view of a normalized [`ToposRuntimeProfile`].
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposRuntimeProfilePayload {
+    pub training_gain: f32,
+    pub inference_gain: f32,
+    pub closure_risk: f32,
+    pub exploration_budget: f32,
+    pub control_energy: f32,
+    pub training_rate_scale: f32,
+    pub training_gradient_bias_scale: f32,
+    pub inference_temperature: f32,
+    pub inference_top_p: f32,
+    pub inference_context_weight: f32,
+    pub learning_inference_balance: f32,
+    pub vector: [f32; 6],
+}
+
+/// Stable serialized view of runtime-route component scores.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposRuntimeRouteScoresPayload {
+    pub training: f32,
+    pub inference: f32,
+    pub guard: f32,
+    pub exploration: f32,
+    pub context: f32,
+    pub vector: [f32; 5],
+}
+
+/// Canonical runtime-route payload shared by every language binding.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposRuntimeRoutePayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub mode: &'static str,
+    pub mode_id: usize,
+    pub score: f32,
+    pub score_key: &'static str,
+    pub learning_action: &'static str,
+    pub inference_action: &'static str,
+    pub scores: ToposRuntimeRouteScoresPayload,
+    pub runtime_profile: ToposRuntimeProfilePayload,
+}
+
 impl ToposRuntimeMode {
     pub fn label(&self) -> &'static str {
         match self {
@@ -552,6 +603,18 @@ impl ToposRuntimeRouteScores {
             self.exploration_score,
             self.context_score,
         ]
+    }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposRuntimeRouteScoresPayload {
+        ToposRuntimeRouteScoresPayload {
+            training: self.training_score,
+            inference: self.inference_score,
+            guard: self.guard_score,
+            exploration: self.exploration_score,
+            context: self.context_score,
+            vector: self.vector(),
+        }
     }
 }
 
@@ -660,6 +723,24 @@ impl ToposRuntimeRoute {
 
     pub fn profile(&self) -> ToposRuntimeProfile {
         self.profile
+    }
+
+    /// Returns the stable contract payload consumed by native and WASM clients.
+    pub fn payload(&self) -> ToposRuntimeRoutePayload {
+        ToposRuntimeRoutePayload {
+            kind: TOPOS_RUNTIME_ROUTE_KIND,
+            contract_version: TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
+            semantic_owner: TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
+            semantic_backend: TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND,
+            mode: self.mode_label(),
+            mode_id: self.mode_id(),
+            score: self.score(),
+            score_key: self.score_key(),
+            learning_action: self.learning_action(),
+            inference_action: self.inference_action(),
+            scores: self.scores.payload(),
+            runtime_profile: self.profile.payload(),
+        }
     }
 }
 
@@ -908,6 +989,24 @@ impl ToposRuntimeProfile {
             self.inference_temperature,
             self.inference_context_weight,
         ]
+    }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposRuntimeProfilePayload {
+        ToposRuntimeProfilePayload {
+            training_gain: self.training_gain,
+            inference_gain: self.inference_gain,
+            closure_risk: self.closure_risk,
+            exploration_budget: self.exploration_budget,
+            control_energy: self.control_energy,
+            training_rate_scale: self.training_rate_scale,
+            training_gradient_bias_scale: self.training_gradient_bias_scale,
+            inference_temperature: self.inference_temperature,
+            inference_top_p: self.inference_top_p,
+            inference_context_weight: self.inference_context_weight,
+            learning_inference_balance: self.learning_inference_balance,
+            vector: self.vector(),
+        }
     }
 
     /// Names the runtime route implied by this joint profile.
@@ -4346,6 +4445,41 @@ mod tests {
         assert_eq!(profile.inference_top_p(), 0.05);
         assert_eq!(profile.inference_context_weight(), 0.25);
         assert_eq!(profile.learning_inference_balance(), 2.0);
+    }
+
+    #[test]
+    fn runtime_route_payload_is_the_shared_transport_contract() {
+        let route = ToposRuntimeProfile::from_input(ToposRuntimeProfileInput {
+            closure_risk: 0.7,
+            control_energy: 0.8,
+            training_gradient_bias_scale: 0.2,
+            ..ToposRuntimeProfileInput::default()
+        })
+        .route();
+        let payload = route.payload();
+
+        assert_eq!(payload.kind, TOPOS_RUNTIME_ROUTE_KIND);
+        assert_eq!(
+            payload.contract_version,
+            TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION
+        );
+        assert_eq!(payload.semantic_owner, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER);
+        assert_eq!(
+            payload.semantic_backend,
+            TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND
+        );
+        assert_eq!(payload.mode, route.mode_label());
+        assert_eq!(payload.mode_id, route.mode_id());
+        assert_eq!(payload.scores.vector, route.scores().vector());
+        assert_eq!(payload.runtime_profile.vector, route.profile().vector());
+
+        let serialized = serde_json::to_value(payload).expect("runtime route serializes");
+        assert_eq!(serialized["kind"], TOPOS_RUNTIME_ROUTE_KIND);
+        assert_eq!(serialized["scores"]["guard"], route.scores().guard_score());
+        assert_eq!(
+            serialized["runtime_profile"]["closure_risk"],
+            route.profile().closure_risk()
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["kind"] == "spiraltorch.topos_control_signal"
     assert signal["contract_version"] == "spiraltorch.topos_control_signal.v1"
     assert signal["semantic_owner"] == "st-tensor::pure::topos"
-    assert signal["semantic_backend"] in {"rust", "python_compat"}
+    assert signal["semantic_backend"] == "rust"
     assert signal["observed_depth"] == 4
     assert signal["visited_volume"] == 25
     assert signal["remaining_volume"] == 75
@@ -214,93 +214,115 @@ def test_topos_runtime_route_names_profile_for_learning_and_inference() -> None:
     assert profile_route["score"] == pytest.approx(route["score"])
 
 
-def test_topos_runtime_profile_route_prefers_native_semantic_owner(monkeypatch) -> None:
+def test_topos_runtime_profile_route_uses_rust_normalization() -> None:
     native = getattr(st, "_rs", None)
     native_route = getattr(native, "_topos_runtime_route_from_profile", None)
     if not callable(native_route):
         pytest.skip("native profile router requires a freshly built extension")
 
-    def fail_python_fallback(_profile):
-        raise AssertionError("Python route semantics should not run when Rust is available")
-
-    monkeypatch.setattr(
-        zspace_inference_module,
-        "_topos_runtime_route_from_profile_python",
-        fail_python_fallback,
-    )
     route = st.topos_runtime_route(
         runtime_profile={
-            "closure_risk": 0.2,
-            "exploration_budget": 0.6,
-            "control_energy": 0.1,
-            "training_rate_scale": 0.5,
-            "training_gradient_bias_scale": 0.05,
-            "inference_temperature": 1.4,
-            "inference_top_p": 0.95,
-            "inference_context_weight": 0.7,
-            "learning_inference_balance": 0.6,
+            "training_gain": float("nan"),
+            "closure_risk": -2.0,
+            "exploration_budget": 4.0,
+            "inference_top_p": 0.0,
+            "inference_context_weight": 8.0,
         }
     )
 
     assert route["semantic_backend"] == "rust"
     assert route["semantic_owner"] == "st-tensor::pure::topos"
+    assert route["runtime_profile"]["training_gain"] == pytest.approx(1.0)
+    assert route["runtime_profile"]["closure_risk"] == pytest.approx(0.0)
+    assert route["runtime_profile"]["exploration_budget"] == pytest.approx(1.0)
+    assert route["runtime_profile"]["inference_top_p"] == pytest.approx(0.05)
+    assert route["runtime_profile"]["inference_context_weight"] == pytest.approx(1.25)
+    assert len(route["runtime_profile"]["vector"]) == 6
+
+
+def test_partial_runtime_profile_mapping_routes_through_rust_defaults() -> None:
+    route = st.topos_runtime_route({"training_gain": 0.4})
+
+    assert route["semantic_backend"] == "rust"
+    assert route["runtime_profile"]["training_gain"] == pytest.approx(0.4)
+    assert route["runtime_profile"]["inference_gain"] == pytest.approx(1.0)
+
+
+def test_raw_topos_keys_take_priority_over_profile_like_metrics() -> None:
+    payload = {"curvature": -0.9, "closure_risk": 0.2}
+
+    assert not zspace_inference_module._looks_like_topos_runtime_profile(payload)
+
+
+def test_topos_runtime_route_fails_closed_without_rust_semantics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_native_topos_runtime_route_from_profile",
+        lambda _profile: None,
+    )
+
+    with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
+        zspace_inference_module._topos_runtime_route_from_profile(
+            {"closure_risk": 0.2}
+        )
 
 
 @pytest.mark.parametrize(
-    "profile",
+    ("profile", "expected_mode"),
     [
-        {
-            "training_rate_scale": 0.01,
-            "inference_temperature": 0.0,
-            "inference_top_p": 0.05,
-            "inference_context_weight": 0.25,
-            "learning_inference_balance": 0.0,
-        },
-        {
-            "training_rate_scale": 0.01,
-            "inference_temperature": 0.5,
-            "inference_top_p": 1.0,
-            "inference_context_weight": 0.8,
-            "learning_inference_balance": 0.0,
-        },
-        {
-            "exploration_budget": 0.6,
-            "training_rate_scale": 0.01,
-            "inference_temperature": 0.5,
-            "inference_top_p": 1.0,
-            "inference_context_weight": 0.25,
-            "learning_inference_balance": 0.0,
-        },
-        {
-            "closure_risk": 0.2,
-            "control_energy": 1.0,
-            "training_rate_scale": 0.01,
-            "training_gradient_bias_scale": 0.35,
-            "inference_temperature": 0.0,
-            "inference_top_p": 0.05,
-            "inference_context_weight": 0.25,
-            "learning_inference_balance": 0.0,
-        },
+        (
+            {
+                "training_rate_scale": 0.01,
+                "inference_temperature": 0.0,
+                "inference_top_p": 0.05,
+                "inference_context_weight": 0.25,
+                "learning_inference_balance": 0.0,
+            },
+            "training_first",
+        ),
+        (
+            {
+                "training_rate_scale": 0.01,
+                "inference_temperature": 0.5,
+                "inference_top_p": 1.0,
+                "inference_context_weight": 0.8,
+                "learning_inference_balance": 0.0,
+            },
+            "balanced",
+        ),
+        (
+            {
+                "exploration_budget": 0.6,
+                "training_rate_scale": 0.01,
+                "inference_temperature": 0.5,
+                "inference_top_p": 1.0,
+                "inference_context_weight": 0.25,
+                "learning_inference_balance": 0.0,
+            },
+            "exploratory",
+        ),
+        (
+            {
+                "closure_risk": 0.2,
+                "control_energy": 1.0,
+                "training_rate_scale": 0.01,
+                "training_gradient_bias_scale": 0.35,
+                "inference_temperature": 0.0,
+                "inference_top_p": 0.05,
+                "inference_context_weight": 0.25,
+                "learning_inference_balance": 0.0,
+            },
+            "guarded",
+        ),
     ],
 )
-def test_python_compat_route_conforms_to_rust_contract(profile) -> None:
+def test_rust_runtime_route_modes_are_reachable(profile, expected_mode) -> None:
     route = st.topos_runtime_route(runtime_profile=profile)
-    if route.get("semantic_backend") != "rust":
-        pytest.skip("Rust profile router requires a freshly built extension")
 
-    compat = zspace_inference_module._topos_runtime_route_from_profile_python(
-        route["runtime_profile"]
-    )
-    assert compat["mode"] == route["mode"]
-    assert compat["score_key"] == route["score_key"]
-    assert compat["learning_action"] == route["learning_action"]
-    assert compat["inference_action"] == route["inference_action"]
-    assert compat["score"] == pytest.approx(route["score"], abs=1e-6)
-    for key in ("training", "inference", "guard", "exploration", "context"):
-        assert compat["scores"][key] == pytest.approx(route["scores"][key], abs=1e-6)
-    assert compat["scores"]["vector"] == pytest.approx(
-        route["scores"]["vector"], abs=1e-6
-    )
+    assert route["semantic_backend"] == "rust"
+    assert route["mode"] == expected_mode
+    assert 0.0 <= route["score"] <= 1.0
+    assert len(route["scores"]["vector"]) == 5
 
 
 def test_topos_control_partial_feeds_zspace_inference() -> None:

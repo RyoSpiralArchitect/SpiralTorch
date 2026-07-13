@@ -695,17 +695,6 @@ def _normalise_topos_runtime_profile(
     return profile
 
 
-_TOPOS_RUNTIME_ROUTE_MODE_IDS = MappingProxyType(
-    {
-        "balanced": 0,
-        "guarded": 1,
-        "exploratory": 2,
-        "contextual": 3,
-        "training_first": 4,
-        "inference_first": 5,
-    }
-)
-
 _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
 _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
 _TOPOS_CONTROL_SIGNAL_INPUT_KEYS = frozenset(
@@ -724,15 +713,19 @@ _TOPOS_CONTROL_SIGNAL_INPUT_KEYS = frozenset(
 
 def _looks_like_topos_runtime_profile(payload: Mapping[str, Any]) -> bool:
     profile_keys = {
+        "training_gain",
+        "inference_gain",
         "control_energy",
         "closure_risk",
         "exploration_budget",
         "training_rate_scale",
+        "training_gradient_bias_scale",
         "inference_temperature",
+        "inference_top_p",
         "inference_context_weight",
         "learning_inference_balance",
     }
-    signal_keys = {
+    signal_keys = _TOPOS_CONTROL_SIGNAL_INPUT_KEYS | {
         "max_depth",
         "max_volume",
         "closure_pressure",
@@ -745,155 +738,6 @@ def _looks_like_topos_runtime_profile(payload: Mapping[str, Any]) -> bool:
     )
 
 
-def _topos_runtime_route_from_profile_python(profile: Mapping[str, Any]) -> dict[str, Any]:
-    closure_risk = _unit_interval(profile.get("closure_risk", 0.0))
-    exploration_budget = _unit_interval(profile.get("exploration_budget", 0.0))
-    control_energy = _unit_interval(profile.get("control_energy", 0.0))
-    training_rate_scale = _clamp_float(
-        profile.get("training_rate_scale", 1.0),
-        0.01,
-        2.0,
-        default=1.0,
-    )
-    training_gradient_bias_scale = _clamp_float(
-        profile.get("training_gradient_bias_scale", 0.0),
-        0.0,
-        0.35,
-        default=0.0,
-    )
-    inference_temperature = _clamp_float(
-        profile.get("inference_temperature", 1.0),
-        0.0,
-        2.0,
-        default=1.0,
-    )
-    inference_top_p = _clamp_float(
-        profile.get("inference_top_p", 1.0),
-        0.05,
-        1.0,
-        default=1.0,
-    )
-    inference_context_weight = _clamp_float(
-        profile.get("inference_context_weight", 1.0),
-        0.25,
-        1.25,
-        default=1.0,
-    )
-    learning_inference_balance = _clamp_float(
-        profile.get("learning_inference_balance", 1.0),
-        0.0,
-        2.0,
-        default=1.0,
-    )
-
-    gradient_pressure = _unit_interval(training_gradient_bias_scale / 0.35)
-    rate_headroom = _unit_interval(training_rate_scale / 1.25)
-    temperature_headroom = _unit_interval(inference_temperature / 1.5)
-    context_pressure = _unit_interval(inference_context_weight / 1.25)
-    balance_centering = _unit_interval(1.0 - abs(learning_inference_balance - 1.0))
-
-    scores = {
-        "training": _unit_interval(
-            0.45 * (1.0 - closure_risk)
-            + 0.25 * rate_headroom
-            + 0.2 * (1.0 - gradient_pressure)
-            + 0.1 * balance_centering
-        ),
-        "inference": _unit_interval(
-            0.3 * (1.0 - closure_risk)
-            + 0.25 * exploration_budget
-            + 0.2 * context_pressure
-            + 0.15 * temperature_headroom
-            + 0.1 * inference_top_p
-        ),
-        "guard": _unit_interval(
-            0.45 * closure_risk + 0.35 * control_energy + 0.2 * gradient_pressure
-        ),
-        "exploration": _unit_interval(
-            0.45 * exploration_budget
-            + 0.25 * temperature_headroom
-            + 0.2 * inference_top_p
-            + 0.1 * (1.0 - control_energy)
-        ),
-        "context": _unit_interval(
-            0.4 * context_pressure
-            + 0.25 * (1.0 - closure_risk)
-            + 0.2 * balance_centering
-            + 0.15 * (1.0 - control_energy)
-        ),
-    }
-
-    if scores["guard"] >= 0.58 and scores["guard"] >= scores["exploration"]:
-        mode = "guarded"
-    elif scores["exploration"] >= 0.62 and exploration_budget >= 0.45:
-        mode = "exploratory"
-    elif scores["context"] >= 0.6 and inference_context_weight >= 0.85:
-        mode = "contextual"
-    elif scores["training"] >= scores["inference"] + 0.08:
-        mode = "training_first"
-    elif scores["inference"] >= scores["training"] + 0.08:
-        mode = "inference_first"
-    else:
-        mode = "balanced"
-
-    mode_score_key = {
-        "balanced": "context",
-        "guarded": "guard",
-        "exploratory": "exploration",
-        "contextual": "context",
-        "training_first": "training",
-        "inference_first": "inference",
-    }[mode]
-    if mode == "balanced":
-        score = _unit_interval(
-            (scores["training"] + scores["inference"] + scores["context"]) / 3.0
-        )
-    else:
-        score = scores[mode_score_key]
-
-    scores["vector"] = [
-        scores["training"],
-        scores["inference"],
-        scores["guard"],
-        scores["exploration"],
-        scores["context"],
-    ]
-
-    if mode == "guarded":
-        learning_action = "dampen_steps"
-        inference_action = "tighten_sampling"
-    elif mode == "exploratory":
-        learning_action = "preserve_headroom"
-        inference_action = "widen_sampling"
-    elif mode == "contextual":
-        learning_action = "keep_balanced"
-        inference_action = "raise_context_weight"
-    elif mode == "training_first":
-        learning_action = "favor_learning"
-        inference_action = "hold_sampling"
-    elif mode == "inference_first":
-        learning_action = "hold_learning"
-        inference_action = "favor_inference"
-    else:
-        learning_action = "keep_balanced"
-        inference_action = "keep_balanced"
-
-    return {
-        "kind": "spiraltorch.topos_runtime_route",
-        "contract_version": "spiraltorch.topos_runtime_route.v1",
-        "semantic_owner": "st-tensor::pure::topos",
-        "semantic_backend": "python_compat",
-        "mode": mode,
-        "mode_id": _TOPOS_RUNTIME_ROUTE_MODE_IDS[mode],
-        "score": score,
-        "score_key": mode_score_key,
-        "learning_action": learning_action,
-        "inference_action": inference_action,
-        "scores": scores,
-        "runtime_profile": dict(profile),
-    }
-
-
 def _native_topos_runtime_route_from_profile(
     profile: Mapping[str, Any],
 ) -> dict[str, Any] | None:
@@ -903,19 +747,7 @@ def _native_topos_runtime_route_from_profile(
     if not callable(route_from_profile):
         return None
 
-    route = route_from_profile(
-        float(profile.get("training_gain", 1.0)),
-        float(profile.get("inference_gain", 1.0)),
-        float(profile.get("closure_risk", 0.0)),
-        float(profile.get("exploration_budget", 0.0)),
-        float(profile.get("control_energy", 0.0)),
-        float(profile.get("training_rate_scale", 1.0)),
-        float(profile.get("training_gradient_bias_scale", 0.0)),
-        float(profile.get("inference_temperature", 1.0)),
-        float(profile.get("inference_top_p", 1.0)),
-        float(profile.get("inference_context_weight", 1.0)),
-        float(profile.get("learning_inference_balance", 1.0)),
-    )
+    route = route_from_profile(dict(profile))
     if not isinstance(route, MappingABC):
         raise RuntimeError(
             "native Topos runtime router returned a non-mapping contract payload"
@@ -927,7 +759,10 @@ def _topos_runtime_route_from_profile(profile: Mapping[str, Any]) -> dict[str, A
     native = _native_topos_runtime_route_from_profile(profile)
     if native is not None:
         return native
-    return _topos_runtime_route_from_profile_python(profile)
+    raise RuntimeError(
+        "Topos runtime routing requires the compiled Rust semantic core; "
+        "rebuild or reinstall SpiralTorch with _topos_runtime_route_from_profile"
+    )
 
 
 def _native_topos_control_signal_from_observation(
@@ -1430,26 +1265,16 @@ def topos_runtime_route(
     base_presence_penalty: float = 0.0,
     **signal_options: Any,
 ) -> dict[str, Any]:
-    """Name the safest route using the shared Rust contract when it is available."""
+    """Name the safest route using the shared Rust semantic contract."""
 
     if runtime_profile is not None:
-        profile = _normalise_topos_runtime_profile(
-            runtime_profile,
-            signal={},
-            training_plan={},
-            inference_plan={},
-            training_gain=training_gain,
-            inference_gain=inference_gain,
-        )
+        profile = dict(runtime_profile)
+        profile.setdefault("training_gain", training_gain)
+        profile.setdefault("inference_gain", inference_gain)
     elif isinstance(topos, MappingABC) and _looks_like_topos_runtime_profile(topos):
-        profile = _normalise_topos_runtime_profile(
-            topos,
-            signal={},
-            training_plan={},
-            inference_plan={},
-            training_gain=training_gain,
-            inference_gain=inference_gain,
-        )
+        profile = dict(topos)
+        profile.setdefault("training_gain", training_gain)
+        profile.setdefault("inference_gain", inference_gain)
     elif (
         callable(getattr(topos, "runtime_route", None))
         and signal_options.get("porosity") is None
