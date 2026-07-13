@@ -3,148 +3,25 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Lightweight execution policy shared between the trainer and tensor-heavy layers.
+//! Thread-local application of the execution plan owned by `st-core`.
 
 use serde_json::json;
-use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::execution_plan::TensorUtilRoute;
+pub use st_core::backend::execution_plan::{AcceleratorFallback, BackendPolicy, ExecutionConfig};
 use st_tensor::{
     AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorUtilBackend,
 };
 use std::cell::RefCell;
 
-const DEFAULT_TENSOR_UTIL_WGPU_MIN_VALUES: usize = 1024;
-
 thread_local! {
     static ACTIVE_BACKEND_POLICY: RefCell<Option<BackendPolicy>> = const { RefCell::new(None) };
-}
-
-/// Tensor backend policy derived from trainer-level device capabilities.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BackendPolicy {
-    caps: DeviceCaps,
-    matmul_backend: MatmulBackend,
-    prepacked_matmul_backend: MatmulBackend,
-    layer_norm_backend: LayerNormBackend,
-    attention_backend: AttentionBackend,
-    softmax_backend: SoftmaxBackend,
-    tensor_util_backend: TensorUtilBackend,
-}
-
-impl BackendPolicy {
-    /// Builds a policy from high-level device capabilities.
-    pub fn from_device_caps(caps: DeviceCaps) -> Self {
-        let matmul_backend = matmul_backend_for(caps.backend);
-        let prepacked_matmul_backend = prepacked_matmul_backend_for(caps.backend);
-        let layer_norm_backend = layer_norm_backend_for(caps.backend);
-        let attention_backend = attention_backend_for(caps.backend);
-        let softmax_backend = softmax_backend_for(caps.backend);
-        let tensor_util_backend = tensor_util_backend_for(caps.backend);
-        Self {
-            caps,
-            matmul_backend,
-            prepacked_matmul_backend,
-            layer_norm_backend,
-            attention_backend,
-            softmax_backend,
-            tensor_util_backend,
-        }
-    }
-
-    /// Creates a policy with explicit tensor backends. Useful for focused tests and experiments.
-    pub fn explicit(
-        caps: DeviceCaps,
-        matmul_backend: MatmulBackend,
-        prepacked_matmul_backend: MatmulBackend,
-        layer_norm_backend: LayerNormBackend,
-        attention_backend: AttentionBackend,
-        softmax_backend: SoftmaxBackend,
-    ) -> Self {
-        Self {
-            caps,
-            matmul_backend,
-            prepacked_matmul_backend,
-            layer_norm_backend,
-            attention_backend,
-            softmax_backend,
-            tensor_util_backend: tensor_util_backend_for(caps.backend),
-        }
-    }
-
-    /// Returns the device capabilities that produced this policy.
-    pub fn device_caps(self) -> DeviceCaps {
-        self.caps
-    }
-
-    /// Backend used for dense `Tensor::matmul_with_backend` calls.
-    pub fn matmul_backend(self) -> MatmulBackend {
-        self.matmul_backend
-    }
-
-    /// Stable label for the device backend that produced this policy.
-    pub fn device_backend_label(self) -> &'static str {
-        self.caps.backend.as_str()
-    }
-
-    /// Stable label for the dense matmul policy backend.
-    pub fn matmul_backend_label(self) -> &'static str {
-        matmul_backend_label(self.matmul_backend)
-    }
-
-    /// Backend used for `Tensor::matmul_prepacked_with_backend` calls.
-    pub fn prepacked_matmul_backend(self) -> MatmulBackend {
-        self.prepacked_matmul_backend
-    }
-
-    /// Stable label for the prepacked matmul policy backend.
-    pub fn prepacked_matmul_backend_label(self) -> &'static str {
-        matmul_backend_label(self.prepacked_matmul_backend)
-    }
-
-    /// Backend used for tensor layer normalisation calls.
-    pub fn layer_norm_backend(self) -> LayerNormBackend {
-        self.layer_norm_backend
-    }
-
-    /// Stable label for the layer-normalisation policy backend.
-    pub fn layer_norm_backend_label(self) -> &'static str {
-        layer_norm_backend_label(self.layer_norm_backend)
-    }
-
-    /// Backend used for fused scaled dot-product attention calls.
-    pub fn attention_backend(self) -> AttentionBackend {
-        self.attention_backend
-    }
-
-    /// Stable label for the fused attention policy backend.
-    pub fn attention_backend_label(self) -> &'static str {
-        attention_backend_label(self.attention_backend)
-    }
-
-    /// Backend used for row-wise softmax calls.
-    pub fn softmax_backend(self) -> SoftmaxBackend {
-        self.softmax_backend
-    }
-
-    /// Stable label for the row-wise softmax policy backend.
-    pub fn softmax_backend_label(self) -> &'static str {
-        softmax_backend_label(self.softmax_backend)
-    }
-
-    /// Backend used for small tensor utility calls such as scale/reduce/projection.
-    pub fn tensor_util_backend(self) -> TensorUtilBackend {
-        self.tensor_util_backend
-    }
-
-    /// Stable label for the tensor utility policy backend.
-    pub fn tensor_util_backend_label(self) -> &'static str {
-        tensor_util_backend_label(self.tensor_util_backend)
-    }
 }
 
 /// RAII guard that restores the previous thread-local backend policy.
 #[derive(Debug)]
 pub struct BackendPolicyGuard {
     previous: Option<BackendPolicy>,
+    _tensor_fallback_guard: st_tensor::execution::AcceleratorFallbackGuard,
 }
 
 impl Drop for BackendPolicyGuard {
@@ -157,13 +34,24 @@ impl Drop for BackendPolicyGuard {
 
 /// Installs `policy` for the current thread until the returned guard is dropped.
 pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
+    let tensor_fallback_guard = st_tensor::execution::push_accelerator_fallback(
+        policy.execution_config().accelerator_fallback,
+    );
     let previous = ACTIVE_BACKEND_POLICY.with(|slot| slot.replace(Some(policy)));
-    BackendPolicyGuard { previous }
+    BackendPolicyGuard {
+        previous,
+        _tensor_fallback_guard: tensor_fallback_guard,
+    }
 }
 
 /// Returns the current thread-local backend policy, if any.
 pub fn current_backend_policy() -> Option<BackendPolicy> {
     ACTIVE_BACKEND_POLICY.with(|slot| *slot.borrow())
+}
+
+/// Returns the captured accelerator fallback contract, preserving legacy env behavior outside a policy scope.
+pub fn current_accelerator_fallback() -> AcceleratorFallback {
+    st_tensor::execution::current_accelerator_fallback()
 }
 
 /// Returns the current dense matmul backend, falling back to tensor-level Auto.
@@ -208,210 +96,40 @@ pub fn current_tensor_util_backend() -> TensorUtilBackend {
         .unwrap_or(TensorUtilBackend::Auto)
 }
 
-/// Returns the current tensor utility backend, guarding small tensors from WGPU dispatch overhead.
+/// Applies the core execution plan to a tensor utility operation of `values` elements.
 pub fn current_tensor_util_backend_for_values(values: usize) -> TensorUtilBackend {
-    let backend = current_tensor_util_backend();
-    if matches!(backend, TensorUtilBackend::GpuWgpu) {
-        let threshold = tensor_util_wgpu_min_values();
-        let selected = if values < threshold {
-            TensorUtilBackend::Cpu
-        } else {
-            backend
-        };
-        emit_tensor_util_route(values, threshold, backend, selected);
-        return selected;
+    let Some(policy) = current_backend_policy() else {
+        return TensorUtilBackend::Auto;
+    };
+    let route = policy.tensor_util_route(values);
+    if route.records_threshold_decision() {
+        emit_tensor_util_route(policy, route);
     }
-    backend
+    route.selected_backend
 }
 
-fn emit_tensor_util_route(
-    values: usize,
-    threshold: usize,
-    requested_backend: TensorUtilBackend,
-    selected_backend: TensorUtilBackend,
-) {
-    let status = if matches!(selected_backend, TensorUtilBackend::GpuWgpu) {
-        "wgpu"
-    } else {
-        "cpu_threshold"
-    };
+fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
     st_tensor::emit_tensor_op_meta("tensor_util_route", || {
         json!({
-            "requested_backend": tensor_util_backend_label(requested_backend),
-            "selected_backend": tensor_util_backend_label(selected_backend),
-            "status": status,
+            "requested_backend": route.requested_backend_label(),
+            "selected_backend": route.selected_backend_label(),
+            "status": route.status.as_str(),
             "choice_source": "threshold_guard",
-            "values": values,
-            "threshold": threshold,
+            "semantic_owner": "st-core",
+            "accelerator_fallback": policy
+                .execution_config()
+                .accelerator_fallback
+                .as_str(),
+            "values": route.values,
+            "threshold": route.threshold,
         })
     });
-}
-
-fn tensor_util_wgpu_min_values() -> usize {
-    std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_TENSOR_UTIL_WGPU_MIN_VALUES)
-}
-
-fn matmul_backend_for(kind: BackendKind) -> MatmulBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_matmul_backend(),
-        BackendKind::Hip => hip_matmul_backend(),
-        BackendKind::Cpu | BackendKind::Cuda | BackendKind::Mps => MatmulBackend::Auto,
-    }
-}
-
-fn prepacked_matmul_backend_for(kind: BackendKind) -> MatmulBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_matmul_backend(),
-        // HIP does not yet expose an explicit prepacked matmul path in st-tensor.
-        BackendKind::Cpu | BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => {
-            MatmulBackend::Auto
-        }
-    }
-}
-
-fn layer_norm_backend_for(kind: BackendKind) -> LayerNormBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_layer_norm_backend(),
-        BackendKind::Cpu => LayerNormBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => LayerNormBackend::Auto,
-    }
-}
-
-fn attention_backend_for(kind: BackendKind) -> AttentionBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_attention_backend(),
-        BackendKind::Cpu => AttentionBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => AttentionBackend::Auto,
-    }
-}
-
-fn softmax_backend_for(kind: BackendKind) -> SoftmaxBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_softmax_backend(),
-        BackendKind::Cpu => SoftmaxBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => SoftmaxBackend::Auto,
-    }
-}
-
-fn tensor_util_backend_for(kind: BackendKind) -> TensorUtilBackend {
-    match kind {
-        BackendKind::Wgpu => TensorUtilBackend::GpuWgpu,
-        BackendKind::Cpu => TensorUtilBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => TensorUtilBackend::Auto,
-    }
-}
-
-fn matmul_backend_label(backend: MatmulBackend) -> &'static str {
-    match backend {
-        MatmulBackend::Auto => "auto",
-        MatmulBackend::CpuFaer => "faer",
-        MatmulBackend::CpuSimd => "cpu_simd",
-        MatmulBackend::CpuNaive => "naive",
-        #[cfg(feature = "wgpu")]
-        MatmulBackend::GpuWgpu => "wgpu",
-        #[cfg(feature = "hip")]
-        MatmulBackend::GpuHip => "hip",
-        #[allow(unreachable_patterns)]
-        _ => "gpu",
-    }
-}
-
-fn layer_norm_backend_label(backend: LayerNormBackend) -> &'static str {
-    match backend {
-        LayerNormBackend::Auto => "auto",
-        LayerNormBackend::Cpu => "cpu",
-        LayerNormBackend::GpuWgpu => "wgpu",
-    }
-}
-
-fn attention_backend_label(backend: AttentionBackend) -> &'static str {
-    match backend {
-        AttentionBackend::Auto => "auto",
-        AttentionBackend::Cpu => "cpu",
-        AttentionBackend::GpuWgpu => "wgpu",
-    }
-}
-
-fn softmax_backend_label(backend: SoftmaxBackend) -> &'static str {
-    match backend {
-        SoftmaxBackend::Auto => "auto",
-        SoftmaxBackend::Cpu => "cpu",
-        #[cfg(feature = "wgpu")]
-        SoftmaxBackend::GpuWgpu => "wgpu",
-        #[allow(unreachable_patterns)]
-        _ => "gpu",
-    }
-}
-
-fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
-    match backend {
-        TensorUtilBackend::Auto => "auto",
-        TensorUtilBackend::Cpu => "cpu",
-        TensorUtilBackend::GpuWgpu => "wgpu",
-    }
-}
-
-fn wgpu_matmul_backend() -> MatmulBackend {
-    #[cfg(feature = "wgpu")]
-    {
-        MatmulBackend::GpuWgpu
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        MatmulBackend::Auto
-    }
-}
-
-fn hip_matmul_backend() -> MatmulBackend {
-    #[cfg(feature = "hip")]
-    {
-        MatmulBackend::GpuHip
-    }
-    #[cfg(not(feature = "hip"))]
-    {
-        MatmulBackend::Auto
-    }
-}
-
-fn wgpu_layer_norm_backend() -> LayerNormBackend {
-    #[cfg(feature = "wgpu")]
-    {
-        LayerNormBackend::GpuWgpu
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        LayerNormBackend::Auto
-    }
-}
-
-fn wgpu_attention_backend() -> AttentionBackend {
-    #[cfg(feature = "wgpu")]
-    {
-        AttentionBackend::GpuWgpu
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        AttentionBackend::Auto
-    }
-}
-
-fn wgpu_softmax_backend() -> SoftmaxBackend {
-    #[cfg(feature = "wgpu")]
-    {
-        SoftmaxBackend::GpuWgpu
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        SoftmaxBackend::Auto
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use st_core::backend::device_caps::DeviceCaps;
     use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -419,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn cpu_policy_keeps_tensor_cpu_only_for_accelerated_ops() {
+    fn core_policy_remains_available_through_the_st_nn_api() {
         let policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
         assert_eq!(policy.matmul_backend(), MatmulBackend::Auto);
         assert_eq!(policy.prepacked_matmul_backend(), MatmulBackend::Auto);
@@ -475,10 +193,25 @@ mod tests {
     }
 
     #[test]
-    fn tensor_util_threshold_route_emits_policy_meta_without_kernel_backend() {
+    fn active_policy_owns_the_fallback_contract() {
+        let strict = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::cpu(),
+            st_core::backend::execution_plan::ExecutionConfig::new(
+                AcceleratorFallback::Forbid,
+                1024,
+            ),
+        );
+        let _guard = push_backend_policy(strict);
+        assert_eq!(current_accelerator_fallback(), AcceleratorFallback::Forbid);
+        assert_eq!(
+            st_tensor::execution::current_accelerator_fallback(),
+            AcceleratorFallback::Forbid
+        );
+    }
+
+    #[test]
+    fn tensor_util_threshold_route_emits_the_core_decision() {
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1024");
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
@@ -489,16 +222,15 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        );
         let guard = push_backend_policy(policy);
         let selected = current_tensor_util_backend_for_values(8);
         drop(guard);
 
         st_tensor::set_thread_meta_observer(previous_observer);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
 
         assert_eq!(selected, TensorUtilBackend::Cpu);
         let events = events.lock().unwrap();
@@ -509,6 +241,7 @@ mod tests {
         assert_eq!(data["requested_backend"], "wgpu");
         assert_eq!(data["selected_backend"], "cpu");
         assert_eq!(data["status"], "cpu_threshold");
+        assert_eq!(data["semantic_owner"], "st-core");
         assert_eq!(data["values"], 8);
         assert_eq!(data["threshold"], 1024);
         assert!(data.get("backend").is_none());

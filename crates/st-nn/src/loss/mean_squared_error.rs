@@ -34,9 +34,7 @@ fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
 
 #[cfg(feature = "wgpu")]
 fn strict_gpu_path() -> bool {
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
+    crate::execution::current_accelerator_fallback().is_strict()
 }
 
 #[cfg(feature = "wgpu")]

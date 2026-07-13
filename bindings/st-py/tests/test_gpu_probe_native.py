@@ -129,6 +129,25 @@ def test_plan_explicit_wgpu_backend() -> None:
     assert int(plan.lanes) >= 1
 
 
+def test_rank_plan_exposes_the_captured_execution_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "1")
+    monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "37")
+
+    strict_plan = st.plan("topk", 2, 8, 2, backend="cpu")
+
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "0")
+    monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "91")
+    fallback_plan = st.plan("topk", 2, 8, 2, backend="cpu")
+
+    assert strict_plan.accelerator_fallback == "forbid"
+    assert int(strict_plan.tensor_util_wgpu_min_values) == 37
+    assert fallback_plan.accelerator_fallback == "allow"
+    assert int(fallback_plan.tensor_util_wgpu_min_values) == 91
+
+
 def test_init_backend_and_session_explicit_wgpu_backend_when_runtime_is_enabled() -> None:
     st = require_native()
     require_wgpu_runtime(st)

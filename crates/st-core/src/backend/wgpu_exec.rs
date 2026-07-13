@@ -87,7 +87,7 @@ fn run_wgpu_selection(plan: &RankPlan, selection: Selection) -> Result<(), Strin
             return run_wgpu_bottomk(plan, buffers);
         }
 
-        if strict_gpu_path() {
+        if plan.accelerator_fallback().is_strict() {
             return Err(format!(
                 "wgpu {} host-buffer bridge is not wired to real WGPU runtime; fallback disabled",
                 selection_name(selection)
@@ -116,7 +116,7 @@ fn run_wgpu_topk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
 
         match real_result {
             Ok(()) => return Ok(()),
-            Err(err) if strict_gpu_path() => {
+            Err(err) if plan.accelerator_fallback().is_strict() => {
                 return Err(format!(
                     "wgpu topk launch failed ({err}); fallback disabled"
                 ));
@@ -129,7 +129,7 @@ fn run_wgpu_topk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
         }
     }
 
-    if strict_gpu_path() {
+    if plan.accelerator_fallback().is_strict() {
         return Err("wgpu topk runtime context is not installed; fallback disabled".to_string());
     }
     run_selection(Selection::Top, plan, buffers)
@@ -152,7 +152,7 @@ fn run_wgpu_midk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
 
         match real_result {
             Ok(()) => return Ok(()),
-            Err(err) if strict_gpu_path() => {
+            Err(err) if plan.accelerator_fallback().is_strict() => {
                 return Err(format!(
                     "wgpu midk launch failed ({err}); fallback disabled"
                 ));
@@ -165,7 +165,7 @@ fn run_wgpu_midk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
         }
     }
 
-    if strict_gpu_path() {
+    if plan.accelerator_fallback().is_strict() {
         return Err("wgpu midk runtime context is not installed; fallback disabled".to_string());
     }
     run_selection(Selection::Mid, plan, buffers)
@@ -191,7 +191,7 @@ fn run_wgpu_bottomk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<()
 
         match real_result {
             Ok(()) => return Ok(()),
-            Err(err) if strict_gpu_path() => {
+            Err(err) if plan.accelerator_fallback().is_strict() => {
                 return Err(format!(
                     "wgpu bottomk launch failed ({err}); fallback disabled"
                 ));
@@ -204,7 +204,7 @@ fn run_wgpu_bottomk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<()
         }
     }
 
-    if strict_gpu_path() {
+    if plan.accelerator_fallback().is_strict() {
         return Err("wgpu bottomk runtime context is not installed; fallback disabled".to_string());
     }
     run_selection(Selection::Bottom, plan, buffers)
@@ -264,19 +264,12 @@ fn selection_name(selection: Selection) -> &'static str {
     }
 }
 
-fn strict_gpu_path() -> bool {
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
-    use crate::ops::rank_entry::plan_rank;
-    use std::ffi::OsString;
-    use std::sync::{Mutex, OnceLock};
+    use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
+    use crate::ops::rank_entry::{plan_rank, plan_rank_with_config};
 
     const ROWS: u32 = 2;
     const COLS: u32 = 5;
@@ -287,6 +280,17 @@ mod tests {
 
     fn plan_for(kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlan {
         plan_rank(kind, rows, cols, k, DeviceCaps::wgpu(32, true, 256))
+    }
+
+    fn strict_plan(kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlan {
+        plan_rank_with_config(
+            kind,
+            rows,
+            cols,
+            k,
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+        )
     }
 
     fn sample_input() -> Vec<f32> {
@@ -343,49 +347,6 @@ mod tests {
         (out_vals, out_idx)
     }
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock available")
-    }
-
-    struct EnvVarRestore {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvVarRestore {
-        fn capture(key: &'static str) -> Self {
-            Self {
-                key,
-                previous: std::env::var_os(key),
-            }
-        }
-    }
-
-    impl Drop for EnvVarRestore {
-        fn drop(&mut self) {
-            if let Some(prev) = &self.previous {
-                unsafe { std::env::set_var(self.key, prev) };
-            } else {
-                unsafe { std::env::remove_var(self.key) };
-            }
-        }
-    }
-
-    fn with_strict_gpu_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let _lock = env_lock();
-        let _restore = EnvVarRestore::capture("SPIRALTORCH_STRICT_GPU");
-        if let Some(value) = value {
-            unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", value) };
-        } else {
-            unsafe { std::env::remove_var("SPIRALTORCH_STRICT_GPU") };
-        }
-        f()
-    }
-
     fn wgpu_runtime_tests_enabled() -> bool {
         std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS")
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
@@ -403,14 +364,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_strict_gpu_env(Some("0"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || {
-                    WgpuExecutor::default().launch_topk(&plan).unwrap();
-                },
-            );
-        });
+        with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                WgpuExecutor::default().launch_topk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![7.0, 3.5, 4.0, 2.0]);
         assert_eq!(out_idx, vec![4, 1, 1, 4]);
@@ -422,18 +381,16 @@ mod tests {
             return;
         }
 
-        let plan = plan(RankKind::MidK, 2);
+        let plan = strict_plan(RankKind::MidK, ROWS, COLS, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        let err = with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || WgpuExecutor::default().launch_midk(&plan),
-            )
-            .expect_err("strict mode should reject software fallback")
-        });
+        let err = with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || WgpuExecutor::default().launch_midk(&plan),
+        )
+        .expect_err("strict mode should reject software fallback");
 
         assert!(err.contains("fallback disabled"));
     }
@@ -444,18 +401,16 @@ mod tests {
             return;
         }
 
-        let plan = plan(RankKind::TopK, 2);
+        let plan = strict_plan(RankKind::TopK, ROWS, COLS, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        let err = with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || WgpuExecutor::default().launch_topk(&plan),
-            )
-            .expect_err("strict mode should require an installed WGPU runtime context")
-        });
+        let err = with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || WgpuExecutor::default().launch_topk(&plan),
+        )
+        .expect_err("strict mode should require an installed WGPU runtime context");
 
         assert!(err.contains("runtime context is not installed"));
         assert!(err.contains("fallback disabled"));
@@ -515,18 +470,16 @@ mod tests {
             return;
         }
 
-        let plan = plan(RankKind::TopK, 2);
+        let plan = strict_plan(RankKind::TopK, ROWS, COLS, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || WgpuExecutor::default().launch_topk(&plan),
-            )
-            .expect("strict WGPU TopK should use the installed runtime context")
-        });
+        with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || WgpuExecutor::default().launch_topk(&plan),
+        )
+        .expect("strict WGPU TopK should use the installed runtime context");
 
         assert_eq!(out_vals, vec![7.0, 3.5, 4.0, 2.0]);
         assert_eq!(out_idx, vec![4, 1, 1, 4]);
@@ -542,18 +495,16 @@ mod tests {
             return;
         }
 
-        let plan = plan(RankKind::BottomK, 2);
+        let plan = strict_plan(RankKind::BottomK, ROWS, COLS, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || WgpuExecutor::default().launch_bottomk(&plan),
-            )
-            .expect("strict WGPU BottomK should use the installed runtime context")
-        });
+        with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || WgpuExecutor::default().launch_bottomk(&plan),
+        )
+        .expect("strict WGPU BottomK should use the installed runtime context");
 
         assert_eq!(out_vals, vec![-2.0, 0.5, -3.0, -1.0]);
         assert_eq!(out_idx, vec![2, 3, 3, 0]);
@@ -569,18 +520,16 @@ mod tests {
             return;
         }
 
-        let plan = plan(RankKind::MidK, 2);
+        let plan = strict_plan(RankKind::MidK, ROWS, COLS, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_wgpu(
-                launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-                || WgpuExecutor::default().launch_midk(&plan),
-            )
-            .expect("strict WGPU MidK should use the installed runtime context")
-        });
+        with_launch_buffers_wgpu(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || WgpuExecutor::default().launch_midk(&plan),
+        )
+        .expect("strict WGPU MidK should use the installed runtime context");
 
         assert_eq!(out_vals, vec![0.5, 1.0, -1.0, 0.25]);
         assert_eq!(out_idx, vec![3, 0, 0, 2]);
@@ -617,19 +566,17 @@ mod tests {
                 WgpuExecutor::launch_bottomk,
             ),
         ] {
-            let plan = plan_for(kind, rows, cols, k);
+            let plan = strict_plan(kind, rows, cols, k);
             let (expected_vals, expected_idx) =
                 software_reference(selection, kind, &input, rows, cols, k);
             let mut out_vals = vec![0.0f32; (rows * k) as usize];
             let mut out_idx = vec![0i32; (rows * k) as usize];
 
-            with_strict_gpu_env(Some("1"), || {
-                with_launch_buffers_wgpu(
-                    launch_buffers_for(&input, rows, cols, &mut out_vals, &mut out_idx, k),
-                    || launch(&WgpuExecutor::default(), &plan),
-                )
-                .expect("strict WGPU rank-k should use the installed runtime context")
-            });
+            with_launch_buffers_wgpu(
+                launch_buffers_for(&input, rows, cols, &mut out_vals, &mut out_idx, k),
+                || launch(&WgpuExecutor::default(), &plan),
+            )
+            .expect("strict WGPU rank-k should use the installed runtime context");
 
             assert_eq!(out_vals, expected_vals);
             assert_eq!(out_idx, expected_idx);

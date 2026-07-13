@@ -4781,6 +4781,8 @@ class RankPlan:
     kind: str
     requested_backend: Optional[str]
     effective_backend: Optional[str]
+    accelerator_fallback: Literal["allow", "forbid"]
+    tensor_util_wgpu_min_values: int
     rows: int
     cols: int
     k: int

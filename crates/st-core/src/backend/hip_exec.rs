@@ -54,7 +54,7 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
             match hip_runtime::run_selection(selection, plan, buffers) {
                 Ok(()) => return Ok(()),
                 Err(err) => {
-                    if strict_gpu_path() {
+                    if plan.accelerator_fallback().is_strict() {
                         return Err(format!("hip launch failed ({err}); fallback disabled"));
                     }
                     return run_selection(selection, plan, buffers).map_err(|soft_err| {
@@ -68,24 +68,24 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
 
         #[cfg(not(feature = "hip-real"))]
         {
+            if plan.accelerator_fallback().is_strict() {
+                return Err(
+                    "hip-real feature is not enabled; software fallback disabled by plan"
+                        .to_string(),
+                );
+            }
             return run_selection(selection, plan, buffers);
         }
     })
-}
-
-#[cfg(feature = "hip-real")]
-fn strict_gpu_path() -> bool {
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
+    use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
     use crate::backend::unison_heuristics::RankKind;
-    use crate::ops::rank_entry::plan_rank;
+    use crate::ops::rank_entry::{plan_rank, plan_rank_with_config};
 
     const ROWS: u32 = 2;
     const COLS: u32 = 5;
@@ -97,6 +97,17 @@ mod tests {
             COLS,
             k,
             DeviceCaps::hip(32, 1024, Some(64 * 1024)),
+        )
+    }
+
+    fn strict_plan(kind: RankKind, k: u32) -> RankPlan {
+        plan_rank_with_config(
+            kind,
+            ROWS,
+            COLS,
+            k,
+            DeviceCaps::hip(32, 1024, Some(64 * 1024)),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
         )
     }
 
@@ -173,5 +184,23 @@ mod tests {
             .launch_topk(&plan(RankKind::TopK, 2))
             .unwrap_err();
         assert!(err.contains("no launch buffers"));
+    }
+
+    #[test]
+    #[cfg(not(feature = "hip-real"))]
+    fn hip_strict_plan_rejects_stub_fallback() {
+        let plan = strict_plan(RankKind::TopK, 2);
+        let input = sample_input();
+        let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
+        let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
+
+        let err = with_launch_buffers_hip(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || HipExecutor::default().launch_topk(&plan),
+        )
+        .expect_err("strict plan must not execute the HIP software stub");
+
+        assert!(err.contains("hip-real feature is not enabled"));
+        assert!(err.contains("fallback disabled"));
     }
 }

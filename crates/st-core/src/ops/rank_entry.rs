@@ -10,6 +10,7 @@
 //!   let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
 //!   execute_rank(&plan, backend_impl, tensors);
 use crate::backend::device_caps::DeviceCaps;
+use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
 use crate::backend::spiralk_fft::SpiralKFftPlan;
 use crate::backend::unison_heuristics::{self, Choice, RankKind};
 
@@ -20,6 +21,7 @@ pub struct RankPlan {
     pub cols: u32,
     pub k: u32,
     pub choice: Choice,
+    pub execution_config: ExecutionConfig,
 }
 
 impl RankPlan {
@@ -42,9 +44,26 @@ impl RankPlan {
     pub fn fft_spiralk_hint(&self) -> String {
         self.fft_plan().emit_spiralk_hint()
     }
+
+    /// Returns the fallback contract captured when this plan was created.
+    pub const fn accelerator_fallback(&self) -> AcceleratorFallback {
+        self.execution_config.accelerator_fallback
+    }
 }
 
 pub fn plan_rank(kind: RankKind, rows: u32, cols: u32, k: u32, caps: DeviceCaps) -> RankPlan {
+    plan_rank_with_config(kind, rows, cols, k, caps, ExecutionConfig::from_env())
+}
+
+/// Plans rank-k with an explicit execution contract instead of consulting process state.
+pub fn plan_rank_with_config(
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    caps: DeviceCaps,
+    execution_config: ExecutionConfig,
+) -> RankPlan {
     let choice = unison_heuristics::choose_unified_rank(rows, cols, k, caps, kind);
     RankPlan {
         kind,
@@ -52,6 +71,7 @@ pub fn plan_rank(kind: RankKind, rows: u32, cols: u32, k: u32, caps: DeviceCaps)
         cols,
         k,
         choice,
+        execution_config,
     }
 }
 
@@ -95,5 +115,20 @@ mod tests {
         assert!(wgsl.contains("@compute"));
         let hint = plan.fft_spiralk_hint();
         assert!(hint.contains("tile_cols"));
+    }
+
+    #[test]
+    fn explicit_execution_config_is_captured_by_the_plan() {
+        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 4096);
+        let plan = plan_rank_with_config(
+            RankKind::MidK,
+            4,
+            128,
+            8,
+            DeviceCaps::wgpu(32, true, 256),
+            config,
+        );
+        assert_eq!(plan.execution_config, config);
+        assert_eq!(plan.accelerator_fallback(), AcceleratorFallback::Forbid);
     }
 }

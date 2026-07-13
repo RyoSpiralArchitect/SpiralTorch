@@ -506,6 +506,7 @@ pub fn classify_roundtable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::execution_plan::ExecutionConfig;
     use crate::backend::unison_heuristics::{Choice, RankKind};
 
     fn plan(kind: RankKind, k: u32) -> RankPlan {
@@ -529,6 +530,7 @@ mod tests {
                 fft_segments: 1,
                 latency_window: None,
             },
+            execution_config: ExecutionConfig::default(),
         }
     }
 

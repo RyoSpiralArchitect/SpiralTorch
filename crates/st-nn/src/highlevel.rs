@@ -8,8 +8,9 @@ use crate::module::Module;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedule};
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::execution_plan::ExecutionConfig;
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::ops::rank_entry::{plan_rank_with_config, RankPlan};
 use st_core::telemetry::atlas::{
     AtlasFragment, AtlasFrame, AtlasPerspective, AtlasRoute, AtlasRouteSummary,
 };
@@ -75,6 +76,7 @@ impl BarycenterConfig {
 #[derive(Debug, Clone)]
 pub struct SpiralSessionBuilder {
     caps: DeviceCaps,
+    execution_config: ExecutionConfig,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -89,6 +91,7 @@ impl SpiralSessionBuilder {
     pub fn new(caps: DeviceCaps) -> Self {
         Self {
             caps,
+            execution_config: ExecutionConfig::from_env(),
             curvature: -1.0,
             hyper_learning_rate: 0.05,
             fallback_learning_rate: 0.01,
@@ -102,6 +105,22 @@ impl SpiralSessionBuilder {
     /// Builder convenience constructor.
     pub fn from_backend(backend: BackendKind) -> Self {
         Self::new(backend.default_caps())
+    }
+
+    /// Binds the session to an explicit backend execution contract.
+    pub fn with_execution_config(mut self, execution_config: ExecutionConfig) -> Self {
+        self.execution_config = execution_config;
+        self
+    }
+
+    /// Updates the backend execution contract in-place.
+    pub fn set_execution_config(&mut self, execution_config: ExecutionConfig) {
+        self.execution_config = execution_config;
+    }
+
+    /// Returns the execution contract that will be inherited by the session.
+    pub const fn execution_config(&self) -> ExecutionConfig {
+        self.execution_config
     }
 
     /// Sets the hyperbolic curvature enforced by the session.
@@ -275,6 +294,7 @@ impl SpiralSessionBuilder {
         let maintainer = self.maintainer.clone().sanitise();
         Ok(SpiralSession {
             caps: self.caps,
+            execution_config: self.execution_config,
             curvature: self.curvature,
             hyper_learning_rate: self.hyper_learning_rate,
             fallback_learning_rate: self.fallback_learning_rate,
@@ -293,6 +313,7 @@ impl SpiralSessionBuilder {
 #[derive(Debug, Clone)]
 pub struct SpiralSession {
     caps: DeviceCaps,
+    execution_config: ExecutionConfig,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -539,6 +560,7 @@ impl SpiralSession {
     /// Reconstructs a builder seeded from this session.
     pub fn to_builder(&self) -> SpiralSessionBuilder {
         let mut builder = SpiralSessionBuilder::new(self.caps);
+        builder.set_execution_config(self.execution_config);
         builder.set_curvature(self.curvature);
         builder.set_hyper_learning_rate(self.hyper_learning_rate);
         builder.set_fallback_learning_rate(self.fallback_learning_rate);
@@ -554,6 +576,11 @@ impl SpiralSession {
     /// Returns the backend capabilities baked into the session.
     pub fn device_caps(&self) -> DeviceCaps {
         self.caps
+    }
+
+    /// Returns the stable execution contract shared by this session's plans and trainers.
+    pub const fn execution_config(&self) -> ExecutionConfig {
+        self.execution_config
     }
 
     /// Returns the configured capacity of the temporal resonance timeline.
@@ -900,8 +927,9 @@ impl SpiralSession {
 
     /// Builds a module trainer preloaded with the session learning rates.
     pub fn trainer(&self) -> ModuleTrainer {
-        ModuleTrainer::new(
+        ModuleTrainer::new_with_execution_config(
             self.caps,
+            self.execution_config,
             self.curvature,
             self.hyper_learning_rate,
             self.fallback_learning_rate,
@@ -923,7 +951,7 @@ impl SpiralSession {
 
     /// Computes the rank plan for the requested selection.
     pub fn plan_rank(&self, kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlan {
-        plan_rank(kind, rows, cols, k, self.caps)
+        plan_rank_with_config(kind, rows, cols, k, self.caps, self.execution_config)
     }
 
     /// Produces a barycenter using the session defaults.
@@ -1078,6 +1106,7 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
+    use st_core::backend::execution_plan::AcceleratorFallback;
     use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::measure::BarycenterIntermediate;
@@ -1098,6 +1127,31 @@ mod tests {
         assert_eq!(session.hyper_learning_rate(), 0.2);
         assert_eq!(session.fallback_learning_rate(), 0.05);
         assert_eq!(session.barycenter_entropy_weight(), 0.0);
+    }
+
+    #[test]
+    fn session_shares_one_execution_contract_across_plans_and_trainers() {
+        let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_execution_config(execution_config)
+            .build()
+            .unwrap();
+
+        assert_eq!(session.execution_config(), execution_config);
+        assert_eq!(
+            session
+                .plan_rank(RankKind::TopK, 4, 128, 8)
+                .execution_config,
+            execution_config
+        );
+        assert_eq!(
+            session.trainer().planner().execution_config(),
+            execution_config
+        );
+        assert_eq!(
+            session.to_builder().build().unwrap().execution_config(),
+            execution_config
+        );
     }
 
     #[test]

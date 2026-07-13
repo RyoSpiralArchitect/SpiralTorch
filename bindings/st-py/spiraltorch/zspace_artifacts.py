@@ -68,6 +68,8 @@ def _json_ready(value: Any) -> Any:
         "backend",
         "requested_backend",
         "effective_backend",
+        "accelerator_fallback",
+        "tensor_util_wgpu_min_values",
         "rows",
         "cols",
         "k",

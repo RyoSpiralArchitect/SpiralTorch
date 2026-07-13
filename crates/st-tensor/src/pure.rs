@@ -351,9 +351,7 @@ impl fmt::Display for MatmulBackend {
 
 #[cfg(any(feature = "wgpu", feature = "hip", test))]
 fn strict_gpu_path() -> bool {
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
+    crate::execution::current_accelerator_fallback().is_strict()
 }
 
 #[cfg(any(feature = "wgpu", feature = "hip"))]
