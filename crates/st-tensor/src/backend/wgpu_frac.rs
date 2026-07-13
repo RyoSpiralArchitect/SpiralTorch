@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 // crates/st-tensor/src/backend/wgpu_frac.rs
-use crate::fractional::gl_coeffs;
+use crate::fractional::{derivative_contract, gl_coeffs, validate_fractional_output};
 use crate::util::readback_f32;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -102,12 +102,9 @@ impl Frac1dKernel {
         h: f32,
         m: usize,
     ) -> Result<Vec<f32>, String> {
+        let scale = derivative_contract(x, alpha, h).map_err(|error| error.to_string())?;
         if x.is_empty() {
             return Ok(Vec::new());
-        }
-
-        if !(0.0..=1.0).contains(&alpha) || alpha <= 0.0 {
-            return Err(format!("alpha must be in (0, 1], got {alpha}"));
         }
 
         let n = x.len();
@@ -115,7 +112,7 @@ impl Frac1dKernel {
         let m = m.min(n.saturating_sub(1));
         let m_u32 = u32::try_from(m).map_err(|_| format!("kernel length {m} exceeds u32 range"))?;
         let w = gl_coeffs(alpha, m).map_err(|error| error.to_string())?;
-        let h_alpha = h.powf(alpha);
+        let h_alpha = scale.h_alpha();
         let xb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("X"),
             contents: bytemuck::cast_slice(x),
@@ -191,7 +188,9 @@ impl Frac1dKernel {
         }
         let _ = queue.submit(Some(enc.finish()));
 
-        readback_f32(device, queue, &yb, n)
+        let output = readback_f32(device, queue, &yb, n)?;
+        validate_fractional_output(&output).map_err(|error| error.to_string())?;
+        Ok(output)
     }
 }
 
@@ -207,6 +206,9 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::fractional::fracdiff1d_gl;
+
     #[track_caller]
     fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
         match result {
@@ -219,5 +221,41 @@ mod tests {
     fn frac_gl_shader_wgsl_is_valid() {
         let shader = include_str!("../wgpu_shaders/frac_gl_1d.wgsl");
         let _ = unwrap_ok(naga::front::wgsl::parse_str(shader));
+    }
+
+    #[test]
+    #[ignore = "requires a live WGPU adapter"]
+    fn frac_gl_wgpu_matches_the_cpu_semantic_core_when_available() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }));
+        let Some(adapter) = adapter else {
+            return;
+        };
+        let (device, queue) = unwrap_ok(pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("st.tensor.wgpu_frac.test"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+            },
+            None,
+        )));
+        let kernel = unwrap_ok(Frac1dKernel::new(
+            &device,
+            include_str!("../wgpu_shaders/frac_gl_1d.wgsl"),
+        ));
+        let input = [0.25, -1.0, 2.0, 0.5, 4.0];
+        let alpha = 0.65;
+        let h = 0.25;
+        let memory = 4;
+        let actual = unwrap_ok(kernel.dispatch(&device, &queue, &input, alpha, h, memory));
+        let expected = unwrap_ok(fracdiff1d_gl(&input, alpha, h, memory));
+
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 2e-5);
+        }
     }
 }
