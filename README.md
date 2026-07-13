@@ -195,6 +195,22 @@ SpiralTorch’s WASM bindings are now **fully runnable** in the browser: geometr
   `st.audit_wasm_report_context(...)`, then persist the selected handoff with
   `st.write_wasm_report_context_artifact(...)`.
 
+Browser runtimes can also fuse telemetry and Z-space partials through the same
+Rust-owned contracts used by Python. WASM adds only client metadata; metric
+aliases, weighting, suppression, reduction, flattening, and audit semantics stay
+in `st-core::telemetry::zspace_fusion`:
+
+```ts
+const fused = zspacePartialFusionObject({
+  partials: [
+    { metrics: { velocity: 0.4, gradient: [0.1, -0.2] }, origin: "canvas" },
+    { metrics: { speed: 0.8 }, weight: 2.0, origin: "webgpu" },
+  ],
+  strategy: "mean",
+  telemetry: [{ browser: { webgpu_ready: true } }],
+});
+```
+
 ### Why SpiralTorch  
 
 Modern ML stacks were built around CUDA—fast, but closed and rigid.  

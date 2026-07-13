@@ -680,6 +680,8 @@ from .zspace_inference import (
     coherence_partial_from_diagnostics,
     decode_zspace_embedding,
     blend_zspace_partials,
+    zspace_partial_fusion,
+    zspace_telemetry_fusion,
     compile_inference,
     infer_canvas_snapshot,
     infer_canvas_transformer,
@@ -2424,9 +2426,6 @@ def encode_zspace(
 _Z_METRIC_ALIAS = PRIMARY_ZSPACE_METRIC_ALIASES
 
 
-_Z_PARTIAL_ALIAS = ZSPACE_METRIC_ALIASES
-
-
 def _coerce_gradient_values(value: _Any) -> list[float] | None:
     if value is None:
         return None
@@ -2460,37 +2459,11 @@ def _metrics_to_mapping(metrics: ZMetrics) -> dict[str, _Any]:
 def _canonicalise_partial_mapping(payload: _Mapping[str, _Any] | None) -> dict[str, _Any]:
     if payload is None:
         return {}
-    resolved: dict[str, _Any] = {}
-    for key, value in payload.items():
-        alias = _Z_PARTIAL_ALIAS.get(key.lower())
-        if alias is None:
-            raise KeyError(f"unknown Z-space metric '{key}'")
-        if alias == "gradient":
-            gradient = _coerce_gradient_values(value)
-            if gradient is not None:
-                resolved[alias] = gradient
-            continue
-        try:
-            resolved[alias] = float(value)
-        except (TypeError, ValueError) as exc:  # noqa: BLE001 - user feedback
-            raise TypeError(
-                f"Z-space metric '{key}' must be a real number, got {value!r}"
-            ) from exc
-    return resolved
+    return blend_zspace_partials([dict(payload)])
 
 
-def _flatten_telemetry(payload: _Mapping[str, _Any], *, prefix: str = "") -> dict[str, float]:
-    flattened: dict[str, float] = {}
-    for key, value in payload.items():
-        label = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
-        if isinstance(value, _Mapping):
-            flattened.update(_flatten_telemetry(value, prefix=label))
-            continue
-        try:
-            flattened[label] = float(value)
-        except (TypeError, ValueError):
-            continue
-    return flattened
+def _flatten_telemetry(payload: _Mapping[str, _Any]) -> dict[str, float]:
+    return dict(zspace_telemetry_fusion(payload)["payload"])
 
 
 def _normalise_telemetry_arg(payload: _Any) -> dict[str, float]:
@@ -2498,9 +2471,9 @@ def _normalise_telemetry_arg(payload: _Any) -> dict[str, float]:
         return {}
     if isinstance(payload, ZSpacePartialBundle):
         mapping = payload.telemetry_payload()
-        return dict(mapping or {})
+        return _flatten_telemetry(mapping) if mapping else {}
     if isinstance(payload, ZSpaceTelemetryFrame):
-        return dict(payload.payload)
+        return _flatten_telemetry(payload.payload)
     if isinstance(payload, _Mapping):
         return _flatten_telemetry(payload)
     raise TypeError("telemetry payloads must be mappings or telemetry frames")
@@ -2831,7 +2804,7 @@ class _ZSpaceNotation:
                 )
                 continue
             if isinstance(partial, _Mapping):
-                normalised.append(_canonicalise_partial_mapping(partial))
+                normalised.append(dict(partial))
                 continue
             raise TypeError(
                 "z.bundle() expects partial bundles, mappings, or ZMetrics entries"
@@ -8173,6 +8146,8 @@ _EXTRAS.extend(
         "infer_with_partials",
         "compile_inference",
         "blend_zspace_partials",
+        "zspace_partial_fusion",
+        "zspace_telemetry_fusion",
         "inference_to_mapping",
         "inference_to_zmetrics",
         "prepare_trainer_step_payload",

@@ -173,6 +173,86 @@ declare module "spiraltorch-wasm" {
         vector: number[];
     };
 
+    export type ZSpaceFusionStrategy = "mean" | "last" | "max" | "min";
+
+    export type ZSpaceTelemetrySummary = {
+        count: number;
+        l1: number;
+        l2: number;
+        linf: number;
+        mean: number;
+        variance: number;
+        energy: number;
+        amplitude: number;
+        positive: number;
+        negative: number;
+        balance: number;
+        focus: number;
+    };
+
+    export type ZSpaceTelemetrySourceAudit = {
+        index: number;
+        flattened_count: number;
+        ignored_value_count: number;
+        conflict_count: number;
+    };
+
+    export type ZSpaceTelemetryFusion = {
+        kind: "spiraltorch.zspace_telemetry_fusion";
+        contract_version: "spiraltorch.zspace_telemetry_fusion.v1";
+        semantic_owner: "st-core::telemetry::zspace_fusion";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        payload: Record<string, number>;
+        summary: ZSpaceTelemetrySummary;
+        input_count: number;
+        active_input_count: number;
+        ignored_value_count: number;
+        conflict_count: number;
+        sources: ZSpaceTelemetrySourceAudit[];
+    };
+
+    export type ZSpacePartialInput = {
+        metrics: Record<string, number | number[]>;
+        weight?: number;
+        origin?: string | null;
+        telemetry?: Record<string, unknown> | null;
+    };
+
+    export type ZSpacePartialFusionRequest = {
+        partials: Array<ZSpacePartialInput | null>;
+        weights?: number[] | null;
+        strategy?: ZSpaceFusionStrategy;
+        telemetry?: Array<Record<string, unknown>>;
+    };
+
+    export type ZSpacePartialSourceAudit = {
+        index: number;
+        origin: string | null;
+        weight: number | null;
+        status: "active" | "suppressed" | "null";
+        metric_count: number;
+        gradient_dim: number;
+        telemetry_entry_count: number;
+    };
+
+    export type ZSpacePartialFusion = {
+        kind: "spiraltorch.zspace_partial_fusion";
+        contract_version: "spiraltorch.zspace_partial_fusion.v1";
+        semantic_owner: "st-core::telemetry::zspace_fusion";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        strategy: ZSpaceFusionStrategy;
+        metrics: Record<string, number>;
+        gradient?: number[];
+        telemetry: ZSpaceTelemetryFusion;
+        input_count: number;
+        active_count: number;
+        suppressed_count: number;
+        null_count: number;
+        sources: ZSpacePartialSourceAudit[];
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -521,6 +601,14 @@ declare module "spiraltorch-wasm" {
         input: ToposControlSignalInput,
         gradientDim: number,
     ): ToposZSpaceProjection;
+    export function zspaceTelemetryFusionJson(payloadsJson: string): string;
+    export function zspaceTelemetryFusionObject(
+        payloads: Array<Record<string, unknown>>,
+    ): ZSpaceTelemetryFusion;
+    export function zspacePartialFusionJson(requestJson: string): string;
+    export function zspacePartialFusionObject(
+        request: ZSpacePartialFusionRequest,
+    ): ZSpacePartialFusion;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

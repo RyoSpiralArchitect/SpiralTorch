@@ -33,6 +33,8 @@ from spiraltorch import (
     infer_weights_from_dlpack,
     infer_weights_from_compat,
     ZSpaceTelemetryFrame,
+    zspace_partial_fusion,
+    zspace_telemetry_fusion,
 )
 
 
@@ -121,6 +123,91 @@ def test_blend_partials_supports_weighted_mean_and_gradient():
     assert math.isclose(blended["speed"], (0.2 + 0.6 * 2.0) / 3.0, rel_tol=1e-6)
     assert math.isclose(blended["gradient"][0], (0.1 + 0.5 * 2.0) / 3.0, rel_tol=1e-6)
     assert len(blended["gradient"]) == 2
+
+
+def test_telemetry_fusion_exposes_rust_owned_contract():
+    contract = zspace_telemetry_fusion(
+        {"psi": {"energy": 2.0, "ready": True}, "ignored": [1.0]},
+        {"psi.energy": "4.0", "note": "ignored"},
+    )
+
+    assert contract["contract_version"] == "spiraltorch.zspace_telemetry_fusion.v1"
+    assert contract["semantic_owner"] == "st-core::telemetry::zspace_fusion"
+    assert contract["semantic_backend"] == "rust"
+    assert contract["payload"] == {"psi.energy": 4.0, "psi.ready": 1.0}
+    assert contract["summary"]["count"] == 2
+    assert contract["conflict_count"] == 1
+    assert contract["ignored_value_count"] == 2
+
+    collection_contract = zspace_telemetry_fusion(
+        [{"psi": {"energy": 2.0}}, {"psi.energy": 4.0}]
+    )
+    assert collection_contract["payload"] == {"psi.energy": 4.0}
+
+
+def test_partial_fusion_overrides_bundle_weights_and_suppresses_telemetry():
+    contract = zspace_partial_fusion(
+        [
+            ZSpacePartialBundle(
+                {"velocity": 1.0, "gradient": [1.0, 2.0]},
+                weight=100.0,
+                origin="suppressed",
+                telemetry={"suppressed_only": 1.0},
+            ),
+            ZSpacePartialBundle(
+                {"speed": 5.0, "gradient": [5.0]},
+                weight=1.0,
+                origin="active",
+                telemetry={"source": 2.0},
+            ),
+        ],
+        weights=[0.0, 3.0],
+        telemetry={"external": 7.0},
+    )
+
+    assert contract["contract_version"] == "spiraltorch.zspace_partial_fusion.v1"
+    assert contract["metrics"] == {"speed": 5.0}
+    assert contract["gradient"] == [5.0]
+    assert contract["suppressed_count"] == 1
+    assert contract["telemetry"]["payload"] == {"external": 7.0, "source": 2.0}
+    assert contract["sources"][0]["status"] == "suppressed"
+
+
+def test_partial_fusion_applies_extrema_strategy_to_gradient():
+    contract = zspace_partial_fusion(
+        [
+            {"speed": -2.0, "gradient": [-2.0, 4.0]},
+            {"speed": 3.0, "gradient": [3.0]},
+        ],
+        strategy="max",
+    )
+
+    assert contract["metrics"]["speed"] == 3.0
+    assert contract["gradient"] == [3.0, 4.0]
+
+
+def test_partial_fusion_fails_closed_on_ambiguous_or_invalid_requests():
+    with pytest.raises(ValueError, match="both resolve to 'speed'"):
+        zspace_partial_fusion([{"speed": 1.0, "velocity": 2.0}])
+    with pytest.raises(ValueError, match="weights length"):
+        zspace_partial_fusion([{"speed": 1.0}], weights=[])
+    with pytest.raises(ValueError, match="unknown variant"):
+        zspace_partial_fusion([{"speed": 1.0}], strategy="median")
+
+
+def test_zspace_fusion_functions_are_public():
+    assert st.zspace_partial_fusion is zspace_partial_fusion
+    assert st.zspace_telemetry_fusion is zspace_telemetry_fusion
+    assert "zspace_partial_fusion" in st.__all__
+    assert "zspace_telemetry_fusion" in st.__all__
+
+
+def test_z_notation_delegates_partial_semantics_to_rust():
+    assert st.z.bundle({"velocity": 0.5}) == {"speed": 0.5}
+    with pytest.raises(ValueError, match="both resolve to 'speed'"):
+        st.z.partial({"speed": 1.0, "velocity": 2.0})
+    with pytest.raises(ValueError, match="unknown Z-space metric"):
+        st.z.bundle({"not_a_metric": 1.0})
 
 
 def test_infer_with_partials_honours_last_strategy():

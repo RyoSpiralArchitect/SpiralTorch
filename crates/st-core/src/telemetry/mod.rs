@@ -31,6 +31,7 @@ pub mod noncollapse;
 pub mod region_visualizer;
 pub mod trace_init;
 pub mod xai_report;
+pub mod zspace_fusion;
 pub mod zspace_region;
 
 #[cfg(feature = "psi")]
