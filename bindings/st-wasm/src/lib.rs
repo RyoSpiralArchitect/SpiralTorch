@@ -7,6 +7,7 @@ mod reports;
 mod scale_stack;
 mod topos_control;
 mod topos_route;
+mod zspace_fusion;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas;
@@ -38,3 +39,4 @@ pub use topos_control::*;
 pub use topos_route::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;
+pub use zspace_fusion::*;

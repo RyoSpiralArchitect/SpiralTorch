@@ -1,6 +1,6 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, Py};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -12,6 +12,37 @@ use st_core::telemetry::dashboard::{
     DashboardEvent, DashboardFrame, DashboardMetric, DashboardRing, EventSeverity,
 };
 use st_core::telemetry::hub;
+use st_core::telemetry::zspace_fusion::{
+    fuse_zspace_partials, fuse_zspace_telemetry, ZSpacePartialFusionRequest,
+};
+
+fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(format!("{context}: {error}"))
+}
+
+#[pyfunction]
+fn _zspace_telemetry_fusion(py: Python<'_>, payloads: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let payloads = crate::json::py_to_json(payloads)?;
+    let payloads: Vec<serde_json::Value> = serde_json::from_value(payloads)
+        .map_err(|error| json_error("telemetry payloads must be a sequence of mappings", error))?;
+    let payload = fuse_zspace_telemetry(&payloads)
+        .map_err(|error| json_error("Z-space telemetry fusion failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space telemetry contract encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request: ZSpacePartialFusionRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space partial fusion request", error))?;
+    let payload = fuse_zspace_partials(request)
+        .map_err(|error| json_error("Z-space partial fusion failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space partial contract encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
 
 fn severity_from_str(value: &str) -> PyResult<EventSeverity> {
     match value.to_ascii_lowercase().as_str() {
@@ -648,6 +679,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(metric_root_token, &module)?)?;
     module.add_function(wrap_pyfunction!(infer_district, &module)?)?;
     module.add_function(wrap_pyfunction!(current, &module)?)?;
+    module.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, &module)?)?;
+    module.add_function(wrap_pyfunction!(_zspace_partial_fusion, &module)?)?;
     module.add(
         "__all__",
         vec![
@@ -669,6 +702,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add("DashboardEvent", module.getattr("DashboardEvent")?)?;
     parent.add("DashboardFrame", module.getattr("DashboardFrame")?)?;
     parent.add("DashboardRing", module.getattr("DashboardRing")?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_partial_fusion, parent)?)?;
     if let Ok(zspace) = parent.getattr("zspace") {
         if let Ok(feedback_cls) = zspace.getattr("SoftlogicZFeedback") {
             module.add("SoftlogicZFeedback", feedback_cls)?;

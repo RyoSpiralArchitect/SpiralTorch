@@ -6,7 +6,12 @@ import inspect
 import math
 import sys
 from dataclasses import dataclass
-from collections.abc import Iterable, Mapping as MappingABC, MutableMapping
+from collections.abc import (
+    Iterable,
+    Mapping as MappingABC,
+    MutableMapping,
+    Sequence as SequenceABC,
+)
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Sequence, Union
 from types import MappingProxyType
 
@@ -40,6 +45,8 @@ __all__ = [
     "infer_with_partials",
     "compile_inference",
     "blend_zspace_partials",
+    "zspace_partial_fusion",
+    "zspace_telemetry_fusion",
     "canvas_partial_from_snapshot",
     "canvas_coherence_partial",
     "elliptic_partial_from_telemetry",
@@ -80,98 +87,6 @@ _PRIMARY_ALIAS_GROUPS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 
 
-_METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
-    {
-        "speed": "speed",
-        "velocity": "speed",
-        "mem": "memory",
-        "memory": "memory",
-        "stab": "stability",
-        "stability": "stability",
-        "frac": "frac",
-        "frac_reg": "frac",
-        "fractality": "frac",
-        "drs": "drs",
-        "drift": "drs",
-        "gradient": "gradient",
-        "canvas_energy": "canvas_energy",
-        "canvas_mean": "canvas_mean",
-        "canvas_peak": "canvas_peak",
-        "canvas_balance": "canvas_balance",
-        "canvas_l1": "canvas_l1",
-        "canvas_l2": "canvas_l2",
-        "canvas_linf": "canvas_linf",
-        "canvas_pixels": "canvas_pixels",
-        "canvas_patch_energy": "canvas_patch_energy",
-        "canvas_patch_mean": "canvas_patch_mean",
-        "canvas_patch_peak": "canvas_patch_peak",
-        "canvas_patch_pixels": "canvas_patch_pixels",
-        "canvas_patch_balance": "canvas_patch_balance",
-        "hypergrad_norm": "hypergrad_norm",
-        "hypergrad_balance": "hypergrad_balance",
-        "hypergrad_mean": "hypergrad_mean",
-        "hypergrad_l1": "hypergrad_l1",
-        "hypergrad_l2": "hypergrad_l2",
-        "hypergrad_linf": "hypergrad_linf",
-        "realgrad_norm": "realgrad_norm",
-        "realgrad_balance": "realgrad_balance",
-        "realgrad_mean": "realgrad_mean",
-        "realgrad_l1": "realgrad_l1",
-        "realgrad_l2": "realgrad_l2",
-        "realgrad_linf": "realgrad_linf",
-        "coherence_mean": "coherence_mean",
-        "coherence_entropy": "coherence_entropy",
-        "coherence_energy_ratio": "coherence_energy_ratio",
-        "coherence_z_bias": "coherence_z_bias",
-        "coherence_fractional_order": "coherence_fractional_order",
-        "coherence_channels": "coherence_channels",
-        "coherence_preserved": "coherence_preserved",
-        "coherence_discarded": "coherence_discarded",
-        "coherence_dominant": "coherence_dominant",
-        "coherence_peak": "coherence_peak",
-        "coherence_weight_entropy": "coherence_weight_entropy",
-        "coherence_response_peak": "coherence_response_peak",
-        "coherence_response_mean": "coherence_response_mean",
-        "coherence_strength": "coherence_strength",
-        "coherence_prosody": "coherence_prosody",
-        "coherence_articulation": "coherence_articulation",
-        "import_l1": "import_l1",
-        "import_l2": "import_l2",
-        "import_linf": "import_linf",
-        "import_mean": "import_mean",
-        "import_variance": "import_variance",
-        "import_energy": "import_energy",
-        "import_count": "import_count",
-        "import_amplitude": "import_amplitude",
-        "import_balance": "import_balance",
-        "import_focus": "import_focus",
-        "elliptic_curvature": "elliptic_curvature",
-        "curvature_radius": "elliptic_curvature",
-        "elliptic_curvature_radius": "elliptic_curvature",
-        "elliptic_geodesic": "elliptic_geodesic",
-        "geodesic_radius": "elliptic_geodesic",
-        "elliptic_normalized": "elliptic_normalized",
-        "normalized_radius": "elliptic_normalized",
-        "elliptic_alignment": "elliptic_alignment",
-        "spin_alignment": "elliptic_alignment",
-        "elliptic_bias": "elliptic_bias",
-        "normal_bias": "elliptic_bias",
-        "elliptic_sheet_position": "elliptic_sheet_position",
-        "sheet_position": "elliptic_sheet_position",
-        "elliptic_sheet_index": "elliptic_sheet_index",
-        "sheet_index": "elliptic_sheet_index",
-        "elliptic_sheet_count": "elliptic_sheet_count",
-        "sheet_count": "elliptic_sheet_count",
-        "elliptic_sector": "elliptic_sector",
-        "topological_sector": "elliptic_sector",
-        "elliptic_homology": "elliptic_homology",
-        "homology_index": "elliptic_homology",
-        "elliptic_resonance": "elliptic_resonance",
-        "resonance_heat": "elliptic_resonance",
-        "elliptic_noise": "elliptic_noise",
-        "noise_density": "elliptic_noise",
-    }
-)
 _METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
 
 
@@ -215,6 +130,13 @@ def _unit_interval(value: Any, *, default: float = 0.0) -> float:
 
 _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
 _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
+_ZSPACE_FUSION_SEMANTIC_OWNER = "st-core::telemetry::zspace_fusion"
+_ZSPACE_TELEMETRY_FUSION_KIND = "spiraltorch.zspace_telemetry_fusion"
+_ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION = (
+    "spiraltorch.zspace_telemetry_fusion.v1"
+)
+_ZSPACE_PARTIAL_FUSION_KIND = "spiraltorch.zspace_partial_fusion"
+_ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION = "spiraltorch.zspace_partial_fusion.v1"
 _TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION = (
     "spiraltorch.topos_zspace_projection.v1"
 )
@@ -1148,17 +1070,82 @@ def _normalise_gradient(values: Sequence[float], length: int) -> list[float]:
 def _flatten_telemetry(
     payload: Mapping[str, Any], prefix: str = ""
 ) -> dict[str, float]:
-    flattened: dict[str, float] = {}
-    for key, value in payload.items():
-        label = f"{prefix}{key}" if prefix else str(key)
-        if isinstance(value, Mapping):
-            flattened.update(_flatten_telemetry(value, prefix=f"{label}."))
+    if not isinstance(payload, Mapping):
+        raise TypeError("telemetry payloads must be provided as mappings")
+    wrapped: Mapping[str, Any] = payload
+    label = prefix.rstrip(".")
+    if label:
+        wrapped = {label: dict(payload)}
+    return dict(zspace_telemetry_fusion(wrapped)["payload"])
+
+
+def _native_zspace_fusion(function_name: str, payload: Any) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    fuse = getattr(native, function_name, None)
+    if not callable(fuse):
+        raise RuntimeError(
+            "Z-space fusion requires the compiled Rust semantic core; "
+            f"rebuild or reinstall SpiralTorch with {function_name}"
+        )
+    contract = fuse(payload)
+    if not isinstance(contract, MappingABC):
+        raise RuntimeError("native Z-space fusion returned a non-mapping payload")
+    return dict(contract)
+
+
+def _validate_zspace_fusion_contract(
+    contract: Mapping[str, Any], *, kind: str, contract_version: str
+) -> None:
+    if (
+        contract.get("kind") != kind
+        or contract.get("contract_version") != contract_version
+        or contract.get("semantic_owner") != _ZSPACE_FUSION_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError("native Z-space fusion returned an untrusted contract")
+
+
+def _telemetry_inputs(
+    payloads: Sequence[Mapping[str, Any] | "ZSpaceTelemetryFrame" | None],
+) -> list[dict[str, Any]]:
+    normalised: list[dict[str, Any]] = []
+    for payload in payloads:
+        if payload is None:
             continue
-        try:
-            flattened[label] = float(value)
-        except (TypeError, ValueError):
-            continue
-    return flattened
+        if isinstance(payload, ZSpaceTelemetryFrame):
+            normalised.append(dict(payload.payload))
+        elif isinstance(payload, Mapping):
+            normalised.append(dict(payload))
+        else:
+            raise TypeError("telemetry payloads must be provided as mappings")
+    return normalised
+
+
+def zspace_telemetry_fusion(
+    *payloads: Mapping[str, Any]
+    | "ZSpaceTelemetryFrame"
+    | Sequence[Mapping[str, Any] | "ZSpaceTelemetryFrame" | None]
+    | None,
+) -> dict[str, Any]:
+    """Fuse telemetry through the canonical Rust contract."""
+
+    inputs: Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None] = payloads
+    if (
+        len(payloads) == 1
+        and isinstance(payloads[0], SequenceABC)
+        and not isinstance(payloads[0], (str, bytes, bytearray))
+    ):
+        inputs = payloads[0]
+    contract = _native_zspace_fusion(
+        "_zspace_telemetry_fusion", _telemetry_inputs(inputs)
+    )
+    _validate_zspace_fusion_contract(
+        contract,
+        kind=_ZSPACE_TELEMETRY_FUSION_KIND,
+        contract_version=_ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION,
+    )
+    return contract
 
 
 def _normalise_telemetry_payload(
@@ -1169,21 +1156,14 @@ def _normalise_telemetry_payload(
     if isinstance(payload, ZSpaceTelemetryFrame):
         return dict(payload.payload)
     if isinstance(payload, Mapping):
-        return _flatten_telemetry(payload)
+        return dict(zspace_telemetry_fusion(payload)["payload"])
     raise TypeError("telemetry payloads must be provided as mappings")
 
 
 def _merge_telemetry_payloads(
     *payloads: Mapping[str, Any] | "ZSpaceTelemetryFrame" | None,
 ) -> dict[str, float]:
-    merged: dict[str, float] = {}
-    for payload in payloads:
-        if payload is None:
-            continue
-        mapping = _normalise_telemetry_payload(payload)
-        if mapping:
-            merged.update(mapping)
-    return merged
+    return dict(zspace_telemetry_fusion(*payloads)["payload"])
 
 
 _ELLIPTIC_SAMPLE_KEYS = {
@@ -1309,20 +1289,6 @@ def _coerce_float_list(candidate: Any) -> list[float]:
         except (TypeError, ValueError):
             return []
     return result
-
-
-def _collect_bundle_telemetry(
-    partials: Sequence[Mapping[str, Any] | ZSpacePartialBundle | None],
-) -> dict[str, float]:
-    payloads: list[Mapping[str, Any]] = []
-    for partial in partials:
-        if isinstance(partial, ZSpacePartialBundle):
-            payload = partial.telemetry_payload()
-            if payload:
-                payloads.append(dict(payload))
-    if not payloads:
-        return {}
-    return _merge_telemetry_payloads(*payloads)
 
 
 def _flatten_values(candidate: Any) -> list[float]:
@@ -1495,19 +1461,19 @@ def _summarise_telemetry(
         return telemetry
     if not isinstance(telemetry, Mapping):
         raise TypeError("telemetry payloads must be provided as mappings")
-    flattened = _flatten_telemetry(telemetry)
-    if not flattened:
-        return ZSpaceTelemetryFrame(MappingProxyType({}), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    values = list(flattened.values())
-    stats = _vector_stats(values)
+    contract = zspace_telemetry_fusion(telemetry)
+    flattened = dict(contract["payload"])
+    stats = contract["summary"]
+    if not isinstance(stats, MappingABC):
+        raise RuntimeError("native Z-space telemetry summary is malformed")
     return ZSpaceTelemetryFrame(
         MappingProxyType(dict(flattened)),
-        mean=stats["mean"],
-        variance=stats["variance"],
-        amplitude=stats["amplitude"],
-        energy=stats["energy"],
-        balance=stats["balance"],
-        focus=stats["focus"],
+        mean=float(stats["mean"]),
+        variance=float(stats["variance"]),
+        amplitude=float(stats["amplitude"]),
+        energy=float(stats["energy"]),
+        balance=float(stats["balance"]),
+        focus=float(stats["focus"]),
     )
 
 
@@ -1599,45 +1565,117 @@ def _canonicalise_inputs(partial: Mapping[str, Any] | None) -> dict[str, Any]:
         return {}
     if not isinstance(partial, Mapping):
         raise TypeError("partial observations must be provided as a mapping")
-    resolved: dict[str, Any] = {}
-    for key, value in partial.items():
-        canonical = _METRIC_ALIASES.get(key.lower())
-        if canonical is None:
-            raise KeyError(f"unknown metric '{key}'")
-        resolved[canonical] = value
-    return resolved
+    return _metrics_from_fusion_contract(zspace_partial_fusion([partial]))
 
 
-def _ensure_iterable(values: Any) -> list[float]:
-    if isinstance(values, Mapping):
-        values = values.values()
-    if not isinstance(values, Iterable):
-        return []
-    result: list[float] = []
-    for value in values:
-        try:
-            result.append(float(value))
-        except (TypeError, ValueError):
-            continue
-    return result
+def _metric_input(value: Any) -> float | list[float]:
+    if isinstance(value, MappingABC):
+        value = value.values()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        return float(value)
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, Iterable):
+        return [float(entry) for entry in value]
+    return float(value)
 
 
-def _resolve_partial(
+def _partial_fusion_input(
     partial: Mapping[str, Any] | ZSpacePartialBundle | None,
-    *,
-    fallback_weight: float = 1.0,
-) -> tuple[dict[str, Any], float] | None:
+) -> dict[str, Any] | None:
     if partial is None:
         return None
-    weight = fallback_weight
     if isinstance(partial, ZSpacePartialBundle):
+        metrics = partial.metrics
         weight = float(partial.weight)
-        mapping = partial.resolved()
+        origin = partial.origin
+        telemetry = partial.telemetry_payload()
+    elif isinstance(partial, Mapping):
+        metrics = partial
+        weight = 1.0
+        origin = None
+        telemetry = None
     else:
-        mapping = _canonicalise_inputs(partial)
-    if weight <= 0.0:
-        return None
-    return mapping, weight
+        raise TypeError(
+            "partial observations must be mappings or ZSpacePartialBundle instances"
+        )
+    encoded = {
+        "metrics": {str(key): _metric_input(value) for key, value in metrics.items()},
+        "weight": weight,
+        "origin": origin,
+        "telemetry": None if telemetry is None else dict(telemetry),
+    }
+    return encoded
+
+
+def _partial_telemetry_inputs(
+    telemetry: Mapping[str, Any]
+    | ZSpaceTelemetryFrame
+    | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
+    | None,
+) -> list[dict[str, Any]]:
+    if telemetry is None:
+        return []
+    if isinstance(telemetry, (MappingABC, ZSpaceTelemetryFrame)):
+        return _telemetry_inputs((telemetry,))
+    if isinstance(telemetry, (str, bytes, bytearray, memoryview)):
+        raise TypeError("telemetry payloads must be provided as mappings")
+    return _telemetry_inputs(telemetry)
+
+
+def zspace_partial_fusion(
+    partials: Sequence[Mapping[str, Any] | ZSpacePartialBundle | None],
+    *,
+    weights: Sequence[float] | None = None,
+    strategy: str = "mean",
+    telemetry: Mapping[str, Any]
+    | ZSpaceTelemetryFrame
+    | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
+    | None = None,
+) -> dict[str, Any]:
+    """Fuse partial metrics and telemetry through the canonical Rust contract."""
+
+    if not isinstance(partials, Sequence) or isinstance(
+        partials, (str, bytes, bytearray, memoryview)
+    ):
+        raise TypeError("partials must be provided as a sequence")
+    request: dict[str, Any] = {
+        "partials": [_partial_fusion_input(partial) for partial in partials],
+        "strategy": str(strategy),
+        "telemetry": _partial_telemetry_inputs(telemetry),
+    }
+    if weights is not None:
+        request["weights"] = [float(weight) for weight in weights]
+    contract = _native_zspace_fusion("_zspace_partial_fusion", request)
+    _validate_zspace_fusion_contract(
+        contract,
+        kind=_ZSPACE_PARTIAL_FUSION_KIND,
+        contract_version=_ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION,
+    )
+    telemetry_contract = contract.get("telemetry")
+    if not isinstance(telemetry_contract, MappingABC):
+        raise RuntimeError("native Z-space partial fusion omitted telemetry contract")
+    _validate_zspace_fusion_contract(
+        telemetry_contract,
+        kind=_ZSPACE_TELEMETRY_FUSION_KIND,
+        contract_version=_ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION,
+    )
+    return contract
+
+
+def _metrics_from_fusion_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
+    metrics = contract.get("metrics")
+    if not isinstance(metrics, MappingABC):
+        raise RuntimeError("native Z-space partial fusion returned malformed metrics")
+    fused: dict[str, Any] = dict(metrics)
+    gradient = contract.get("gradient")
+    if gradient is not None:
+        if not isinstance(gradient, Sequence) or isinstance(
+            gradient, (str, bytes, bytearray, memoryview)
+        ):
+            raise RuntimeError("native Z-space partial fusion returned malformed gradient")
+        fused["gradient"] = [float(value) for value in gradient]
+    return fused
 
 
 def blend_zspace_partials(
@@ -1662,70 +1700,9 @@ def blend_zspace_partials(
         ``"min"``.
     """
 
-    if not isinstance(partials, Sequence):
-        raise TypeError("partials must be provided as a sequence")
-
-    def _reduce(values: list[tuple[float, float]]) -> float:
-        if not values:
-            return 0.0
-        if strategy == "last":
-            return values[-1][0]
-        if strategy == "max":
-            return max(value for value, _ in values)
-        if strategy == "min":
-            return min(value for value, _ in values)
-        # default: weighted mean
-        total_weight = sum(weight for _, weight in values)
-        if total_weight <= 0.0:
-            return values[-1][0]
-        return sum(value * weight for value, weight in values) / total_weight
-
-    aggregated: dict[str, list[tuple[float, float]]] = {}
-    gradients: list[tuple[list[float], float]] = []
-    default_weight = 1.0
-    for index, partial in enumerate(partials):
-        weight_override = None
-        if weights is not None:
-            try:
-                weight_override = float(weights[index])
-            except (IndexError, TypeError, ValueError):
-                weight_override = None
-        resolved = _resolve_partial(
-            partial,
-            fallback_weight=(
-                weight_override if weight_override is not None else default_weight
-            ),
-        )
-        if resolved is None:
-            continue
-        mapping, weight = resolved
-        gradient = mapping.pop("gradient", None)
-        for key, value in mapping.items():
-            try:
-                numeric = float(value)
-            except (TypeError, ValueError):
-                continue
-            aggregated.setdefault(key, []).append((numeric, weight))
-        if gradient is not None:
-            gradients.append((_ensure_iterable(gradient), weight))
-
-    merged = {key: _reduce(values) for key, values in aggregated.items()}
-
-    if gradients:
-        length = max((len(values) for values, _ in gradients), default=0)
-        if length:
-            total_weight = 0.0
-            accumulator = [0.0] * length
-            for values, weight in gradients:
-                padded = list(values) + [0.0] * (length - len(values))
-                for idx in range(length):
-                    accumulator[idx] += padded[idx] * weight
-                total_weight += weight
-            if total_weight > 0.0:
-                merged["gradient"] = [value / total_weight for value in accumulator]
-            else:
-                merged["gradient"] = gradients[-1][0]
-    return merged
+    return _metrics_from_fusion_contract(
+        zspace_partial_fusion(partials, weights=weights, strategy=strategy)
+    )
 
 
 def _aggregate_values(values: Sequence[float], mode: str) -> float:
@@ -2398,11 +2375,14 @@ class ZSpaceInferencePipeline:
         """Blend registered partials and compute the Z-space inference."""
 
         chosen_strategy = strategy or self._strategy
-        blended = blend_zspace_partials(
-            self._partials, strategy=chosen_strategy, weights=weights
+        fusion = zspace_partial_fusion(
+            self._partials,
+            strategy=chosen_strategy,
+            weights=weights,
+            telemetry=telemetry,
         )
-        bundle_telemetry = _collect_bundle_telemetry(self._partials)
-        merged_telemetry = _merge_telemetry_payloads(bundle_telemetry, telemetry)
+        blended = _metrics_from_fusion_contract(fusion)
+        merged_telemetry = dict(fusion["telemetry"]["payload"])
         inference = self._runtime.update(
             blended,
             telemetry=merged_telemetry if merged_telemetry else None,
@@ -2501,9 +2481,14 @@ def infer_with_partials(
 ) -> ZSpaceInference:
     """Infer Z-space metrics from multiple partial observations."""
 
-    blended = blend_zspace_partials(partials, weights=weights, strategy=strategy)
-    bundle_telemetry = _collect_bundle_telemetry(partials)
-    merged_telemetry = _merge_telemetry_payloads(bundle_telemetry, telemetry)
+    fusion = zspace_partial_fusion(
+        partials,
+        weights=weights,
+        strategy=strategy,
+        telemetry=telemetry,
+    )
+    blended = _metrics_from_fusion_contract(fusion)
+    merged_telemetry = dict(fusion["telemetry"]["payload"])
     return infer_from_partial(
         z_state,
         blended,

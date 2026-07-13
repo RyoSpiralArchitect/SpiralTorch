@@ -4062,6 +4062,31 @@ def blend_zspace_partials(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_partial_fusion(
+    partials: Sequence[Mapping[str, Any] | ZSpacePartialBundle | None],
+    *,
+    weights: Sequence[float] | None = ...,
+    strategy: str = ...,
+    telemetry: Mapping[str, Any]
+    | ZSpaceTelemetryFrame
+    | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
+    | None = ...,
+) -> Dict[str, Any]: ...
+
+
+@overload
+def zspace_telemetry_fusion(
+    payloads: Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None],
+    /,
+) -> Dict[str, Any]: ...
+
+
+@overload
+def zspace_telemetry_fusion(
+    *payloads: Mapping[str, Any] | ZSpaceTelemetryFrame | None,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10828,6 +10853,8 @@ __all__ = [
     "infer_with_partials",
     "compile_inference",
     "blend_zspace_partials",
+    "zspace_partial_fusion",
+    "zspace_telemetry_fusion",
     "inference_to_mapping",
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",
