@@ -7325,12 +7325,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertEqual(frame["row_type"], "hf_gpt2_finetune_training_telemetry")
         self.assertEqual(frame["status"], "ok")
+        self.assertEqual(
+            frame["projection_contract_version"],
+            "spiraltorch.training_telemetry_projection.v1",
+        )
+        self.assertEqual(
+            frame["projection_semantic_owner"],
+            "st-core::telemetry::training_projection",
+        )
+        self.assertEqual(frame["projection_semantic_backend"], "rust")
+        self.assertEqual(frame["signal_source"], "trainer_log_proxy")
+        self.assertEqual(frame["signal_semantics"], "surrogate")
         self.assertEqual(frame["loss_key"], "loss")
         self.assertAlmostEqual(frame["loss_delta"], -0.5)
         self.assertAlmostEqual(frame["loss_improvement"], 0.5)
         self.assertAlmostEqual(frame["progress"], 0.4)
         self.assertIn("pressure", frame["desire"])
         self.assertIn("total", frame["psi"])
+        self.assertAlmostEqual(frame["desire"]["pressure"], 0.8)
+        self.assertAlmostEqual(frame["desire"]["saturation"], 0.88)
+        self.assertAlmostEqual(frame["psi"]["total"], 0.48)
         telemetry = frame["telemetry"]
         self.assertIn("hf_ft.loss", telemetry)
         self.assertIn("hf_ft.desire.pressure", telemetry)
@@ -7388,6 +7402,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             frame["inference_distortion_handoff"]["recommended_probe"],
             "distort-002",
         )
+
+    def test_trainer_training_telemetry_frame_drops_non_finite_observations(
+        self,
+    ) -> None:
+        state = types.SimpleNamespace(
+            global_step=math.inf,
+            epoch=math.nan,
+            max_steps=10,
+        )
+
+        frame = hf_ft.hf_gpt2_finetune_training_telemetry_frame(
+            "log",
+            logs={
+                "loss": math.inf,
+                "grad_norm": math.nan,
+                "learning_rate": -math.inf,
+            },
+            state=state,
+            previous_loss=math.inf,
+        )
+
+        self.assertIsNone(frame["loss_key"])
+        self.assertIsNone(frame["loss"])
+        self.assertIsNone(frame["previous_loss"])
+        self.assertIsNone(frame["global_step"])
+        self.assertIsNone(frame["epoch"])
+        self.assertNotIn("hf_ft.loss", frame["telemetry"])
+        self.assertNotIn("hf_ft.grad_norm", frame["telemetry"])
+        self.assertNotIn("hf_ft.learning_rate", frame["telemetry"])
+        json.dumps(frame, allow_nan=False)
 
     def test_trainer_trace_summary_reports_throughput_and_eval_series(self) -> None:
         rows = [
