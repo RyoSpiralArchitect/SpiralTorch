@@ -1743,6 +1743,14 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert report["selection_profiles"]["quality"]["score"] > 0.0
     assert 0.0 <= selection_rows["open"]["selection_scores"]["balanced"] <= 1.0
     assert 0.0 <= selection_rows["guarded"]["selection_scores"]["grounded"] <= 1.0
+    assert report["selection_semantics"] == {
+        "kind": "spiraltorch.topos_route_policy",
+        "contract_version": "spiraltorch.topos_route_policy.v1",
+        "semantic_owner": "st-core::runtime::topos_route_policy",
+        "semantic_backend": "rust",
+        "row_count": 2,
+        "active_row_count": 2,
+    }
     assert any("multiple runtime modes" in item for item in report["recommendations"])
 
     report_from_memory = st.api_llm_topos_sweep_report(result)
@@ -1820,6 +1828,95 @@ def test_topos_sweep_route_rewards_train_stagent_policy() -> None:
     assert len(policy["update_events"]) == 3
     assert policy["truncated_update_events"] is True
     assert agent.epsilon == pytest.approx(0.0)
+
+
+def test_topos_route_policy_is_owned_by_rust_and_rejects_unknown_profiles() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {
+                "label": "guarded",
+                "count": 1,
+                "trace_route_score": 0.8,
+                "selection_scores": {"balanced": 0.7},
+            }
+        ],
+    }
+
+    rewards = st.api_llm_topos_sweep_route_rewards(report)
+    assert rewards[0]["profile"] == "balanced"
+    normalized = st.api_llm_topos_sweep_route_rewards(report, profile=" Grounded ")
+    assert normalized[0]["profile"] == "grounded"
+    assert normalized[0]["reward"] == pytest.approx(0.8)
+    with pytest.raises(ValueError, match="unknown route-policy profile 'commander'"):
+        st.api_llm_topos_sweep_route_rewards(report, profile="commander")
+
+
+def test_topos_route_policy_requires_the_native_semantic_core(monkeypatch) -> None:
+    monkeypatch.setattr(st, "_rs", None)
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [{"label": "guarded", "count": 1}],
+    }
+
+    with pytest.raises(RuntimeError, match="require the compiled Rust core"):
+        st.api_llm_topos_sweep_route_rewards(report)
+
+
+def test_topos_route_policy_selection_resolves_label_before_action_index() -> None:
+    policy = {
+        "selected_index": 0,
+        "selected_label": "guarded",
+        "route_rewards": [
+            {"index": 0, "label": "open", "reward": 0.2},
+            {"index": 1, "label": "guarded", "reward": 0.8},
+        ],
+    }
+
+    selection = st.api_llm_topos_route_policy_selection(policy)
+    assert selection["selected_label"] == "guarded"
+    assert selection["selected_index"] == 1
+    assert selection["route_reward"]["reward"] == pytest.approx(0.8)
+
+
+def test_topos_route_policy_selection_rejects_reward_identity_drift() -> None:
+    policy = {
+        "selected_index": 0,
+        "route_rewards": [
+            {"index": 1, "label": "guarded", "reward": 0.8},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="declares index 1; expected 0"):
+        st.api_llm_topos_route_policy_selection(policy)
+
+
+def test_topos_route_policy_wire_integers_are_target_independent() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {"label": "wide", "count": 2**32, "trace_route_score": 0.8},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="expected u32"):
+        st.api_llm_topos_sweep_route_rewards(report)
+
+
+@pytest.mark.parametrize("selected_index", [0.5, -1, 2**32, True, "0"])
+def test_topos_route_policy_selection_leaves_index_validation_to_rust(
+    selected_index: object,
+) -> None:
+    policy = {
+        "selected_index": selected_index,
+        "selected_label": "guarded",
+        "route_rewards": [
+            {"index": 0, "label": "guarded", "reward": 0.8},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="expected u32"):
+        st.api_llm_topos_route_policy_selection(policy)
 
 
 def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:

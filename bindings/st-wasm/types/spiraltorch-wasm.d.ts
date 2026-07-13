@@ -75,6 +75,124 @@ declare module "spiraltorch-wasm" {
         runtime_profile: ToposRuntimeProfile;
     };
 
+    export type ToposRoutePolicyProfile =
+        | "balanced"
+        | "quality"
+        | "grounded"
+        | "efficiency"
+        | "latency";
+
+    export type ToposRoutePolicyRow = {
+        label: string;
+        count?: number;
+        trace_route_score?: number | null;
+        trace_quality_score?: number | null;
+        trace_efficiency_score?: number | null;
+        trace_text_quality_score?: number | null;
+        response_text_quality_score?: number | null;
+        response_prompt_coverage?: number | null;
+        response_completion_rate?: number | null;
+        response_incomplete_rate?: number | null;
+        response_confidence?: number | null;
+        latency_ms_mean?: number | null;
+        total_tokens?: number | null;
+        adapter_runtime_route_score?: number | null;
+        adapter_guard_score?: number | null;
+        adapter_exploration_score?: number | null;
+        adapter_context_score?: number | null;
+        closure_pressure?: number | null;
+        openness?: number | null;
+        context_weight?: number | null;
+        request_temperature?: number | null;
+        mode?: string | null;
+        selection_scores?: Partial<Record<ToposRoutePolicyProfile, number>>;
+    };
+
+    export type ToposRoutePolicyWinner = {
+        label: string | null;
+        score: number;
+        trace_route_score: number;
+        trace_quality_score: number;
+        trace_efficiency_score: number;
+        response_text_quality_score: number;
+        response_prompt_coverage: number;
+        response_completion_rate: number;
+        latency_ms_mean: number;
+        total_tokens: number;
+        adapter_runtime_route_score: number;
+        adapter_guard_score: number;
+        adapter_context_score: number;
+        closure_pressure: number | null;
+        openness: number | null;
+        context_weight: number | null;
+    };
+
+    export type ToposRoutePolicyEvaluationRequest = {
+        rows: ToposRoutePolicyRow[];
+    };
+
+    export type ToposRoutePolicyEvaluation = {
+        kind: "spiraltorch.topos_route_policy";
+        contract_version: "spiraltorch.topos_route_policy.v1";
+        semantic_owner: "st-core::runtime::topos_route_policy";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        row_count: number;
+        active_row_count: number;
+        rows: ToposRoutePolicyRow[];
+        profiles: Record<ToposRoutePolicyProfile, ToposRoutePolicyWinner>;
+    };
+
+    export type ToposRouteRewardsRequest = {
+        rows: ToposRoutePolicyRow[];
+        profile?: ToposRoutePolicyProfile;
+    };
+
+    export type ToposRouteReward = {
+        index: number;
+        source_index: number;
+        label: string;
+        profile: ToposRoutePolicyProfile;
+        reward: number;
+        count: number;
+        trace_route_score: number;
+        response_text_quality_score: number;
+        response_completion_rate: number;
+        response_incomplete_rate: number;
+        adapter_runtime_route_score: number;
+    };
+
+    export type ToposRouteRewards = {
+        kind: "spiraltorch.topos_route_rewards";
+        contract_version: "spiraltorch.topos_route_policy.v1";
+        semantic_owner: "st-core::runtime::topos_route_policy";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        profile: ToposRoutePolicyProfile;
+        input_row_count: number;
+        reward_count: number;
+        rewards: ToposRouteReward[];
+    };
+
+    export type ToposRoutePolicyResolveRequest = {
+        rewards: ToposRouteReward[];
+        selected_label?: string | null;
+        selected_index?: number;
+    };
+
+    export type ToposRoutePolicyResolution = {
+        kind: "spiraltorch.topos_route_policy_resolution";
+        contract_version: "spiraltorch.topos_route_policy.v1";
+        semantic_owner: "st-core::runtime::topos_route_policy";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        resolution: "label" | "index" | "none";
+        selected_position: number | null;
+        selected_label: string | null;
+        selected_reward: number | null;
+        route_reward: ToposRouteReward | null;
+    };
+
     export type ToposControlSignalInput = {
         curvature?: number;
         tolerance?: number;
@@ -589,6 +707,18 @@ declare module "spiraltorch-wasm" {
     export function toposRuntimeRouteObject(
         profile: ToposRuntimeProfileInput,
     ): ToposRuntimeRoute;
+    export function toposRoutePolicyEvaluateJson(requestJson: string): string;
+    export function toposRoutePolicyEvaluateObject(
+        request: ToposRoutePolicyEvaluationRequest,
+    ): ToposRoutePolicyEvaluation;
+    export function toposRoutePolicyRewardsJson(requestJson: string): string;
+    export function toposRoutePolicyRewardsObject(
+        request: ToposRouteRewardsRequest,
+    ): ToposRouteRewards;
+    export function toposRoutePolicyResolveJson(requestJson: string): string;
+    export function toposRoutePolicyResolveObject(
+        request: ToposRoutePolicyResolveRequest,
+    ): ToposRoutePolicyResolution;
     export function toposControlSignalJson(inputJson: string): string;
     export function toposControlSignalObject(
         input: ToposControlSignalInput,
