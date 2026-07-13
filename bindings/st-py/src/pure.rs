@@ -1,4 +1,5 @@
 use num_complex::Complex32 as PyComplex32;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
@@ -14,9 +15,8 @@ use st_tensor::{
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposControlSignalInput,
     ToposInferenceHints, ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeProfileInput,
-    ToposRuntimeRoute, ToposRuntimeRouteScores, ToposTrainingHints, ToposTrainingPlan, ZBox,
-    ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
-    TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
+    ToposRuntimeRoute, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -31,6 +31,17 @@ fn st_complex_to_py(values: &[StComplex32]) -> Vec<PyComplex32> {
         .iter()
         .map(|value| PyComplex32::new(value.re, value.im))
         .collect()
+}
+
+fn serialized_payload_to_py<T: serde::Serialize>(
+    py: Python<'_>,
+    label: &str,
+    payload: T,
+) -> PyResult<PyObject> {
+    let value = serde_json::to_value(payload).map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to serialize {label}: {error}"))
+    })?;
+    crate::json::json_to_py(py, &value)
 }
 
 fn topos_control_signal_to_pydict(
@@ -161,98 +172,71 @@ fn topos_runtime_profile_to_pydict(
     py: Python<'_>,
     profile: ToposRuntimeProfile,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("training_gain", profile.training_gain())?;
-    dict.set_item("inference_gain", profile.inference_gain())?;
-    dict.set_item("closure_risk", profile.closure_risk())?;
-    dict.set_item("exploration_budget", profile.exploration_budget())?;
-    dict.set_item("control_energy", profile.control_energy())?;
-    dict.set_item("training_rate_scale", profile.training_rate_scale())?;
-    dict.set_item(
-        "training_gradient_bias_scale",
-        profile.training_gradient_bias_scale(),
-    )?;
-    dict.set_item("inference_temperature", profile.inference_temperature())?;
-    dict.set_item("inference_top_p", profile.inference_top_p())?;
-    dict.set_item(
-        "inference_context_weight",
-        profile.inference_context_weight(),
-    )?;
-    dict.set_item(
-        "learning_inference_balance",
-        profile.learning_inference_balance(),
-    )?;
-    dict.set_item("vector", profile.vector().to_vec())?;
-    Ok(dict.into_py(py))
-}
-
-fn topos_runtime_route_scores_to_pydict(
-    py: Python<'_>,
-    scores: ToposRuntimeRouteScores,
-) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("training", scores.training_score())?;
-    dict.set_item("inference", scores.inference_score())?;
-    dict.set_item("guard", scores.guard_score())?;
-    dict.set_item("exploration", scores.exploration_score())?;
-    dict.set_item("context", scores.context_score())?;
-    dict.set_item("vector", scores.vector().to_vec())?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos runtime profile", profile.payload())
 }
 
 fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("kind", "spiraltorch.topos_runtime_route")?;
-    dict.set_item("contract_version", TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION)?;
-    dict.set_item("semantic_owner", TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER)?;
-    dict.set_item("semantic_backend", "rust")?;
-    dict.set_item("mode", route.mode_label())?;
-    dict.set_item("mode_id", route.mode_id())?;
-    dict.set_item("score", route.score())?;
-    dict.set_item("score_key", route.score_key())?;
-    dict.set_item("learning_action", route.learning_action())?;
-    dict.set_item("inference_action", route.inference_action())?;
-    dict.set_item(
-        "scores",
-        topos_runtime_route_scores_to_pydict(py, route.scores())?,
-    )?;
-    dict.set_item(
-        "runtime_profile",
-        topos_runtime_profile_to_pydict(py, route.profile())?,
-    )?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos runtime route", route.payload())
+}
+
+fn topos_runtime_profile_input_from_pydict(
+    profile: &Bound<'_, PyDict>,
+) -> PyResult<ToposRuntimeProfileInput> {
+    fn item_or_default(profile: &Bound<'_, PyDict>, key: &str, default: f32) -> PyResult<f32> {
+        match profile.get_item(key)? {
+            Some(value) => value.extract(),
+            None => Ok(default),
+        }
+    }
+
+    // Direct extraction preserves non-finite values for canonical Rust normalization.
+    let defaults = ToposRuntimeProfileInput::default();
+    Ok(ToposRuntimeProfileInput {
+        training_gain: item_or_default(profile, "training_gain", defaults.training_gain)?,
+        inference_gain: item_or_default(profile, "inference_gain", defaults.inference_gain)?,
+        closure_risk: item_or_default(profile, "closure_risk", defaults.closure_risk)?,
+        exploration_budget: item_or_default(
+            profile,
+            "exploration_budget",
+            defaults.exploration_budget,
+        )?,
+        control_energy: item_or_default(profile, "control_energy", defaults.control_energy)?,
+        training_rate_scale: item_or_default(
+            profile,
+            "training_rate_scale",
+            defaults.training_rate_scale,
+        )?,
+        training_gradient_bias_scale: item_or_default(
+            profile,
+            "training_gradient_bias_scale",
+            defaults.training_gradient_bias_scale,
+        )?,
+        inference_temperature: item_or_default(
+            profile,
+            "inference_temperature",
+            defaults.inference_temperature,
+        )?,
+        inference_top_p: item_or_default(profile, "inference_top_p", defaults.inference_top_p)?,
+        inference_context_weight: item_or_default(
+            profile,
+            "inference_context_weight",
+            defaults.inference_context_weight,
+        )?,
+        learning_inference_balance: item_or_default(
+            profile,
+            "learning_inference_balance",
+            defaults.learning_inference_balance,
+        )?,
+    })
 }
 
 #[pyfunction(name = "_topos_runtime_route_from_profile")]
-#[pyo3(signature = (training_gain=1.0, inference_gain=1.0, closure_risk=0.0, exploration_budget=0.0, control_energy=0.0, training_rate_scale=1.0, training_gradient_bias_scale=0.0, inference_temperature=1.0, inference_top_p=1.0, inference_context_weight=1.0, learning_inference_balance=1.0))]
-#[allow(clippy::too_many_arguments)]
 fn py_topos_runtime_route_from_profile(
     py: Python<'_>,
-    training_gain: f32,
-    inference_gain: f32,
-    closure_risk: f32,
-    exploration_budget: f32,
-    control_energy: f32,
-    training_rate_scale: f32,
-    training_gradient_bias_scale: f32,
-    inference_temperature: f32,
-    inference_top_p: f32,
-    inference_context_weight: f32,
-    learning_inference_balance: f32,
+    profile: &Bound<'_, PyDict>,
 ) -> PyResult<PyObject> {
-    let profile = ToposRuntimeProfile::from_input(ToposRuntimeProfileInput {
-        training_gain,
-        inference_gain,
-        closure_risk,
-        exploration_budget,
-        control_energy,
-        training_rate_scale,
-        training_gradient_bias_scale,
-        inference_temperature,
-        inference_top_p,
-        inference_context_weight,
-        learning_inference_balance,
-    });
+    let profile =
+        ToposRuntimeProfile::from_input(topos_runtime_profile_input_from_pydict(profile)?);
     topos_runtime_route_to_pydict(py, profile.route())
 }
 

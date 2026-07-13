@@ -32,9 +32,11 @@ pub use self::topos::{
     MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlSignal,
     ToposControlSignalInput, ToposInferenceHints, ToposInferencePlan, ToposRuntimeMode,
-    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute, ToposRuntimeRouteScores,
+    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeProfilePayload, ToposRuntimeRoute,
+    ToposRuntimeRoutePayload, ToposRuntimeRouteScores, ToposRuntimeRouteScoresPayload,
     ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
     TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER, TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION,
+    TOPOS_RUNTIME_ROUTE_KIND, TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND,
     TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER,
 };
 

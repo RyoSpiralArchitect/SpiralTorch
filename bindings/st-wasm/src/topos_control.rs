@@ -74,20 +74,8 @@ pub fn topos_control_signal_value(input: ToposControlSignalInput) -> Result<Valu
         "sampling_focus": inference_plan.sampling_focus(),
         "vector": inference_plan.vector(),
     });
-    let runtime_profile = json!({
-        "training_gain": runtime_profile.training_gain(),
-        "inference_gain": runtime_profile.inference_gain(),
-        "closure_risk": runtime_profile.closure_risk(),
-        "exploration_budget": runtime_profile.exploration_budget(),
-        "control_energy": runtime_profile.control_energy(),
-        "training_rate_scale": runtime_profile.training_rate_scale(),
-        "training_gradient_bias_scale": runtime_profile.training_gradient_bias_scale(),
-        "inference_temperature": runtime_profile.inference_temperature(),
-        "inference_top_p": runtime_profile.inference_top_p(),
-        "inference_context_weight": runtime_profile.inference_context_weight(),
-        "learning_inference_balance": runtime_profile.learning_inference_balance(),
-        "vector": runtime_profile.vector(),
-    });
+    let runtime_profile = serde_json::to_value(runtime_profile.payload())
+        .expect("Topos runtime profile payload is serializable");
     let mut payload = json!({
         "kind": "spiraltorch.topos_control_signal",
         "contract_version": TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
