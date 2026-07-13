@@ -438,13 +438,12 @@ def test_topos_runtime_request_scales_hosted_llm_controls() -> None:
     assert damped_request["temperature"] == pytest.approx(0.741325)
 
 
-def test_topos_runtime_request_prefers_named_inference_hints() -> None:
+def test_topos_runtime_request_uses_named_inference_hints() -> None:
     request = st.topos_runtime_request(
         {
             "curvature": -0.9,
             "max_depth": 10,
             "max_volume": 100,
-            "temperature_scale": 1.3,
             "inference_hints": {
                 "temperature_scale": 0.5,
                 "top_p_scale": 0.7,
@@ -463,6 +462,18 @@ def test_topos_runtime_request_prefers_named_inference_hints() -> None:
     assert request["top_p"] == pytest.approx(0.63)
     assert request["frequency_penalty"] == pytest.approx(0.3)
     assert request["presence_penalty"] == pytest.approx(-0.1)
+
+
+def test_topos_runtime_request_rejects_derived_signal_overrides() -> None:
+    with pytest.raises(ValueError, match="derived fields are Rust-owned"):
+        st.topos_runtime_request(
+            {
+                "curvature": -0.9,
+                "max_depth": 10,
+                "max_volume": 100,
+                "temperature_scale": 1.3,
+            }
+        )
 
 
 def test_topos_runtime_adapter_is_serializable_context_payload() -> None:

@@ -43,8 +43,14 @@ pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND: &str = "rust";
 /// Stable contract identifier shared by Rust, Python, and WASM control-signal clients.
 pub const TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION: &str = "spiraltorch.topos_control_signal.v1";
 
+/// Stable payload kind shared by Rust, Python, and WASM control-signal clients.
+pub const TOPOS_CONTROL_SIGNAL_KIND: &str = "spiraltorch.topos_control_signal";
+
 /// Crate/module that owns open-topos control-signal semantics.
 pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER: &str = TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER;
+
+/// Backend label used when the canonical Rust control semantics produced a payload.
+pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND: &str = "rust";
 
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
     if !permeability.is_finite() {
@@ -210,6 +216,18 @@ impl Default for ToposControlSignalInput {
     }
 }
 
+/// External optimizer hints admitted by the canonical Rust control contract.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposTrainingHintsInput {
+    pub learning_rate_scale: Option<f32>,
+    pub regularization_scale: Option<f32>,
+    pub step_damping: Option<f32>,
+    pub gradient_bias_scale: Option<f32>,
+    pub clip_scale: Option<f32>,
+    pub momentum_damping: Option<f32>,
+}
+
 /// Named optimizer controls projected from an open-topos pressure signal.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToposTrainingHints {
@@ -238,6 +256,58 @@ pub struct ToposTrainingPlan {
 }
 
 impl ToposTrainingHints {
+    /// Normalizes external optimizer hints against a neutral training posture.
+    pub fn from_input(input: ToposTrainingHintsInput) -> Self {
+        Self {
+            learning_rate_scale: 1.0,
+            regularization_scale: 1.0,
+            step_damping: 0.0,
+            gradient_bias_scale: 0.0,
+            clip_scale: 1.0,
+            momentum_damping: 0.0,
+        }
+        .with_input(input)
+    }
+
+    /// Applies a partial external hint override while preserving canonical bounds.
+    pub fn with_input(&self, input: ToposTrainingHintsInput) -> Self {
+        Self {
+            learning_rate_scale: finite_or(
+                input
+                    .learning_rate_scale
+                    .unwrap_or(self.learning_rate_scale),
+                self.learning_rate_scale,
+            )
+            .clamp(0.1, 1.25),
+            regularization_scale: finite_or(
+                input
+                    .regularization_scale
+                    .unwrap_or(self.regularization_scale),
+                self.regularization_scale,
+            )
+            .clamp(0.5, 2.0),
+            step_damping: finite_or(
+                input.step_damping.unwrap_or(self.step_damping),
+                self.step_damping,
+            )
+            .clamp(0.0, 1.0),
+            gradient_bias_scale: finite_or(
+                input
+                    .gradient_bias_scale
+                    .unwrap_or(self.gradient_bias_scale),
+                self.gradient_bias_scale,
+            )
+            .clamp(0.0, 0.35),
+            clip_scale: finite_or(input.clip_scale.unwrap_or(self.clip_scale), self.clip_scale)
+                .clamp(0.25, 1.0),
+            momentum_damping: finite_or(
+                input.momentum_damping.unwrap_or(self.momentum_damping),
+                self.momentum_damping,
+            )
+            .clamp(0.0, 0.85),
+        }
+    }
+
     pub fn learning_rate_scale(&self) -> f32 {
         self.learning_rate_scale
     }
@@ -271,6 +341,19 @@ impl ToposTrainingHints {
             self.clip_scale,
             self.momentum_damping,
         ]
+    }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposTrainingHintsPayload {
+        ToposTrainingHintsPayload {
+            learning_rate_scale: self.learning_rate_scale,
+            regularization_scale: self.regularization_scale,
+            step_damping: self.step_damping,
+            gradient_bias_scale: self.gradient_bias_scale,
+            clip_scale: self.clip_scale,
+            momentum_damping: self.momentum_damping,
+            vector: self.vector(),
+        }
     }
 
     /// Applies a runtime gain and returns concrete optimizer controls.
@@ -351,6 +434,24 @@ impl ToposTrainingPlan {
             self.effective_momentum_damping,
         ]
     }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposTrainingPlanPayload {
+        ToposTrainingPlanPayload {
+            gain: self.gain,
+            learning_rate_scale: self.learning_rate_scale,
+            regularization_scale: self.regularization_scale,
+            step_damping: self.step_damping,
+            gradient_bias_scale: self.gradient_bias_scale,
+            clip_scale: self.clip_scale,
+            momentum_damping: self.momentum_damping,
+            raw_rate_scale: self.raw_rate_scale,
+            rate_scale: self.rate_scale,
+            effective_gradient_bias_scale: self.effective_gradient_bias_scale,
+            effective_momentum_damping: self.effective_momentum_damping,
+            vector: self.vector(),
+        }
+    }
 }
 
 /// Named hosted-inference controls projected from an open-topos pressure signal.
@@ -362,6 +463,103 @@ pub struct ToposInferenceHints {
     frequency_penalty_bias: f32,
     presence_penalty_bias: f32,
     context_weight: f32,
+}
+
+/// External inference hints admitted by the canonical Rust control contract.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposInferenceHintsInput {
+    pub temperature_scale: Option<f32>,
+    pub top_p_scale: Option<f32>,
+    pub sampling_focus: Option<f32>,
+    pub frequency_penalty_bias: Option<f32>,
+    pub presence_penalty_bias: Option<f32>,
+    pub context_weight: Option<f32>,
+}
+
+/// Sampling controls and provider bounds used to build a canonical inference plan.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposInferencePlanOptions {
+    pub gain: f32,
+    pub base_temperature: f32,
+    pub base_top_p: f32,
+    pub min_temperature: f32,
+    pub max_temperature: f32,
+    pub min_top_p: f32,
+    pub max_top_p: f32,
+    pub base_frequency_penalty: f32,
+    pub base_presence_penalty: f32,
+}
+
+impl Default for ToposInferencePlanOptions {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            base_temperature: 1.0,
+            base_top_p: 1.0,
+            min_temperature: 0.0,
+            max_temperature: 2.0,
+            min_top_p: 0.05,
+            max_top_p: 1.0,
+            base_frequency_penalty: 0.0,
+            base_presence_penalty: 0.0,
+        }
+    }
+}
+
+impl ToposInferencePlanOptions {
+    /// Validates provider bounds and normalizes non-finite runtime controls.
+    pub fn validated(self) -> PureResult<Self> {
+        for (label, value) in [
+            ("topos_inference_min_temperature", self.min_temperature),
+            ("topos_inference_max_temperature", self.max_temperature),
+            ("topos_inference_min_top_p", self.min_top_p),
+            ("topos_inference_max_top_p", self.max_top_p),
+        ] {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue { label, value });
+            }
+        }
+        if self.min_temperature < 0.0 || self.max_temperature < self.min_temperature {
+            return Err(TensorError::InvalidValue {
+                label: "topos_inference_temperature_bounds",
+            });
+        }
+        if self.min_top_p < 0.0 || self.max_top_p > 1.0 || self.max_top_p < self.min_top_p {
+            return Err(TensorError::InvalidValue {
+                label: "topos_inference_top_p_bounds",
+            });
+        }
+        Ok(Self {
+            gain: finite_non_negative(self.gain),
+            base_temperature: finite_or(self.base_temperature, 1.0),
+            base_top_p: finite_or(self.base_top_p, 1.0),
+            min_temperature: self.min_temperature,
+            max_temperature: self.max_temperature,
+            min_top_p: self.min_top_p,
+            max_top_p: self.max_top_p,
+            base_frequency_penalty: finite_or(self.base_frequency_penalty, 0.0),
+            base_presence_penalty: finite_or(self.base_presence_penalty, 0.0),
+        })
+    }
+}
+
+/// Gain and inference options used to derive the complete control payload.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposControlPlanOptions {
+    pub training_gain: f32,
+    pub inference: ToposInferencePlanOptions,
+}
+
+impl Default for ToposControlPlanOptions {
+    fn default() -> Self {
+        Self {
+            training_gain: 1.0,
+            inference: ToposInferencePlanOptions::default(),
+        }
+    }
 }
 
 /// Hosted-inference request controls after applying base sampling parameters.
@@ -491,6 +689,62 @@ pub struct ToposRuntimeProfilePayload {
     pub vector: [f32; 6],
 }
 
+/// Stable serialized view of optimizer hints.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposTrainingHintsPayload {
+    pub learning_rate_scale: f32,
+    pub regularization_scale: f32,
+    pub step_damping: f32,
+    pub gradient_bias_scale: f32,
+    pub clip_scale: f32,
+    pub momentum_damping: f32,
+    pub vector: [f32; 6],
+}
+
+/// Stable serialized view of gain-applied optimizer controls.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposTrainingPlanPayload {
+    pub gain: f32,
+    pub learning_rate_scale: f32,
+    pub regularization_scale: f32,
+    pub step_damping: f32,
+    pub gradient_bias_scale: f32,
+    pub clip_scale: f32,
+    pub momentum_damping: f32,
+    pub raw_rate_scale: f32,
+    pub rate_scale: f32,
+    pub effective_gradient_bias_scale: f32,
+    pub effective_momentum_damping: f32,
+    pub vector: [f32; 6],
+}
+
+/// Stable serialized view of hosted-inference hints.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposInferenceHintsPayload {
+    pub temperature_scale: f32,
+    pub top_p_scale: f32,
+    pub sampling_focus: f32,
+    pub frequency_penalty_bias: f32,
+    pub presence_penalty_bias: f32,
+    pub context_weight: f32,
+    pub vector: [f32; 6],
+}
+
+/// Stable serialized view of concrete hosted-inference controls.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposInferencePlanPayload {
+    pub gain: f32,
+    pub temperature: f32,
+    pub top_p: f32,
+    pub frequency_penalty: f32,
+    pub presence_penalty: f32,
+    pub context_weight: f32,
+    pub temperature_scale: f32,
+    pub top_p_scale: f32,
+    pub sampling_focus: f32,
+    pub vector: [f32; 6],
+}
+
 /// Stable serialized view of runtime-route component scores.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct ToposRuntimeRouteScoresPayload {
@@ -517,6 +771,44 @@ pub struct ToposRuntimeRoutePayload {
     pub inference_action: &'static str,
     pub scores: ToposRuntimeRouteScoresPayload,
     pub runtime_profile: ToposRuntimeProfilePayload,
+}
+
+/// Canonical control bundle shared by Rust, Python, and WASM clients.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposControlSignalPayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub curvature: f32,
+    pub tolerance: f32,
+    pub saturation: f32,
+    pub porosity: f32,
+    pub max_depth: usize,
+    pub max_volume: usize,
+    pub observed_depth: usize,
+    pub visited_volume: usize,
+    pub remaining_volume: usize,
+    pub depth_pressure: f32,
+    pub volume_pressure: f32,
+    pub closure_pressure: f32,
+    pub openness: f32,
+    pub guard_strength: f32,
+    pub stability_hint: f32,
+    pub exploration_hint: f32,
+    pub learning_rate_scale: f32,
+    pub temperature_scale: f32,
+    pub regularization_scale: f32,
+    pub step_damping: f32,
+    pub sampling_focus: f32,
+    pub runtime_hints: [f32; 5],
+    pub gradient: [f32; 6],
+    pub training_hints: ToposTrainingHintsPayload,
+    pub training_plan: ToposTrainingPlanPayload,
+    pub inference_hints: ToposInferenceHintsPayload,
+    pub inference_plan: ToposInferencePlanPayload,
+    pub runtime_profile: ToposRuntimeProfilePayload,
+    pub runtime_route: ToposRuntimeRoutePayload,
 }
 
 impl ToposRuntimeMode {
@@ -745,6 +1037,59 @@ impl ToposRuntimeRoute {
 }
 
 impl ToposInferenceHints {
+    /// Normalizes external inference hints against a neutral sampling posture.
+    pub fn from_input(input: ToposInferenceHintsInput) -> Self {
+        Self {
+            temperature_scale: 1.0,
+            top_p_scale: 1.0,
+            sampling_focus: 0.0,
+            frequency_penalty_bias: 0.0,
+            presence_penalty_bias: 0.0,
+            context_weight: 1.0,
+        }
+        .with_input(input)
+    }
+
+    /// Applies a partial external hint override while preserving canonical bounds.
+    pub fn with_input(&self, input: ToposInferenceHintsInput) -> Self {
+        Self {
+            temperature_scale: finite_or(
+                input.temperature_scale.unwrap_or(self.temperature_scale),
+                self.temperature_scale,
+            )
+            .clamp(0.5, 1.5),
+            top_p_scale: finite_or(
+                input.top_p_scale.unwrap_or(self.top_p_scale),
+                self.top_p_scale,
+            )
+            .clamp(0.05, 1.25),
+            sampling_focus: finite_or(
+                input.sampling_focus.unwrap_or(self.sampling_focus),
+                self.sampling_focus,
+            )
+            .clamp(0.0, 1.0),
+            frequency_penalty_bias: finite_or(
+                input
+                    .frequency_penalty_bias
+                    .unwrap_or(self.frequency_penalty_bias),
+                self.frequency_penalty_bias,
+            )
+            .clamp(-2.0, 2.0),
+            presence_penalty_bias: finite_or(
+                input
+                    .presence_penalty_bias
+                    .unwrap_or(self.presence_penalty_bias),
+                self.presence_penalty_bias,
+            )
+            .clamp(-2.0, 2.0),
+            context_weight: finite_or(
+                input.context_weight.unwrap_or(self.context_weight),
+                self.context_weight,
+            )
+            .clamp(0.25, 1.25),
+        }
+    }
+
     pub fn temperature_scale(&self) -> f32 {
         self.temperature_scale
     }
@@ -780,6 +1125,19 @@ impl ToposInferenceHints {
         ]
     }
 
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposInferenceHintsPayload {
+        ToposInferenceHintsPayload {
+            temperature_scale: self.temperature_scale,
+            top_p_scale: self.top_p_scale,
+            sampling_focus: self.sampling_focus,
+            frequency_penalty_bias: self.frequency_penalty_bias,
+            presence_penalty_bias: self.presence_penalty_bias,
+            context_weight: self.context_weight,
+            vector: self.vector(),
+        }
+    }
+
     /// Applies base sampling parameters and returns concrete hosted-LLM controls.
     pub fn plan(
         &self,
@@ -789,25 +1147,42 @@ impl ToposInferenceHints {
         base_frequency_penalty: f32,
         base_presence_penalty: f32,
     ) -> ToposInferencePlan {
-        let gain = finite_non_negative(gain);
+        self.plan_with_options(ToposInferencePlanOptions {
+            gain,
+            base_temperature,
+            base_top_p,
+            base_frequency_penalty,
+            base_presence_penalty,
+            ..ToposInferencePlanOptions::default()
+        })
+        .expect("default Topos inference bounds are valid")
+    }
+
+    /// Applies provider bounds and returns concrete hosted-LLM controls.
+    pub fn plan_with_options(
+        &self,
+        options: ToposInferencePlanOptions,
+    ) -> PureResult<ToposInferencePlan> {
+        let options = options.validated()?;
+        let gain = options.gain;
         let temperature_scale = (1.0 + gain * (self.temperature_scale - 1.0)).clamp(0.5, 1.5);
         let top_p_scale = (1.0 + gain * (self.top_p_scale - 1.0)).clamp(0.05, 1.25);
         let context_weight = (1.0 + gain * (self.context_weight - 1.0)).clamp(0.25, 1.25);
-        ToposInferencePlan {
+        Ok(ToposInferencePlan {
             gain,
-            temperature: (finite_or(base_temperature, 1.0) * temperature_scale).clamp(0.0, 2.0),
-            top_p: (finite_or(base_top_p, 1.0) * top_p_scale).clamp(0.05, 1.0),
-            frequency_penalty: (finite_or(base_frequency_penalty, 0.0)
+            temperature: (options.base_temperature * temperature_scale)
+                .clamp(options.min_temperature, options.max_temperature),
+            top_p: (options.base_top_p * top_p_scale).clamp(options.min_top_p, options.max_top_p),
+            frequency_penalty: (options.base_frequency_penalty
                 + gain * self.frequency_penalty_bias)
                 .clamp(-2.0, 2.0),
-            presence_penalty: (finite_or(base_presence_penalty, 0.0)
-                + gain * self.presence_penalty_bias)
+            presence_penalty: (options.base_presence_penalty + gain * self.presence_penalty_bias)
                 .clamp(-2.0, 2.0),
             context_weight,
             temperature_scale,
             top_p_scale,
             sampling_focus: self.sampling_focus,
-        }
+        })
     }
 }
 
@@ -857,6 +1232,22 @@ impl ToposInferencePlan {
             self.context_weight,
             self.sampling_focus,
         ]
+    }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposInferencePlanPayload {
+        ToposInferencePlanPayload {
+            gain: self.gain,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            frequency_penalty: self.frequency_penalty,
+            presence_penalty: self.presence_penalty,
+            context_weight: self.context_weight,
+            temperature_scale: self.temperature_scale,
+            top_p_scale: self.top_p_scale,
+            sampling_focus: self.sampling_focus,
+            vector: self.vector(),
+        }
     }
 }
 
@@ -1282,6 +1673,68 @@ impl ToposControlSignal {
             base_presence_penalty,
         )
         .route()
+    }
+
+    /// Returns the canonical default control bundle shared by every client.
+    pub fn payload(&self) -> ToposControlSignalPayload {
+        self.payload_with_options(ToposControlPlanOptions::default(), None, None)
+            .expect("default Topos control options are valid")
+    }
+
+    /// Derives one canonical control bundle from a signal, optional external hints, and plans.
+    pub fn payload_with_options(
+        &self,
+        options: ToposControlPlanOptions,
+        training_hints_input: Option<ToposTrainingHintsInput>,
+        inference_hints_input: Option<ToposInferenceHintsInput>,
+    ) -> PureResult<ToposControlSignalPayload> {
+        let training_hints = training_hints_input.map_or_else(
+            || self.training_hints(),
+            |input| self.training_hints().with_input(input),
+        );
+        let training_plan = training_hints.plan(options.training_gain);
+        let inference_hints = inference_hints_input.map_or_else(
+            || self.inference_hints(),
+            |input| self.inference_hints().with_input(input),
+        );
+        let inference_plan = inference_hints.plan_with_options(options.inference)?;
+        let runtime_profile = ToposRuntimeProfile::from_parts(self, training_plan, inference_plan);
+        let runtime_route = runtime_profile.route();
+        Ok(ToposControlSignalPayload {
+            kind: TOPOS_CONTROL_SIGNAL_KIND,
+            contract_version: TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
+            semantic_owner: TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
+            semantic_backend: TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND,
+            curvature: self.curvature,
+            tolerance: self.tolerance,
+            saturation: self.saturation,
+            porosity: self.porosity,
+            max_depth: self.max_depth,
+            max_volume: self.max_volume,
+            observed_depth: self.observed_depth,
+            visited_volume: self.visited_volume,
+            remaining_volume: self.remaining_volume,
+            depth_pressure: self.depth_pressure,
+            volume_pressure: self.volume_pressure,
+            closure_pressure: self.closure_pressure,
+            openness: self.openness,
+            guard_strength: self.guard_strength,
+            stability_hint: self.stability_hint,
+            exploration_hint: self.exploration_hint,
+            learning_rate_scale: self.learning_rate_scale,
+            temperature_scale: self.temperature_scale,
+            regularization_scale: self.regularization_scale,
+            step_damping: self.step_damping,
+            sampling_focus: self.sampling_focus,
+            runtime_hints: self.runtime_hints(),
+            gradient: self.gradient(),
+            training_hints: training_hints.payload(),
+            training_plan: training_plan.payload(),
+            inference_hints: inference_hints.payload(),
+            inference_plan: inference_plan.payload(),
+            runtime_profile: runtime_profile.payload(),
+            runtime_route: runtime_route.payload(),
+        })
     }
 
     /// Compact runtime hint vector for optimizers and inference adapters.
@@ -4703,6 +5156,148 @@ mod tests {
         let signal_route = signal.runtime_route(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
         assert_eq!(signal_route.mode(), route.mode());
         assert!((signal_route.score() - route.score()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn topos_control_payload_is_one_self_consistent_default_bundle() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            observed_depth: 16,
+            visited_volume: 128,
+            ..ToposControlSignalInput::default()
+        }));
+        let payload = signal.payload();
+
+        assert_eq!(payload.kind, TOPOS_CONTROL_SIGNAL_KIND);
+        assert_eq!(
+            payload.contract_version,
+            TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION
+        );
+        assert_eq!(payload.semantic_owner, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER);
+        assert_eq!(
+            payload.semantic_backend,
+            TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND
+        );
+        assert_eq!(payload.training_hints, signal.training_hints().payload());
+        assert_eq!(payload.training_plan, signal.training_plan(1.0).payload());
+        assert_eq!(payload.inference_hints, signal.inference_hints().payload());
+        assert_eq!(
+            payload.inference_plan,
+            signal.inference_plan(1.0, 1.0, 1.0, 0.0, 0.0).payload()
+        );
+        assert_eq!(
+            payload.runtime_route.runtime_profile,
+            payload.runtime_profile
+        );
+        assert_eq!(payload.runtime_hints, signal.runtime_hints());
+        assert_eq!(payload.gradient, signal.gradient());
+    }
+
+    #[test]
+    fn topos_control_payload_normalizes_partial_external_hints_in_rust() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            observed_depth: 32,
+            visited_volume: 256,
+            ..ToposControlSignalInput::default()
+        }));
+        let base_training = signal.training_hints();
+        let base_inference = signal.inference_hints();
+        let payload = unwrap_ok(signal.payload_with_options(
+            ToposControlPlanOptions {
+                training_gain: 0.5,
+                inference: ToposInferencePlanOptions {
+                    gain: 1.0,
+                    base_temperature: 0.8,
+                    base_top_p: 0.95,
+                    min_temperature: 0.6,
+                    max_temperature: 0.7,
+                    min_top_p: 0.8,
+                    max_top_p: 0.85,
+                    ..ToposInferencePlanOptions::default()
+                },
+            },
+            Some(ToposTrainingHintsInput {
+                learning_rate_scale: Some(10.0),
+                regularization_scale: Some(f32::NAN),
+                gradient_bias_scale: Some(-1.0),
+                clip_scale: Some(0.0),
+                ..ToposTrainingHintsInput::default()
+            }),
+            Some(ToposInferenceHintsInput {
+                temperature_scale: Some(10.0),
+                top_p_scale: Some(0.0),
+                presence_penalty_bias: Some(f32::NAN),
+                context_weight: Some(0.0),
+                ..ToposInferenceHintsInput::default()
+            }),
+        ));
+
+        assert_eq!(payload.training_hints.learning_rate_scale, 1.25);
+        assert_eq!(
+            payload.training_hints.regularization_scale,
+            base_training.regularization_scale()
+        );
+        assert_eq!(payload.training_hints.gradient_bias_scale, 0.0);
+        assert_eq!(payload.training_hints.clip_scale, 0.25);
+        assert_eq!(payload.training_plan.gain, 0.5);
+        assert!((payload.training_plan.raw_rate_scale - 0.3125).abs() < 1e-6);
+        assert!((payload.training_plan.rate_scale - 0.65625).abs() < 1e-6);
+        assert_eq!(payload.inference_hints.temperature_scale, 1.5);
+        assert_eq!(payload.inference_hints.top_p_scale, 0.05);
+        assert_eq!(payload.inference_hints.context_weight, 0.25);
+        assert_eq!(
+            payload.inference_hints.presence_penalty_bias,
+            base_inference.presence_penalty_bias()
+        );
+        assert_eq!(payload.inference_plan.temperature, 0.7);
+        assert_eq!(payload.inference_plan.top_p, 0.8);
+        assert_eq!(
+            payload.runtime_route.runtime_profile,
+            payload.runtime_profile
+        );
+    }
+
+    #[test]
+    fn topos_control_payload_rejects_invalid_provider_bounds() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(
+            ToposControlSignalInput::default(),
+        ));
+        let reversed = unwrap_err(signal.payload_with_options(
+            ToposControlPlanOptions {
+                inference: ToposInferencePlanOptions {
+                    min_temperature: 1.0,
+                    max_temperature: 0.5,
+                    ..ToposInferencePlanOptions::default()
+                },
+                ..ToposControlPlanOptions::default()
+            },
+            None,
+            None,
+        ));
+        assert!(matches!(
+            reversed,
+            TensorError::InvalidValue {
+                label: "topos_inference_temperature_bounds"
+            }
+        ));
+
+        let non_finite = unwrap_err(signal.payload_with_options(
+            ToposControlPlanOptions {
+                inference: ToposInferencePlanOptions {
+                    min_top_p: f32::NAN,
+                    ..ToposInferencePlanOptions::default()
+                },
+                ..ToposControlPlanOptions::default()
+            },
+            None,
+            None,
+        ));
+        assert!(matches!(
+            non_finite,
+            TensorError::NonFiniteValue {
+                label: "topos_inference_min_top_p",
+                ..
+            }
+        ));
     }
 
     #[test]
