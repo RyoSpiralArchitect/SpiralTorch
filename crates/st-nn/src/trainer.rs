@@ -55,6 +55,7 @@ use rand::rngs::StdRng;
 use rand::{seq::SliceRandom, SeedableRng};
 use serde_json::Value;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
 use st_core::ecosystem::{
@@ -94,12 +95,6 @@ use std::time::{Duration, Instant, SystemTime};
 #[cfg(all(test, feature = "selfsup"))]
 fn tensor_meta_observer_test_lock() -> std::sync::MutexGuard<'static, ()> {
     crate::test_global_state_lock()
-}
-
-#[cfg(test)]
-thread_local! {
-    static STRICT_GPU_TEST_OVERRIDE: std::cell::RefCell<Option<bool>> =
-        const { std::cell::RefCell::new(None) };
 }
 
 /// Adaptive curvature controller that nudges the trainer's hyperbolic geometry
@@ -2524,20 +2519,11 @@ fn is_wgpu_runtime_fallback(data: &Value) -> bool {
         || message.contains("WGPU backend not available")
 }
 
-fn strict_gpu_path() -> bool {
-    #[cfg(test)]
-    {
-        if let Some(value) = STRICT_GPU_TEST_OVERRIDE.with(|slot| *slot.borrow()) {
-            return value;
-        }
-    }
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
-}
-
-fn strict_expected_tensor_backend(caps: DeviceCaps) -> Option<BackendKind> {
-    if !strict_gpu_path() {
+fn strict_expected_tensor_backend(
+    caps: DeviceCaps,
+    accelerator_fallback: AcceleratorFallback,
+) -> Option<BackendKind> {
+    if !accelerator_fallback.is_strict() {
         return None;
     }
     match caps.backend {
@@ -4441,6 +4427,23 @@ impl ModuleTrainer {
         hyper_learning_rate: f32,
         fallback_learning_rate: f32,
     ) -> Self {
+        Self::new_with_execution_config(
+            caps,
+            ExecutionConfig::from_env(),
+            curvature,
+            hyper_learning_rate,
+            fallback_learning_rate,
+        )
+    }
+
+    /// Creates a trainer bound to an explicit, stable execution contract.
+    pub fn new_with_execution_config(
+        caps: DeviceCaps,
+        execution_config: ExecutionConfig,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
         #[cfg(feature = "psi")]
         let psi = Self::init_psi_meter();
 
@@ -4473,7 +4476,7 @@ impl ModuleTrainer {
 
         Self {
             epoch: 0,
-            planner: RankPlanner::new(caps),
+            planner: RankPlanner::with_execution_config(caps, execution_config),
             curvature,
             hyper_learning_rate,
             fallback_learning_rate,
@@ -5537,8 +5540,14 @@ impl ModuleTrainer {
         self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
-        let backend_policy = BackendPolicy::from_device_caps(self.planner.device_caps());
-        let strict_expected_backend = strict_expected_tensor_backend(self.planner.device_caps());
+        let backend_policy = BackendPolicy::from_device_caps_with_config(
+            self.planner.device_caps(),
+            self.planner.execution_config(),
+        );
+        let strict_expected_backend = strict_expected_tensor_backend(
+            self.planner.device_caps(),
+            self.planner.execution_config().accelerator_fallback,
+        );
         let trace_trainer_steps = global_registry().event_bus().has_listeners("TrainerStep");
         let trace_parameter_updates = trace_trainer_steps;
         let tensor_trace = Some(TensorOpMetaStepCollector::install());
@@ -6579,7 +6588,10 @@ impl ModuleTrainer {
         let result = (|| {
             let mut total_loss = 0.0f32;
             let mut steps = 0usize;
-            let backend_policy = BackendPolicy::from_device_caps(self.planner.device_caps());
+            let backend_policy = BackendPolicy::from_device_caps_with_config(
+                self.planner.device_caps(),
+                self.planner.execution_config(),
+            );
             for batch in batches.into_iter() {
                 let (input, target) = batch.into_batch()?;
                 validate_trainer_tensor("trainer_eval_input", &input)?;
@@ -7499,31 +7511,6 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        crate::test_global_state_lock()
-    }
-
-    struct StrictGpuOverrideRestore {
-        previous: Option<bool>,
-    }
-
-    impl Drop for StrictGpuOverrideRestore {
-        fn drop(&mut self) {
-            let previous = self.previous;
-            super::STRICT_GPU_TEST_OVERRIDE.with(|slot| {
-                *slot.borrow_mut() = previous;
-            });
-        }
-    }
-
-    fn with_strict_gpu_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let _lock = env_lock();
-        let override_value = value.map(|value| matches!(value, "1" | "true" | "TRUE"));
-        let previous = super::STRICT_GPU_TEST_OVERRIDE.with(|slot| slot.replace(override_value));
-        let _restore = StrictGpuOverrideRestore { previous };
-        f()
-    }
 
     fn build_language_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -10855,36 +10842,36 @@ mod tests {
 
     #[test]
     fn strict_gpu_trainer_rejects_cpu_tensor_backend_fallback() {
-        with_strict_gpu_env(Some("1"), || {
-            let caps = DeviceCaps::wgpu(32, true, 256);
-            let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
-            let mut model = Linear::new("strict_linear", 2, 1).unwrap();
-            trainer.prepare(&mut model).unwrap();
-            let before = model.weight().value().clone();
-            let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
-            let dataset = vec![(
-                Tensor::from_vec(2, 2, vec![0.5, -1.0, 1.5, 0.25]).unwrap(),
-                Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
-            )];
-            let mut loss = MeanSquaredError::new();
-            let err = trainer
-                .train_epoch(&mut model, &mut loss, dataset, &schedule)
-                .expect_err("strict GPU trainer should reject non-GPU tensor backend");
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
+        let mut trainer =
+            ModuleTrainer::new_with_execution_config(caps, execution_config, -1.0, 0.05, 0.01);
+        let mut model = Linear::new("strict_linear", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let before = model.weight().value().clone();
+        let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(2, 2, vec![0.5, -1.0, 1.5, 0.25]).unwrap(),
+            Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+        let err = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .expect_err("strict GPU trainer should reject non-GPU tensor backend");
 
-            match err {
-                TensorError::BackendFailure { backend, message } => {
-                    assert_eq!(backend, "wgpu");
-                    assert!(
-                        message.contains("SPIRALTORCH_STRICT_GPU")
-                            || message.contains("wgpu")
-                            || message.contains("WGPU"),
-                        "unexpected strict GPU message: {message}"
-                    );
-                }
-                other => panic!("unexpected error: {other:?}"),
+        match err {
+            TensorError::BackendFailure { backend, message } => {
+                assert_eq!(backend, "wgpu");
+                assert!(
+                    message.contains("SPIRALTORCH_STRICT_GPU")
+                        || message.contains("wgpu")
+                        || message.contains("WGPU"),
+                    "unexpected strict GPU message: {message}"
+                );
             }
-            assert_eq!(*model.weight().value(), before);
-        });
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(*model.weight().value(), before);
     }
 
     #[test]

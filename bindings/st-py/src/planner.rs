@@ -2,13 +2,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
-use std::ffi::OsString;
-use std::sync::{Mutex, OnceLock};
 
 use st_backend_hip as hip_backend;
 #[cfg(feature = "cuda")]
 use st_core::backend::cuda_exec::CudaExecutor;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
 #[cfg(feature = "cuda")]
@@ -31,7 +30,7 @@ use st_core::ops::rank_entry::execute_rank;
 use crate::json::json_to_py;
 #[cfg(feature = "kdsl")]
 use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
-use st_core::ops::rank_entry::{plan_rank, RankPlan};
+use st_core::ops::rank_entry::{plan_rank, plan_rank_with_config, RankPlan};
 #[cfg(feature = "kdsl")]
 use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
 
@@ -201,6 +200,16 @@ impl PyRankPlan {
     #[getter]
     fn effective_backend(&self) -> Option<&'static str> {
         self.effective_backend
+    }
+
+    #[getter]
+    fn accelerator_fallback(&self) -> &'static str {
+        self.inner.accelerator_fallback().as_str()
+    }
+
+    #[getter]
+    fn tensor_util_wgpu_min_values(&self) -> usize {
+        self.inner.execution_config.tensor_util_wgpu_min_values
     }
 
     #[getter]
@@ -513,49 +522,6 @@ fn parse_rank_kind(kind: &str) -> PyResult<RankKind> {
     }
 }
 
-fn strict_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("strict env lock available")
-}
-
-struct EnvVarRestore {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvVarRestore {
-    fn capture(key: &'static str) -> Self {
-        Self {
-            key,
-            previous: std::env::var_os(key),
-        }
-    }
-}
-
-impl Drop for EnvVarRestore {
-    fn drop(&mut self) {
-        if let Some(previous) = self.previous.as_ref() {
-            unsafe { std::env::set_var(self.key, previous) };
-        } else {
-            unsafe { std::env::remove_var(self.key) };
-        }
-    }
-}
-
-fn with_strict_gpu_env<T>(strict: bool, f: impl FnOnce() -> T) -> T {
-    let _guard = strict_env_lock();
-    let _restore = EnvVarRestore::capture("SPIRALTORCH_STRICT_GPU");
-    if strict {
-        unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", "1") };
-    } else {
-        unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", "0") };
-    }
-    f()
-}
-
 fn diagnostic_input(rows: u32, cols: u32) -> Vec<f32> {
     let mut input = Vec::with_capacity((rows as usize).saturating_mul(cols as usize));
     let cols_center = cols as f32 * 0.5;
@@ -578,62 +544,57 @@ fn execute_backend_probe(
     strict: bool,
 ) -> Result<(Vec<f32>, Vec<i32>), String> {
     let caps = build_caps(backend, None, None, None, None);
-    let plan = plan_rank(kind, rows, cols, k, caps);
+    let mut execution_config = ExecutionConfig::from_env();
+    execution_config.accelerator_fallback = if strict {
+        AcceleratorFallback::Forbid
+    } else {
+        AcceleratorFallback::Allow
+    };
+    let plan = plan_rank_with_config(kind, rows, cols, k, caps, execution_config);
     let input = diagnostic_input(rows, cols);
     let mut out_vals = vec![0.0f32; (rows as usize).saturating_mul(k as usize)];
     let mut out_idx = vec![0i32; (rows as usize).saturating_mul(k as usize)];
 
-    let launch = with_strict_gpu_env(strict, || -> Result<(), String> {
-        match backend {
-            BackendKind::Mps => Err("mps GPU probing is not wired yet".to_string()),
-            BackendKind::Cuda => {
-                #[cfg(feature = "cuda")]
-                {
-                    let buffers = LaunchBuffers::new(
-                        &input,
-                        rows,
-                        cols,
-                        k,
-                        out_vals.as_mut_slice(),
-                        out_idx.as_mut_slice(),
-                    )?;
-                    with_launch_buffers_cuda(buffers, || {
-                        execute_rank(&CudaExecutor::default(), &plan)
-                    })
-                }
-                #[cfg(not(feature = "cuda"))]
-                {
-                    Err("cuda feature is not enabled in this build".to_string())
-                }
+    let launch: Result<(), String> = match backend {
+        BackendKind::Mps => Err("mps GPU probing is not wired yet".to_string()),
+        BackendKind::Cuda => {
+            #[cfg(feature = "cuda")]
+            {
+                let buffers = LaunchBuffers::new(
+                    &input,
+                    rows,
+                    cols,
+                    k,
+                    out_vals.as_mut_slice(),
+                    out_idx.as_mut_slice(),
+                )?;
+                with_launch_buffers_cuda(buffers, || execute_rank(&CudaExecutor::default(), &plan))
             }
-            BackendKind::Hip => {
-                #[cfg(feature = "hip")]
-                {
-                    if strict && !cfg!(feature = "hip-real") {
-                        return Err(
-                            "hip-real feature is required for strict HIP GPU probing".to_string()
-                        );
-                    }
-                    let buffers = LaunchBuffers::new(
-                        &input,
-                        rows,
-                        cols,
-                        k,
-                        out_vals.as_mut_slice(),
-                        out_idx.as_mut_slice(),
-                    )?;
-                    with_launch_buffers_hip(buffers, || {
-                        execute_rank(&HipExecutor::default(), &plan)
-                    })
-                }
-                #[cfg(not(feature = "hip"))]
-                {
-                    Err("hip feature is not enabled in this build".to_string())
-                }
+            #[cfg(not(feature = "cuda"))]
+            {
+                Err("cuda feature is not enabled in this build".to_string())
             }
-            _ => Err("gpu probe supports only 'cuda' or 'hip' backends".to_string()),
         }
-    });
+        BackendKind::Hip => {
+            #[cfg(feature = "hip")]
+            {
+                let buffers = LaunchBuffers::new(
+                    &input,
+                    rows,
+                    cols,
+                    k,
+                    out_vals.as_mut_slice(),
+                    out_idx.as_mut_slice(),
+                )?;
+                with_launch_buffers_hip(buffers, || execute_rank(&HipExecutor::default(), &plan))
+            }
+            #[cfg(not(feature = "hip"))]
+            {
+                Err("hip feature is not enabled in this build".to_string())
+            }
+        }
+        _ => Err("gpu probe supports only 'cuda' or 'hip' backends".to_string()),
+    };
 
     launch.map(|_| (out_vals, out_idx))
 }

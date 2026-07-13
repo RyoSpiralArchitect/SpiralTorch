@@ -54,7 +54,7 @@ fn run_cuda_selection(plan: &RankPlan, selection: Selection) -> Result<(), Strin
             match cuda_runtime::run_selection(selection, plan, &mut buffers) {
                 Ok(()) => return Ok(()),
                 Err(err) => {
-                    if strict_gpu_path() {
+                    if plan.accelerator_fallback().is_strict() {
                         return Err(format!("cuda launch failed ({err}); fallback disabled"));
                     }
                     return run_selection(selection, plan, buffers).map_err(|soft_err| {
@@ -68,26 +68,24 @@ fn run_cuda_selection(plan: &RankPlan, selection: Selection) -> Result<(), Strin
 
         #[cfg(not(feature = "cuda"))]
         {
+            if plan.accelerator_fallback().is_strict() {
+                return Err(
+                    "cuda feature is not enabled; software fallback disabled by plan".to_string(),
+                );
+            }
             return run_selection(selection, plan, buffers);
         }
     })
-}
-
-fn strict_gpu_path() -> bool {
-    std::env::var("SPIRALTORCH_STRICT_GPU")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
+    use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
     use crate::backend::rankk_launch::LaunchSlices;
     use crate::backend::unison_heuristics::RankKind;
-    use crate::ops::rank_entry::plan_rank;
-    use std::ffi::OsString;
-    use std::sync::{Mutex, OnceLock};
+    use crate::ops::rank_entry::{plan_rank, plan_rank_with_config};
 
     const ROWS: u32 = 2;
     const COLS: u32 = 5;
@@ -110,6 +108,17 @@ mod tests {
             cols,
             k,
             DeviceCaps::cuda(32, 1024, Some(64 * 1024)),
+        )
+    }
+
+    fn strict_plan_with_shape(kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlan {
+        plan_rank_with_config(
+            kind,
+            rows,
+            cols,
+            k,
+            DeviceCaps::cuda(32, 1024, Some(64 * 1024)),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
         )
     }
 
@@ -149,49 +158,6 @@ mod tests {
         k: u32,
     ) -> LaunchBuffers<'a> {
         LaunchBuffers::new(input, rows, cols, k, out_vals, out_idx).expect("valid launch buffers")
-    }
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock available")
-    }
-
-    struct EnvVarRestore {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvVarRestore {
-        fn capture(key: &'static str) -> Self {
-            Self {
-                key,
-                previous: std::env::var_os(key),
-            }
-        }
-    }
-
-    impl Drop for EnvVarRestore {
-        fn drop(&mut self) {
-            if let Some(prev) = &self.previous {
-                unsafe { std::env::set_var(self.key, prev) };
-            } else {
-                unsafe { std::env::remove_var(self.key) };
-            }
-        }
-    }
-
-    fn with_strict_gpu_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let _lock = env_lock();
-        let _restore = EnvVarRestore::capture("SPIRALTORCH_STRICT_GPU");
-        if let Some(value) = value {
-            unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", value) };
-        } else {
-            unsafe { std::env::remove_var("SPIRALTORCH_STRICT_GPU") };
-        }
-        f()
     }
 
     #[test]
@@ -257,39 +223,6 @@ mod tests {
     }
 
     #[test]
-    fn strict_gpu_env_defaults_to_false_when_unset() {
-        with_strict_gpu_env(None, || {
-            assert!(!strict_gpu_path());
-        });
-    }
-
-    #[test]
-    fn strict_gpu_env_accepts_truthy_values() {
-        with_strict_gpu_env(Some("1"), || {
-            assert!(strict_gpu_path());
-        });
-        with_strict_gpu_env(Some("true"), || {
-            assert!(strict_gpu_path());
-        });
-        with_strict_gpu_env(Some("TRUE"), || {
-            assert!(strict_gpu_path());
-        });
-    }
-
-    #[test]
-    fn strict_gpu_env_rejects_non_truthy_values() {
-        with_strict_gpu_env(Some("0"), || {
-            assert!(!strict_gpu_path());
-        });
-        with_strict_gpu_env(Some("false"), || {
-            assert!(!strict_gpu_path());
-        });
-        with_strict_gpu_env(Some("yes"), || {
-            assert!(!strict_gpu_path());
-        });
-    }
-
-    #[test]
     fn cuda_midk_non_strict_falls_back_when_gpu_precheck_fails() {
         let rows = 1;
         let cols = LARGE_COLS;
@@ -315,40 +248,55 @@ mod tests {
 
         let mut out_vals = vec![0.0f32; (rows * k) as usize];
         let mut out_idx = vec![0i32; (rows * k) as usize];
-        with_strict_gpu_env(Some("0"), || {
-            with_launch_buffers_cuda(
-                launch_buffers_shape(&input, rows, cols, &mut out_vals, &mut out_idx, k),
-                || {
-                    CudaExecutor::default()
-                        .launch_midk(&plan)
-                        .expect("non-strict mode should fallback to software");
-                },
-            );
-        });
+        with_launch_buffers_cuda(
+            launch_buffers_shape(&input, rows, cols, &mut out_vals, &mut out_idx, k),
+            || {
+                CudaExecutor::default()
+                    .launch_midk(&plan)
+                    .expect("non-strict mode should fallback to software");
+            },
+        );
 
         assert_eq!(out_vals, expected_vals);
         assert_eq!(out_idx, expected_idx);
     }
 
     #[test]
+    #[cfg(feature = "cuda")]
     fn cuda_midk_strict_mode_blocks_fallback_when_gpu_precheck_fails() {
         let rows = 1;
         let cols = LARGE_COLS;
         let k = 5;
-        let plan = plan_with_shape(RankKind::MidK, rows, cols, k);
+        let plan = strict_plan_with_shape(RankKind::MidK, rows, cols, k);
         let input = sample_input_shape(rows, cols);
 
         let mut out_vals = vec![0.0f32; (rows * k) as usize];
         let mut out_idx = vec![0i32; (rows * k) as usize];
-        let err = with_strict_gpu_env(Some("1"), || {
-            with_launch_buffers_cuda(
-                launch_buffers_shape(&input, rows, cols, &mut out_vals, &mut out_idx, k),
-                || CudaExecutor::default().launch_midk(&plan),
-            )
-            .expect_err("strict mode should reject software fallback")
-        });
+        let err = with_launch_buffers_cuda(
+            launch_buffers_shape(&input, rows, cols, &mut out_vals, &mut out_idx, k),
+            || CudaExecutor::default().launch_midk(&plan),
+        )
+        .expect_err("strict mode should reject software fallback");
 
         assert!(err.contains("fallback disabled"));
         assert!(err.contains("supports cols"));
+    }
+
+    #[test]
+    #[cfg(not(feature = "cuda"))]
+    fn cuda_strict_plan_rejects_stub_fallback_when_feature_is_disabled() {
+        let plan = strict_plan_with_shape(RankKind::TopK, ROWS, COLS, 2);
+        let input = sample_input();
+        let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
+        let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
+
+        let err = with_launch_buffers_cuda(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || CudaExecutor::default().launch_topk(&plan),
+        )
+        .expect_err("strict plan must not execute the CUDA software stub");
+
+        assert!(err.contains("cuda feature is not enabled"));
+        assert!(err.contains("fallback disabled"));
     }
 }

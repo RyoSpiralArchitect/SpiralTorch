@@ -28,6 +28,7 @@ pub mod cuda_loader;
 #[cfg(feature = "cuda")]
 pub mod cuda_runtime;
 pub mod device_caps;
+pub mod execution_plan;
 #[cfg(feature = "hip")]
 pub mod hip_exec;
 #[cfg(feature = "hip-real")]

@@ -9,6 +9,7 @@ pub mod fractional;
 
 pub mod backend;
 pub mod dlpack;
+pub mod execution;
 mod hardmax;
 mod memory;
 pub mod observability;

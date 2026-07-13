@@ -478,6 +478,8 @@ def test_build_zspace_planner_snapshot_captures_device_and_plan() -> None:
         kind = "topk"
         requested_backend = "auto"
         effective_backend = "wgpu"
+        accelerator_fallback = "forbid"
+        tensor_util_wgpu_min_values = 1024
         rows = 8
         cols = 128
         k = 4
@@ -512,6 +514,8 @@ def test_build_zspace_planner_snapshot_captures_device_and_plan() -> None:
     assert snapshot["device_report"]["backend"] == "wgpu"
     assert snapshot["rank_plan"]["kind"] == "topk"
     assert snapshot["rank_plan"]["effective_backend"] == "wgpu"
+    assert snapshot["rank_plan"]["accelerator_fallback"] == "forbid"
+    assert snapshot["rank_plan"]["tensor_util_wgpu_min_values"] == 1024
     assert snapshot["rank_plan"]["workgroup"] == 128
     assert "errors" not in snapshot
 
