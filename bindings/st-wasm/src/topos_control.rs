@@ -1,10 +1,39 @@
-use serde_json::{json, Value};
-use st_tensor::{
-    TensorError, ToposControlSignal, ToposControlSignalInput,
-    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
-};
+use serde_json::Value;
+use st_tensor::{TensorError, ToposControlSignal, ToposControlSignalInput};
 
-use crate::topos_route::topos_runtime_route_from_route_value;
+const TOPOS_CONTROL_SIGNAL_INPUT_KEYS: &[&str] = &[
+    "curvature",
+    "tolerance",
+    "saturation",
+    "porosity",
+    "max_depth",
+    "max_volume",
+    "observed_depth",
+    "visited_volume",
+];
+
+fn topos_control_signal_input_from_value(value: Value) -> Result<ToposControlSignalInput, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Topos control signal input must be an object".to_owned())?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !TOPOS_CONTROL_SIGNAL_INPUT_KEYS.contains(&key.as_str()))
+    {
+        return Err(format!("unsupported Topos control signal key: {key}"));
+    }
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn topos_control_signal_input_from_json(
+    input_json: &str,
+) -> Result<ToposControlSignalInput, String> {
+    let value = serde_json::from_str(input_json).map_err(|error| error.to_string())?;
+    topos_control_signal_input_from_value(value)
+}
+
+#[cfg(test)]
+use st_tensor::TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION;
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -24,106 +53,23 @@ fn to_json_compatible_js(value: &Value) -> Result<JsValue, JsValue> {
 /// Build the shared Topos control-signal payload without introducing WASM semantics.
 pub fn topos_control_signal_value(input: ToposControlSignalInput) -> Result<Value, TensorError> {
     let signal = ToposControlSignal::from_input(input)?;
-    let training_hints = signal.training_hints();
-    let training_plan = signal.training_plan(1.0);
-    let inference_hints = signal.inference_hints();
-    let inference_plan = signal.inference_plan(1.0, 1.0, 1.0, 0.0, 0.0);
-    let runtime_profile = signal.runtime_profile(1.0, 1.0, 1.0, 1.0, 0.0, 0.0);
-    let runtime_route = signal.runtime_route(1.0, 1.0, 1.0, 1.0, 0.0, 0.0);
-    let training_hints = json!({
-        "learning_rate_scale": training_hints.learning_rate_scale(),
-        "regularization_scale": training_hints.regularization_scale(),
-        "step_damping": training_hints.step_damping(),
-        "gradient_bias_scale": training_hints.gradient_bias_scale(),
-        "clip_scale": training_hints.clip_scale(),
-        "momentum_damping": training_hints.momentum_damping(),
-        "vector": training_hints.vector(),
-    });
-    let training_plan = json!({
-        "gain": training_plan.gain(),
-        "learning_rate_scale": training_plan.learning_rate_scale(),
-        "regularization_scale": training_plan.regularization_scale(),
-        "step_damping": training_plan.step_damping(),
-        "gradient_bias_scale": training_plan.gradient_bias_scale(),
-        "clip_scale": training_plan.clip_scale(),
-        "momentum_damping": training_plan.momentum_damping(),
-        "raw_rate_scale": training_plan.raw_rate_scale(),
-        "rate_scale": training_plan.rate_scale(),
-        "effective_gradient_bias_scale": training_plan.effective_gradient_bias_scale(),
-        "effective_momentum_damping": training_plan.effective_momentum_damping(),
-        "vector": training_plan.vector(),
-    });
-    let inference_hints = json!({
-        "temperature_scale": inference_hints.temperature_scale(),
-        "top_p_scale": inference_hints.top_p_scale(),
-        "sampling_focus": inference_hints.sampling_focus(),
-        "frequency_penalty_bias": inference_hints.frequency_penalty_bias(),
-        "presence_penalty_bias": inference_hints.presence_penalty_bias(),
-        "context_weight": inference_hints.context_weight(),
-        "vector": inference_hints.vector(),
-    });
-    let inference_plan = json!({
-        "gain": inference_plan.gain(),
-        "temperature": inference_plan.temperature(),
-        "top_p": inference_plan.top_p(),
-        "frequency_penalty": inference_plan.frequency_penalty(),
-        "presence_penalty": inference_plan.presence_penalty(),
-        "context_weight": inference_plan.context_weight(),
-        "temperature_scale": inference_plan.temperature_scale(),
-        "top_p_scale": inference_plan.top_p_scale(),
-        "sampling_focus": inference_plan.sampling_focus(),
-        "vector": inference_plan.vector(),
-    });
-    let runtime_profile = serde_json::to_value(runtime_profile.payload())
-        .expect("Topos runtime profile payload is serializable");
-    let mut payload = json!({
-        "kind": "spiraltorch.topos_control_signal",
-        "contract_version": TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
-        "semantic_owner": TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
-        "semantic_backend": "rust",
-        "execution_client": "wasm",
-        "curvature": signal.curvature(),
-        "tolerance": signal.tolerance(),
-        "saturation": signal.saturation(),
-        "porosity": signal.porosity(),
-        "max_depth": signal.max_depth(),
-        "max_volume": signal.max_volume(),
-        "observed_depth": signal.observed_depth(),
-        "visited_volume": signal.visited_volume(),
-        "remaining_volume": signal.remaining_volume(),
-    });
-    let derived = json!({
-        "depth_pressure": signal.depth_pressure(),
-        "volume_pressure": signal.volume_pressure(),
-        "closure_pressure": signal.closure_pressure(),
-        "openness": signal.openness(),
-        "guard_strength": signal.guard_strength(),
-        "stability_hint": signal.stability_hint(),
-        "exploration_hint": signal.exploration_hint(),
-        "learning_rate_scale": signal.learning_rate_scale(),
-        "temperature_scale": signal.temperature_scale(),
-        "regularization_scale": signal.regularization_scale(),
-        "step_damping": signal.step_damping(),
-        "sampling_focus": signal.sampling_focus(),
-        "runtime_hints": signal.runtime_hints(),
-        "gradient": signal.gradient(),
-    });
-    let clients = json!({
-        "training_hints": training_hints,
-        "training_plan": training_plan,
-        "inference_hints": inference_hints,
-        "inference_plan": inference_plan,
-        "runtime_profile": runtime_profile,
-        "runtime_route": topos_runtime_route_from_route_value(runtime_route),
-    });
-    let Value::Object(ref mut payload_map) = payload else {
-        unreachable!("json object literal must serialize as an object")
-    };
-    for section in [derived, clients] {
-        let Value::Object(section) = section else {
-            unreachable!("json object literal must serialize as an object")
-        };
-        payload_map.extend(section);
+    let mut payload =
+        serde_json::to_value(signal.payload()).expect("Topos control payload is serializable");
+    let payload_map = payload
+        .as_object_mut()
+        .expect("Topos control payload is an object");
+    payload_map.insert(
+        "execution_client".to_owned(),
+        Value::String("wasm".to_owned()),
+    );
+    if let Some(route) = payload_map
+        .get_mut("runtime_route")
+        .and_then(Value::as_object_mut)
+    {
+        route.insert(
+            "execution_client".to_owned(),
+            Value::String("wasm".to_owned()),
+        );
     }
     Ok(payload)
 }
@@ -131,7 +77,7 @@ pub fn topos_control_signal_value(input: ToposControlSignalInput) -> Result<Valu
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = toposControlSignalJson)]
 pub fn topos_control_signal_json(input_json: &str) -> Result<String, JsValue> {
-    let input = serde_json::from_str::<ToposControlSignalInput>(input_json).map_err(js_error)?;
+    let input = topos_control_signal_input_from_json(input_json).map_err(js_error)?;
     let payload = topos_control_signal_value(input).map_err(js_error)?;
     serde_json::to_string(&payload).map_err(js_error)
 }
@@ -139,8 +85,8 @@ pub fn topos_control_signal_json(input_json: &str) -> Result<String, JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = toposControlSignalObject)]
 pub fn topos_control_signal_object(input: &JsValue) -> Result<JsValue, JsValue> {
-    let input = serde_wasm_bindgen::from_value::<ToposControlSignalInput>(input.clone())
-        .map_err(js_error)?;
+    let input = serde_wasm_bindgen::from_value::<Value>(input.clone()).map_err(js_error)?;
+    let input = topos_control_signal_input_from_value(input).map_err(js_error)?;
     let payload = topos_control_signal_value(input).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
@@ -175,11 +121,43 @@ mod tests {
     }
 
     #[test]
+    fn wasm_control_signal_matches_rust_payload_except_client_metadata() {
+        let input = ToposControlSignalInput {
+            porosity: 0.35,
+            max_depth: 12,
+            max_volume: 80,
+            observed_depth: 7,
+            visited_volume: 31,
+            ..ToposControlSignalInput::default()
+        };
+        let signal = ToposControlSignal::from_input(input).expect("valid control signal");
+        let expected = serde_json::to_value(signal.payload()).expect("serializable Rust payload");
+        let mut actual = topos_control_signal_value(input).expect("valid WASM payload");
+        let actual_map = actual.as_object_mut().expect("WASM payload object");
+        actual_map.remove("execution_client");
+        actual_map
+            .get_mut("runtime_route")
+            .and_then(Value::as_object_mut)
+            .expect("runtime route object")
+            .remove("execution_client");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn wasm_control_signal_rejects_invalid_topology() {
         let result = topos_control_signal_value(ToposControlSignalInput {
             curvature: f32::NAN,
             ..ToposControlSignalInput::default()
         });
         assert!(matches!(result, Err(TensorError::NonFiniteValue { .. })));
+    }
+
+    #[test]
+    fn wasm_control_signal_ingress_rejects_unknown_keys() {
+        let error = topos_control_signal_input_from_json(r#"{"porosity":0.25,"porostiy":0.75}"#)
+            .expect_err("unknown Topos control key must fail closed");
+
+        assert!(error.contains("unsupported Topos control signal key: porostiy"));
     }
 }

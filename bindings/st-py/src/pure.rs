@@ -1,5 +1,5 @@
 use num_complex::Complex32 as PyComplex32;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
@@ -13,10 +13,10 @@ use st_tensor::measure::{
 use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposControlSignalInput,
-    ToposInferenceHints, ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeProfileInput,
-    ToposRuntimeRoute, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
-    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER,
+    OpenCartesianTopos, Tensor, TensorBiome, ToposControlPlanOptions, ToposControlSignal,
+    ToposControlSignalInput, ToposInferenceHints, ToposInferenceHintsInput, ToposInferencePlan,
+    ToposInferencePlanOptions, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
+    ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingPlan, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -48,124 +48,26 @@ fn topos_control_signal_to_pydict(
     py: Python<'_>,
     signal: ToposControlSignal,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("kind", "spiraltorch.topos_control_signal")?;
-    dict.set_item("contract_version", TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION)?;
-    dict.set_item("semantic_owner", TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER)?;
-    dict.set_item("semantic_backend", "rust")?;
-    dict.set_item("curvature", signal.curvature())?;
-    dict.set_item("tolerance", signal.tolerance())?;
-    dict.set_item("saturation", signal.saturation())?;
-    dict.set_item("porosity", signal.porosity())?;
-    dict.set_item("max_depth", signal.max_depth())?;
-    dict.set_item("max_volume", signal.max_volume())?;
-    dict.set_item("observed_depth", signal.observed_depth())?;
-    dict.set_item("visited_volume", signal.visited_volume())?;
-    dict.set_item("remaining_volume", signal.remaining_volume())?;
-    dict.set_item("depth_pressure", signal.depth_pressure())?;
-    dict.set_item("volume_pressure", signal.volume_pressure())?;
-    dict.set_item("closure_pressure", signal.closure_pressure())?;
-    dict.set_item("openness", signal.openness())?;
-    dict.set_item("guard_strength", signal.guard_strength())?;
-    dict.set_item("stability_hint", signal.stability_hint())?;
-    dict.set_item("exploration_hint", signal.exploration_hint())?;
-    dict.set_item("learning_rate_scale", signal.learning_rate_scale())?;
-    dict.set_item("temperature_scale", signal.temperature_scale())?;
-    dict.set_item("regularization_scale", signal.regularization_scale())?;
-    dict.set_item("step_damping", signal.step_damping())?;
-    dict.set_item("sampling_focus", signal.sampling_focus())?;
-    dict.set_item("runtime_hints", signal.runtime_hints().to_vec())?;
-    dict.set_item("gradient", signal.gradient().to_vec())?;
-    dict.set_item(
-        "training_hints",
-        topos_training_hints_to_pydict(py, signal.training_hints())?,
-    )?;
-    dict.set_item(
-        "training_plan",
-        topos_training_plan_to_pydict(py, signal.training_plan(1.0))?,
-    )?;
-    dict.set_item(
-        "inference_hints",
-        topos_inference_hints_to_pydict(py, signal.inference_hints())?,
-    )?;
-    dict.set_item(
-        "inference_plan",
-        topos_inference_plan_to_pydict(py, signal.inference_plan(1.0, 1.0, 1.0, 0.0, 0.0))?,
-    )?;
-    dict.set_item(
-        "runtime_profile",
-        topos_runtime_profile_to_pydict(py, signal.runtime_profile(1.0, 1.0, 1.0, 1.0, 0.0, 0.0))?,
-    )?;
-    dict.set_item(
-        "runtime_route",
-        topos_runtime_route_to_pydict(py, signal.runtime_route(1.0, 1.0, 1.0, 1.0, 0.0, 0.0))?,
-    )?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos control signal", signal.payload())
 }
 
 fn topos_training_hints_to_pydict(py: Python<'_>, hints: ToposTrainingHints) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("learning_rate_scale", hints.learning_rate_scale())?;
-    dict.set_item("regularization_scale", hints.regularization_scale())?;
-    dict.set_item("step_damping", hints.step_damping())?;
-    dict.set_item("gradient_bias_scale", hints.gradient_bias_scale())?;
-    dict.set_item("clip_scale", hints.clip_scale())?;
-    dict.set_item("momentum_damping", hints.momentum_damping())?;
-    dict.set_item("vector", hints.vector().to_vec())?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos training hints", hints.payload())
 }
 
 fn topos_training_plan_to_pydict(py: Python<'_>, plan: ToposTrainingPlan) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("gain", plan.gain())?;
-    dict.set_item("learning_rate_scale", plan.learning_rate_scale())?;
-    dict.set_item("regularization_scale", plan.regularization_scale())?;
-    dict.set_item("step_damping", plan.step_damping())?;
-    dict.set_item("gradient_bias_scale", plan.gradient_bias_scale())?;
-    dict.set_item("clip_scale", plan.clip_scale())?;
-    dict.set_item("momentum_damping", plan.momentum_damping())?;
-    dict.set_item("raw_rate_scale", plan.raw_rate_scale())?;
-    dict.set_item("rate_scale", plan.rate_scale())?;
-    dict.set_item(
-        "effective_gradient_bias_scale",
-        plan.effective_gradient_bias_scale(),
-    )?;
-    dict.set_item(
-        "effective_momentum_damping",
-        plan.effective_momentum_damping(),
-    )?;
-    dict.set_item("vector", plan.vector().to_vec())?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos training plan", plan.payload())
 }
 
 fn topos_inference_hints_to_pydict(
     py: Python<'_>,
     hints: ToposInferenceHints,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("temperature_scale", hints.temperature_scale())?;
-    dict.set_item("top_p_scale", hints.top_p_scale())?;
-    dict.set_item("sampling_focus", hints.sampling_focus())?;
-    dict.set_item("frequency_penalty_bias", hints.frequency_penalty_bias())?;
-    dict.set_item("presence_penalty_bias", hints.presence_penalty_bias())?;
-    dict.set_item("context_weight", hints.context_weight())?;
-    dict.set_item("vector", hints.vector().to_vec())?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos inference hints", hints.payload())
 }
 
 fn topos_inference_plan_to_pydict(py: Python<'_>, plan: ToposInferencePlan) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
-    dict.set_item("gain", plan.gain())?;
-    dict.set_item("temperature", plan.temperature())?;
-    dict.set_item("top_p", plan.top_p())?;
-    dict.set_item("frequency_penalty", plan.frequency_penalty())?;
-    dict.set_item("presence_penalty", plan.presence_penalty())?;
-    dict.set_item("context_weight", plan.context_weight())?;
-    dict.set_item("temperature_scale", plan.temperature_scale())?;
-    dict.set_item("top_p_scale", plan.top_p_scale())?;
-    dict.set_item("sampling_focus", plan.sampling_focus())?;
-    dict.set_item("vector", plan.vector().to_vec())?;
-    Ok(dict.into_py(py))
+    serialized_payload_to_py(py, "Topos inference plan", plan.payload())
 }
 
 fn topos_runtime_profile_to_pydict(
@@ -179,50 +81,238 @@ fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> Py
     serialized_payload_to_py(py, "Topos runtime route", route.payload())
 }
 
+fn dict_f32_or_default(dict: &Bound<'_, PyDict>, key: &str, default: f32) -> PyResult<f32> {
+    match dict.get_item(key)? {
+        Some(value) => value.extract(),
+        None => Ok(default),
+    }
+}
+
+fn dict_usize_or_default(dict: &Bound<'_, PyDict>, key: &str, default: usize) -> PyResult<usize> {
+    match dict.get_item(key)? {
+        Some(value) => value.extract(),
+        None => Ok(default),
+    }
+}
+
+fn dict_optional_f32(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f32>> {
+    match dict.get_item(key)? {
+        Some(value) if !value.is_none() => value.extract().map(Some),
+        Some(_) | None => Ok(None),
+    }
+}
+
+fn validate_dict_keys(dict: &Bound<'_, PyDict>, label: &str, allowed: &[&str]) -> PyResult<()> {
+    for (key, _) in dict.iter() {
+        let key = key
+            .extract::<String>()
+            .map_err(|_| PyTypeError::new_err(format!("{label} keys must be strings")))?;
+        if !allowed.contains(&key.as_str()) {
+            return Err(PyValueError::new_err(format!(
+                "unsupported {label} key: {key}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn topos_control_signal_input_from_pydict(
+    signal: &Bound<'_, PyDict>,
+) -> PyResult<ToposControlSignalInput> {
+    validate_dict_keys(
+        signal,
+        "Topos control signal",
+        &[
+            "curvature",
+            "tolerance",
+            "saturation",
+            "porosity",
+            "max_depth",
+            "max_volume",
+            "observed_depth",
+            "visited_volume",
+        ],
+    )?;
+    let defaults = ToposControlSignalInput::default();
+    Ok(ToposControlSignalInput {
+        curvature: dict_f32_or_default(signal, "curvature", defaults.curvature)?,
+        tolerance: dict_f32_or_default(signal, "tolerance", defaults.tolerance)?,
+        saturation: dict_f32_or_default(signal, "saturation", defaults.saturation)?,
+        porosity: dict_f32_or_default(signal, "porosity", defaults.porosity)?,
+        max_depth: dict_usize_or_default(signal, "max_depth", defaults.max_depth)?,
+        max_volume: dict_usize_or_default(signal, "max_volume", defaults.max_volume)?,
+        observed_depth: dict_usize_or_default(signal, "observed_depth", defaults.observed_depth)?,
+        visited_volume: dict_usize_or_default(signal, "visited_volume", defaults.visited_volume)?,
+    })
+}
+
+fn topos_training_hints_input_from_pydict(
+    hints: &Bound<'_, PyDict>,
+) -> PyResult<ToposTrainingHintsInput> {
+    validate_dict_keys(
+        hints,
+        "Topos training hints",
+        &[
+            "learning_rate_scale",
+            "regularization_scale",
+            "step_damping",
+            "gradient_bias_scale",
+            "clip_scale",
+            "momentum_damping",
+            "vector",
+        ],
+    )?;
+    Ok(ToposTrainingHintsInput {
+        learning_rate_scale: dict_optional_f32(hints, "learning_rate_scale")?,
+        regularization_scale: dict_optional_f32(hints, "regularization_scale")?,
+        step_damping: dict_optional_f32(hints, "step_damping")?,
+        gradient_bias_scale: dict_optional_f32(hints, "gradient_bias_scale")?,
+        clip_scale: dict_optional_f32(hints, "clip_scale")?,
+        momentum_damping: dict_optional_f32(hints, "momentum_damping")?,
+    })
+}
+
+fn topos_inference_hints_input_from_pydict(
+    hints: &Bound<'_, PyDict>,
+) -> PyResult<ToposInferenceHintsInput> {
+    validate_dict_keys(
+        hints,
+        "Topos inference hints",
+        &[
+            "temperature_scale",
+            "top_p_scale",
+            "sampling_focus",
+            "frequency_penalty_bias",
+            "presence_penalty_bias",
+            "context_weight",
+            "vector",
+        ],
+    )?;
+    Ok(ToposInferenceHintsInput {
+        temperature_scale: dict_optional_f32(hints, "temperature_scale")?,
+        top_p_scale: dict_optional_f32(hints, "top_p_scale")?,
+        sampling_focus: dict_optional_f32(hints, "sampling_focus")?,
+        frequency_penalty_bias: dict_optional_f32(hints, "frequency_penalty_bias")?,
+        presence_penalty_bias: dict_optional_f32(hints, "presence_penalty_bias")?,
+        context_weight: dict_optional_f32(hints, "context_weight")?,
+    })
+}
+
+fn topos_control_plan_options_from_pydict(
+    options: Option<&Bound<'_, PyDict>>,
+) -> PyResult<ToposControlPlanOptions> {
+    let defaults = ToposControlPlanOptions::default();
+    let Some(options) = options else {
+        return Ok(defaults);
+    };
+    validate_dict_keys(
+        options,
+        "Topos control options",
+        &[
+            "training_gain",
+            "inference_gain",
+            "base_temperature",
+            "base_top_p",
+            "min_temperature",
+            "max_temperature",
+            "min_top_p",
+            "max_top_p",
+            "base_frequency_penalty",
+            "base_presence_penalty",
+        ],
+    )?;
+    let inference = defaults.inference;
+    Ok(ToposControlPlanOptions {
+        training_gain: dict_f32_or_default(options, "training_gain", defaults.training_gain)?,
+        inference: ToposInferencePlanOptions {
+            gain: dict_f32_or_default(options, "inference_gain", inference.gain)?,
+            base_temperature: dict_f32_or_default(
+                options,
+                "base_temperature",
+                inference.base_temperature,
+            )?,
+            base_top_p: dict_f32_or_default(options, "base_top_p", inference.base_top_p)?,
+            min_temperature: dict_f32_or_default(
+                options,
+                "min_temperature",
+                inference.min_temperature,
+            )?,
+            max_temperature: dict_f32_or_default(
+                options,
+                "max_temperature",
+                inference.max_temperature,
+            )?,
+            min_top_p: dict_f32_or_default(options, "min_top_p", inference.min_top_p)?,
+            max_top_p: dict_f32_or_default(options, "max_top_p", inference.max_top_p)?,
+            base_frequency_penalty: dict_f32_or_default(
+                options,
+                "base_frequency_penalty",
+                inference.base_frequency_penalty,
+            )?,
+            base_presence_penalty: dict_f32_or_default(
+                options,
+                "base_presence_penalty",
+                inference.base_presence_penalty,
+            )?,
+        },
+    })
+}
+
 fn topos_runtime_profile_input_from_pydict(
     profile: &Bound<'_, PyDict>,
 ) -> PyResult<ToposRuntimeProfileInput> {
-    fn item_or_default(profile: &Bound<'_, PyDict>, key: &str, default: f32) -> PyResult<f32> {
-        match profile.get_item(key)? {
-            Some(value) => value.extract(),
-            None => Ok(default),
-        }
-    }
-
+    validate_dict_keys(
+        profile,
+        "Topos runtime profile",
+        &[
+            "training_gain",
+            "inference_gain",
+            "closure_risk",
+            "exploration_budget",
+            "control_energy",
+            "training_rate_scale",
+            "training_gradient_bias_scale",
+            "inference_temperature",
+            "inference_top_p",
+            "inference_context_weight",
+            "learning_inference_balance",
+            "vector",
+        ],
+    )?;
     // Direct extraction preserves non-finite values for canonical Rust normalization.
     let defaults = ToposRuntimeProfileInput::default();
     Ok(ToposRuntimeProfileInput {
-        training_gain: item_or_default(profile, "training_gain", defaults.training_gain)?,
-        inference_gain: item_or_default(profile, "inference_gain", defaults.inference_gain)?,
-        closure_risk: item_or_default(profile, "closure_risk", defaults.closure_risk)?,
-        exploration_budget: item_or_default(
+        training_gain: dict_f32_or_default(profile, "training_gain", defaults.training_gain)?,
+        inference_gain: dict_f32_or_default(profile, "inference_gain", defaults.inference_gain)?,
+        closure_risk: dict_f32_or_default(profile, "closure_risk", defaults.closure_risk)?,
+        exploration_budget: dict_f32_or_default(
             profile,
             "exploration_budget",
             defaults.exploration_budget,
         )?,
-        control_energy: item_or_default(profile, "control_energy", defaults.control_energy)?,
-        training_rate_scale: item_or_default(
+        control_energy: dict_f32_or_default(profile, "control_energy", defaults.control_energy)?,
+        training_rate_scale: dict_f32_or_default(
             profile,
             "training_rate_scale",
             defaults.training_rate_scale,
         )?,
-        training_gradient_bias_scale: item_or_default(
+        training_gradient_bias_scale: dict_f32_or_default(
             profile,
             "training_gradient_bias_scale",
             defaults.training_gradient_bias_scale,
         )?,
-        inference_temperature: item_or_default(
+        inference_temperature: dict_f32_or_default(
             profile,
             "inference_temperature",
             defaults.inference_temperature,
         )?,
-        inference_top_p: item_or_default(profile, "inference_top_p", defaults.inference_top_p)?,
-        inference_context_weight: item_or_default(
+        inference_top_p: dict_f32_or_default(profile, "inference_top_p", defaults.inference_top_p)?,
+        inference_context_weight: dict_f32_or_default(
             profile,
             "inference_context_weight",
             defaults.inference_context_weight,
         )?,
-        learning_inference_balance: item_or_default(
+        learning_inference_balance: dict_f32_or_default(
             profile,
             "learning_inference_balance",
             defaults.learning_inference_balance,
@@ -238,6 +328,30 @@ fn py_topos_runtime_route_from_profile(
     let profile =
         ToposRuntimeProfile::from_input(topos_runtime_profile_input_from_pydict(profile)?);
     topos_runtime_route_to_pydict(py, profile.route())
+}
+
+#[pyfunction(name = "_topos_control_bundle_from_observation")]
+#[pyo3(signature = (signal, options=None, training_hints=None, inference_hints=None))]
+fn py_topos_control_bundle_from_observation(
+    py: Python<'_>,
+    signal: &Bound<'_, PyDict>,
+    options: Option<&Bound<'_, PyDict>>,
+    training_hints: Option<&Bound<'_, PyDict>>,
+    inference_hints: Option<&Bound<'_, PyDict>>,
+) -> PyResult<PyObject> {
+    let signal = ToposControlSignal::from_input(topos_control_signal_input_from_pydict(signal)?)
+        .map_err(tensor_err_to_py)?;
+    let options = topos_control_plan_options_from_pydict(options)?;
+    let training_hints = training_hints
+        .map(topos_training_hints_input_from_pydict)
+        .transpose()?;
+    let inference_hints = inference_hints
+        .map(topos_inference_hints_input_from_pydict)
+        .transpose()?;
+    let payload = signal
+        .payload_with_options(options, training_hints, inference_hints)
+        .map_err(tensor_err_to_py)?;
+    serialized_payload_to_py(py, "Topos control bundle", payload)
 }
 
 #[pyfunction(name = "_topos_control_signal_from_observation")]
@@ -1748,6 +1862,10 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
     m.add_function(wrap_pyfunction!(
         py_topos_control_signal_from_observation,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        py_topos_control_bundle_from_observation,
         m
     )?)?;
     m.add_function(wrap_pyfunction!(py_topos_runtime_route_from_profile, m)?)?;

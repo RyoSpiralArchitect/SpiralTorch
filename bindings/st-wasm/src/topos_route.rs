@@ -1,6 +1,43 @@
 use serde_json::Value;
 use st_tensor::{ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute};
 
+const TOPOS_RUNTIME_PROFILE_INPUT_KEYS: &[&str] = &[
+    "training_gain",
+    "inference_gain",
+    "closure_risk",
+    "exploration_budget",
+    "control_energy",
+    "training_rate_scale",
+    "training_gradient_bias_scale",
+    "inference_temperature",
+    "inference_top_p",
+    "inference_context_weight",
+    "learning_inference_balance",
+    "vector",
+];
+
+fn topos_runtime_profile_input_from_value(
+    value: Value,
+) -> Result<ToposRuntimeProfileInput, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Topos runtime profile input must be an object".to_owned())?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !TOPOS_RUNTIME_PROFILE_INPUT_KEYS.contains(&key.as_str()))
+    {
+        return Err(format!("unsupported Topos runtime profile key: {key}"));
+    }
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn topos_runtime_profile_input_from_json(
+    profile_json: &str,
+) -> Result<ToposRuntimeProfileInput, String> {
+    let value = serde_json::from_str(profile_json).map_err(|error| error.to_string())?;
+    topos_runtime_profile_input_from_value(value)
+}
+
 #[cfg(test)]
 use st_tensor::{TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER};
 
@@ -40,15 +77,15 @@ pub(crate) fn topos_runtime_route_from_route_value(route: ToposRuntimeRoute) -> 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = toposRuntimeRouteJson)]
 pub fn topos_runtime_route_json(profile_json: &str) -> Result<String, JsValue> {
-    let input = serde_json::from_str::<ToposRuntimeProfileInput>(profile_json).map_err(js_error)?;
+    let input = topos_runtime_profile_input_from_json(profile_json).map_err(js_error)?;
     serde_json::to_string(&topos_runtime_route_value(input)).map_err(js_error)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = toposRuntimeRouteObject)]
 pub fn topos_runtime_route_object(profile: &JsValue) -> Result<JsValue, JsValue> {
-    let input = serde_wasm_bindgen::from_value::<ToposRuntimeProfileInput>(profile.clone())
-        .map_err(js_error)?;
+    let input = serde_wasm_bindgen::from_value::<Value>(profile.clone()).map_err(js_error)?;
+    let input = topos_runtime_profile_input_from_value(input).map_err(js_error)?;
     to_json_compatible_js(&topos_runtime_route_value(input))
 }
 
@@ -100,7 +137,7 @@ mod tests {
 
     #[test]
     fn wasm_profile_json_accepts_partial_and_roundtrip_payloads() {
-        let input = serde_json::from_str::<ToposRuntimeProfileInput>(
+        let input = topos_runtime_profile_input_from_json(
             r#"{"closure_risk":0.7,"vector":[0.0,0.7,0.0,1.0,1.0,1.0]}"#,
         )
         .expect("partial runtime profile");
@@ -112,5 +149,14 @@ mod tests {
         assert!((closure_risk - 0.7).abs() < 1e-6);
         assert_eq!(payload["runtime_profile"]["training_gain"], 1.0);
         assert_eq!(payload["runtime_profile"]["inference_top_p"], 1.0);
+    }
+
+    #[test]
+    fn wasm_profile_ingress_rejects_unknown_keys() {
+        let error =
+            topos_runtime_profile_input_from_json(r#"{"closure_risk":0.7,"closure_riks":0.2}"#)
+                .expect_err("unknown Topos runtime profile key must fail closed");
+
+        assert!(error.contains("unsupported Topos runtime profile key: closure_riks"));
     }
 }

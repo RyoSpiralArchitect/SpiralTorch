@@ -46,14 +46,20 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
         0.0786561
     )
     assert signal["inference_hints"]["top_p_scale"] == pytest.approx(0.890274375)
-    assert signal["inference_hints"]["frequency_penalty_bias"] == pytest.approx(0.28540109375)
-    assert signal["inference_hints"]["presence_penalty_bias"] == pytest.approx(-0.038100625)
+    assert signal["inference_hints"]["frequency_penalty_bias"] == pytest.approx(
+        0.28540109375
+    )
+    assert signal["inference_hints"]["presence_penalty_bias"] == pytest.approx(
+        -0.038100625
+    )
     assert signal["inference_hints"]["context_weight"] == pytest.approx(0.9225)
     assert signal["inference_plan"]["temperature"] == pytest.approx(0.8533125)
     assert signal["inference_plan"]["top_p"] == pytest.approx(0.890274375)
     assert signal["runtime_profile"]["closure_risk"] == pytest.approx(0.4451)
     assert signal["runtime_profile"]["exploration_budget"] == pytest.approx(0.4555)
-    assert signal["runtime_profile"]["control_energy"] == pytest.approx(0.4041837060714286)
+    assert signal["runtime_profile"]["control_energy"] == pytest.approx(
+        0.4041837060714286
+    )
     assert signal["runtime_profile"]["learning_inference_balance"] == pytest.approx(
         0.9104766571449497
     )
@@ -65,20 +71,12 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     )
 
 
-def test_raw_topos_control_input_prefers_native_semantic_owner(monkeypatch) -> None:
+def test_raw_topos_control_input_uses_native_bundle_ingress() -> None:
     native = getattr(st, "_rs", None)
-    native_signal = getattr(native, "_topos_control_signal_from_observation", None)
-    if not callable(native_signal):
-        pytest.skip("native control-signal ingress requires a freshly built extension")
+    native_bundle = getattr(native, "_topos_control_bundle_from_observation", None)
+    if not callable(native_bundle):
+        pytest.skip("native control-bundle ingress requires a freshly built extension")
 
-    def fail_python_fallback(*_args, **_kwargs):
-        raise AssertionError("Python control-signal semantics should not run")
-
-    monkeypatch.setattr(
-        zspace_inference_module,
-        "_normalise_topos_control_signal",
-        fail_python_fallback,
-    )
     signal = st.topos_control_signal(
         {
             "curvature": -0.9,
@@ -95,33 +93,99 @@ def test_raw_topos_control_input_prefers_native_semantic_owner(monkeypatch) -> N
     assert signal["closure_pressure"] == pytest.approx(0.4)
 
 
-def test_derived_topos_overrides_remain_explicitly_exploratory() -> None:
+def test_derived_topos_overrides_are_rejected() -> None:
+    with pytest.raises(ValueError, match="derived fields are Rust-owned"):
+        st.topos_control_signal(
+            {
+                "porosity": 0.25,
+                "max_depth": 10,
+                "max_volume": 100,
+                "guard_strength": 0.99,
+            }
+        )
+
+
+def test_topos_control_signal_rejects_non_string_keys() -> None:
+    with pytest.raises(TypeError, match="keys must be strings"):
+        st.topos_control_signal({1: 0.25})
+
+
+def test_partial_external_hints_are_normalized_by_rust() -> None:
     signal = st.topos_control_signal(
         {
-            "contract_version": "spiraltorch.topos_control_signal.v1",
-            "semantic_owner": "st-tensor::pure::topos",
-            "semantic_backend": "rust",
             "porosity": 0.25,
             "max_depth": 10,
             "max_volume": 100,
-            "observed_depth": 4,
-            "visited_volume": 25,
-            "guard_strength": 0.99,
-        }
+            "training_hints": {
+                "learning_rate_scale": 99.0,
+                "clip_scale": 0.0,
+            },
+            "inference_hints": {
+                "top_p_scale": 0.0,
+                "context_weight": 99.0,
+            },
+        },
+        observed_depth=4,
+        visited_volume=25,
     )
 
-    assert signal["semantic_backend"] == "python_exploratory"
-    assert signal["guard_strength"] == pytest.approx(0.99)
+    assert signal["semantic_backend"] == "rust"
+    assert signal["training_hints"]["learning_rate_scale"] == pytest.approx(1.25)
+    assert signal["training_hints"]["clip_scale"] == pytest.approx(0.25)
+    assert signal["training_plan"]["raw_rate_scale"] == pytest.approx(0.3125)
+    assert signal["inference_hints"]["top_p_scale"] == pytest.approx(0.05)
+    assert signal["inference_hints"]["context_weight"] == pytest.approx(1.25)
+    assert signal["runtime_profile"]["inference_context_weight"] == pytest.approx(1.25)
+
+
+def test_nested_topos_hint_typos_are_rejected_at_native_boundary() -> None:
+    with pytest.raises(ValueError, match="unsupported Topos inference hints key"):
+        st.topos_control_signal(
+            {
+                "inference_hints": {"tempereture_scale": 0.8},
+            }
+        )
+
+
+def test_topos_plan_option_typos_are_rejected_at_native_boundary() -> None:
+    native = getattr(st, "_rs", None)
+    native_bundle = getattr(native, "_topos_control_bundle_from_observation", None)
+    if not callable(native_bundle):
+        pytest.skip("native control-bundle ingress requires a freshly built extension")
+
+    with pytest.raises(ValueError, match="unsupported Topos control options key"):
+        native_bundle({}, {"inference_gian": 0.5})
+
+
+def test_topos_control_signal_fails_closed_without_rust_semantics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_native_topos_control_bundle_from_observation",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
+        st.topos_control_signal({"porosity": 0.25})
 
 
 def test_raw_topos_control_input_rejects_non_finite_geometry() -> None:
     native = getattr(st, "_rs", None)
-    native_signal = getattr(native, "_topos_control_signal_from_observation", None)
-    if not callable(native_signal):
-        pytest.skip("native control-signal ingress requires a freshly built extension")
+    native_bundle = getattr(native, "_topos_control_bundle_from_observation", None)
+    if not callable(native_bundle):
+        pytest.skip("native control-bundle ingress requires a freshly built extension")
 
-    with pytest.raises(ValueError, match="non-finite value detected for topos_curvature"):
+    with pytest.raises(
+        ValueError, match="non-finite value detected for topos_curvature"
+    ):
         st.topos_control_signal({"curvature": float("nan")})
+
+
+def test_topos_inference_plan_rejects_invalid_provider_bounds() -> None:
+    with pytest.raises(ValueError, match="topos_inference_temperature_bounds"):
+        st.topos_inference_plan(min_temperature=1.0, max_temperature=0.5)
+
+    with pytest.raises(ValueError, match="topos_inference_top_p_bounds"):
+        st.topos_inference_plan(min_top_p=0.9, max_top_p=0.5)
 
 
 def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
@@ -262,9 +326,7 @@ def test_topos_runtime_route_fails_closed_without_rust_semantics(monkeypatch) ->
     )
 
     with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
-        zspace_inference_module._topos_runtime_route_from_profile(
-            {"closure_risk": 0.2}
-        )
+        zspace_inference_module._topos_runtime_route_from_profile({"closure_risk": 0.2})
 
 
 @pytest.mark.parametrize(
@@ -468,15 +530,19 @@ def test_topos_training_hints_reach_trainer_telemetry() -> None:
         observed_depth=4,
         visited_volume=25,
     )
-    metrics = st.z_metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal})
+    metrics = st.z_metrics(
+        speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal}
+    )
     trainer = st.ZSpaceTrainer(z_dim=4, lam_frac=0.0, topos_control_gain=0.5)
 
     trainer.step(metrics)
 
-    assert trainer.last_topos_control["training_hints.gradient_bias_scale"] == pytest.approx(
-        0.0786561
+    assert trainer.last_topos_control[
+        "training_hints.gradient_bias_scale"
+    ] == pytest.approx(0.0786561)
+    assert trainer.last_topos_control["training_hints.clip_scale"] == pytest.approx(
+        0.871
     )
-    assert trainer.last_topos_control["training_hints.clip_scale"] == pytest.approx(0.871)
 
 
 def test_z_metrics_partial_preserves_topos_telemetry() -> None:
@@ -533,7 +599,9 @@ def test_open_topos_runtime_route_uses_native_method_when_available() -> None:
     if hasattr(guard, "with_porosity"):
         guard = guard.with_porosity(0.25)
     if not hasattr(guard, "runtime_route"):
-        pytest.skip("OpenCartesianTopos.runtime_route requires a freshly built native extension")
+        pytest.skip(
+            "OpenCartesianTopos.runtime_route requires a freshly built native extension"
+        )
 
     native = guard.runtime_route(4, 25, 1.0, 1.0, 0.8, 1.0, 0.0, 0.0)
     routed = st.topos_runtime_route(
@@ -554,7 +622,9 @@ def test_tensor_biome_control_signal_reflects_absorbed_volume() -> None:
     guard = st.hypergrad_topos(max_volume=8)
     biome = st.TensorBiome(guard)
     if not hasattr(biome, "control_signal"):
-        pytest.skip("TensorBiome.control_signal requires a freshly built native extension")
+        pytest.skip(
+            "TensorBiome.control_signal requires a freshly built native extension"
+        )
     biome.absorb(st.Tensor(1, 2, [0.1, 0.2]))
     biome.absorb(st.Tensor(1, 2, [0.3, 0.4]))
 
