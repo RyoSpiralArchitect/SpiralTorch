@@ -4087,6 +4087,21 @@ def zspace_telemetry_fusion(
 ) -> Dict[str, Any]: ...
 
 
+def training_telemetry_projection(
+    *,
+    step: float | int | None = ...,
+    max_steps: float | int | None = ...,
+    epoch: float | int | None = ...,
+    loss: float | int | None = ...,
+    previous_loss: float | int | None = ...,
+    grad_norm: float | int | None = ...,
+    learning_rate: float | int | None = ...,
+    desire_gain: float = ...,
+    psi_gain: float = ...,
+    learning_rate_scale: float = ...,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10857,6 +10872,7 @@ __all__ = [
     "blend_zspace_partials",
     "zspace_partial_fusion",
     "zspace_telemetry_fusion",
+    "training_telemetry_projection",
     "inference_to_mapping",
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",

@@ -32,6 +32,7 @@ from .runtime_imports import (
     runtime_import_preflight_summary_lines,
     write_runtime_import_preflight_report,
 )
+from .training_telemetry import training_telemetry_projection
 
 __all__ = [
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
@@ -4620,6 +4621,13 @@ def _safe_number(value: object) -> int | float | None:
     return None if math.isnan(number) else number
 
 
+def _finite_training_telemetry_number(value: object) -> float | None:
+    number = _safe_number(value)
+    if number is None or not math.isfinite(float(number)):
+        return None
+    return float(number)
+
+
 def _first_safe_number(*values: object) -> int | float | None:
     for value in values:
         number = _safe_number(value)
@@ -5117,7 +5125,7 @@ def _prefixed_numeric_payload(
     payload: dict[str, float] = {}
     for key, value in values.items():
         number = _safe_number(value)
-        if number is None:
+        if number is None or not math.isfinite(float(number)):
             continue
         payload[f"{clean_prefix}.{key}"] = float(number)
     return payload
@@ -5226,102 +5234,39 @@ def hf_gpt2_finetune_training_telemetry_frame(
     live native PSI hooks.
     """
 
-    desire_gain_value = _finite_non_negative(desire_gain, label="desire_gain")
-    psi_gain_value = _finite_non_negative(psi_gain, label="psi_gain")
     clean_prefix = str(telemetry_prefix or "hf_ft").strip() or "hf_ft"
     metric_payload = _metric_fields(metrics if metrics is not None else logs)
-    global_step = _safe_number(_safe_attr(state, "global_step"))
-    max_steps = _safe_number(_safe_attr(state, "max_steps"))
-    epoch = _safe_number(_safe_attr(state, "epoch"))
-    progress = None
-    if global_step is not None and max_steps is not None and float(max_steps) > 0.0:
-        progress = max(0.0, min(1.0, float(global_step) / float(max_steps)))
+    global_step = _finite_training_telemetry_number(_safe_attr(state, "global_step"))
+    max_steps = _finite_training_telemetry_number(_safe_attr(state, "max_steps"))
+    epoch = _finite_training_telemetry_number(_safe_attr(state, "epoch"))
 
     loss_key = None
     loss = None
     for candidate in ("eval_loss", "loss", "train_loss"):
-        candidate_loss = _safe_number(metric_payload.get(candidate))
+        candidate_loss = _finite_training_telemetry_number(metric_payload.get(candidate))
         if candidate_loss is not None:
             loss_key = candidate
-            loss = float(candidate_loss)
+            loss = candidate_loss
             break
-    previous = _safe_number(previous_loss)
-    loss_delta = None if loss is None or previous is None else loss - float(previous)
-    loss_improvement = None if loss_delta is None else -loss_delta
-    loss_pressure = _bounded01(loss)
-    grad_norm = _safe_number(metric_payload.get("grad_norm"))
-    grad_pressure = _bounded01(grad_norm)
-    learning_rate = _safe_number(metric_payload.get("learning_rate"))
-    lr_pressure = None
-    if learning_rate is not None:
-        lr_pressure = _bounded01(float(learning_rate) * 10_000.0)
-    stability = None if loss_delta is None else 1.0 / (1.0 + abs(float(loss_delta)))
-    improvement_pressure = _bounded01(loss_improvement)
-    desire_pressure = (
-        None
-        if loss_pressure is None
-        else min(1.0, desire_gain_value * float(loss_pressure))
+    previous = _finite_training_telemetry_number(previous_loss)
+    grad_norm = _finite_training_telemetry_number(metric_payload.get("grad_norm"))
+    learning_rate = _finite_training_telemetry_number(
+        metric_payload.get("learning_rate")
     )
-    saturation_terms = [
-        value
-        for value in (loss_pressure, grad_pressure)
-        if value is not None
-    ]
-    desire_saturation = (
-        None
-        if not saturation_terms
-        else min(1.0, desire_gain_value * sum(saturation_terms) / len(saturation_terms))
+    projection = training_telemetry_projection(
+        step=global_step,
+        max_steps=max_steps,
+        epoch=epoch,
+        loss=loss,
+        previous_loss=previous,
+        grad_norm=grad_norm,
+        learning_rate=learning_rate,
+        desire_gain=desire_gain,
+        psi_gain=psi_gain,
     )
-    psi_components = [
-        value
-        for value in (loss_pressure, grad_pressure, lr_pressure)
-        if value is not None
-    ]
-    psi_total = (
-        None
-        if not psi_components
-        else min(
-            1.0,
-            psi_gain_value
-            * sum(float(value) for value in psi_components)
-            / len(psi_components),
-        )
-    )
-    desire = {
-        "gain": desire_gain_value,
-        "pressure": desire_pressure,
-        "stability": stability,
-        "saturation": desire_saturation,
-        "improvement_pressure": improvement_pressure,
-    }
-    psi = {
-        "gain": psi_gain_value,
-        "total": psi_total,
-        "loss_component": loss_pressure,
-        "gradient_component": grad_pressure,
-        "learning_rate_component": lr_pressure,
-    }
-    telemetry_values = {
-        "step": global_step,
-        "max_steps": max_steps,
-        "epoch": epoch,
-        "progress": progress,
-        "loss": loss,
-        "loss_delta": loss_delta,
-        "loss_improvement": loss_improvement,
-        "grad_norm": grad_norm,
-        "learning_rate": learning_rate,
-        "desire.gain": desire_gain_value,
-        "desire.pressure": desire_pressure,
-        "desire.stability": stability,
-        "desire.saturation": desire_saturation,
-        "desire.improvement_pressure": improvement_pressure,
-        "psi.gain": psi_gain_value,
-        "psi.total": psi_total,
-        "psi.loss_component": loss_pressure,
-        "psi.gradient_component": grad_pressure,
-        "psi.learning_rate_component": lr_pressure,
-    }
+    desire = dict(projection["desire"])
+    psi = dict(projection["psi"])
+    telemetry_values = dict(projection["telemetry"])
     inference_handoff = (
         _json_safe(inference_distortion_handoff)
         if isinstance(inference_distortion_handoff, Mapping)
@@ -5343,13 +5288,18 @@ def hf_gpt2_finetune_training_telemetry_frame(
         "loss_key": loss_key,
         "loss": loss,
         "previous_loss": previous,
-        "loss_delta": loss_delta,
-        "loss_improvement": loss_improvement,
+        "loss_delta": projection.get("loss_delta"),
+        "loss_improvement": projection.get("loss_improvement"),
         "global_step": global_step,
         "epoch": epoch,
-        "progress": progress,
+        "progress": projection.get("progress"),
         "desire": {key: value for key, value in desire.items() if value is not None},
         "psi": {key: value for key, value in psi.items() if value is not None},
+        "projection_contract_version": projection["contract_version"],
+        "projection_semantic_owner": projection["semantic_owner"],
+        "projection_semantic_backend": projection["semantic_backend"],
+        "signal_source": projection["signal_source"],
+        "signal_semantics": projection["signal_semantics"],
         "inference_distortion_handoff": inference_handoff,
         "telemetry": telemetry,
     }

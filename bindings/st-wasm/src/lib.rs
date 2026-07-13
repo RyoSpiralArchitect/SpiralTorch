@@ -8,6 +8,7 @@ mod scale_stack;
 mod topos_control;
 mod topos_policy;
 mod topos_route;
+mod training_projection;
 mod zspace_fusion;
 
 #[cfg(target_arch = "wasm32")]
@@ -39,6 +40,7 @@ pub use scale_stack::*;
 pub use topos_control::*;
 pub use topos_policy::*;
 pub use topos_route::*;
+pub use training_projection::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;
 pub use zspace_fusion::*;
