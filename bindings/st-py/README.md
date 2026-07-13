@@ -181,7 +181,13 @@ value:
   and learned by any stAgent-shaped loop via
   `train_stagent_topos_route_policy(...)`; the
   `examples/api_llm_topos_stagent_route_policy.py` demo runs this keylessly or
-  reuses an existing sweep report with `--report report.json`. Browser-side
+  reuses an existing sweep report with `--report report.json`. Python gathers
+  provider evidence and orchestrates stAgent, while the compiled
+  `st-core::runtime::topos_route_policy` contract exclusively owns profile
+  normalization, scoring, deterministic tie-breaking, reward projection, and
+  selected-route resolution. The same contract is exposed to browser clients
+  through `spiraltorch-wasm`; Python deliberately has no semantic fallback when
+  the Rust core is unavailable. Browser-side
   WASM learning reports can also be
   loaded with `load_wasm_report(...)`, summarized with `summarize_wasm_report(...)`,
   converted into reusable context via `api_llm_wasm_context_partials(...)`, and

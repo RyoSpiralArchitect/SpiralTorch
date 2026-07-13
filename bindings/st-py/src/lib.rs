@@ -31,6 +31,7 @@ mod qr;
 mod rec;
 #[cfg(feature = "robotics")]
 mod robotics;
+mod runtime;
 mod safety;
 mod scale_stack;
 mod selfsup;
@@ -289,6 +290,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     kv::register(py, m)?;
     wgpu::register(py, m)?;
     telemetry::register(py, m)?;
+    runtime::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
 

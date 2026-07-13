@@ -6,6 +6,7 @@ mod fractal_field;
 mod reports;
 mod scale_stack;
 mod topos_control;
+mod topos_policy;
 mod topos_route;
 mod zspace_fusion;
 
@@ -36,6 +37,7 @@ pub use mellin::*;
 pub use reports::*;
 pub use scale_stack::*;
 pub use topos_control::*;
+pub use topos_policy::*;
 pub use topos_route::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;

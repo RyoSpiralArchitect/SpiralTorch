@@ -1,0 +1,66 @@
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyModule};
+use pyo3::wrap_pyfunction;
+use st_core::runtime::topos_route_policy::{
+    build_topos_route_rewards, evaluate_topos_route_policy, resolve_topos_route_policy,
+    ToposRoutePolicyEvaluationRequest, ToposRoutePolicyResolveRequest, ToposRouteRewardsRequest,
+};
+
+fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(format!("{context}: {error}"))
+}
+
+fn request_from_py<T>(request: &Bound<'_, PyAny>, context: &str) -> PyResult<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let request = crate::json::py_to_json(request)?;
+    serde_json::from_value(request).map_err(|error| json_error(context, error))
+}
+
+fn payload_to_py<T>(py: Python<'_>, payload: T, context: &str) -> PyResult<PyObject>
+where
+    T: serde::Serialize,
+{
+    let payload = serde_json::to_value(payload).map_err(|error| json_error(context, error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _topos_route_policy_evaluate(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request: ToposRoutePolicyEvaluationRequest =
+        request_from_py(request, "invalid Topos route-policy evaluation request")?;
+    let payload = evaluate_topos_route_policy(request)
+        .map_err(|error| json_error("Topos route-policy evaluation failed", error))?;
+    payload_to_py(py, payload, "Topos route-policy contract encoding failed")
+}
+
+#[pyfunction]
+fn _topos_route_policy_rewards(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request: ToposRouteRewardsRequest =
+        request_from_py(request, "invalid Topos route-reward request")?;
+    let payload = build_topos_route_rewards(request)
+        .map_err(|error| json_error("Topos route-reward projection failed", error))?;
+    payload_to_py(py, payload, "Topos route-reward contract encoding failed")
+}
+
+#[pyfunction]
+fn _topos_route_policy_resolve(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request: ToposRoutePolicyResolveRequest =
+        request_from_py(request, "invalid Topos route-policy resolution request")?;
+    let payload = resolve_topos_route_policy(request)
+        .map_err(|error| json_error("Topos route-policy resolution failed", error))?;
+    payload_to_py(
+        py,
+        payload,
+        "Topos route-policy resolution contract encoding failed",
+    )
+}
+
+pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+    parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_topos_route_policy_rewards, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_topos_route_policy_resolve, parent)?)?;
+    Ok(())
+}

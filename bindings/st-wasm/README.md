@@ -73,6 +73,39 @@ gradient axes are semantic; wider client vectors are explicitly zero-filled by R
 carry `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and
 direct Rust runs can be audited against one semantic core.
 
+Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
+while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
+tie-breaking, reward projection, and selected-route resolution:
+
+```ts
+import {
+    toposRoutePolicyEvaluateObject,
+    toposRoutePolicyResolveObject,
+    toposRoutePolicyRewardsObject,
+} from "spiraltorch-wasm";
+
+const evaluation = toposRoutePolicyEvaluateObject({
+    rows: [
+        { label: "guarded", count: 3, trace_route_score: 0.8 },
+        { label: "exploratory", count: 3, trace_route_score: 0.6 },
+    ],
+});
+const projected = toposRoutePolicyRewardsObject({
+    rows: evaluation.rows,
+    profile: "grounded",
+});
+const selected = toposRoutePolicyResolveObject({
+    rewards: projected.rewards,
+    selected_label: evaluation.profiles.grounded.label,
+});
+
+console.log(selected.selected_label, selected.selected_reward);
+```
+
+The object and JSON entry points are transport adapters only. Their payloads retain the
+Rust `semantic_owner` and add `execution_client: "wasm"` for audit provenance; no browser
+fallback reimplements the route-policy formulas.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

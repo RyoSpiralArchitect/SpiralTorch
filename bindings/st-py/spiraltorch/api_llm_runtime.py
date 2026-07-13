@@ -69,6 +69,11 @@ _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 _SELECTION_PROFILES = ("balanced", "quality", "grounded", "efficiency", "latency")
+_TOPOS_ROUTE_POLICY_CONTRACT_VERSION = "spiraltorch.topos_route_policy.v1"
+_TOPOS_ROUTE_POLICY_KIND = "spiraltorch.topos_route_policy"
+_TOPOS_ROUTE_REWARDS_KIND = "spiraltorch.topos_route_rewards"
+_TOPOS_ROUTE_POLICY_RESOLUTION_KIND = "spiraltorch.topos_route_policy_resolution"
+_TOPOS_ROUTE_POLICY_SEMANTIC_OWNER = "st-core::runtime::topos_route_policy"
 _TOPOS_SWEEP_SIGNAL_KEYS = frozenset(
     {
         "curvature",
@@ -5044,7 +5049,7 @@ def _topos_sweep_selection_row(
     total_tokens = _response_route_stat(response, "total_tokens")
     if total_tokens is None:
         total_tokens = _finite_float(trace.get("total_tokens"))
-    row = {
+    return {
         "label": label,
         "count": max(response_count, trace_count, adapter_count),
         "trace_route_score": _finite_float(trace.get("route_score")),
@@ -5077,88 +5082,59 @@ def _topos_sweep_selection_row(
         "request_temperature": _finite_float(adapter.get("request_temperature")),
         "mode": adapter.get("mode"),
     }
-    row["selection_scores"] = {
-        profile: _topos_sweep_selection_profile_score(row, profile)
-        for profile in _SELECTION_PROFILES
-    }
-    return row
 
 
-def _topos_sweep_selection_profile_score(
-    row: Mapping[str, Any],
-    profile: str,
-) -> float:
-    trace_route = _bounded_unit(row.get("trace_route_score"))
-    trace_quality = _bounded_unit(row.get("trace_quality_score"))
-    trace_efficiency = _bounded_unit(row.get("trace_efficiency_score"))
-    response_quality = _bounded_unit(row.get("response_text_quality_score"))
-    prompt_coverage = _bounded_unit(row.get("response_prompt_coverage"))
-    completion = _bounded_unit(row.get("response_completion_rate"))
-    confidence = _bounded_unit(row.get("response_confidence"))
-    adapter_route = _bounded_unit(row.get("adapter_runtime_route_score"))
-    adapter_guard = _bounded_unit(row.get("adapter_guard_score"))
-    adapter_context = _bounded_unit(row.get("adapter_context_score"))
-    openness = _bounded_unit(row.get("openness"))
-    context_weight = _bounded_unit(row.get("context_weight"))
-    closure_reward = 1.0 - _bounded_unit(row.get("closure_pressure"))
-    latency_reward = 1.0 - _latency_cost(row)
-    token_reward = 1.0 - _token_cost(row)
-    incomplete_penalty = 0.08 * _bounded_unit(row.get("response_incomplete_rate"))
-    if profile == "quality":
-        score = (
-            0.30 * trace_quality
-            + 0.30 * response_quality
-            + 0.15 * prompt_coverage
-            + 0.10 * confidence
-            + 0.10 * completion
-            + 0.05 * adapter_route
-        )
-    elif profile == "grounded":
-        score = (
-            0.30 * response_quality
-            + 0.20 * prompt_coverage
-            + 0.20 * context_weight
-            + 0.15 * adapter_guard
-            + 0.10 * completion
-            + 0.05 * adapter_context
-        )
-    elif profile == "efficiency":
-        score = (
-            0.25 * trace_efficiency
-            + 0.20 * latency_reward
-            + 0.20 * token_reward
-            + 0.15 * response_quality
-            + 0.10 * completion
-            + 0.10 * adapter_route
-        )
-    elif profile == "latency":
-        score = (
-            0.40 * latency_reward
-            + 0.20 * token_reward
-            + 0.15 * response_quality
-            + 0.10 * completion
-            + 0.10 * trace_route
-            + 0.05 * adapter_route
-        )
-    else:
-        score = (
-            0.25 * trace_route
-            + 0.20 * adapter_route
-            + 0.20 * response_quality
-            + 0.10 * completion
-            + 0.10 * trace_efficiency
-            + 0.10 * closure_reward
-            + 0.05 * openness
-        )
-    return max(0.0, min(1.0, score - incomplete_penalty))
+def _native_topos_route_policy_contract(
+    function_name: str,
+    request: Mapping[str, Any],
+    *,
+    expected_kind: str,
+) -> dict[str, Any] | None:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    function = getattr(native, function_name, None)
+    if not callable(function):
+        return None
+    payload = function(dict(request))
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("native Topos route-policy core returned a non-mapping payload")
+    contract = dict(payload)
+    if (
+        contract.get("kind") != expected_kind
+        or contract.get("contract_version")
+        != _TOPOS_ROUTE_POLICY_CONTRACT_VERSION
+        or contract.get("semantic_owner") != _TOPOS_ROUTE_POLICY_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError("native Topos route-policy core returned an untrusted contract")
+    return contract
 
 
-def _topos_sweep_selection_rows(
+def _topos_route_policy_contract(
+    function_name: str,
+    request: Mapping[str, Any],
+    *,
+    expected_kind: str,
+) -> dict[str, Any]:
+    contract = _native_topos_route_policy_contract(
+        function_name,
+        request,
+        expected_kind=expected_kind,
+    )
+    if contract is not None:
+        return contract
+    raise RuntimeError(
+        "Topos route-policy semantics require the compiled Rust core; "
+        f"rebuild or reinstall SpiralTorch with {function_name}"
+    )
+
+
+def _topos_sweep_selection_contract(
     labels: Sequence[Any],
     adapter_rows: Sequence[Mapping[str, Any]],
     response_route_rows: Sequence[Mapping[str, Any]],
     trace_comparison: Mapping[str, Any],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     adapters = {str(row.get("label")): row for row in adapter_rows if row.get("label")}
     responses = {
         str(row.get("label")): row for row in response_route_rows if row.get("label")
@@ -5175,72 +5151,11 @@ def _topos_sweep_selection_rows(
                 trace=_mapping_or_empty(traces.get(label_value)),
             )
         )
-    return rows
-
-
-def _topos_sweep_selection_profiles(
-    rows: Sequence[Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    profiles: dict[str, dict[str, Any]] = {}
-    for profile in _SELECTION_PROFILES:
-        candidates: list[tuple[float, Mapping[str, Any]]] = []
-        for row in rows:
-            if int(row.get("count") or 0) <= 0:
-                continue
-            scores = row.get("selection_scores")
-            score = (
-                _finite_float(scores.get(profile))
-                if isinstance(scores, Mapping)
-                else None
-            )
-            if score is not None:
-                candidates.append((score, row))
-        if not candidates:
-            profiles[profile] = {"label": None, "score": 0.0}
-            continue
-        score, row = max(
-            candidates,
-            key=lambda item: (
-                item[0],
-                _finite_float(item[1].get("trace_route_score")) or 0.0,
-                str(item[1].get("label")),
-            ),
-        )
-        profiles[profile] = {
-            "label": row.get("label"),
-            "score": score,
-            "trace_route_score": _finite_float(row.get("trace_route_score")) or 0.0,
-            "trace_quality_score": _finite_float(row.get("trace_quality_score")) or 0.0,
-            "trace_efficiency_score": _finite_float(
-                row.get("trace_efficiency_score")
-            )
-            or 0.0,
-            "response_text_quality_score": _finite_float(
-                row.get("response_text_quality_score")
-            )
-            or 0.0,
-            "response_prompt_coverage": _finite_float(
-                row.get("response_prompt_coverage")
-            )
-            or 0.0,
-            "response_completion_rate": _finite_float(
-                row.get("response_completion_rate")
-            )
-            or 0.0,
-            "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
-            "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
-            "adapter_runtime_route_score": _finite_float(
-                row.get("adapter_runtime_route_score")
-            )
-            or 0.0,
-            "adapter_guard_score": _finite_float(row.get("adapter_guard_score")) or 0.0,
-            "adapter_context_score": _finite_float(row.get("adapter_context_score"))
-            or 0.0,
-            "closure_pressure": _finite_float(row.get("closure_pressure")),
-            "openness": _finite_float(row.get("openness")),
-            "context_weight": _finite_float(row.get("context_weight")),
-        }
-    return profiles
+    return _topos_route_policy_contract(
+        "_topos_route_policy_evaluate",
+        {"rows": rows},
+        expected_kind=_TOPOS_ROUTE_POLICY_KIND,
+    )
 
 
 def _topos_sweep_report_or_self(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -5274,66 +5189,42 @@ def api_llm_topos_sweep_route_rewards(
         for row in _list_from_sequence(report.get("selection_rows"))
         if isinstance(row, Mapping)
     ]
-    rewards: list[dict[str, Any]] = []
-    for index, row in enumerate(rows):
-        label = row.get("label")
-        if label in {None, ""}:
-            continue
-        scores = row.get("selection_scores")
-        reward = (
-            _finite_float(scores.get(profile))
-            if isinstance(scores, Mapping)
-            else None
-        )
-        if reward is None:
-            reward = _finite_float(row.get("trace_route_score"))
-        reward_value = max(0.0, min(1.0, reward or 0.0))
-        rewards.append(
-            {
-                "index": len(rewards),
-                "source_index": index,
-                "label": str(label),
-                "profile": profile,
-                "reward": reward_value,
-                "count": int(_finite_float(row.get("count")) or 0),
-                "trace_route_score": _finite_float(row.get("trace_route_score")) or 0.0,
-                "response_text_quality_score": _finite_float(
-                    row.get("response_text_quality_score")
-                )
-                or 0.0,
-                "response_completion_rate": _finite_float(
-                    row.get("response_completion_rate")
-                )
-                or 0.0,
-                "response_incomplete_rate": _finite_float(
-                    row.get("response_incomplete_rate")
-                )
-                or 0.0,
-                "adapter_runtime_route_score": _finite_float(
-                    row.get("adapter_runtime_route_score")
-                )
-                or 0.0,
-            }
-        )
-    return rewards
+    contract = _topos_route_policy_contract(
+        "_topos_route_policy_rewards",
+        {"rows": [dict(row) for row in rows], "profile": str(profile)},
+        expected_kind=_TOPOS_ROUTE_REWARDS_KIND,
+    )
+    rewards = contract.get("rewards")
+    if not isinstance(rewards, Sequence) or isinstance(
+        rewards, (str, bytes, bytearray)
+    ):
+        raise RuntimeError("native Topos route-policy core returned invalid rewards")
+    return [dict(row) for row in rewards if isinstance(row, Mapping)]
 
 
 def _selected_topos_route_reward(
     policy: Mapping[str, Any],
-    selected_label: str | None,
-    selected_index: int,
+    selected_label: Any,
+    selected_index: Any,
 ) -> dict[str, Any] | None:
     rows = [
         dict(row)
         for row in _list_from_sequence(policy.get("route_rewards"))
         if isinstance(row, Mapping)
     ]
-    for row in rows:
-        if selected_label is not None and str(row.get("label")) == selected_label:
-            return row
-    if 0 <= selected_index < len(rows):
-        return rows[selected_index]
-    return None
+    request: dict[str, Any] = {
+        "rewards": rows,
+        "selected_label": selected_label,
+    }
+    if selected_index is not None:
+        request["selected_index"] = selected_index
+    contract = _topos_route_policy_contract(
+        "_topos_route_policy_resolve",
+        request,
+        expected_kind=_TOPOS_ROUTE_POLICY_RESOLUTION_KIND,
+    )
+    route_reward = contract.get("route_reward")
+    return dict(route_reward) if isinstance(route_reward, Mapping) else None
 
 
 def _topos_profile_entry_by_label(
@@ -5362,17 +5253,14 @@ def api_llm_topos_route_policy_selection(
     if not isinstance(policy, Mapping):
         raise TypeError("policy must be a mapping")
 
-    raw_index = _finite_float(policy.get("selected_index"))
-    selected_index = int(raw_index) if raw_index is not None else 0
+    raw_index = policy.get("selected_index")
     selected_label = policy.get("selected_label")
-    selected_label_value = (
-        str(selected_label) if selected_label is not None and str(selected_label) else None
-    )
     route_reward = _selected_topos_route_reward(
         policy,
-        selected_label_value,
-        selected_index,
+        selected_label,
+        raw_index,
     )
+    selected_index = int(raw_index) if raw_index is not None else 0
     if route_reward is not None:
         selected_label = route_reward.get("label")
         raw_index = _finite_float(route_reward.get("index"))
@@ -5533,8 +5421,10 @@ def train_stagent_topos_route_policy(
     trace = _agent_select_action_trace(agent, state, policy_after)
     raw_action = _finite_float(trace.get("action"))
     selected_index = int(raw_action) if raw_action is not None else 0
-    selected_row = (
-        route_rewards[selected_index] if 0 <= selected_index < len(route_rewards) else None
+    selected_row = _selected_topos_route_reward(
+        {"route_rewards": route_rewards},
+        None,
+        selected_index,
     )
     return {
         "kind": "spiraltorch.api_llm_topos_sweep_stagent_route_policy",
@@ -5591,13 +5481,24 @@ def api_llm_topos_sweep_report(
         max_pair_rows=max_pair_rows,
     )
     response_winners = _topos_sweep_response_winners(response_route_rows)
-    selection_rows = _topos_sweep_selection_rows(
+    selection_contract = _topos_sweep_selection_contract(
         labels,
         rows,
         response_route_rows,
         comparison,
     )
-    selection_profiles = _topos_sweep_selection_profiles(selection_rows)
+    selection_rows = [
+        dict(row)
+        for row in _list_from_sequence(selection_contract.get("rows"))
+        if isinstance(row, Mapping)
+    ]
+    selection_profiles = {
+        str(profile): dict(winner)
+        for profile, winner in _mapping_or_empty(
+            selection_contract.get("profiles")
+        ).items()
+        if isinstance(winner, Mapping)
+    }
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "source_kind": sweep.get("kind"),
@@ -5618,6 +5519,17 @@ def api_llm_topos_sweep_report(
         "response_pair_rows": response_pair_rows,
         "selection_rows": selection_rows,
         "selection_profiles": selection_profiles,
+        "selection_semantics": {
+            key: selection_contract.get(key)
+            for key in (
+                "kind",
+                "contract_version",
+                "semantic_owner",
+                "semantic_backend",
+                "row_count",
+                "active_row_count",
+            )
+        },
         "comparison": dict(comparison),
     }
     report["recommendations"] = _topos_sweep_report_recommendations(
