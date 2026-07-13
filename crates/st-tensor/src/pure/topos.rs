@@ -114,6 +114,26 @@ fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     }
 }
 
+fn square_root_floor(value: usize) -> usize {
+    let mut root = (value as f64).sqrt() as usize;
+    while root
+        .checked_add(1)
+        .and_then(|next| next.checked_mul(next))
+        .is_some_and(|square| square <= value)
+    {
+        root += 1;
+    }
+    while root.checked_mul(root).is_none_or(|square| square > value) {
+        root -= 1;
+    }
+    root
+}
+
+fn checked_tensor_volume(rows: usize, cols: usize) -> PureResult<usize> {
+    rows.checked_mul(cols)
+        .ok_or(TensorError::InvalidDimensions { rows, cols })
+}
+
 /// Runtime pressure and openness signal emitted by an open-cartesian topos.
 ///
 /// The signal is intentionally scalar and copyable so training loops, Python
@@ -2019,7 +2039,7 @@ impl OpenCartesianTopos {
     /// Ensures the provided tensor stays finite and within the permitted volume.
     pub fn guard_tensor(&self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        let volume = rows.saturating_mul(cols);
+        let volume = checked_tensor_volume(rows, cols)?;
         if volume > self.max_volume {
             return Err(TensorError::TensorVolumeExceeded {
                 label,
@@ -2116,7 +2136,13 @@ impl ModalityProfile {
             return Err(TensorError::EmptyInput("modality_max_volume"));
         }
         if let Some(saturation) = local_saturation {
-            if saturation <= 0.0 || !saturation.is_finite() {
+            if !saturation.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "modality_local_saturation",
+                    value: saturation,
+                });
+            }
+            if saturation <= 0.0 {
                 return Err(TensorError::NonPositiveSaturation { saturation });
             }
         }
@@ -2130,6 +2156,11 @@ impl ModalityProfile {
     /// Returns the maximum tensor volume admitted by the modality.
     pub fn max_volume(&self) -> usize {
         self.max_volume
+    }
+
+    /// Returns the optional modality-local saturation cap.
+    pub fn local_saturation(&self) -> Option<f32> {
+        self.local_saturation
     }
 
     /// Returns the permeability applied when clamping modality values.
@@ -2169,13 +2200,12 @@ impl ModalityProfile {
         slice: &mut [f32],
     ) -> PureResult<()> {
         let saturation = self.effective_saturation(topos);
-        for value in slice.iter_mut() {
+        for &value in slice.iter() {
             if !value.is_finite() {
-                return Err(TensorError::NonFiniteValue {
-                    label,
-                    value: *value,
-                });
+                return Err(TensorError::NonFiniteValue { label, value });
             }
+        }
+        for value in slice.iter_mut() {
             *value = permeable_clamp(*value, saturation, self.permeability);
         }
         topos.guard_slice(label, slice)
@@ -2188,7 +2218,7 @@ impl ModalityProfile {
         tensor: &mut Tensor,
     ) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.guard_volume(label, rows.saturating_mul(cols))?;
+        self.guard_volume(label, checked_tensor_volume(rows, cols)?)?;
         self.rewrite_slice(topos, label, tensor.data_mut())?;
         topos.guard_tensor(label, tensor)
     }
@@ -2216,7 +2246,8 @@ pub struct GraphGuardProfile {
 }
 
 impl GraphGuardProfile {
-    /// Creates a graph guard profile. Node, edge, and degree counts must be positive.
+    /// Creates a graph guard profile. Node and edge budgets must be positive; a zero
+    /// maximum degree is valid for an explicitly edgeless graph.
     pub fn new(
         max_nodes: usize,
         max_edges: usize,
@@ -2231,21 +2262,41 @@ impl GraphGuardProfile {
         if max_edges == 0 {
             return Err(TensorError::EmptyInput("graph_max_edges"));
         }
-        if max_degree == 0 {
-            return Err(TensorError::EmptyInput("graph_max_degree"));
+        if max_degree > max_nodes.saturating_sub(1) {
+            return Err(TensorError::InvalidValue {
+                label: "graph_max_degree_exceeds_nodes",
+            });
         }
-        if symmetry_tolerance < 0.0 || !symmetry_tolerance.is_finite() {
+        if !symmetry_tolerance.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "graph_symmetry_tolerance",
+                value: symmetry_tolerance,
+            });
+        }
+        if symmetry_tolerance < 0.0 {
             return Err(TensorError::InvalidValue {
                 label: "graph_symmetry_tolerance",
             });
         }
-        if activation_threshold < 0.0 || !activation_threshold.is_finite() {
+        if !activation_threshold.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "graph_activation_threshold",
+                value: activation_threshold,
+            });
+        }
+        if activation_threshold <= 0.0 {
             return Err(TensorError::InvalidValue {
                 label: "graph_activation_threshold",
             });
         }
         if let Some(saturation) = edge_saturation {
-            if saturation <= 0.0 || !saturation.is_finite() {
+            if !saturation.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "graph_edge_saturation",
+                    value: saturation,
+                });
+            }
+            if saturation <= 0.0 {
                 return Err(TensorError::NonPositiveSaturation { saturation });
             }
         }
@@ -2265,6 +2316,31 @@ impl GraphGuardProfile {
         self.max_nodes
     }
 
+    /// Maximum number of active undirected edges admitted by the guard.
+    pub fn max_edges(&self) -> usize {
+        self.max_edges
+    }
+
+    /// Maximum off-diagonal neighbour degree admitted per node.
+    pub fn max_degree(&self) -> usize {
+        self.max_degree
+    }
+
+    /// Symmetry tolerance applied after adjacency canonicalization.
+    pub fn symmetry_tolerance(&self) -> f32 {
+        self.symmetry_tolerance
+    }
+
+    /// Strictly positive absolute weight that activates an edge.
+    pub fn activation_threshold(&self) -> f32 {
+        self.activation_threshold
+    }
+
+    /// Optional graph-local edge saturation cap.
+    pub fn edge_saturation(&self) -> Option<f32> {
+        self.edge_saturation
+    }
+
     /// Returns the permeability admitted while guarding adjacency tensors.
     pub fn permeability(&self) -> f32 {
         self.permeability
@@ -2272,6 +2348,14 @@ impl GraphGuardProfile {
 
     fn validate_for_topos(&self, topos: &OpenCartesianTopos) -> PureResult<()> {
         let max_possible = topos.max_volume();
+        let adjacency_volume = self.expected_len(self.max_nodes)?;
+        if adjacency_volume > max_possible {
+            return Err(TensorError::TensorVolumeExceeded {
+                label: "graph_adjacency_profile",
+                volume: adjacency_volume,
+                max_volume: max_possible,
+            });
+        }
         if self.max_edges > max_possible {
             return Err(TensorError::InvalidValue {
                 label: "graph_edges_exceed_topos_volume",
@@ -2330,7 +2414,7 @@ impl GraphGuardProfile {
         if edge_count <= self.max_edges {
             return Ok(0);
         }
-        let slack = ((self.max_edges as f32) * self.permeability).ceil() as usize;
+        let slack = ((self.max_edges as f64) * self.permeability as f64).ceil() as usize;
         let overflow = edge_count - self.max_edges;
         if overflow > slack {
             return Err(TensorError::TensorVolumeExceeded {
@@ -2354,6 +2438,12 @@ impl GraphGuardProfile {
     /// This is an alias for [`with_permeability`](Self::with_permeability) that mirrors the
     /// terminology used by higher level guards and bindings.
     pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
+        if !porosity.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "graph_porosity",
+                value: porosity,
+            });
+        }
         if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
@@ -2371,6 +2461,10 @@ pub struct GraphGuardReport {
     pub max_degree: usize,
     /// Number of asymmetric edge pairs detected beyond the configured tolerance.
     pub symmetry_violations: usize,
+    /// Number of active diagonal self-loop entries.
+    pub self_loops: usize,
+    /// Number of non-finite entries repaired to zero before graph measurements.
+    pub repaired_non_finite: usize,
     /// Number of entries that were saturated into the admissible range.
     pub saturated_entries: usize,
     /// Number of edges exceeding the configured budget but tolerated by permeability.
@@ -2390,11 +2484,14 @@ impl RewardBoundary {
     /// Creates a new reward boundary. `lower` must be below `upper` and hysteresis must be
     /// non-negative.
     pub fn new(lower: f32, upper: f32, hysteresis: f32) -> PureResult<Self> {
-        if !lower.is_finite() || !upper.is_finite() || !hysteresis.is_finite() {
-            return Err(TensorError::NonFiniteValue {
-                label: "reward_boundary",
-                value: f32::NAN,
-            });
+        for (label, value) in [
+            ("reward_boundary_lower", lower),
+            ("reward_boundary_upper", upper),
+            ("reward_boundary_hysteresis", hysteresis),
+        ] {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue { label, value });
+            }
         }
         if lower >= upper {
             return Err(TensorError::InvalidValue {
@@ -2421,6 +2518,12 @@ impl RewardBoundary {
         hysteresis: f32,
         porosity: f32,
     ) -> PureResult<Self> {
+        if !porosity.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "reward_boundary_porosity",
+                value: porosity,
+            });
+        }
         if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
@@ -2439,6 +2542,11 @@ impl RewardBoundary {
         self.upper
     }
 
+    /// Returns the hysteresis applied outside each reward bound.
+    pub fn hysteresis(&self) -> f32 {
+        self.hysteresis
+    }
+
     /// Returns the configured porosity.
     pub fn porosity(&self) -> f32 {
         self.porosity
@@ -2446,11 +2554,26 @@ impl RewardBoundary {
 
     fn clamp(&self, value: f32) -> f32 {
         if value > self.upper {
-            porous_mix(value, self.upper, self.porosity)
+            self.soft_clamp(value, self.upper, true)
         } else if value < self.lower {
-            -porous_mix(-value, -self.lower, self.porosity)
+            self.soft_clamp(value, self.lower, false)
         } else {
             value
+        }
+    }
+
+    fn soft_clamp(&self, value: f32, bound: f32, upper: bool) -> f32 {
+        if self.porosity <= f32::EPSILON {
+            return bound;
+        }
+        let span = self.upper - self.lower;
+        let excess = if upper { value - bound } else { bound - value };
+        let bleed = excess / (excess + span);
+        let inward = span * (self.porosity * 0.25) * bleed.clamp(0.0, 1.0);
+        if upper {
+            bound - inward
+        } else {
+            bound + inward
         }
     }
 
@@ -2460,6 +2583,15 @@ impl RewardBoundary {
 
     fn breached_upper(&self, value: f32) -> bool {
         value > self.upper + self.hysteresis * (1.0 + self.porosity)
+    }
+
+    fn validate_for_topos(&self, topos: &OpenCartesianTopos) -> PureResult<()> {
+        if self.lower < -topos.saturation() || self.upper > topos.saturation() {
+            return Err(TensorError::InvalidValue {
+                label: "reward_boundary_exceeds_topos_saturation",
+            });
+        }
+        Ok(())
     }
 }
 
@@ -2526,6 +2658,7 @@ impl<'a> MultiModalToposGuard<'a> {
         reward: RewardBoundary,
     ) -> PureResult<Self> {
         graph.validate_for_topos(topos)?;
+        reward.validate_for_topos(topos)?;
         text.validate_for_topos(topos)?;
         audio.validate_for_topos(topos)?;
         vision.validate_for_topos(topos)?;
@@ -2548,10 +2681,11 @@ impl<'a> MultiModalToposGuard<'a> {
                 .with_permeability(0.1)?;
         let vision = ModalityProfile::new(topos.max_volume().clamp(1, 262144), None)?
             .with_permeability(0.15)?;
+        let graph_max_nodes = cmp::min(2048, square_root_floor(topos.max_volume())).max(1);
         let graph = GraphGuardProfile::new(
-            cmp::min(2048, topos.max_volume()),
+            graph_max_nodes,
             cmp::min(topos.max_volume(), 131_072),
-            1024,
+            cmp::min(1024, graph_max_nodes.saturating_sub(1)),
             1e-3,
             1e-4,
             None,
@@ -2564,6 +2698,31 @@ impl<'a> MultiModalToposGuard<'a> {
     /// Returns the underlying topos guard.
     pub fn topos(&self) -> &'a OpenCartesianTopos {
         self.topos
+    }
+
+    /// Returns the active text modality profile.
+    pub fn text_profile(&self) -> ModalityProfile {
+        self.text
+    }
+
+    /// Returns the active audio modality profile.
+    pub fn audio_profile(&self) -> ModalityProfile {
+        self.audio
+    }
+
+    /// Returns the active vision modality profile.
+    pub fn vision_profile(&self) -> ModalityProfile {
+        self.vision
+    }
+
+    /// Returns the active graph guard profile.
+    pub fn graph_profile(&self) -> GraphGuardProfile {
+        self.graph
+    }
+
+    /// Returns the active reward boundary.
+    pub fn reward_boundary(&self) -> RewardBoundary {
+        self.reward
     }
 
     /// Returns a rewrite monad anchored to the multi-modal guard.
@@ -2611,6 +2770,7 @@ impl<'a> MultiModalToposGuard<'a> {
 
     /// Overrides the reward boundary detector.
     pub fn with_reward_boundary(mut self, boundary: RewardBoundary) -> PureResult<Self> {
+        boundary.validate_for_topos(self.topos)?;
         self.reward = boundary;
         Ok(self)
     }
@@ -2642,53 +2802,69 @@ impl<'a> MultiModalToposGuard<'a> {
         adjacency: &mut [f32],
         node_count: usize,
     ) -> PureResult<GraphGuardReport> {
-        let expected = self.graph.guard_shape(node_count, adjacency.len())?;
-        if let Some(budget) = self.graph.max_edges.checked_mul(2) {
-            let soft_budget = (budget as f32 * (1.0 + self.graph.permeability()))
-                .ceil()
-                .max(budget as f32) as usize;
-            if expected > soft_budget {
-                return Err(TensorError::InvalidValue {
-                    label: "graph_edge_budget",
-                });
-            }
+        let adjacency_volume = self.graph.guard_shape(node_count, adjacency.len())?;
+        if adjacency_volume > self.topos.max_volume() {
+            return Err(TensorError::TensorVolumeExceeded {
+                label: "graph_adjacency",
+                volume: adjacency_volume,
+                max_volume: self.topos.max_volume(),
+            });
         }
+        let mut canonical = Vec::with_capacity(adjacency.len());
+        let mut repaired_non_finite = 0usize;
+        let mut saturated_entries = 0usize;
+        for &value in adjacency.iter() {
+            let finite = if value.is_finite() {
+                value
+            } else {
+                repaired_non_finite = repaired_non_finite.saturating_add(1);
+                0.0
+            };
+            let clamped = self.graph.saturate_value(self.topos, finite);
+            if clamped != finite {
+                saturated_entries = saturated_entries.saturating_add(1);
+            }
+            canonical.push(clamped);
+        }
+        self.topos.guard_slice("graph_adjacency", &canonical)?;
+
         let mut edge_count = 0usize;
         let mut max_degree = 0usize;
         let mut symmetry_violations = 0usize;
-        let mut saturated_entries = 0usize;
+        let mut self_loops = 0usize;
         for i in 0..node_count {
+            let diagonal = canonical[i * node_count + i];
+            if diagonal.abs() >= self.graph.activation_threshold {
+                self_loops = self_loops.saturating_add(1);
+            }
             let mut degree = 0usize;
             for j in 0..node_count {
-                let idx = i * node_count + j;
-                let clamped = self.graph.saturate_value(self.topos, adjacency[idx]);
-                if clamped != adjacency[idx] {
-                    adjacency[idx] = clamped;
-                    saturated_entries += 1;
+                if i == j {
+                    continue;
                 }
-                if clamped.abs() >= self.graph.activation_threshold {
-                    degree += 1;
+                let forward = canonical[i * node_count + j];
+                let reverse = canonical[j * node_count + i];
+                if forward.abs().max(reverse.abs()) >= self.graph.activation_threshold {
+                    degree = degree.saturating_add(1);
                     if i < j {
-                        edge_count += 1;
+                        edge_count = edge_count.saturating_add(1);
                     }
                 }
-                if i < j {
-                    let sym_idx = j * node_count + i;
-                    let sym = adjacency[sym_idx];
-                    if (clamped - sym).abs() > self.graph.symmetry_tolerance {
-                        symmetry_violations += 1;
-                    }
+                if i < j && (forward - reverse).abs() > self.graph.symmetry_tolerance {
+                    symmetry_violations = symmetry_violations.saturating_add(1);
                 }
             }
             self.graph.guard_degree(degree)?;
             max_degree = cmp::max(max_degree, degree);
         }
         let overflow = self.graph.guard_edge_budget(edge_count)?;
-        self.topos.guard_slice("graph_adjacency", adjacency)?;
+        adjacency.copy_from_slice(&canonical);
         Ok(GraphGuardReport {
             edge_count,
             max_degree,
             symmetry_violations,
+            self_loops,
+            repaired_non_finite,
             saturated_entries,
             edge_overflow: overflow,
         })
@@ -2699,30 +2875,35 @@ impl<'a> MultiModalToposGuard<'a> {
         if rewards.is_empty() {
             return Err(TensorError::EmptyInput("reward_trace"));
         }
-        let mut signal = RewardBoundarySignal::default();
-        for (idx, reward) in rewards.iter_mut().enumerate() {
+        for &reward in rewards.iter() {
             if !reward.is_finite() {
                 return Err(TensorError::NonFiniteValue {
                     label: "reward_trace",
-                    value: *reward,
+                    value: reward,
                 });
             }
-            signal.min_observed = signal.min_observed.min(*reward);
-            signal.max_observed = signal.max_observed.max(*reward);
-            let saturated = self.topos.saturate(*reward);
-            if self.reward.breached_lower(saturated) && signal.lower_breach_index.is_none() {
+        }
+
+        let mut signal = RewardBoundarySignal::default();
+        let mut guarded = Vec::with_capacity(rewards.len());
+        for (idx, &reward) in rewards.iter().enumerate() {
+            signal.min_observed = signal.min_observed.min(reward);
+            signal.max_observed = signal.max_observed.max(reward);
+            if self.reward.breached_lower(reward) && signal.lower_breach_index.is_none() {
                 signal.lower_breach_index = Some(idx);
             }
-            if self.reward.breached_upper(saturated) && signal.upper_breach_index.is_none() {
+            if self.reward.breached_upper(reward) && signal.upper_breach_index.is_none() {
                 signal.upper_breach_index = Some(idx);
             }
+            let saturated = self.topos.saturate(reward);
             let clamped = self.reward.clamp(saturated);
-            if (clamped - *reward).abs() > f32::EPSILON {
-                signal.clamped += 1;
+            if (clamped - reward).abs() > f32::EPSILON {
+                signal.clamped = signal.clamped.saturating_add(1);
             }
-            *reward = clamped;
+            guarded.push(clamped);
         }
-        self.topos.guard_slice("reward_trace", rewards)?;
+        self.topos.guard_slice("reward_trace", &guarded)?;
+        rewards.copy_from_slice(&guarded);
         Ok(signal.finalise())
     }
 }
@@ -2790,10 +2971,13 @@ impl<'a> MultiModalAtlas<'a> {
         label: &'static str,
         tensor: &mut Tensor,
     ) -> PureResult<()> {
+        let mut candidate = tensor.clone();
         self.guard
             .text
-            .rewrite_tensor(self.guard.topos, label, tensor)?;
-        self.atlas.guard_tensor(label, tensor)
+            .rewrite_tensor(self.guard.topos, label, &mut candidate)?;
+        self.atlas.guard_tensor(label, &candidate)?;
+        *tensor = candidate;
+        Ok(())
     }
 
     /// Lifts a text tensor through the atlas after applying modality saturation.
@@ -2812,10 +2996,13 @@ impl<'a> MultiModalAtlas<'a> {
         waveform: &mut [f32],
     ) -> PureResult<()> {
         self.guard.audio.guard_volume(label, waveform.len())?;
+        let mut candidate = waveform.to_vec();
         self.guard
             .audio
-            .rewrite_slice(self.guard.topos, label, waveform)?;
-        self.atlas.guard_slice(label, waveform)
+            .rewrite_slice(self.guard.topos, label, &mut candidate)?;
+        self.atlas.guard_slice(label, &candidate)?;
+        waveform.copy_from_slice(&candidate);
+        Ok(())
     }
 
     /// Guards vision tensors while accounting for atlas traversal volume.
@@ -2824,10 +3011,13 @@ impl<'a> MultiModalAtlas<'a> {
         label: &'static str,
         tensor: &mut Tensor,
     ) -> PureResult<()> {
+        let mut candidate = tensor.clone();
         self.guard
             .vision
-            .rewrite_tensor(self.guard.topos, label, tensor)?;
-        self.atlas.guard_tensor(label, tensor)
+            .rewrite_tensor(self.guard.topos, label, &mut candidate)?;
+        self.atlas.guard_tensor(label, &candidate)?;
+        *tensor = candidate;
+        Ok(())
     }
 
     /// Lifts a vision tensor through the atlas after modality saturation.
@@ -3099,8 +3289,15 @@ impl<'a> ToposAtlas<'a> {
         self.monad
     }
 
-    fn observe_volume(&mut self, label: &'static str, volume: usize) -> PureResult<()> {
-        let projected = self.visited_volume.saturating_add(volume);
+    fn projected_volume(&self, label: &'static str, volume: usize) -> PureResult<usize> {
+        let projected =
+            self.visited_volume
+                .checked_add(volume)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label,
+                    volume: usize::MAX,
+                    max_volume: self.topos.max_volume(),
+                })?;
         if projected > self.topos.max_volume() {
             return Err(TensorError::TensorVolumeExceeded {
                 label,
@@ -3108,29 +3305,36 @@ impl<'a> ToposAtlas<'a> {
                 max_volume: self.topos.max_volume(),
             });
         }
-        self.visited_volume = projected;
-        Ok(())
+        Ok(projected)
     }
 
     /// Guards a tensor and records the total traversed volume.
     pub fn guard_tensor(&mut self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(label, rows.saturating_mul(cols))?;
-        self.monad.guard_tensor(label, tensor)
+        let projected = self.projected_volume(label, checked_tensor_volume(rows, cols)?)?;
+        self.monad.guard_tensor(label, tensor)?;
+        self.visited_volume = projected;
+        Ok(())
     }
 
     /// Rewrites a tensor in-place while tracking the traversed volume.
     pub fn guard_tensor_mut(&mut self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(label, rows.saturating_mul(cols))?;
-        self.monad.rewrite_tensor(label, tensor)
+        let projected = self.projected_volume(label, checked_tensor_volume(rows, cols)?)?;
+        let mut candidate = tensor.clone();
+        self.monad.rewrite_tensor(label, &mut candidate)?;
+        self.visited_volume = projected;
+        *tensor = candidate;
+        Ok(())
     }
 
     /// Lifts an owned tensor into the atlas, returning the rewritten value.
     pub fn lift_tensor(&mut self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
         let (rows, cols) = tensor.shape();
-        self.observe_volume(label, rows.saturating_mul(cols))?;
-        self.monad.lift_tensor(label, tensor)
+        let projected = self.projected_volume(label, checked_tensor_volume(rows, cols)?)?;
+        let tensor = self.monad.lift_tensor(label, tensor)?;
+        self.visited_volume = projected;
+        Ok(tensor)
     }
 
     /// Guards a slice without affecting the tracked volume.
@@ -3167,8 +3371,14 @@ impl<'a> ToposAtlas<'a> {
         label: &'static str,
         patch: &FractalPatch,
     ) -> PureResult<()> {
-        self.observe_depth(patch.depth() as usize)?;
-        self.guard_tensor(label, patch.relation())
+        let depth = patch.depth() as usize;
+        self.topos.ensure_loop_free(depth)?;
+        let (rows, cols) = patch.relation().shape();
+        let projected = self.projected_volume(label, checked_tensor_volume(rows, cols)?)?;
+        self.monad.guard_tensor(label, patch.relation())?;
+        self.visited_volume = projected;
+        self.depth = self.depth.max(depth);
+        Ok(())
     }
 
     /// Updates the maximum visited depth.
@@ -4637,6 +4847,26 @@ mod tests {
     }
 
     #[test]
+    fn atlas_state_and_mutations_commit_together() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 1));
+        let mut atlas = ToposAtlas::new(&topos);
+        let invalid = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::NAN]));
+        let error = unwrap_err(atlas.guard_tensor("invalid_atlas_tensor", &invalid));
+        assert!(matches!(error, TensorError::NonFiniteValue { .. }));
+        assert_eq!(atlas.visited_volume(), 0);
+
+        let valid = unwrap_ok(Tensor::from_vec(1, 1, vec![0.5]));
+        unwrap_ok(atlas.guard_tensor("valid_atlas_tensor", &valid));
+        assert_eq!(atlas.visited_volume(), 1);
+
+        let mut candidate = unwrap_ok(Tensor::from_vec(1, 1, vec![100.0]));
+        let error = unwrap_err(atlas.guard_tensor_mut("full_atlas", &mut candidate));
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(candidate.data(), &[100.0]);
+        assert_eq!(atlas.visited_volume(), 1);
+    }
+
+    #[test]
     fn atlas_lifts_tensor_through_monad() {
         let topos = demo_topos();
         let mut atlas = ToposAtlas::new(&topos);
@@ -4912,6 +5142,102 @@ mod tests {
     }
 
     #[test]
+    fn modality_rewrite_is_transactional_on_non_finite_input() {
+        let topos = demo_topos();
+        let text_profile = unwrap_ok(ModalityProfile::new(2, Some(0.25)));
+        assert_eq!(text_profile.local_saturation(), Some(0.25));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_text_profile(text_profile));
+        let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![10.0, f32::NAN]));
+        let error = unwrap_err(guard.guard_text_tensor("transactional_text", &mut tensor));
+
+        assert!(matches!(error, TensorError::NonFiniteValue { .. }));
+        assert_eq!(tensor.data()[0], 10.0);
+        assert!(tensor.data()[1].is_nan());
+    }
+
+    #[test]
+    fn graph_profile_enforces_topology_and_activation_contracts() {
+        let error = unwrap_err(GraphGuardProfile::new(4, 6, 4, 1e-3, 0.1, None));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+        let error = unwrap_err(GraphGuardProfile::new(4, 6, 3, 1e-3, 0.0, None));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+        let error = unwrap_err(GraphGuardProfile::new(4, 6, 3, f32::NAN, 0.1, None));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "graph_symmetry_tolerance",
+                ..
+            }
+        ));
+
+        let small_topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 9));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&small_topos));
+        assert_eq!(guard.graph_profile().max_nodes(), 3);
+        assert_eq!(guard.graph_profile().max_degree(), 2);
+        assert!(guard.graph_profile().activation_threshold() > 0.0);
+    }
+
+    #[test]
+    fn sparse_graph_uses_edge_budget_not_dense_storage_size() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 64));
+        let profile = unwrap_ok(GraphGuardProfile::new(8, 1, 7, 1e-3, 0.1, Some(1.0)));
+        let profile = unwrap_ok(profile.with_permeability(0.0));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_graph_profile(profile));
+        let mut adjacency = vec![0.0f32; 64];
+        let report = unwrap_ok(guard.guard_graph_adjacency(&mut adjacency, 8));
+
+        assert_eq!(report.edge_count, 0);
+        assert_eq!(report.max_degree, 0);
+        assert_eq!(report.edge_overflow, 0);
+    }
+
+    #[test]
+    fn graph_report_is_measured_after_canonicalization() {
+        let topos = demo_topos();
+        let profile = unwrap_ok(GraphGuardProfile::new(2, 1, 1, 1e-3, 0.05, Some(1.0)));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_graph_profile(profile));
+        let mut forward = vec![f32::NAN, 10.0, 0.2, 0.0];
+        let mut reverse = vec![f32::NAN, 0.2, 10.0, 0.0];
+
+        let forward_report = unwrap_ok(guard.guard_graph_adjacency(&mut forward, 2));
+        let reverse_report = unwrap_ok(guard.guard_graph_adjacency(&mut reverse, 2));
+
+        assert_eq!(forward_report, reverse_report);
+        assert_eq!(forward_report.edge_count, 1);
+        assert_eq!(forward_report.max_degree, 1);
+        assert_eq!(forward_report.symmetry_violations, 1);
+        assert_eq!(forward_report.self_loops, 0);
+        assert_eq!(forward_report.repaired_non_finite, 1);
+        assert_eq!(forward_report.saturated_entries, 1);
+        assert_eq!(forward[0], 0.0);
+        assert_eq!(reverse[0], 0.0);
+    }
+
+    #[test]
+    fn graph_guard_rolls_back_on_degree_and_edge_budget_failures() {
+        let topos = demo_topos();
+        let mut adjacency = vec![0.0f32, 2.0, 2.0, 2.0, 0.0, 2.0, 2.0, 2.0, 0.0];
+        let original = adjacency.clone();
+
+        let degree_profile = unwrap_ok(GraphGuardProfile::new(3, 3, 1, 1e-3, 0.1, Some(0.5)));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let degree_guard = unwrap_ok(guard.with_graph_profile(degree_profile));
+        let error = unwrap_err(degree_guard.guard_graph_adjacency(&mut adjacency, 3));
+        assert!(matches!(error, TensorError::InvalidValue { .. }));
+        assert_eq!(adjacency, original);
+
+        let edge_profile = unwrap_ok(GraphGuardProfile::new(3, 1, 2, 1e-3, 0.1, Some(0.5)));
+        let edge_profile = unwrap_ok(edge_profile.with_permeability(0.0));
+        let edge_guard = unwrap_ok(guard.with_graph_profile(edge_profile));
+        let error = unwrap_err(edge_guard.guard_graph_adjacency(&mut adjacency, 3));
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(adjacency, original);
+    }
+
+    #[test]
     fn multi_modal_graph_guard_reports_symmetry() {
         let topos = demo_topos();
         let graph_profile = unwrap_ok(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)));
@@ -4944,6 +5270,64 @@ mod tests {
     }
 
     #[test]
+    fn reward_boundary_clamps_windows_on_either_side_of_zero() {
+        let positive = unwrap_ok(RewardBoundary::with_porosity(1.0, 2.0, 0.1, 0.5));
+        let negative = unwrap_ok(RewardBoundary::with_porosity(-2.0, -1.0, 0.1, 0.5));
+        assert_eq!(positive.hysteresis(), 0.1);
+
+        for value in [0.0f32, 3.0] {
+            let clamped = positive.clamp(value);
+            assert!((positive.lower()..=positive.upper()).contains(&clamped));
+        }
+        for value in [-3.0f32, 0.0] {
+            let clamped = negative.clamp(value);
+            assert!((negative.lower()..=negative.upper()).contains(&clamped));
+        }
+    }
+
+    #[test]
+    fn reward_guard_observes_raw_runaway_before_topos_saturation() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 8));
+        let boundary = unwrap_ok(RewardBoundary::new(-0.98, 0.98, 0.0));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_reward_boundary(boundary));
+        let mut rewards = [100.0f32];
+        let signal = unwrap_ok(guard.guard_reward_trace(&mut rewards));
+
+        assert_eq!(signal.upper_breach_index, Some(0));
+        assert_eq!(signal.max_observed, 100.0);
+        assert_eq!(signal.clamped, 1);
+        assert!(rewards[0].abs() <= topos.saturation());
+    }
+
+    #[test]
+    fn reward_boundary_cannot_escape_the_global_topos_envelope() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 8));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let boundary = unwrap_ok(RewardBoundary::new(-2.0, 2.0, 0.1));
+        let error = unwrap_err(guard.with_reward_boundary(boundary));
+
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue {
+                label: "reward_boundary_exceeds_topos_saturation"
+            }
+        ));
+    }
+
+    #[test]
+    fn reward_guard_is_transactional_on_non_finite_tail() {
+        let topos = demo_topos();
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let mut rewards = [100.0f32, f32::NAN];
+        let error = unwrap_err(guard.guard_reward_trace(&mut rewards));
+
+        assert!(matches!(error, TensorError::NonFiniteValue { .. }));
+        assert_eq!(rewards[0], 100.0);
+        assert!(rewards[1].is_nan());
+    }
+
+    #[test]
     fn multi_modal_atlas_tracks_volume_and_lifts() {
         let topos = demo_topos();
         let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
@@ -4968,6 +5352,22 @@ mod tests {
             .iter()
             .all(|&value| value.abs() <= vision_headroom + 1e-5));
         assert_eq!(atlas.visited_volume(), 12);
+    }
+
+    #[test]
+    fn multi_modal_atlas_does_not_rewrite_when_capacity_commit_fails() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 1));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let mut atlas = guard.atlas();
+        let mut first = unwrap_ok(Tensor::from_vec(1, 1, vec![0.5]));
+        unwrap_ok(atlas.guard_text_tensor("first_text", &mut first));
+        assert_eq!(atlas.visited_volume(), 1);
+
+        let mut second = unwrap_ok(Tensor::from_vec(1, 1, vec![100.0]));
+        let error = unwrap_err(atlas.guard_text_tensor("overflow_text", &mut second));
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(second.data(), &[100.0]);
+        assert_eq!(atlas.visited_volume(), 1);
     }
 
     #[test]
