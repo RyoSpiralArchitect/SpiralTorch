@@ -503,9 +503,7 @@ impl DifferentialTrace {
         let recursive = RecursiveDifferential::from_barycenter(&barycenter)?;
         let infinity = InfinityDifferential::new(levels, curvatures)?;
         let topos = self.topos_override.or_else(|| session.topos().cloned());
-        SpiralDifferential::new(
-            topos, homotopy, functor, recursive, infinity,
-        )
+        SpiralDifferential::new(topos, homotopy, functor, recursive, infinity)
     }
 
     /// Finalises the trace without modifying a hypergrad tape.
