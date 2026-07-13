@@ -81,6 +81,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "topos_inference_plan",
             "topos_runtime_profile",
             "topos_runtime_route",
+            "topos_zspace_projection",
             "topos_control_partial",
             "canvas_partial_from_snapshot",
             "canvas_coherence_partial",

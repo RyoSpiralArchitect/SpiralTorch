@@ -38,16 +38,22 @@ converts the object/JSON boundary; it does not maintain separate pressure, hint,
 formulas:
 
 ```ts
-import { toposControlSignalObject, toposRuntimeRouteObject } from "spiraltorch-wasm";
+import {
+    toposControlSignalObject,
+    toposRuntimeRouteObject,
+    toposZSpaceProjectionObject,
+} from "spiraltorch-wasm";
 
-const signal = toposControlSignalObject({
+const toposInput = {
     curvature: -1.0,
     porosity: 0.25,
     max_depth: 64,
     max_volume: 512,
     observed_depth: 12,
     visited_volume: 96,
-});
+};
+
+const signal = toposControlSignalObject(toposInput);
 
 const route = toposRuntimeRouteObject({
     closure_risk: 0.2,
@@ -56,13 +62,16 @@ const route = toposRuntimeRouteObject({
     inference_top_p: 0.95,
 });
 
-console.log(signal.closure_pressure, route.mode, route.semantic_owner);
+const projection = toposZSpaceProjectionObject(toposInput, 8);
+
+console.log(signal.closure_pressure, route.mode, projection.gradient);
 ```
 
-`toposControlSignalJson` and `toposRuntimeRouteJson` expose the same contracts for storage
-and worker-message flows. Results carry `contract_version`, `semantic_owner`, and
-`semantic_backend` so Python, browser, and direct Rust runs can be audited against one
-semantic core.
+`toposControlSignalJson`, `toposRuntimeRouteJson`, and `toposZSpaceProjectionJson`
+expose the same contracts for storage and worker-message flows. The projection's first six
+gradient axes are semantic; wider client vectors are explicitly zero-filled by Rust. Results
+carry `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and
+direct Rust runs can be audited against one semantic core.
 
 ## High-level Canvas utilities
 

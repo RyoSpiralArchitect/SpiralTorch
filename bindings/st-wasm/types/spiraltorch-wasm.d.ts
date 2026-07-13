@@ -47,7 +47,7 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ToposRuntimeProfile = Required<ToposRuntimeProfileInput> & {
-        vector: number[];
+        vector: [number, number, number, number, number];
     };
 
     export type ToposRuntimeRouteScores = {
@@ -154,6 +154,23 @@ declare module "spiraltorch-wasm" {
         inference_plan: ToposInferencePlan;
         runtime_profile: ToposRuntimeProfile;
         runtime_route: ToposRuntimeRoute;
+    };
+
+    export type ToposZSpaceProjection = {
+        kind: "spiraltorch.topos_zspace_projection";
+        contract_version: "spiraltorch.topos_zspace_projection.v1";
+        semantic_owner: "st-tensor::pure::topos";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        gradient_dim: number;
+        base_gradient_dim: 6;
+        speed: number;
+        memory: number;
+        stability: number;
+        drs: number;
+        frac: number;
+        gradient: number[];
+        vector: number[];
     };
 
     export type WasmReportRuntimeAudit = {
@@ -496,6 +513,14 @@ declare module "spiraltorch-wasm" {
     export function toposControlSignalObject(
         input: ToposControlSignalInput,
     ): ToposControlSignal;
+    export function toposZSpaceProjectionJson(
+        inputJson: string,
+        gradientDim: number,
+    ): string;
+    export function toposZSpaceProjectionObject(
+        input: ToposControlSignalInput,
+        gradientDim: number,
+    ): ToposZSpaceProjection;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

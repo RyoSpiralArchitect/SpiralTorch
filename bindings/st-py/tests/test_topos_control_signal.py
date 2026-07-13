@@ -93,6 +93,82 @@ def test_raw_topos_control_input_uses_native_bundle_ingress() -> None:
     assert signal["closure_pressure"] == pytest.approx(0.4)
 
 
+def test_topos_zspace_projection_uses_rust_contract_and_dimension_adaptation() -> None:
+    projection = st.topos_zspace_projection(
+        {
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+        },
+        observed_depth=4,
+        visited_volume=25,
+        gradient_dim=8,
+    )
+
+    assert projection["kind"] == "spiraltorch.topos_zspace_projection"
+    assert (
+        projection["contract_version"]
+        == "spiraltorch.topos_zspace_projection.v1"
+    )
+    assert projection["semantic_owner"] == "st-tensor::pure::topos"
+    assert projection["semantic_backend"] == "rust"
+    assert projection["gradient_dim"] == 8
+    assert projection["base_gradient_dim"] == 6
+    assert projection["speed"] == pytest.approx(0.41477418)
+    assert projection["memory"] == pytest.approx(0.25)
+    assert projection["stability"] == pytest.approx(0.4201313)
+    assert projection["drs"] == pytest.approx(0.1355)
+    assert projection["frac"] == pytest.approx(0.6680031)
+    assert projection["gradient"][:6] == pytest.approx(
+        [0.6, 0.645, 0.54, 0.23875, 0.4, 0.25]
+    )
+    assert projection["gradient"][6:] == [0.0, 0.0]
+    assert projection["vector"] == pytest.approx(
+        [
+            projection["speed"],
+            projection["memory"],
+            projection["stability"],
+            projection["drs"],
+            projection["frac"],
+        ]
+    )
+
+
+@pytest.mark.parametrize("gradient_dim", [0, 4097])
+def test_topos_zspace_projection_rejects_unsafe_dimensions(gradient_dim: int) -> None:
+    with pytest.raises(ValueError, match="topos_zspace_gradient_dim"):
+        st.topos_zspace_projection(gradient_dim=gradient_dim)
+
+
+def test_topos_zspace_projection_fails_closed_without_rust_semantics(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_native_topos_zspace_projection_from_observation",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
+        st.topos_zspace_projection()
+
+
+def test_topos_zspace_projection_rejects_untrusted_native_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_native_topos_zspace_projection_from_observation",
+        lambda *_args, **_kwargs: {
+            "kind": "spiraltorch.topos_control_signal",
+            "contract_version": "spiraltorch.topos_zspace_projection.v1",
+            "semantic_owner": "st-tensor::pure::topos",
+            "semantic_backend": "rust",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="untrusted contract"):
+        st.topos_zspace_projection()
+
+
 def test_derived_topos_overrides_are_rejected() -> None:
     with pytest.raises(ValueError, match="derived fields are Rust-owned"):
         st.topos_control_signal(
@@ -418,7 +494,48 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     assert telemetry["topos.inference_hints.context_weight"] > 0.0
     assert telemetry["topos.runtime_route.mode_id"] == pytest.approx(3.0)
     assert telemetry["topos.runtime_route.score"] > 0.0
+    assert telemetry["topos.zspace_projection.gradient_dim"] == pytest.approx(4.0)
+    assert telemetry["topos.zspace_projection.base_gradient_dim"] == pytest.approx(
+        6.0
+    )
+    assert telemetry["topos.zspace_projection.memory"] == pytest.approx(
+        resolved["memory"]
+    )
     assert "topos.runtime_route.runtime_profile.control_energy" not in telemetry
+
+
+def test_topos_control_partial_consumes_projection_without_python_reconstruction(
+    monkeypatch,
+) -> None:
+    projection = {
+        "kind": "spiraltorch.topos_zspace_projection",
+        "contract_version": "spiraltorch.topos_zspace_projection.v1",
+        "semantic_owner": "st-tensor::pure::topos",
+        "semantic_backend": "rust",
+        "gradient_dim": 3,
+        "base_gradient_dim": 6,
+        "speed": 0.11,
+        "memory": 0.22,
+        "stability": 0.33,
+        "drs": -0.44,
+        "frac": 0.55,
+        "gradient": [0.66, -0.77, 0.88],
+        "vector": [0.11, 0.22, 0.33, -0.44, 0.55],
+    }
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_topos_zspace_projection_from_observation",
+        lambda *_args, **_kwargs: dict(projection),
+    )
+
+    partial = st.topos_control_partial(gradient_dim=3)
+
+    assert partial.resolved()["speed"] == pytest.approx(0.11)
+    assert partial.resolved()["memory"] == pytest.approx(0.22)
+    assert partial.resolved()["stability"] == pytest.approx(0.33)
+    assert partial.resolved()["drs"] == pytest.approx(-0.44)
+    assert partial.resolved()["frac"] == pytest.approx(0.55)
+    assert partial.resolved()["gradient"] == pytest.approx([0.66, -0.77, 0.88])
 
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
@@ -429,6 +546,7 @@ def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_inference_plan" in st.__all__
     assert "topos_runtime_profile" in st.__all__
     assert "topos_runtime_route" in st.__all__
+    assert "topos_zspace_projection" in st.__all__
     assert "topos_control_partial" in st.__all__
 
 
