@@ -5,17 +5,14 @@
 
 //! Lightweight public operations exposed from the SpiralTorch core crate.
 //!
-//! Historically this module re-exported a large collection of experimental
-//! utilities (fractional autodiff, ndarray-based FFT helpers, prototype
-//! hypergrad solvers, etc.). Those prototypes pulled in heavy dependencies and
-//! routinely broke clean builds when the optional features were not enabled.
-//!
-//! The new high-level `st-nn` crate only needs the rank planner entry points
-//! today, so we keep the surface tight and dependency free. The experimental
-//! helpers live next to their callers and can grow behind dedicated features
-//! without leaking into the default build.
+//! Historically this module mixed experimental helpers with runtime contracts.
+//! The current surface keeps only stable adapters here: their mathematical
+//! semantics live in focused crates such as `st-frac`, while `st-core` exposes
+//! them to runtimes without reimplementing those semantics.
 
 pub mod ablog;
+pub mod frac;
+pub mod frac_autograd;
 pub mod operator_registry;
 pub mod rank_entry;
 pub mod realgrad;

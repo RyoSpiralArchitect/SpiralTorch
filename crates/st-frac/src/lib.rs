@@ -27,7 +27,7 @@ pub enum FracBackend {
     Wgpu { radix: u8 },
 }
 
-#[derive(Debug, Error, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum FracErr {
     /// The requested axis does not exist in the input tensor.
     #[error("axis out of range")]
@@ -78,6 +78,89 @@ pub enum Pad {
     Wrap,
     /// Fill with the provided constant value.
     Constant(f32),
+}
+
+/// Scaling semantics for a GL operator.
+///
+/// `Fixed` is deliberately distinct from `Step`: both multiply the forward
+/// operator, but only `Step(h)` contributes `-ln(h) * h^-alpha` to the exact
+/// derivative with respect to `alpha`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum GlScale {
+    /// Apply no additional scaling.
+    #[default]
+    Unit,
+    /// Apply a caller-provided scale that is independent of `alpha`.
+    Fixed(f32),
+    /// Apply the derivative scale `h^-alpha` for sample spacing `h`.
+    Step(f32),
+}
+
+impl GlScale {
+    fn multiplier_and_alpha_derivative(self, alpha: f32) -> Result<(f32, f32), FracErr> {
+        validate_alpha(alpha)?;
+        match self {
+            Self::Unit => Ok((1.0, 0.0)),
+            Self::Fixed(scale) => {
+                validate_scale(Some(scale))?;
+                Ok((scale, 0.0))
+            }
+            Self::Step(h) => {
+                let scale = gl_step_scale(alpha, h)?.inverse_h_alpha();
+                let derivative = -f64::from(h).ln() * f64::from(scale);
+                Ok((
+                    scale,
+                    checked_f32("GL step-scale alpha derivative", derivative)?,
+                ))
+            }
+        }
+    }
+
+    /// Resolve the forward multiplier for `alpha`.
+    pub fn multiplier(self, alpha: f32) -> Result<f32, FracErr> {
+        self.multiplier_and_alpha_derivative(alpha)
+            .map(|(multiplier, _)| multiplier)
+    }
+}
+
+/// Backend-independent contract for an ND GL fractional difference.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FracdiffGlConfig {
+    pub alpha: f32,
+    pub axis: usize,
+    pub kernel_len: usize,
+    pub pad: Pad,
+    pub scale: GlScale,
+}
+
+impl FracdiffGlConfig {
+    /// Construct an unscaled GL operator.
+    pub const fn new(alpha: f32, axis: usize, kernel_len: usize, pad: Pad) -> Self {
+        Self {
+            alpha,
+            axis,
+            kernel_len,
+            pad,
+            scale: GlScale::Unit,
+        }
+    }
+
+    /// Attach an alpha-independent multiplier.
+    pub const fn with_fixed_scale(mut self, scale: f32) -> Self {
+        self.scale = GlScale::Fixed(scale);
+        self
+    }
+
+    /// Attach the sample-spacing multiplier `h^-alpha`.
+    pub const fn with_step(mut self, h: f32) -> Self {
+        self.scale = GlScale::Step(h);
+        self
+    }
+
+    /// Resolve this operator's validated forward multiplier.
+    pub fn scale_multiplier(self) -> Result<f32, FracErr> {
+        self.scale.multiplier(self.alpha)
+    }
 }
 
 /// Validated powers of a GL sample spacing.
@@ -204,6 +287,40 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Result<Vec<f32>, FracErr> {
         *coefficient = checked_f32("GL coefficient", previous)?;
     }
     Ok(c)
+}
+
+/// Generate GL coefficients and their exact derivatives with respect to `alpha`.
+///
+/// Both recurrences are accumulated in `f64` before checked conversion to
+/// `f32`, including at integer orders where a coefficient can be zero while
+/// its derivative remains non-zero.
+pub fn gl_coeffs_with_alpha_derivative(
+    alpha: f32,
+    len: usize,
+) -> Result<(Vec<f32>, Vec<f32>), FracErr> {
+    if len == 0 {
+        return Err(FracErr::Kernel);
+    }
+    let alpha = validate_alpha(alpha)?;
+    let mut coefficients = zeroed_vec("GL coefficient", len)?;
+    let mut derivatives = zeroed_vec("GL coefficient alpha derivative", len)?;
+    coefficients[0] = 1.0;
+
+    let mut previous = 1.0f64;
+    let mut previous_derivative = 0.0f64;
+    for index in 1..len {
+        let order = index as f64;
+        let factor = -((alpha - (order - 1.0)) / order);
+        let factor_derivative = -1.0 / order;
+        let next = factor * previous;
+        let next_derivative = factor_derivative * previous + factor * previous_derivative;
+        coefficients[index] = checked_f32("GL coefficient", next)?;
+        derivatives[index] = checked_f32("GL coefficient alpha derivative", next_derivative)?;
+        previous = next;
+        previous_derivative = next_derivative;
+    }
+
+    Ok((coefficients, derivatives))
 }
 
 fn wrap_index(idx: isize, len: usize) -> usize {
@@ -453,6 +570,22 @@ pub fn fracdiff_gl_1d_with_coeffs(
     fracdiff_gl_1d_with_coeffs_forward(x, coeff, pad, scale)
 }
 
+/// Differentiate [`fracdiff_gl_1d`] exactly with respect to `alpha`.
+///
+/// `scale` is treated as independent of `alpha`. Callers using an
+/// alpha-dependent scale such as `h^-alpha` must add that scale derivative
+/// separately.
+pub fn fracdiff_gl_1d_alpha_derivative(
+    x: &[f32],
+    alpha: f32,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<Vec<f32>, FracErr> {
+    let (_, coefficient_derivatives) = gl_coeffs_with_alpha_derivative(alpha, kernel_len)?;
+    fracdiff_gl_1d_with_coeffs_impl(x, &coefficient_derivatives, pad, scale)
+}
+
 /// Apply the exact vector-Jacobian product of [`fracdiff_gl_1d`].
 ///
 /// Boundary samples from `Reflect`, `Edge`, and `Wrap` padding are accumulated
@@ -491,15 +624,43 @@ pub fn fracdiff_gl_nd(
     pad: Pad,
     scale: Option<f32>,
 ) -> Result<ArrayD<f32>, FracErr> {
+    let mut config = FracdiffGlConfig::new(alpha, axis, kernel_len, pad);
+    if let Some(scale) = scale {
+        config = config.with_fixed_scale(scale);
+    }
+    fracdiff_gl_nd_config(x, config)
+}
+
+/// Apply a backend-independent GL operator contract.
+pub fn fracdiff_gl_nd_config(
+    x: &ArrayD<f32>,
+    config: FracdiffGlConfig,
+) -> Result<ArrayD<f32>, FracErr> {
+    if config.axis >= x.ndim() {
+        return Err(FracErr::Axis);
+    }
+    let coeff = gl_coeffs(config.alpha, config.kernel_len)?;
+    let scale = config.scale_multiplier()?;
+    fracdiff_gl_nd_with_coeffs(x, config.axis, &coeff, config.pad, Some(scale))
+}
+
+/// Apply a GL fractional difference along one axis using precomputed coefficients.
+pub fn fracdiff_gl_nd_with_coeffs(
+    x: &ArrayD<f32>,
+    axis: usize,
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<ArrayD<f32>, FracErr> {
     if axis >= x.ndim() {
         return Err(FracErr::Axis);
     }
-    if kernel_len == 0 {
+    if coeff.is_empty() {
         return Err(FracErr::Kernel);
     }
+    validate_slice("GL coefficient", coeff)?;
     validate_pad(pad)?;
     let mut y = x.clone();
-    let coeff = gl_coeffs(alpha, kernel_len)?;
     let scale = validate_scale(scale)?;
     let axis_len = x.len_of(Axis(axis));
     let mut scratch_src = zeroed_vec("fractional source scratch", axis_len)?;
@@ -513,13 +674,13 @@ pub fn fracdiff_gl_nd(
     for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes) {
         match (src.as_slice(), dst.as_slice_mut()) {
             (Some(src_slice), Some(dst_slice)) => {
-                conv1d_gl_line(src_slice, dst_slice, &coeff, pad, scale)?;
+                conv1d_gl_line(src_slice, dst_slice, coeff, pad, scale)?;
             }
             _ => {
                 for (slot, &value) in scratch_src.iter_mut().zip(src.iter()) {
                     *slot = value;
                 }
-                conv1d_gl_line(&scratch_src, &mut scratch_dst, &coeff, pad, scale)?;
+                conv1d_gl_line(&scratch_src, &mut scratch_dst, coeff, pad, scale)?;
                 for (dst_value, &value) in dst.iter_mut().zip(scratch_dst.iter()) {
                     *dst_value = value;
                 }
@@ -538,15 +699,43 @@ pub fn fracdiff_gl_nd_backward(
     pad: Pad,
     scale: Option<f32>,
 ) -> Result<ArrayD<f32>, FracErr> {
+    let mut config = FracdiffGlConfig::new(alpha, axis, kernel_len, pad);
+    if let Some(scale) = scale {
+        config = config.with_fixed_scale(scale);
+    }
+    fracdiff_gl_nd_vjp_config(gy, config)
+}
+
+/// Apply the exact input VJP for a backend-independent GL operator contract.
+pub fn fracdiff_gl_nd_vjp_config(
+    gy: &ArrayD<f32>,
+    config: FracdiffGlConfig,
+) -> Result<ArrayD<f32>, FracErr> {
+    if config.axis >= gy.ndim() {
+        return Err(FracErr::Axis);
+    }
+    let coeff = gl_coeffs(config.alpha, config.kernel_len)?;
+    let scale = config.scale_multiplier()?;
+    fracdiff_gl_nd_vjp_with_coeffs(gy, config.axis, &coeff, config.pad, Some(scale))
+}
+
+/// Apply the exact ND VJP using precomputed GL coefficients.
+pub fn fracdiff_gl_nd_vjp_with_coeffs(
+    gy: &ArrayD<f32>,
+    axis: usize,
+    coeff: &[f32],
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<ArrayD<f32>, FracErr> {
     if axis >= gy.ndim() {
         return Err(FracErr::Axis);
     }
-    if kernel_len == 0 {
+    if coeff.is_empty() {
         return Err(FracErr::Kernel);
     }
+    validate_slice("GL coefficient", coeff)?;
     validate_pad(pad)?;
     let mut gx = gy.clone();
-    let coeff = gl_coeffs(alpha, kernel_len)?;
     let scale = validate_scale(scale)?;
     let axis_len = gy.len_of(Axis(axis));
     let mut scratch_src = zeroed_vec("fractional VJP source scratch", axis_len)?;
@@ -560,13 +749,13 @@ pub fn fracdiff_gl_nd_backward(
     for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes) {
         match (src.as_slice(), dst.as_slice_mut()) {
             (Some(src_slice), Some(dst_slice)) => {
-                vjp1d_gl_line(src_slice, dst_slice, &coeff, pad, scale)?;
+                vjp1d_gl_line(src_slice, dst_slice, coeff, pad, scale)?;
             }
             _ => {
                 for (slot, &value) in scratch_src.iter_mut().zip(src.iter()) {
                     *slot = value;
                 }
-                vjp1d_gl_line(&scratch_src, &mut scratch_dst, &coeff, pad, scale)?;
+                vjp1d_gl_line(&scratch_src, &mut scratch_dst, coeff, pad, scale)?;
                 for (dst_value, &value) in dst.iter_mut().zip(scratch_dst.iter()) {
                     *dst_value = value;
                 }
@@ -574,6 +763,52 @@ pub fn fracdiff_gl_nd_backward(
         }
     }
     Ok(gx)
+}
+
+/// Differentiate [`fracdiff_gl_nd`] exactly with respect to `alpha`.
+///
+/// As with [`fracdiff_gl_1d_alpha_derivative`], `scale` is held constant.
+pub fn fracdiff_gl_nd_alpha_derivative(
+    x: &ArrayD<f32>,
+    alpha: f32,
+    axis: usize,
+    kernel_len: usize,
+    pad: Pad,
+    scale: Option<f32>,
+) -> Result<ArrayD<f32>, FracErr> {
+    let mut config = FracdiffGlConfig::new(alpha, axis, kernel_len, pad);
+    if let Some(scale) = scale {
+        config = config.with_fixed_scale(scale);
+    }
+    fracdiff_gl_nd_alpha_derivative_config(x, config)
+}
+
+/// Differentiate a backend-independent GL operator contract with respect to `alpha`.
+///
+/// Unlike the lower-level fixed-scale entry point, this includes the derivative
+/// of `h^-alpha` when `config.scale` is [`GlScale::Step`].
+pub fn fracdiff_gl_nd_alpha_derivative_config(
+    x: &ArrayD<f32>,
+    config: FracdiffGlConfig,
+) -> Result<ArrayD<f32>, FracErr> {
+    if config.axis >= x.ndim() {
+        return Err(FracErr::Axis);
+    }
+    let (coefficients, coefficient_derivatives) =
+        gl_coeffs_with_alpha_derivative(config.alpha, config.kernel_len)?;
+    let (scale, scale_derivative) = config.scale.multiplier_and_alpha_derivative(config.alpha)?;
+    let effective_derivatives = coefficients
+        .iter()
+        .zip(coefficient_derivatives)
+        .map(|(&coefficient, coefficient_derivative)| {
+            checked_f32(
+                "scaled GL coefficient alpha derivative",
+                f64::from(scale) * f64::from(coefficient_derivative)
+                    + f64::from(scale_derivative) * f64::from(coefficient),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    fracdiff_gl_nd_with_coeffs(x, config.axis, &effective_derivatives, config.pad, None)
 }
 
 #[cfg(test)]
@@ -596,6 +831,133 @@ mod tests {
             assert!(coeffs.last().unwrap().abs() < 1e-4);
         } else {
             assert!(coeffs.last().unwrap().abs() >= 1e-4);
+        }
+    }
+
+    #[test]
+    fn coefficient_alpha_derivative_matches_central_difference() {
+        let epsilon = 1e-3f32;
+        for alpha in [0.37f32, 1.0] {
+            let (_, analytic) = gl_coeffs_with_alpha_derivative(alpha, 8).unwrap();
+            let plus = gl_coeffs(alpha + epsilon, 8).unwrap();
+            let minus = gl_coeffs(alpha - epsilon, 8).unwrap();
+
+            for (index, ((analytic, plus), minus)) in
+                analytic.iter().zip(&plus).zip(&minus).enumerate()
+            {
+                let numeric = (plus - minus) / (2.0 * epsilon);
+                let tolerance = 2e-3f32 * analytic.abs().max(numeric.abs()).max(1.0);
+                assert!(
+                    (analytic - numeric).abs() <= tolerance,
+                    "alpha={alpha}, index={index}, analytic={analytic}, numeric={numeric}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn alpha_derivative_matches_central_difference_for_every_padding_mode() {
+        let input = [0.25, -1.5, 2.0, 0.75];
+        let alpha = 0.63f32;
+        let epsilon = 1e-3f32;
+        let pads = [
+            Pad::Zero,
+            Pad::Reflect,
+            Pad::Edge,
+            Pad::Wrap,
+            Pad::Constant(2.5),
+        ];
+
+        for pad in pads {
+            let analytic =
+                fracdiff_gl_1d_alpha_derivative(&input, alpha, 6, pad, Some(0.7)).unwrap();
+            let plus = fracdiff_gl_1d(&input, alpha + epsilon, 6, pad, Some(0.7)).unwrap();
+            let minus = fracdiff_gl_1d(&input, alpha - epsilon, 6, pad, Some(0.7)).unwrap();
+
+            for (index, ((analytic, plus), minus)) in
+                analytic.iter().zip(&plus).zip(&minus).enumerate()
+            {
+                let numeric = (plus - minus) / (2.0 * epsilon);
+                let tolerance = 3e-3f32 * analytic.abs().max(numeric.abs()).max(1.0);
+                assert!(
+                    (analytic - numeric).abs() <= tolerance,
+                    "pad={pad:?}, index={index}, analytic={analytic}, numeric={numeric}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nd_precomputed_entry_points_match_order_entry_points() {
+        let input =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![0.5, -1.0, 2.0, 1.5, 0.25, -0.75]).unwrap();
+        let gradient =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 0.5, -0.25, 2.0, -1.0, 0.75]).unwrap();
+        let alpha = 0.55;
+        let coefficients = gl_coeffs(alpha, 5).unwrap();
+
+        assert_eq!(
+            fracdiff_gl_nd(&input, alpha, 1, 5, Pad::Reflect, Some(0.8)).unwrap(),
+            fracdiff_gl_nd_with_coeffs(&input, 1, &coefficients, Pad::Reflect, Some(0.8)).unwrap()
+        );
+        assert_eq!(
+            fracdiff_gl_nd_backward(&gradient, alpha, 1, 5, Pad::Reflect, Some(0.8)).unwrap(),
+            fracdiff_gl_nd_vjp_with_coeffs(&gradient, 1, &coefficients, Pad::Reflect, Some(0.8),)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn nd_config_is_the_shared_forward_and_vjp_contract() {
+        let input =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![0.5, -1.0, 2.0, 1.5, 0.25, -0.75]).unwrap();
+        let gradient =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 0.5, -0.25, 2.0, -1.0, 0.75]).unwrap();
+        let config = FracdiffGlConfig::new(0.55, 1, 5, Pad::Reflect).with_fixed_scale(0.8);
+
+        assert_eq!(
+            fracdiff_gl_nd_config(&input, config).unwrap(),
+            fracdiff_gl_nd(&input, 0.55, 1, 5, Pad::Reflect, Some(0.8)).unwrap()
+        );
+        assert_eq!(
+            fracdiff_gl_nd_vjp_config(&gradient, config).unwrap(),
+            fracdiff_gl_nd_backward(&gradient, 0.55, 1, 5, Pad::Reflect, Some(0.8)).unwrap()
+        );
+    }
+
+    #[test]
+    fn step_scaled_config_alpha_derivative_includes_scale_derivative() {
+        let input =
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), vec![0.5, -1.0, 2.0, 1.5, 0.25, -0.75]).unwrap();
+        let alpha = 0.55f32;
+        let epsilon = 1e-3f32;
+        let config = FracdiffGlConfig::new(alpha, 1, 5, Pad::Edge).with_step(0.25);
+        let analytic = fracdiff_gl_nd_alpha_derivative_config(&input, config).unwrap();
+        let plus = fracdiff_gl_nd_config(
+            &input,
+            FracdiffGlConfig {
+                alpha: alpha + epsilon,
+                ..config
+            },
+        )
+        .unwrap();
+        let minus = fracdiff_gl_nd_config(
+            &input,
+            FracdiffGlConfig {
+                alpha: alpha - epsilon,
+                ..config
+            },
+        )
+        .unwrap();
+
+        for (index, ((analytic, plus), minus)) in analytic.iter().zip(&plus).zip(&minus).enumerate()
+        {
+            let numeric = (plus - minus) / (2.0 * epsilon);
+            let tolerance = 4e-3f32 * analytic.abs().max(numeric.abs()).max(1.0);
+            assert!(
+                (analytic - numeric).abs() <= tolerance,
+                "index={index}, analytic={analytic}, numeric={numeric}"
+            );
         }
     }
 
@@ -734,6 +1096,16 @@ mod tests {
         assert!(matches!(gl_coeffs(0.0, 2), Err(FracErr::Alpha { .. })));
         assert!(matches!(gl_coeffs(f32::NAN, 2), Err(FracErr::Alpha { .. })));
         assert!(matches!(gl_step_scale(0.5, 0.0), Err(FracErr::Step { .. })));
+        assert!(matches!(
+            FracdiffGlConfig::new(f32::NAN, 0, 2, Pad::Zero).scale_multiplier(),
+            Err(FracErr::Alpha { .. })
+        ));
+        assert!(matches!(
+            FracdiffGlConfig::new(0.5, 0, 2, Pad::Zero)
+                .with_fixed_scale(f32::INFINITY)
+                .scale_multiplier(),
+            Err(FracErr::NonFiniteParameter { .. })
+        ));
         assert!(matches!(
             fracdiff_gl_1d(&[1.0, f32::NAN], 0.5, 2, Pad::Zero, None),
             Err(FracErr::NonFiniteSample { .. })
