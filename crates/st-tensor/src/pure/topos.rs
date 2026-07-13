@@ -2087,7 +2087,20 @@ impl OpenCartesianTopos {
         label: &'static str,
         tensor: &mut Tensor,
     ) -> PureResult<()> {
-        self.guard_probability_slice(label, tensor.data_mut())
+        let (rows, cols) = tensor.shape();
+        let volume = checked_tensor_volume(rows, cols)?;
+        if volume > self.max_volume {
+            return Err(TensorError::TensorVolumeExceeded {
+                label,
+                volume,
+                max_volume: self.max_volume,
+            });
+        }
+        let mut candidate = tensor.clone();
+        self.guard_probability_slice(label, candidate.data_mut())?;
+        self.guard_tensor(label, &candidate)?;
+        *tensor = candidate;
+        Ok(())
     }
 
     /// Catches runaway recursion depth before it can trigger a feedback loop.
@@ -3118,6 +3131,31 @@ impl MultiModalBiome {
         self.biome.topos()
     }
 
+    /// Returns the text profile preserved by this biome.
+    pub fn text_profile(&self) -> ModalityProfile {
+        self.text
+    }
+
+    /// Returns the audio profile preserved by this biome.
+    pub fn audio_profile(&self) -> ModalityProfile {
+        self.audio
+    }
+
+    /// Returns the vision profile preserved by this biome.
+    pub fn vision_profile(&self) -> ModalityProfile {
+        self.vision
+    }
+
+    /// Returns the graph profile preserved by this biome.
+    pub fn graph_profile(&self) -> GraphGuardProfile {
+        self.graph
+    }
+
+    /// Returns the reward boundary preserved by this biome.
+    pub fn reward_boundary(&self) -> RewardBoundary {
+        self.reward
+    }
+
     /// Returns a rewrite monad anchored to the biome's guard.
     pub fn monad(&self) -> RewriteMonad<'_> {
         self.biome.monad()
@@ -3221,6 +3259,21 @@ impl MultiModalBiome {
     /// Total accumulated weight across all shoots.
     pub fn total_weight(&self) -> f32 {
         self.biome.total_weight()
+    }
+
+    /// Common tensor shape shared by all retained shoots.
+    pub fn shape(&self) -> Option<(usize, usize)> {
+        self.biome.shape()
+    }
+
+    /// Number of tensor values currently retained by the biome.
+    pub fn stored_volume(&self) -> usize {
+        self.biome.stored_volume()
+    }
+
+    /// Remaining aggregate storage volume admitted by the biome's topos.
+    pub fn remaining_volume(&self) -> usize {
+        self.biome.remaining_volume()
     }
 
     /// Returns the weights assigned to each shoot.
@@ -3434,6 +3487,26 @@ impl<'a> RewriteMonad<'a> {
         self.topos.site().guard()
     }
 
+    fn rewrite_slice_candidate(
+        &self,
+        label: &'static str,
+        mut candidate: Vec<f32>,
+    ) -> PureResult<Vec<f32>> {
+        self.topos.saturate_slice(&mut candidate);
+        self.topos.guard_slice(label, &candidate)?;
+        Ok(candidate)
+    }
+
+    fn rewrite_tensor_candidate(
+        &self,
+        label: &'static str,
+        mut candidate: Tensor,
+    ) -> PureResult<Tensor> {
+        self.topos.saturate_slice(candidate.data_mut());
+        self.topos.guard_tensor(label, &candidate)?;
+        Ok(candidate)
+    }
+
     /// Rewrites a scalar by saturating it into the open-cartesian window.
     pub fn rewrite_scalar(&self, value: f32) -> f32 {
         self.topos.saturate(value)
@@ -3441,8 +3514,9 @@ impl<'a> RewriteMonad<'a> {
 
     /// Rewrites a mutable slice and validates the result.
     pub fn rewrite_slice(&self, label: &'static str, slice: &mut [f32]) -> PureResult<()> {
-        self.topos.saturate_slice(slice);
-        self.topos.guard_slice(label, slice)
+        let candidate = self.rewrite_slice_candidate(label, slice.to_vec())?;
+        slice.copy_from_slice(&candidate);
+        Ok(())
     }
 
     /// Guards a read-only slice without saturation.
@@ -3452,8 +3526,9 @@ impl<'a> RewriteMonad<'a> {
 
     /// Rewrites a tensor and re-validates its envelope.
     pub fn rewrite_tensor(&self, label: &'static str, tensor: &mut Tensor) -> PureResult<()> {
-        self.topos.saturate_slice(tensor.data_mut());
-        self.topos.guard_tensor(label, tensor)
+        let candidate = self.rewrite_tensor_candidate(label, tensor.clone())?;
+        *tensor = candidate;
+        Ok(())
     }
 
     /// Guards an immutable tensor reference.
@@ -3490,9 +3565,8 @@ impl<'a> RewriteMonad<'a> {
     }
 
     /// Lifts an owned tensor into the monadic context and returns the guarded value.
-    pub fn lift_tensor(&self, label: &'static str, mut tensor: Tensor) -> PureResult<Tensor> {
-        self.rewrite_tensor(label, &mut tensor)?;
-        Ok(tensor)
+    pub fn lift_tensor(&self, label: &'static str, tensor: Tensor) -> PureResult<Tensor> {
+        self.rewrite_tensor_candidate(label, tensor)
     }
 
     /// Applies a closure to a tensor before rewriting it through the guard.
@@ -3506,8 +3580,7 @@ impl<'a> RewriteMonad<'a> {
         F: FnOnce(&mut Tensor) -> PureResult<()>,
     {
         f(&mut tensor)?;
-        self.rewrite_tensor(label, &mut tensor)?;
-        Ok(tensor)
+        self.rewrite_tensor_candidate(label, tensor)
     }
 
     /// Applies a closure to a mutable slice before rewriting it through the guard.
@@ -3515,8 +3588,11 @@ impl<'a> RewriteMonad<'a> {
     where
         F: FnOnce(&mut [f32]) -> PureResult<()>,
     {
-        f(slice)?;
-        self.rewrite_slice(label, slice)
+        let mut candidate = slice.to_vec();
+        f(&mut candidate)?;
+        let candidate = self.rewrite_slice_candidate(label, candidate)?;
+        slice.copy_from_slice(&candidate);
+        Ok(())
     }
 
     /// Cultivates a fresh tensor biome anchored to this monad's guard.
@@ -3524,27 +3600,27 @@ impl<'a> RewriteMonad<'a> {
         TensorBiome::new(self.topos.clone())
     }
 
-    /// Absorbs an owned tensor into an existing biome using the monadic guard.
+    /// Absorbs an owned tensor through both this monadic guard and the destination biome guard.
     pub fn absorb_into_biome(
         &self,
         biome: &mut TensorBiome,
         label: &'static str,
-        mut tensor: Tensor,
+        tensor: Tensor,
     ) -> PureResult<()> {
-        self.rewrite_tensor(label, &mut tensor)?;
-        biome.push_shoot(tensor, 1.0)
+        let tensor = self.rewrite_tensor_candidate(label, tensor)?;
+        biome.absorb(label, tensor)
     }
 
-    /// Absorbs a weighted tensor into an existing biome through the monad guard.
+    /// Absorbs a weighted tensor through this monad and the destination biome guard.
     pub fn absorb_weighted_into_biome(
         &self,
         biome: &mut TensorBiome,
         label: &'static str,
-        mut tensor: Tensor,
+        tensor: Tensor,
         weight: f32,
     ) -> PureResult<()> {
-        self.rewrite_tensor(label, &mut tensor)?;
-        biome.push_shoot(tensor, weight)
+        let tensor = self.rewrite_tensor_candidate(label, tensor)?;
+        biome.absorb_weighted(label, tensor, weight)
     }
 }
 
@@ -3574,6 +3650,46 @@ impl TensorBiome {
             total_weight: 0.0,
             shape: None,
         }
+    }
+
+    fn validate_weight(weight: f32) -> PureResult<()> {
+        if !weight.is_finite() || weight <= 0.0 {
+            return Err(TensorError::NonPositiveWeight { weight });
+        }
+        Ok(())
+    }
+
+    fn projected_total_weight(&self, weight: f32) -> PureResult<f32> {
+        Self::validate_weight(weight)?;
+        checked_f64_to_f32(
+            "tensor_biome_total_weight",
+            self.total_weight as f64 + weight as f64,
+        )
+    }
+
+    fn guard_storage_volume(
+        &self,
+        label: &'static str,
+        shoot_count: usize,
+        shape: (usize, usize),
+    ) -> PureResult<usize> {
+        let per_shoot = checked_tensor_volume(shape.0, shape.1)?;
+        let volume =
+            shoot_count
+                .checked_mul(per_shoot)
+                .ok_or(TensorError::TensorVolumeExceeded {
+                    label,
+                    volume: usize::MAX,
+                    max_volume: self.topos.max_volume(),
+                })?;
+        if volume > self.topos.max_volume() {
+            return Err(TensorError::TensorVolumeExceeded {
+                label,
+                volume,
+                max_volume: self.topos.max_volume(),
+            });
+        }
+        Ok(volume)
     }
 
     /// Returns the guard topos.
@@ -3606,11 +3722,17 @@ impl TensorBiome {
         self.total_weight
     }
 
-    /// Estimated number of tensor values currently retained by the biome.
+    /// Number of tensor values currently retained by the biome.
     pub fn stored_volume(&self) -> usize {
         self.shape
-            .map(|(rows, cols)| self.len().saturating_mul(rows).saturating_mul(cols))
-            .unwrap_or(0)
+            .and_then(|(rows, cols)| rows.checked_mul(cols))
+            .and_then(|volume| volume.checked_mul(self.len()))
+            .unwrap_or_else(|| if self.shape.is_some() { usize::MAX } else { 0 })
+    }
+
+    /// Remaining aggregate storage volume admitted by the guard topos.
+    pub fn remaining_volume(&self) -> usize {
+        self.topos.max_volume().saturating_sub(self.stored_volume())
     }
 
     /// Emits a control signal derived from the currently retained shoots.
@@ -3637,16 +3759,16 @@ impl TensorBiome {
     pub fn absorb_weighted(
         &mut self,
         label: &'static str,
-        mut tensor: Tensor,
+        tensor: Tensor,
         weight: f32,
     ) -> PureResult<()> {
-        if !weight.is_finite() || weight <= 0.0 {
-            return Err(TensorError::NonPositiveWeight { weight });
-        }
+        Self::validate_weight(weight)?;
         let monad = RewriteMonad::new(&self.topos);
-        monad.rewrite_tensor(label, &mut tensor)?;
+        let tensor = monad.lift_tensor(label, tensor)?;
         let (rows, cols) = tensor.shape();
-        self.push_shoot(tensor, weight)?;
+        let values = checked_tensor_volume(rows, cols)?;
+        self.push_shoot(label, tensor, weight)?;
+        let stored_values = self.stored_volume();
         crate::emit_tensor_op("tensor_biome_absorb_weighted", &[rows, cols], &[self.len()]);
         crate::emit_tensor_op_meta("tensor_biome_absorb_weighted", || {
             serde_json::json!({
@@ -3660,14 +3782,14 @@ impl TensorBiome {
                 "label": label,
                 "rows": rows,
                 "cols": cols,
-                "values": rows.saturating_mul(cols),
+                "values": values,
                 "shoots": self.len(),
                 "weight": weight,
                 "total_weight": self.total_weight,
                 "curvature": self.topos.curvature(),
                 "saturation": self.topos.saturation(),
-                "estimated_rewrite_values": rows.saturating_mul(cols),
-                "estimated_stored_values": self.len().saturating_mul(rows).saturating_mul(cols),
+                "estimated_rewrite_values": values,
+                "estimated_stored_values": stored_values,
             })
         });
         Ok(())
@@ -3692,14 +3814,14 @@ impl TensorBiome {
     where
         F: FnOnce(RewriteMonad<'_>) -> PureResult<Tensor>,
     {
+        Self::validate_weight(weight)?;
         let tensor = build(self.monad())?;
         self.absorb_weighted(label, tensor, weight)
     }
 
-    fn push_shoot(&mut self, tensor: Tensor, weight: f32) -> PureResult<()> {
-        if !weight.is_finite() || weight <= 0.0 {
-            return Err(TensorError::NonPositiveWeight { weight });
-        }
+    fn push_shoot(&mut self, label: &'static str, tensor: Tensor, weight: f32) -> PureResult<()> {
+        let total_weight = self.projected_total_weight(weight)?;
+        self.topos.guard_tensor(label, &tensor)?;
         let shape = tensor.shape();
         if let Some(expected) = self.shape {
             if expected != shape {
@@ -3708,12 +3830,20 @@ impl TensorBiome {
                     right: shape,
                 });
             }
-        } else {
-            self.shape = Some(shape);
         }
-        self.total_weight += weight;
+        let shoot_count = self
+            .len()
+            .checked_add(1)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "tensor_biome_storage",
+                volume: usize::MAX,
+                max_volume: self.topos.max_volume(),
+            })?;
+        self.guard_storage_volume("tensor_biome_storage", shoot_count, shape)?;
         self.shoots.push(tensor);
         self.weights.push(weight);
+        self.shape = Some(shape);
+        self.total_weight = total_weight;
         Ok(())
     }
 
@@ -3724,10 +3854,26 @@ impl TensorBiome {
     {
         let topos = self.topos.clone();
         let monad = RewriteMonad::new(&topos);
-        for shoot in &mut self.shoots {
+        let mut candidates = self.shoots.clone();
+        for shoot in &mut candidates {
             f(monad, shoot)?;
             monad.rewrite_tensor(label, shoot)?;
         }
+        let shape = candidates.first().map(Tensor::shape);
+        if let Some(expected) = shape {
+            for candidate in candidates.iter().skip(1) {
+                let actual = candidate.shape();
+                if actual != expected {
+                    return Err(TensorError::ShapeMismatch {
+                        left: expected,
+                        right: actual,
+                    });
+                }
+            }
+            self.guard_storage_volume("tensor_biome_storage", candidates.len(), expected)?;
+        }
+        self.shoots = candidates;
+        self.shape = shape;
         Ok(())
     }
 
@@ -3740,9 +3886,8 @@ impl TensorBiome {
         let monad = RewriteMonad::new(&topos);
         let mut biome = TensorBiome::new(topos.clone());
         for (shoot, &weight) in self.shoots.iter().zip(self.weights.iter()) {
-            let mut mapped = f(monad, shoot)?;
-            monad.rewrite_tensor(label, &mut mapped)?;
-            biome.push_shoot(mapped, weight)?;
+            let mapped = monad.lift_tensor(label, f(monad, shoot)?)?;
+            biome.push_shoot(label, mapped, weight)?;
         }
         Ok(biome)
     }
@@ -3753,17 +3898,23 @@ impl TensorBiome {
             return Err(TensorError::EmptyInput("tensor_biome_weights"));
         }
         let before = self.weights.clone();
-        let raw_total = before.iter().copied().sum::<f32>();
+        let raw_total = before.iter().map(|&weight| weight as f64).sum::<f64>();
         let topos = self.topos.clone();
         let monad = RewriteMonad::new(&topos);
-        monad.guard_probability_slice("tensor_biome_weights", &mut self.weights)?;
-        self.total_weight = self.weights.iter().sum();
+        let mut weights = self.weights.clone();
+        monad.guard_probability_slice("tensor_biome_weights", &mut weights)?;
+        let total_weight = checked_f64_to_f32(
+            "tensor_biome_total_weight",
+            weights.iter().map(|&weight| weight as f64).sum::<f64>(),
+        )?;
         let changed_weights = before
             .iter()
             .copied()
-            .zip(self.weights.iter().copied())
+            .zip(weights.iter().copied())
             .filter(|(lhs, rhs)| (lhs - rhs).abs() > 1.0e-6)
             .count();
+        self.weights = weights;
+        self.total_weight = total_weight;
         crate::emit_tensor_op(
             "tensor_biome_renormalise_weights",
             &[before.len()],
@@ -3816,23 +3967,60 @@ impl TensorBiome {
         self.canopy_with_backend(TensorUtilBackend::Auto)
     }
 
-    /// Harvests the biome with an explicit tensor utility backend for the
-    /// accumulation and normalisation passes before the guarded topos rewrite.
+    /// Harvests the biome with an explicit tensor utility backend for weighted
+    /// accumulation and a final normalisation after host-side `f64` weight ratios.
     pub fn canopy_with_backend(&self, backend: TensorUtilBackend) -> PureResult<Tensor> {
         let (rows, cols) = self.shape.ok_or(TensorError::EmptyInput("tensor_biome"))?;
         if self.is_empty() {
             return Err(TensorError::EmptyInput("tensor_biome"));
+        }
+        if !self.total_weight.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "tensor_biome_total_weight",
+                value: self.total_weight,
+            });
         }
         if self.total_weight <= 0.0 {
             return Err(TensorError::NonPositiveWeight {
                 weight: self.total_weight,
             });
         }
-        let mut acc = Tensor::zeros(rows, cols)?;
-        for (shoot, &weight) in self.shoots.iter().zip(self.weights.iter()) {
-            acc.add_scaled_with_backend(shoot, weight, backend)?;
+        if self.shoots.len() != self.weights.len() {
+            return Err(TensorError::DataLength {
+                expected: self.shoots.len(),
+                got: self.weights.len(),
+            });
         }
-        let mut canopy = acc.scale_with_backend(1.0 / self.total_weight, backend)?;
+        let total_weight = self
+            .weights
+            .iter()
+            .map(|&weight| weight as f64)
+            .sum::<f64>();
+        if !total_weight.is_finite() || total_weight <= 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "tensor_biome_weight_sum",
+                value: total_weight as f32,
+            });
+        }
+        let mut acc = Tensor::zeros(rows, cols)?;
+        let mut normalised_total = 0.0f64;
+        for (shoot, &weight) in self.shoots.iter().zip(self.weights.iter()) {
+            let normalised_weight = checked_f64_to_f32(
+                "tensor_biome_normalised_weight",
+                weight as f64 / total_weight,
+            )?;
+            normalised_total += normalised_weight as f64;
+            acc.add_scaled_with_backend(shoot, normalised_weight, backend)?;
+        }
+        if !normalised_total.is_finite() || normalised_total <= 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "tensor_biome_normalised_weight_sum",
+                value: normalised_total as f32,
+            });
+        }
+        let normalisation =
+            checked_f64_to_f32("tensor_biome_weight_normalisation", 1.0 / normalised_total)?;
+        let mut canopy = acc.scale_with_backend(normalisation, backend)?;
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("tensor_biome_canopy", &mut canopy)?;
         let tensor_util_backend = tensor_util_backend_label(backend);
@@ -3848,6 +4036,7 @@ impl TensorBiome {
                 "kind": "topos_biome_canopy",
                 "accumulation_backend": tensor_util_backend,
                 "normalise_backend": tensor_util_backend,
+                "weight_normalise_backend": "host_f64",
                 "rewrite_backend": "topos_cpu",
                 "rewrite_mode": "guarded_canopy_rewrite",
                 "route_blocker": "open_cartesian_topos_rewrite_after_tensor_util_accumulation",
@@ -3878,11 +4067,21 @@ impl TensorBiome {
         if self.is_empty() {
             return Err(TensorError::EmptyInput("tensor_biome"));
         }
-        let mut data = Vec::with_capacity(self.shoots.len() * rows * cols);
+        let stacked_rows =
+            self.shoots
+                .len()
+                .checked_mul(rows)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.shoots.len(),
+                    cols: rows,
+                })?;
+        let volume = checked_tensor_volume(stacked_rows, cols)?;
+        self.guard_storage_volume("tensor_biome_stack", self.shoots.len(), (rows, cols))?;
+        let mut data = Vec::with_capacity(volume);
         for shoot in &self.shoots {
             data.extend_from_slice(shoot.data());
         }
-        Tensor::from_vec(self.shoots.len() * rows, cols, data)
+        Tensor::from_vec(stacked_rows, cols, data)
     }
 }
 
@@ -4076,6 +4275,7 @@ fn dot_f64(label: &'static str, a: &[f32], b: &[f32]) -> PureResult<f64> {
 mod tests {
     use super::*;
     use crate::pure::fractal::FractalPatch;
+    use std::cell::Cell;
     use std::sync::{Arc, Mutex, OnceLock};
 
     #[track_caller]
@@ -4571,6 +4771,76 @@ mod tests {
     }
 
     #[test]
+    fn biome_rejects_aggregate_volume_without_mutation() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 8, 2));
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb("volume_a", unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]))));
+        unwrap_ok(biome.absorb("volume_b", unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]))));
+        let shoots_before = biome.shoots().to_vec();
+        let weights_before = biome.weights().to_vec();
+
+        let error =
+            unwrap_err(biome.absorb("volume_c", unwrap_ok(Tensor::from_vec(1, 1, vec![3.0]))));
+
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(biome.shoots(), shoots_before);
+        assert_eq!(biome.weights(), weights_before);
+        assert_eq!(biome.stored_volume(), 2);
+        assert_eq!(biome.total_weight(), 2.0);
+        assert_eq!(biome.shape(), Some((1, 1)));
+    }
+
+    #[test]
+    fn biome_rejects_total_weight_overflow_without_mutation() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 8, 2));
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb_weighted(
+            "weight_a",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+            f32::MAX,
+        ));
+
+        let error = unwrap_err(biome.absorb_weighted(
+            "weight_b",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![2.0])),
+            f32::MAX,
+        ));
+
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "tensor_biome_total_weight",
+                ..
+            }
+        ));
+        assert_eq!(biome.len(), 1);
+        assert_eq!(biome.weights(), &[f32::MAX]);
+        assert_eq!(biome.total_weight(), f32::MAX);
+        assert_eq!(unwrap_ok(biome.canopy()).data(), &[1.0]);
+    }
+
+    #[test]
+    fn biome_canopy_avoids_intermediate_weight_overflow() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        let weight = f32::MAX * 0.25;
+        unwrap_ok(biome.absorb_weighted(
+            "large_weight_a",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![8.0])),
+            weight,
+        ));
+        unwrap_ok(biome.absorb_weighted(
+            "large_weight_b",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![4.0])),
+            weight,
+        ));
+
+        let canopy = unwrap_ok(biome.canopy());
+
+        assert!((canopy.data()[0] - 6.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn biome_weighted_canopy_respects_shoot_weights() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos);
@@ -4673,6 +4943,7 @@ mod tests {
         assert_eq!(canopy_meta.1["requested_backend"], "auto");
         assert_eq!(canopy_meta.1["accumulation_backend"], "auto");
         assert_eq!(canopy_meta.1["normalise_backend"], "auto");
+        assert_eq!(canopy_meta.1["weight_normalise_backend"], "host_f64");
         assert_eq!(canopy_meta.1["rewrite_backend"], "topos_cpu");
         assert_eq!(canopy_meta.1["rewrite_mode"], "guarded_canopy_rewrite");
         assert_eq!(
@@ -4722,6 +4993,7 @@ mod tests {
         assert_eq!(canopy_meta.1["requested_backend"], "cpu");
         assert_eq!(canopy_meta.1["accumulation_backend"], "cpu");
         assert_eq!(canopy_meta.1["normalise_backend"], "cpu");
+        assert_eq!(canopy_meta.1["weight_normalise_backend"], "host_f64");
         assert_eq!(canopy_meta.1["rewrite_backend"], "topos_cpu");
     }
 
@@ -4743,6 +5015,48 @@ mod tests {
         let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![20.0, -20.0]));
         unwrap_ok(monad.rewrite_tensor("rewrite", &mut tensor));
         assert!(tensor.data().iter().all(|v| v.abs() <= topos.saturation()));
+    }
+
+    #[test]
+    fn rewrite_monad_rejects_oversized_tensor_without_mutation() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 1));
+        let monad = RewriteMonad::new(&topos);
+        let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![100.0, -100.0]));
+        let original = tensor.clone();
+
+        let error = unwrap_err(monad.rewrite_tensor("oversized_rewrite", &mut tensor));
+
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(tensor, original);
+    }
+
+    #[test]
+    fn rewrite_monad_bind_slice_rolls_back_callback_failure() {
+        let topos = demo_topos();
+        let monad = RewriteMonad::new(&topos);
+        let mut slice = [0.25f32, 0.5];
+        let original = slice;
+
+        let error = unwrap_err(monad.bind_slice("failing_bind", &mut slice, |candidate| {
+            candidate[0] = 9.0;
+            Err(TensorError::Generic("bind failed".to_string()))
+        }));
+
+        assert!(matches!(error, TensorError::Generic(_)));
+        assert_eq!(slice, original);
+    }
+
+    #[test]
+    fn probability_tensor_volume_failure_is_transactional() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 1));
+        let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![2.0, 1.0]));
+        let original = tensor.clone();
+
+        let error =
+            unwrap_err(topos.guard_probability_tensor("oversized_probability", &mut tensor));
+
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert_eq!(tensor, original);
     }
 
     #[test]
@@ -4931,6 +5245,22 @@ mod tests {
     }
 
     #[test]
+    fn biome_rejects_invalid_weight_before_running_builder() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        let called = Cell::new(false);
+
+        let error = unwrap_err(biome.absorb_weighted_with("invalid_weight", f32::NAN, |_| {
+            called.set(true);
+            Tensor::from_vec(1, 1, vec![1.0])
+        }));
+
+        assert!(matches!(error, TensorError::NonPositiveWeight { .. }));
+        assert!(!called.get());
+        assert!(biome.is_empty());
+    }
+
+    #[test]
     fn biome_bind_shoots_rewrites_each_shoot() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
@@ -4947,6 +5277,75 @@ mod tests {
         }));
         let canopy = unwrap_ok(biome.canopy());
         assert!(canopy.data()[0].abs() <= topos.saturation());
+    }
+
+    #[test]
+    fn biome_bind_shoots_rolls_back_late_callback_failure() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb("bind_a", unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]))));
+        unwrap_ok(biome.absorb("bind_b", unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]))));
+        let shoots_before = biome.shoots().to_vec();
+        let calls = Cell::new(0usize);
+
+        let error = unwrap_err(biome.bind_shoots("failing_bind_shoots", |_, shoot| {
+            calls.set(calls.get() + 1);
+            shoot.data_mut()[0] += 10.0;
+            if calls.get() == 2 {
+                return Err(TensorError::Generic("second shoot failed".to_string()));
+            }
+            Ok(())
+        }));
+
+        assert!(matches!(error, TensorError::Generic(_)));
+        assert_eq!(calls.get(), 2);
+        assert_eq!(biome.shoots(), shoots_before);
+        assert_eq!(biome.shape(), Some((1, 1)));
+        assert_eq!(biome.stored_volume(), 2);
+    }
+
+    #[test]
+    fn biome_bind_shoots_commits_a_common_shape_change() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb("reshape_a", unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]))));
+        unwrap_ok(biome.absorb("reshape_b", unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]))));
+
+        unwrap_ok(biome.bind_shoots("reshape_shoots", |_, shoot| {
+            let value = shoot.data()[0];
+            *shoot = Tensor::from_vec(1, 2, vec![value, value + 0.5])?;
+            Ok(())
+        }));
+
+        assert_eq!(biome.shape(), Some((1, 2)));
+        assert_eq!(biome.stored_volume(), 4);
+        assert_eq!(unwrap_ok(biome.stack()).shape(), (2, 2));
+    }
+
+    #[test]
+    fn biome_bind_shoots_rejects_divergent_shapes_transactionally() {
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb("shape_bind_a", unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]))));
+        unwrap_ok(biome.absorb("shape_bind_b", unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]))));
+        let shoots_before = biome.shoots().to_vec();
+        let calls = Cell::new(0usize);
+
+        let error = unwrap_err(biome.bind_shoots("divergent_shapes", |_, shoot| {
+            calls.set(calls.get() + 1);
+            let value = shoot.data()[0];
+            *shoot = if calls.get() == 1 {
+                Tensor::from_vec(1, 2, vec![value, value])?
+            } else {
+                Tensor::from_vec(2, 1, vec![value, value])?
+            };
+            Ok(())
+        }));
+
+        assert!(matches!(error, TensorError::ShapeMismatch { .. }));
+        assert_eq!(biome.shoots(), shoots_before);
+        assert_eq!(biome.shape(), Some((1, 1)));
+        assert_eq!(biome.stored_volume(), 2);
     }
 
     #[test]
@@ -5014,6 +5413,32 @@ mod tests {
         assert!((biome.total_weight() - 2.0).abs() < 1e-6);
         let canopy = unwrap_ok(biome.canopy());
         assert!(canopy.data()[0].abs() <= topos.saturation());
+    }
+
+    #[test]
+    fn monad_absorption_respects_the_destination_biome_topos() {
+        let source_topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 8, 4));
+        let destination_topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 1.0, 8, 1));
+        let monad = RewriteMonad::new(&source_topos);
+        let mut biome = TensorBiome::new(destination_topos);
+
+        let error = unwrap_err(monad.absorb_into_biome(
+            &mut biome,
+            "destination_volume",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![8.0, 8.0])),
+        ));
+        assert!(matches!(error, TensorError::TensorVolumeExceeded { .. }));
+        assert!(biome.is_empty());
+
+        unwrap_ok(monad.absorb_into_biome(
+            &mut biome,
+            "destination_saturation",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![8.0])),
+        ));
+        let canopy = unwrap_ok(biome.canopy());
+        assert!(canopy.data()[0].is_finite());
+        assert!(canopy.data()[0].abs() <= biome.topos().saturation());
+        assert!(canopy.data()[0] < 8.0);
     }
 
     #[test]
@@ -5378,6 +5803,23 @@ mod tests {
         let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
         let guard = unwrap_ok(guard.with_text_profile(text_profile));
         let mut biome = guard.cultivate_biome();
+        assert_eq!(biome.text_profile().local_saturation(), Some(0.5));
+        assert_eq!(
+            biome.audio_profile().max_volume(),
+            guard.audio_profile().max_volume()
+        );
+        assert_eq!(
+            biome.vision_profile().max_volume(),
+            guard.vision_profile().max_volume()
+        );
+        assert_eq!(
+            biome.graph_profile().max_nodes(),
+            guard.graph_profile().max_nodes()
+        );
+        assert_eq!(
+            biome.reward_boundary().lower(),
+            guard.reward_boundary().lower()
+        );
         unwrap_ok(biome.absorb_text(
             "multi_modal_biome_text",
             unwrap_ok(Tensor::from_vec(1, 4, vec![2.0; 4])),
@@ -5389,6 +5831,12 @@ mod tests {
         ));
         assert_eq!(biome.len(), 2);
         assert!((biome.total_weight() - 3.0).abs() < 1e-6);
+        assert_eq!(biome.shape(), Some((1, 4)));
+        assert_eq!(biome.stored_volume(), 8);
+        assert_eq!(
+            biome.remaining_volume(),
+            biome.topos().max_volume() - biome.stored_volume()
+        );
         let canopy = unwrap_ok(biome.canopy());
         let text_limit = biome.text.effective_saturation(biome.topos());
         let text_headroom = text_limit * (1.0 + biome.text.permeability());
