@@ -75,6 +75,20 @@ pub struct TeslaTail {
 
 const LOG_FLOOR: f32 = 1.0e-12;
 
+fn checked_f64_to_f32(label: &'static str, value: f64) -> PureResult<f32> {
+    if !value.is_finite() || value.abs() > f32::MAX as f64 {
+        let value = if value.is_nan() {
+            f32::NAN
+        } else if value.is_sign_negative() {
+            f32::NEG_INFINITY
+        } else {
+            f32::INFINITY
+        };
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(value as f32)
+}
+
 fn guard_probability_mass(label: &'static str, value: f32) -> PureResult<f32> {
     if !value.is_finite() {
         return Err(TensorError::NonFiniteValue { label, value });
@@ -86,17 +100,29 @@ fn legacy_guard_probability_slice(label: &'static str, slice: &mut [f32]) -> Pur
     if slice.is_empty() {
         return Err(TensorError::EmptyInput(label));
     }
-    let mut sum = 0.0f32;
-    for value in slice.iter_mut() {
-        *value = guard_probability_mass(label, *value)?;
-        sum += *value;
+    let mut candidate = Vec::with_capacity(slice.len());
+    let mut sum = 0.0f64;
+    for &value in slice.iter() {
+        let guarded = guard_probability_mass(label, value)?;
+        candidate.push(guarded);
+        sum += guarded as f64;
     }
     if !sum.is_finite() || sum <= 0.0 {
-        return Err(TensorError::NonFiniteValue { label, value: sum });
+        return Err(TensorError::NonFiniteValue {
+            label,
+            value: sum as f32,
+        });
     }
-    for value in slice.iter_mut() {
-        *value /= sum;
+    let mut normalised_sum = 0.0f64;
+    for value in &mut candidate {
+        *value = checked_f64_to_f32(label, *value as f64 / sum)?;
+        normalised_sum += *value as f64;
     }
+    let correction = 1.0 / normalised_sum;
+    for value in &mut candidate {
+        *value = checked_f64_to_f32(label, *value as f64 * correction)?;
+    }
+    slice.copy_from_slice(&candidate);
     Ok(())
 }
 
@@ -122,25 +148,56 @@ fn normalise_distribution(
 }
 
 fn kl_divergence(p: &[f32], q: &[f32]) -> PureResult<f32> {
-    let mut acc = 0.0f32;
+    let mut acc = 0.0f64;
     for (&pi, &qi) in p.iter().zip(q.iter()) {
+        if !pi.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "kl numerator",
+                value: pi,
+            });
+        }
+        if pi < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "kl numerator",
+            });
+        }
+        if pi == 0.0 {
+            continue;
+        }
         let qi = guard_probability_mass("kl denominator", qi)?;
-        acc += pi * (pi / qi).ln();
+        acc += pi as f64 * (pi as f64 / qi as f64).ln();
     }
-    Ok(acc)
+    checked_f64_to_f32("kl_divergence", acc.max(0.0))
 }
 
 fn symmetric_kl(p: &[f32], q: &[f32]) -> PureResult<f32> {
-    Ok(kl_divergence(p, q)? + kl_divergence(q, p)?)
+    checked_f64_to_f32(
+        "symmetric_kl",
+        kl_divergence(p, q)? as f64 + kl_divergence(q, p)? as f64,
+    )
 }
 
-fn entropy(dist: &[f32]) -> f32 {
-    let mut acc = 0.0f32;
+fn entropy(dist: &[f32]) -> PureResult<f32> {
+    let mut acc = 0.0f64;
     for &value in dist {
-        let value = value.max(LOG_FLOOR);
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "entropy component",
+                value,
+            });
+        }
+        if value < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "entropy component",
+            });
+        }
+        if value == 0.0 {
+            continue;
+        }
+        let value = value as f64;
         acc -= value * value.ln();
     }
-    acc
+    checked_f64_to_f32("entropy", acc.max(0.0))
 }
 
 fn barycenter_objective(
@@ -150,15 +207,17 @@ fn barycenter_objective(
     entropy_weight: f32,
     coupling_energy: f32,
 ) -> PureResult<(f32, f32, f32)> {
-    let mut kl_energy = 0.0f32;
+    let mut kl_energy = 0.0f64;
     for (weight, dist) in weights.iter().zip(normalised.iter()) {
-        kl_energy += *weight * kl_divergence(candidate, dist)?;
+        kl_energy += *weight as f64 * kl_divergence(candidate, dist)? as f64;
     }
-    let entropy_value = entropy(candidate);
+    let entropy_value = entropy(candidate)?;
+    let objective =
+        kl_energy + coupling_energy as f64 - entropy_weight as f64 * entropy_value as f64;
     Ok((
-        kl_energy,
+        checked_f64_to_f32("barycenter_kl_energy", kl_energy)?,
         entropy_value,
-        kl_energy + coupling_energy - entropy_weight * entropy_value,
+        checked_f64_to_f32("barycenter_objective", objective)?,
     ))
 }
 
@@ -166,27 +225,37 @@ fn weighted_baseline(
     guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
     normalised: &[Vec<f32>],
-    weight_sum: f32,
+    weight_sum: f64,
 ) -> PureResult<Vec<f32>> {
     let volume = normalised
         .first()
         .map(|dist| dist.len())
         .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
-    let mut baseline = vec![0.0f32; volume];
-    for (weight, dist) in weights.iter().zip(normalised.iter()) {
-        for (slot, value) in baseline.iter_mut().zip(dist.iter()) {
-            *slot += *weight * guard_probability_mass("baseline component", *value)?;
-        }
-    }
-    if weight_sum <= 0.0 {
+    if !weight_sum.is_finite() || weight_sum < 0.0 {
         return Err(TensorError::NonFiniteValue {
             label: "weight_sum",
-            value: weight_sum,
+            value: weight_sum as f32,
         });
     }
-    for value in baseline.iter_mut() {
-        *value /= weight_sum;
-        *value = guard_probability_mass("baseline component", *value)?;
+    if weight_sum == 0.0 {
+        let uniform = checked_f64_to_f32("baseline component", 1.0 / volume as f64)?;
+        let mut baseline = vec![uniform; volume];
+        guard_probability_slice_with(guard, "z_space_barycenter_baseline", &mut baseline)?;
+        return Ok(baseline);
+    }
+    let mut accumulator = vec![0.0f64; volume];
+    for (weight, dist) in weights.iter().zip(normalised.iter()) {
+        let ratio = *weight as f64 / weight_sum;
+        for (slot, value) in accumulator.iter_mut().zip(dist.iter()) {
+            *slot += ratio * guard_probability_mass("baseline component", *value)? as f64;
+        }
+    }
+    let mut baseline = Vec::with_capacity(volume);
+    for value in accumulator {
+        baseline.push(guard_probability_mass(
+            "baseline component",
+            checked_f64_to_f32("baseline component", value)?,
+        )?);
     }
     guard_probability_slice_with(guard, "z_space_barycenter_baseline", &mut baseline)?;
     Ok(baseline)
@@ -209,21 +278,9 @@ fn barycenter_intermediates(
     for &alpha in &schedule {
         let mut mix = Vec::with_capacity(bary.len());
         for (&start, &target) in baseline.iter().zip(bary.iter()) {
-            let value = (1.0 - alpha) * start + alpha * target;
+            let value = (1.0 - alpha as f64) * start as f64 + alpha as f64 * target as f64;
+            let value = checked_f64_to_f32("barycenter intermediate", value)?;
             mix.push(guard_probability_mass("barycenter intermediate", value)?);
-        }
-        let mut total = 0.0f32;
-        for value in mix.iter_mut() {
-            total += *value;
-        }
-        if total <= 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label: "barycenter intermediate mass",
-                value: total,
-            });
-        }
-        for value in mix.iter_mut() {
-            *value /= total;
         }
         guard_probability_slice_with(guard, "barycenter intermediate", &mut mix)?;
         let (kl_energy, entropy_value, objective) =
@@ -243,43 +300,55 @@ fn barycenter_mode(
     guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
     normalised: &[Vec<f32>],
-    effective: f32,
+    effective: f64,
 ) -> PureResult<Vec<f32>> {
     let volume = normalised
         .first()
         .map(|dist| dist.len())
         .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
-    let mut out = vec![0.0f32; volume];
-    for (idx, slot) in out.iter_mut().enumerate() {
-        let mut log_sum = 0.0f32;
-        for (weight, dist) in weights.iter().zip(normalised.iter()) {
-            let value = guard_probability_mass("barycenter component", dist[idx])?;
-            log_sum += weight * value.ln();
-        }
-        *slot = (log_sum / effective).exp();
-    }
-    let mut total = 0.0f32;
-    for value in out.iter_mut() {
-        if !value.is_finite() {
-            return Err(TensorError::NonFiniteValue {
-                label: "barycenter value",
-                value: *value,
-            });
-        }
-        *value = guard_probability_mass("barycenter value", *value)?;
-        total += *value;
-    }
-    if total <= 0.0 {
-        return Err(TensorError::NonFiniteValue {
-            label: "barycenter mass",
-            value: total,
+    if !effective.is_finite() || effective <= 0.0 {
+        return Err(TensorError::DegenerateBarycenter {
+            effective_weight: effective as f32,
         });
     }
-    for value in out.iter_mut() {
-        *value /= total;
+    let mut log_modes = vec![0.0f64; volume];
+    for (idx, slot) in log_modes.iter_mut().enumerate() {
+        let mut log_sum = 0.0f64;
+        for (weight, dist) in weights.iter().zip(normalised.iter()) {
+            let value = guard_probability_mass("barycenter component", dist[idx])? as f64;
+            log_sum += *weight as f64 * value.ln();
+        }
+        *slot = log_sum / effective;
     }
-    guard_probability_slice_with(guard, "z_space_barycenter_mode", &mut out)?;
-    Ok(out)
+    let max_log = log_modes.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !max_log.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "barycenter_log_mode",
+            value: max_log as f32,
+        });
+    }
+    let mut total = 0.0f64;
+    let mut out = Vec::with_capacity(volume);
+    for log_mode in log_modes {
+        let value = (log_mode - max_log).exp();
+        total += value;
+        out.push(value);
+    }
+    if !total.is_finite() || total <= 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: "barycenter mass",
+            value: total as f32,
+        });
+    }
+    let mut normalised_out = Vec::with_capacity(volume);
+    for value in out {
+        normalised_out.push(guard_probability_mass(
+            "barycenter value",
+            checked_f64_to_f32("barycenter value", value / total)?,
+        )?);
+    }
+    guard_probability_slice_with(guard, "z_space_barycenter_mode", &mut normalised_out)?;
+    Ok(normalised_out)
 }
 
 /// Solve the variational barycentre problem described in the Z-space note.
@@ -288,10 +357,11 @@ fn barycenter_mode(
 /// rows.  Every supplied density is renormalised to guard against numerical
 /// drift and entries are clipped at `1e-12` to keep the logarithms well-defined.
 ///
-/// * `weights` --- non-negative coefficients \(W_u\)
-/// * `entropy_weight` --- entropy regulariser \(\gamma_S\)
-/// * `beta_j` --- coupling scale \(\beta_J\)
-/// * `coupling` --- optional matrix \(J_{uv}\)
+/// * `weights` --- non-negative coefficients \(W_u\); all-zero weights are valid
+///   when the entropy term keeps the effective temperature positive
+/// * `entropy_weight` --- finite entropy regulariser \(\gamma_S\)
+/// * `beta_j` --- finite non-negative coupling scale \(\beta_J\)
+/// * `coupling` --- optional non-negative finite matrix \(J_{uv}\)
 fn z_space_barycenter_inner(
     guard: Option<RewriteMonad<'_>>,
     weights: &[f32],
@@ -309,40 +379,55 @@ fn z_space_barycenter_inner(
             got: weights.len(),
         });
     }
-    if entropy_weight.is_nan() {
+    if !entropy_weight.is_finite() {
         return Err(TensorError::NonFiniteValue {
             label: "entropy_weight",
             value: entropy_weight,
         });
     }
-    if beta_j.is_nan() {
+    if !beta_j.is_finite() {
         return Err(TensorError::NonFiniteValue {
             label: "beta_j",
             value: beta_j,
         });
     }
+    if beta_j < 0.0 {
+        return Err(TensorError::InvalidValue { label: "beta_j" });
+    }
 
-    let mut weight_sum = 0.0f32;
+    let mut weight_sum = 0.0f64;
     for &weight in weights {
-        if weight < 0.0 || !weight.is_finite() {
+        if !weight.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "barycenter weight",
                 value: weight,
             });
         }
-        weight_sum += weight;
+        if weight < 0.0 {
+            return Err(TensorError::NonPositiveWeight { weight });
+        }
+        weight_sum += weight as f64;
     }
-    if weight_sum <= 0.0 {
+    if !weight_sum.is_finite() || weight_sum < 0.0 {
         return Err(TensorError::NonFiniteValue {
             label: "weight_sum",
-            value: weight_sum,
+            value: weight_sum as f32,
         });
     }
 
-    let effective_weight = weight_sum + entropy_weight;
-    if effective_weight <= 0.0 {
-        return Err(TensorError::DegenerateBarycenter { effective_weight });
+    let effective = weight_sum + entropy_weight as f64;
+    if !effective.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "barycenter_effective_weight",
+            value: effective as f32,
+        });
     }
+    if effective <= 0.0 {
+        return Err(TensorError::DegenerateBarycenter {
+            effective_weight: effective as f32,
+        });
+    }
+    let effective_weight = checked_f64_to_f32("barycenter_effective_weight", effective)?;
 
     let (rows, cols) = densities[0].shape();
     let mut normalised = Vec::with_capacity(densities.len());
@@ -357,7 +442,7 @@ fn z_space_barycenter_inner(
     }
 
     let baseline = weighted_baseline(guard, weights, &normalised, weight_sum)?;
-    let bary = barycenter_mode(guard, weights, &normalised, effective_weight)?;
+    let bary = barycenter_mode(guard, weights, &normalised, effective)?;
     let bary_tensor = Tensor::from_vec(rows, cols, bary.clone())?;
 
     let coupling_energy = if let Some(coupling_tensor) = coupling {
@@ -369,17 +454,28 @@ fn z_space_barycenter_inner(
             });
         }
         let matrix = coupling_tensor.data();
-        let mut acc = 0.0f32;
+        let mut acc = 0.0f64;
         for u in 0..densities.len() {
             for v in 0..densities.len() {
                 let weight = matrix[u * densities.len() + v];
+                if !weight.is_finite() {
+                    return Err(TensorError::NonFiniteValue {
+                        label: "barycenter_coupling",
+                        value: weight,
+                    });
+                }
+                if weight < 0.0 {
+                    return Err(TensorError::InvalidValue {
+                        label: "barycenter_coupling",
+                    });
+                }
                 if weight == 0.0 {
                     continue;
                 }
-                acc += weight * symmetric_kl(&normalised[u], &normalised[v])?;
+                acc += weight as f64 * symmetric_kl(&normalised[u], &normalised[v])? as f64;
             }
         }
-        0.5 * beta_j * acc
+        checked_f64_to_f32("barycenter_coupling_energy", 0.5 * beta_j as f64 * acc)?
     } else {
         0.0
     };
@@ -409,6 +505,8 @@ fn z_space_barycenter_inner(
     })
 }
 
+/// Solves the Z-space barycenter while projecting every probability slice
+/// through the supplied open-topos rewrite contract.
 pub fn z_space_barycenter_guarded(
     monad: RewriteMonad<'_>,
     weights: &[f32],
@@ -427,6 +525,7 @@ pub fn z_space_barycenter_guarded(
     )
 }
 
+/// Solves the Z-space barycenter with the standalone finite probability guard.
 pub fn z_space_barycenter(
     weights: &[f32],
     densities: &[Tensor],
@@ -438,6 +537,9 @@ pub fn z_space_barycenter(
 }
 
 /// Builds the Tesla tail spectrum and coherence indicator from the dominant eigenpairs.
+///
+/// Radii and `kappa` must lie in `[0, 1]`. Input line weights are normalised to
+/// unit mass before amplitudes and the coherence rate are evaluated.
 pub fn tesla_tail_spectrum(
     radii: &[f32],
     frequencies: &[f32],
@@ -459,12 +561,19 @@ pub fn tesla_tail_spectrum(
             got: weights.len(),
         });
     }
-    if !kappa.is_finite() || kappa < 0.0 {
-        return Err(TensorError::NonPositiveWeight { weight: kappa });
+    if !kappa.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "tesla_tail_kappa",
+            value: kappa,
+        });
+    }
+    if !(0.0..=1.0).contains(&kappa) {
+        return Err(TensorError::InvalidValue {
+            label: "tesla_tail_kappa",
+        });
     }
 
-    let mut lines = Vec::with_capacity(radii.len());
-    let mut penalty = 0.0f32;
+    let mut weight_sum = 0.0f64;
     for idx in 0..radii.len() {
         let r = radii[idx];
         if !r.is_finite() {
@@ -473,7 +582,7 @@ pub fn tesla_tail_spectrum(
                 value: r,
             });
         }
-        if r < 0.0 {
+        if !(0.0..=1.0).contains(&r) {
             return Err(TensorError::InvalidValue {
                 label: "tesla_tail_radius",
             });
@@ -486,19 +595,50 @@ pub fn tesla_tail_spectrum(
             });
         }
         let weight = weights[idx];
-        if !weight.is_finite() || weight < 0.0 {
+        if !weight.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "tesla_tail_weight",
+                value: weight,
+            });
+        }
+        if weight < 0.0 {
             return Err(TensorError::NonPositiveWeight { weight });
         }
-        let amplitude = weight * r;
+        weight_sum += weight as f64;
+    }
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        return Err(TensorError::DegenerateBarycenter {
+            effective_weight: weight_sum as f32,
+        });
+    }
+
+    let mut normalised_weights = Vec::with_capacity(weights.len());
+    let mut normalised_sum = 0.0f64;
+    for &weight in weights {
+        let normalised = checked_f64_to_f32("tesla_tail_weight", weight as f64 / weight_sum)?;
+        normalised_sum += normalised as f64;
+        normalised_weights.push(normalised);
+    }
+    let correction = 1.0 / normalised_sum;
+    let mut lines = Vec::with_capacity(radii.len());
+    let mut penalty = 0.0f64;
+    for idx in 0..radii.len() {
+        let weight = checked_f64_to_f32(
+            "tesla_tail_weight",
+            normalised_weights[idx] as f64 * correction,
+        )?;
+        let amplitude =
+            checked_f64_to_f32("tesla_tail_amplitude", weight as f64 * radii[idx] as f64)?;
         lines.push(TeslaTailLine {
-            frequency: omega,
+            frequency: frequencies[idx],
             amplitude,
             weight,
         });
-        penalty += weight * (1.0 - r);
+        penalty += weight as f64 * (1.0 - radii[idx] as f64);
     }
 
-    let coherence_rate = 1.0 - kappa * penalty;
+    let coherence_rate =
+        checked_f64_to_f32("tesla_tail_coherence_rate", 1.0 - kappa as f64 * penalty)?;
     Ok(TeslaTail {
         lines,
         coherence_rate,
@@ -506,6 +646,10 @@ pub fn tesla_tail_spectrum(
 }
 
 /// Applies the NIRT weight update \(W_{t+1} = W_t + \eta\, \mathrm{Sim}(\rho^*, \tilde\rho)\, \mathrm{CR}\).
+///
+/// Similarities must lie in `[-1, 1]` and the coherence rate in `[0, 1]`.
+/// The caller's weights are committed only after every candidate is finite and
+/// the complete update can be normalised to unit mass.
 pub fn nirt_weight_update(
     weights: &mut [f32],
     similarities: &[f32],
@@ -530,9 +674,15 @@ pub fn nirt_weight_update(
             value: coherence_rate,
         });
     }
+    if !(0.0..=1.0).contains(&coherence_rate) {
+        return Err(TensorError::InvalidValue {
+            label: "nirt_coherence_rate",
+        });
+    }
 
-    let mut total = 0.0f32;
-    for (weight, similarity) in weights.iter_mut().zip(similarities.iter()) {
+    let mut candidate = Vec::with_capacity(weights.len());
+    let mut total = 0.0f64;
+    for (weight, similarity) in weights.iter().zip(similarities.iter()) {
         if !weight.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "nirt_weight",
@@ -548,20 +698,41 @@ pub fn nirt_weight_update(
                 value: *similarity,
             });
         }
-        let updated = *weight + eta * coherence_rate * *similarity;
-        *weight = updated.max(0.0);
-        total += *weight;
+        if !(-1.0..=1.0).contains(similarity) {
+            return Err(TensorError::InvalidValue {
+                label: "nirt_similarity",
+            });
+        }
+        let updated = *weight as f64 + eta as f64 * coherence_rate as f64 * *similarity as f64;
+        let updated = updated.max(0.0);
+        if !updated.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "nirt_updated_weight",
+                value: updated as f32,
+            });
+        }
+        candidate.push(updated);
+        total += updated;
     }
 
-    if total <= 0.0 {
+    if !total.is_finite() || total <= 0.0 {
         return Err(TensorError::DegenerateBarycenter {
-            effective_weight: total,
+            effective_weight: total as f32,
         });
     }
 
-    for weight in weights.iter_mut() {
-        *weight /= total;
+    let mut normalised = Vec::with_capacity(candidate.len());
+    let mut normalised_sum = 0.0f64;
+    for weight in candidate {
+        let weight = checked_f64_to_f32("nirt_weight", weight / total)?;
+        normalised_sum += weight as f64;
+        normalised.push(weight);
     }
+    let correction = 1.0 / normalised_sum;
+    for weight in &mut normalised {
+        *weight = checked_f64_to_f32("nirt_weight", *weight as f64 * correction)?;
+    }
+    weights.copy_from_slice(&normalised);
     Ok(())
 }
 
@@ -578,7 +749,8 @@ pub trait KoopmanAction<G> {
 ///
 /// The caller is responsible for supplying a Følner set (or any finite subset of
 /// the acting group).  The result converges to the invariant projection when
-/// the supplied sequence grows along a Følner exhaustion.
+/// the supplied sequence grows along a Følner exhaustion. Action outputs are
+/// accumulated in `f64` and must preserve the input shape and finite value domain.
 pub fn conditional_expectation<G, A>(action: &A, elements: &[G], f: &Tensor) -> PureResult<Tensor>
 where
     A: KoopmanAction<G>,
@@ -587,12 +759,42 @@ where
         return Err(TensorError::EmptyInput("conditional_expectation"));
     }
     let (rows, cols) = f.shape();
-    let mut accumulator = Tensor::zeros(rows, cols)?;
+    for &value in f.data() {
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "conditional_expectation_input",
+                value,
+            });
+        }
+    }
+    let mut accumulator = vec![0.0f64; f.data().len()];
     for element in elements {
         let transformed = action.apply(element, f)?;
-        accumulator.add_scaled(&transformed, 1.0)?;
+        if transformed.shape() != (rows, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: transformed.shape(),
+            });
+        }
+        for (slot, &value) in accumulator.iter_mut().zip(transformed.data()) {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "conditional_expectation_action",
+                    value,
+                });
+            }
+            *slot += value as f64;
+        }
     }
-    accumulator.scale(1.0 / elements.len() as f32)
+    let denominator = elements.len() as f64;
+    let mut averaged = Vec::with_capacity(accumulator.len());
+    for value in accumulator {
+        averaged.push(checked_f64_to_f32(
+            "conditional_expectation_output",
+            value / denominator,
+        )?);
+    }
+    Tensor::from_vec(rows, cols, averaged)
 }
 
 /// Produces the running Cesàro averages associated with a Følner sequence.
@@ -607,18 +809,16 @@ where
     I::Item: AsRef<[G]>,
 {
     let mut averages = Vec::new();
-    for (idx, subset) in sequence.into_iter().enumerate() {
+    for subset in sequence {
         let subset_ref = subset.as_ref();
         if subset_ref.is_empty() {
             return Err(TensorError::EmptyInput("cesaro_averages"));
         }
         let projection = conditional_expectation(action, subset_ref, f)?;
-        // To avoid accidental aliasing we clone once before pushing.
-        averages.push(projection.clone());
-        // We overwrite the vector entry with the newly computed projection so
-        // the caller can observe convergence while preserving ownership of the
-        // tensor.
-        averages[idx] = projection;
+        averages.push(projection);
+    }
+    if averages.is_empty() {
+        return Err(TensorError::EmptyInput("cesaro_averages"));
     }
     Ok(averages)
 }
@@ -678,6 +878,28 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Debug)]
+    struct ExtremeAction;
+
+    impl KoopmanAction<bool> for ExtremeAction {
+        fn apply(&self, element: &bool, _input: &Tensor) -> PureResult<Tensor> {
+            Tensor::from_vec(1, 1, vec![if *element { f32::MAX } else { -f32::MAX }])
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct MalformedAction;
+
+    impl KoopmanAction<usize> for MalformedAction {
+        fn apply(&self, element: &usize, _input: &Tensor) -> PureResult<Tensor> {
+            if *element == 0 {
+                Tensor::from_vec(1, 2, vec![0.0, 0.0])
+            } else {
+                Tensor::from_vec(1, 1, vec![f32::NAN])
+            }
+        }
+    }
+
     #[test]
     fn projection_recovers_invariants() {
         let action = CyclicShift { width: 3 };
@@ -700,6 +922,39 @@ mod tests {
     }
 
     #[test]
+    fn conditional_expectation_uses_finite_f64_accumulation() {
+        let input = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let projected = unwrap_ok(conditional_expectation(
+            &ExtremeAction,
+            &[true, false],
+            &input,
+        ));
+        assert_eq!(projected.data(), &[0.0]);
+    }
+
+    #[test]
+    fn conditional_expectation_rejects_malformed_actions() {
+        let input = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let error = unwrap_err(conditional_expectation(&MalformedAction, &[0], &input));
+        assert!(matches!(error, TensorError::ShapeMismatch { .. }));
+
+        let error = unwrap_err(conditional_expectation(&MalformedAction, &[1], &input));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "conditional_expectation_action",
+                ..
+            }
+        ));
+        let error = unwrap_err(cesaro_averages::<usize, _, Vec<Vec<usize>>>(
+            &MalformedAction,
+            Vec::new(),
+            &input,
+        ));
+        assert!(matches!(error, TensorError::EmptyInput("cesaro_averages")));
+    }
+
+    #[test]
     fn barycenter_respects_symmetry() {
         let densities = vec![
             unwrap_ok(Tensor::from_vec(1, 2, vec![0.8, 0.2])),
@@ -716,6 +971,13 @@ mod tests {
     }
 
     #[test]
+    fn information_energies_respect_zero_support_limits() {
+        let kl = unwrap_ok(kl_divergence(&[1.0, 0.0], &[0.5, 0.5]));
+        assert!((kl - core::f32::consts::LN_2).abs() < 1e-6);
+        assert_eq!(unwrap_ok(entropy(&[1.0, 0.0])), 0.0);
+    }
+
+    #[test]
     fn barycenter_degeneracy_detected() {
         let densities = vec![unwrap_ok(Tensor::from_vec(1, 2, vec![0.6, 0.4]))];
         let weights = vec![1.0];
@@ -723,6 +985,146 @@ mod tests {
         assert!(matches!(
             err,
             TensorError::DegenerateBarycenter { effective_weight } if effective_weight <= 0.0
+        ));
+    }
+
+    #[test]
+    fn barycenter_rejects_invalid_parameters_and_coupling() {
+        let densities = vec![unwrap_ok(Tensor::from_vec(1, 2, vec![0.6, 0.4]))];
+        let weights = vec![1.0];
+        let error = unwrap_err(z_space_barycenter(
+            &weights,
+            &densities,
+            f32::INFINITY,
+            0.0,
+            None,
+        ));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "entropy_weight",
+                ..
+            }
+        ));
+        let error = unwrap_err(z_space_barycenter(
+            &weights,
+            &densities,
+            0.0,
+            f32::INFINITY,
+            None,
+        ));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "beta_j",
+                ..
+            }
+        ));
+        let error = unwrap_err(z_space_barycenter(&weights, &densities, 0.0, -0.5, None));
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue { label: "beta_j" }
+        ));
+
+        let coupling = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::NAN]));
+        let error = unwrap_err(z_space_barycenter(
+            &weights,
+            &densities,
+            0.0,
+            1.0,
+            Some(&coupling),
+        ));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "barycenter_coupling",
+                ..
+            }
+        ));
+        let coupling = unwrap_ok(Tensor::from_vec(1, 1, vec![-1.0]));
+        let error = unwrap_err(z_space_barycenter(
+            &weights,
+            &densities,
+            0.0,
+            1.0,
+            Some(&coupling),
+        ));
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue {
+                label: "barycenter_coupling"
+            }
+        ));
+    }
+
+    #[test]
+    fn barycenter_normalises_extreme_finite_densities_and_weights() {
+        let densities = vec![
+            unwrap_ok(Tensor::from_vec(1, 2, vec![f32::MAX, f32::MAX])),
+            unwrap_ok(Tensor::from_vec(
+                1,
+                2,
+                vec![f32::MIN_POSITIVE, f32::MIN_POSITIVE],
+            )),
+        ];
+        let weight = f32::MAX * 0.25;
+        let result = unwrap_ok(z_space_barycenter(
+            &[weight, weight],
+            &densities,
+            0.0,
+            0.0,
+            None,
+        ));
+        assert!(result.density.data().iter().all(|value| value.is_finite()));
+        assert!((result.density.data()[0] - 0.5).abs() < 1e-6);
+        assert!((result.density.data()[1] - 0.5).abs() < 1e-6);
+        assert!(result.objective.is_finite());
+        assert!(result.effective_weight.is_finite());
+    }
+
+    #[test]
+    fn barycenter_mode_remains_stable_near_degenerate_temperature() {
+        let densities = vec![unwrap_ok(Tensor::from_vec(1, 2, vec![0.9, 0.1]))];
+        let result = unwrap_ok(z_space_barycenter(&[1.0], &densities, -0.999, 0.0, None));
+        assert!(result.density.data()[0] > 0.999);
+        assert!(result.density.data()[1] >= 0.0);
+        assert!((result.density.data().iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn entropy_only_barycenter_is_uniform() {
+        let densities = vec![
+            unwrap_ok(Tensor::from_vec(1, 3, vec![0.98, 0.01, 0.01])),
+            unwrap_ok(Tensor::from_vec(1, 3, vec![0.1, 0.2, 0.7])),
+        ];
+        let result = unwrap_ok(z_space_barycenter(&[0.0, 0.0], &densities, 0.5, 0.0, None));
+        for value in result.density.data() {
+            assert!((*value - 1.0 / 3.0).abs() < 1e-6);
+        }
+        assert_eq!(result.kl_energy, 0.0);
+        assert!(result.entropy > 0.0);
+        assert!(result.objective < 0.0);
+    }
+
+    #[test]
+    fn barycenter_rejects_unrepresentable_effective_weight() {
+        let densities = vec![
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+        ];
+        let error = unwrap_err(z_space_barycenter(
+            &[f32::MAX, f32::MAX],
+            &densities,
+            0.0,
+            0.0,
+            None,
+        ));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "barycenter_effective_weight",
+                ..
+            }
         ));
     }
 
@@ -809,6 +1211,36 @@ mod tests {
     }
 
     #[test]
+    fn tesla_tail_normalises_weights_and_enforces_rate_domain() {
+        let tail = unwrap_ok(tesla_tail_spectrum(
+            &[1.0, 0.5],
+            &[1.0, 2.0],
+            &[3.0, 1.0],
+            1.0,
+        ));
+        assert!((tail.lines[0].weight - 0.75).abs() < 1e-6);
+        assert!((tail.lines[1].weight - 0.25).abs() < 1e-6);
+        assert!((tail.coherence_rate - 0.875).abs() < 1e-6);
+
+        let error = unwrap_err(tesla_tail_spectrum(&[1.1], &[1.0], &[1.0], 0.5));
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue {
+                label: "tesla_tail_radius"
+            }
+        ));
+        let error = unwrap_err(tesla_tail_spectrum(&[1.0], &[1.0], &[1.0], 1.1));
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue {
+                label: "tesla_tail_kappa"
+            }
+        ));
+        let error = unwrap_err(tesla_tail_spectrum(&[1.0], &[1.0], &[0.0], 0.5));
+        assert!(matches!(error, TensorError::DegenerateBarycenter { .. }));
+    }
+
+    #[test]
     fn nirt_weight_update_shifts_mass_towards_similar_modes() {
         let mut weights = vec![0.3, 0.4, 0.3];
         let similarities = vec![0.9, 0.1, 0.4];
@@ -817,5 +1249,38 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-6);
         assert!(weights[0] > weights[1]);
         assert!(weights[0] > 0.3);
+    }
+
+    #[test]
+    fn nirt_weight_update_rolls_back_late_failures() {
+        let mut weights = vec![0.4, 0.6];
+        let original = weights.clone();
+        let error = unwrap_err(nirt_weight_update(&mut weights, &[0.5, f32::NAN], 0.8, 0.2));
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "nirt_similarity",
+                ..
+            }
+        ));
+        assert_eq!(weights, original);
+
+        let error = unwrap_err(nirt_weight_update(&mut weights, &[0.5, 1.1], 0.8, 0.2));
+        assert!(matches!(
+            error,
+            TensorError::InvalidValue {
+                label: "nirt_similarity"
+            }
+        ));
+        assert_eq!(weights, original);
+    }
+
+    #[test]
+    fn nirt_weight_update_rolls_back_degenerate_candidates() {
+        let mut weights = vec![0.0, 0.0];
+        let original = weights.clone();
+        let error = unwrap_err(nirt_weight_update(&mut weights, &[-1.0, -1.0], 1.0, 1.0));
+        assert!(matches!(error, TensorError::DegenerateBarycenter { .. }));
+        assert_eq!(weights, original);
     }
 }
