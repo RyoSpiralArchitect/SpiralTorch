@@ -3,13 +3,14 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Legacy WGPU fractional ops wrapper.
+//! WGPU execution for the shared fractional GL contract.
 //!
-//! This module is intentionally kept behind `wgpu-rt`: it is an older
-//! st-core-local wrapper, but if it is revived it must fail as a structured
-//! backend error rather than panicking inside a long training run.
+//! `st-frac` owns the operator configuration, coefficients, scaling, and CPU
+//! semantics. This feature-gated module validates WGPU capabilities and only
+//! executes the supported subset. The legacy low-level wrapper remains for
+//! compatibility with callers that already prepare coefficients themselves.
 
-use ndarray::{ArrayD, IxDyn};
+use ndarray::{ArrayD, Axis, IxDyn};
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Duration;
@@ -17,10 +18,14 @@ use wgpu::util::DeviceExt;
 
 use super::wgpu_rt;
 
+pub use st_frac::FracdiffGlConfig;
+
 const WGPU_FRAC_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum WgpuFracError {
+    #[error(transparent)]
+    FractionalCore(#[from] st_frac::FracErr),
     #[error("fractional WGPU input is empty or has a zero-sized selected axis")]
     EmptyInput,
     #[error("axis {axis} is out of bounds for tensor rank {rank}")]
@@ -33,6 +38,10 @@ pub enum WgpuFracError {
     },
     #[error("{label} length overflow")]
     LengthOverflow { label: &'static str },
+    #[error("{label} dimension {value} exceeds the WGPU u32 index range")]
+    DimensionTooLarge { label: &'static str, value: usize },
+    #[error("fractional WGPU kernel does not support {pad} padding")]
+    UnsupportedPad { pad: &'static str },
     #[error("shape error: {0}")]
     Shape(String),
     #[error("WGPU {stage} failed: {message}")]
@@ -40,6 +49,33 @@ pub enum WgpuFracError {
         stage: &'static str,
         message: String,
     },
+}
+
+#[derive(Debug)]
+struct AxisLayout {
+    data: Vec<f32>,
+    rows: u32,
+    cols: u32,
+    permuted_shape: Vec<usize>,
+    inverse_permutation: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct PreparedFracdiff {
+    layout: Option<AxisLayout>,
+    coefficients: Vec<f32>,
+    alpha_scale: f32,
+    pad_zero: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FracDispatch<'a> {
+    data: &'a [f32],
+    rows: u32,
+    cols: u32,
+    coefficients: &'a [f32],
+    alpha_scale: f32,
+    pad_zero: bool,
 }
 
 fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
@@ -72,7 +108,7 @@ fn checked_len(label: &'static str, factors: &[usize]) -> Result<usize, WgpuFrac
     })
 }
 
-fn flatten_rows_cols(x: &ArrayD<f32>, axis: usize) -> Result<(Vec<f32>, u32, u32), WgpuFracError> {
+fn flatten_rows_cols(x: &ArrayD<f32>, axis: usize) -> Result<AxisLayout, WgpuFracError> {
     let rank = x.ndim();
     if axis >= rank {
         return Err(WgpuFracError::AxisOutOfBounds { axis, rank });
@@ -81,6 +117,10 @@ fn flatten_rows_cols(x: &ArrayD<f32>, axis: usize) -> Result<(Vec<f32>, u32, u32
     let mut perm: Vec<usize> = (0..rank).collect();
     perm.retain(|&dim| dim != axis);
     perm.push(axis);
+    let mut inverse_permutation = vec![0usize; rank];
+    for (new_axis, &old_axis) in perm.iter().enumerate() {
+        inverse_permutation[old_axis] = new_axis;
+    }
     let xp = x.view().permuted_axes(perm);
     let cols = *xp.shape().last().ok_or(WgpuFracError::EmptyInput)?;
     if cols == 0 || xp.is_empty() {
@@ -89,7 +129,71 @@ fn flatten_rows_cols(x: &ArrayD<f32>, axis: usize) -> Result<(Vec<f32>, u32, u32
     let rows = xp.len() / cols;
     let data: Vec<f32> = xp.iter().copied().collect();
     validate_finite_slice("fracdiff_input", &data)?;
-    Ok((data, rows as u32, cols as u32))
+    let rows_u32 = u32::try_from(rows).map_err(|_| WgpuFracError::DimensionTooLarge {
+        label: "fractional row",
+        value: rows,
+    })?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| WgpuFracError::DimensionTooLarge {
+        label: "fractional axis",
+        value: cols,
+    })?;
+    Ok(AxisLayout {
+        data,
+        rows: rows_u32,
+        cols: cols_u32,
+        permuted_shape: xp.shape().to_vec(),
+        inverse_permutation,
+    })
+}
+
+fn restore_axis_layout(
+    values: Vec<f32>,
+    layout: &AxisLayout,
+) -> Result<ArrayD<f32>, WgpuFracError> {
+    let permuted = ArrayD::from_shape_vec(IxDyn(&layout.permuted_shape), values)
+        .map_err(|err| WgpuFracError::Shape(err.to_string()))?;
+    Ok(permuted.permuted_axes(IxDyn(&layout.inverse_permutation)))
+}
+
+fn prepare_fracdiff_gl_wgpu(
+    x: &ArrayD<f32>,
+    config: FracdiffGlConfig,
+) -> Result<PreparedFracdiff, WgpuFracError> {
+    if config.axis >= x.ndim() {
+        return Err(WgpuFracError::AxisOutOfBounds {
+            axis: config.axis,
+            rank: x.ndim(),
+        });
+    }
+    let pad_zero = match config.pad {
+        st_frac::Pad::Zero => true,
+        st_frac::Pad::Edge => false,
+        st_frac::Pad::Reflect => return Err(WgpuFracError::UnsupportedPad { pad: "Reflect" }),
+        st_frac::Pad::Wrap => return Err(WgpuFracError::UnsupportedPad { pad: "Wrap" }),
+        st_frac::Pad::Constant(_) => {
+            return Err(WgpuFracError::UnsupportedPad { pad: "Constant" });
+        }
+    };
+    let scale = config.scale_multiplier()?;
+    let coefficients = st_frac::gl_coeffs(config.alpha, config.kernel_len)?;
+    if let Some((index, &value)) = x.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+        return Err(WgpuFracError::NonFiniteValue {
+            label: "fracdiff_input",
+            index,
+            value,
+        });
+    }
+    let layout = if x.is_empty() || x.len_of(Axis(config.axis)) == 0 {
+        None
+    } else {
+        Some(flatten_rows_cols(x, config.axis)?)
+    };
+    Ok(PreparedFracdiff {
+        layout,
+        coefficients,
+        alpha_scale: scale,
+        pad_zero,
+    })
 }
 
 fn create_shader(
@@ -179,30 +283,96 @@ pub fn fracdiff_gl_wgpu(
     axis: usize,
     pad_zero: bool,
 ) -> Result<ArrayD<f32>, WgpuFracError> {
-    let (data, rows, cols) = flatten_rows_cols(x, axis)?;
-    if coeff.is_empty() {
+    let layout = flatten_rows_cols(x, axis)?;
+    let out = dispatch_fracdiff_gl_wgpu(
+        device,
+        queue,
+        FracDispatch {
+            data: &layout.data,
+            rows: layout.rows,
+            cols: layout.cols,
+            coefficients: coeff,
+            alpha_scale,
+            pad_zero,
+        },
+    )?;
+    ArrayD::from_shape_vec(IxDyn(&[layout.rows as usize, layout.cols as usize]), out)
+        .map_err(|err| WgpuFracError::Shape(err.to_string()))
+}
+
+/// Apply the shared GL derivative contract on WGPU while preserving `x`'s ND shape.
+///
+/// Coefficients and scaling come from `st-frac`; this backend only executes the
+/// resulting Zero- or Edge-padded kernel. Unsupported padding is rejected
+/// explicitly rather than being approximated by a different mode.
+pub fn fracdiff_gl_wgpu_nd(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    x: &ArrayD<f32>,
+    config: FracdiffGlConfig,
+) -> Result<ArrayD<f32>, WgpuFracError> {
+    let PreparedFracdiff {
+        layout,
+        coefficients,
+        alpha_scale,
+        pad_zero,
+    } = prepare_fracdiff_gl_wgpu(x, config)?;
+    let Some(layout) = layout else {
+        return Ok(x.clone());
+    };
+    let values = dispatch_fracdiff_gl_wgpu(
+        device,
+        queue,
+        FracDispatch {
+            data: &layout.data,
+            rows: layout.rows,
+            cols: layout.cols,
+            coefficients: &coefficients,
+            alpha_scale,
+            pad_zero,
+        },
+    )?;
+    restore_axis_layout(values, &layout)
+}
+
+fn dispatch_fracdiff_gl_wgpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    dispatch: FracDispatch<'_>,
+) -> Result<Vec<f32>, WgpuFracError> {
+    if dispatch.coefficients.is_empty() {
         return Err(WgpuFracError::EmptyInput);
     }
-    validate_finite_slice("fracdiff_coeff", coeff)?;
-    if !alpha_scale.is_finite() {
+    validate_finite_slice("fracdiff_coeff", dispatch.coefficients)?;
+    if !dispatch.alpha_scale.is_finite() {
         return Err(WgpuFracError::NonFiniteValue {
             label: "fracdiff_alpha_scale",
             index: 0,
-            value: alpha_scale,
+            value: dispatch.alpha_scale,
         });
     }
 
-    let n = checked_len("fracdiff_output", &[rows as usize, cols as usize])?;
+    let n = checked_len(
+        "fracdiff_output",
+        &[dispatch.rows as usize, dispatch.cols as usize],
+    )?;
     let byte_len = checked_len("fracdiff_output_bytes", &[n, std::mem::size_of::<f32>()])?;
+
+    let klen = u32::try_from(dispatch.coefficients.len()).map_err(|_| {
+        WgpuFracError::DimensionTooLarge {
+            label: "fractional kernel",
+            value: dispatch.coefficients.len(),
+        }
+    })?;
 
     let buf_x = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("fracdiff.X"),
-        contents: bytemuck::cast_slice(&data),
+        contents: bytemuck::cast_slice(dispatch.data),
         usage: wgpu::BufferUsages::STORAGE,
     });
     let buf_c = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("fracdiff.C"),
-        contents: bytemuck::cast_slice(coeff),
+        contents: bytemuck::cast_slice(dispatch.coefficients),
         usage: wgpu::BufferUsages::STORAGE,
     });
     let y = vec![0f32; n];
@@ -214,11 +384,11 @@ pub fn fracdiff_gl_wgpu(
             | wgpu::BufferUsages::COPY_DST,
     });
     let params = FracParams {
-        cols,
-        rows,
-        klen: coeff.len() as u32,
-        alpha_scale,
-        pad_mode: if pad_zero { 0 } else { 1 },
+        cols: dispatch.cols,
+        rows: dispatch.rows,
+        klen,
+        alpha_scale: dispatch.alpha_scale,
+        pad_mode: if dispatch.pad_zero { 0 } else { 1 },
         _pad: [0; 3],
     };
     let buf_p = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -280,7 +450,7 @@ pub fn fracdiff_gl_wgpu(
         });
         cpass.set_pipeline(&pipeline);
         cpass.set_bind_group(0, &bind, &[]);
-        cpass.dispatch_workgroups(rows.div_ceil(128), 1, 1);
+        cpass.dispatch_workgroups(dispatch.rows.div_ceil(128), 1, 1);
     }
 
     let buf_read = device.create_buffer(&wgpu::BufferDescriptor {
@@ -306,9 +476,7 @@ pub fn fracdiff_gl_wgpu(
             })?;
     let out: Vec<f32> = bytemuck::cast_slice(&bytes).to_vec();
     validate_finite_slice("fracdiff_output", &out)?;
-
-    ArrayD::from_shape_vec(IxDyn(&[rows as usize, cols as usize]), out)
-        .map_err(|err| WgpuFracError::Shape(err.to_string()))
+    Ok(out)
 }
 
 #[repr(C)]
@@ -479,6 +647,125 @@ mod tests {
                 value,
             } if value.is_nan()
         ));
+    }
+
+    #[test]
+    fn axis_layout_round_trips_a_non_last_axis() {
+        let input = ArrayD::from_shape_vec(
+            IxDyn(&[2, 3, 4]),
+            (0..24).map(|value| value as f32).collect(),
+        )
+        .unwrap();
+        let layout = flatten_rows_cols(&input, 1).unwrap();
+        assert_eq!(layout.permuted_shape, vec![2, 4, 3]);
+        let values = layout.data.clone();
+        let restored = restore_axis_layout(values, &layout).unwrap();
+        assert_eq!(restored.shape(), input.shape());
+        assert_eq!(restored, input);
+    }
+
+    #[test]
+    fn semantic_preflight_uses_shared_coefficients_and_step_scale() {
+        let input = ArrayD::from_shape_vec(IxDyn(&[1, 3]), vec![0.25, -1.0, 2.0]).unwrap();
+        let config = FracdiffGlConfig::new(0.5, 1, 4, st_frac::Pad::Edge).with_step(0.25);
+        let prepared = prepare_fracdiff_gl_wgpu(&input, config).unwrap();
+        assert_eq!(prepared.coefficients, st_frac::gl_coeffs(0.5, 4).unwrap());
+        assert_eq!(prepared.alpha_scale, 2.0);
+        assert!(!prepared.pad_zero);
+        assert!(prepared.layout.is_some());
+    }
+
+    #[test]
+    fn semantic_preflight_rejects_unsupported_padding_and_invalid_core_parameters() {
+        let input = ArrayD::from_shape_vec(IxDyn(&[2]), vec![1.0, 2.0]).unwrap();
+        assert_eq!(
+            prepare_fracdiff_gl_wgpu(
+                &input,
+                FracdiffGlConfig::new(0.5, 0, 3, st_frac::Pad::Reflect).with_step(1.0),
+            )
+            .unwrap_err(),
+            WgpuFracError::UnsupportedPad { pad: "Reflect" }
+        );
+        assert!(matches!(
+            prepare_fracdiff_gl_wgpu(
+                &input,
+                FracdiffGlConfig::new(0.0, 0, 3, st_frac::Pad::Zero).with_step(1.0),
+            ),
+            Err(WgpuFracError::FractionalCore(
+                st_frac::FracErr::Alpha { .. }
+            ))
+        ));
+        assert!(matches!(
+            prepare_fracdiff_gl_wgpu(
+                &input,
+                FracdiffGlConfig::new(0.5, 0, 3, st_frac::Pad::Zero).with_step(0.0),
+            ),
+            Err(WgpuFracError::FractionalCore(st_frac::FracErr::Step { .. }))
+        ));
+    }
+
+    #[test]
+    fn semantic_preflight_preserves_valid_empty_tensors_without_dispatch() {
+        let input = ArrayD::from_shape_vec(IxDyn(&[2, 0, 3]), Vec::new()).unwrap();
+        let config = FracdiffGlConfig::new(0.5, 1, 3, st_frac::Pad::Zero).with_step(1.0);
+        let prepared = prepare_fracdiff_gl_wgpu(&input, config).unwrap();
+        assert!(prepared.layout.is_none());
+    }
+
+    #[test]
+    #[ignore = "requires a live WGPU adapter"]
+    fn semantic_wgpu_entry_matches_cpu_and_preserves_nd_shape() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }));
+        let Some(adapter) = adapter else {
+            return;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("st.core.wgpu_frac.semantic_test"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+            },
+            None,
+        ))
+        .unwrap();
+        let input = ArrayD::from_shape_vec(
+            IxDyn(&[2, 3, 4]),
+            (0..24).map(|value| value as f32 * 0.25 - 2.0).collect(),
+        )
+        .unwrap();
+        let alpha = 0.65;
+        let h = 0.25;
+        let kernel_len = 5;
+        let actual = fracdiff_gl_wgpu_nd(
+            &device,
+            &queue,
+            &input,
+            FracdiffGlConfig::new(alpha, 1, kernel_len, st_frac::Pad::Edge).with_step(h),
+        )
+        .unwrap();
+        let scale = st_frac::gl_step_scale(alpha, h).unwrap();
+        let expected = st_frac::fracdiff_gl_nd(
+            &input,
+            alpha,
+            1,
+            kernel_len,
+            st_frac::Pad::Edge,
+            Some(scale.inverse_h_alpha()),
+        )
+        .unwrap();
+
+        assert_eq!(actual.shape(), input.shape());
+        for (actual, expected) in actual.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expected).abs() < 3e-5,
+                "actual={actual}, expected={expected}"
+            );
+        }
     }
 
     #[test]
