@@ -819,11 +819,16 @@ topos = st.hypergrad_topos(max_depth=10, max_volume=100)
 signal = st.topos_control_signal(topos, observed_depth=4, visited_volume=25)
 training = st.topos_training_hints(signal)
 runtime = st.topos_runtime_adapter(signal, request_options={"base_temperature": 0.8})
+projection = st.topos_zspace_projection(signal, gradient_dim=4)
 
 trainer = st.ZSpaceTrainer(z_dim=4, topos_control_gain=0.5)
 trainer.step(st.z.metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal}))
 
-print(training["gradient_bias_scale"], runtime["request"]["temperature"])
+print(
+    training["gradient_bias_scale"],
+    runtime["request"]["temperature"],
+    projection["gradient"],
+)
 ```
 
 For hosted-model experiments, sweep several topological postures through the

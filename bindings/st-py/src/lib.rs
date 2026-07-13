@@ -44,8 +44,8 @@ mod theory;
 mod trainer;
 mod vision;
 mod wgpu;
-mod zspace;
 mod zpulse;
+mod zspace;
 
 #[cfg(not(feature = "nn"))]
 mod psi_synchro {

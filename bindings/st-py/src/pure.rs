@@ -16,7 +16,8 @@ use st_tensor::{
     OpenCartesianTopos, Tensor, TensorBiome, ToposControlPlanOptions, ToposControlSignal,
     ToposControlSignalInput, ToposInferenceHints, ToposInferenceHintsInput, ToposInferencePlan,
     ToposInferencePlanOptions, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
-    ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingPlan, ZBox, ZBoxSite,
+    ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingPlan, ToposZSpaceProjectionOptions,
+    ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -79,6 +80,17 @@ fn topos_runtime_profile_to_pydict(
 
 fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<PyObject> {
     serialized_payload_to_py(py, "Topos runtime route", route.payload())
+}
+
+fn topos_zspace_projection_to_pydict(
+    py: Python<'_>,
+    signal: &ToposControlSignal,
+    gradient_dim: usize,
+) -> PyResult<PyObject> {
+    let projection = signal
+        .zspace_projection(ToposZSpaceProjectionOptions { gradient_dim })
+        .map_err(tensor_err_to_py)?;
+    serialized_payload_to_py(py, "Topos Z-space projection", projection.payload())
 }
 
 fn dict_f32_or_default(dict: &Bound<'_, PyDict>, key: &str, default: f32) -> PyResult<f32> {
@@ -352,6 +364,18 @@ fn py_topos_control_bundle_from_observation(
         .payload_with_options(options, training_hints, inference_hints)
         .map_err(tensor_err_to_py)?;
     serialized_payload_to_py(py, "Topos control bundle", payload)
+}
+
+#[pyfunction(name = "_topos_zspace_projection_from_observation")]
+#[pyo3(signature = (signal, gradient_dim=6))]
+fn py_topos_zspace_projection_from_observation(
+    py: Python<'_>,
+    signal: &Bound<'_, PyDict>,
+    gradient_dim: usize,
+) -> PyResult<PyObject> {
+    let signal = ToposControlSignal::from_input(topos_control_signal_input_from_pydict(signal)?)
+        .map_err(tensor_err_to_py)?;
+    topos_zspace_projection_to_pydict(py, &signal, gradient_dim)
 }
 
 #[pyfunction(name = "_topos_control_signal_from_observation")]
@@ -1866,6 +1890,10 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(
         py_topos_control_bundle_from_observation,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        py_topos_zspace_projection_from_observation,
         m
     )?)?;
     m.add_function(wrap_pyfunction!(py_topos_runtime_route_from_profile, m)?)?;

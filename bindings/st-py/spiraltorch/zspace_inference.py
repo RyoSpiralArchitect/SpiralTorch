@@ -215,6 +215,10 @@ def _unit_interval(value: Any, *, default: float = 0.0) -> float:
 
 _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
 _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
+_TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION = (
+    "spiraltorch.topos_zspace_projection.v1"
+)
+_TOPOS_ZSPACE_PROJECTION_KIND = "spiraltorch.topos_zspace_projection"
 _TOPOS_CONTROL_SIGNAL_INPUT_KEYS = frozenset(
     {
         "curvature",
@@ -335,6 +339,52 @@ def _topos_control_bundle_from_observation(
         "rebuild or reinstall SpiralTorch with "
         "_topos_control_bundle_from_observation"
     )
+
+
+def _native_topos_zspace_projection_from_observation(
+    payload: Mapping[str, Any],
+    *,
+    gradient_dim: int,
+) -> dict[str, Any] | None:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    project = getattr(native, "_topos_zspace_projection_from_observation", None)
+    if not callable(project):
+        return None
+
+    projection = project(dict(payload), gradient_dim)
+    if not isinstance(projection, MappingABC):
+        raise RuntimeError(
+            "native Topos Z-space core returned a non-mapping contract payload"
+        )
+    return dict(projection)
+
+
+def _topos_zspace_projection_from_observation(
+    payload: Mapping[str, Any],
+    *,
+    gradient_dim: int,
+) -> dict[str, Any]:
+    projection = _native_topos_zspace_projection_from_observation(
+        payload,
+        gradient_dim=gradient_dim,
+    )
+    if projection is None:
+        raise RuntimeError(
+            "Topos Z-space projection requires the compiled Rust semantic core; "
+            "rebuild or reinstall SpiralTorch with "
+            "_topos_zspace_projection_from_observation"
+        )
+    if (
+        projection.get("kind") != _TOPOS_ZSPACE_PROJECTION_KIND
+        or projection.get("contract_version")
+        != _TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION
+        or projection.get("semantic_owner")
+        != _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER
+        or projection.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError("native Topos Z-space core returned an untrusted contract")
+    return projection
 
 
 def _is_native_topos_control_signal(payload: Mapping[str, Any]) -> bool:
@@ -688,6 +738,38 @@ def topos_runtime_route(
     return _topos_bundle_section(bundle, "runtime_route")
 
 
+def topos_zspace_projection(
+    topos: Any | None = None,
+    *,
+    gradient_dim: int = 6,
+    curvature: float = -1.0,
+    tolerance: float = 1e-3,
+    saturation: float = 1.0,
+    max_depth: int = 64,
+    max_volume: int = 512,
+    porosity: float | None = None,
+    observed_depth: int = 0,
+    visited_volume: int = 0,
+) -> dict[str, Any]:
+    """Project an open-topos signal through the canonical Rust Z-space contract."""
+
+    payload, _, _ = _topos_control_request_parts(
+        topos,
+        curvature=curvature,
+        tolerance=tolerance,
+        saturation=saturation,
+        max_depth=max_depth,
+        max_volume=max_volume,
+        porosity=porosity,
+        observed_depth=observed_depth,
+        visited_volume=visited_volume,
+    )
+    return _topos_zspace_projection_from_observation(
+        payload,
+        gradient_dim=gradient_dim,
+    )
+
+
 def topos_control_partial(
     topos: Any | None = None,
     *,
@@ -700,31 +782,10 @@ def topos_control_partial(
     """Convert an open-topos pressure signal into a Z-space inference partial."""
 
     signal = topos_control_signal(topos, **signal_options)
-    gradient = list(signal["gradient"])
-    dim = max(1, int(gradient_dim))
-    if len(gradient) < dim:
-        gradient.extend(0.0 for _ in range(dim - len(gradient)))
+    projection = topos_zspace_projection(signal, gradient_dim=gradient_dim)
     metrics = {
-        "speed": _unit_interval(
-            signal["openness"]
-            * (0.7 + 0.3 * signal["porosity"])
-            * signal["learning_rate_scale"]
-        ),
-        "memory": _unit_interval(signal["volume_pressure"]),
-        "stability": _unit_interval(
-            signal["stability_hint"] / max(1.0, signal["regularization_scale"])
-        ),
-        "drs": max(
-            -1.0,
-            min(
-                1.0,
-                float(signal["openness"])
-                - float(signal["closure_pressure"])
-                - 0.25 * float(signal["step_damping"]),
-            ),
-        ),
-        "frac": _unit_interval(signal["sampling_focus"]),
-        "gradient": gradient[:dim],
+        key: projection[key]
+        for key in ("speed", "memory", "stability", "drs", "frac", "gradient")
     }
     telemetry_signal = dict(signal)
     telemetry_signal.pop("training_plan", None)
@@ -735,6 +796,7 @@ def topos_control_partial(
         route_payload = dict(runtime_route)
         route_payload.pop("runtime_profile", None)
         telemetry_signal["runtime_route"] = route_payload
+    telemetry_signal["zspace_projection"] = projection
     telemetry = _flatten_telemetry(telemetry_signal, prefix=f"{telemetry_prefix}.")
     return ZSpacePartialBundle(
         metrics,

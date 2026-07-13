@@ -52,6 +52,24 @@ pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER: &str = TOPOS_RUNTIME_ROUTE_SEMANT
 /// Backend label used when the canonical Rust control semantics produced a payload.
 pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND: &str = "rust";
 
+/// Stable contract identifier shared by Rust, Python, and WASM Z-space clients.
+pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v1";
+
+/// Stable payload kind for a Topos control signal projected into Z-space metrics.
+pub const TOPOS_ZSPACE_PROJECTION_KIND: &str = "spiraltorch.topos_zspace_projection";
+
+/// Crate/module that owns the Topos-to-Z-space projection semantics.
+pub const TOPOS_ZSPACE_PROJECTION_SEMANTIC_OWNER: &str = TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER;
+
+/// Backend label used when canonical Rust projection semantics produced a payload.
+pub const TOPOS_ZSPACE_PROJECTION_SEMANTIC_BACKEND: &str = "rust";
+
+/// Number of meaningful axes in the canonical Topos gradient basis.
+pub const TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM: usize = 6;
+
+/// Allocation guard for client-requested projection vectors.
+pub const TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM: usize = 4096;
+
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
     if !permeability.is_finite() {
         return Err(TensorError::NonFiniteValue {
@@ -214,6 +232,44 @@ impl Default for ToposControlSignalInput {
             visited_volume: 0,
         }
     }
+}
+
+/// Client representation options for the canonical Topos-to-Z-space projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct ToposZSpaceProjectionOptions {
+    /// Output width. Dimensions above the six semantic axes are explicitly zero-filled.
+    pub gradient_dim: usize,
+}
+
+impl Default for ToposZSpaceProjectionOptions {
+    fn default() -> Self {
+        Self {
+            gradient_dim: TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM,
+        }
+    }
+}
+
+impl ToposZSpaceProjectionOptions {
+    fn validated(self) -> PureResult<Self> {
+        if !(1..=TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM).contains(&self.gradient_dim) {
+            return Err(TensorError::InvalidValue {
+                label: "topos_zspace_gradient_dim must be in 1..=4096",
+            });
+        }
+        Ok(self)
+    }
+}
+
+/// Canonical Z-space metrics projected from one open-topos control signal.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToposZSpaceProjection {
+    speed: f32,
+    memory: f32,
+    stability: f32,
+    drs: f32,
+    frac: f32,
+    gradient: Vec<f32>,
 }
 
 /// External optimizer hints admitted by the canonical Rust control contract.
@@ -771,6 +827,24 @@ pub struct ToposRuntimeRoutePayload {
     pub inference_action: &'static str,
     pub scores: ToposRuntimeRouteScoresPayload,
     pub runtime_profile: ToposRuntimeProfilePayload,
+}
+
+/// Canonical Topos-to-Z-space projection payload shared by every language binding.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ToposZSpaceProjectionPayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub gradient_dim: usize,
+    pub base_gradient_dim: usize,
+    pub speed: f32,
+    pub memory: f32,
+    pub stability: f32,
+    pub drs: f32,
+    pub frac: f32,
+    pub gradient: Vec<f32>,
+    pub vector: [f32; 5],
 }
 
 /// Canonical control bundle shared by Rust, Python, and WASM clients.
@@ -1758,6 +1832,75 @@ impl ToposControlSignal {
             self.depth_pressure,
             self.volume_pressure,
         ]
+    }
+
+    /// Projects this signal into the canonical metrics consumed by Z-space inference.
+    pub fn zspace_projection(
+        &self,
+        options: ToposZSpaceProjectionOptions,
+    ) -> PureResult<ToposZSpaceProjection> {
+        let options = options.validated()?;
+        let mut gradient = self.gradient().to_vec();
+        gradient.resize(options.gradient_dim, 0.0);
+        Ok(ToposZSpaceProjection {
+            speed: (self.openness * (0.7 + 0.3 * self.porosity) * self.learning_rate_scale)
+                .clamp(0.0, 1.0),
+            memory: self.volume_pressure.clamp(0.0, 1.0),
+            stability: (self.stability_hint / self.regularization_scale.max(1.0)).clamp(0.0, 1.0),
+            drs: (self.openness - self.closure_pressure - 0.25 * self.step_damping)
+                .clamp(-1.0, 1.0),
+            frac: self.sampling_focus.clamp(0.0, 1.0),
+            gradient,
+        })
+    }
+}
+
+impl ToposZSpaceProjection {
+    pub fn speed(&self) -> f32 {
+        self.speed
+    }
+
+    pub fn memory(&self) -> f32 {
+        self.memory
+    }
+
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    pub fn drs(&self) -> f32 {
+        self.drs
+    }
+
+    pub fn frac(&self) -> f32 {
+        self.frac
+    }
+
+    pub fn gradient(&self) -> &[f32] {
+        &self.gradient
+    }
+
+    pub fn vector(&self) -> [f32; 5] {
+        [self.speed, self.memory, self.stability, self.drs, self.frac]
+    }
+
+    /// Returns the stable transport payload used by language bindings.
+    pub fn payload(&self) -> ToposZSpaceProjectionPayload {
+        ToposZSpaceProjectionPayload {
+            kind: TOPOS_ZSPACE_PROJECTION_KIND,
+            contract_version: TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
+            semantic_owner: TOPOS_ZSPACE_PROJECTION_SEMANTIC_OWNER,
+            semantic_backend: TOPOS_ZSPACE_PROJECTION_SEMANTIC_BACKEND,
+            gradient_dim: self.gradient.len(),
+            base_gradient_dim: TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM,
+            speed: self.speed,
+            memory: self.memory,
+            stability: self.stability,
+            drs: self.drs,
+            frac: self.frac,
+            gradient: self.gradient.clone(),
+            vector: self.vector(),
+        }
     }
 }
 
@@ -5156,6 +5299,85 @@ mod tests {
         let signal_route = signal.runtime_route(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
         assert_eq!(signal_route.mode(), route.mode());
         assert!((signal_route.score() - route.score()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn topos_zspace_projection_owns_metrics_and_dimension_adaptation() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            porosity: 0.25,
+            max_depth: 10,
+            max_volume: 100,
+            observed_depth: 4,
+            visited_volume: 25,
+            ..ToposControlSignalInput::default()
+        }));
+        let projection =
+            unwrap_ok(signal.zspace_projection(ToposZSpaceProjectionOptions { gradient_dim: 8 }));
+
+        assert!((projection.speed() - 0.41477418).abs() < 1e-6);
+        assert!((projection.memory() - 0.25).abs() < 1e-6);
+        assert!((projection.stability() - 0.4201313).abs() < 1e-6);
+        assert!((projection.drs() - 0.1355).abs() < 1e-6);
+        assert!((projection.frac() - 0.6680031).abs() < 1e-6);
+        assert_eq!(&projection.gradient()[..6], &signal.gradient());
+        assert_eq!(&projection.gradient()[6..], &[0.0, 0.0]);
+
+        let payload = projection.payload();
+        assert_eq!(payload.kind, TOPOS_ZSPACE_PROJECTION_KIND);
+        assert_eq!(
+            payload.contract_version,
+            TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION
+        );
+        assert_eq!(
+            payload.semantic_owner,
+            TOPOS_ZSPACE_PROJECTION_SEMANTIC_OWNER
+        );
+        assert_eq!(payload.semantic_backend, "rust");
+        assert_eq!(payload.gradient_dim, 8);
+        assert_eq!(payload.base_gradient_dim, 6);
+        assert_eq!(payload.vector, projection.vector());
+    }
+
+    #[test]
+    fn topos_zspace_projection_truncates_and_rejects_unsafe_dimensions() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(
+            ToposControlSignalInput::default(),
+        ));
+        let projection =
+            unwrap_ok(signal.zspace_projection(ToposZSpaceProjectionOptions { gradient_dim: 4 }));
+        assert_eq!(projection.gradient(), &signal.gradient()[..4]);
+
+        for gradient_dim in [0, TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM + 1] {
+            let error =
+                unwrap_err(signal.zspace_projection(ToposZSpaceProjectionOptions { gradient_dim }));
+            assert!(matches!(error, TensorError::InvalidValue { .. }));
+        }
+    }
+
+    #[test]
+    fn topos_zspace_projection_stays_finite_across_guard_pressure_grid() {
+        for observed_depth in [0, 1, 32, 64, usize::MAX] {
+            for visited_volume in [0, 1, 256, 512, usize::MAX] {
+                let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+                    observed_depth,
+                    visited_volume,
+                    ..ToposControlSignalInput::default()
+                }));
+                let projection = unwrap_ok(
+                    signal.zspace_projection(ToposZSpaceProjectionOptions { gradient_dim: 8 }),
+                );
+                for value in projection.vector() {
+                    assert!(value.is_finite());
+                }
+                assert!((0.0..=1.0).contains(&projection.speed()));
+                assert!((0.0..=1.0).contains(&projection.memory()));
+                assert!((0.0..=1.0).contains(&projection.stability()));
+                assert!((-1.0..=1.0).contains(&projection.drs()));
+                assert!((0.0..=1.0).contains(&projection.frac()));
+                assert_eq!(projection.gradient().len(), 8);
+                assert!(projection.gradient().iter().all(|value| value.is_finite()));
+            }
+        }
     }
 
     #[test]

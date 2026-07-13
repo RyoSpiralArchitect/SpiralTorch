@@ -1,5 +1,7 @@
 use serde_json::Value;
-use st_tensor::{TensorError, ToposControlSignal, ToposControlSignalInput};
+use st_tensor::{
+    TensorError, ToposControlSignal, ToposControlSignalInput, ToposZSpaceProjectionOptions,
+};
 
 const TOPOS_CONTROL_SIGNAL_INPUT_KEYS: &[&str] = &[
     "curvature",
@@ -33,7 +35,10 @@ fn topos_control_signal_input_from_json(
 }
 
 #[cfg(test)]
-use st_tensor::TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION;
+use st_tensor::{
+    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
+    TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM,
+};
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -74,6 +79,25 @@ pub fn topos_control_signal_value(input: ToposControlSignalInput) -> Result<Valu
     Ok(payload)
 }
 
+/// Project a Topos control signal through the shared Rust Z-space contract.
+pub fn topos_zspace_projection_value(
+    input: ToposControlSignalInput,
+    gradient_dim: usize,
+) -> Result<Value, TensorError> {
+    let signal = ToposControlSignal::from_input(input)?;
+    let projection = signal.zspace_projection(ToposZSpaceProjectionOptions { gradient_dim })?;
+    let mut payload = serde_json::to_value(projection.payload())
+        .expect("Topos Z-space projection payload is serializable");
+    payload
+        .as_object_mut()
+        .expect("Topos Z-space projection payload is an object")
+        .insert(
+            "execution_client".to_owned(),
+            Value::String("wasm".to_owned()),
+        );
+    Ok(payload)
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = toposControlSignalJson)]
 pub fn topos_control_signal_json(input_json: &str) -> Result<String, JsValue> {
@@ -88,6 +112,29 @@ pub fn topos_control_signal_object(input: &JsValue) -> Result<JsValue, JsValue> 
     let input = serde_wasm_bindgen::from_value::<Value>(input.clone()).map_err(js_error)?;
     let input = topos_control_signal_input_from_value(input).map_err(js_error)?;
     let payload = topos_control_signal_value(input).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = toposZSpaceProjectionJson)]
+pub fn topos_zspace_projection_json(
+    input_json: &str,
+    gradient_dim: usize,
+) -> Result<String, JsValue> {
+    let input = topos_control_signal_input_from_json(input_json).map_err(js_error)?;
+    let payload = topos_zspace_projection_value(input, gradient_dim).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = toposZSpaceProjectionObject)]
+pub fn topos_zspace_projection_object(
+    input: &JsValue,
+    gradient_dim: usize,
+) -> Result<JsValue, JsValue> {
+    let input = serde_wasm_bindgen::from_value::<Value>(input.clone()).map_err(js_error)?;
+    let input = topos_control_signal_input_from_value(input).map_err(js_error)?;
+    let payload = topos_zspace_projection_value(input, gradient_dim).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -159,5 +206,49 @@ mod tests {
             .expect_err("unknown Topos control key must fail closed");
 
         assert!(error.contains("unsupported Topos control signal key: porostiy"));
+    }
+
+    #[test]
+    fn wasm_zspace_projection_matches_rust_except_client_metadata() {
+        let input = ToposControlSignalInput {
+            porosity: 0.25,
+            max_depth: 10,
+            max_volume: 100,
+            observed_depth: 4,
+            visited_volume: 25,
+            ..ToposControlSignalInput::default()
+        };
+        let signal = ToposControlSignal::from_input(input).expect("valid control signal");
+        let expected = serde_json::to_value(
+            signal
+                .zspace_projection(ToposZSpaceProjectionOptions { gradient_dim: 8 })
+                .expect("valid projection")
+                .payload(),
+        )
+        .expect("serializable Rust projection");
+        let mut actual = topos_zspace_projection_value(input, 8).expect("valid WASM projection");
+        actual
+            .as_object_mut()
+            .expect("WASM projection object")
+            .remove("execution_client");
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            expected["contract_version"],
+            TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION
+        );
+        assert_eq!(expected["semantic_backend"], "rust");
+        assert_eq!(expected["gradient_dim"], 8);
+        assert_eq!(expected["gradient"].as_array().map(Vec::len), Some(8));
+    }
+
+    #[test]
+    fn wasm_zspace_projection_rejects_unsafe_dimensions() {
+        for gradient_dim in [0, TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM + 1] {
+            let error =
+                topos_zspace_projection_value(ToposControlSignalInput::default(), gradient_dim)
+                    .expect_err("unsafe projection dimension must fail closed");
+            assert!(matches!(error, TensorError::InvalidValue { .. }));
+        }
     }
 }

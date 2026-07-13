@@ -4992,6 +4992,20 @@ def topos_runtime_route(
     **signal_options: Any,
 ) -> Dict[str, object]: ...
 
+def topos_zspace_projection(
+    topos: Any | None = ...,
+    *,
+    gradient_dim: int = ...,
+    curvature: float = ...,
+    tolerance: float = ...,
+    saturation: float = ...,
+    max_depth: int = ...,
+    max_volume: int = ...,
+    porosity: float | None = ...,
+    observed_depth: int = ...,
+    visited_volume: int = ...,
+) -> Dict[str, object]: ...
+
 def topos_control_partial(
     topos: Any | None = ...,
     *,
