@@ -4102,6 +4102,28 @@ def training_telemetry_projection(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_generation_control(
+    logits: Sequence[float | int],
+    token_ids: Sequence[int],
+    recent_tokens: Sequence[int] = ...,
+    *,
+    curvature: float = ...,
+    temperature: float = ...,
+    entropy_target: float | None = ...,
+    entropy_tolerance: float = ...,
+    entropy_gain: float = ...,
+    min_temperature: float | None = ...,
+    max_temperature: float | None = ...,
+    repression_window: int = ...,
+    repression_strength: float = ...,
+    last_token_repression: float = ...,
+    ngram_size: int = ...,
+    ngram_window: int = ...,
+    ngram_repression_strength: float = ...,
+    ngram_decay: float = ...,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10873,6 +10895,7 @@ __all__ = [
     "zspace_partial_fusion",
     "zspace_telemetry_fusion",
     "training_telemetry_projection",
+    "zspace_generation_control",
     "inference_to_mapping",
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",

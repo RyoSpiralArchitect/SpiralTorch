@@ -1,9 +1,50 @@
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyAny, PyDict};
+use pyo3::wrap_pyfunction;
 use spiral_safety::{
     AuditEvent, AuditSink, ContentChannel, SafetyPolicy, SafetyVerdict, SafetyViolation,
 };
+use st_core::inference::generation_control::{
+    apply_zspace_generation_control, ZSpaceGenerationControlRequest,
+};
+
+fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(format!("{context}: {error}"))
+}
+
+#[pyfunction]
+fn _zspace_generation_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space generation control request must be a mapping")
+    })?;
+    for field in ["logits", "token_ids", "recent_tokens"] {
+        if request_object
+            .get(field)
+            .is_some_and(|value| !value.is_array())
+        {
+            return Err(PyValueError::new_err(format!(
+                "Z-space generation control '{field}' must be a sequence"
+            )));
+        }
+    }
+    if request_object
+        .get("config")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space generation control 'config' must be a mapping",
+        ));
+    }
+    let request: ZSpaceGenerationControlRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space generation control request", error))?;
+    let payload = apply_zspace_generation_control(request)
+        .map_err(|error| json_error("Z-space generation control failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space generation control encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
 
 #[pyclass(module = "spiraltorch.inference", name = "SafetyViolation")]
 #[derive(Clone)]
@@ -226,6 +267,7 @@ impl InferenceRuntime {
 }
 
 pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(_zspace_generation_control, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;

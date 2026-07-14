@@ -3,6 +3,7 @@
 mod cobol;
 mod cosmology;
 mod fractal_field;
+mod generation_control;
 mod reports;
 mod scale_stack;
 mod topos_control;
@@ -33,6 +34,7 @@ pub use cosmology::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;
 pub use fractal_field::*;
+pub use generation_control::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use reports::*;

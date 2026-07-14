@@ -9,14 +9,14 @@ use crate::execution::{
 };
 use crate::module::Module;
 use crate::{PureResult, Tensor};
+use st_core::inference::generation_control::{
+    project_zspace_softmax, zspace_entropy, ZSpaceGenerationControlError, ZSpaceSoftmaxConfig,
+    ZSpaceSoftmaxProjection, ZSPACE_SOFTMAX_LOG_FLOOR,
+};
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError, TensorUtilBackend};
 use std::cell::RefCell;
-
-const LOG_FLOOR: f32 = 1.0e-12;
-const ADJUST_MIN: f32 = 0.25;
-const ADJUST_MAX: f32 = 4.0;
 
 fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
     if !value.is_finite() {
@@ -34,6 +34,37 @@ fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> 
 
 fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
     validate_finite_slice(label, tensor.data())
+}
+
+fn semantic_error_to_tensor(error: ZSpaceGenerationControlError) -> TensorError {
+    let label = match error {
+        ZSpaceGenerationControlError::NonFinite { field }
+        | ZSpaceGenerationControlError::NonPositive { field }
+        | ZSpaceGenerationControlError::Negative { field }
+        | ZSpaceGenerationControlError::OutOfRange { field, .. }
+        | ZSpaceGenerationControlError::NonFiniteDerived { field } => field,
+        ZSpaceGenerationControlError::InvalidTemperatureBounds => {
+            "zspace_softmax_temperature_bounds"
+        }
+        ZSpaceGenerationControlError::CandidateLengthMismatch { .. } => {
+            "zspace_softmax_candidate_lengths"
+        }
+    };
+    TensorError::InvalidValue { label }
+}
+
+fn f64_to_f32(label: &'static str, value: f64) -> PureResult<f32> {
+    let value = value as f32;
+    validate_finite_value(label, value)?;
+    Ok(value)
+}
+
+fn f64_slice_to_f32(label: &'static str, values: &[f64]) -> PureResult<Vec<f32>> {
+    values
+        .iter()
+        .copied()
+        .map(|value| f64_to_f32(label, value))
+        .collect()
 }
 
 fn current_softmax_requested_label() -> &'static str {
@@ -245,8 +276,12 @@ impl ZSpaceSoftmax {
                 value: temperature,
             });
         }
-        let min_temperature = (temperature * 0.1).max(1.0e-3);
-        let max_temperature = temperature * 10.0;
+        let semantic = ZSpaceSoftmaxConfig::new(f64::from(curvature), f64::from(temperature))
+            .map_err(semantic_error_to_tensor)?;
+        let min_temperature =
+            f64_to_f32("zspace_softmax_min_temperature", semantic.min_temperature())?;
+        let max_temperature =
+            f64_to_f32("zspace_softmax_max_temperature", semantic.max_temperature())?;
         Ok(Self {
             curvature,
             temperature,
@@ -285,6 +320,9 @@ impl ZSpaceSoftmax {
                 value: gain,
             });
         }
+        self.semantic_config()?
+            .with_entropy_target(f64::from(target), f64::from(tolerance), f64::from(gain))
+            .map_err(semantic_error_to_tensor)?;
         self.entropy_target = Some(target);
         self.entropy_tolerance = tolerance;
         self.entropy_gain = gain;
@@ -310,11 +348,13 @@ impl ZSpaceSoftmax {
             });
         }
         if min_temperature > max_temperature {
-            return Err(TensorError::InvalidDimensions {
-                rows: min_temperature as usize,
-                cols: max_temperature as usize,
+            return Err(TensorError::InvalidValue {
+                label: "zspace_softmax_temperature_bounds",
             });
         }
+        self.semantic_config()?
+            .with_temperature_bounds(f64::from(min_temperature), f64::from(max_temperature))
+            .map_err(semantic_error_to_tensor)?;
         self.min_temperature = min_temperature;
         self.max_temperature = max_temperature;
         Ok(self)
@@ -347,41 +387,45 @@ impl ZSpaceSoftmax {
         self.last_temperatures.replace(Vec::new());
     }
 
-    fn curvature_scale(&self) -> f32 {
-        (-self.curvature).sqrt()
-    }
-
-    fn fixed_temperature(&self) -> f32 {
-        self.temperature
-            .clamp(self.min_temperature, self.max_temperature)
-    }
-
-    fn temperature_from_entropy(&self, entropy: f32) -> PureResult<(f32, bool, bool)> {
-        validate_finite_value("zspace_softmax_entropy", entropy)?;
-        let base_temperature = self.fixed_temperature();
-        validate_finite_value("zspace_softmax_temperature", base_temperature)?;
-        let Some(target) = self.entropy_target else {
-            return Ok((base_temperature, false, false));
-        };
-        let delta = target - entropy;
-        validate_finite_value("zspace_softmax_entropy_delta", delta)?;
-        if delta.abs() <= self.entropy_tolerance {
-            return Ok((base_temperature, false, false));
+    fn semantic_config(&self) -> PureResult<ZSpaceSoftmaxConfig> {
+        let mut config =
+            ZSpaceSoftmaxConfig::new(f64::from(self.curvature), f64::from(self.temperature))
+                .map_err(semantic_error_to_tensor)?;
+        if let Some(target) = self.entropy_target {
+            config = config
+                .with_entropy_target(
+                    f64::from(target),
+                    f64::from(self.entropy_tolerance),
+                    f64::from(self.entropy_gain),
+                )
+                .map_err(semantic_error_to_tensor)?;
         }
-        let raw_adjust = 1.0 + self.entropy_gain * delta;
-        validate_finite_value("zspace_softmax_temperature_adjust", raw_adjust)?;
-        let adjust = raw_adjust.clamp(ADJUST_MIN, ADJUST_MAX);
-        let raw_temperature = base_temperature * adjust;
-        validate_finite_value("zspace_softmax_temperature", raw_temperature)?;
-        let effective_temperature =
-            raw_temperature.clamp(self.min_temperature, self.max_temperature);
-        validate_finite_value("zspace_softmax_temperature", effective_temperature)?;
-        let gradient_active = self.entropy_gain > 0.0
-            && raw_adjust > ADJUST_MIN
-            && raw_adjust < ADJUST_MAX
-            && raw_temperature > self.min_temperature
-            && raw_temperature < self.max_temperature;
-        Ok((effective_temperature, true, gradient_active))
+        config
+            .with_temperature_bounds(
+                f64::from(self.min_temperature),
+                f64::from(self.max_temperature),
+            )
+            .map_err(semantic_error_to_tensor)
+    }
+
+    fn curvature_scale(&self) -> PureResult<f32> {
+        f64_to_f32(
+            "zspace_softmax_curvature_scale",
+            self.semantic_config()?.curvature_scale(),
+        )
+    }
+
+    fn fixed_temperature(&self) -> PureResult<f32> {
+        f64_to_f32(
+            "zspace_softmax_temperature",
+            self.semantic_config()?.fixed_temperature(),
+        )
+    }
+
+    fn project_row(&self, row: &[f32]) -> PureResult<ZSpaceSoftmaxProjection> {
+        validate_finite_slice("zspace_softmax_input", row)?;
+        let logits = row.iter().copied().map(f64::from).collect::<Vec<_>>();
+        project_zspace_softmax(&logits, self.semantic_config()?).map_err(semantic_error_to_tensor)
     }
 
     fn batch_softmax_fixed_temperature(
@@ -390,7 +434,7 @@ impl ZSpaceSoftmax {
         route_backend: TensorUtilBackend,
     ) -> PureResult<Tensor> {
         let (_rows, cols) = input.shape();
-        let factor = self.curvature_scale() / self.fixed_temperature();
+        let factor = self.curvature_scale()? / self.fixed_temperature()?;
         validate_finite_value("zspace_softmax_scale", factor)?;
         let logits = input.scale_with_backend(factor, route_backend)?;
         let mut probs = logits.row_softmax_with_backend(current_softmax_backend())?;
@@ -418,61 +462,24 @@ impl ZSpaceSoftmax {
 
     fn compute_row(&self, row: &[f32]) -> PureResult<(Vec<f32>, f32, f32)> {
         if row.is_empty() {
-            return Ok((Vec::new(), 0.0, self.temperature));
+            return Ok((Vec::new(), 0.0, self.fixed_temperature()?));
         }
-        let scale = self.curvature_scale();
-        let mut effective_temperature = self
-            .temperature
-            .clamp(self.min_temperature, self.max_temperature);
-        let mut probs;
-        let mut entropy;
-        let mut state = self.softmax_with_scale(row, scale / effective_temperature)?;
-        probs = state.0;
-        entropy = state.1;
-
-        let (adapted_temperature, adapted, _) = self.temperature_from_entropy(entropy)?;
-        if adapted {
-            effective_temperature = adapted_temperature;
-            state = self.softmax_with_scale(row, scale / effective_temperature)?;
-            probs = state.0;
-            entropy = state.1;
-        }
-
-        Ok((probs, entropy, effective_temperature))
-    }
-
-    fn softmax_with_scale(&self, row: &[f32], scale: f32) -> PureResult<(Vec<f32>, f32)> {
-        if row.is_empty() {
-            return Ok((Vec::new(), 0.0));
-        }
-        validate_finite_slice("zspace_softmax_input", row)?;
-        validate_finite_value("zspace_softmax_scale", scale)?;
-        let scaled = row
-            .iter()
-            .map(|value| {
-                let scaled = value * scale;
-                validate_finite_value("zspace_softmax_scaled_logit", scaled)?;
-                Ok(scaled)
-            })
-            .collect::<PureResult<Vec<_>>>()?;
-        let logits = Tensor::from_vec(1, row.len(), scaled)?;
-        let probs_tensor = logits.row_softmax_with_backend(current_softmax_backend())?;
-        let mut probs = probs_tensor.data().to_vec();
-        Self::sanitize_prob_row(&mut probs)?;
-        let entropy = Self::entropy_from_probs(&probs)?;
-        Ok((probs, entropy))
+        let projection = self.project_row(row)?;
+        Ok((
+            f64_slice_to_f32("zspace_softmax_probability", &projection.probabilities)?,
+            f64_to_f32("zspace_softmax_entropy", projection.entropy)?,
+            f64_to_f32(
+                "zspace_softmax_temperature",
+                projection.effective_temperature,
+            )?,
+        ))
     }
 
     fn entropy_from_probs(probs: &[f32]) -> PureResult<f32> {
         validate_finite_slice("zspace_softmax_probability", probs)?;
-        let mut entropy = 0.0f32;
-        for prob in probs.iter().copied() {
-            let guarded = prob.max(LOG_FLOOR);
-            validate_finite_value("zspace_softmax_entropy_term", guarded)?;
-            entropy -= prob * guarded.ln();
-            validate_finite_value("zspace_softmax_entropy", entropy)?;
-        }
-        Ok(entropy)
+        let probabilities = probs.iter().copied().map(f64::from).collect::<Vec<_>>();
+        let entropy = zspace_entropy(&probabilities).map_err(semantic_error_to_tensor)?;
+        f64_to_f32("zspace_softmax_entropy", entropy)
     }
 }
 
@@ -483,7 +490,7 @@ impl Module for ZSpaceSoftmax {
         if cols == 0 {
             let output = Tensor::zeros(rows, cols)?;
             let entropies = vec![0.0; rows];
-            let temperatures = vec![self.fixed_temperature(); rows];
+            let temperatures = vec![self.fixed_temperature()?; rows];
             validate_finite_slice("zspace_softmax_entropy", &entropies)?;
             validate_finite_slice("zspace_softmax_temperature", &temperatures)?;
             self.last_entropies.replace(entropies);
@@ -514,7 +521,7 @@ impl Module for ZSpaceSoftmax {
                 .map(Self::entropy_from_probs)
                 .collect::<PureResult<Vec<_>>>()?;
             validate_finite_slice("zspace_softmax_entropy", &entropies)?;
-            let temperatures = vec![self.fixed_temperature(); rows];
+            let temperatures = vec![self.fixed_temperature()?; rows];
             validate_finite_slice("zspace_softmax_temperature", &temperatures)?;
             self.last_entropies.replace(entropies);
             self.last_temperatures.replace(temperatures);
@@ -598,7 +605,7 @@ impl Module for ZSpaceSoftmax {
             );
             return Ok(output);
         }
-        let scale = self.curvature_scale();
+        let scale = self.curvature_scale()?;
         validate_finite_value("zspace_softmax_scale", scale)?;
         if self.entropy_target.is_none() {
             let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
@@ -610,7 +617,7 @@ impl Module for ZSpaceSoftmax {
             {
                 if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available()
                 {
-                    let factor = scale / self.fixed_temperature();
+                    let factor = scale / self.fixed_temperature()?;
                     validate_finite_value("zspace_softmax_backward_factor", factor)?;
                     match wgpu_dense::zspace_softmax_backward_fixed(
                         input.data(),
@@ -650,7 +657,7 @@ impl Module for ZSpaceSoftmax {
             }
 
             let probs = self.batch_softmax_fixed_temperature(input, route_backend)?;
-            let factor = scale / self.fixed_temperature();
+            let factor = scale / self.fixed_temperature()?;
             validate_finite_value("zspace_softmax_backward_factor", factor)?;
             let mut grad = Vec::with_capacity(rows * cols);
             for r in 0..rows {
@@ -700,71 +707,92 @@ impl Module for ZSpaceSoftmax {
         let input_data = input.data();
         let grad_output_data = grad_output.data();
         let mut temperature_gradient_rows = 0usize;
+        let semantic_config = self.semantic_config()?;
+        let curvature_scale = semantic_config.curvature_scale();
+        let entropy_gain = semantic_config.entropy_gain();
         for r in 0..rows {
             let offset = r * cols;
             let row_slice = &input_data[offset..offset + cols];
             let grad_slice = &grad_output_data[offset..offset + cols];
-            let base_temperature = self.fixed_temperature();
-            validate_finite_value("zspace_softmax_temperature", base_temperature)?;
-            let (base_prob, base_entropy) =
-                self.softmax_with_scale(row_slice, scale / base_temperature)?;
-            let (temp, adapted, temperature_gradient_active) =
-                self.temperature_from_entropy(base_entropy)?;
-            let prob = if adapted {
-                self.softmax_with_scale(row_slice, scale / temp)?.0
-            } else {
-                base_prob.clone()
-            };
-            let mut dot = 0.0f32;
-            for (g, p) in grad_slice.iter().zip(prob.iter()) {
-                let term = g * p;
-                validate_finite_value("zspace_softmax_backward_dot_term", term)?;
+            let projection = self.project_row(row_slice)?;
+            let mut dot = 0.0f64;
+            for (&g, &p) in grad_slice.iter().zip(projection.probabilities.iter()) {
+                let term = f64::from(g) * p;
+                if !term.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_dot_term",
+                    });
+                }
                 dot += term;
-                validate_finite_value("zspace_softmax_backward_dot", dot)?;
-            }
-            let factor = scale / temp.clamp(self.min_temperature, self.max_temperature);
-            validate_finite_value("zspace_softmax_backward_factor", factor)?;
-            let mut row_grad = Vec::with_capacity(cols);
-            let mut dloss_dscale = 0.0f32;
-            for ((&g_out, &p), &input_value) in
-                grad_slice.iter().zip(prob.iter()).zip(row_slice.iter())
-            {
-                let grad_scaled_logit = p * (g_out - dot);
-                validate_finite_value(
-                    "zspace_softmax_backward_scaled_logit_grad",
-                    grad_scaled_logit,
-                )?;
-                dloss_dscale += grad_scaled_logit * input_value;
-                validate_finite_value("zspace_softmax_backward_dloss_dscale", dloss_dscale)?;
-                let value = factor * grad_scaled_logit;
-                validate_finite_value("zspace_softmax_backward_grad", value)?;
-                row_grad.push(value);
-            }
-            if temperature_gradient_active {
-                temperature_gradient_rows = temperature_gradient_rows.saturating_add(1);
-                let dloss_dtemperature = dloss_dscale * (-scale / (temp * temp));
-                validate_finite_value(
-                    "zspace_softmax_backward_dloss_dtemperature",
-                    dloss_dtemperature,
-                )?;
-                let base_factor = scale / base_temperature;
-                validate_finite_value("zspace_softmax_backward_base_factor", base_factor)?;
-                for (idx, grad_value) in row_grad.iter_mut().enumerate() {
-                    let prob0 = base_prob[idx];
-                    let log_prob0 = prob0.max(LOG_FLOOR).ln();
-                    validate_finite_value("zspace_softmax_backward_log_probability", log_prob0)?;
-                    let dentropy_dx = -base_factor * prob0 * (log_prob0 + base_entropy);
-                    validate_finite_value("zspace_softmax_backward_dentropy_dx", dentropy_dx)?;
-                    let dtemperature_dx = -base_temperature * self.entropy_gain * dentropy_dx;
-                    validate_finite_value(
-                        "zspace_softmax_backward_dtemperature_dx",
-                        dtemperature_dx,
-                    )?;
-                    *grad_value += dloss_dtemperature * dtemperature_dx;
-                    validate_finite_value("zspace_softmax_backward_grad", *grad_value)?;
+                if !dot.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_dot",
+                    });
                 }
             }
-            grad.extend(row_grad);
+            let factor = projection.scale;
+            let mut row_grad = Vec::with_capacity(cols);
+            let mut dloss_dscale = 0.0f64;
+            for ((&g_out, &p), &input_value) in grad_slice
+                .iter()
+                .zip(projection.probabilities.iter())
+                .zip(row_slice.iter())
+            {
+                let grad_scaled_logit = p * (f64::from(g_out) - dot);
+                if !grad_scaled_logit.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_scaled_logit_grad",
+                    });
+                }
+                dloss_dscale += grad_scaled_logit * f64::from(input_value);
+                if !dloss_dscale.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_dloss_dscale",
+                    });
+                }
+                let value = factor * grad_scaled_logit;
+                if !value.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_grad",
+                    });
+                }
+                row_grad.push(value);
+            }
+            if projection.temperature_gradient_active {
+                temperature_gradient_rows = temperature_gradient_rows.saturating_add(1);
+                let dloss_dtemperature = dloss_dscale
+                    * (-curvature_scale
+                        / (projection.effective_temperature * projection.effective_temperature));
+                if !dloss_dtemperature.is_finite() {
+                    return Err(TensorError::InvalidValue {
+                        label: "zspace_softmax_backward_dloss_dtemperature",
+                    });
+                }
+                for (idx, grad_value) in row_grad.iter_mut().enumerate() {
+                    let prob0 = projection.base_probabilities[idx];
+                    let log_prob0 = prob0.max(ZSPACE_SOFTMAX_LOG_FLOOR).ln();
+                    let dentropy_dx =
+                        -projection.base_scale * prob0 * (log_prob0 + projection.base_entropy);
+                    if !dentropy_dx.is_finite() {
+                        return Err(TensorError::InvalidValue {
+                            label: "zspace_softmax_backward_dentropy_dx",
+                        });
+                    }
+                    let dtemperature_dx = -projection.base_temperature * entropy_gain * dentropy_dx;
+                    if !dtemperature_dx.is_finite() {
+                        return Err(TensorError::InvalidValue {
+                            label: "zspace_softmax_backward_dtemperature_dx",
+                        });
+                    }
+                    *grad_value += dloss_dtemperature * dtemperature_dx;
+                    if !grad_value.is_finite() {
+                        return Err(TensorError::InvalidValue {
+                            label: "zspace_softmax_backward_grad",
+                        });
+                    }
+                }
+            }
+            grad.extend(f64_slice_to_f32("zspace_softmax_backward_grad", &row_grad)?);
         }
         let output = Tensor::from_vec(rows, cols, grad)?;
         emit_zspace_softmax_backward_meta(
@@ -969,28 +997,20 @@ mod tests {
     }
 
     #[test]
-    fn zspace_softmax_rejects_overflowing_scaled_logit_without_mutating_metrics() {
+    fn zspace_softmax_handles_extreme_finite_logits_without_overflow() {
         let layer = ZSpaceSoftmax::new(-4.0, 1.0)
             .unwrap()
             .with_entropy_target(0.5, 1e-3, 0.5)
             .unwrap();
-        let input = Tensor::from_vec(1, 3, vec![0.2, -0.1, 0.3]).unwrap();
-        let _ = layer.forward(&input).unwrap();
-        let entropies_before = layer.last_entropies();
-        let temperatures_before = layer.last_temperatures();
-        let bad_input = Tensor::from_vec(1, 3, vec![f32::MAX, 0.0, 0.0]).unwrap();
+        let input = Tensor::from_vec(1, 3, vec![f32::MAX, 0.0, -f32::MAX]).unwrap();
 
-        let err = layer.forward(&bad_input).unwrap_err();
+        let output = layer.forward(&input).unwrap();
 
-        assert!(matches!(
-            err,
-            TensorError::NonFiniteValue {
-                label: "zspace_softmax_scaled_logit",
-                value,
-            } if value.is_infinite()
-        ));
-        assert_eq!(layer.last_entropies(), entropies_before);
-        assert_eq!(layer.last_temperatures(), temperatures_before);
+        assert!(output.data().iter().all(|value| value.is_finite()));
+        assert!((output.data().iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert_eq!(output.data()[0], 1.0);
+        assert_eq!(output.data()[1], 0.0);
+        assert_eq!(output.data()[2], 0.0);
     }
 
     #[test]
@@ -1041,6 +1061,68 @@ mod tests {
         let temps = layer.last_temperatures();
         assert_eq!(temps.len(), 1);
         assert!(temps[0] < 1.0);
+    }
+
+    #[test]
+    fn zspace_softmax_fixed_forward_matches_the_st_core_projection() {
+        let layer = ZSpaceSoftmax::new(-1.0, 1.5)
+            .unwrap()
+            .with_temperature_bounds(0.1, 4.0)
+            .unwrap();
+        let logits = [2.0_f32, 0.5, -1.0];
+        let input = Tensor::from_vec(1, logits.len(), logits.to_vec()).unwrap();
+
+        let output = layer.forward(&input).unwrap();
+        let expected = project_zspace_softmax(
+            &logits.iter().copied().map(f64::from).collect::<Vec<_>>(),
+            ZSpaceSoftmaxConfig::new(-1.0, 1.5)
+                .unwrap()
+                .with_temperature_bounds(0.1, 4.0)
+                .unwrap(),
+        )
+        .unwrap();
+
+        for (&actual, &expected) in output.data().iter().zip(expected.probabilities.iter()) {
+            assert!((f64::from(actual) - expected).abs() < 1.0e-6);
+        }
+        assert!((f64::from(layer.last_entropies()[0]) - expected.entropy).abs() < 1.0e-6);
+        assert!(
+            (f64::from(layer.last_temperatures()[0]) - expected.effective_temperature).abs()
+                < 1.0e-6
+        );
+    }
+
+    #[test]
+    fn zspace_softmax_adaptive_forward_matches_the_st_core_projection() {
+        let layer = ZSpaceSoftmax::new(-1.0, 1.5)
+            .unwrap()
+            .with_entropy_target(1.3, 1.0e-6, 0.8)
+            .unwrap()
+            .with_temperature_bounds(0.1, 4.0)
+            .unwrap();
+        let logits = [2.0_f32, 0.5, -1.0];
+        let input = Tensor::from_vec(1, logits.len(), logits.to_vec()).unwrap();
+
+        let output = layer.forward(&input).unwrap();
+        let expected = project_zspace_softmax(
+            &logits.iter().copied().map(f64::from).collect::<Vec<_>>(),
+            ZSpaceSoftmaxConfig::new(-1.0, 1.5)
+                .unwrap()
+                .with_entropy_target(1.3, 1.0e-6, 0.8)
+                .unwrap()
+                .with_temperature_bounds(0.1, 4.0)
+                .unwrap(),
+        )
+        .unwrap();
+
+        for (&actual, &expected) in output.data().iter().zip(expected.probabilities.iter()) {
+            assert!((f64::from(actual) - expected).abs() < 1.0e-6);
+        }
+        assert!((f64::from(layer.last_entropies()[0]) - expected.entropy).abs() < 1.0e-6);
+        assert!(
+            (f64::from(layer.last_temperatures()[0]) - expected.effective_temperature).abs()
+                < 1.0e-6
+        );
     }
 
     #[test]
@@ -1096,7 +1178,7 @@ mod tests {
         let _ = layer.forward(&input).unwrap();
         let temperatures = layer.last_temperatures();
         assert_eq!(temperatures.len(), 1);
-        assert!((temperatures[0] - layer.fixed_temperature()).abs() > 1.0e-4);
+        assert!((temperatures[0] - layer.fixed_temperature().unwrap()).abs() > 1.0e-4);
         let grad_input = layer.backward(&input, &grad_out).unwrap();
         let analytic = grad_input.data()[0];
 
