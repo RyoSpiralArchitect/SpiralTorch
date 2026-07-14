@@ -3,3 +3,4 @@
 //! Canonical inference-time semantic contracts.
 
 pub mod generation_control;
+pub mod temperature_control;

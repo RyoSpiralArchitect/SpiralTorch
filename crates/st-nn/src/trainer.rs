@@ -7545,7 +7545,8 @@ mod tests {
         let geometry = build_language_geometry();
         let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
         let semantics = build_language_semantics();
-        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6);
+        let controller =
+            TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.6).expect("valid controller");
         let desire = DesireLagrangian::new(geometry, repression, semantics, controller)
             .unwrap()
             .with_alpha_schedule(warmup(0.0, 0.2, 1))
