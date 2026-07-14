@@ -216,7 +216,8 @@ mod tests {
         let geometry = build_geometry();
         let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
         let semantics = build_semantics();
-        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.8);
+        let controller =
+            TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.8).expect("valid controller");
         DesireLagrangian::new(geometry, repression, semantics, controller)
             .unwrap()
             .with_top_k(Some(2))

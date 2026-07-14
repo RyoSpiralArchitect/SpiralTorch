@@ -79,6 +79,10 @@ PY
   checkpoint presets.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `zspace_temperature_control(...)` for atomic stateful entropy, Z-feedback,
+  scale, and gradient-temperature transitions. Python transports `config` and
+  `state`; `st-core::inference::temperature_control` validates the request,
+  computes every adjustment, and returns the auditable `next_state`.
 - `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
   scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
   FT/runtime probes over local-HF embeddings.

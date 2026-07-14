@@ -697,6 +697,7 @@ from .zspace_inference import (
 )
 from .training_telemetry import training_telemetry_projection
 from .generation_control import zspace_generation_control
+from .temperature_control import zspace_temperature_control
 
 from .api_llm_runtime import (
     ApiLLMTrace,
@@ -8152,6 +8153,7 @@ _EXTRAS.extend(
         "zspace_telemetry_fusion",
         "training_telemetry_projection",
         "zspace_generation_control",
+        "zspace_temperature_control",
         "inference_to_mapping",
         "inference_to_zmetrics",
         "prepare_trainer_step_payload",

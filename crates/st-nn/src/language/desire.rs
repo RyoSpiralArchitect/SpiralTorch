@@ -6,7 +6,7 @@
 use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeometry};
 use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
-use super::temperature::{entropy, TemperatureController};
+use super::temperature::{temperature_error_to_tensor, TemperatureController};
 use crate::execution::{current_softmax_backend, current_tensor_util_backend_for_values};
 use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
@@ -513,9 +513,13 @@ impl DesireLagrangian {
         }
         stabilise(&mut scores);
         let distribution = softmax(&scores);
-        let entropy = entropy(&distribution);
         let z_feedback = hub::get_softlogic_z();
-        let temperature = self.controller.update(&distribution, z_feedback.as_ref());
+        let temperature_transition = self
+            .controller
+            .update_detailed(&distribution, z_feedback.as_ref())
+            .map_err(temperature_error_to_tensor)?;
+        let entropy = temperature_transition.entropy as f32;
+        let temperature = temperature_transition.temperature as f32;
         self.update_tracking(phase, &active, &distribution);
         let hypergrad_penalty = self.hypergrad_penalty(phase, &active, &offsets, &distribution);
         let avoidance = self.build_report(phase);
@@ -909,7 +913,8 @@ mod tests {
         let geometry = build_geometry();
         let repression = RepressionField::new(vec![0.1, 0.2]).unwrap();
         let semantics = build_semantics();
-        let controller = TemperatureController::new(1.0, 0.7, 0.5, 0.5, 2.0);
+        let controller =
+            TemperatureController::new(1.0, 0.7, 0.5, 0.5, 2.0).expect("valid controller");
         DesireLagrangian::new(geometry, repression, semantics, controller).unwrap()
     }
 
@@ -918,7 +923,8 @@ mod tests {
         let geometry = build_geometry();
         let repression = RepressionField::new(vec![0.1, 0.3]).unwrap();
         let semantics = build_semantics();
-        let controller = TemperatureController::new(1.0, 0.7, 0.5, 0.5, 2.0);
+        let controller =
+            TemperatureController::new(1.0, 0.7, 0.5, 0.5, 2.0).expect("valid controller");
         let mut lagrangian = DesireLagrangian::new(geometry, repression, semantics, controller)
             .unwrap()
             .with_top_k(Some(2));
@@ -1087,7 +1093,8 @@ mod tests {
         let geometry = build_geometry();
         let repression = RepressionField::new(vec![0.05, 0.15]).unwrap();
         let semantics = build_semantics();
-        let controller = TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.8);
+        let controller =
+            TemperatureController::new(1.0, 0.8, 0.4, 0.4, 1.8).expect("valid controller");
         let mut lagrangian = DesireLagrangian::new(geometry, repression, semantics, controller)
             .unwrap()
             .with_alpha_schedule(warmup(0.0, 0.1, 2))

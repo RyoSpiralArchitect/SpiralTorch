@@ -6526,7 +6526,8 @@ fn build_simple_desire_automation(
     let anchors = std::collections::HashSet::new();
     let semantics =
         SemanticBridge::new(log_pi, row_sums, col_sums, anchors, epsilon, concept_kernel)?;
-    let controller = TemperatureController::new(1.0, target_entropy, eta, temp_min, temp_max);
+    let controller = TemperatureController::new(1.0, target_entropy, eta, temp_min, temp_max)
+        .map_err(|error| TensorError::Generic(format!("temperature control failed: {error}")))?;
     let desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
         .with_alpha_schedule(warmup(0.0, alpha_end, 1))
         .with_beta_schedule(warmup(0.0, beta_end, 1))

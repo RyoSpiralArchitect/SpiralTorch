@@ -4124,6 +4124,16 @@ def zspace_generation_control(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_temperature_control(
+    probabilities: Sequence[float | int],
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    feedback: Mapping[str, object] | None = ...,
+    gradient_heat: float | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10896,6 +10906,7 @@ __all__ = [
     "zspace_telemetry_fusion",
     "training_telemetry_projection",
     "zspace_generation_control",
+    "zspace_temperature_control",
     "inference_to_mapping",
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",

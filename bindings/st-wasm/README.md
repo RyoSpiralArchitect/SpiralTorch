@@ -73,6 +73,31 @@ gradient axes are semantic; wider client vectors are explicitly zero-filled by R
 carry `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and
 direct Rust runs can be audited against one semantic core.
 
+Stateful temperature control follows the same contract. The browser carries
+controller state between calls, while Rust alone validates probability mass and
+computes entropy, Z-feedback, scale-memory, and gradient adjustments:
+
+```ts
+import { zspaceTemperatureControlObject } from "spiraltorch-wasm";
+
+const transition = zspaceTemperatureControlObject({
+    probabilities: [0.6, 0.4],
+    config: {
+        target_entropy: 0.8,
+        eta: 0.2,
+        min_temperature: 0.3,
+        max_temperature: 2.0,
+    },
+    state: { temperature: 1.0 },
+});
+
+console.log(transition.entropy, transition.next_state.temperature);
+```
+
+`zspaceTemperatureControlJson` exposes the identical versioned payload for
+worker-message and persistence paths. Neither entry point contains a browser
+fallback for the transition formula.
+
 Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
 while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
 tie-breaking, reward projection, and selected-route resolution:

@@ -8,6 +8,9 @@ use spiral_safety::{
 use st_core::inference::generation_control::{
     apply_zspace_generation_control, ZSpaceGenerationControlRequest,
 };
+use st_core::inference::temperature_control::{
+    apply_temperature_control, TemperatureControlRequest,
+};
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -43,6 +46,47 @@ fn _zspace_generation_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyR
         .map_err(|error| json_error("Z-space generation control failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space generation control encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_temperature_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space temperature control request must be a mapping")
+    })?;
+    if request_object
+        .get("probabilities")
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space temperature control 'probabilities' must be a sequence",
+        ));
+    }
+    for field in ["config", "state"] {
+        if request_object
+            .get(field)
+            .is_some_and(|value| !value.is_object())
+        {
+            return Err(PyValueError::new_err(format!(
+                "Z-space temperature control '{field}' must be a mapping"
+            )));
+        }
+    }
+    if request_object
+        .get("feedback")
+        .is_some_and(|value| !value.is_object() && !value.is_null())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space temperature control 'feedback' must be a mapping",
+        ));
+    }
+    let request: TemperatureControlRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space temperature control request", error))?;
+    let payload = apply_temperature_control(request)
+        .map_err(|error| json_error("Z-space temperature control failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space temperature control encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -268,6 +312,7 @@ impl InferenceRuntime {
 
 pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_generation_control, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_temperature_control, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;
