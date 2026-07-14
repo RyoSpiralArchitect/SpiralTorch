@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .generation_control import zspace_generation_control
+
 __all__ = [
     "ZSpaceActivationProbeHook",
     "ZSpaceCheckpointPromptSpec",
@@ -617,8 +619,6 @@ def hf_causal_lm_artifact_probe_lines(
     ]
 
 
-ADJUST_MIN = 0.25
-ADJUST_MAX = 4.0
 EPSILON = 1.0e-12
 CHECKPOINT_GENERATION_CONTROL_ROW_TYPE = "hf_checkpoint_generation_control"
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -1837,16 +1837,6 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def _row_list(value: Any) -> list[float]:
-    data = value.tolist() if hasattr(value, "tolist") else value
-    if not data:
-        return []
-    first = data[0]
-    if isinstance(first, list):
-        return [float(item) for item in first]
-    return [float(item) for item in data]
-
-
 def _tensor_row_to_ints(value: Any) -> list[int]:
     data = value.detach().cpu().tolist() if hasattr(value, "detach") else value
     if data and isinstance(data[0], list):
@@ -1854,61 +1844,14 @@ def _tensor_row_to_ints(value: Any) -> list[int]:
     return [int(item) for item in data]
 
 
-def _entropy(probabilities: Sequence[float]) -> float:
-    return -sum(p * math.log(max(p, EPSILON)) for p in probabilities if p > 0.0)
-
-
-def _softmax(values: Sequence[float], *, scale: float) -> list[float]:
-    if not values:
-        return []
-    max_value = max(values)
-    exps = [math.exp((value - max_value) * scale) for value in values]
-    total = max(sum(exps), EPSILON)
-    return [value / total for value in exps]
-
-
-def _math_zspace_softmax(
-    values: Sequence[float],
-    *,
-    curvature: float,
-    temperature: float,
-    entropy_target: float | None,
-    entropy_tolerance: float,
-    entropy_gain: float,
-    min_temperature: float,
-    max_temperature: float,
-) -> tuple[list[float], dict[str, object]]:
-    base_temperature = max(min_temperature, min(max_temperature, temperature))
-    scale = math.sqrt(-curvature) / base_temperature
-    base_probabilities = _softmax(values, scale=scale)
-    entropy = _entropy(base_probabilities)
-    effective_temperature = base_temperature
-    adaptive = False
-    if entropy_target is not None:
-        delta = entropy_target - entropy
-        if abs(delta) > entropy_tolerance:
-            adjust = max(ADJUST_MIN, min(ADJUST_MAX, 1.0 + entropy_gain * delta))
-            effective_temperature = max(
-                min_temperature,
-                min(max_temperature, base_temperature * adjust),
-            )
-            adaptive = True
-    probabilities = _softmax(values, scale=math.sqrt(-curvature) / effective_temperature)
-    return probabilities, {
-        "backend": "math_zspace_softmax",
-        "entropy": _entropy(probabilities),
-        "temperature": effective_temperature,
-        "adaptive_temperature": adaptive,
-    }
-
-
 class ZSpaceRepressionLogitsProcessor:
     """Transformers-compatible logits processor for Z-Space generation control.
 
-    The processor first subtracts a dynamic repetition/repression field from the
-    selected top-k logits, then converts those logits through SpiralTorch's
-    ZSpaceSoftmax when the native wheel is available. Returning log
-    probabilities lets greedy decoding observe repression-driven rank changes.
+    Python selects and scatters the top-k candidates while the compiled Rust
+    core owns repetition/ngram repression, adaptive Z-space softmax, and all
+    associated validation. Returning log probabilities lets greedy decoding
+    observe repression-driven rank changes. ``use_native_zspace`` remains a
+    compatibility argument; semantic execution is always Rust-owned.
     """
 
     def __init__(
@@ -1933,54 +1876,56 @@ class ZSpaceRepressionLogitsProcessor:
         use_native_zspace: bool = True,
     ) -> None:
         self.top_k = _positive_int(top_k, label="top_k")
-        self.curvature = _finite_float(curvature, label="curvature")
-        if self.curvature >= 0.0:
-            raise ValueError("curvature must be negative")
-        self.temperature = _positive_float(temperature, label="temperature")
-        self.entropy_target = _optional_finite_float(
-            entropy_target,
-            label="entropy_target",
+        preflight = zspace_generation_control(
+            [],
+            [],
+            [],
+            curvature=curvature,
+            temperature=temperature,
+            entropy_target=entropy_target,
+            entropy_tolerance=entropy_tolerance,
+            entropy_gain=entropy_gain,
+            min_temperature=min_temperature,
+            max_temperature=max_temperature,
+            repression_window=repression_window,
+            repression_strength=repression_strength,
+            last_token_repression=last_token_repression,
+            ngram_size=ngram_size,
+            ngram_window=ngram_window,
+            ngram_repression_strength=ngram_repression_strength,
+            ngram_decay=ngram_decay,
         )
-        self.entropy_tolerance = _non_negative_float(
-            entropy_tolerance,
-            label="entropy_tolerance",
+        resolved = dict(preflight["config"])
+        self.curvature = float(resolved["curvature"])
+        self.temperature = float(resolved["temperature"])
+        self.entropy_target = resolved.get("entropy_target")
+        self.entropy_tolerance = float(resolved["entropy_tolerance"])
+        self.entropy_gain = float(resolved["entropy_gain"])
+        self.min_temperature = float(resolved["min_temperature"])
+        self.max_temperature = float(resolved["max_temperature"])
+        self.repression_window = int(resolved["repression_window"])
+        self.repression_strength = float(resolved["repression_strength"])
+        self.last_token_repression = float(resolved["last_token_repression"])
+        self.ngram_size = int(resolved["ngram_size"])
+        self.ngram_window = int(resolved["ngram_window"])
+        self.ngram_repression_strength = float(
+            resolved["ngram_repression_strength"]
         )
-        self.entropy_gain = _non_negative_float(entropy_gain, label="entropy_gain")
-        default_min = max(self.temperature * 0.1, 1.0e-3)
-        default_max = self.temperature * 10.0
-        self.min_temperature = _positive_float(
-            default_min if min_temperature is None else min_temperature,
-            label="min_temperature",
-        )
-        self.max_temperature = _positive_float(
-            default_max if max_temperature is None else max_temperature,
-            label="max_temperature",
-        )
-        if self.min_temperature > self.max_temperature:
-            raise ValueError("min_temperature must be <= max_temperature")
-        self.repression_window = _non_negative_int(
-            repression_window,
-            label="repression_window",
-        )
-        self.repression_strength = _non_negative_float(
-            repression_strength,
-            label="repression_strength",
-        )
-        self.last_token_repression = _non_negative_float(
-            last_token_repression,
-            label="last_token_repression",
-        )
-        self.ngram_size = _non_negative_int(ngram_size, label="ngram_size")
-        self.ngram_window = _non_negative_int(ngram_window, label="ngram_window")
-        self.ngram_repression_strength = _non_negative_float(
-            ngram_repression_strength,
-            label="ngram_repression_strength",
-        )
-        self.ngram_decay = _unit_interval_float(ngram_decay, label="ngram_decay")
+        self.ngram_decay = float(resolved["ngram_decay"])
         self.mask_non_top_k = bool(mask_non_top_k)
+        # Kept as a compatibility signal; the semantic path is always Rust-owned.
         self.use_native_zspace = bool(use_native_zspace)
-        self._native_layer: Any | None = None
         self._native_error: str | None = None
+        self._contract_metadata = {
+            key: preflight[key]
+            for key in (
+                "kind",
+                "contract_version",
+                "semantic_owner",
+                "semantic_backend",
+                "backend",
+            )
+        }
         self._reports: list[dict[str, object]] = []
 
     def __call__(self, input_ids: Any, scores: Any) -> Any:
@@ -1992,6 +1937,11 @@ class ZSpaceRepressionLogitsProcessor:
         if vocab_size <= 0:
             return scores
         k = min(self.top_k, vocab_size)
+        if not self.mask_non_top_k and k < vocab_size:
+            raise ValueError(
+                "mask_non_top_k=False requires top_k to cover the full vocabulary; "
+                "mixing transformed log probabilities with untouched raw logits is unsafe"
+            )
         top_values, top_indices = torch.topk(scores, k=k, dim=-1)
         processed = (
             torch.full_like(scores, float("-inf"))
@@ -2000,56 +1950,63 @@ class ZSpaceRepressionLogitsProcessor:
         )
         rows: list[dict[str, object]] = []
         for row in range(batch_size):
-            row_values = [float(item) for item in top_values[row].detach().cpu().tolist()]
-            row_indices = [int(item) for item in top_indices[row].detach().cpu().tolist()]
+            raw_values = [float(item) for item in top_values[row].detach().cpu().tolist()]
+            raw_indices = [int(item) for item in top_indices[row].detach().cpu().tolist()]
+            selected_positions: list[int] = []
+            row_values: list[float] = []
+            row_indices: list[int] = []
+            for position, (value, token) in enumerate(zip(raw_values, raw_indices)):
+                if value == float("-inf"):
+                    continue
+                if not math.isfinite(value):
+                    raise ValueError(
+                        "Z-space generation control selected a NaN or positive-infinite logit"
+                    )
+                selected_positions.append(position)
+                row_values.append(value)
+                row_indices.append(token)
+            if not row_values:
+                raise ValueError("Z-space generation control found no finite token candidates")
             input_row = input_ids[row] if input_ids is not None else []
-            token_counts, last_token, recent_tokens = self._recent_repression_state(
-                input_row
-            )
-            adjusted_values, repression = self._apply_repression(
+            recent_tokens = _tensor_row_to_ints(input_row)
+            control = self._generation_control(
                 row_values,
                 row_indices,
-                token_counts,
-                last_token,
                 recent_tokens,
             )
-            probabilities, zspace_report = self._zspace_probabilities(adjusted_values)
-            log_probabilities = [
-                math.log(max(float(probability), EPSILON))
-                for probability in probabilities
-            ]
+            log_probabilities = [float(value) for value in control["log_probabilities"]]
             update = torch.tensor(
                 log_probabilities,
                 dtype=scores.dtype,
                 device=scores.device,
             )
-            processed[row].scatter_(0, top_indices[row], update)
-            before_pos = max(range(len(row_values)), key=row_values.__getitem__)
-            after_pos = max(
-                range(len(log_probabilities)),
-                key=log_probabilities.__getitem__,
-            )
+            selected_indices = top_indices[row][selected_positions]
+            processed[row].scatter_(0, selected_indices, update)
+            before_pos = int(control["before_top_position"])
+            after_pos = int(control["after_top_position"])
             rows.append(
                 {
                     "row": row,
-                    "top_k": k,
-                    "before_top_token": row_indices[before_pos],
-                    "after_top_token": row_indices[after_pos],
-                    "top_token_changed": row_indices[before_pos]
-                    != row_indices[after_pos],
+                    "top_k": len(row_values),
+                    "before_top_token": int(control["before_top_token"]),
+                    "after_top_token": int(control["after_top_token"]),
+                    "top_token_changed": bool(control["top_token_changed"]),
                     "before_top_logit": row_values[before_pos],
                     "after_top_log_probability": log_probabilities[after_pos],
-                    "repressed_token_count": repression["repressed_token_count"],
-                    "max_repression": repression["max_repression"],
-                    "ngram_repressed_token_count": repression[
+                    "repressed_token_count": control["repressed_token_count"],
+                    "max_repression": control["max_repression"],
+                    "ngram_repressed_token_count": control[
                         "ngram_repressed_token_count"
                     ],
-                    "max_ngram_repression": repression["max_ngram_repression"],
-                    "entropy": zspace_report.get("entropy"),
-                    "temperature": zspace_report.get("temperature"),
-                    "adaptive_temperature": zspace_report.get("adaptive_temperature"),
-                    "backend": zspace_report.get("backend"),
-                    "native_error": zspace_report.get("native_error"),
+                    "max_ngram_repression": control["max_ngram_repression"],
+                    "entropy": control["entropy"],
+                    "temperature": control["effective_temperature"],
+                    "adaptive_temperature": control["adaptive_temperature"],
+                    "backend": control["backend"],
+                    "contract_version": control["contract_version"],
+                    "semantic_owner": control["semantic_owner"],
+                    "semantic_backend": control["semantic_backend"],
+                    "native_error": None,
                 }
             )
         self._reports.append(
@@ -2073,6 +2030,7 @@ class ZSpaceRepressionLogitsProcessor:
                 "ngram_repression_strength": self.ngram_repression_strength,
                 "ngram_decay": self.ngram_decay,
                 "mask_non_top_k": self.mask_non_top_k,
+                "contract": dict(self._contract_metadata),
                 "rows": rows,
             }
         )
@@ -2131,6 +2089,7 @@ class ZSpaceRepressionLogitsProcessor:
             "row_type": "zspace_repression_generation_control",
             "status": "ok" if all_reports else "unused",
             "processor": "ZSpaceRepressionLogitsProcessor",
+            "contract": dict(self._contract_metadata),
             "calls": len(all_reports),
             "reported_rows": len(rows),
             "backend": backends[0] if backends else None,
@@ -2153,98 +2112,16 @@ class ZSpaceRepressionLogitsProcessor:
     def reset_report(self) -> None:
         self._reports.clear()
 
-    def _recent_repression_state(
-        self,
-        input_row: Any,
-    ) -> tuple[dict[int, int], int | None, list[int]]:
-        tokens = _tensor_row_to_ints(input_row)
-        recent = tokens[-self.repression_window :] if self.repression_window > 0 else []
-        counts: dict[int, int] = {}
-        for token in recent:
-            counts[token] = counts.get(token, 0) + 1
-        ngram_window = self.ngram_window or self.repression_window
-        ngram_recent = tokens[-ngram_window:] if ngram_window > 0 else []
-        return counts, (recent[-1] if recent else None), ngram_recent
-
-    def _apply_repression(
+    def _generation_control(
         self,
         values: Sequence[float],
         indices: Sequence[int],
-        counts: Mapping[int, int],
-        last_token: int | None,
         recent_tokens: Sequence[int],
-    ) -> tuple[list[float], dict[str, object]]:
-        if not values:
-            return [], {
-                "repressed_token_count": 0,
-                "max_repression": 0.0,
-                "ngram_repressed_token_count": 0,
-                "max_ngram_repression": 0.0,
-            }
-        adjusted: list[float] = []
-        penalties: list[float] = []
-        ngram_penalties: list[float] = []
-        for value, token in zip(values, indices):
-            count = counts.get(int(token), 0)
-            penalty = self.repression_strength * float(count)
-            if last_token is not None and int(token) == int(last_token):
-                penalty += self.last_token_repression
-            ngram_penalty = self._ngram_repression_penalty(
-                recent_tokens,
-                int(token),
-            )
-            penalty += ngram_penalty
-            adjusted.append(float(value) - penalty)
-            penalties.append(penalty)
-            ngram_penalties.append(ngram_penalty)
-        return adjusted, {
-            "repressed_token_count": sum(1 for penalty in penalties if penalty > 0.0),
-            "max_repression": max(penalties) if penalties else 0.0,
-            "ngram_repressed_token_count": sum(
-                1 for penalty in ngram_penalties if penalty > 0.0
-            ),
-            "max_ngram_repression": (
-                max(ngram_penalties) if ngram_penalties else 0.0
-            ),
-        }
-
-    def _ngram_repression_penalty(
-        self,
-        recent_tokens: Sequence[int],
-        candidate_token: int,
-    ) -> float:
-        if (
-            self.ngram_size <= 1
-            or self.ngram_repression_strength <= 0.0
-            or len(recent_tokens) < self.ngram_size
-        ):
-            return 0.0
-        prefix_size = self.ngram_size - 1
-        prefix = tuple(int(token) for token in recent_tokens[-prefix_size:])
-        candidate_ngram = (*prefix, int(candidate_token))
-        weighted_matches = 0.0
-        latest_start = len(recent_tokens) - self.ngram_size
-        for start in range(0, latest_start + 1):
-            ngram = tuple(
-                int(token)
-                for token in recent_tokens[start : start + self.ngram_size]
-            )
-            if ngram != candidate_ngram:
-                continue
-            distance = max(0, latest_start - start)
-            weighted_matches += self.ngram_decay ** distance
-        return self.ngram_repression_strength * weighted_matches
-
-    def _zspace_probabilities(
-        self,
-        values: Sequence[float],
-    ) -> tuple[list[float], dict[str, object]]:
-        if self.use_native_zspace:
-            native = self._native_probabilities(values)
-            if native is not None:
-                return native
-        return _math_zspace_softmax(
+    ) -> dict[str, object]:
+        return zspace_generation_control(
             values,
+            indices,
+            recent_tokens,
             curvature=self.curvature,
             temperature=self.temperature,
             entropy_target=self.entropy_target,
@@ -2252,51 +2129,14 @@ class ZSpaceRepressionLogitsProcessor:
             entropy_gain=self.entropy_gain,
             min_temperature=self.min_temperature,
             max_temperature=self.max_temperature,
+            repression_window=self.repression_window,
+            repression_strength=self.repression_strength,
+            last_token_repression=self.last_token_repression,
+            ngram_size=self.ngram_size,
+            ngram_window=self.ngram_window,
+            ngram_repression_strength=self.ngram_repression_strength,
+            ngram_decay=self.ngram_decay,
         )
-
-    def _native_probabilities(
-        self,
-        values: Sequence[float],
-    ) -> tuple[list[float], dict[str, object]] | None:
-        try:
-            if self._native_layer is None:
-                st = importlib.import_module("spiraltorch")
-                nn = getattr(st, "nn", None)
-                layer_type = getattr(nn, "ZSpaceSoftmax", None)
-                tensor_type = getattr(st, "Tensor", None)
-                if layer_type is None or tensor_type is None:
-                    self._native_error = "spiraltorch.nn.ZSpaceSoftmax unavailable"
-                    return None
-                kwargs: dict[str, object] = {
-                    "entropy_target": self.entropy_target,
-                    "entropy_tolerance": self.entropy_tolerance,
-                    "entropy_gain": self.entropy_gain,
-                    "min_temperature": self.min_temperature,
-                    "max_temperature": self.max_temperature,
-                }
-                self._native_layer = layer_type(
-                    self.curvature,
-                    self.temperature,
-                    **kwargs,
-                )
-            st = importlib.import_module("spiraltorch")
-            tensor = st.Tensor(1, len(values), list(values))
-            output = self._native_layer(tensor)
-            probabilities = _row_list(output)
-            entropies = self._native_layer.last_entropies()
-            temperatures = self._native_layer.last_temperatures()
-            return probabilities, {
-                "backend": "spiraltorch_zspace_softmax",
-                "entropy": float(entropies[0]) if entropies else _entropy(probabilities),
-                "temperature": (
-                    float(temperatures[0]) if temperatures else self.temperature
-                ),
-                "adaptive_temperature": self.entropy_target is not None,
-                "native_error": None,
-            }
-        except Exception as exc:  # pragma: no cover - defensive native fallback
-            self._native_error = f"{exc.__class__.__name__}: {exc}"
-            return None
 
 
 def build_zspace_repression_logits_processor(

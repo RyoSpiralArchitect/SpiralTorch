@@ -244,8 +244,20 @@ class ZSpaceRepressionLogitsProcessorTests(unittest.TestCase):
         self.assertEqual(aggregate_only["reported_rows"], 0)
         self.assertEqual(aggregate_only["rows"], [])
         self.assertEqual(aggregate_only["top_token_changed_count"], 1)
-        self.assertEqual(report["rows"][0]["backend"], "math_zspace_softmax")
-        self.assertEqual(report["backend"], "math_zspace_softmax")
+        self.assertEqual(
+            report["rows"][0]["backend"],
+            "spiraltorch_generation_control_core",
+        )
+        self.assertEqual(report["backend"], "spiraltorch_generation_control_core")
+        self.assertEqual(
+            report["rows"][0]["semantic_owner"],
+            "st-core::inference::generation_control",
+        )
+        self.assertEqual(report["rows"][0]["semantic_backend"], "rust")
+        self.assertEqual(
+            report["contract"]["contract_version"],
+            "spiraltorch.zspace_generation_control.v1",
+        )
         self.assertGreater(report["rows"][0]["max_repression"], 0.0)
 
     def test_softmax_only_records_entropy_without_reordering_greedy(self) -> None:
@@ -297,6 +309,44 @@ class ZSpaceRepressionLogitsProcessorTests(unittest.TestCase):
         self.assertEqual(report["ngram_repressed_token_total"], 1)
         self.assertGreater(report["max_ngram_repression"], 0.0)
         self.assertEqual(report["rows"][0]["ngram_repressed_token_count"], 1)
+
+    def test_unmasked_partial_vocabulary_control_fails_closed(self) -> None:
+        processor = ZSpaceRepressionLogitsProcessor(
+            top_k=2,
+            curvature=-1.0,
+            mask_non_top_k=False,
+        )
+        input_ids = torch.tensor([[0, 1]], dtype=torch.long)
+        scores = torch.tensor([[4.0, 3.5, 1.0]], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "mixing transformed log probabilities"):
+            processor(input_ids, scores)
+
+    def test_masked_negative_infinity_candidates_stay_masked(self) -> None:
+        processor = ZSpaceRepressionLogitsProcessor(
+            top_k=3,
+            curvature=-1.0,
+            repression_window=4,
+            repression_strength=2.0,
+        )
+        input_ids = torch.tensor([[0, 0]], dtype=torch.long)
+        scores = torch.tensor([[4.0, float("-inf"), 3.5]], dtype=torch.float32)
+
+        output = processor(input_ids, scores)
+
+        self.assertTrue(torch.isneginf(output[0, 1]))
+        self.assertGreater(float(output[0, 2]), float(output[0, 0]))
+        self.assertEqual(processor.report()["rows"][0]["top_k"], 2)
+
+    def test_selected_nan_or_positive_infinity_fails_closed(self) -> None:
+        processor = ZSpaceRepressionLogitsProcessor(top_k=3, curvature=-1.0)
+        input_ids = torch.tensor([[0]], dtype=torch.long)
+
+        for invalid in (float("nan"), float("inf")):
+            with self.subTest(invalid=invalid):
+                scores = torch.tensor([[4.0, invalid, 3.5]], dtype=torch.float32)
+                with self.assertRaisesRegex(ValueError, "NaN or positive-infinite"):
+                    processor(input_ids, scores)
 
     def test_generation_report_embeds_zspace_control_payload(self) -> None:
         control = {

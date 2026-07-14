@@ -696,6 +696,7 @@ from .zspace_inference import (
     infer_weights_from_compat,
 )
 from .training_telemetry import training_telemetry_projection
+from .generation_control import zspace_generation_control
 
 from .api_llm_runtime import (
     ApiLLMTrace,
@@ -8150,6 +8151,7 @@ _EXTRAS.extend(
         "zspace_partial_fusion",
         "zspace_telemetry_fusion",
         "training_telemetry_projection",
+        "zspace_generation_control",
         "inference_to_mapping",
         "inference_to_zmetrics",
         "prepare_trainer_step_payload",
