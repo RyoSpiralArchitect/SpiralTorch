@@ -453,6 +453,29 @@ mod tests {
             actual["optimizer_application"]["rate_scale"],
             actual["control"]["training_plan"]["rate_scale"]
         );
+        assert_eq!(
+            actual["optimizer_application"]["scope"],
+            "learning_rate_and_gradient_state"
+        );
+        assert_eq!(
+            actual["optimizer_application"]["effective_gradient_bias_scale"],
+            actual["control"]["training_plan"]["effective_gradient_bias_scale"]
+        );
+        assert_eq!(
+            actual["optimizer_application"]["effective_momentum_damping"],
+            actual["control"]["training_plan"]["effective_momentum_damping"]
+        );
+        assert_eq!(
+            actual["optimizer_application"]["gradient_bias_normalization"],
+            "raw_gradient_rms"
+        );
+        assert_eq!(
+            actual["optimizer_application"]["gradient_bias_basis"]
+                .as_array()
+                .expect("WASM optimizer bias basis")
+                .len(),
+            10
+        );
     }
 
     #[test]

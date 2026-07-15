@@ -54,7 +54,7 @@ pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND: &str = "rust";
 
 /// Stable contract identifier for one control-to-optimizer application snapshot.
 pub const TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION: &str =
-    "spiraltorch.topos_optimizer_snapshot.v1";
+    "spiraltorch.topos_optimizer_snapshot.v2";
 
 /// Stable payload kind shared by native, Python, and WASM optimizer clients.
 pub const TOPOS_OPTIMIZER_SNAPSHOT_KIND: &str = "spiraltorch.topos_optimizer_snapshot";
@@ -67,6 +67,19 @@ pub const TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND: &str = "rust";
 
 /// Largest sequence that remains exact in JavaScript's integer number domain.
 pub const TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
+
+/// Number of axes in the optimizer-specific Topos gradient-bias basis.
+pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM: usize = 10;
+
+/// Canonical scale-relative bias rule shared by every optimizer client.
+pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE: &str =
+    "g_biased[i]=g[i]+rms(g)*bias_scale*basis[i%10]";
+
+/// Canonical state transition used to damp abrupt gradient changes.
+pub const TOPOS_OPTIMIZER_MOMENTUM_RULE: &str = "m_t=damping*m_(t-1)+(1-damping)*g_biased";
+
+/// Canonical normalization used by the Topos gradient-bias rule.
+pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION: &str = "raw_gradient_rms";
 
 /// Stable contract identifier shared by Rust, Python, and WASM Z-space clients.
 pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v1";
@@ -556,6 +569,267 @@ impl ToposTrainingPlan {
     }
 }
 
+/// Builds the shared Topos basis used to bias optimizer gradients.
+///
+/// The function accepts `f64` so higher-level Rust runtimes can reuse the exact
+/// semantics without narrowing their telemetry before the final update.
+#[allow(clippy::too_many_arguments)]
+pub fn topos_optimizer_gradient_bias_basis(
+    closure_pressure: f64,
+    volume_pressure: f64,
+    depth_pressure: f64,
+    guard_strength: f64,
+    step_damping: f64,
+    sampling_focus: f64,
+    learning_rate_hint: f64,
+    regularization_scale: f64,
+    openness: f64,
+    exploration_hint: f64,
+) -> [f64; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM] {
+    [
+        closure_pressure - 0.5,
+        volume_pressure - 0.5,
+        depth_pressure - 0.5,
+        guard_strength - 0.5,
+        step_damping - 0.5,
+        sampling_focus - 0.5,
+        1.0 - learning_rate_hint,
+        regularization_scale - 1.0,
+        0.5 - openness,
+        0.5 - exploration_hint,
+    ]
+}
+
+/// Rust-owned gradient-state controls configured on Amega optimizer tapes.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposOptimizerStateControl {
+    gradient_bias_rule: &'static str,
+    gradient_bias_normalization: &'static str,
+    effective_gradient_bias_scale: f32,
+    gradient_bias_basis_dim: usize,
+    gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+    momentum_rule: &'static str,
+    effective_momentum_damping: f32,
+}
+
+impl Default for ToposOptimizerStateControl {
+    fn default() -> Self {
+        Self::neutral()
+    }
+}
+
+impl ToposOptimizerStateControl {
+    /// Returns a control that preserves the historical stateless gradient path.
+    pub const fn neutral() -> Self {
+        Self {
+            gradient_bias_rule: TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+            gradient_bias_normalization: TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION,
+            effective_gradient_bias_scale: 0.0,
+            gradient_bias_basis_dim: TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+            gradient_bias_basis: [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            momentum_rule: TOPOS_OPTIMIZER_MOMENTUM_RULE,
+            effective_momentum_damping: 0.0,
+        }
+    }
+
+    /// Validates an externally transported control before optimizer state adopts it.
+    pub fn new(
+        effective_gradient_bias_scale: f32,
+        gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+        effective_momentum_damping: f32,
+    ) -> PureResult<Self> {
+        if !effective_gradient_bias_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_optimizer_gradient_bias_scale",
+                value: effective_gradient_bias_scale,
+            });
+        }
+        if !(0.0..=0.35).contains(&effective_gradient_bias_scale) {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_gradient_bias_scale",
+            });
+        }
+        if !effective_momentum_damping.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_optimizer_momentum_damping",
+                value: effective_momentum_damping,
+            });
+        }
+        if !(0.0..=0.85).contains(&effective_momentum_damping) {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_momentum_damping",
+            });
+        }
+        for value in gradient_bias_basis {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "topos_optimizer_gradient_bias_basis",
+                    value,
+                });
+            }
+            if !(-1.0..=1.0).contains(&value) {
+                return Err(TensorError::InvalidValue {
+                    label: "topos_optimizer_gradient_bias_basis",
+                });
+            }
+        }
+        Ok(Self {
+            gradient_bias_rule: TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+            gradient_bias_normalization: TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION,
+            effective_gradient_bias_scale,
+            gradient_bias_basis_dim: TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+            gradient_bias_basis,
+            momentum_rule: TOPOS_OPTIMIZER_MOMENTUM_RULE,
+            effective_momentum_damping,
+        })
+    }
+
+    pub fn gradient_bias_scale(&self) -> f32 {
+        self.effective_gradient_bias_scale
+    }
+
+    pub fn gradient_bias_rule(&self) -> &'static str {
+        self.gradient_bias_rule
+    }
+
+    pub fn gradient_bias_normalization(&self) -> &'static str {
+        self.gradient_bias_normalization
+    }
+
+    pub fn gradient_bias_basis_dim(&self) -> usize {
+        self.gradient_bias_basis_dim
+    }
+
+    pub fn gradient_bias_basis(&self) -> &[f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM] {
+        &self.gradient_bias_basis
+    }
+
+    pub fn momentum_damping(&self) -> f32 {
+        self.effective_momentum_damping
+    }
+
+    pub fn momentum_rule(&self) -> &'static str {
+        self.momentum_rule
+    }
+
+    pub fn is_neutral(&self) -> bool {
+        self.effective_gradient_bias_scale == 0.0 && self.effective_momentum_damping == 0.0
+    }
+
+    /// Applies the canonical RMS-relative bias and momentum transition.
+    pub fn gradient_step(
+        &self,
+        raw_gradient: &[f32],
+        previous_momentum: &[f32],
+    ) -> PureResult<ToposOptimizerGradientStep> {
+        if raw_gradient.len() != previous_momentum.len() {
+            return Err(TensorError::DataLength {
+                expected: raw_gradient.len(),
+                got: previous_momentum.len(),
+            });
+        }
+        let mut sum_squares = 0.0f64;
+        for &value in raw_gradient {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "topos_optimizer_raw_gradient",
+                    value,
+                });
+            }
+            let value = value as f64;
+            sum_squares += value * value;
+        }
+        for &value in previous_momentum {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "topos_optimizer_previous_momentum",
+                    value,
+                });
+            }
+        }
+        let raw_gradient_rms = if raw_gradient.is_empty() {
+            0.0
+        } else {
+            (sum_squares / raw_gradient.len() as f64).sqrt() as f32
+        };
+        if !raw_gradient_rms.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_optimizer_raw_gradient_rms",
+                value: raw_gradient_rms,
+            });
+        }
+        let gradient_bias_amplitude = raw_gradient_rms * self.effective_gradient_bias_scale;
+        if !gradient_bias_amplitude.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_optimizer_gradient_bias_amplitude",
+                value: gradient_bias_amplitude,
+            });
+        }
+
+        let damping = self.effective_momentum_damping;
+        let incoming = 1.0 - damping;
+        let mut next_momentum = Vec::with_capacity(raw_gradient.len());
+        for (index, (&raw, &previous)) in raw_gradient
+            .iter()
+            .zip(previous_momentum.iter())
+            .enumerate()
+        {
+            let bias = gradient_bias_amplitude
+                * self.gradient_bias_basis[index % TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+            let biased = raw + bias;
+            if !biased.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "topos_optimizer_biased_gradient",
+                    value: biased,
+                });
+            }
+            let momentum = damping * previous + incoming * biased;
+            if !momentum.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "topos_optimizer_next_momentum",
+                    value: momentum,
+                });
+            }
+            next_momentum.push(momentum);
+        }
+        Ok(ToposOptimizerGradientStep {
+            raw_gradient_rms,
+            gradient_bias_amplitude,
+            next_momentum,
+        })
+    }
+}
+
+/// One validated gradient-state transition ready for a tape update.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToposOptimizerGradientStep {
+    raw_gradient_rms: f32,
+    gradient_bias_amplitude: f32,
+    next_momentum: Vec<f32>,
+}
+
+impl ToposOptimizerGradientStep {
+    pub fn raw_gradient_rms(&self) -> f32 {
+        self.raw_gradient_rms
+    }
+
+    pub fn gradient_bias_amplitude(&self) -> f32 {
+        self.gradient_bias_amplitude
+    }
+
+    pub fn applied_gradient(&self) -> &[f32] {
+        &self.next_momentum
+    }
+
+    pub fn next_momentum(&self) -> &[f32] {
+        &self.next_momentum
+    }
+
+    pub fn into_next_momentum(self) -> Vec<f32> {
+        self.next_momentum
+    }
+}
+
 /// Named hosted-inference controls projected from an open-topos pressure signal.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToposInferenceHints {
@@ -931,11 +1205,7 @@ pub struct ToposControlSignalPayload {
     pub runtime_route: ToposRuntimeRoutePayload,
 }
 
-/// Learning-rate mutation prescribed for one optimizer step.
-///
-/// The complete requested optimizer posture remains available under
-/// [`ToposOptimizerSnapshotPayload::control`]. This payload intentionally records only the
-/// rate control that the current optimizer integration can apply and audit transactionally.
+/// Learning-rate and gradient-state mutation prescribed for one optimizer step.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct ToposOptimizerApplicationPayload {
     pub scope: &'static str,
@@ -945,6 +1215,14 @@ pub struct ToposOptimizerApplicationPayload {
     pub rate_scale: f32,
     pub hyper_learning_rate: f32,
     pub real_learning_rate: f32,
+    #[serde(flatten)]
+    pub optimizer_state: ToposOptimizerStateControl,
+}
+
+impl ToposOptimizerApplicationPayload {
+    pub fn optimizer_state_control(&self) -> ToposOptimizerStateControl {
+        self.optimizer_state
+    }
 }
 
 /// Atomic Rust-owned record connecting one Topos observation to its prescribed optimizer mutation.
@@ -1923,6 +2201,24 @@ impl ToposControlSignal {
             "topos_optimizer_output_real_learning_rate",
             scaled_real_learning_rate,
         )?;
+        let gradient_bias_basis = topos_optimizer_gradient_bias_basis(
+            control.closure_pressure as f64,
+            control.volume_pressure as f64,
+            control.depth_pressure as f64,
+            control.guard_strength as f64,
+            control.training_plan.step_damping as f64,
+            control.sampling_focus as f64,
+            control.training_hints.learning_rate_scale as f64,
+            control.training_plan.regularization_scale as f64,
+            control.openness as f64,
+            control.exploration_hint as f64,
+        )
+        .map(|value| value as f32);
+        let optimizer_state = ToposOptimizerStateControl::new(
+            control.training_plan.effective_gradient_bias_scale,
+            gradient_bias_basis,
+            control.training_plan.effective_momentum_damping,
+        )?;
 
         Ok(ToposOptimizerSnapshotPayload {
             kind: TOPOS_OPTIMIZER_SNAPSHOT_KIND,
@@ -1932,13 +2228,14 @@ impl ToposControlSignal {
             sequence,
             control,
             optimizer_application: ToposOptimizerApplicationPayload {
-                scope: "learning_rate",
-                control_path: "control.training_plan.rate_scale",
+                scope: "learning_rate_and_gradient_state",
+                control_path: "control.training_plan",
                 input_hyper_learning_rate: hyper_learning_rate,
                 input_real_learning_rate: real_learning_rate,
                 rate_scale,
                 hyper_learning_rate: scaled_hyper_learning_rate,
                 real_learning_rate: scaled_real_learning_rate,
+                optimizer_state,
             },
         })
     }
@@ -5642,7 +5939,7 @@ mod tests {
     }
 
     #[test]
-    fn topos_optimizer_snapshot_binds_one_control_bundle_to_prescribed_rates() {
+    fn topos_optimizer_snapshot_binds_one_control_bundle_to_optimizer_state() {
         let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
             observed_depth: 7,
             visited_volume: 31,
@@ -5684,10 +5981,13 @@ mod tests {
             snapshot.optimizer_application.rate_scale,
             snapshot.control.training_plan.rate_scale
         );
-        assert_eq!(snapshot.optimizer_application.scope, "learning_rate");
+        assert_eq!(
+            snapshot.optimizer_application.scope,
+            "learning_rate_and_gradient_state"
+        );
         assert_eq!(
             snapshot.optimizer_application.control_path,
-            "control.training_plan.rate_scale"
+            "control.training_plan"
         );
         assert!(
             (snapshot.optimizer_application.hyper_learning_rate
@@ -5706,11 +6006,71 @@ mod tests {
         assert_eq!(serialized["control"]["semantic_backend"], "rust");
         assert_eq!(
             serialized["optimizer_application"]["control_path"],
-            "control.training_plan.rate_scale"
+            "control.training_plan"
         );
-        assert!(serialized["optimizer_application"]
-            .get("effective_gradient_bias_scale")
-            .is_none());
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_bias_rule"],
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_bias_normalization"],
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["effective_gradient_bias_scale"],
+            serialized["control"]["training_plan"]["effective_gradient_bias_scale"]
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["effective_momentum_damping"],
+            serialized["control"]["training_plan"]["effective_momentum_damping"]
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_bias_basis_dim"],
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_bias_basis"]
+                .as_array()
+                .expect("gradient-bias basis array")
+                .len(),
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM
+        );
+    }
+
+    #[test]
+    fn optimizer_state_control_is_neutral_and_zero_safe() {
+        let raw = [2.0, -1.0];
+        let previous = [7.0, -8.0];
+        let neutral = ToposOptimizerStateControl::neutral();
+        let neutral_step = unwrap_ok(neutral.gradient_step(&raw, &previous));
+        assert_eq!(neutral_step.applied_gradient(), raw.as_slice());
+
+        let controlled = unwrap_ok(ToposOptimizerStateControl::new(
+            0.35,
+            [1.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            0.5,
+        ));
+        let zeros = [0.0, 0.0];
+        let zero_step = unwrap_ok(controlled.gradient_step(&zeros, &zeros));
+        assert_eq!(zero_step.raw_gradient_rms(), 0.0);
+        assert_eq!(zero_step.gradient_bias_amplitude(), 0.0);
+        assert_eq!(zero_step.applied_gradient(), zeros.as_slice());
+    }
+
+    #[test]
+    fn optimizer_state_control_applies_rms_bias_and_momentum_equation() {
+        let mut basis = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+        basis[0] = 1.0;
+        basis[1] = -1.0;
+        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 0.25));
+        let step = unwrap_ok(control.gradient_step(&[3.0, 4.0], &[1.0, -1.0]));
+        let rms = (12.5f32).sqrt();
+        let amplitude = rms * 0.2;
+        assert!((step.raw_gradient_rms() - rms).abs() < 1e-6);
+        assert!((step.gradient_bias_amplitude() - amplitude).abs() < 1e-6);
+        assert!((step.applied_gradient()[0] - (0.25 + 0.75 * (3.0 + amplitude))).abs() < 1e-6);
+        assert!((step.applied_gradient()[1] - (-0.25 + 0.75 * (4.0 - amplitude))).abs() < 1e-6);
+        assert_eq!(step.applied_gradient(), step.next_momentum());
     }
 
     #[test]

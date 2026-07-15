@@ -341,6 +341,61 @@ declare module "spiraltorch-wasm" {
         runtime_route: ToposRuntimeRoute;
     };
 
+    export type ToposInferencePlanOptions = {
+        gain?: number;
+        base_temperature?: number;
+        base_top_p?: number;
+        min_temperature?: number;
+        max_temperature?: number;
+        min_top_p?: number;
+        max_top_p?: number;
+        base_frequency_penalty?: number;
+        base_presence_penalty?: number;
+    };
+
+    export type ToposControlPlanOptions = {
+        training_gain?: number;
+        inference?: ToposInferencePlanOptions;
+    };
+
+    export type ToposOptimizerSnapshotRequest = {
+        signal: ToposControlSignalInput;
+        sequence: number;
+        hyper_learning_rate: number;
+        real_learning_rate: number;
+        options?: ToposControlPlanOptions;
+        training_hints?: Partial<ToposTrainingHints>;
+        inference_hints?: Partial<ToposInferenceHints>;
+    };
+
+    export type ToposOptimizerApplication = {
+        scope: "learning_rate_and_gradient_state";
+        control_path: "control.training_plan";
+        input_hyper_learning_rate: number;
+        input_real_learning_rate: number;
+        rate_scale: number;
+        hyper_learning_rate: number;
+        real_learning_rate: number;
+        gradient_bias_rule: "g_biased[i]=g[i]+rms(g)*bias_scale*basis[i%10]";
+        gradient_bias_normalization: "raw_gradient_rms";
+        effective_gradient_bias_scale: number;
+        gradient_bias_basis_dim: 10;
+        gradient_bias_basis: number[];
+        momentum_rule: "m_t=damping*m_(t-1)+(1-damping)*g_biased";
+        effective_momentum_damping: number;
+    };
+
+    export type ToposOptimizerSnapshot = {
+        kind: "spiraltorch.topos_optimizer_snapshot";
+        contract_version: "spiraltorch.topos_optimizer_snapshot.v2";
+        semantic_owner: "st-tensor::pure::topos";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        sequence: number;
+        control: Omit<ToposControlSignal, "execution_client">;
+        optimizer_application: ToposOptimizerApplication;
+    };
+
     export type ToposZSpaceProjection = {
         kind: "spiraltorch.topos_zspace_projection";
         contract_version: "spiraltorch.topos_zspace_projection.v1";
@@ -1222,6 +1277,10 @@ declare module "spiraltorch-wasm" {
     export function toposControlSignalObject(
         input: ToposControlSignalInput,
     ): ToposControlSignal;
+    export function toposOptimizerSnapshotJson(inputJson: string): string;
+    export function toposOptimizerSnapshotObject(
+        input: ToposOptimizerSnapshotRequest,
+    ): ToposOptimizerSnapshot;
     export function toposZSpaceProjectionJson(
         inputJson: string,
         gradientDim: number,
