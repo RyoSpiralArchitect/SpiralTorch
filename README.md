@@ -1049,10 +1049,27 @@ Native parameter training consumes that same report without rebuilding its
 semantics in Python:
 
 ```python
+import spiraltorch as st
+
+z_optimizer = st.ZSpaceTrainer(z_dim=2, topos_control_gain=1.0)
+z_optimizer.step({
+    "gradient": [0.1, -0.2],
+    "telemetry": {"topos.training_hints.learning_rate_scale": 0.5},
+})
+model = st.nn.Sequential()
+model.add(st.nn.Linear("controlled", 2, 1))
+module_trainer = st.nn.ModuleTrainer(
+    backend="cpu",
+    curvature=-1.0,
+    hyper_learning_rate=1e-2,
+    fallback_learning_rate=1e-2,
+)
+module_trainer.prepare(model)
 receipt = module_trainer.apply_zspace_meta_optimizer_report(
     model,
-    trainer.last_optimizer_report,
+    z_optimizer.last_optimizer_report,
 )
+print(receipt["absolute_learning_rate_scale"], receipt["changed"])
 ```
 
 Rust re-derives the bounded Topos scale, applies it idempotently to all trainer
