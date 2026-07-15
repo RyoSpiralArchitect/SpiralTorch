@@ -1026,7 +1026,24 @@ samples = [
     {"speed": 0.3, "mem": 0.2, "stab": 0.6, "drs": 0.1},
 ]
 print("z:", st.step_many(trainer, samples))
+print("semantic owner:", trainer.last_optimizer_report["semantic_owner"])
 ```
+
+`ZSpaceTrainer` is a Python orchestrator over the versioned
+`st-core::runtime::zspace_optimizer` contract. Rust alone validates checkpoints,
+normalises observations, evaluates the periodic fractional Sobolev regulariser
+and its FFT-derived analytic gradient, resolves bounded Topos controls, and
+commits the Adam update. Client-controlled Z dimensions are capped at 4096.
+Use `last_optimizer_report` to inspect the objective decomposition, effective
+learning rate, clipping, regularisation scale, applied gradient, and complete
+before/after state. `gradient_projection="exact"` rejects mismatched observed
+gradients; the compatibility default is `"tile_or_truncate"`.
+
+The reported objective is an observed resource cost, not a claim that resource
+telemetry was differentiated through Z. State updates combine the supplied
+Z-gradient with the normalised analytic fractional gradient and optional Topos
+bias. Topos `learning_rate_scale` changes the actual Adam learning rate, while
+`regularization_scale` changes the actual fractional weight.
 
 ### 11) Vision × Canvas
 

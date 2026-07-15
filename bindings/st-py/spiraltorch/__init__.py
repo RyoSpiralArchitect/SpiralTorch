@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cmath as _cmath
 import contextlib as _contextlib
 import json as _json
 import math as _math
@@ -25,7 +24,6 @@ from typing import (
     Iterable as _Iterable,
     List as _List,
     Mapping as _Mapping,
-    MutableSequence as _MutableSequence,
     Optional as _Optional,
     Sequence as _Sequence,
     Tuple as _Tuple,
@@ -698,6 +696,16 @@ from .zspace_inference import (
 from .training_telemetry import training_telemetry_projection
 from .concept_diffusion import zspace_concept_diffusion
 from .free_energy import zspace_free_energy
+from .zspace_optimizer import (
+    ZSPACE_META_OBJECTIVE_FORMULA,
+    ZSPACE_META_OPTIMIZER_CONTRACT_VERSION,
+    ZSPACE_META_OPTIMIZER_KIND,
+    ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND,
+    ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER,
+    zspace_meta_optimizer_init,
+    zspace_meta_optimizer_restore,
+    zspace_meta_optimizer_step,
+)
 from .generation_control import zspace_generation_control
 from .imaginary_time_schrodinger import zspace_imaginary_time_schrodinger
 from .temperature_control import zspace_temperature_control
@@ -3804,7 +3812,7 @@ class SpiralTorchVision:
 
 
 class ZSpaceTrainer:
-    """Lightweight Adam optimiser operating on a Z vector."""
+    """Rust-backed transactional Adam controller operating on a Z vector."""
 
     def __init__(
         self,
@@ -3821,73 +3829,166 @@ class ZSpaceTrainer:
         beta2: float = 0.999,
         eps: float = 1e-8,
         topos_control_gain: float = 0.0,
+        gradient_projection: str = "tile_or_truncate",
     ) -> None:
-        if z_dim <= 0:
-            raise ValueError("z_dim must be positive")
-        self._z: _List[float] = [0.0] * z_dim
-        self._alpha = max(1e-6, float(alpha))
-        self._lam = (float(lam_speed), float(lam_mem), float(lam_stab), float(lam_frac), float(lam_drs))
-        self._lr = float(lr)
-        self._beta1 = float(beta1)
-        self._beta2 = float(beta2)
-        self._eps = float(eps)
-        self._topos_control_gain = max(0.0, float(topos_control_gain))
-        self._m: _List[float] = [0.0] * z_dim
-        self._v: _List[float] = [0.0] * z_dim
-        self._t = 0
+        self._optimizer_lock = _threading.RLock()
+        config = {
+            "dimension": z_dim,
+            "fractional_order": alpha,
+            "weights": {
+                "speed": lam_speed,
+                "memory": lam_mem,
+                "stability": lam_stab,
+                "fractional": lam_frac,
+                "drift_response": lam_drs,
+            },
+            "learning_rate": lr,
+            "first_moment_decay": beta1,
+            "second_moment_decay": beta2,
+            "epsilon": eps,
+            "topos_control_gain": topos_control_gain,
+            "gradient_projection": gradient_projection,
+        }
+        checkpoint = zspace_meta_optimizer_init(config)
         self._last_inference: ZSpaceInference | None = None
         self._last_telemetry: dict[str, float] = {}
         self._last_topos_control: dict[str, float] = {}
+        self._last_optimizer_report: dict[str, _Any] | None = None
+        self._apply_native_checkpoint(checkpoint)
+
+    def _apply_native_checkpoint(self, checkpoint: _Mapping[str, _Any]) -> None:
+        with self._optimizer_lock:
+            config = dict(checkpoint["config"])
+            state = dict(checkpoint["state"])
+            weights = dict(config["weights"])
+            vectors = {
+                attribute: [float(value) for value in state[field]]
+                for attribute, field in (
+                    ("_z", "z"),
+                    ("_m", "first_moment"),
+                    ("_v", "second_moment"),
+                )
+            }
+            step = int(state["step"])
+            fractional_order = float(config["fractional_order"])
+            objective_weights = (
+                float(weights["speed"]),
+                float(weights["memory"]),
+                float(weights["stability"]),
+                float(weights["fractional"]),
+                float(weights["drift_response"]),
+            )
+            learning_rate = float(config["learning_rate"])
+            first_moment_decay = float(config["first_moment_decay"])
+            second_moment_decay = float(config["second_moment_decay"])
+            epsilon = float(config["epsilon"])
+            topos_control_gain = float(config["topos_control_gain"])
+            gradient_projection = str(config["gradient_projection"])
+
+            self._optimizer_config = config
+            for attribute, values in vectors.items():
+                current = getattr(self, attribute, None)
+                if isinstance(current, list):
+                    current[:] = values
+                else:
+                    setattr(self, attribute, values)
+            self._t = step
+            self._alpha = fractional_order
+            self._lam = objective_weights
+            self._lr = learning_rate
+            self._beta1 = first_moment_decay
+            self._beta2 = second_moment_decay
+            self._eps = epsilon
+            self._topos_control_gain = topos_control_gain
+            self._gradient_projection = gradient_projection
+
+    def _native_state(self) -> dict[str, _Any]:
+        with self._optimizer_lock:
+            return {
+                "z": list(self._z),
+                "first_moment": list(self._m),
+                "second_moment": list(self._v),
+                "step": self._t,
+            }
 
     @property
     def state(self) -> _List[float]:
-        return list(self._z)
+        with self._optimizer_lock:
+            return list(self._z)
 
     @property
     def last_inference(self) -> ZSpaceInference | None:
-        return self._last_inference
+        with self._optimizer_lock:
+            return self._last_inference
 
     @property
     def last_telemetry(self) -> _Mapping[str, float]:
-        return dict(self._last_telemetry)
+        with self._optimizer_lock:
+            return dict(self._last_telemetry)
 
     @property
     def last_topos_control(self) -> _Mapping[str, float]:
-        return dict(self._last_topos_control)
+        with self._optimizer_lock:
+            return dict(self._last_topos_control)
+
+    @property
+    def last_optimizer_report(self) -> _Mapping[str, _Any] | None:
+        with self._optimizer_lock:
+            if self._last_optimizer_report is None:
+                return None
+            return _json.loads(_json.dumps(self._last_optimizer_report))
 
     def reset(self) -> None:
-        for arr in (self._z, self._m, self._v):
-            for idx in range(len(arr)):
-                arr[idx] = 0.0
-        self._t = 0
-        self._last_inference = None
-        self._last_telemetry = {}
-        self._last_topos_control = {}
+        with self._optimizer_lock:
+            checkpoint = zspace_meta_optimizer_init(self._optimizer_config)
+            self._apply_native_checkpoint(checkpoint)
+            self._last_inference = None
+            self._last_telemetry = {}
+            self._last_topos_control = {}
+            self._last_optimizer_report = None
 
     def state_dict(self) -> _Dict[str, _Any]:
-        return {
-            "z": list(self._z),
-            "moment": list(self._m),
-            "velocity": list(self._v),
-            "step": self._t,
-            "hyperparams": {
-                "alpha": self._alpha,
-                "lambda": self._lam,
-                "lr": self._lr,
-                "beta1": self._beta1,
-                "beta2": self._beta2,
-                "eps": self._eps,
-                "topos_control_gain": self._topos_control_gain,
-            },
-            "last_telemetry": dict(self._last_telemetry),
-        }
+        with self._optimizer_lock:
+            return {
+                "contract_version": ZSPACE_META_OPTIMIZER_CONTRACT_VERSION,
+                "z": list(self._z),
+                "moment": list(self._m),
+                "velocity": list(self._v),
+                "step": self._t,
+                "hyperparams": {
+                    "alpha": self._alpha,
+                    "lambda": self._lam,
+                    "lr": self._lr,
+                    "beta1": self._beta1,
+                    "beta2": self._beta2,
+                    "eps": self._eps,
+                    "topos_control_gain": self._topos_control_gain,
+                    "gradient_projection": self._gradient_projection,
+                },
+                "last_telemetry": dict(self._last_telemetry),
+            }
 
     def load_state_dict(self, state: _Mapping[str, _Any], *, strict: bool = True) -> None:
+        with self._optimizer_lock:
+            self._load_optimizer_state_dict_unlocked(state, strict=strict)
+
+    def _load_optimizer_state_dict_unlocked(
+        self, state: _Mapping[str, _Any], *, strict: bool
+    ) -> None:
         if not isinstance(state, _Mapping):
             raise TypeError("state must be a mapping")
+        contract_version = state.get("contract_version")
+        if (
+            contract_version is not None
+            and contract_version != ZSPACE_META_OPTIMIZER_CONTRACT_VERSION
+        ):
+            raise ValueError(
+                "unsupported Z-space meta-optimizer checkpoint contract: "
+                f"{contract_version!r}"
+            )
         z = state.get("z")
-        moment = state.get("moment")
-        velocity = state.get("velocity")
+        moment = state.get("moment", state.get("first_moment"))
+        velocity = state.get("velocity", state.get("second_moment"))
         if z is None or moment is None or velocity is None:
             if strict:
                 missing = [
@@ -3902,43 +4003,54 @@ class ZSpaceTrainer:
                 moment = self._m
             if velocity is None:
                 velocity = self._v
-        self._assign_vector(self._z, z, strict)
-        self._assign_vector(self._m, moment, strict)
-        self._assign_vector(self._v, velocity, strict)
-        self._t = int(state.get("step", self._t))
+
+        config = dict(self._optimizer_config)
+        config["weights"] = dict(config["weights"])
         hyper = state.get("hyperparams")
         if isinstance(hyper, _Mapping):
-            alpha = float(hyper.get("alpha", self._alpha))
-            self._alpha = max(1e-6, alpha)
+            config["fractional_order"] = hyper.get("alpha", config["fractional_order"])
             lam = hyper.get("lambda")
             if isinstance(lam, _Sequence) and len(lam) == 5:
-                self._lam = tuple(float(value) for value in lam)
-            self._lr = float(hyper.get("lr", self._lr))
-            self._beta1 = float(hyper.get("beta1", self._beta1))
-            self._beta2 = float(hyper.get("beta2", self._beta2))
-            self._eps = float(hyper.get("eps", self._eps))
-            self._topos_control_gain = max(
-                0.0,
-                float(hyper.get("topos_control_gain", self._topos_control_gain)),
+                config["weights"] = {
+                    "speed": lam[0],
+                    "memory": lam[1],
+                    "stability": lam[2],
+                    "fractional": lam[3],
+                    "drift_response": lam[4],
+                }
+            config["learning_rate"] = hyper.get("lr", config["learning_rate"])
+            config["first_moment_decay"] = hyper.get(
+                "beta1", config["first_moment_decay"]
             )
-        telemetry = state.get("last_telemetry")
-        if isinstance(telemetry, _Mapping):
-            self._last_telemetry = _normalise_telemetry_arg(telemetry)
-            self._last_topos_control = self._extract_topos_control(self._last_telemetry)
+            config["second_moment_decay"] = hyper.get(
+                "beta2", config["second_moment_decay"]
+            )
+            config["epsilon"] = hyper.get("eps", config["epsilon"])
+            config["topos_control_gain"] = hyper.get(
+                "topos_control_gain", config["topos_control_gain"]
+            )
+            config["gradient_projection"] = hyper.get(
+                "gradient_projection", config["gradient_projection"]
+            )
 
-    def _assign_vector(self, target: _MutableSequence[float], values: _Any, strict: bool) -> None:
-        data = [float(v) for v in values]
-        if len(data) != len(target):
-            if strict:
-                raise ValueError(
-                    f"expected vector of length {len(target)}, received {len(data)}"
-                )
-            if len(data) < len(target):
-                data.extend(0.0 for _ in range(len(target) - len(data)))
-            else:
-                data = data[: len(target)]
-        for idx, value in enumerate(data):
-            target[idx] = value
+        telemetry = state.get("last_telemetry")
+        next_telemetry = dict(self._last_telemetry)
+        if isinstance(telemetry, _Mapping):
+            next_telemetry = _normalise_telemetry_arg(telemetry)
+        checkpoint = zspace_meta_optimizer_restore(
+            config=config,
+            state={
+                "z": z,
+                "first_moment": moment,
+                "second_moment": velocity,
+                "step": state.get("step", self._t),
+            },
+            strict=strict,
+        )
+        self._apply_native_checkpoint(checkpoint)
+        self._last_telemetry = next_telemetry
+        self._last_topos_control = self._extract_topos_control(next_telemetry)
+        self._last_optimizer_report = None
 
     def _extract_topos_control(self, telemetry: _Mapping[str, float]) -> dict[str, float]:
         prefix = "topos."
@@ -3948,214 +4060,56 @@ class ZSpaceTrainer:
             if key.startswith(prefix)
         }
 
-    def _cache_step_telemetry(self, metrics: ZMetrics) -> None:
-        telemetry = _normalise_telemetry_arg(metrics.telemetry) if metrics.telemetry else {}
-        self._last_telemetry = telemetry
-        self._last_topos_control = self._extract_topos_control(telemetry)
-
-    def _topos_pressure(self) -> float:
-        if not self._last_topos_control:
-            return 0.0
-        closure = self._last_topos_control.get("closure_pressure", 0.0)
-        depth = self._last_topos_control.get("depth_pressure", 0.0)
-        volume = self._last_topos_control.get("volume_pressure", 0.0)
-        guard = self._last_topos_control.get("guard_strength", closure)
-        damping = self._last_topos_control.get("step_damping", closure * guard)
-        focus = self._last_topos_control.get("sampling_focus", guard)
-        return max(0.0, min(1.0, max(closure, depth, volume, guard, damping, focus)))
-
-    def _topos_learning_rate_scale(self) -> float:
-        gain = self._topos_control_gain
-        if gain <= 0.0 or not self._last_topos_control:
-            return 1.0
-        raw = float(
-            self._last_topos_control.get(
-                "training_hints.learning_rate_scale",
-                self._last_topos_control.get("learning_rate_scale", 1.0),
-            )
-        )
-        if not _math.isfinite(raw):
-            raw = 1.0
-        hinted = max(0.1, min(1.25, raw))
-        return max(0.1, min(1.25, 1.0 + gain * (hinted - 1.0)))
-
-    def _topos_gradient_clip_scale(self) -> float:
-        gain = self._topos_control_gain
-        if gain <= 0.0 or not self._last_topos_control:
-            return 1.0
-        raw = float(
-            self._last_topos_control.get(
-                "training_hints.clip_scale",
-                self._last_topos_control.get("clip_scale", 1.0),
-            )
-        )
-        if not _math.isfinite(raw):
-            raw = 1.0
-        hinted = max(0.25, min(1.0, raw))
-        return max(0.25, min(1.0, 1.0 + gain * (hinted - 1.0)))
-
-    def _topos_gradient_bias(self) -> _List[float]:
-        gain = self._topos_control_gain
-        if gain <= 0.0 or not self._last_topos_control:
-            return [0.0] * len(self._z)
-        closure = self._last_topos_control.get("closure_pressure", 0.0)
-        volume = self._last_topos_control.get("volume_pressure", closure)
-        depth = self._last_topos_control.get("depth_pressure", closure)
-        guard = self._last_topos_control.get("guard_strength", closure)
-        openness = self._last_topos_control.get("openness", 1.0 - closure)
-        exploration = self._last_topos_control.get("exploration_hint", 0.0)
-        lr_scale = self._last_topos_control.get("learning_rate_scale", 1.0)
-        regularization = self._last_topos_control.get(
-            "training_hints.regularization_scale",
-            self._last_topos_control.get("regularization_scale", 1.0),
-        )
-        damping = self._last_topos_control.get(
-            "training_hints.step_damping",
-            self._last_topos_control.get("step_damping", closure * guard),
-        )
-        focus = self._last_topos_control.get("sampling_focus", guard)
-        basis = (
-            closure - 0.5,
-            volume - 0.5,
-            depth - 0.5,
-            guard - 0.5,
-            damping - 0.5,
-            focus - 0.5,
-            1.0 - lr_scale,
-            regularization - 1.0,
-            0.5 - openness,
-            0.5 - exploration,
-        )
-        bias_hint = self._last_topos_control.get(
-            "training_hints.gradient_bias_scale",
-            self._last_topos_control.get("gradient_bias_scale", 0.05),
-        )
-        try:
-            bias_hint_value = float(bias_hint)
-        except (TypeError, ValueError):
-            bias_hint_value = 0.05
-        if not _math.isfinite(bias_hint_value):
-            bias_hint_value = 0.05
-        scale = max(0.0, min(0.35, bias_hint_value)) * gain
-        return [scale * basis[idx % len(basis)] for idx in range(len(self._z))]
-
     def step_batch(
         self,
-        metrics: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+        metrics: _Iterable[_Mapping[str, _Any] | ZMetrics | ZSpaceInference],
     ) -> _List[float]:
-        losses: _List[float] = []
-        for sample in metrics:
-            losses.append(self.step(sample))
-        return losses
-
-    def _rfft(self, values: _Sequence[float]) -> _List[complex]:
-        n = len(values)
-        if n == 0:
-            return []
-        freq: _List[complex] = []
-        for k in range(n // 2 + 1):
-            total = 0.0j
-            for t, val in enumerate(values):
-                angle = -2.0 * _math.pi * k * t / max(1, n)
-                total += complex(val, 0.0) * _cmath.exp(1j * angle)
-            freq.append(total)
-        return freq
-
-    def _frac_reg(self, values: _Sequence[float]) -> float:
-        spectrum = self._rfft(values)
-        n = len(spectrum)
-        if n <= 1:
-            return 0.0
-        acc = 0.0
-        for idx, coeff in enumerate(spectrum):
-            omega = idx / max(1, n - 1)
-            weight = omega ** (2.0 * self._alpha)
-            acc += weight * abs(coeff) ** 2
-        return acc / n
-
-    def _frac_grad(self) -> _List[float]:
-        grad: _List[float] = []
-        base = self._frac_reg(self._z)
-        step = 1e-4
-        for i in range(len(self._z)):
-            original = self._z[i]
-            self._z[i] = original + step
-            plus = self._frac_reg(self._z)
-            self._z[i] = original - step
-            minus = self._frac_reg(self._z)
-            self._z[i] = original
-            grad.append((plus - minus) / (2.0 * step))
-        scale = max(1.0, max(abs(g) for g in grad) if grad else 1.0)
-        return [g / scale for g in grad]
-
-    def _normalise(self, value: float) -> float:
-        return _math.tanh(value)
-
-    def _normalise_gradient(self, grad: _Sequence[float] | None) -> _List[float]:
-        if not grad:
-            return [0.0] * len(self._z)
-        grad_list = list(grad)
-        if len(grad_list) == len(self._z):
-            return [self._normalise(g) for g in grad_list]
-        out: _List[float] = []
-        for idx in range(len(self._z)):
-            out.append(self._normalise(grad_list[idx % len(grad_list)]))
-        return out
-
-    def _adam_update(self, grad: _Sequence[float]) -> None:
-        self._t += 1
-        for i, g in enumerate(grad):
-            self._m[i] = self._beta1 * self._m[i] + (1.0 - self._beta1) * g
-            self._v[i] = self._beta2 * self._v[i] + (1.0 - self._beta2) * (g * g)
-            m_hat = self._m[i] / (1.0 - self._beta1 ** self._t)
-            v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
-            self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
+        return [self.step(sample) for sample in metrics]
 
     def step(
         self,
-        metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference",
+        metrics: _Mapping[str, _Any] | ZMetrics | "ZSpaceInference",
         *,
         prefer_applied: bool = True,
     ) -> float:
-        if isinstance(metrics, ZSpaceInference):
-            self._last_inference = metrics
-        normalized = ZMetrics.from_payload(
-            metrics, prefer_applied=prefer_applied
-        )
-        self._cache_step_telemetry(normalized)
+        with self._optimizer_lock:
+            return self._step_unlocked(metrics, prefer_applied=prefer_applied)
 
-        speed = float(normalized.speed)
-        memory = float(normalized.memory)
-        stability = float(normalized.stability)
-        gradient = normalized.gradient
-        drs_signal = float(normalized.drs)
-        lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
-        topos_pressure = self._topos_pressure()
-        penalty = (
-            lam_speed * self._normalise(speed)
-            + lam_mem * self._normalise(memory)
-            + lam_stab * self._normalise(stability)
+    def _step_unlocked(
+        self,
+        metrics: _Mapping[str, _Any] | ZMetrics | "ZSpaceInference",
+        *,
+        prefer_applied: bool,
+    ) -> float:
+        candidate_inference = metrics if isinstance(metrics, ZSpaceInference) else None
+        normalized = ZMetrics.from_payload(metrics, prefer_applied=prefer_applied)
+        telemetry = (
+            _normalise_telemetry_arg(normalized.telemetry)
+            if normalized.telemetry
+            else {}
         )
-        if lam_drs:
-            penalty += lam_drs * self._normalise(drs_signal)
-        if self._topos_control_gain:
-            penalty += self._topos_control_gain * self._normalise(topos_pressure)
-        frac_reg = self._frac_reg(self._z)
-        loss = penalty + lam_frac * frac_reg
-        grad_metric = self._normalise_gradient(gradient)
-        frac_grad = self._frac_grad()
-        topos_lr_scale = self._topos_learning_rate_scale()
-        topos_bias = self._topos_gradient_bias()
-        total_grad = [
-            (grad_metric[idx] + lam_frac * frac_grad[idx]) * topos_lr_scale
-            + topos_bias[idx]
-            for idx in range(len(self._z))
-        ]
-        topos_clip = self._topos_gradient_clip_scale()
-        if topos_clip < 1.0:
-            total_grad = [max(-topos_clip, min(topos_clip, grad)) for grad in total_grad]
-        self._adam_update(total_grad)
-        return loss
+        gradient = _coerce_gradient_sequence(normalized.gradient) or []
+        report = zspace_meta_optimizer_step(
+            config=self._optimizer_config,
+            state=self._native_state(),
+            observation={
+                "speed": normalized.speed,
+                "memory": normalized.memory,
+                "stability": normalized.stability,
+                "drift_response": normalized.drs,
+                "gradient": gradient,
+                "telemetry": telemetry,
+            },
+        )
+        self._apply_native_checkpoint(
+            {"config": report["config"], "state": report["state_after"]}
+        )
+        self._last_optimizer_report = report
+        self._last_telemetry = telemetry
+        self._last_topos_control = self._extract_topos_control(telemetry)
+        if candidate_inference is not None:
+            self._last_inference = candidate_inference
+        return float(report["objective"]["objective_before"])
 
     def infer_partial(
         self,
@@ -4164,6 +4118,22 @@ class ZSpaceTrainer:
         alpha: float | None = None,
         smoothing: float = 0.35,
         telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
+    ) -> ZSpaceInference:
+        with self._optimizer_lock:
+            return self._infer_partial_unlocked(
+                partial,
+                alpha=alpha,
+                smoothing=smoothing,
+                telemetry=telemetry,
+            )
+
+    def _infer_partial_unlocked(
+        self,
+        partial: _Mapping[str, _Any] | ZSpacePartialBundle | None,
+        *,
+        alpha: float | None,
+        smoothing: float,
+        telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None,
     ) -> ZSpaceInference:
         if alpha is None:
             alpha = self._alpha
@@ -4193,18 +4163,26 @@ class ZSpaceTrainer:
         telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
         prefer_applied: bool = True,
     ) -> float:
-        inference = self.infer_partial(
-            partial,
-            alpha=alpha,
-            smoothing=smoothing,
-            telemetry=telemetry,
-        )
-        return self.step(inference, prefer_applied=prefer_applied)
+        with self._optimizer_lock:
+            previous_inference = self._last_inference
+            inference = self._infer_partial_unlocked(
+                partial,
+                alpha=alpha,
+                smoothing=smoothing,
+                telemetry=telemetry,
+            )
+            try:
+                return self._step_unlocked(
+                    inference, prefer_applied=prefer_applied
+                )
+            except Exception:
+                self._last_inference = previous_inference
+                raise
 
 
 def step_many(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+    samples: _Iterable[_Mapping[str, _Any] | ZMetrics | ZSpaceInference],
 ) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
@@ -4213,7 +4191,7 @@ def step_many(
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+    samples: _Iterable[_Mapping[str, _Any] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:
@@ -8157,6 +8135,14 @@ _EXTRAS.extend(
         "training_telemetry_projection",
         "zspace_concept_diffusion",
         "zspace_free_energy",
+        "ZSPACE_META_OBJECTIVE_FORMULA",
+        "ZSPACE_META_OPTIMIZER_CONTRACT_VERSION",
+        "ZSPACE_META_OPTIMIZER_KIND",
+        "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
+        "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+        "zspace_meta_optimizer_init",
+        "zspace_meta_optimizer_restore",
+        "zspace_meta_optimizer_step",
         "zspace_generation_control",
         "zspace_imaginary_time_schrodinger",
         "zspace_temperature_control",

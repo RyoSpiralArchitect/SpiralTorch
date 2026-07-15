@@ -3599,13 +3599,43 @@ WGPU would add dispatch cost without creating a useful common execution path;
 WGPU remains the tensor data plane while all clients consume the same Rust
 contract.
 
-One migration boundary is intentionally still visible. The legacy Python
-`ZSpaceTrainer` and `tools/python/zspace_trainer.py` retain their own `tanh`
-resource penalty, finite-difference fractional regulariser, and Adam update.
-They are exploratory clients, not the canonical runtime-policy implementation.
-The next Rust-first vertical should move that optimizer/regulariser state
-machine behind a versioned Rust contract, then leave Python to orchestrate and
-WASM to consume the same transition.
+Z-space meta-optimization now has the same ownership boundary. The versioned
+`st-core::runtime::zspace_optimizer` contract validates configuration and
+checkpoints, applies the observed-resource `tanh` objective, evaluates a
+one-sided periodic fractional Sobolev seminorm and its FFT-derived analytic
+gradient, projects observed gradients, resolves Topos controls, and commits
+Adam state as one fail-closed transaction. Client-requested dimensions are
+capped at 4096, and normalized Topos controls are included in the audit report.
+Step counters stop at JavaScript's largest exactly representable integer, so
+Python, Rust, WASM Object, and JSON clients cannot disagree on checkpoint age.
+The analytic derivative is checked against central differences and against the
+quadratic Euler identity. Invalid observations, state, dimensions, moment
+values, or derived arithmetic leave the stateful Rust optimizer unchanged.
+
+The objective and update gradient are deliberately separate in the report.
+Speed, memory, stability, drift-response, and Topos pressure are observed costs;
+the contract does not pretend those measurements were differentiated through
+Z. The update combines the caller-supplied Z-gradient with the normalized
+analytic fractional gradient and Topos bias. Topos `learning_rate_scale` now scales the
+actual Adam learning rate rather than multiplying the gradient, where Adam's
+normalisation would largely cancel it. `regularization_scale` now scales the
+actual fractional weight rather than appearing only in a bias basis.
+
+Python's `ZSpaceTrainer` retains payload fusion, inference caching, and legacy
+checkpoint field names, but init, restore, and step all call the Rust contract
+and commit only a validated report. Per-trainer locking serializes the native
+transition and Python commit while FFT work runs outside the GIL.
+`tools/python/zspace_trainer.py` is now a
+compatibility adapter with no pure-Python optimizer fallback. WASM exposes the
+same init/restore/step request and report, adding only its execution-client
+marker. This is scalar control-plane work; WGPU remains the tensor data plane.
+
+One naming and wiring boundary remains visible. `ZSpaceMetaOptimizer` in
+`st-core` controls the small latent Z state, while `st-nn::optim::ZSpaceOptimizer`
+applies accumulated gradients to module parameters. They are distinct today,
+but the next learning vertical should consume the meta-optimizer report through
+an explicit adapter or rename the module optimizer so the two responsibilities
+cannot be mistaken for competing semantic owners.
 
 Next steps:
 

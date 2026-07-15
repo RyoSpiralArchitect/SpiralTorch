@@ -84,6 +84,13 @@ partials with latent states, while `ZSpaceTrainer` and `stream_zspace_training`
 provide an optimiser-friendly wrapper that incrementally adapts a posterior to
 incoming metrics.
 
+`ZSpaceTrainer` delegates its state transition to the versioned Rust
+`ZSpaceMetaOptimizer`. The core report distinguishes the observed resource
+objective from the supplied Z-gradient, evaluates the periodic fractional
+Sobolev term with a normalized FFT-derived analytic gradient, resolves Topos learning-rate,
+regularisation, clipping, and bias controls, and atomically commits Adam state.
+Python owns orchestration and inference caches, not a second optimizer formula.
+
 The inference helpers accept structured telemetry. Pass dicts, `ZSpaceTelemetryFrame`
 instances, or the telemetry captured inside a `ZSpacePartialBundle`; everything
 is flattened and merged automatically before the posterior update so PSI health

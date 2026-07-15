@@ -15,6 +15,7 @@ mod topos_policy;
 mod topos_route;
 mod training_projection;
 mod zspace_fusion;
+mod zspace_optimizer;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas;
@@ -54,3 +55,4 @@ pub use training_projection::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;
 pub use zspace_fusion::*;
+pub use zspace_optimizer::*;

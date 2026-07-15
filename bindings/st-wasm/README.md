@@ -98,6 +98,45 @@ console.log(transition.entropy, transition.next_state.temperature);
 worker-message and persistence paths. Neither entry point contains a browser
 fallback for the transition formula.
 
+Z-space meta-optimization follows the same state-carrying client model. The
+browser stores the returned checkpoint, but Rust owns restore coercion,
+observation normalisation, the FFT-derived fractional Sobolev gradient, bounded Topos
+controls, and Adam:
+
+```ts
+import {
+    zspaceMetaOptimizerInitObject,
+    zspaceMetaOptimizerStepObject,
+} from "spiraltorch-wasm";
+
+const checkpoint = zspaceMetaOptimizerInitObject({
+    dimension: 4,
+    fractional_order: 0.35,
+});
+const transition = zspaceMetaOptimizerStepObject({
+    config: checkpoint.config,
+    state: checkpoint.state,
+    observation: {
+        speed: 0.2,
+        memory: 0.1,
+        stability: 0.7,
+        gradient: [0.05, -0.02, 0.01, 0.0],
+    },
+});
+
+console.log(
+    transition.state_after.z,
+    transition.adam.effective_learning_rate,
+    transition.semantic_owner,
+);
+```
+
+`zspaceMetaOptimizerInitJson`, `zspaceMetaOptimizerRestoreJson`, and
+`zspaceMetaOptimizerStepJson` provide the identical contract for workers and
+persistence. WASM adds only `execution_client: "wasm"`; it does not carry a
+browser Adam or FFT fallback. The shared Rust contract bounds step counters at
+JavaScript's largest exactly representable integer.
+
 Concept diffusion is also a peer contract rather than a browser-side
 approximation. Rust validates the labelled simplex and symmetric graph, applies
 observation/Z-bias controls, selects CFL-safe heat-flow substeps, and audits
