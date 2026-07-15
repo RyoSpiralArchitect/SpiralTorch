@@ -2449,14 +2449,32 @@ import spiraltorch as st
 topos = st.hypergrad_topos(max_depth=10, max_volume=100)
 signal = st.topos_control_signal(topos, observed_depth=4, visited_volume=25)
 training = st.topos_training_hints(signal)
+snapshot = st.topos_optimizer_snapshot(
+    topos,
+    sequence=1,
+    hyper_learning_rate=0.04,
+    real_learning_rate=0.02,
+    gain=0.75,
+    observed_depth=4,
+    visited_volume=25,
+)
 adapter = st.topos_runtime_adapter(signal, request_options={"base_temperature": 0.8})
 
 trainer = st.ZSpaceTrainer(z_dim=4, topos_control_gain=0.5)
 trainer.step(st.z.metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal}))
 
 print("gradient bias:", training["gradient_bias_scale"])
+print("snapshot hyper rate:", snapshot["optimizer_application"]["hyper_learning_rate"])
 print("runtime temperature:", adapter["request"]["temperature"])
 ```
+
+`topos_optimizer_snapshot()` is the step boundary for optimizer integration. Rust atomically
+owns its sequence-checked control bundle, training plan, runtime profile, and prescribed
+learning-rate mutation. Planned gradient-bias and momentum controls remain in
+`control.training_plan`; they are not reported as applied until an optimizer actually mutates
+those states. `Amegagrad` commits this snapshot only after both tapes accept the rates, then
+exposes diagnostics and telemetry as projections rather than rebuilding Topos semantics in
+Python.
 
 ## SpiralTorchRec quickstart
 

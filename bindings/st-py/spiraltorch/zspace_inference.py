@@ -33,6 +33,7 @@ __all__ = [
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",
     "topos_control_signal",
+    "topos_optimizer_snapshot",
     "topos_training_hints",
     "topos_training_plan",
     "topos_inference_hints",
@@ -133,6 +134,8 @@ def _unit_interval(value: Any, *, default: float = 0.0) -> float:
 
 _TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
 _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
+_TOPOS_OPTIMIZER_SNAPSHOT_KIND = "spiraltorch.topos_optimizer_snapshot"
+_TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION = "spiraltorch.topos_optimizer_snapshot.v1"
 _ZSPACE_FUSION_SEMANTIC_OWNER = "st-core::telemetry::zspace_fusion"
 _ZSPACE_TELEMETRY_FUSION_KIND = "spiraltorch.zspace_telemetry_fusion"
 _ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION = (
@@ -274,6 +277,48 @@ def _topos_control_bundle_from_observation(
         "Topos control derivation requires the compiled Rust semantic core; "
         "rebuild or reinstall SpiralTorch with "
         "_topos_control_bundle_from_observation"
+    )
+
+
+def _native_topos_optimizer_snapshot_from_observation(
+    payload: Mapping[str, Any],
+    *,
+    sequence: int,
+    hyper_learning_rate: float,
+    real_learning_rate: float,
+    options: Mapping[str, Any] | None = None,
+    training_hints: Mapping[str, Any] | None = None,
+    inference_hints: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    derive = getattr(native, "_topos_optimizer_snapshot_from_observation", None)
+    if not callable(derive):
+        return None
+
+    snapshot = derive(
+        dict(payload),
+        int(sequence),
+        float(hyper_learning_rate),
+        float(real_learning_rate),
+        None if options is None else dict(options),
+        None if training_hints is None else dict(training_hints),
+        None if inference_hints is None else dict(inference_hints),
+    )
+    if not isinstance(snapshot, MappingABC):
+        raise RuntimeError(
+            "native Topos optimizer core returned a non-mapping contract payload"
+        )
+    return dict(snapshot)
+
+
+def _is_native_topos_optimizer_snapshot(payload: Mapping[str, Any]) -> bool:
+    return (
+        payload.get("kind") == _TOPOS_OPTIMIZER_SNAPSHOT_KIND
+        and payload.get("contract_version")
+        == _TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION
+        and payload.get("semantic_owner") == _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER
+        and payload.get("semantic_backend") == "rust"
     )
 
 
@@ -469,6 +514,7 @@ def _topos_bundle_section(bundle: Mapping[str, Any], key: str) -> dict[str, Any]
 def topos_control_signal(
     topos: Any | None = None,
     *,
+    training_gain: float = 1.0,
     curvature: float = -1.0,
     tolerance: float = 1e-3,
     saturation: float = 1.0,
@@ -482,6 +528,7 @@ def topos_control_signal(
 
     return _topos_control_bundle(
         topos,
+        plan_options={"training_gain": training_gain},
         curvature=curvature,
         tolerance=tolerance,
         saturation=saturation,
@@ -491,6 +538,72 @@ def topos_control_signal(
         observed_depth=observed_depth,
         visited_volume=visited_volume,
     )
+
+
+def topos_optimizer_snapshot(
+    topos: Any | None = None,
+    *,
+    sequence: int = 0,
+    hyper_learning_rate: float,
+    real_learning_rate: float,
+    gain: float = 1.0,
+    training_hints: Mapping[str, Any] | None = None,
+    inference_hints: Mapping[str, Any] | None = None,
+    curvature: float = -1.0,
+    tolerance: float = 1e-3,
+    saturation: float = 1.0,
+    max_depth: int = 64,
+    max_volume: int = 512,
+    porosity: float | None = None,
+    observed_depth: int = 0,
+    visited_volume: int = 0,
+) -> dict[str, Any]:
+    """Bind one Rust-owned Topos control bundle to a prescribed rate application."""
+
+    payload, embedded_training_hints, embedded_inference_hints = (
+        _topos_control_request_parts(
+            topos,
+            curvature=curvature,
+            tolerance=tolerance,
+            saturation=saturation,
+            max_depth=max_depth,
+            max_volume=max_volume,
+            porosity=porosity,
+            observed_depth=observed_depth,
+            visited_volume=visited_volume,
+        )
+    )
+    if training_hints is None:
+        used_training_hints = embedded_training_hints
+    elif isinstance(training_hints, MappingABC):
+        used_training_hints = dict(training_hints)
+    else:
+        raise TypeError("Topos training_hints must be a mapping")
+    if inference_hints is None:
+        used_inference_hints = embedded_inference_hints
+    elif isinstance(inference_hints, MappingABC):
+        used_inference_hints = dict(inference_hints)
+    else:
+        raise TypeError("Topos inference_hints must be a mapping")
+
+    snapshot = _native_topos_optimizer_snapshot_from_observation(
+        payload,
+        sequence=sequence,
+        hyper_learning_rate=hyper_learning_rate,
+        real_learning_rate=real_learning_rate,
+        options={"training_gain": gain},
+        training_hints=used_training_hints,
+        inference_hints=used_inference_hints,
+    )
+    if snapshot is None:
+        raise RuntimeError(
+            "Topos optimizer snapshots require the compiled Rust semantic core; "
+            "rebuild or reinstall SpiralTorch with "
+            "_topos_optimizer_snapshot_from_observation"
+        )
+    if not _is_native_topos_optimizer_snapshot(snapshot):
+        raise RuntimeError("native Topos optimizer core returned an untrusted contract")
+    return snapshot
 
 
 def topos_training_hints(

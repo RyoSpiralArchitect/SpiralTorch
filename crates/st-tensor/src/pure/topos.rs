@@ -52,6 +52,22 @@ pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER: &str = TOPOS_RUNTIME_ROUTE_SEMANT
 /// Backend label used when the canonical Rust control semantics produced a payload.
 pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND: &str = "rust";
 
+/// Stable contract identifier for one control-to-optimizer application snapshot.
+pub const TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION: &str =
+    "spiraltorch.topos_optimizer_snapshot.v1";
+
+/// Stable payload kind shared by native, Python, and WASM optimizer clients.
+pub const TOPOS_OPTIMIZER_SNAPSHOT_KIND: &str = "spiraltorch.topos_optimizer_snapshot";
+
+/// Crate/module that owns Topos optimizer snapshot semantics.
+pub const TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_OWNER: &str = TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER;
+
+/// Backend label used when Rust produced the optimizer snapshot.
+pub const TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND: &str = "rust";
+
+/// Largest sequence that remains exact in JavaScript's integer number domain.
+pub const TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
+
 /// Stable contract identifier shared by Rust, Python, and WASM Z-space clients.
 pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v1";
 
@@ -69,6 +85,16 @@ pub const TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM: usize = 6;
 
 /// Allocation guard for client-requested projection vectors.
 pub const TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM: usize = 4096;
+
+fn validate_optimizer_learning_rate(label: &'static str, rate: f32) -> PureResult<()> {
+    if !rate.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value: rate });
+    }
+    if rate <= 0.0 {
+        return Err(TensorError::NonPositiveLearningRate { rate });
+    }
+    Ok(())
+}
 
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
     if !permeability.is_finite() {
@@ -903,6 +929,34 @@ pub struct ToposControlSignalPayload {
     pub inference_plan: ToposInferencePlanPayload,
     pub runtime_profile: ToposRuntimeProfilePayload,
     pub runtime_route: ToposRuntimeRoutePayload,
+}
+
+/// Learning-rate mutation prescribed for one optimizer step.
+///
+/// The complete requested optimizer posture remains available under
+/// [`ToposOptimizerSnapshotPayload::control`]. This payload intentionally records only the
+/// rate control that the current optimizer integration can apply and audit transactionally.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposOptimizerApplicationPayload {
+    pub scope: &'static str,
+    pub control_path: &'static str,
+    pub input_hyper_learning_rate: f32,
+    pub input_real_learning_rate: f32,
+    pub rate_scale: f32,
+    pub hyper_learning_rate: f32,
+    pub real_learning_rate: f32,
+}
+
+/// Atomic Rust-owned record connecting one Topos observation to its prescribed optimizer mutation.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct ToposOptimizerSnapshotPayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub sequence: u64,
+    pub control: ToposControlSignalPayload,
+    pub optimizer_application: ToposOptimizerApplicationPayload,
 }
 
 impl ToposRuntimeMode {
@@ -1828,6 +1882,64 @@ impl ToposControlSignal {
             inference_plan: inference_plan.payload(),
             runtime_profile: runtime_profile.payload(),
             runtime_route: runtime_route.payload(),
+        })
+    }
+
+    /// Binds one canonical control bundle to its prescribed learning-rate mutation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn optimizer_snapshot(
+        &self,
+        sequence: u64,
+        hyper_learning_rate: f32,
+        real_learning_rate: f32,
+        options: ToposControlPlanOptions,
+        training_hints_input: Option<ToposTrainingHintsInput>,
+        inference_hints_input: Option<ToposInferenceHintsInput>,
+    ) -> PureResult<ToposOptimizerSnapshotPayload> {
+        if sequence > TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_snapshot_sequence",
+            });
+        }
+        validate_optimizer_learning_rate(
+            "topos_optimizer_input_hyper_learning_rate",
+            hyper_learning_rate,
+        )?;
+        validate_optimizer_learning_rate(
+            "topos_optimizer_input_real_learning_rate",
+            real_learning_rate,
+        )?;
+
+        let control =
+            self.payload_with_options(options, training_hints_input, inference_hints_input)?;
+        let rate_scale = control.training_plan.rate_scale;
+        let scaled_hyper_learning_rate = hyper_learning_rate * rate_scale;
+        let scaled_real_learning_rate = real_learning_rate * rate_scale;
+        validate_optimizer_learning_rate(
+            "topos_optimizer_output_hyper_learning_rate",
+            scaled_hyper_learning_rate,
+        )?;
+        validate_optimizer_learning_rate(
+            "topos_optimizer_output_real_learning_rate",
+            scaled_real_learning_rate,
+        )?;
+
+        Ok(ToposOptimizerSnapshotPayload {
+            kind: TOPOS_OPTIMIZER_SNAPSHOT_KIND,
+            contract_version: TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
+            semantic_owner: TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_OWNER,
+            semantic_backend: TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND,
+            sequence,
+            control,
+            optimizer_application: ToposOptimizerApplicationPayload {
+                scope: "learning_rate",
+                control_path: "control.training_plan.rate_scale",
+                input_hyper_learning_rate: hyper_learning_rate,
+                input_real_learning_rate: real_learning_rate,
+                rate_scale,
+                hyper_learning_rate: scaled_hyper_learning_rate,
+                real_learning_rate: scaled_real_learning_rate,
+            },
         })
     }
 
@@ -5527,6 +5639,156 @@ mod tests {
             payload.runtime_route.runtime_profile,
             payload.runtime_profile
         );
+    }
+
+    #[test]
+    fn topos_optimizer_snapshot_binds_one_control_bundle_to_prescribed_rates() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            observed_depth: 7,
+            visited_volume: 31,
+            ..ToposControlSignalInput::default()
+        }));
+        let snapshot = unwrap_ok(signal.optimizer_snapshot(
+            42,
+            0.04,
+            0.02,
+            ToposControlPlanOptions {
+                training_gain: 0.5,
+                ..ToposControlPlanOptions::default()
+            },
+            Some(ToposTrainingHintsInput {
+                learning_rate_scale: Some(0.6),
+                clip_scale: Some(0.8),
+                ..ToposTrainingHintsInput::default()
+            }),
+            None,
+        ));
+
+        assert_eq!(snapshot.kind, TOPOS_OPTIMIZER_SNAPSHOT_KIND);
+        assert_eq!(
+            snapshot.contract_version,
+            TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION
+        );
+        assert_eq!(
+            snapshot.semantic_owner,
+            TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_OWNER
+        );
+        assert_eq!(
+            snapshot.semantic_backend,
+            TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND
+        );
+        assert_eq!(snapshot.sequence, 42);
+        assert_eq!(snapshot.control.observed_depth, 7);
+        assert_eq!(snapshot.control.visited_volume, 31);
+        assert_eq!(
+            snapshot.optimizer_application.rate_scale,
+            snapshot.control.training_plan.rate_scale
+        );
+        assert_eq!(snapshot.optimizer_application.scope, "learning_rate");
+        assert_eq!(
+            snapshot.optimizer_application.control_path,
+            "control.training_plan.rate_scale"
+        );
+        assert!(
+            (snapshot.optimizer_application.hyper_learning_rate
+                - 0.04 * snapshot.control.training_plan.rate_scale)
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            (snapshot.optimizer_application.real_learning_rate
+                - 0.02 * snapshot.control.training_plan.rate_scale)
+                .abs()
+                < 1e-6
+        );
+
+        let serialized = serde_json::to_value(snapshot).expect("snapshot is serializable");
+        assert_eq!(serialized["control"]["semantic_backend"], "rust");
+        assert_eq!(
+            serialized["optimizer_application"]["control_path"],
+            "control.training_plan.rate_scale"
+        );
+        assert!(serialized["optimizer_application"]
+            .get("effective_gradient_bias_scale")
+            .is_none());
+    }
+
+    #[test]
+    fn topos_optimizer_snapshot_guards_sequence_and_learning_rate_boundaries() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(
+            ToposControlSignalInput::default(),
+        ));
+        let max_sequence = unwrap_ok(signal.optimizer_snapshot(
+            TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE,
+            0.04,
+            0.02,
+            ToposControlPlanOptions::default(),
+            None,
+            None,
+        ));
+        assert_eq!(max_sequence.sequence, TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE);
+
+        let unsafe_sequence = unwrap_err(signal.optimizer_snapshot(
+            TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE + 1,
+            0.04,
+            0.02,
+            ToposControlPlanOptions::default(),
+            None,
+            None,
+        ));
+        assert!(matches!(
+            unsafe_sequence,
+            TensorError::InvalidValue {
+                label: "topos_optimizer_snapshot_sequence"
+            }
+        ));
+
+        for rate in [0.0, -0.01] {
+            let error = unwrap_err(signal.optimizer_snapshot(
+                1,
+                rate,
+                0.02,
+                ToposControlPlanOptions::default(),
+                None,
+                None,
+            ));
+            assert!(matches!(error, TensorError::NonPositiveLearningRate { .. }));
+        }
+        let non_finite = unwrap_err(signal.optimizer_snapshot(
+            1,
+            f32::NAN,
+            0.02,
+            ToposControlPlanOptions::default(),
+            None,
+            None,
+        ));
+        assert!(matches!(
+            non_finite,
+            TensorError::NonFiniteValue {
+                label: "topos_optimizer_input_hyper_learning_rate",
+                ..
+            }
+        ));
+
+        let overflow = unwrap_err(signal.optimizer_snapshot(
+            1,
+            f32::MAX,
+            0.02,
+            ToposControlPlanOptions::default(),
+            Some(ToposTrainingHintsInput {
+                learning_rate_scale: Some(1.25),
+                clip_scale: Some(1.25),
+                ..ToposTrainingHintsInput::default()
+            }),
+            None,
+        ));
+        assert!(matches!(
+            overflow,
+            TensorError::NonFiniteValue {
+                label: "topos_optimizer_output_hyper_learning_rate",
+                ..
+            }
+        ));
     }
 
     #[test]

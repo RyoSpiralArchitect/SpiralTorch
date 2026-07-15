@@ -40,6 +40,7 @@ formulas:
 ```ts
 import {
     toposControlSignalObject,
+    toposOptimizerSnapshotObject,
     toposRuntimeRouteObject,
     toposZSpaceProjectionObject,
 } from "spiraltorch-wasm";
@@ -55,6 +56,14 @@ const toposInput = {
 
 const signal = toposControlSignalObject(toposInput);
 
+const optimizerSnapshot = toposOptimizerSnapshotObject({
+    signal: toposInput,
+    sequence: 1,
+    hyper_learning_rate: 0.04,
+    real_learning_rate: 0.02,
+    options: { training_gain: 0.75 },
+});
+
 const route = toposRuntimeRouteObject({
     closure_risk: 0.2,
     exploration_budget: 0.6,
@@ -64,14 +73,21 @@ const route = toposRuntimeRouteObject({
 
 const projection = toposZSpaceProjectionObject(toposInput, 8);
 
-console.log(signal.closure_pressure, route.mode, projection.gradient);
+console.log(
+    signal.closure_pressure,
+    optimizerSnapshot.optimizer_application.hyper_learning_rate,
+    route.mode,
+    projection.gradient,
+);
 ```
 
-`toposControlSignalJson`, `toposRuntimeRouteJson`, and `toposZSpaceProjectionJson`
-expose the same contracts for storage and worker-message flows. The projection's first six
-gradient axes are semantic; wider client vectors are explicitly zero-filled by Rust. Results
-carry `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and
-direct Rust runs can be audited against one semantic core.
+`toposControlSignalJson`, `toposOptimizerSnapshotJson`, `toposRuntimeRouteJson`, and
+`toposZSpaceProjectionJson` expose the same contracts for storage and worker-message flows.
+Optimizer snapshots bind a JavaScript-safe sequence, the complete Rust control bundle, and the
+learning-rate mutation prescribed by that bundle. The projection's first six gradient axes are
+semantic; wider client vectors are explicitly zero-filled by Rust. Results carry
+`contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and direct Rust
+runs can be audited against one semantic core.
 
 Latent posterior decoding and partial projection use the same boundary. The
 browser passes state, partial observations, and telemetry to
