@@ -106,6 +106,8 @@ pub struct CoherenceDiagnosticsSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distribution_channels: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distribution_weight_mass: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub swap_invariant: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification_kind: Option<String>,
@@ -123,6 +125,22 @@ pub struct CoherenceDiagnosticsSummary {
     pub background_energy_ratio_max: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cascade_energy_ratio_min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_contract_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_semantic_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_semantic_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_formula: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spectral_radius: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spectral_entropy: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spectral_pressure: Option<f32>,
     pub fractional_order: f32,
     pub z_bias: f32,
     pub preserved_channels: usize,
@@ -146,6 +164,7 @@ impl CoherenceDiagnosticsSummary {
     fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Self {
         let distribution = diagnostics.distribution_summary().ok();
         let classification = diagnostics.classify(Default::default()).ok();
+        let control = diagnostics.control_summary().ok();
         let label = classification
             .map(|payload| payload.label)
             .unwrap_or_else(|| diagnostics.observation().lift_to_label());
@@ -158,6 +177,7 @@ impl CoherenceDiagnosticsSummary {
             concentration: distribution.map(|summary| summary.concentration as f32),
             effective_channels: distribution.map(|summary| summary.effective_channels as f32),
             distribution_channels: distribution.map(|summary| summary.channels),
+            distribution_weight_mass: distribution.map(|summary| summary.weight_mass as f32),
             swap_invariant: classification.map(|payload| payload.swap_invariant),
             classification_kind: classification.map(|payload| payload.kind.to_owned()),
             classification_reason: classification.map(|payload| payload.reason.to_owned()),
@@ -173,6 +193,14 @@ impl CoherenceDiagnosticsSummary {
                 .map(|payload| payload.policy.background_energy_ratio_max),
             cascade_energy_ratio_min: classification
                 .map(|payload| payload.policy.cascade_energy_ratio_min),
+            control_kind: control.map(|payload| payload.kind.to_owned()),
+            control_contract_version: control.map(|payload| payload.contract_version.to_owned()),
+            control_semantic_owner: control.map(|payload| payload.semantic_owner.to_owned()),
+            control_semantic_backend: control.map(|payload| payload.semantic_backend.to_owned()),
+            control_formula: control.map(|payload| payload.control_formula.to_owned()),
+            spectral_radius: control.map(|payload| payload.spectral_radius as f32),
+            spectral_entropy: control.map(|payload| payload.spectral_entropy as f32),
+            spectral_pressure: control.map(|payload| payload.spectral_pressure as f32),
             fractional_order: diagnostics.fractional_order(),
             z_bias: diagnostics.z_bias(),
             preserved_channels: diagnostics.preserved_channels(),
@@ -542,6 +570,7 @@ impl ZSpaceTraceEvent {
                     "coherence_concentration": diagnostics.concentration,
                     "coherence_effective_channels": diagnostics.effective_channels,
                     "coherence_distribution_channels": diagnostics.distribution_channels,
+                    "coherence_distribution_weight_mass": diagnostics.distribution_weight_mass,
                     "coherence_swap_invariant": diagnostics.swap_invariant,
                     "coherence_classification_kind": diagnostics.classification_kind,
                     "coherence_classification_reason": diagnostics.classification_reason,
@@ -551,6 +580,14 @@ impl ZSpaceTraceEvent {
                     "coherence_classification_formula": diagnostics.classification_formula,
                     "coherence_background_energy_ratio_max": diagnostics.background_energy_ratio_max,
                     "coherence_cascade_energy_ratio_min": diagnostics.cascade_energy_ratio_min,
+                    "coherence_control_kind": diagnostics.control_kind,
+                    "coherence_control_contract_version": diagnostics.control_contract_version,
+                    "coherence_control_semantic_owner": diagnostics.control_semantic_owner,
+                    "coherence_control_semantic_backend": diagnostics.control_semantic_backend,
+                    "coherence_control_formula": diagnostics.control_formula,
+                    "coherence_spectral_radius": diagnostics.spectral_radius,
+                    "coherence_spectral_entropy": diagnostics.spectral_entropy,
+                    "coherence_spectral_pressure": diagnostics.spectral_pressure,
                     "preserved_channels": diagnostics.preserved_channels,
                     "discarded_channels": diagnostics.discarded_channels,
                     "z_bias": diagnostics.z_bias,
@@ -982,6 +1019,7 @@ mod tests {
         assert!(diagnostics["concentration"].is_number());
         assert!(diagnostics["effective_channels"].is_number());
         assert!(diagnostics["distribution_channels"].is_number());
+        assert!(diagnostics["distribution_weight_mass"].is_number());
         assert!(diagnostics["swap_invariant"].is_boolean());
         assert_eq!(
             diagnostics["classification_kind"],
@@ -1000,6 +1038,23 @@ mod tests {
         assert!(diagnostics["classification_formula"].is_string());
         assert!(diagnostics["background_energy_ratio_max"].is_number());
         assert!(diagnostics["cascade_energy_ratio_min"].is_number());
+        assert_eq!(
+            diagnostics["control_kind"],
+            "spiraltorch.zspace_coherence_control"
+        );
+        assert_eq!(
+            diagnostics["control_contract_version"],
+            "spiraltorch.zspace_coherence_control.v1"
+        );
+        assert_eq!(
+            diagnostics["control_semantic_owner"],
+            "st-core::inference::zspace_coherence"
+        );
+        assert_eq!(diagnostics["control_semantic_backend"], "rust");
+        assert!(diagnostics["control_formula"].is_string());
+        assert!(diagnostics["spectral_radius"].is_number());
+        assert!(diagnostics["spectral_entropy"].is_number());
+        assert!(diagnostics["spectral_pressure"].is_number());
     }
 
     #[test]
@@ -1022,10 +1077,16 @@ mod tests {
         assert!(summary.normalized_entropy.is_none());
         assert!(summary.concentration.is_none());
         assert!(summary.effective_channels.is_none());
+        assert!(summary.distribution_weight_mass.is_none());
         assert!(summary.classification_kind.is_none());
         assert!(summary.classification_contract_version.is_none());
         assert!(summary.background_energy_ratio_max.is_none());
         assert!(summary.cascade_energy_ratio_min.is_none());
+        assert!(summary.control_kind.is_none());
+        assert!(summary.control_contract_version.is_none());
+        assert!(summary.spectral_radius.is_none());
+        assert!(summary.spectral_entropy.is_none());
+        assert!(summary.spectral_pressure.is_none());
     }
 
     #[test]

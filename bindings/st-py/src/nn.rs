@@ -5953,6 +5953,11 @@ impl PyNnModuleTrainer {
         self.inner.disable_spectral_learning_rate();
     }
 
+    pub fn push_coherence_diagnostics(&mut self, diagnostics: &PyCoherenceDiagnostics) -> bool {
+        self.inner
+            .push_coherence_diagnostics(diagnostics.inner.clone())
+    }
+
     pub fn spectral_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let metrics = self.inner.spectral_metrics();
         match metrics {
@@ -5980,10 +5985,38 @@ impl PyNnModuleTrainer {
                     adjustment_dict.set_item("sheet_index", adjustment.sheet_index)?;
                     adjustment_dict.set_item("sheet_count", adjustment.sheet_count)?;
                     adjustment_dict.set_item("spin_alignment", adjustment.spin_alignment)?;
+                    adjustment_dict
+                        .set_item("raw_mean_coherence", adjustment.raw_mean_coherence)?;
+                    adjustment_dict
+                        .set_item("raw_coherence_entropy", adjustment.raw_coherence_entropy)?;
                     adjustment_dict.set_item("spectral_radius", adjustment.spectral_radius)?;
                     adjustment_dict.set_item("spectral_entropy", adjustment.spectral_entropy)?;
                     adjustment_dict.set_item("spectral_pressure", adjustment.spectral_pressure)?;
+                    adjustment_dict
+                        .set_item("effective_channels", adjustment.effective_channels)?;
+                    adjustment_dict
+                        .set_item("distribution_channels", adjustment.distribution_channels)?;
                     adjustment_dict.set_item("energy_ratio", adjustment.energy_ratio)?;
+                    adjustment_dict.set_item("control_kind", adjustment.control_kind)?;
+                    adjustment_dict.set_item(
+                        "control_contract_version",
+                        adjustment.control_contract_version,
+                    )?;
+                    adjustment_dict
+                        .set_item("control_semantic_owner", adjustment.control_semantic_owner)?;
+                    adjustment_dict.set_item(
+                        "control_semantic_backend",
+                        adjustment.control_semantic_backend,
+                    )?;
+                    adjustment_dict.set_item("control_formula", adjustment.control_formula)?;
+                    adjustment_dict
+                        .set_item("classification_reason", adjustment.classification_reason)?;
+                    adjustment_dict.set_item(
+                        "classification_contract_version",
+                        adjustment.classification_contract_version,
+                    )?;
+                    adjustment_dict
+                        .set_item("classification_formula", adjustment.classification_formula)?;
                     adjustment_dict.set_item("band_scale", adjustment.band_scale)?;
                     adjustment_dict.set_item("local_lr", adjustment.local_lr)?;
 
@@ -5992,10 +6025,31 @@ impl PyNnModuleTrainer {
                     dict.set_item("sheet_index", adjustment.sheet_index)?;
                     dict.set_item("sheet_count", adjustment.sheet_count)?;
                     dict.set_item("spin_alignment", adjustment.spin_alignment)?;
+                    dict.set_item("raw_mean_coherence", adjustment.raw_mean_coherence)?;
+                    dict.set_item("raw_coherence_entropy", adjustment.raw_coherence_entropy)?;
                     dict.set_item("spectral_radius", adjustment.spectral_radius)?;
                     dict.set_item("spectral_entropy", adjustment.spectral_entropy)?;
                     dict.set_item("spectral_pressure", adjustment.spectral_pressure)?;
+                    dict.set_item("effective_channels", adjustment.effective_channels)?;
+                    dict.set_item("distribution_channels", adjustment.distribution_channels)?;
                     dict.set_item("energy_ratio", adjustment.energy_ratio)?;
+                    dict.set_item("control_kind", adjustment.control_kind)?;
+                    dict.set_item(
+                        "control_contract_version",
+                        adjustment.control_contract_version,
+                    )?;
+                    dict.set_item("control_semantic_owner", adjustment.control_semantic_owner)?;
+                    dict.set_item(
+                        "control_semantic_backend",
+                        adjustment.control_semantic_backend,
+                    )?;
+                    dict.set_item("control_formula", adjustment.control_formula)?;
+                    dict.set_item("classification_reason", adjustment.classification_reason)?;
+                    dict.set_item(
+                        "classification_contract_version",
+                        adjustment.classification_contract_version,
+                    )?;
+                    dict.set_item("classification_formula", adjustment.classification_formula)?;
                     dict.set_item("band_scale", adjustment.band_scale)?;
                     dict.set_item("local_lr", adjustment.local_lr)?;
                 } else {
@@ -9199,6 +9253,16 @@ impl PyCoherenceDiagnostics {
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         json_to_py(py, &value)
     }
+
+    fn control_to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let control = self
+            .inner
+            .control_summary()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let value = serde_json::to_value(control)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -9309,6 +9373,11 @@ impl PyCoherenceDiagnostics {
     #[getter]
     fn classification(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.classification_to_py(py, ZSpaceCoherenceClassificationPolicy::default())
+    }
+
+    #[getter]
+    fn control(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.control_to_py(py)
     }
 
     #[pyo3(signature = (*, background_energy_ratio_max=1.0e-5, cascade_energy_ratio_min=0.7))]

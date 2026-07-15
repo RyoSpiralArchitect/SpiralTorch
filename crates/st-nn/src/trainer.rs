@@ -69,6 +69,16 @@ use st_core::ecosystem::{
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::heur::free_energy::FreeEnergyReport;
+use st_core::inference::zspace_coherence::{
+    classify_zspace_coherence, derive_zspace_coherence_control,
+    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationPolicy,
+    ZSpaceCoherenceClassificationRequest, ZSpaceCoherenceControlPayload,
+    ZSpaceCoherenceDistributionSummary, ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION,
+    ZSPACE_COHERENCE_CLASSIFICATION_FORMULA, ZSPACE_COHERENCE_CLASSIFICATION_KIND,
+    ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION, ZSPACE_COHERENCE_CONTROL_FORMULA,
+    ZSPACE_COHERENCE_CONTROL_KIND, ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
+    ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
+};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
 use st_core::runtime::autopilot::Autopilot;
@@ -577,11 +587,9 @@ impl From<CurvatureDecision> for CurvatureMetrics {
 pub struct CoherenceSignal {
     dominant_channel: Option<usize>,
     preserved_channels: usize,
-    mean_coherence: f32,
     z_bias: f32,
-    energy_ratio: f32,
-    entropy: f32,
-    label: CoherenceLabel,
+    control: ZSpaceCoherenceControlPayload,
+    classification: ZSpaceCoherenceClassificationPayload,
     repaired_non_finite_weights: usize,
     repaired_negative_weights: usize,
     pre_discard_repaired_non_finite: usize,
@@ -598,7 +606,7 @@ impl CoherenceSignal {
     }
 
     pub fn mean_coherence(&self) -> f32 {
-        self.mean_coherence
+        self.control.raw_mean_coherence as f32
     }
 
     pub fn z_bias(&self) -> f32 {
@@ -606,15 +614,43 @@ impl CoherenceSignal {
     }
 
     pub fn energy_ratio(&self) -> f32 {
-        self.energy_ratio
+        self.control.energy_ratio as f32
     }
 
     pub fn coherence_entropy(&self) -> f32 {
-        self.entropy
+        self.control.raw_coherence_entropy as f32
+    }
+
+    pub fn normalized_entropy(&self) -> f32 {
+        self.control.spectral_entropy as f32
+    }
+
+    pub fn concentration(&self) -> f32 {
+        self.control.spectral_radius as f32
+    }
+
+    pub fn spectral_pressure(&self) -> f32 {
+        self.control.spectral_pressure as f32
+    }
+
+    pub fn effective_channels(&self) -> f32 {
+        self.control.effective_channels as f32
+    }
+
+    pub fn distribution_channels(&self) -> usize {
+        self.control.channels
     }
 
     pub fn label(&self) -> CoherenceLabel {
-        self.label
+        self.classification.label
+    }
+
+    pub fn control(&self) -> &ZSpaceCoherenceControlPayload {
+        &self.control
+    }
+
+    pub fn classification(&self) -> &ZSpaceCoherenceClassificationPayload {
+        &self.classification
     }
 
     pub fn repaired_non_finite_weights(&self) -> usize {
@@ -648,45 +684,126 @@ impl CoherenceSignal {
             .saturating_add(self.pre_discard_repairs_total())
     }
 
-    fn label_from_str(label: &str) -> CoherenceLabel {
-        match label.trim() {
-            "symmetric_pulse" => CoherenceLabel::SymmetricPulse,
-            "cascade_imbalance" => CoherenceLabel::CascadeImbalance,
-            "diffuse_drift" => CoherenceLabel::DiffuseDrift,
-            _ => CoherenceLabel::Background,
-        }
+    fn trace_value_matches(actual: Option<f32>, expected: f64) -> bool {
+        actual.is_some_and(|actual| {
+            actual.is_finite()
+                && (f64::from(actual) - expected).abs()
+                    <= 8.0 * f32::EPSILON as f64 * expected.abs().max(1.0)
+        })
+    }
+
+    fn structure_is_valid(
+        dominant_channel: Option<usize>,
+        preserved_channels: usize,
+        discarded_channels: usize,
+        distribution_channels: usize,
+        z_bias: f32,
+    ) -> bool {
+        z_bias.is_finite()
+            && dominant_channel
+                .map(|index| index < distribution_channels)
+                .unwrap_or(true)
+            && preserved_channels
+                .checked_add(discarded_channels)
+                .is_some_and(|channels| channels == distribution_channels)
     }
 
     fn from_zspace_trace_event(event: &ZSpaceTraceEvent) -> Option<Self> {
         let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = event else {
             return None;
         };
+        let distribution = ZSpaceCoherenceDistributionSummary {
+            channels: diagnostics.distribution_channels?,
+            weight_mass: f64::from(diagnostics.distribution_weight_mass?),
+            weight_entropy: f64::from(diagnostics.entropy),
+            normalized_entropy: f64::from(diagnostics.normalized_entropy?),
+            concentration: f64::from(diagnostics.concentration?),
+            effective_channels: f64::from(diagnostics.effective_channels?),
+        };
+        let control = derive_zspace_coherence_control(
+            distribution,
+            f64::from(diagnostics.energy_ratio),
+            f64::from(diagnostics.mean_coherence),
+        )
+        .ok()?;
+        if !Self::structure_is_valid(
+            diagnostics.dominant_channel,
+            diagnostics.preserved_channels,
+            diagnostics.discarded_channels,
+            control.channels,
+            diagnostics.z_bias,
+        ) {
+            return None;
+        }
+        if diagnostics.control_kind.as_deref() != Some(ZSPACE_COHERENCE_CONTROL_KIND)
+            || diagnostics.control_contract_version.as_deref()
+                != Some(ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION)
+            || diagnostics.control_semantic_owner.as_deref()
+                != Some(ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER)
+            || diagnostics.control_semantic_backend.as_deref()
+                != Some(ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND)
+            || diagnostics.control_formula.as_deref() != Some(ZSPACE_COHERENCE_CONTROL_FORMULA)
+            || !Self::trace_value_matches(diagnostics.spectral_radius, control.spectral_radius)
+            || !Self::trace_value_matches(diagnostics.spectral_entropy, control.spectral_entropy)
+            || !Self::trace_value_matches(diagnostics.spectral_pressure, control.spectral_pressure)
+        {
+            return None;
+        }
+        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
+            energy_ratio: f64::from(diagnostics.energy_ratio),
+            swap_invariant: diagnostics.swap_invariant?,
+            policy: ZSpaceCoherenceClassificationPolicy {
+                background_energy_ratio_max: diagnostics.background_energy_ratio_max?,
+                cascade_energy_ratio_min: diagnostics.cascade_energy_ratio_min?,
+            },
+        })
+        .ok()?;
+        if diagnostics.label != classification.label.as_str()
+            || diagnostics.classification_kind.as_deref()
+                != Some(ZSPACE_COHERENCE_CLASSIFICATION_KIND)
+            || diagnostics.classification_contract_version.as_deref()
+                != Some(ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION)
+            || diagnostics.classification_semantic_owner.as_deref()
+                != Some(ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER)
+            || diagnostics.classification_semantic_backend.as_deref()
+                != Some(ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND)
+            || diagnostics.classification_formula.as_deref()
+                != Some(ZSPACE_COHERENCE_CLASSIFICATION_FORMULA)
+            || diagnostics.classification_reason.as_deref() != Some(classification.reason)
+        {
+            return None;
+        }
         Some(Self {
             dominant_channel: diagnostics.dominant_channel,
-            preserved_channels: diagnostics.preserved_channels.max(1),
-            mean_coherence: diagnostics.mean_coherence,
+            preserved_channels: diagnostics.preserved_channels,
             z_bias: diagnostics.z_bias,
-            energy_ratio: diagnostics.energy_ratio,
-            entropy: diagnostics.entropy,
-            label: Self::label_from_str(&diagnostics.label),
+            control,
+            classification,
             repaired_non_finite_weights: diagnostics.repaired_non_finite_weights,
             repaired_negative_weights: diagnostics.repaired_negative_weights,
             pre_discard_repaired_non_finite: diagnostics.pre_discard_repaired_non_finite,
             pre_discard_repaired_negative: diagnostics.pre_discard_repaired_negative,
         })
     }
-}
 
-impl From<&CoherenceDiagnostics> for CoherenceSignal {
-    fn from(diagnostics: &CoherenceDiagnostics) -> Self {
-        Self {
+    fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Option<Self> {
+        let control = diagnostics.control_summary().ok()?;
+        let classification = diagnostics.classify(Default::default()).ok()?;
+        if !Self::structure_is_valid(
+            diagnostics.dominant_channel(),
+            diagnostics.preserved_channels(),
+            diagnostics.discarded_channels(),
+            control.channels,
+            diagnostics.z_bias(),
+        ) {
+            return None;
+        }
+        Some(Self {
             dominant_channel: diagnostics.dominant_channel(),
-            preserved_channels: diagnostics.preserved_channels().max(1),
-            mean_coherence: diagnostics.mean_coherence(),
+            preserved_channels: diagnostics.preserved_channels(),
             z_bias: diagnostics.z_bias(),
-            energy_ratio: diagnostics.energy_ratio(),
-            entropy: diagnostics.coherence_entropy(),
-            label: diagnostics.observation().lift_to_label(),
+            control,
+            classification,
             repaired_non_finite_weights: diagnostics.repaired_non_finite_weights(),
             repaired_negative_weights: diagnostics.repaired_negative_weights(),
             pre_discard_repaired_non_finite: diagnostics
@@ -697,7 +814,14 @@ impl From<&CoherenceDiagnostics> for CoherenceSignal {
                 .pre_discard()
                 .map(|telemetry| telemetry.repaired_negative())
                 .unwrap_or(0),
-        }
+        })
+    }
+}
+
+impl From<&CoherenceDiagnostics> for CoherenceSignal {
+    fn from(diagnostics: &CoherenceDiagnostics) -> Self {
+        Self::from_diagnostics(diagnostics)
+            .expect("CoherenceDiagnostics must satisfy its Rust-owned control contract")
     }
 }
 
@@ -709,6 +833,25 @@ pub struct ZSpaceTraceCoherenceBridge {
 }
 
 impl ZSpaceTraceCoherenceBridge {
+    fn replace_latest(latest: &Mutex<Option<CoherenceSignal>>, signal: Option<CoherenceSignal>) {
+        let mut guard = latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = signal;
+    }
+
+    fn replace_latest_from_trace_event(
+        latest: &Mutex<Option<CoherenceSignal>>,
+        trace_event: &ZSpaceTraceEvent,
+    ) {
+        if matches!(trace_event, ZSpaceTraceEvent::Aggregated { .. }) {
+            Self::replace_latest(
+                latest,
+                CoherenceSignal::from_zspace_trace_event(trace_event),
+            );
+        }
+    }
+
     pub fn subscribe() -> Self {
         let bus = global_registry().event_bus().clone();
         let latest: Arc<Mutex<Option<CoherenceSignal>>> = Arc::new(Mutex::new(None));
@@ -719,17 +862,16 @@ impl ZSpaceTraceCoherenceBridge {
                 let Some(payload) = event.downcast_data::<serde_json::Value>() else {
                     return;
                 };
+                let is_aggregated =
+                    payload.get("kind").and_then(Value::as_str) == Some("Aggregated");
                 let Ok(trace_event) = serde_json::from_value::<ZSpaceTraceEvent>(payload.clone())
                 else {
+                    if is_aggregated {
+                        Self::replace_latest(&latest_clone, None);
+                    }
                     return;
                 };
-                let Some(signal) = CoherenceSignal::from_zspace_trace_event(&trace_event) else {
-                    return;
-                };
-                let mut guard = latest_clone
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                *guard = Some(signal);
+                Self::replace_latest_from_trace_event(&latest_clone, &trace_event);
             }),
         );
         Self {
@@ -2362,7 +2504,7 @@ fn write_backend_policy_extra(policy: BackendPolicy, extra: &mut HashMap<String,
     );
 }
 
-fn write_coherence_repair_extra(
+fn write_coherence_signal_extra(
     signal: Option<&CoherenceSignal>,
     extra: &mut HashMap<String, f64>,
 ) {
@@ -2393,6 +2535,41 @@ fn write_coherence_repair_extra(
         "coherence_pre_discard_repairs_total".to_string(),
         signal.pre_discard_repairs_total() as f64,
     );
+    extra.insert("coherence_control_ready".to_string(), 1.0);
+    extra.insert(
+        "coherence_raw_mean".to_string(),
+        signal.mean_coherence() as f64,
+    );
+    extra.insert(
+        "coherence_raw_entropy".to_string(),
+        signal.coherence_entropy() as f64,
+    );
+    extra.insert(
+        "coherence_normalized_entropy".to_string(),
+        signal.normalized_entropy() as f64,
+    );
+    extra.insert(
+        "coherence_concentration".to_string(),
+        signal.concentration() as f64,
+    );
+    extra.insert(
+        "coherence_spectral_pressure".to_string(),
+        signal.spectral_pressure() as f64,
+    );
+    extra.insert(
+        "coherence_effective_channels".to_string(),
+        signal.effective_channels() as f64,
+    );
+    extra.insert(
+        "coherence_distribution_channels".to_string(),
+        signal.distribution_channels() as f64,
+    );
+    extra.insert(
+        "coherence_preserved_channels".to_string(),
+        signal.preserved_channels() as f64,
+    );
+    extra.insert("coherence_control_contract_v1".to_string(), 1.0);
+    extra.insert("coherence_control_backend_rust".to_string(), 1.0);
     extra.insert(
         "coherence_repairs_total".to_string(),
         signal.repairs_total() as f64,
@@ -4135,7 +4312,7 @@ impl SpectralLearningRatePolicy {
         curvature: f32,
         band_energy: &BandEnergy,
     ) -> Option<SpectralAdjustment> {
-        let signal = diagnostics.map(CoherenceSignal::from);
+        let signal = diagnostics.and_then(CoherenceSignal::from_diagnostics);
         self.observe_signal(signal.as_ref(), curvature, band_energy)
     }
 
@@ -4147,11 +4324,8 @@ impl SpectralLearningRatePolicy {
     ) -> Option<SpectralAdjustment> {
         let diagnostics = diagnostics?;
         let label = diagnostics.label();
-        let preserved = diagnostics.preserved_channels().max(1);
-        let dominant = diagnostics
-            .dominant_channel()
-            .unwrap_or(0)
-            .min(preserved - 1);
+        let sheets = diagnostics.distribution_channels().max(1);
+        let dominant = diagnostics.dominant_channel().unwrap_or(0).min(sheets - 1);
         let dominant_changed = self
             .last_dominant
             .map(|previous| previous != dominant)
@@ -4173,20 +4347,20 @@ impl SpectralLearningRatePolicy {
         } else {
             self.smoothing
         };
-        let sheet_ratio = (dominant as f32 + 0.5) / preserved as f32;
+        let sheet_ratio = (dominant as f32 + 0.5) / sheets as f32;
         let sheet_bias = (sheet_ratio - 0.5) * self.sheet_gain;
         let spin = diagnostics.z_bias().clamp(-1.0, 1.0);
         let spin_bias = spin * self.spin_gain;
-        let spectral_radius = diagnostics.mean_coherence().abs();
-        let entropy = diagnostics.coherence_entropy().max(0.0);
-        let energy_ratio = diagnostics.energy_ratio().max(0.0);
-        let spectral_pressure = energy_ratio * (1.0 - entropy.tanh());
+        let spectral_radius = diagnostics.concentration();
+        let entropy = diagnostics.normalized_entropy();
+        let energy_ratio = diagnostics.energy_ratio();
+        let spectral_pressure = diagnostics.spectral_pressure();
         let curvature_term = if curvature < 0.0 {
             (-curvature).sqrt() * self.curvature_gain
         } else {
             0.0
         };
-        let radius_bias = (1.0 - spectral_radius.tanh()).clamp(0.0, 1.0) * self.radius_gain;
+        let radius_bias = (1.0 - spectral_radius).clamp(0.0, 1.0) * self.radius_gain;
 
         let base_above = 1.0
             + sheet_bias.max(0.0)
@@ -4318,12 +4492,24 @@ impl SpectralLearningRatePolicy {
             metrics: SpectralAdjustmentMetrics {
                 absolute_lr_scale: self.applied_lr_scale,
                 sheet_index: diagnostics.dominant_channel().map(|idx| idx as u32),
-                sheet_count: preserved as u32,
+                sheet_count: sheets as u32,
                 spin_alignment: spin,
+                raw_mean_coherence: diagnostics.mean_coherence(),
+                raw_coherence_entropy: diagnostics.coherence_entropy(),
                 spectral_radius,
                 spectral_entropy: entropy,
                 spectral_pressure,
+                effective_channels: diagnostics.effective_channels(),
+                distribution_channels: diagnostics.distribution_channels() as u32,
                 energy_ratio,
+                control_kind: diagnostics.control().kind,
+                control_contract_version: diagnostics.control().contract_version,
+                control_semantic_owner: diagnostics.control().semantic_owner,
+                control_semantic_backend: diagnostics.control().semantic_backend,
+                control_formula: diagnostics.control().control_formula,
+                classification_reason: diagnostics.classification().reason,
+                classification_contract_version: diagnostics.classification().contract_version,
+                classification_formula: diagnostics.classification().classification_formula,
                 band_scale: target_band,
                 local_lr: target_local,
             },
@@ -4359,10 +4545,22 @@ pub struct SpectralAdjustmentMetrics {
     pub sheet_index: Option<u32>,
     pub sheet_count: u32,
     pub spin_alignment: f32,
+    pub raw_mean_coherence: f32,
+    pub raw_coherence_entropy: f32,
     pub spectral_radius: f32,
     pub spectral_entropy: f32,
     pub spectral_pressure: f32,
+    pub effective_channels: f32,
+    pub distribution_channels: u32,
     pub energy_ratio: f32,
+    pub control_kind: &'static str,
+    pub control_contract_version: &'static str,
+    pub control_semantic_owner: &'static str,
+    pub control_semantic_backend: &'static str,
+    pub control_formula: &'static str,
+    pub classification_reason: &'static str,
+    pub classification_contract_version: &'static str,
+    pub classification_formula: &'static str,
     pub band_scale: (f32, f32, f32),
     pub local_lr: (f32, f32, f32),
 }
@@ -4718,9 +4916,10 @@ impl ModuleTrainer {
         self.phase_last_turnover = None;
     }
 
-    /// Publishes fresh coherence diagnostics that will be consumed by the spectral policy.
-    pub fn push_coherence_diagnostics(&mut self, diagnostics: CoherenceDiagnostics) {
-        self.pending_coherence = Some(CoherenceSignal::from(&diagnostics));
+    /// Publishes fresh coherence diagnostics when their Rust control contract validates.
+    pub fn push_coherence_diagnostics(&mut self, diagnostics: CoherenceDiagnostics) -> bool {
+        self.pending_coherence = CoherenceSignal::from_diagnostics(&diagnostics);
+        self.pending_coherence.is_some()
     }
 
     /// Enables automatic coherence injection by listening to `ZSpaceTrace` plugin events.
@@ -5792,7 +5991,7 @@ impl ModuleTrainer {
                     .write_extra(&mut extra, "batch_grad_output");
             }
             write_backend_policy_extra(backend_policy, &mut extra);
-            write_coherence_repair_extra(coherence_snapshot.as_ref(), &mut extra);
+            write_coherence_signal_extra(coherence_snapshot.as_ref(), &mut extra);
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
@@ -5904,6 +6103,14 @@ impl ModuleTrainer {
                     metrics.spectral_radius as f64,
                 );
                 extra.insert(
+                    "spectral_raw_mean_coherence".to_string(),
+                    metrics.raw_mean_coherence as f64,
+                );
+                extra.insert(
+                    "spectral_raw_coherence_entropy".to_string(),
+                    metrics.raw_coherence_entropy as f64,
+                );
+                extra.insert(
                     "spectral_entropy".to_string(),
                     metrics.spectral_entropy as f64,
                 );
@@ -5911,6 +6118,16 @@ impl ModuleTrainer {
                     "spectral_pressure".to_string(),
                     metrics.spectral_pressure as f64,
                 );
+                extra.insert(
+                    "spectral_effective_channels".to_string(),
+                    metrics.effective_channels as f64,
+                );
+                extra.insert(
+                    "spectral_distribution_channels".to_string(),
+                    metrics.distribution_channels as f64,
+                );
+                extra.insert("spectral_control_contract_v1".to_string(), 1.0);
+                extra.insert("spectral_control_backend_rust".to_string(), 1.0);
                 extra.insert(
                     "spectral_energy_ratio".to_string(),
                     metrics.energy_ratio as f64,
@@ -7607,8 +7824,14 @@ mod tests {
     use crate::roundtable::RoundtableGnnBridge;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
+    use crate::zspace_coherence::{
+        ZSpaceCoherenceSequencer, ZSpaceTraceConfig, ZSpaceTraceRecorder,
+    };
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
+    use st_core::inference::zspace_coherence::{
+        is_zspace_coherence_swap_invariant, summarize_zspace_coherence_distribution,
+    };
     use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::runtime::zspace_optimizer::{
@@ -7646,6 +7869,43 @@ mod tests {
             },
         })
         .expect("parameter control report")
+    }
+
+    fn coherence_signal_for_weights(
+        weights: Vec<f32>,
+        energy_ratio: f32,
+        z_bias: f32,
+    ) -> CoherenceSignal {
+        let channels = weights.len();
+        let raw_mean_coherence = weights.iter().sum::<f32>() / channels as f32;
+        let distribution = summarize_zspace_coherence_distribution(&weights).unwrap();
+        let control = derive_zspace_coherence_control(
+            distribution,
+            f64::from(energy_ratio),
+            f64::from(raw_mean_coherence),
+        )
+        .unwrap();
+        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
+            energy_ratio: f64::from(energy_ratio),
+            swap_invariant: is_zspace_coherence_swap_invariant(&weights),
+            policy: ZSpaceCoherenceClassificationPolicy::default(),
+        })
+        .unwrap();
+        CoherenceSignal {
+            dominant_channel: weights
+                .iter()
+                .enumerate()
+                .max_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
+                .map(|(index, _)| index),
+            preserved_channels: weights.iter().filter(|weight| **weight > 0.0).count(),
+            z_bias,
+            control,
+            classification,
+            repaired_non_finite_weights: 0,
+            repaired_negative_weights: 0,
+            pre_discard_repaired_non_finite: 0,
+            pre_discard_repaired_negative: 0,
+        }
     }
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -8633,6 +8893,124 @@ mod tests {
         assert!(band.l1().is_finite());
         assert!(band.l1() > 0.0);
         assert!((0.0..=1.0).contains(&band.spectral.sheet_confidence));
+    }
+
+    #[test]
+    fn spectral_policy_control_is_dimension_invariant_at_distribution_extremes() {
+        fn policy() -> SpectralLearningRatePolicy {
+            SpectralLearningRatePolicy::default()
+                .with_smoothing(1.0)
+                .with_event_smoothing(1.0)
+                .with_sheet_gain(0.0)
+                .with_spin_gain(0.0)
+                .with_phase_gain(0.0)
+                .with_stuck_phase_gain(0.0)
+                .with_energy_gain(0.0)
+        }
+
+        fn adjustment(weights: Vec<f32>) -> SpectralAdjustment {
+            let signal = coherence_signal_for_weights(weights, 0.8, 0.0);
+            policy()
+                .observe_signal(Some(&signal), 0.0, &BandEnergy::new(1.0, 1.0, 1.0))
+                .expect("validated coherence control")
+        }
+
+        for concentrated in [false, true] {
+            let mut four = vec![0.25; 4];
+            let mut sixty_four = vec![1.0 / 64.0; 64];
+            if concentrated {
+                four.fill(0.0);
+                four[0] = 1.0;
+                sixty_four.fill(0.0);
+                sixty_four[0] = 1.0;
+            }
+
+            let four = adjustment(four);
+            let sixty_four = adjustment(sixty_four);
+            assert!((four.metrics.raw_mean_coherence - 0.25).abs() < 1.0e-6);
+            assert!((sixty_four.metrics.raw_mean_coherence - 1.0 / 64.0).abs() < 1.0e-6);
+            assert!(
+                (four.metrics.spectral_radius - sixty_four.metrics.spectral_radius).abs() < 1.0e-6
+            );
+            assert!(
+                (four.metrics.spectral_entropy - sixty_four.metrics.spectral_entropy).abs()
+                    < 1.0e-6
+            );
+            assert!(
+                (four.metrics.spectral_pressure - sixty_four.metrics.spectral_pressure).abs()
+                    < 1.0e-6
+            );
+            assert!((four.lr_scale - sixty_four.lr_scale).abs() < 1.0e-6);
+            assert!((four.band_scale.0 - sixty_four.band_scale.0).abs() < 1.0e-6);
+            assert!((four.band_scale.1 - sixty_four.band_scale.1).abs() < 1.0e-6);
+            assert!((four.band_scale.2 - sixty_four.band_scale.2).abs() < 1.0e-6);
+            assert_eq!(four.metrics.control_kind, ZSPACE_COHERENCE_CONTROL_KIND);
+            assert_eq!(
+                four.metrics.control_contract_version,
+                ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION
+            );
+            assert_eq!(four.metrics.control_semantic_backend, "rust");
+            assert_eq!(four.metrics.distribution_channels, 4);
+            assert_eq!(sixty_four.metrics.distribution_channels, 64);
+        }
+    }
+
+    #[test]
+    fn trace_bridge_accepts_only_current_consistent_rust_control_contracts() {
+        let topos = OpenCartesianTopos::new(-1.0, 1.0e-5, 10.0, 256, 8192).unwrap();
+        let mut sequencer = ZSpaceCoherenceSequencer::new(64, 4, -1.0, topos).unwrap();
+        let recorder = ZSpaceTraceRecorder::new(ZSpaceTraceConfig {
+            capacity: 16,
+            max_vector_len: 64,
+            publish_plugin_events: false,
+        });
+        sequencer.register_plugin(recorder.clone());
+        let input = Tensor::from_vec(1, 64, vec![0.05; 64]).unwrap();
+        sequencer.forward_with_diagnostics(&input).unwrap();
+        let event = recorder
+            .snapshot()
+            .events
+            .into_iter()
+            .find(|event| matches!(event, ZSpaceTraceEvent::Aggregated { .. }))
+            .expect("aggregated trace event");
+
+        let signal = CoherenceSignal::from_zspace_trace_event(&event)
+            .expect("current Rust trace contract should be accepted");
+        assert_eq!(signal.control().kind, ZSPACE_COHERENCE_CONTROL_KIND);
+        assert_eq!(signal.control().semantic_backend, "rust");
+        let latest = Mutex::new(None);
+        ZSpaceTraceCoherenceBridge::replace_latest_from_trace_event(&latest, &event);
+        assert!(latest.lock().unwrap().is_some());
+
+        let mut legacy = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut legacy else {
+            unreachable!()
+        };
+        diagnostics.control_contract_version = None;
+        assert!(CoherenceSignal::from_zspace_trace_event(&legacy).is_none());
+
+        let mut missing_mass = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut missing_mass else {
+            unreachable!()
+        };
+        diagnostics.distribution_weight_mass = None;
+        assert!(CoherenceSignal::from_zspace_trace_event(&missing_mass).is_none());
+
+        let mut invalid_structure = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut invalid_structure else {
+            unreachable!()
+        };
+        diagnostics.dominant_channel = diagnostics.distribution_channels;
+        assert!(CoherenceSignal::from_zspace_trace_event(&invalid_structure).is_none());
+
+        let mut tampered = event;
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut tampered else {
+            unreachable!()
+        };
+        diagnostics.spectral_pressure = diagnostics.spectral_pressure.map(|value| value + 0.1);
+        assert!(CoherenceSignal::from_zspace_trace_event(&tampered).is_none());
+        ZSpaceTraceCoherenceBridge::replace_latest_from_trace_event(&latest, &tampered);
+        assert!(latest.lock().unwrap().is_none());
     }
 
     #[test]
@@ -9746,23 +10124,15 @@ mod tests {
     }
 
     #[test]
-    fn coherence_repair_trace_writes_trainer_extra_metrics() {
-        let signal = CoherenceSignal {
-            dominant_channel: Some(1),
-            preserved_channels: 4,
-            mean_coherence: 0.25,
-            z_bias: 0.1,
-            energy_ratio: 0.5,
-            entropy: 0.2,
-            label: CoherenceLabel::DiffuseDrift,
-            repaired_non_finite_weights: 2,
-            repaired_negative_weights: 1,
-            pre_discard_repaired_non_finite: 3,
-            pre_discard_repaired_negative: 4,
-        };
+    fn coherence_signal_trace_writes_trainer_extra_metrics() {
+        let mut signal = coherence_signal_for_weights(vec![0.5, 0.2, 0.2, 0.1], 0.5, 0.1);
+        signal.repaired_non_finite_weights = 2;
+        signal.repaired_negative_weights = 1;
+        signal.pre_discard_repaired_non_finite = 3;
+        signal.pre_discard_repaired_negative = 4;
 
         let mut extra = HashMap::new();
-        write_coherence_repair_extra(Some(&signal), &mut extra);
+        write_coherence_signal_extra(Some(&signal), &mut extra);
 
         assert_eq!(
             extra.get("coherence_repaired_non_finite_weights").copied(),
@@ -9794,6 +10164,21 @@ mod tests {
         );
         assert_eq!(extra.get("coherence_repairs_total").copied(), Some(10.0));
         assert_eq!(extra.get("coherence_repaired_detected").copied(), Some(1.0));
+        assert_eq!(extra.get("coherence_control_ready").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("coherence_distribution_channels").copied(),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra.get("coherence_control_contract_v1").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("coherence_control_backend_rust").copied(),
+            Some(1.0)
+        );
+        assert!((0.0..=1.0).contains(&extra["coherence_normalized_entropy"]));
+        assert!((0.0..=1.0).contains(&extra["coherence_concentration"]));
     }
 
     #[test]

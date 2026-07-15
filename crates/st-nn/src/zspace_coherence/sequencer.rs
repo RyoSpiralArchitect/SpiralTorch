@@ -20,12 +20,13 @@ use crate::{
     Module, PureResult, Tensor,
 };
 use st_core::inference::zspace_coherence::{
-    classify_zspace_coherence, is_zspace_coherence_swap_invariant, project_zspace_coherence,
-    summarize_zspace_coherence_distribution, ZSpaceCoherenceClassificationPayload,
-    ZSpaceCoherenceClassificationRequest, ZSpaceCoherenceContourInput,
-    ZSpaceCoherenceDiagnosticsInput, ZSpaceCoherenceDistributionSummary,
-    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionError,
-    ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionRequest,
+    classify_zspace_coherence, derive_zspace_coherence_control, is_zspace_coherence_swap_invariant,
+    project_zspace_coherence, summarize_zspace_coherence_distribution,
+    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationRequest,
+    ZSpaceCoherenceContourInput, ZSpaceCoherenceControlPayload, ZSpaceCoherenceDiagnosticsInput,
+    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionConfig,
+    ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
+    ZSpaceCoherenceProjectionRequest,
 };
 pub use st_core::inference::zspace_coherence::{
     ZSpaceCoherenceClassificationPolicy, ZSpaceCoherenceLabel as CoherenceLabel,
@@ -574,6 +575,17 @@ impl CoherenceDiagnostics {
         &self,
     ) -> Result<ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionError> {
         summarize_zspace_coherence_distribution(&self.normalized_weights)
+    }
+
+    /// Derives dimensionless trainer/runtime controls through the canonical Rust contract.
+    pub fn control_summary(
+        &self,
+    ) -> Result<ZSpaceCoherenceControlPayload, ZSpaceCoherenceProjectionError> {
+        derive_zspace_coherence_control(
+            self.distribution_summary()?,
+            self.energy_ratio as f64,
+            self.mean_coherence as f64,
+        )
     }
 
     /// Classifies these diagnostics through the canonical Rust observation policy.
@@ -3286,6 +3298,59 @@ mod tests {
                 "dominant_energy_ratio_at_or_above_cascade_min"
             );
         }
+    }
+
+    #[test]
+    fn control_summary_uses_dimensionless_radius_entropy_and_pressure() {
+        fn extreme_diagnostics(channels: usize, concentrated: bool) -> CoherenceDiagnostics {
+            let mut normalized = vec![1.0 / channels as f32; channels];
+            if concentrated {
+                normalized.fill(0.0);
+                normalized[0] = 1.0;
+            }
+            let entropy = if concentrated {
+                0.0
+            } else {
+                (channels as f32).ln()
+            };
+            make_diagnostics(
+                normalized.clone(),
+                normalized,
+                0.8,
+                entropy,
+                1.0 / channels as f32,
+            )
+        }
+
+        let uniform_four = extreme_diagnostics(4, false).control_summary().unwrap();
+        let uniform_sixty_four = extreme_diagnostics(64, false).control_summary().unwrap();
+        assert!((uniform_four.raw_mean_coherence - 0.25).abs() < 1.0e-6);
+        assert!((uniform_sixty_four.raw_mean_coherence - 1.0 / 64.0).abs() < 1.0e-6);
+        assert!((uniform_four.spectral_radius - uniform_sixty_four.spectral_radius).abs() < 1.0e-6);
+        assert!(
+            (uniform_four.spectral_entropy - uniform_sixty_four.spectral_entropy).abs() < 1.0e-6
+        );
+        assert!(
+            (uniform_four.spectral_pressure - uniform_sixty_four.spectral_pressure).abs() < 1.0e-6
+        );
+
+        let concentrated_four = extreme_diagnostics(4, true).control_summary().unwrap();
+        let concentrated_sixty_four = extreme_diagnostics(64, true).control_summary().unwrap();
+        assert!((concentrated_four.spectral_radius - 1.0).abs() < 1.0e-6);
+        assert!((concentrated_four.spectral_entropy - 0.0).abs() < 1.0e-6);
+        assert!((concentrated_four.spectral_pressure - 0.8).abs() < 1.0e-6);
+        assert!(
+            (concentrated_four.spectral_radius - concentrated_sixty_four.spectral_radius).abs()
+                < 1.0e-6
+        );
+        assert!(
+            (concentrated_four.spectral_entropy - concentrated_sixty_four.spectral_entropy).abs()
+                < 1.0e-6
+        );
+        assert!(
+            (concentrated_four.spectral_pressure - concentrated_sixty_four.spectral_pressure).abs()
+                < 1.0e-6
+        );
     }
 
     #[test]

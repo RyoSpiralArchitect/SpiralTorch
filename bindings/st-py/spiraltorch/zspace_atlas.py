@@ -261,6 +261,10 @@ def zspace_trace_event_to_atlas_frame(
                 _as_float(diagnostics.get("distribution_channels")),
             ),
             (
+                "coherence_distribution_weight_mass",
+                _as_float(diagnostics.get("distribution_weight_mass")),
+            ),
+            (
                 "coherence_swap_invariant",
                 _as_metric_float(diagnostics.get("swap_invariant")),
             ),
@@ -271,6 +275,18 @@ def zspace_trace_event_to_atlas_frame(
             (
                 "coherence_cascade_energy_ratio_min",
                 _as_float(diagnostics.get("cascade_energy_ratio_min")),
+            ),
+            (
+                "coherence_spectral_radius",
+                _as_float(diagnostics.get("spectral_radius")),
+            ),
+            (
+                "coherence_spectral_entropy",
+                _as_float(diagnostics.get("spectral_entropy")),
+            ),
+            (
+                "coherence_spectral_pressure",
+                _as_float(diagnostics.get("spectral_pressure")),
             ),
         )
 
@@ -373,6 +389,11 @@ def zspace_trace_event_to_atlas_frame(
             "classification_semantic_owner",
             "classification_semantic_backend",
             "classification_formula",
+            "control_kind",
+            "control_contract_version",
+            "control_semantic_owner",
+            "control_semantic_backend",
+            "control_formula",
         ):
             value = diagnostics.get(field)
             if isinstance(value, str) and value:

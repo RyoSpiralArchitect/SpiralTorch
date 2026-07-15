@@ -262,8 +262,22 @@ def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
     assert math.isfinite(diagnostics.coherence_entropy)
     observation = diagnostics.observation
     classification = diagnostics.classification
+    control = diagnostics.control
     assert classification["label"] == observation.label
     assert classification["semantic_backend"] == "rust"
+    assert control["kind"] == "spiraltorch.zspace_coherence_control"
+    assert control["contract_version"] == "spiraltorch.zspace_coherence_control.v1"
+    assert control["semantic_owner"] == "st-core::inference::zspace_coherence"
+    assert control["semantic_backend"] == "rust"
+    assert control["channels"] == len(diagnostics.normalized_weights)
+    assert control["raw_mean_coherence"] == pytest.approx(diagnostics.mean_coherence)
+    assert control["raw_coherence_entropy"] == pytest.approx(
+        diagnostics.coherence_entropy
+    )
+    assert 0.0 <= control["spectral_radius"] <= 1.0
+    assert 0.0 <= control["spectral_entropy"] <= 1.0
+    assert 0.0 <= control["spectral_pressure"] <= 1.0
+    assert control["control_formula"]
     custom_classification = diagnostics.classify(cascade_energy_ratio_min=0.95)
     assert custom_classification["policy"]["cascade_energy_ratio_min"] == pytest.approx(
         0.95

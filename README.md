@@ -234,6 +234,7 @@ sequencer = st.ZSpaceCoherenceSequencer(16, 2, -0.9, topos=topos)
 x = st.Tensor((1, 16), data=[0.1] * 8 + [0.8] * 8)
 out, coherence, diagnostics = sequencer.forward_with_diagnostics(x)
 contour = sequencer.emit_linguistic_contour(x)
+control = diagnostics.control
 contract = st.zspace_coherence_project(
     diagnostics,
     coherence=coherence,
@@ -242,12 +243,18 @@ contract = st.zspace_coherence_project(
 assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
 assert contract["derived"]["distribution_source"] == "normalized_weights"
 assert contract["classification"]["label"] == diagnostics.observation.label
+assert control["contract_version"] == "spiraltorch.zspace_coherence_control.v1"
+assert contract["control"]["spectral_radius"] == control["spectral_radius"]
 ```
 
 Python remains the orchestrator; it does not reconstruct the Rust diagnostics
-or carry a second projection formula. Rust preserves raw `mean_coherence` for
-audit, but derives control-facing `speed` and `stability` from normalized HHI
-concentration and `H / ln(N)` so channel count alone cannot change the result.
+or carry a second projection formula. Rust preserves raw `mean_coherence` and
+raw Shannon entropy for audit, but derives trainer-facing spectral radius,
+entropy, and pressure from normalized HHI concentration and `H / ln(N)` so
+channel count alone cannot change the control signal. Pass diagnostics directly
+with `trainer.push_coherence_diagnostics(diagnostics)`; replayed trace events are
+accepted only when their Rust contract provenance, probability mass, summaries,
+classification, and control values still agree.
 The same versioned Rust policy emits `background`, `symmetric_pulse`,
 `cascade_imbalance`, or `diffuse_drift` with an explicit reason and thresholds;
 trace, Python, and WASM only transport that decision. Call
