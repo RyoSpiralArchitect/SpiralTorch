@@ -2039,7 +2039,18 @@ print("weights:", weights.tolist())
 trainer = st.ZSpaceTrainer(z_dim=4)
 loss = trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
 print("z:", trainer.state, "loss:", loss)
+print("optimizer audit:", trainer.last_optimizer_report["adam"])
 ```
+
+The class contains no Python Adam or fractional-FFT fallback. Initialization,
+checkpoint restore, observation normalisation, the FFT-derived periodic
+fractional Sobolev gradient, bounded Topos controls, and the complete Adam
+transition are owned by `st-core::runtime::zspace_optimizer`. Python fuses payloads and caches inference
+metadata, then serializes transition-plus-commit per trainer and commits only a
+successful Rust report. Native FFT work releases the GIL. The low-level
+`zspace_meta_optimizer_init`, `zspace_meta_optimizer_restore`, and
+`zspace_meta_optimizer_step` functions expose the same versioned contract for
+custom orchestrators.
 
 ### AmegagradSession quickstart
 

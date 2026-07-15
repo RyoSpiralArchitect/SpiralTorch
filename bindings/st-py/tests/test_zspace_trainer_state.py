@@ -16,7 +16,7 @@ def test_load_state_with_empty_vectors_resets_contents() -> None:
         trainer,
         z=[1.0, -2.0, 3.0],
         moment=[0.5, 0.25, -0.75],
-        velocity=[0.1, -0.2, 0.3],
+        velocity=[0.1, 0.2, 0.3],
         step=7,
     )
 
@@ -42,7 +42,7 @@ def test_load_state_with_missing_vectors_preserves_existing_when_non_strict() ->
     original_state = {
         "z": [0.3, -0.1],
         "moment": [0.7, -0.6],
-        "velocity": [0.2, -0.4],
+        "velocity": [0.2, 0.4],
     }
     _set_trainer_vectors(
         trainer,

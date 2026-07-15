@@ -47,6 +47,7 @@ mod vision;
 mod wgpu;
 mod zpulse;
 mod zspace;
+mod zspace_optimizer;
 
 #[cfg(not(feature = "nn"))]
 mod psi_synchro {
@@ -277,6 +278,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[cfg(feature = "robotics")]
     robotics::register(py, m)?;
     zspace::register(py, m)?;
+    zspace_optimizer::register(py, m)?;
     elliptic::register(py, m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;

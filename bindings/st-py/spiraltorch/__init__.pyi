@@ -4800,6 +4800,7 @@ class ZSpaceTrainer:
         beta2: float = ...,
         eps: float = ...,
         topos_control_gain: float = ...,
+        gradient_projection: str = ...,
     ) -> None: ...
     @property
     def state(self) -> List[float]: ...
@@ -4809,28 +4810,69 @@ class ZSpaceTrainer:
     def last_telemetry(self) -> Mapping[str, float]: ...
     @property
     def last_topos_control(self) -> Mapping[str, float]: ...
+    @property
+    def last_optimizer_report(self) -> Mapping[str, object] | None: ...
     def step(
         self,
-        metrics: Mapping[str, float] | ZMetrics | ZSpaceInference,
+        metrics: Mapping[str, object] | ZMetrics | ZSpaceInference,
         *,
         prefer_applied: bool = ...,
     ) -> float: ...
     def reset(self) -> None: ...
     def state_dict(self) -> Dict[str, object]: ...
-    def load_state_dict(self, state: Dict[str, object], *, strict: bool = ...) -> None: ...
+    def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
     def step_batch(
         self,
-        metrics: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
+        metrics: Iterable[Mapping[str, object] | ZMetrics | ZSpaceInference],
     ) -> List[float]: ...
+    def infer_partial(
+        self,
+        partial: Mapping[str, object] | ZSpacePartialBundle | None,
+        *,
+        alpha: float | None = ...,
+        smoothing: float = ...,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+    def step_partial(
+        self,
+        partial: Mapping[str, object] | ZSpacePartialBundle | None,
+        *,
+        alpha: float | None = ...,
+        smoothing: float = ...,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+        prefer_applied: bool = ...,
+    ) -> float: ...
+
+ZSPACE_META_OBJECTIVE_FORMULA: str
+ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: str
+ZSPACE_META_OPTIMIZER_KIND: str
+ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND: str
+ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER: str
+
+def zspace_meta_optimizer_init(
+    config: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_meta_optimizer_restore(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    strict: bool = ...,
+) -> Dict[str, object]: ...
+def zspace_meta_optimizer_step(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    observation: Mapping[str, object],
+) -> Dict[str, object]: ...
 
 def step_many(
     trainer: ZSpaceTrainer,
-    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
+    samples: Iterable[Mapping[str, object] | ZMetrics | ZSpaceInference],
 ) -> List[float]: ...
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
+    samples: Iterable[Mapping[str, object] | ZMetrics | ZSpaceInference],
     *,
     on_step: Optional[Callable[[int, List[float], float], None]] = ...,
 ) -> List[float]: ...
@@ -10943,6 +10985,14 @@ __all__ = [
     "training_telemetry_projection",
     "zspace_concept_diffusion",
     "zspace_free_energy",
+    "ZSPACE_META_OBJECTIVE_FORMULA",
+    "ZSPACE_META_OPTIMIZER_CONTRACT_VERSION",
+    "ZSPACE_META_OPTIMIZER_KIND",
+    "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
+    "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+    "zspace_meta_optimizer_init",
+    "zspace_meta_optimizer_restore",
+    "zspace_meta_optimizer_step",
     "zspace_generation_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

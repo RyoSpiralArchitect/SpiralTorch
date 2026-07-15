@@ -30,6 +30,18 @@ def test_spiraltorchvision_negative_weight_rejected():
         vision.accumulate([[[1.0]]], weight=-0.1)
 
 
+def test_spiraltorchvision_state_round_trip_does_not_require_optimizer_state():
+    vision = SpiralTorchVision(depth=1, height=1, width=2, alpha=0.4)
+    vision.accumulate([[[1.0, 2.0]]])
+    state = vision.state_dict()
+
+    restored = SpiralTorchVision(depth=1, height=1, width=2)
+    restored.load_state_dict(state)
+
+    assert restored.volume == vision.volume
+    assert restored.state_dict()["alpha"] == pytest.approx(0.4)
+
+
 def test_stream_vision_training_with_trainer_updates_state():
     vision = SpiralTorchVision(depth=2, height=2, width=2, alpha=0.35, temporal=3)
     trainer = st.ZSpaceTrainer(z_dim=4, lr=5e-3)

@@ -471,6 +471,155 @@ declare module "spiraltorch-wasm" {
         component_sum_residual: number;
     };
 
+    export type ZSpaceMetaOptimizerGradientProjection =
+        | "tile_or_truncate"
+        | "exact";
+
+    export type ZSpaceMetaOptimizerWeights = {
+        speed?: number;
+        memory?: number;
+        stability?: number;
+        fractional?: number;
+        drift_response?: number;
+    };
+
+    export type ZSpaceMetaOptimizerConfigInput = {
+        dimension?: number;
+        fractional_order?: number;
+        weights?: ZSpaceMetaOptimizerWeights;
+        learning_rate?: number;
+        first_moment_decay?: number;
+        second_moment_decay?: number;
+        epsilon?: number;
+        topos_control_gain?: number;
+        gradient_projection?: ZSpaceMetaOptimizerGradientProjection;
+    };
+
+    export type ZSpaceMetaOptimizerConfig = Required<
+        Omit<ZSpaceMetaOptimizerConfigInput, "weights">
+    > & {
+        weights: Required<ZSpaceMetaOptimizerWeights>;
+    };
+
+    export type ZSpaceMetaOptimizerState = {
+        z: number[];
+        first_moment: number[];
+        second_moment: number[];
+        step: number;
+    };
+
+    export type ZSpaceMetaOptimizerObservation = {
+        speed?: number;
+        memory?: number;
+        stability?: number;
+        drift_response?: number;
+        gradient?: number[];
+        telemetry?: Record<string, number>;
+    };
+
+    export type ZSpaceMetaOptimizerRestoreRequest = {
+        config: ZSpaceMetaOptimizerConfigInput;
+        state: ZSpaceMetaOptimizerState;
+        strict?: boolean;
+    };
+
+    export type ZSpaceMetaOptimizerStepRequest = {
+        config: ZSpaceMetaOptimizerConfigInput;
+        state: ZSpaceMetaOptimizerState;
+        observation: ZSpaceMetaOptimizerObservation;
+    };
+
+    export type ZSpaceMetaOptimizerCheckpoint = {
+        contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        kind: "spiraltorch.zspace_meta_optimizer";
+        semantic_owner: "st-core::runtime::zspace_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        config: ZSpaceMetaOptimizerConfig;
+        state: ZSpaceMetaOptimizerState;
+    };
+
+    export type ZSpaceMetaOptimizerStepReport = {
+        contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        kind: "spiraltorch.zspace_meta_optimizer";
+        semantic_owner: "st-core::runtime::zspace_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        objective_formula: "J_obs=sum_i(lambda_i*tanh(metric_i))+lambda_topos*tanh(topos_pressure)+lambda_frac_eff*R_alpha(z)";
+        transition_validated: true;
+        config: ZSpaceMetaOptimizerConfig;
+        observation: Required<ZSpaceMetaOptimizerObservation>;
+        objective: {
+            normalized_speed: number;
+            normalized_memory: number;
+            normalized_stability: number;
+            normalized_drift_response: number;
+            speed_term: number;
+            memory_term: number;
+            stability_term: number;
+            drift_response_term: number;
+            topos_term: number;
+            fractional_term: number;
+            observed_resource_penalty: number;
+            objective_before: number;
+        };
+        fractional_regularizer: {
+            formula: string;
+            order: number;
+            signal_length: number;
+            spectral_bins: number;
+            energy: number;
+            raw_gradient: number[];
+            gradient_normalization_scale: number;
+            normalized_gradient: number[];
+        };
+        topos_control: {
+            present: boolean;
+            active: boolean;
+            closure_pressure: number;
+            depth_pressure: number;
+            volume_pressure: number;
+            guard_strength: number;
+            step_damping: number;
+            sampling_focus: number;
+            openness: number;
+            exploration_hint: number;
+            pressure: number;
+            learning_rate_hint: number;
+            learning_rate_scale: number;
+            effective_learning_rate: number;
+            clip_hint: number;
+            clip_scale: number;
+            gradient_clip_threshold: number | null;
+            regularization_hint: number;
+            regularization_scale: number;
+            effective_fractional_weight: number;
+            gradient_bias_scale: number;
+            gradient_bias: number[];
+        };
+        gradient: {
+            rule: string;
+            source_dimension: number;
+            target_dimension: number;
+            projection: ZSpaceMetaOptimizerGradientProjection;
+            observed: number[];
+            projected_normalized: number[];
+            before_clip: number[];
+            applied: number[];
+            clipped_values: number;
+        };
+        adam: {
+            rule: string;
+            step: number;
+            first_moment_bias_correction: number;
+            second_moment_bias_correction: number;
+            effective_learning_rate: number;
+            parameter_delta: number[];
+        };
+        state_before: ZSpaceMetaOptimizerState;
+        state_after: ZSpaceMetaOptimizerState;
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -843,6 +992,18 @@ declare module "spiraltorch-wasm" {
     export function zspaceFreeEnergyObject(
         request: FreeEnergyRequest,
     ): FreeEnergyReport;
+    export function zspaceMetaOptimizerInitJson(configJson: string): string;
+    export function zspaceMetaOptimizerInitObject(
+        config: ZSpaceMetaOptimizerConfigInput,
+    ): ZSpaceMetaOptimizerCheckpoint;
+    export function zspaceMetaOptimizerRestoreJson(requestJson: string): string;
+    export function zspaceMetaOptimizerRestoreObject(
+        request: ZSpaceMetaOptimizerRestoreRequest,
+    ): ZSpaceMetaOptimizerCheckpoint;
+    export function zspaceMetaOptimizerStepJson(requestJson: string): string;
+    export function zspaceMetaOptimizerStepObject(
+        request: ZSpaceMetaOptimizerStepRequest,
+    ): ZSpaceMetaOptimizerStepReport;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,
