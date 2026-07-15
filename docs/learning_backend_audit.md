@@ -3667,6 +3667,29 @@ adds only an execution-client marker. This control plane remains deliberately
 separate from WGPU, which owns bulk tensor execution rather than posterior
 meaning.
 
+Coherence diagnostics now cross that boundary without a Python
+reinterpretation. `st-nn::zspace_coherence::CoherenceDiagnostics` owns the
+measured channel weights, entropy, energy concentration, fractional order,
+Z-bias, pre-discard counts, and optional linguistic contour. Its
+`project_to_zspace_partial(...)` method delegates the projection to
+`st-core::inference::zspace_coherence`, whose versioned contract owns gain
+validation, the five base projections, weight entropy, response summaries, and
+contour metrics. The contract does not use `mean_coherence` as a control signal:
+Maxwell weights already live on a probability simplex, which would make that
+mean equal to `1 / channel_count`. It instead recomputes normalized HHI
+concentration and `H / ln(N)`, exposes the derived values and source in the
+payload, and keeps the raw mean only as an audit field.
+
+The Python binding now retains the Rust diagnostics object instead of
+destructuring it and hiding scalar fields promised by the stub.
+`coherence_partial_from_diagnostics(...)` is only an adapter over
+`zspace_coherence_project(...)`; it has no local formula or silent-zero
+fallback. Z-space trace conversion to Atlas uses the same contract when all
+required diagnostics are present. Invalid optional legacy fields are noted and
+omitted; a rejected contract falls back to raw diagnostic display rather than
+aborting the Atlas route. WASM exposes the identical object/JSON request and
+adds only `execution_client: "wasm"`.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op

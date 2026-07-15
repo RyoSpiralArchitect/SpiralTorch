@@ -103,6 +103,37 @@ The corresponding `zspacePosteriorDecodeJson` and
 contracts. WASM adds only `execution_client: "wasm"`; it has no JavaScript
 posterior fallback.
 
+Coherence diagnostics use a peer contract as well. Browser code may carry
+diagnostics produced elsewhere, but the projection formula and summaries are
+owned by `st-core::inference::zspace_coherence`:
+
+```ts
+import { zspaceCoherenceProjectObject } from "spiraltorch-wasm";
+
+const projection = zspaceCoherenceProjectObject({
+    diagnostics: {
+        mean_coherence: 1 / 3,
+        coherence_entropy: 1.0296530140645737,
+        energy_ratio: 0.7,
+        z_bias: -0.12,
+        fractional_order: 0.4,
+        normalized_weights: [0.5, 0.3, 0.2],
+    },
+    coherence: [0.6, 0.3, 0.1],
+});
+
+console.log(
+    projection.partial.speed,
+    projection.derived.normalized_entropy,
+    projection.semantic_owner,
+);
+```
+
+`zspaceCoherenceProjectJson` exposes the same worker/persistence boundary.
+Rust recomputes dimension-normalized entropy and normalized HHI concentration;
+WASM adds only `execution_client: "wasm"` and has no JavaScript coherence
+heuristic or normalization fallback.
+
 Stateful temperature control follows the same contract. The browser carries
 controller state between calls, while Rust alone validates probability mass and
 computes entropy, Z-feedback, scale-memory, and gradient adjustments:

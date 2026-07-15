@@ -2150,6 +2150,40 @@ contract = st.zspace_posterior_project(
 assert contract["semantic_owner"] == "st-core::inference::zspace_posterior"
 ```
 
+Coherence-to-Z-space projection is also Rust-owned. Native
+`CoherenceDiagnostics` exposes its measured weights, entropy, energy ratio,
+fractional order, Z-bias, repair counts, and pre-discard counts directly.
+`zspace_coherence_project(...)` returns the complete versioned contract;
+`coherence_partial_from_diagnostics(...)` returns only its `partial` map for
+existing inference pipelines:
+
+```python
+import spiraltorch as st
+
+topos = st.OpenCartesianTopos(-0.9, 1e-5, 10.0, 32, 1024)
+sequencer = st.ZSpaceCoherenceSequencer(16, 2, -0.9, topos=topos)
+x = st.Tensor((1, 16), data=[0.1] * 8 + [0.8] * 8)
+_, coherence, diagnostics = sequencer.forward_with_diagnostics(x)
+contour = sequencer.emit_linguistic_contour(x)
+contract = st.zspace_coherence_project(
+    diagnostics,
+    coherence=coherence,
+    contour=contour,
+)
+partial = st.coherence_partial_from_diagnostics(diagnostics, contour=contour)
+
+assert contract["contract_version"] == "spiraltorch.zspace_coherence_projection.v1"
+assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
+assert contract["derived"]["distribution_source"] == "normalized_weights"
+assert partial["speed"] == contract["partial"]["speed"]
+```
+
+Rust recomputes normalized HHI concentration and `H / ln(N)` from the measured
+probability simplex, so `speed` and `stability` do not drift merely because a
+model uses more Maxwell channels. Missing diagnostics, invalid probability
+mass, inconsistent channel counts, and invalid gains fail at the contract
+boundary instead of being silently replaced or clamped by Python.
+
 ### SoT-3Dφ → TensorBiome quickstart
 
 ```bash

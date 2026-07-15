@@ -265,6 +265,118 @@ def test_zspace_trace_event_to_atlas_frame_surfaces_noncollapse_metrics(
     assert f"zspace.trace.noncollapse.stage={expected_stage}" in frame.notes()
 
 
+def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[dict, list[float]]] = []
+
+    def project(diagnostics, *, coherence):
+        calls.append((dict(diagnostics), list(coherence)))
+        return {"partial": {"speed": 0.777, "coherence_mean": 0.22}}
+
+    monkeypatch.setattr(st, "zspace_coherence_project", project)
+    frame = zspace_trace_event_to_atlas_frame(
+        {
+            "kind": "Aggregated",
+            "coherence": [0.4, 0.2],
+            "diagnostics": {
+                "mean_coherence": 0.22,
+                "entropy": 0.31,
+                "energy_ratio": 0.61,
+                "fractional_order": 0.45,
+                "z_bias": -0.08,
+                "preserved_channels": 2,
+                "discarded_channels": 0,
+                "dominant_channel": 0,
+            },
+        }
+    )
+
+    assert frame is not None
+    assert calls == [
+        (
+            {
+                "mean_coherence": 0.22,
+                "coherence_entropy": 0.31,
+                "energy_ratio": 0.61,
+                "fractional_order": 0.45,
+                "z_bias": -0.08,
+                "preserved_channels": 2,
+                "discarded_channels": 0,
+                "dominant_channel": 0,
+            },
+            [0.4, 0.2],
+        )
+    ]
+    assert frame.metric_value("speed") == pytest.approx(0.777)
+    assert frame.metric_value("coherence_mean") == pytest.approx(0.22)
+
+
+def test_zspace_trace_atlas_omits_malformed_optional_count_without_aborting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    def project(diagnostics, *, coherence):
+        calls.append(dict(diagnostics))
+        return {"partial": {"speed": 0.5}}
+
+    monkeypatch.setattr(st, "zspace_coherence_project", project)
+    frame = zspace_trace_event_to_atlas_frame(
+        {
+            "kind": "Aggregated",
+            "coherence": [0.7, 0.3],
+            "diagnostics": {
+                "mean_coherence": 0.5,
+                "entropy": 0.61,
+                "energy_ratio": 0.7,
+                "fractional_order": 0.45,
+                "z_bias": -0.08,
+                "preserved_channels": 1.5,
+                "discarded_channels": 0,
+                "dominant_channel": 0,
+            },
+        }
+    )
+
+    assert frame is not None
+    assert "preserved_channels" not in calls[0]
+    assert frame.metric_value("speed") == pytest.approx(0.5)
+    assert (
+        "zspace.trace.coherence_projection.omitted=preserved_channels"
+        in frame.notes()
+    )
+
+
+def test_zspace_trace_atlas_falls_back_to_raw_metrics_when_contract_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject(*args, **kwargs):
+        raise ValueError("invalid coherence contract")
+
+    monkeypatch.setattr(st, "zspace_coherence_project", reject)
+    frame = zspace_trace_event_to_atlas_frame(
+        {
+            "kind": "Aggregated",
+            "coherence": [0.7, 0.3],
+            "diagnostics": {
+                "mean_coherence": 0.5,
+                "entropy": 0.61,
+                "energy_ratio": 0.7,
+                "fractional_order": 0.45,
+                "z_bias": -0.08,
+                "preserved_channels": 2,
+                "discarded_channels": 0,
+                "dominant_channel": 0,
+            },
+        }
+    )
+
+    assert frame is not None
+    assert frame.metric_value("coherence_mean") == pytest.approx(0.5)
+    assert "zspace.trace.coherence_projection.skipped=ValueError" in frame.notes()
+
+
 def test_zspace_trace_to_atlas_route_exposes_noncollapse_focus_metrics() -> None:
     route = zspace_trace_to_atlas_route(
         [

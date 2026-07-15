@@ -19,6 +19,11 @@ use crate::{
     language::{ConceptHint, MaxwellDesireBridge, NarrativeHint, SemanticBridge},
     Module, PureResult, Tensor,
 };
+use st_core::inference::zspace_coherence::{
+    project_zspace_coherence, ZSpaceCoherenceContourInput, ZSpaceCoherenceDiagnosticsInput,
+    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionError,
+    ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionRequest,
+};
 use st_core::maxwell::MaxwellZPulse;
 use st_core::telemetry::noncollapse::NonCollapseSnapshot;
 #[cfg(feature = "psi")]
@@ -508,12 +513,11 @@ impl CoherenceDiagnostics {
         self.coherence.iter().filter(|value| **value > 0.0).count()
     }
 
-    /// Returns the number of channels removed by pre-discard when available.
+    /// Returns the number of channels carrying no positive mass after repair and pre-discard.
     pub fn discarded_channels(&self) -> usize {
-        self.pre_discard
-            .as_ref()
-            .map(|telemetry| telemetry.discarded())
-            .unwrap_or(0)
+        self.coherence
+            .len()
+            .saturating_sub(self.preserved_channels())
     }
 
     /// Aggregates the main non-collapse metrics exposed by the coherence path.
@@ -539,6 +543,39 @@ impl CoherenceDiagnostics {
         }
 
         snapshot
+    }
+
+    /// Projects these diagnostics through the canonical Rust Z-space contract.
+    pub fn project_to_zspace_partial(
+        &self,
+        config: ZSpaceCoherenceProjectionConfig,
+        contour: Option<&LinguisticContour>,
+    ) -> Result<ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionError> {
+        project_zspace_coherence(ZSpaceCoherenceProjectionRequest {
+            diagnostics: ZSpaceCoherenceDiagnosticsInput {
+                mean_coherence: self.mean_coherence() as f64,
+                coherence_entropy: self.coherence_entropy() as f64,
+                energy_ratio: self.energy_ratio() as f64,
+                z_bias: self.z_bias() as f64,
+                fractional_order: self.fractional_order() as f64,
+                normalized_weights: self
+                    .normalized_weights()
+                    .iter()
+                    .map(|value| *value as f64)
+                    .collect(),
+                preserved_channels: Some(self.preserved_channels()),
+                discarded_channels: Some(self.discarded_channels()),
+                dominant_channel: self.dominant_channel(),
+            },
+            coherence: self.coherence().iter().map(|value| *value as f64).collect(),
+            contour: contour.map(|contour| ZSpaceCoherenceContourInput {
+                coherence_strength: contour.coherence_strength() as f64,
+                prosody_index: contour.prosody_index() as f64,
+                articulation_bias: contour.articulation_bias() as f64,
+                timbre_spread: Some(contour.timbre_spread() as f64),
+            }),
+            config,
+        })
     }
 
     /// Detects structural events present in the coherence response.
@@ -1741,7 +1778,7 @@ impl ZSpaceCoherenceSequencer {
         let sum = normalized_weights.iter().sum::<f32>();
         if sum > 0.0 {
             for value in &mut normalized_weights {
-                *value = (*value / sum).max(1e-6);
+                *value /= sum;
             }
         } else if !normalized_weights.is_empty() {
             let fill = 1.0 / normalized_weights.len() as f32;
@@ -2750,6 +2787,57 @@ mod tests {
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
+    }
+
+    #[test]
+    fn diagnostics_project_through_the_shared_zspace_contract() {
+        let entropy = -(0.6_f32 * 0.6_f32.ln() + 0.3_f32 * 0.3_f32.ln() + 0.1_f32 * 0.1_f32.ln());
+        let diagnostics = make_diagnostics(
+            vec![0.6, 0.3, 0.1],
+            vec![0.6, 0.3, 0.1],
+            0.7,
+            entropy,
+            1.0 / 3.0,
+        );
+        let payload = diagnostics
+            .project_to_zspace_partial(ZSpaceCoherenceProjectionConfig::default(), None)
+            .expect("valid coherence projection");
+        let expected_concentration = (0.46_f64 - 1.0 / 3.0) / (1.0 - 1.0 / 3.0);
+
+        assert_eq!(
+            payload.semantic_owner,
+            "st-core::inference::zspace_coherence"
+        );
+        assert!((payload.partial["speed"] - expected_concentration.tanh()).abs() < 1.0e-6);
+        assert_eq!(payload.derived.distribution_source, "normalized_weights");
+        assert_eq!(payload.partial["coherence_channels"], 3.0);
+    }
+
+    #[test]
+    fn diagnostics_normalization_preserves_discarded_zero_mass() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(8, 1, -1.0, topos).unwrap();
+        let aggregated = Tensor::zeros(1, 8).unwrap();
+        let diagnostics = seq.build_coherence_diagnostics(
+            &aggregated,
+            &[0.75, 0.25, 0.0],
+            3,
+            1.0,
+            0.5,
+            CoherenceRepairStats::default(),
+            None,
+        );
+
+        assert_eq!(diagnostics.normalized_weights(), &[0.75, 0.25, 0.0]);
+        assert_eq!(diagnostics.preserved_channels(), 2);
+        assert_eq!(diagnostics.discarded_channels(), 1);
+        assert!((diagnostics.normalized_weights().iter().sum::<f32>() - 1.0).abs() < 1.0e-6);
+        let projection = diagnostics
+            .project_to_zspace_partial(ZSpaceCoherenceProjectionConfig::default(), None)
+            .expect("zero-mass channels remain valid diagnostics");
+        assert_eq!(projection.partial["coherence_channels"], 3.0);
+        assert_eq!(projection.partial["coherence_preserved"], 2.0);
+        assert_eq!(projection.partial["coherence_discarded"], 1.0);
     }
 
     #[cfg(feature = "wgpu")]

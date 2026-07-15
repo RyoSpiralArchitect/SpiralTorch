@@ -3,6 +3,7 @@
 //! Rust owns normalization, reduction, and audit metadata. Language bindings
 //! should only translate their native values into these request types.
 
+use crate::inference::zspace_coherence::canonical_zspace_coherence_metric_name;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -739,22 +740,6 @@ pub fn canonical_metric_name(name: &str) -> Option<&'static str> {
         "realgrad_l1" => Some("realgrad_l1"),
         "realgrad_l2" => Some("realgrad_l2"),
         "realgrad_linf" => Some("realgrad_linf"),
-        "coherence_mean" => Some("coherence_mean"),
-        "coherence_entropy" => Some("coherence_entropy"),
-        "coherence_energy_ratio" => Some("coherence_energy_ratio"),
-        "coherence_z_bias" => Some("coherence_z_bias"),
-        "coherence_fractional_order" => Some("coherence_fractional_order"),
-        "coherence_channels" => Some("coherence_channels"),
-        "coherence_preserved" => Some("coherence_preserved"),
-        "coherence_discarded" => Some("coherence_discarded"),
-        "coherence_dominant" => Some("coherence_dominant"),
-        "coherence_peak" => Some("coherence_peak"),
-        "coherence_weight_entropy" => Some("coherence_weight_entropy"),
-        "coherence_response_peak" => Some("coherence_response_peak"),
-        "coherence_response_mean" => Some("coherence_response_mean"),
-        "coherence_strength" => Some("coherence_strength"),
-        "coherence_prosody" => Some("coherence_prosody"),
-        "coherence_articulation" => Some("coherence_articulation"),
         "import_l1" => Some("import_l1"),
         "import_l2" => Some("import_l2"),
         "import_linf" => Some("import_linf"),
@@ -779,7 +764,7 @@ pub fn canonical_metric_name(name: &str) -> Option<&'static str> {
         "elliptic_homology" | "homology_index" => Some("elliptic_homology"),
         "elliptic_resonance" | "resonance_heat" => Some("elliptic_resonance"),
         "elliptic_noise" | "noise_density" => Some("elliptic_noise"),
-        _ => None,
+        _ => canonical_zspace_coherence_metric_name(name),
     }
 }
 
@@ -848,6 +833,62 @@ mod tests {
         assert!(!fused.telemetry.payload.contains_key("suppressed_only"));
         assert_eq!(fused.telemetry.payload["source"], 2.0);
         assert_eq!(fused.telemetry.payload["external"], 7.0);
+    }
+
+    #[test]
+    fn coherence_projection_metrics_flow_through_partial_fusion() {
+        use crate::inference::zspace_coherence::{
+            project_zspace_coherence, ZSpaceCoherenceContourInput, ZSpaceCoherenceDiagnosticsInput,
+            ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionRequest,
+        };
+
+        let entropy = -(0.6_f64 * 0.6_f64.ln() + 0.3_f64 * 0.3_f64.ln() + 0.1_f64 * 0.1_f64.ln());
+        let projection = project_zspace_coherence(ZSpaceCoherenceProjectionRequest {
+            diagnostics: ZSpaceCoherenceDiagnosticsInput {
+                mean_coherence: 1.0 / 3.0,
+                coherence_entropy: entropy,
+                energy_ratio: 0.7,
+                z_bias: -0.1,
+                fractional_order: 0.4,
+                normalized_weights: vec![0.6, 0.3, 0.1],
+                preserved_channels: Some(3),
+                discarded_channels: Some(0),
+                dominant_channel: Some(0),
+            },
+            coherence: vec![0.6, 0.3, 0.1],
+            contour: Some(ZSpaceCoherenceContourInput {
+                coherence_strength: 0.46,
+                prosody_index: 0.4,
+                articulation_bias: 0.2,
+                timbre_spread: Some(0.3),
+            }),
+            config: ZSpaceCoherenceProjectionConfig::default(),
+        })
+        .expect("valid coherence projection");
+        let expected_concentration = projection.partial["coherence_concentration"];
+        let metrics = projection
+            .partial
+            .into_iter()
+            .map(|(name, value)| (name, ZSpaceMetricInput::Scalar(value)))
+            .collect();
+
+        let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(ZSpacePartialInput {
+                metrics,
+                weight: 1.0,
+                origin: Some("coherence".to_owned()),
+                telemetry: None,
+            })],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("all Rust-owned coherence metrics must be registered");
+
+        assert_eq!(fused.active_count, 1);
+        assert_eq!(
+            fused.metrics["coherence_concentration"],
+            expected_concentration
+        );
+        assert_eq!(fused.metrics["coherence_timbre_spread"], 0.3);
     }
 
     #[test]

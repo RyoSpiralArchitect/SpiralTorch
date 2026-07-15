@@ -72,8 +72,8 @@ use st_nn::{
     warmup,
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
-        CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
-        PreDiscardSnapshot, PreDiscardTelemetry,
+        CoherenceObservation, CoherenceSignature, LinguisticChannelReport, LinguisticContour,
+        PreDiscardPolicy, PreDiscardSnapshot, PreDiscardTelemetry,
     },
     AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset,
     DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
@@ -8830,12 +8830,38 @@ impl PyCoherenceObservation {
 #[derive(Clone)]
 #[pyclass(module = "spiraltorch.nn", name = "CoherenceDiagnostics", unsendable)]
 pub(crate) struct PyCoherenceDiagnostics {
-    aggregated: PyTensor,
-    coherence: Vec<f32>,
-    channel_reports: Vec<PyCoherenceChannelReport>,
-    pre_discard: Option<PyPreDiscardTelemetry>,
-    observation: PyCoherenceObservation,
-    noncollapse_snapshot: PyNonCollapseSnapshot,
+    inner: CoherenceDiagnostics,
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone)]
+#[pyclass(module = "spiraltorch.nn", name = "LinguisticContour", unsendable)]
+pub(crate) struct PyLinguisticContour {
+    inner: LinguisticContour,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyLinguisticContour {
+    #[getter]
+    fn coherence_strength(&self) -> f32 {
+        self.inner.coherence_strength()
+    }
+
+    #[getter]
+    fn articulation_bias(&self) -> f32 {
+        self.inner.articulation_bias()
+    }
+
+    #[getter]
+    fn prosody_index(&self) -> f32 {
+        self.inner.prosody_index()
+    }
+
+    #[getter]
+    fn timbre_spread(&self) -> f32 {
+        self.inner.timbre_spread()
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -9064,21 +9090,7 @@ impl PyPreDiscardPolicy {
 #[cfg(feature = "nn")]
 impl PyCoherenceDiagnostics {
     fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
-        let noncollapse_snapshot = PyNonCollapseSnapshot::from(diagnostics.noncollapse_snapshot());
-        let observation = PyCoherenceObservation::from_observation(diagnostics.observation());
-        let (aggregated, coherence, channel_reports, pre_discard) = diagnostics.into_parts();
-        let channel_reports = channel_reports
-            .iter()
-            .map(PyCoherenceChannelReport::from_report)
-            .collect();
-        Self {
-            aggregated: PyTensor::from_tensor(aggregated),
-            coherence,
-            channel_reports,
-            pre_discard: pre_discard.map(PyPreDiscardTelemetry::from_telemetry),
-            observation,
-            noncollapse_snapshot,
-        }
+        Self { inner: diagnostics }
     }
 }
 
@@ -9086,45 +9098,110 @@ impl PyCoherenceDiagnostics {
 #[pymethods]
 impl PyCoherenceDiagnostics {
     #[getter]
+    fn channel_weights(&self) -> Vec<f32> {
+        self.inner.channel_weights().to_vec()
+    }
+
+    #[getter]
+    fn normalized_weights(&self) -> Vec<f32> {
+        self.inner.normalized_weights().to_vec()
+    }
+
+    #[getter]
+    fn normalization(&self) -> f32 {
+        self.inner.normalization()
+    }
+
+    #[getter]
+    fn fractional_order(&self) -> f32 {
+        self.inner.fractional_order()
+    }
+
+    #[getter]
+    fn repaired_non_finite_weights(&self) -> usize {
+        self.inner.repaired_non_finite_weights()
+    }
+
+    #[getter]
+    fn repaired_negative_weights(&self) -> usize {
+        self.inner.repaired_negative_weights()
+    }
+
+    #[getter]
+    fn repaired_weights_total(&self) -> usize {
+        self.inner.repaired_weights_total()
+    }
+
+    #[getter]
+    fn dominant_channel(&self) -> Option<usize> {
+        self.inner.dominant_channel()
+    }
+
+    #[getter]
+    fn mean_coherence(&self) -> f32 {
+        self.inner.mean_coherence()
+    }
+
+    #[getter]
+    fn z_bias(&self) -> f32 {
+        self.inner.z_bias()
+    }
+
+    #[getter]
+    fn energy_ratio(&self) -> f32 {
+        self.inner.energy_ratio()
+    }
+
+    #[getter]
+    fn coherence_entropy(&self) -> f32 {
+        self.inner.coherence_entropy()
+    }
+
+    #[getter]
     fn aggregated(&self) -> PyTensor {
-        self.aggregated.clone()
+        PyTensor::from_tensor(self.inner.aggregated().clone())
     }
 
     #[getter]
     fn coherence(&self) -> Vec<f32> {
-        self.coherence.clone()
+        self.inner.coherence().to_vec()
     }
 
     #[getter]
     fn channel_reports(&self) -> Vec<PyCoherenceChannelReport> {
-        self.channel_reports.clone()
+        self.inner
+            .channel_reports()
+            .iter()
+            .map(PyCoherenceChannelReport::from_report)
+            .collect()
     }
 
     #[getter]
     fn preserved_channels(&self) -> usize {
-        self.coherence.iter().filter(|value| **value > 0.0).count()
+        self.inner.preserved_channels()
     }
 
     #[getter]
     fn discarded_channels(&self) -> usize {
-        self.coherence
-            .len()
-            .saturating_sub(self.preserved_channels())
+        self.inner.discarded_channels()
     }
 
     #[getter]
     fn pre_discard(&self) -> Option<PyPreDiscardTelemetry> {
-        self.pre_discard.clone()
+        self.inner
+            .pre_discard()
+            .cloned()
+            .map(PyPreDiscardTelemetry::from_telemetry)
     }
 
     #[getter]
     fn observation(&self) -> PyCoherenceObservation {
-        self.observation.clone()
+        PyCoherenceObservation::from_observation(self.inner.observation())
     }
 
     #[getter]
     fn noncollapse_snapshot(&self) -> PyNonCollapseSnapshot {
-        self.noncollapse_snapshot.clone()
+        PyNonCollapseSnapshot::from(self.inner.noncollapse_snapshot())
     }
 }
 
@@ -9996,6 +10073,14 @@ impl PyZSpaceCoherenceSequencer {
         ))
     }
 
+    pub fn emit_linguistic_contour(&self, x: &PyTensor) -> PyResult<PyLinguisticContour> {
+        let contour = self
+            .inner
+            .emit_linguistic_contour(&x.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyLinguisticContour { inner: contour })
+    }
+
     #[pyo3(signature = (*, capacity=256, max_vector_len=256, publish_plugin_events=true))]
     pub fn install_trace_recorder(
         &mut self,
@@ -10246,6 +10331,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyCoherenceSignature>()?;
     module.add_class::<PyCoherenceObservation>()?;
+    module.add_class::<PyLinguisticContour>()?;
     module.add_class::<PyPreDiscardTelemetry>()?;
     module.add_class::<PyPreDiscardPolicy>()?;
     module.add_class::<PyPreDiscardSnapshot>()?;
@@ -10319,6 +10405,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "DataLoader",
             "DataLoaderIter",
             "CoherenceChannelReport",
+            "LinguisticContour",
             "CoherenceDiagnostics",
             "PreDiscardTelemetry",
             "PreDiscardPolicy",
@@ -10446,6 +10533,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(observation) = module.getattr("CoherenceObservation") {
         parent.add("CoherenceObservation", observation)?;
+    }
+    if let Ok(contour) = module.getattr("LinguisticContour") {
+        parent.add("LinguisticContour", contour)?;
     }
     if let Ok(telemetry) = module.getattr("PreDiscardTelemetry") {
         parent.add("PreDiscardTelemetry", telemetry)?;

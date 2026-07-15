@@ -28,12 +28,6 @@ def _as_float(value: Any) -> float | None:
     return out
 
 
-def _mean(values: Sequence[float]) -> float:
-    if not values:
-        return 0.0
-    return float(sum(values)) / float(len(values))
-
-
 def _as_metric_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return 1.0 if value else 0.0
@@ -228,12 +222,15 @@ def zspace_trace_event_to_atlas_frame(
         fragment.push_metric("zspace.trace.step", float(step_val), district)
 
     coherence = normalised.get("coherence")
-    if isinstance(coherence, Sequence):
+    coh: list[float] = []
+    if isinstance(coherence, Sequence) and not isinstance(
+        coherence, (str, bytes, bytearray)
+    ):
         coh_values = [_as_float(v) for v in coherence]
-        coh = [v for v in coh_values if v is not None]
-        fragment.push_metric("coherence_channels", float(len(coh)), district)
-        fragment.push_metric("coherence_response_mean", _mean(coh), district)
-        fragment.push_metric("coherence_response_peak", max(coh) if coh else 0.0, district)
+        if all(value is not None for value in coh_values):
+            coh = [float(value) for value in coh_values if value is not None]
+        else:
+            fragment.push_note("zspace.trace.coherence_projection.omitted=coherence")
 
     diagnostics = normalised.get("diagnostics")
     if isinstance(diagnostics, Mapping):
@@ -247,27 +244,92 @@ def zspace_trace_event_to_atlas_frame(
         dominant = _as_float(diagnostics.get("dominant_channel"))
         label = diagnostics.get("label")
 
-        if mean_coherence is not None:
-            fragment.push_metric("coherence_mean", mean_coherence, district)
-            fragment.push_metric("speed", math.tanh(mean_coherence), district)
-        if entropy is not None:
-            fragment.push_metric("coherence_entropy", entropy, district)
-            fragment.push_metric("stability", math.tanh(1.0 - entropy), district)
-        if energy_ratio is not None:
-            fragment.push_metric("coherence_energy_ratio", energy_ratio, district)
-            fragment.push_metric("drs", math.tanh(energy_ratio - 0.5), district)
-        if fractional_order is not None:
-            fragment.push_metric("coherence_fractional_order", fractional_order, district)
-            fragment.push_metric("frac", math.tanh(fractional_order), district)
-        if z_bias is not None:
-            fragment.push_metric("coherence_z_bias", z_bias, district)
-            fragment.push_metric("memory", math.tanh(z_bias), district)
-        if preserved is not None:
-            fragment.push_metric("coherence_preserved", preserved, district)
-        if discarded is not None:
-            fragment.push_metric("coherence_discarded", discarded, district)
-        if dominant is not None:
-            fragment.push_metric("coherence_dominant", dominant, district)
+        required = (
+            mean_coherence,
+            entropy,
+            energy_ratio,
+            fractional_order,
+            z_bias,
+        )
+        projection_emitted = False
+        if all(value is not None for value in required):
+            projection_diagnostics: dict[str, Any] = {
+                "mean_coherence": mean_coherence,
+                "coherence_entropy": entropy,
+                "energy_ratio": energy_ratio,
+                "fractional_order": fractional_order,
+                "z_bias": z_bias,
+            }
+            for field, value in (
+                ("preserved_channels", preserved),
+                ("discarded_channels", discarded),
+                ("dominant_channel", dominant),
+            ):
+                if value is not None:
+                    if value < 0.0 or not value.is_integer():
+                        fragment.push_note(
+                            f"zspace.trace.coherence_projection.omitted={field}"
+                        )
+                    else:
+                        projection_diagnostics[field] = int(value)
+            normalized_weights = diagnostics.get("normalized_weights")
+            if normalized_weights is not None:
+                if isinstance(normalized_weights, Sequence) and not isinstance(
+                    normalized_weights, (str, bytes, bytearray)
+                ):
+                    weight_values = [_as_float(value) for value in normalized_weights]
+                    if all(value is not None for value in weight_values):
+                        projection_diagnostics["normalized_weights"] = [
+                            float(value) for value in weight_values if value is not None
+                        ]
+                    else:
+                        fragment.push_note(
+                            "zspace.trace.coherence_projection.omitted=normalized_weights"
+                        )
+                else:
+                    fragment.push_note(
+                        "zspace.trace.coherence_projection.omitted=normalized_weights"
+                    )
+            try:
+                contract = st.zspace_coherence_project(
+                    projection_diagnostics,
+                    coherence=coh,
+                )
+                if not isinstance(contract, Mapping):
+                    raise RuntimeError(
+                        "Z-space coherence contract returned a non-mapping payload"
+                    )
+                partial = contract.get("partial")
+                if not isinstance(partial, Mapping):
+                    raise RuntimeError(
+                        "Z-space coherence contract returned malformed partial metrics"
+                    )
+                projected_metrics = [
+                    (str(metric_name), float(metric_value))
+                    for metric_name, metric_value in partial.items()
+                ]
+            except (TypeError, ValueError, RuntimeError) as exc:
+                fragment.push_note(
+                    "zspace.trace.coherence_projection.skipped="
+                    f"{type(exc).__name__}"
+                )
+            else:
+                for metric_name, metric_value in projected_metrics:
+                    fragment.push_metric(metric_name, metric_value, district)
+                projection_emitted = True
+        if not projection_emitted:
+            for metric_name, metric_value in (
+                ("coherence_mean", mean_coherence),
+                ("coherence_entropy", entropy),
+                ("coherence_energy_ratio", energy_ratio),
+                ("coherence_fractional_order", fractional_order),
+                ("coherence_z_bias", z_bias),
+                ("coherence_preserved", preserved),
+                ("coherence_discarded", discarded),
+                ("coherence_dominant", dominant),
+            ):
+                if metric_value is not None:
+                    fragment.push_metric(metric_name, metric_value, district)
         if label is not None:
             fragment.push_note(f"zspace.trace.label={label}")
 

@@ -31,6 +31,10 @@ pub use sequencer::{
     CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
     PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
+pub use st_core::inference::zspace_coherence::{
+    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionDerived,
+    ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
+};
 pub use text_vae::ZSpaceTextVae;
 pub use trace::{
     coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord,

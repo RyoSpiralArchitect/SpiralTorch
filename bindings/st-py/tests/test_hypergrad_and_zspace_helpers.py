@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 import spiraltorch as st
@@ -254,6 +256,25 @@ def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
     assert snapshot.preserved_channels == diagnostics.preserved_channels
     assert snapshot.discarded_channels == diagnostics.discarded_channels
     assert snapshot.pre_discard_preserved_ratio is not None
+    assert len(diagnostics.channel_weights) == seq.maxwell_channels()
+    assert len(diagnostics.normalized_weights) == seq.maxwell_channels()
+    assert math.isfinite(diagnostics.mean_coherence)
+    assert math.isfinite(diagnostics.coherence_entropy)
+
+    contour = seq.emit_linguistic_contour(x)
+    partial = st.coherence_partial_from_diagnostics(
+        diagnostics,
+        contour=contour,
+    )
+    weights = list(diagnostics.normalized_weights)
+    channels = len(weights)
+    squared_mass = sum(weight * weight for weight in weights)
+    uniform_mass = 1.0 / channels
+    concentration = (squared_mass - uniform_mass) / (1.0 - uniform_mass)
+    assert partial["speed"] == pytest.approx(math.tanh(max(0.0, concentration)))
+    assert partial["coherence_normalized_entropy"] <= 1.0
+    assert partial["coherence_strength"] == pytest.approx(contour.coherence_strength)
+    assert partial["coherence_timbre_spread"] == pytest.approx(contour.timbre_spread)
 
 
 def test_encode_zspace_returns_tensor() -> None:

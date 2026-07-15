@@ -32,7 +32,7 @@ from spiraltorch import (
     weights_partial_from_compat,
     infer_weights_from_dlpack,
     infer_weights_from_compat,
-    ZSpaceTelemetryFrame,
+    zspace_coherence_project,
     zspace_posterior_decode,
     zspace_posterior_project,
     zspace_partial_fusion,
@@ -471,7 +471,7 @@ def test_canvas_coherence_partial_combines_sources():
     partial = canvas_coherence_partial(
         snapshot,
         diagnostics,
-        coherence=[0.6, 0.3, 0.1],
+        coherence=[0.6, 0.25, 0.1, 0.05],
         weights=(2.0, 1.0),
     )
     assert "canvas_energy" in partial
@@ -480,12 +480,12 @@ def test_canvas_coherence_partial_combines_sources():
 
 class _DummyDiagnostics:
     def __init__(self) -> None:
-        self.mean_coherence = 0.62
-        self.coherence_entropy = 0.24
+        self.mean_coherence = 0.25
+        self.coherence_entropy = 1.0296530140645737
         self.energy_ratio = 0.7
         self.z_bias = -0.12
         self.fractional_order = 0.4
-        self.normalized_weights = [0.5, 0.3, 0.2]
+        self.normalized_weights = [0.5, 0.3, 0.2, 0.0]
         self.preserved_channels = 3
         self.discarded_channels = 1
         self.dominant_channel = 0
@@ -499,7 +499,7 @@ class _DummyContour:
         return 0.41
 
     def articulation_bias(self) -> float:
-        return -0.19
+        return 0.19
 
 
 class _DummySequencer:
@@ -510,7 +510,7 @@ class _DummySequencer:
 
     def forward_with_diagnostics(self, tensor: object):
         self.calls.append(tensor)
-        return ("tensor", [0.62, 0.28, 0.1], self._diagnostics)
+        return ("tensor", [0.62, 0.23, 0.1, 0.05], self._diagnostics)
 
     def emit_linguistic_contour(self, tensor: object) -> _DummyContour:
         self.calls.append(("contour", tensor))
@@ -519,16 +519,58 @@ class _DummySequencer:
 
 def test_coherence_diagnostics_projection_infers_metrics():
     diagnostics = _DummyDiagnostics()
-    partial = coherence_partial_from_diagnostics(diagnostics, coherence=[0.6, 0.3, 0.1])
+    contract = zspace_coherence_project(
+        diagnostics,
+        coherence=[0.6, 0.25, 0.1, 0.05],
+        contour=_DummyContour(),
+    )
+    assert contract["kind"] == "spiraltorch.zspace_coherence_projection"
+    assert (
+        contract["contract_version"]
+        == "spiraltorch.zspace_coherence_projection.v1"
+    )
+    assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
+    assert contract["semantic_backend"] == "rust"
+    assert "speed=tanh(speed_gain*C)" in contract["projection_formula"]
+    assert contract["derived"]["distribution_source"] == "normalized_weights"
+    assert contract["derived"]["normalized_entropy"] == pytest.approx(
+        diagnostics.coherence_entropy / math.log(4.0)
+    )
+    partial = coherence_partial_from_diagnostics(
+        diagnostics, coherence=[0.6, 0.25, 0.1, 0.05]
+    )
     assert math.isclose(partial["coherence_mean"], diagnostics.mean_coherence, rel_tol=1e-6)
     assert "coherence_weight_entropy" in partial
     inference = infer_coherence_diagnostics(
         [0.2, -0.05, 0.41, -0.09],
         diagnostics,
-        coherence=[0.6, 0.3, 0.1],
+        coherence=[0.6, 0.25, 0.1, 0.05],
         contour=_DummyContour(),
     )
     assert "coherence_strength" in inference.metrics
+
+
+def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain():
+    contract = zspace_coherence_project(
+        {
+            "mean_coherence": 0.2,
+            "entropy": 0.3,
+            "energy_ratio": 0.6,
+            "z_bias": 0.1,
+            "fractional_order": 0.5,
+        },
+        coherence=[0.1, 0.4, 0.2],
+    )
+    assert contract["partial"]["coherence_entropy"] == pytest.approx(0.3)
+    assert contract["partial"]["coherence_response_peak"] == pytest.approx(0.4)
+
+    with pytest.raises(ValueError, match="speed_gain"):
+        zspace_coherence_project(_DummyDiagnostics(), speed_gain=-1.0)
+    with pytest.raises(ValueError, match="coherence.*3 channels.*4"):
+        zspace_coherence_project(
+            _DummyDiagnostics(),
+            coherence=[0.6, 0.3, 0.1],
+        )
 
 
 def test_infer_coherence_from_sequencer_can_return_outputs():
@@ -557,7 +599,7 @@ def test_infer_canvas_with_coherence_projects_blended_partial():
         vector,
         snapshot,
         diagnostics,
-        coherence=[0.7, 0.2, 0.1],
+        coherence=[0.7, 0.15, 0.1, 0.05],
         strategy="mean",
     )
     assert "canvas_energy" in inference.metrics

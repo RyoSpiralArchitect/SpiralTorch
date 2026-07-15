@@ -12,7 +12,7 @@ from collections.abc import (
     MutableMapping,
     Sequence as SequenceABC,
 )
-from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Sequence, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Sequence, Union, get_origin
 from types import MappingProxyType
 
 from ._zspace_aliases import (
@@ -42,6 +42,7 @@ __all__ = [
     "topos_control_partial",
     "zspace_posterior_decode",
     "zspace_posterior_project",
+    "zspace_coherence_project",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -143,6 +144,13 @@ _ZSPACE_POSTERIOR_CONTRACT_VERSION = "spiraltorch.zspace_posterior.v1"
 _ZSPACE_POSTERIOR_DECODE_KIND = "spiraltorch.zspace_posterior_decode"
 _ZSPACE_POSTERIOR_PROJECTION_KIND = "spiraltorch.zspace_posterior_projection"
 _ZSPACE_POSTERIOR_SEMANTIC_OWNER = "st-core::inference::zspace_posterior"
+_ZSPACE_COHERENCE_PROJECTION_CONTRACT_VERSION = (
+    "spiraltorch.zspace_coherence_projection.v1"
+)
+_ZSPACE_COHERENCE_PROJECTION_KIND = "spiraltorch.zspace_coherence_projection"
+_ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER = (
+    "st-core::inference::zspace_coherence"
+)
 _TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION = (
     "spiraltorch.topos_zspace_projection.v1"
 )
@@ -1061,6 +1069,42 @@ def _native_zspace_posterior(
         raise RuntimeError("native Z-space posterior returned a non-mapping payload")
     contract = dict(contract)
     _validate_zspace_posterior_contract(contract, expected_kind=expected_kind)
+    return contract
+
+
+def _native_zspace_coherence_projection(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    project = getattr(native, "_zspace_coherence_project", None)
+    if not callable(project):
+        raise RuntimeError(
+            "Z-space coherence projection requires the compiled Rust semantic core; "
+            "rebuild or reinstall SpiralTorch with _zspace_coherence_project"
+        )
+    contract = project(dict(request))
+    if not isinstance(contract, MappingABC):
+        raise RuntimeError(
+            "native Z-space coherence projection returned a non-mapping payload"
+        )
+    contract = dict(contract)
+    if (
+        contract.get("kind") != _ZSPACE_COHERENCE_PROJECTION_KIND
+        or contract.get("contract_version")
+        != _ZSPACE_COHERENCE_PROJECTION_CONTRACT_VERSION
+        or contract.get("semantic_owner")
+        != _ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError(
+            "native Z-space coherence projection returned an untrusted contract"
+        )
+    partial = contract.get("partial")
+    if not isinstance(partial, MappingABC):
+        raise RuntimeError(
+            "native Z-space coherence projection returned malformed partial metrics"
+        )
     return contract
 
 
@@ -2932,21 +2976,114 @@ def infer_canvas_transformer(
     )
 
 
-def _sequence_floats(values: Any) -> list[float]:
+_COHERENCE_MISSING = object()
+
+
+def _coherence_source_value(source: Any, *names: str) -> Any:
+    if isinstance(source, MappingABC):
+        for name in names:
+            if name in source:
+                return _maybe_call(source[name])
+    else:
+        for name in names:
+            value = getattr(source, name, _COHERENCE_MISSING)
+            if value is not _COHERENCE_MISSING:
+                return _maybe_call(value)
+    return _COHERENCE_MISSING
+
+
+def _coherence_sequence(values: Any, *, field: str) -> list[float]:
     values = _maybe_call(values)
-    if values is None:
+    if values is None or values is _COHERENCE_MISSING:
         return []
-    if isinstance(values, Mapping):
+    if isinstance(values, MappingABC):
         values = values.values()
-    if not isinstance(values, Iterable):
-        return []
-    out: list[float] = []
-    for value in values:
-        try:
-            out.append(float(value))
-        except (TypeError, ValueError):
-            continue
-    return out
+    if isinstance(values, (str, bytes, bytearray, memoryview)) or not isinstance(
+        values, Iterable
+    ):
+        raise TypeError(f"coherence field '{field}' must be a sequence")
+    return [float(value) for value in values]
+
+
+def _coherence_count(value: Any, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"coherence field '{field}' must be a non-negative integer")
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
+        raise ValueError(f"coherence field '{field}' must be a non-negative integer")
+    return int(numeric)
+
+
+def zspace_coherence_project(
+    diagnostics: Any,
+    *,
+    coherence: Any = None,
+    contour: Any = None,
+    speed_gain: float = 1.0,
+    stability_gain: float = 1.0,
+    frac_gain: float = 1.0,
+    drs_gain: float = 1.0,
+) -> dict[str, Any]:
+    """Project coherence diagnostics through the canonical Rust contract."""
+
+    diagnostics_input: dict[str, Any] = {}
+    for canonical, aliases in (
+        ("mean_coherence", ("mean_coherence",)),
+        ("coherence_entropy", ("coherence_entropy", "entropy")),
+        ("energy_ratio", ("energy_ratio",)),
+        ("z_bias", ("z_bias",)),
+        ("fractional_order", ("fractional_order",)),
+    ):
+        value = _coherence_source_value(diagnostics, *aliases)
+        if value is _COHERENCE_MISSING or value is None:
+            raise ValueError(
+                f"coherence diagnostics are missing required field '{canonical}'"
+            )
+        diagnostics_input[canonical] = float(value)
+
+    weights = _coherence_source_value(diagnostics, "normalized_weights")
+    diagnostics_input["normalized_weights"] = _coherence_sequence(
+        weights, field="normalized_weights"
+    )
+    for field in ("preserved_channels", "discarded_channels", "dominant_channel"):
+        value = _coherence_source_value(diagnostics, field)
+        if value is not _COHERENCE_MISSING and value is not None:
+            diagnostics_input[field] = _coherence_count(value, field=field)
+
+    response_source = coherence
+    if response_source is None:
+        response_source = _coherence_source_value(diagnostics, "coherence")
+
+    contour_input: dict[str, float] | None = None
+    if contour is not None:
+        contour_input = {}
+        for canonical, source_name in (
+            ("coherence_strength", "coherence_strength"),
+            ("prosody_index", "prosody_index"),
+            ("articulation_bias", "articulation_bias"),
+        ):
+            value = _coherence_source_value(contour, source_name)
+            if value is _COHERENCE_MISSING or value is None:
+                raise ValueError(
+                    f"linguistic contour is missing required field '{source_name}'"
+                )
+            contour_input[canonical] = float(value)
+        timbre = _coherence_source_value(contour, "timbre_spread")
+        if timbre is not _COHERENCE_MISSING and timbre is not None:
+            contour_input["timbre_spread"] = float(timbre)
+
+    request = {
+        "diagnostics": diagnostics_input,
+        "coherence": _coherence_sequence(response_source, field="coherence"),
+        "contour": contour_input,
+        "config": {
+            "speed_gain": float(speed_gain),
+            "stability_gain": float(stability_gain),
+            "frac_gain": float(frac_gain),
+            "drs_gain": float(drs_gain),
+        },
+    }
+    return _native_zspace_coherence_projection(request)
 
 
 def coherence_partial_from_diagnostics(
@@ -2959,85 +3096,18 @@ def coherence_partial_from_diagnostics(
     frac_gain: float = 1.0,
     drs_gain: float = 1.0,
 ) -> dict[str, float]:
-    """Convert coherence diagnostics into Z-space partial observations."""
+    """Return partial metrics from the canonical Rust coherence contract."""
 
-    speed_gain = max(0.0, float(speed_gain))
-    stability_gain = max(0.0, float(stability_gain))
-    frac_gain = max(0.0, float(frac_gain))
-    drs_gain = max(0.0, float(drs_gain))
-
-    mean_coherence = float(
-        _maybe_call(getattr(diagnostics, "mean_coherence", 0.0)) or 0.0
+    contract = zspace_coherence_project(
+        diagnostics,
+        coherence=coherence,
+        contour=contour,
+        speed_gain=speed_gain,
+        stability_gain=stability_gain,
+        frac_gain=frac_gain,
+        drs_gain=drs_gain,
     )
-    entropy = float(_maybe_call(getattr(diagnostics, "coherence_entropy", 0.0)) or 0.0)
-    energy_ratio = float(_maybe_call(getattr(diagnostics, "energy_ratio", 0.0)) or 0.0)
-    z_bias = float(_maybe_call(getattr(diagnostics, "z_bias", 0.0)) or 0.0)
-    fractional_raw = _maybe_call(getattr(diagnostics, "fractional_order", 0.0))
-    fractional_order = float(fractional_raw) if fractional_raw is not None else 0.0
-    weights = _sequence_floats(getattr(diagnostics, "normalized_weights", []))
-    preserved_raw = _maybe_call(getattr(diagnostics, "preserved_channels", None))
-    preserved = (
-        float(preserved_raw) if preserved_raw is not None else float(len(weights))
-    )
-    discarded_raw = _maybe_call(getattr(diagnostics, "discarded_channels", None))
-    discarded = float(discarded_raw) if discarded_raw is not None else 0.0
-    dominant = _maybe_call(getattr(diagnostics, "dominant_channel", None))
-
-    response = _sequence_floats(coherence)
-
-    partial: dict[str, float] = {
-        "speed": math.tanh(speed_gain * mean_coherence),
-        "memory": math.tanh(z_bias),
-        "stability": math.tanh(stability_gain * (1.0 - entropy)),
-        "frac": math.tanh(frac_gain * fractional_order),
-        "drs": math.tanh(drs_gain * (energy_ratio - 0.5)),
-        "coherence_mean": mean_coherence,
-        "coherence_entropy": entropy,
-        "coherence_energy_ratio": energy_ratio,
-        "coherence_z_bias": z_bias,
-        "coherence_fractional_order": fractional_order,
-        "coherence_channels": float(len(weights)),
-        "coherence_preserved": preserved,
-        "coherence_discarded": discarded,
-    }
-    if dominant is not None:
-        try:
-            partial["coherence_dominant"] = float(dominant)
-        except (TypeError, ValueError):
-            partial["coherence_dominant"] = -1.0
-
-    if weights:
-        partial["coherence_peak"] = max(weights)
-        weight_entropy = -sum(
-            weight * math.log(max(weight, 1e-9)) for weight in weights if weight > 0.0
-        )
-        partial["coherence_weight_entropy"] = weight_entropy
-    else:
-        partial["coherence_peak"] = 0.0
-        partial["coherence_weight_entropy"] = 0.0
-
-    if response:
-        partial["coherence_response_peak"] = max(response)
-        partial["coherence_response_mean"] = sum(response) / len(response)
-    else:
-        partial["coherence_response_peak"] = 0.0
-        partial["coherence_response_mean"] = 0.0
-
-    if contour is not None:
-        for key, attr in (
-            ("coherence_strength", "coherence_strength"),
-            ("coherence_prosody", "prosody_index"),
-            ("coherence_articulation", "articulation_bias"),
-        ):
-            value = _maybe_call(getattr(contour, attr, None))
-            if value is None:
-                continue
-            try:
-                partial[key] = float(value)
-            except (TypeError, ValueError):
-                partial[key] = 0.0
-
-    return partial
+    return {str(key): float(value) for key, value in contract["partial"].items()}
 
 
 def infer_coherence_diagnostics(

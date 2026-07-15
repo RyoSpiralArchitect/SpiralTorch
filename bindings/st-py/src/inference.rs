@@ -15,6 +15,9 @@ use st_core::inference::imaginary_time_schrodinger::{
 use st_core::inference::temperature_control::{
     apply_temperature_control, TemperatureControlRequest,
 };
+use st_core::inference::zspace_coherence::{
+    project_zspace_coherence, ZSpaceCoherenceProjectionRequest,
+};
 use st_core::inference::zspace_posterior::{
     decode_zspace_posterior, project_zspace_posterior, ZSpacePosteriorDecodeRequest,
     ZSpacePosteriorProjectionRequest,
@@ -247,6 +250,54 @@ fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
     crate::json::json_to_py(py, &payload)
 }
 
+#[pyfunction]
+fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space coherence projection request must be a mapping")
+    })?;
+    if request_object
+        .get("diagnostics")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space coherence projection 'diagnostics' must be a mapping",
+        ));
+    }
+    if request_object
+        .get("coherence")
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space coherence projection 'coherence' must be a sequence",
+        ));
+    }
+    if request_object
+        .get("contour")
+        .is_some_and(|value| !value.is_object() && !value.is_null())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space coherence projection 'contour' must be a mapping",
+        ));
+    }
+    if request_object
+        .get("config")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space coherence projection 'config' must be a mapping",
+        ));
+    }
+    let request: ZSpaceCoherenceProjectionRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space coherence projection request", error))?;
+    let payload = py
+        .allow_threads(|| project_zspace_coherence(request))
+        .map_err(|error| json_error("Z-space coherence projection failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space coherence projection encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
 #[pyclass(module = "spiraltorch.inference", name = "SafetyViolation")]
 #[derive(Clone)]
 struct SafetyViolationPy {
@@ -474,6 +525,7 @@ pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_imaginary_time_schrodinger, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_posterior_decode, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_posterior_project, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_coherence_project, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;
