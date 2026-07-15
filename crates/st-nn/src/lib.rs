@@ -98,13 +98,14 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
-    BatchNorm1d, Dropout, Embedding, Gelu, HamiltonJacobiFlow, KleinGordonAudit,
-    KleinGordonBackwardAudit, KleinGordonConfig, KleinGordonPropagation, KleinGordonTensorBackward,
-    KleinGordonTensorStep, LayerNorm, Lstm, Relu, Scaler, StochasticSchrodingerAudit,
-    StochasticSchrodingerBackwardAudit, StochasticSchrodingerConfig, StochasticSchrodingerLayer,
-    ToposResonator, ZRelativityModule, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry,
-    ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, ZSpaceLayerNorm, ZSpaceLayerNormTelemetry,
-    ZSpaceMixer,
+    BatchNorm1d, Dropout, Embedding, Gelu, HamiltonJacobiAudit, HamiltonJacobiBackwardAudit,
+    HamiltonJacobiConfig, HamiltonJacobiFlow, HamiltonJacobiTensorBackward,
+    HamiltonJacobiTensorStep, KleinGordonAudit, KleinGordonBackwardAudit, KleinGordonConfig,
+    KleinGordonPropagation, KleinGordonTensorBackward, KleinGordonTensorStep, LayerNorm, Lstm,
+    Relu, Scaler, StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit,
+    StochasticSchrodingerConfig, StochasticSchrodingerLayer, ToposResonator, ZRelativityModule,
+    ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock,
+    ZSpaceLayerNorm, ZSpaceLayerNormTelemetry, ZSpaceMixer,
 };
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,

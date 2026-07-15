@@ -11954,25 +11954,38 @@ mod tests {
             .map(|idx| ((idx as f32 + 1.0) * 0.13).sin().abs() + 0.1)
             .collect();
         let hj_step = 0.1;
+        let hj_gradient_scale = 0.5;
+        let hj_inverse_mass = 1.0;
+        let hj_diffusion = 0.1;
         let hj_forward = unwrap_ok(wgpu_dense::dynamic_hamilton_jacobi_forward(
             &input,
             &hj_potential,
             rows,
             cols,
             hj_step,
+            hj_gradient_scale,
+            hj_inverse_mass,
+            hj_diffusion,
         ));
         for r in 0..rows {
             for c in 0..cols {
                 let idx = r * cols + c;
                 let current = input[idx];
-                let prev = if r > 0 { input[idx - cols] } else { current };
-                let next = if r + 1 < rows {
-                    input[idx + cols]
+                let row_start = r * cols;
+                let previous = row_start + if c == 0 { cols - 1 } else { c - 1 };
+                let next = row_start + if c + 1 == cols { 0 } else { c + 1 };
+                let gradient = if cols == 1 {
+                    0.0
                 } else {
-                    current
+                    (input[next] - input[previous]) * hj_gradient_scale
                 };
-                let grad = (2.0 * current - prev - next) + hj_potential[c] * current;
-                let expected = current - hj_step * grad;
+                let laplacian_delta = if cols == 1 {
+                    0.0
+                } else {
+                    input[previous] - 2.0 * current + input[next]
+                };
+                let hamiltonian = 0.5 * hj_inverse_mass * gradient * gradient + hj_potential[c];
+                let expected = current - hj_step * hamiltonian + hj_diffusion * laplacian_delta;
                 assert!((expected - hj_forward[idx]).abs() < 1e-6);
             }
         }
@@ -11983,33 +11996,36 @@ mod tests {
             rows,
             cols,
             hj_step,
+            hj_gradient_scale,
+            hj_inverse_mass,
+            hj_diffusion,
         ));
+        let mut expected_grad_action = vec![0.0; rows * cols];
+        let mut expected_grad_potential = vec![0.0; cols];
         for r in 0..rows {
+            let row_start = r * cols;
             for c in 0..cols {
-                let idx = r * cols + c;
-                let mut factor = 1.0 - hj_step * (2.0 + hj_potential[c]);
-                if rows == 1 {
-                    factor = 1.0 - hj_step * hj_potential[c];
-                } else if r == 0 || r + 1 == rows {
-                    factor = 1.0 - hj_step * (1.0 + hj_potential[c]);
+                let idx = row_start + c;
+                let upstream = rhs[idx];
+                expected_grad_action[idx] += upstream;
+                expected_grad_potential[c] += -hj_step * upstream;
+                if cols > 1 {
+                    let previous = row_start + if c == 0 { cols - 1 } else { c - 1 };
+                    let next = row_start + if c + 1 == cols { 0 } else { c + 1 };
+                    let gradient = (input[next] - input[previous]) * hj_gradient_scale;
+                    let kinetic =
+                        hj_step * hj_inverse_mass * gradient * hj_gradient_scale * upstream;
+                    expected_grad_action[previous] += kinetic + hj_diffusion * upstream;
+                    expected_grad_action[idx] += -2.0 * hj_diffusion * upstream;
+                    expected_grad_action[next] += -kinetic + hj_diffusion * upstream;
                 }
-                let mut expected = rhs[idx] * factor;
-                if r > 0 {
-                    expected += rhs[idx - cols] * hj_step;
-                }
-                if r + 1 < rows {
-                    expected += rhs[idx + cols] * hj_step;
-                }
-                assert!((expected - hj_grad.0[idx]).abs() < 1e-6);
             }
         }
-        for c in 0..cols {
-            let mut expected = 0.0f32;
-            for r in 0..rows {
-                let idx = r * cols + c;
-                expected += -hj_step * input[idx] * rhs[idx];
-            }
-            assert!((expected - hj_grad.1[c]).abs() < 1e-5);
+        for (expected, actual) in expected_grad_action.iter().zip(&hj_grad.0) {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+        for (expected, actual) in expected_grad_potential.iter().zip(&hj_grad.1) {
+            assert!((expected - actual).abs() < 1e-5);
         }
 
         let sch_time_step = 0.15;

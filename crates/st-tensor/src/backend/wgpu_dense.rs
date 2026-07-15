@@ -4073,6 +4073,24 @@ mod tests {
     }
 
     #[test]
+    fn hamilton_jacobi_boundary_rejects_invalid_values_before_dispatch() {
+        let invalid_diffusion =
+            dynamic_hamilton_jacobi_forward(&[0.2], &[0.1], 1, 1, 0.1, 0.5, 1.0, -0.1)
+                .expect_err("negative diffusion coefficient must fail before dispatch");
+        assert!(invalid_diffusion.contains("derived parameters"));
+
+        let non_finite_action =
+            dynamic_hamilton_jacobi_forward(&[f32::NAN], &[0.1], 1, 1, 0.1, 0.5, 1.0, 0.1)
+                .expect_err("non-finite action must fail before dispatch");
+        assert!(non_finite_action.contains("inputs must be finite"));
+
+        let invalid_backward =
+            dynamic_hamilton_jacobi_backward(&[0.2], &[1.0], &[0.1], 1, 1, 0.1, 0.5, 0.0, 0.1)
+                .expect_err("zero inverse mass must fail before dispatch");
+        assert!(invalid_backward.contains("derived parameters"));
+    }
+
+    #[test]
     fn matmul_shader_wgsl_is_valid() {
         let key = PipelineKey::new(
             ScalarType::F32,
@@ -6821,12 +6839,16 @@ pub fn dynamic_klein_gordon_backward(
     Ok((grad_field, grad_momentum, grad_mass_squared, grad_source))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn dynamic_hamilton_jacobi_forward(
     input: &[f32],
     potential: &[f32],
     rows: usize,
     cols: usize,
-    step_size: f32,
+    time_step: f32,
+    central_gradient_scale: f32,
+    inverse_mass: f32,
+    diffusion_step_coefficient: f32,
 ) -> Result<Vec<f32>, String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
         checked_tensor_util_shape("dynamic_hamilton_jacobi_forward", input, rows, cols)?;
@@ -6836,35 +6858,56 @@ pub fn dynamic_hamilton_jacobi_forward(
             potential.len()
         ));
     }
-    if !step_size.is_finite() {
-        return Err("dynamic_hamilton_jacobi_forward step size must be finite".into());
+    if !input.iter().all(|value| value.is_finite())
+        || !potential.iter().all(|value| value.is_finite())
+    {
+        return Err("dynamic_hamilton_jacobi_forward inputs must be finite".into());
+    }
+    if !time_step.is_finite()
+        || time_step <= 0.0
+        || !central_gradient_scale.is_finite()
+        || central_gradient_scale <= 0.0
+        || !inverse_mass.is_finite()
+        || inverse_mass <= 0.0
+        || !diffusion_step_coefficient.is_finite()
+        || diffusion_step_coefficient < 0.0
+    {
+        return Err("dynamic_hamilton_jacobi_forward derived parameters are invalid".into());
     }
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
-    tensor_util_internal(
+    let output = tensor_util_internal(
         input,
         Some(potential),
         rows,
         cols,
         volume,
-        step_size,
-        0.0,
-        0.0,
-        0.0,
+        time_step,
+        central_gradient_scale,
+        inverse_mass,
+        diffusion_step_coefficient,
         ctx.tensor_util_dynamic_hamilton_jacobi_forward_pipeline
             .clone(),
         workgroups,
         "dynamic_hamilton_jacobi_forward",
-    )
+    )?;
+    if output.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_hamilton_jacobi_forward produced non-finite output".into());
+    }
+    Ok(output)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn dynamic_hamilton_jacobi_backward(
     input: &[f32],
     grad_output: &[f32],
     potential: &[f32],
     rows: usize,
     cols: usize,
-    step_size: f32,
+    time_step: f32,
+    central_gradient_scale: f32,
+    inverse_mass: f32,
+    diffusion_step_coefficient: f32,
 ) -> Result<(Vec<f32>, Vec<f32>), String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
         checked_tensor_util_shape("dynamic_hamilton_jacobi_backward", input, rows, cols)?;
@@ -6880,12 +6923,25 @@ pub fn dynamic_hamilton_jacobi_backward(
             potential.len()
         ));
     }
-    if !step_size.is_finite() {
-        return Err("dynamic_hamilton_jacobi_backward step size must be finite".into());
+    if !input.iter().all(|value| value.is_finite())
+        || !grad_output.iter().all(|value| value.is_finite())
+        || !potential.iter().all(|value| value.is_finite())
+    {
+        return Err("dynamic_hamilton_jacobi_backward inputs must be finite".into());
     }
-    let mut aux = Vec::with_capacity(volume + cols);
+    if !time_step.is_finite()
+        || time_step <= 0.0
+        || !central_gradient_scale.is_finite()
+        || central_gradient_scale <= 0.0
+        || !inverse_mass.is_finite()
+        || inverse_mass <= 0.0
+        || !diffusion_step_coefficient.is_finite()
+        || diffusion_step_coefficient < 0.0
+    {
+        return Err("dynamic_hamilton_jacobi_backward derived parameters are invalid".into());
+    }
+    let mut aux = Vec::with_capacity(volume);
     aux.extend_from_slice(grad_output);
-    aux.extend_from_slice(potential);
     let output_elements = volume.checked_add(cols).ok_or_else(|| {
         "dynamic_hamilton_jacobi_backward output volume exceeds usize range".to_string()
     })?;
@@ -6897,15 +6953,18 @@ pub fn dynamic_hamilton_jacobi_backward(
         rows,
         cols,
         output_elements,
-        step_size,
-        0.0,
-        0.0,
-        0.0,
+        time_step,
+        central_gradient_scale,
+        inverse_mass,
+        diffusion_step_coefficient,
         ctx.tensor_util_dynamic_hamilton_jacobi_backward_pipeline
             .clone(),
         workgroups,
         "dynamic_hamilton_jacobi_backward",
     )?;
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_hamilton_jacobi_backward produced non-finite output".into());
+    }
     let grad_input = packed[..volume].to_vec();
     let grad_potential = packed[volume..volume + cols].to_vec();
     Ok((grad_input, grad_potential))
