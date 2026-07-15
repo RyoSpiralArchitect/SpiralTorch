@@ -33,6 +33,8 @@ from spiraltorch import (
     infer_weights_from_dlpack,
     infer_weights_from_compat,
     ZSpaceTelemetryFrame,
+    zspace_posterior_decode,
+    zspace_posterior_project,
     zspace_partial_fusion,
     zspace_telemetry_fusion,
 )
@@ -44,6 +46,89 @@ def test_decode_produces_expected_structure():
     assert set(decoded.metrics.keys()) == {"speed", "memory", "stability", "frac", "drs"}
     assert len(decoded.gradient) == len(vector)
     assert math.isclose(sum(decoded.barycentric), 1.0, rel_tol=1e-6)
+
+
+def test_posterior_decode_exposes_rust_owned_golden_contract():
+    contract = zspace_posterior_decode([0.12, -0.03, 0.48, -0.2])
+
+    assert contract["kind"] == "spiraltorch.zspace_posterior_decode"
+    assert contract["contract_version"] == "spiraltorch.zspace_posterior.v1"
+    assert contract["semantic_owner"] == "st-core::inference::zspace_posterior"
+    assert contract["semantic_backend"] == "rust"
+    assert "DFT" in contract["fractional_formula"]
+    assert "zero exterior boundaries" in contract["gradient_formula"]
+    assert "softplus" in contract["barycentric_formula"]
+    assert contract["energy"] == pytest.approx(0.2857)
+    assert contract["frac_energy"] == pytest.approx(0.2621560649191949)
+    assert contract["gradient"] == pytest.approx(
+        [-0.015, 0.18, -0.085, -0.24]
+    )
+    assert contract["metrics"] == pytest.approx(
+        {
+            "speed": 0.4463024613684294,
+            "memory": 0.10991043037290935,
+            "stability": 0.672934550609384,
+            "drs": 0.6180432815695912,
+            "frac": 0.7247563119052868,
+        }
+    )
+
+
+def test_posterior_projection_delegates_aliases_and_telemetry_to_rust():
+    contract = zspace_posterior_project(
+        [0.12, -0.03, 0.48, -0.2],
+        {"speed": 0.3, "mem": -0.2, "gradient": [2.0, -1.0]},
+        telemetry={"psi": {"energy": 2.0, "focus": 0.4}},
+    )
+
+    assert contract["kind"] == "spiraltorch.zspace_posterior_projection"
+    assert "rms_5" in contract["projection_formula"]
+    assert "variance" in contract["telemetry_formula"]
+    assert contract["applied"]["memory"] == pytest.approx(-0.2)
+    assert contract["gradient"] == pytest.approx(
+        [0.7615941559557649, -0.46211715726000974, 0.0, 0.0]
+    )
+    assert contract["telemetry"]["semantic_backend"] == "rust"
+    assert contract["telemetry"]["summary"]["variance"] == pytest.approx(0.64)
+    assert contract["residual"] == pytest.approx(0.09345350599255713)
+    assert contract["confidence"] == pytest.approx(1.0)
+
+
+def test_posterior_contract_rejects_ambiguous_or_invalid_requests():
+    with pytest.raises(ValueError, match="both resolve to 'speed'"):
+        zspace_posterior_project([0.1], {"speed": 0.2, "velocity": 0.3})
+    with pytest.raises(ValueError, match="smoothing"):
+        zspace_posterior_project([0.1], smoothing=1.1)
+    with pytest.raises(ValueError, match="at least one"):
+        zspace_posterior_decode([])
+    with pytest.raises(ValueError, match="fractional order"):
+        zspace_posterior_decode([0.1], alpha=0.0)
+
+
+def test_posterior_requires_the_native_semantic_core(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(st, "_rs", object())
+
+    with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
+        zspace_posterior_decode([0.1])
+    with pytest.raises(RuntimeError, match="compiled Rust semantic core"):
+        zspace_posterior_project([0.1], {"speed": 0.2})
+
+
+def test_posterior_rejects_an_untrusted_native_contract(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    native = types.SimpleNamespace(
+        _zspace_posterior_decode=lambda _request: {
+            "kind": "spiraltorch.zspace_posterior_decode",
+            "contract_version": "spiraltorch.zspace_posterior.v1",
+            "semantic_owner": "python",
+            "semantic_backend": "rust",
+        }
+    )
+    monkeypatch.setattr(st, "_rs", native)
+
+    with pytest.raises(RuntimeError, match="untrusted contract"):
+        zspace_posterior_decode([0.1])
 
 
 @pytest.mark.parametrize(
@@ -200,6 +285,13 @@ def test_zspace_fusion_functions_are_public():
     assert st.zspace_telemetry_fusion is zspace_telemetry_fusion
     assert "zspace_partial_fusion" in st.__all__
     assert "zspace_telemetry_fusion" in st.__all__
+
+
+def test_zspace_posterior_functions_are_public():
+    assert st.zspace_posterior_decode is zspace_posterior_decode
+    assert st.zspace_posterior_project is zspace_posterior_project
+    assert "zspace_posterior_decode" in st.__all__
+    assert "zspace_posterior_project" in st.__all__
 
 
 def test_z_notation_delegates_partial_semantics_to_rust():

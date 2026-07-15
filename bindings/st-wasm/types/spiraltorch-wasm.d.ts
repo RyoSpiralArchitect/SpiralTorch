@@ -371,6 +371,67 @@ declare module "spiraltorch-wasm" {
         sources: ZSpacePartialSourceAudit[];
     };
 
+    export type ZSpacePosteriorDecodeRequest = {
+        z_state: number[];
+        alpha?: number;
+    };
+
+    export type ZSpacePosteriorDecode = {
+        kind: "spiraltorch.zspace_posterior_decode";
+        contract_version: "spiraltorch.zspace_posterior.v1";
+        semantic_owner: "st-core::inference::zspace_posterior";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        metric_formula: string;
+        fractional_formula: string;
+        gradient_formula: string;
+        barycentric_formula: string;
+        z_state: number[];
+        alpha: number;
+        metrics: Record<string, number>;
+        gradient: number[];
+        barycentric: [number, number, number];
+        energy: number;
+        frac_energy: number;
+        spectral_bins: number;
+    };
+
+    export type ZSpacePosteriorProjectionRequest = {
+        z_state: number[];
+        alpha?: number;
+        partial?: Record<string, number | number[]>;
+        smoothing?: number;
+        telemetry?: Array<Record<string, unknown>>;
+    };
+
+    export type ZSpacePosteriorTelemetryAdjustment = {
+        variance_damping: number;
+        focus_gain: number;
+        energy_gain: number;
+        residual_before: number;
+        confidence_before: number;
+    };
+
+    export type ZSpacePosteriorProjection = {
+        kind: "spiraltorch.zspace_posterior_projection";
+        contract_version: "spiraltorch.zspace_posterior.v1";
+        semantic_owner: "st-core::inference::zspace_posterior";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        projection_formula: string;
+        telemetry_formula: string;
+        smoothing: number;
+        metrics: Record<string, number>;
+        gradient: number[];
+        barycentric: [number, number, number];
+        residual: number;
+        confidence: number;
+        applied: Record<string, number | number[]>;
+        prior: ZSpacePosteriorDecode;
+        telemetry?: ZSpaceTelemetryFusion;
+        telemetry_adjustment?: ZSpacePosteriorTelemetryAdjustment;
+    };
+
     export type FreeEnergyBandInput = {
         above: number;
         here: number;
@@ -1002,6 +1063,14 @@ declare module "spiraltorch-wasm" {
     export function zspacePartialFusionObject(
         request: ZSpacePartialFusionRequest,
     ): ZSpacePartialFusion;
+    export function zspacePosteriorDecodeJson(requestJson: string): string;
+    export function zspacePosteriorDecodeObject(
+        request: ZSpacePosteriorDecodeRequest,
+    ): ZSpacePosteriorDecode;
+    export function zspacePosteriorProjectJson(requestJson: string): string;
+    export function zspacePosteriorProjectObject(
+        request: ZSpacePosteriorProjectionRequest,
+    ): ZSpacePosteriorProjection;
     export function zspaceFreeEnergyJson(requestJson: string): string;
     export function zspaceFreeEnergyObject(
         request: FreeEnergyRequest,

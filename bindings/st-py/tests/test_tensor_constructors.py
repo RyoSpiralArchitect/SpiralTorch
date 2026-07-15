@@ -151,6 +151,8 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "canvas_coherence_partial",
         "elliptic_partial_from_telemetry",
         "coherence_partial_from_diagnostics",
+        "zspace_posterior_decode",
+        "zspace_posterior_project",
         "decode_zspace_embedding",
         "blend_zspace_partials",
         "zspace_partial_fusion",

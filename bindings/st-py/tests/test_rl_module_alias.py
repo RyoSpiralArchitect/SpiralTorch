@@ -87,6 +87,8 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "canvas_coherence_partial",
             "elliptic_partial_from_telemetry",
             "coherence_partial_from_diagnostics",
+            "zspace_posterior_decode",
+            "zspace_posterior_project",
             "decode_zspace_embedding",
             "blend_zspace_partials",
             "zspace_partial_fusion",

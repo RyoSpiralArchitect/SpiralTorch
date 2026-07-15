@@ -3649,6 +3649,24 @@ passes the full report to the Rust verifier; it does not select fields or
 calculate a ratio. WASM exposes the same verified control as a transport and
 audit surface, but does not pretend to own an `st-nn` parameter runtime.
 
+The latent posterior now has the same single-owner boundary. The complete
+decode/project semantics live in `st-core::inference::zspace_posterior`:
+finite-state validation, FFT half-spectrum and fractional energy, latent
+gradient normalization, base metric reconstruction, softplus barycentric
+projection, residual confidence, canonical partial aliases, and telemetry
+adjustment. The payload records its formula identifiers, contract version,
+semantic owner, and Rust backend.
+
+Python's `ZSpacePosterior` remains the orchestration API, but now only
+serializes requests, validates the Rust-owned envelope, and adapts payloads to
+the existing dataclasses. Its duplicate DFT, normalization, barycentric, and
+confidence formulas have been removed. Direct low-level decode/project
+functions expose the audit payload when orchestration code needs provenance.
+WASM presents the same decode/project contract as a peer browser client and
+adds only an execution-client marker. This control plane remains deliberately
+separate from WGPU, which owns bulk tensor execution rather than posterior
+meaning.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op

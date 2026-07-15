@@ -6,3 +6,4 @@ pub mod concept_diffusion;
 pub mod generation_control;
 pub mod imaginary_time_schrodinger;
 pub mod temperature_control;
+pub mod zspace_posterior;
