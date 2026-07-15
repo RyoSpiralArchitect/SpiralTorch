@@ -5,6 +5,7 @@ use pyo3::wrap_pyfunction;
 use spiral_safety::{
     AuditEvent, AuditSink, ContentChannel, SafetyPolicy, SafetyVerdict, SafetyViolation,
 };
+use st_core::inference::concept_diffusion::{apply_concept_diffusion, ConceptDiffusionRequest};
 use st_core::inference::generation_control::{
     apply_zspace_generation_control, ZSpaceGenerationControlRequest,
 };
@@ -87,6 +88,55 @@ fn _zspace_temperature_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> Py
         .map_err(|error| json_error("Z-space temperature control failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space temperature control encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_concept_diffusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space concept diffusion request must be a mapping")
+    })?;
+    for field in ["tags", "state", "affinity", "z_bias"] {
+        if request_object
+            .get(field)
+            .is_some_and(|value| !value.is_array())
+        {
+            return Err(PyValueError::new_err(format!(
+                "Z-space concept diffusion '{field}' must be a sequence"
+            )));
+        }
+    }
+    if request_object
+        .get("diffusion_tensor")
+        .is_some_and(|value| !value.is_array() && !value.is_null())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space concept diffusion 'diffusion_tensor' must be a sequence",
+        ));
+    }
+    if request_object
+        .get("observation")
+        .is_some_and(|value| !value.is_object() && !value.is_null())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space concept diffusion 'observation' must be a mapping",
+        ));
+    }
+    if request_object
+        .get("config")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space concept diffusion 'config' must be a mapping",
+        ));
+    }
+    let request: ConceptDiffusionRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space concept diffusion request", error))?;
+    let payload = apply_concept_diffusion(request)
+        .map_err(|error| json_error("Z-space concept diffusion failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space concept diffusion encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -313,6 +363,7 @@ impl InferenceRuntime {
 pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_generation_control, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_temperature_control, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_concept_diffusion, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;

@@ -1,6 +1,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod cobol;
+mod concept_diffusion;
 mod cosmology;
 mod fractal_field;
 mod generation_control;
@@ -31,6 +32,7 @@ pub use canvas::*;
 pub use cobol::*;
 #[cfg(target_arch = "wasm32")]
 pub use cobol_bridge::*;
+pub use concept_diffusion::*;
 pub use cosmology::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;

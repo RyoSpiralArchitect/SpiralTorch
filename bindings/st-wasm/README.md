@@ -98,6 +98,27 @@ console.log(transition.entropy, transition.next_state.temperature);
 worker-message and persistence paths. Neither entry point contains a browser
 fallback for the transition formula.
 
+Concept diffusion is also a peer contract rather than a browser-side
+approximation. Rust validates the labelled simplex and symmetric graph, applies
+observation/Z-bias controls, selects CFL-safe heat-flow substeps, and audits
+entropy plus Dirichlet energy:
+
+```ts
+import { zspaceConceptDiffusionObject } from "spiraltorch-wasm";
+
+const transition = zspaceConceptDiffusionObject({
+    tags: ["left", "right"],
+    state: [1.0, 0.0],
+    affinity: [[0.0, 1.0], [1.0, 0.0]],
+    config: { timestep: 0.25 },
+});
+
+console.log(transition.next_state); // [0.75, 0.25]
+```
+
+`zspaceConceptDiffusionJson` returns the identical versioned payload for worker
+and persistence boundaries. JavaScript never reconstructs the heat equation.
+
 Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
 while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
 tie-breaking, reward projection, and selected-route resolution:

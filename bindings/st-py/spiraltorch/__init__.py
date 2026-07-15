@@ -696,6 +696,7 @@ from .zspace_inference import (
     infer_weights_from_compat,
 )
 from .training_telemetry import training_telemetry_projection
+from .concept_diffusion import zspace_concept_diffusion
 from .generation_control import zspace_generation_control
 from .temperature_control import zspace_temperature_control
 
@@ -8152,6 +8153,7 @@ _EXTRAS.extend(
         "zspace_partial_fusion",
         "zspace_telemetry_fusion",
         "training_telemetry_projection",
+        "zspace_concept_diffusion",
         "zspace_generation_control",
         "zspace_temperature_control",
         "inference_to_mapping",
