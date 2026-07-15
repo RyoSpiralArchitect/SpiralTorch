@@ -438,6 +438,14 @@ def runtime_import_preflight_report(
     describe_runtime_devices: Callable[..., Mapping[str, object]] | None = ...,
 ) -> Dict[str, Any]: ...
 
+def evaluate_runtime_device_route(
+    reports: Iterable[Mapping[str, object]],
+    *,
+    requested_backends: object = ...,
+    required_available_backends: object = ...,
+    required_ready_backends: object = ...,
+) -> Dict[str, object]: ...
+
 def runtime_import_preflight_summary_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...

@@ -289,6 +289,33 @@ The object and JSON entry points are transport adapters only. Their payloads ret
 Rust `semantic_owner` and add `execution_client: "wasm"` for audit provenance; no browser
 fallback reimplements the route-policy formulas.
 
+Runtime-device readiness follows that boundary too. Browser code may collect WebGPU or host
+observations, but direct readiness, surrogate readiness, fallback identity, and requirement
+gates are evaluated only by `st-core::backend::runtime_route`:
+
+```ts
+import { runtimeDeviceRouteObject } from "spiraltorch-wasm";
+
+const runtime = runtimeDeviceRouteObject({
+    reports: [{
+        requested_backend: "mps",
+        effective_backend: "wgpu",
+        runtime_ready: true,
+        requested_backend_runtime_ready: false,
+        effective_backend_runtime_ready: true,
+        runtime_status: "kernel_wired",
+    }],
+    requested_backends: ["mps"],
+    required_ready_backends: ["mps"],
+});
+
+console.log(runtime.routes[0].native_ready, runtime.routes[0].route_ready);
+```
+
+This reports native MPS honestly as unavailable while preserving a ready WGPU surrogate.
+The browser binding adds only `execution_client: "wasm"`; it owns no readiness precedence
+or fallback heuristic.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

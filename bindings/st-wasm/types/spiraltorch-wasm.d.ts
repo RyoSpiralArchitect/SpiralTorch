@@ -75,6 +75,73 @@ declare module "spiraltorch-wasm" {
         runtime_profile: ToposRuntimeProfile;
     };
 
+    export type RuntimeDeviceRouteEvidence = {
+        requested_backend: string;
+        effective_backend?: string | null;
+        runtime_ready?: boolean | null;
+        requested_backend_runtime_ready?: boolean | null;
+        effective_backend_runtime_ready?: boolean | null;
+        available?: boolean | null;
+        runtime_status?: string | null;
+        requested_backend_runtime_status?: string | null;
+        effective_backend_runtime_status?: string | null;
+        status?: string | null;
+        error?: string | null;
+    };
+
+    export type RuntimeDeviceRouteRequest = {
+        reports?: RuntimeDeviceRouteEvidence[];
+        requested_backends?: string[];
+        required_available_backends?: string[];
+        required_ready_backends?: string[];
+    };
+
+    export type RuntimeDeviceRouteRow = {
+        requested_backend: string;
+        effective_backend: string;
+        report_available: boolean;
+        native_ready: boolean | null;
+        route_ready: boolean;
+        fallback: boolean;
+        route: "direct" | "surrogate" | "unavailable";
+        route_status: "ready" | "surrogate_ready" | "not_ready" | "error";
+        runtime_status: string;
+        requested_backend_runtime_status: string | null;
+        effective_backend_runtime_status: string | null;
+        diagnostic: string | null;
+    };
+
+    export type RuntimeDeviceRoute = {
+        kind: "spiraltorch.runtime_device_route";
+        contract_version: "spiraltorch.runtime_device_route.v1";
+        semantic_owner: "st-core::backend::runtime_route";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        backends: string[];
+        report_count: number;
+        routes: RuntimeDeviceRouteRow[];
+        available_backends: string[];
+        native_ready_backends: string[];
+        native_not_ready_backends: string[];
+        native_readiness_unknown_backends: string[];
+        ready_backends: string[];
+        not_ready_backends: string[];
+        fallback_backends: string[];
+        error_backends: string[];
+        missing_report_backends: string[];
+        status_by_backend: Record<string, string>;
+        all_ready: boolean;
+        has_errors: boolean;
+        required_available_backends: string[];
+        required_available_backends_missing: string[];
+        required_available_backends_passed: boolean | null;
+        required_ready_backends: string[];
+        required_ready_backends_missing: string[];
+        required_ready_backends_passed: boolean | null;
+        failures: string[];
+        passed: boolean;
+    };
+
     export type ToposRoutePolicyProfile =
         | "balanced"
         | "quality"
@@ -1135,6 +1202,10 @@ declare module "spiraltorch-wasm" {
     export function toposRuntimeRouteObject(
         profile: ToposRuntimeProfileInput,
     ): ToposRuntimeRoute;
+    export function runtimeDeviceRouteJson(requestJson: string): string;
+    export function runtimeDeviceRouteObject(
+        request: RuntimeDeviceRouteRequest,
+    ): RuntimeDeviceRoute;
     export function toposRoutePolicyEvaluateJson(requestJson: string): string;
     export function toposRoutePolicyEvaluateObject(
         request: ToposRoutePolicyEvaluationRequest,

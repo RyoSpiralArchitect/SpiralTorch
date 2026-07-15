@@ -43,11 +43,16 @@ __all__ = [
     "runtime_imports_from_source",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
+    "evaluate_runtime_device_route",
     "runtime_device_backends_from_source",
     "runtime_device_report_fields",
     "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
 ]
+
+_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v1"
+_RUNTIME_DEVICE_ROUTE_KIND = "spiraltorch.runtime_device_route"
+_RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER = "st-core::backend::runtime_route"
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
     "transformers": ["transformers"],
@@ -719,11 +724,8 @@ def _default_describe_runtime_devices():
 
     def _describe(backends, *, continue_on_error=True, **kwargs):
         rows = []
-        ready = []
-        not_ready = []
-        errors = []
-        statuses = {}
-        for backend in unique_stripped_values(backends):
+        backend_labels = unique_stripped_values(backends)
+        for backend in backend_labels:
             try:
                 row = dict(describe_device(backend, **dict(kwargs)))
             except Exception as exc:
@@ -736,26 +738,13 @@ def _default_describe_runtime_devices():
                     "runtime_status": "error",
                     "error": str(exc),
                 }
-            ready_value = _runtime_device_row_ready(row)
-            status = _runtime_device_row_status(row)
-            if "error" in row:
-                errors.append(backend)
-            if ready_value:
-                ready.append(backend)
-            else:
-                not_ready.append(backend)
-            statuses[backend] = status
             rows.append(row)
-        return {
-            "backends": unique_stripped_values(backends),
-            "reports": rows,
-            "ready_backends": ready,
-            "not_ready_backends": not_ready,
-            "error_backends": errors,
-            "status_by_backend": statuses,
-            "all_ready": bool(rows) and len(ready) == len(rows),
-            "has_errors": bool(errors),
-        }
+        contract = evaluate_runtime_device_route(
+            rows,
+            requested_backends=backend_labels,
+        )
+        contract["reports"] = rows
+        return contract
 
     return _describe
 
@@ -768,30 +757,103 @@ def _runtime_device_row_backend(row: Mapping[str, object], default: object = Non
     return str(default or "unknown")
 
 
-def _runtime_device_row_ready(row: Mapping[str, object]) -> bool:
+def _runtime_device_route_evidence(
+    row: Mapping[str, object],
+    *,
+    default_backend: object = None,
+) -> dict[str, object]:
+    evidence: dict[str, object] = {
+        "requested_backend": _runtime_device_row_backend(row, default=default_backend),
+    }
     for key in (
+        "effective_backend",
         "runtime_ready",
-        "effective_backend_runtime_ready",
         "requested_backend_runtime_ready",
+        "effective_backend_runtime_ready",
         "available",
-    ):
-        value = row.get(key)
-        if isinstance(value, bool):
-            return value
-    return False
-
-
-def _runtime_device_row_status(row: Mapping[str, object]) -> str:
-    for key in (
         "runtime_status",
-        "effective_backend_runtime_status",
         "requested_backend_runtime_status",
+        "effective_backend_runtime_status",
         "status",
+        "error",
     ):
         value = row.get(key)
         if value is not None:
-            return str(value)
-    return "unknown"
+            evidence[key] = str(value) if key == "error" else value
+    return evidence
+
+
+def _native_runtime_device_route_contract(
+    request: Mapping[str, object],
+) -> dict[str, object]:
+    try:
+        import spiraltorch as st  # type: ignore
+    except Exception as exc:  # pragma: no cover - import failures vary by env.
+        raise RuntimeError(
+            "runtime-device route semantics require the compiled Rust core"
+        ) from exc
+    native = getattr(st, "_rs", None)
+    evaluate = getattr(native, "_runtime_device_route_evaluate", None)
+    if not callable(evaluate):
+        raise RuntimeError(
+            "runtime-device route semantics require the compiled Rust core; "
+            "rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate"
+        )
+    payload = evaluate(dict(request))
+    if not isinstance(payload, Mapping):
+        raise RuntimeError(
+            "native runtime-device route core returned a non-mapping payload"
+        )
+    contract = dict(payload)
+    if (
+        contract.get("kind") != _RUNTIME_DEVICE_ROUTE_KIND
+        or contract.get("contract_version") != _RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION
+        or contract.get("semantic_owner") != _RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError(
+            "native runtime-device route core returned an untrusted contract"
+        )
+    return contract
+
+
+def evaluate_runtime_device_route(
+    reports: object,
+    *,
+    requested_backends: object = None,
+    required_available_backends: object = None,
+    required_ready_backends: object = None,
+) -> dict[str, object]:
+    """Evaluate device observations through the Rust-owned route contract."""
+
+    if reports is None:
+        report_values: list[object] = []
+    elif isinstance(reports, Mapping) or isinstance(reports, (str, bytes, bytearray)):
+        raise TypeError("reports must be an iterable of mappings")
+    else:
+        try:
+            report_values = list(reports)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("reports must be an iterable of mappings") from exc
+    requested = unique_stripped_values(requested_backends)
+    evidence = []
+    for index, row in enumerate(report_values):
+        if not isinstance(row, Mapping):
+            raise TypeError(f"reports[{index}] must be a mapping")
+        default_backend = requested[index] if index < len(requested) else None
+        evidence.append(
+            _runtime_device_route_evidence(row, default_backend=default_backend)
+        )
+    return _native_runtime_device_route_contract(
+        {
+            "reports": evidence,
+            "requested_backends": requested,
+            "required_available_backends": unique_stripped_values(
+                required_available_backends
+            ),
+            "required_ready_backends": unique_stripped_values(required_ready_backends),
+        }
+    )
 
 
 def runtime_device_report_fields(
@@ -868,56 +930,70 @@ def runtime_device_report_fields(
             ]
         else:
             reports = []
-    available = [
-        _runtime_device_row_backend(row, default=backends[index])
-        for index, row in enumerate(reports)
-        if "error" not in row
-    ]
-    ready = [
-        _runtime_device_row_backend(row, default=backends[index])
-        for index, row in enumerate(reports)
-        if _runtime_device_row_ready(row)
-    ]
-    error_backends = [
-        _runtime_device_row_backend(row, default=backends[index])
-        for index, row in enumerate(reports)
-        if "error" in row
-    ]
-    not_ready = [
-        backend for backend in backends
-        if backend not in ready
-    ]
+    contract = evaluate_runtime_device_route(
+        reports,
+        requested_backends=backends,
+        required_available_backends=required,
+        required_ready_backends=ready_required,
+    )
+    available = list(contract.get("available_backends", []))
+    ready = list(contract.get("ready_backends", []))
+    not_ready = list(contract.get("not_ready_backends", []))
+    error_backends = list(contract.get("error_backends", []))
+    status_by_backend = contract.get("status_by_backend", {})
+    if not isinstance(status_by_backend, Mapping):
+        raise RuntimeError("native runtime-device route core returned invalid statuses")
     statuses = [
-        f"{backend}={_runtime_device_row_status(row)}"
-        for backend, row in zip(backends, reports)
+        f"{backend}={status_by_backend.get(backend, 'missing')}" for backend in backends
     ]
-    missing_required = [
-        backend for backend in required
-        if backend not in available
-    ]
-    missing_ready_required = [
-        backend for backend in ready_required
-        if backend not in ready
-    ]
+    missing_required = list(contract.get("required_available_backends_missing", []))
+    missing_ready_required = list(contract.get("required_ready_backends_missing", []))
+    failures = list(contract.get("failures", []))
     return {
         f"{field_prefix}runtime_device_report_requested": True,
         f"{field_prefix}runtime_device_report_backends": csv_label(backends),
         f"{field_prefix}runtime_device_report_available_backends": csv_label(available),
         f"{field_prefix}runtime_device_report_ready_backends": csv_label(ready),
         f"{field_prefix}runtime_device_report_not_ready_backends": csv_label(not_ready),
-        f"{field_prefix}runtime_device_report_error_backends": csv_label(error_backends),
+        f"{field_prefix}runtime_device_report_error_backends": csv_label(
+            error_backends
+        ),
         f"{field_prefix}runtime_device_report_statuses": csv_label(statuses),
         f"{field_prefix}runtime_device_reports_json": json.dumps(
             reports,
             ensure_ascii=False,
             sort_keys=True,
         ),
+        f"{field_prefix}runtime_device_route_contract_json": json.dumps(
+            contract,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        f"{field_prefix}runtime_device_route_contract_version": contract.get(
+            "contract_version"
+        ),
+        f"{field_prefix}runtime_device_route_semantic_owner": contract.get(
+            "semantic_owner"
+        ),
+        f"{field_prefix}runtime_device_route_semantic_backend": contract.get(
+            "semantic_backend"
+        ),
+        f"{field_prefix}runtime_device_route_fallback_backends": csv_label(
+            contract.get("fallback_backends")
+        ),
+        f"{field_prefix}runtime_device_native_ready_backends": csv_label(
+            contract.get("native_ready_backends")
+        ),
+        f"{field_prefix}runtime_device_native_not_ready_backends": csv_label(
+            contract.get("native_not_ready_backends")
+        ),
+        f"{field_prefix}runtime_device_route_failures": csv_label(failures),
         f"{field_prefix}required_runtime_device_backends": csv_label(required),
         f"{field_prefix}required_runtime_device_backends_missing": (
             csv_label(missing_required) if required else "none"
         ),
         f"{field_prefix}required_runtime_device_backends_passed": (
-            None if not required else not missing_required
+            contract.get("required_available_backends_passed")
         ),
         f"{field_prefix}required_runtime_device_ready_backends": (
             csv_label(ready_required)
@@ -926,7 +1002,7 @@ def runtime_device_report_fields(
             csv_label(missing_ready_required) if ready_required else "none"
         ),
         f"{field_prefix}required_runtime_device_ready_backends_passed": (
-            None if not ready_required else not missing_ready_required
+            contract.get("required_ready_backends_passed")
         ),
     }
 
@@ -937,6 +1013,9 @@ def runtime_device_requirement_failures(
     field_prefix: str = "",
     failure_prefix: str = "runtime_device",
 ) -> list[str]:
+    contract_failures_key = f"{field_prefix}runtime_device_route_failures"
+    if contract_failures_key in row:
+        return csv_values(row.get(contract_failures_key))
     failures = []
     if row.get(f"{field_prefix}required_runtime_device_backends_passed") is False:
         for backend in sorted(

@@ -770,6 +770,7 @@ from .runtime_imports import (
     required_runtime_import_presets_from_source,
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
+    evaluate_runtime_device_route,
     runtime_import_coimport_status,
     runtime_import_install_hint,
     runtime_import_install_hints_label,
@@ -1357,6 +1358,7 @@ _EXTRAS = [
     "runtime_import_probe","runtime_import_probe_fields","runtime_import_probe_rows",
     "runtime_import_required_gate_fields","runtime_import_requirement_failures",
     "runtime_imports_from_args","runtime_imports_from_source",
+    "evaluate_runtime_device_route",
     "runtime_device_backends_from_source","runtime_device_report_fields",
     "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
@@ -8458,32 +8460,6 @@ def _normalize_runtime_device_backends(backends: _Any) -> list[str]:
     return list(dict.fromkeys(normalized))
 
 
-def _runtime_report_ready(report: _Mapping[str, _Any]) -> bool:
-    for key in (
-        "runtime_ready",
-        "effective_backend_runtime_ready",
-        "requested_backend_runtime_ready",
-        "available",
-    ):
-        value = report.get(key)
-        if isinstance(value, bool):
-            return value
-    return False
-
-
-def _runtime_report_status(report: _Mapping[str, _Any]) -> str:
-    for key in (
-        "runtime_status",
-        "effective_backend_runtime_status",
-        "requested_backend_runtime_status",
-        "status",
-    ):
-        value = report.get(key)
-        if value is not None:
-            return str(value)
-    return "unknown"
-
-
 def describe_runtime_devices(
     backends: _Any = _RUNTIME_DEVICE_REPORT_BACKENDS,
     *,
@@ -8498,11 +8474,6 @@ def describe_runtime_devices(
 
     backend_labels = _normalize_runtime_device_backends(backends)
     reports: list[_Dict[str, _Any]] = []
-    ready_backends: list[str] = []
-    not_ready_backends: list[str] = []
-    error_backends: list[str] = []
-    status_by_backend: _Dict[str, str] = {}
-
     for backend in backend_labels:
         try:
             report = dict(describe(backend, **dict(kwargs)))
@@ -8520,27 +8491,13 @@ def describe_runtime_devices(
             report.setdefault("requested_backend", backend)
             report.setdefault("backend", str(report.get("effective_backend", backend)))
 
-        ready = _runtime_report_ready(report)
-        status = _runtime_report_status(report)
-        if "error" in report:
-            error_backends.append(backend)
-        if ready:
-            ready_backends.append(backend)
-        else:
-            not_ready_backends.append(backend)
-        status_by_backend[backend] = status
         reports.append(report)
-
-    return {
-        "backends": backend_labels,
-        "reports": reports,
-        "ready_backends": ready_backends,
-        "not_ready_backends": not_ready_backends,
-        "error_backends": error_backends,
-        "status_by_backend": status_by_backend,
-        "all_ready": bool(reports) and len(ready_backends) == len(reports),
-        "has_errors": bool(error_backends),
-    }
+    contract = evaluate_runtime_device_route(
+        reports,
+        requested_backends=backend_labels,
+    )
+    contract["reports"] = reports
+    return contract
 
 
 def _resolve_runtime_entry(backend: str) -> tuple[str, str, _Dict[str, _Any]]:

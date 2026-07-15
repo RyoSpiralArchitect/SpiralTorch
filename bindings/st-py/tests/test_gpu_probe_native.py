@@ -94,6 +94,10 @@ def test_describe_runtime_devices_collects_backend_readiness(
     assert "describe_runtime_devices" in st.__all__
     assert st.planner.describe_runtime_devices is st.describe_runtime_devices
     assert summary["backends"] == ["wgpu", "cpu", "mps"]
+    assert summary["kind"] == "spiraltorch.runtime_device_route"
+    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v1"
+    assert summary["semantic_owner"] == "st-core::backend::runtime_route"
+    assert summary["semantic_backend"] == "rust"
     assert summary["ready_backends"] == ["wgpu"]
     assert summary["not_ready_backends"] == ["cpu", "mps"]
     assert summary["error_backends"] == ["mps"]
@@ -113,6 +117,54 @@ def test_describe_runtime_devices_collects_backend_readiness(
 
     with pytest.raises(RuntimeError, match="mps placeholder"):
         st.describe_runtime_devices(["mps"], continue_on_error=False)
+
+
+def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> None:
+    st = require_native()
+
+    contract = st.evaluate_runtime_device_route(
+        [
+            {
+                "requested_backend": "mps",
+                "effective_backend": "wgpu",
+                "runtime_ready": True,
+                "requested_backend_runtime_ready": False,
+                "effective_backend_runtime_ready": True,
+                "runtime_status": "kernel_wired",
+                "requested_backend_runtime_status": "placeholder",
+                "effective_backend_runtime_status": "kernel_wired",
+                "error": "native MPS kernels are not wired",
+            }
+        ],
+        requested_backends=["mps"],
+        required_available_backends=["mps"],
+        required_ready_backends=["mps"],
+    )
+
+    assert "evaluate_runtime_device_route" in st.__all__
+    assert contract["ready_backends"] == ["mps"]
+    assert contract["native_ready_backends"] == []
+    assert contract["native_not_ready_backends"] == ["mps"]
+    assert contract["fallback_backends"] == ["mps"]
+    assert contract["error_backends"] == []
+    assert contract["routes"][0]["route"] == "surrogate"
+    assert contract["routes"][0]["diagnostic"] == "native MPS kernels are not wired"
+    assert contract["passed"] is True
+
+
+def test_runtime_device_route_rejects_conflicting_readiness() -> None:
+    st = require_native()
+
+    with pytest.raises(ValueError, match="disagrees on route readiness"):
+        st.evaluate_runtime_device_route(
+            [
+                {
+                    "requested_backend": "wgpu",
+                    "runtime_ready": True,
+                    "effective_backend_runtime_ready": False,
+                }
+            ]
+        )
 
 
 def test_plan_explicit_wgpu_backend() -> None:
