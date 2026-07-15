@@ -40,6 +40,8 @@ __all__ = [
     "topos_runtime_profile",
     "topos_runtime_route",
     "topos_control_partial",
+    "zspace_posterior_decode",
+    "zspace_posterior_project",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -137,6 +139,10 @@ _ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION = (
 )
 _ZSPACE_PARTIAL_FUSION_KIND = "spiraltorch.zspace_partial_fusion"
 _ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION = "spiraltorch.zspace_partial_fusion.v1"
+_ZSPACE_POSTERIOR_CONTRACT_VERSION = "spiraltorch.zspace_posterior.v1"
+_ZSPACE_POSTERIOR_DECODE_KIND = "spiraltorch.zspace_posterior_decode"
+_ZSPACE_POSTERIOR_PROJECTION_KIND = "spiraltorch.zspace_posterior_projection"
+_ZSPACE_POSTERIOR_SEMANTIC_OWNER = "st-core::inference::zspace_posterior"
 _TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION = (
     "spiraltorch.topos_zspace_projection.v1"
 )
@@ -1009,64 +1015,6 @@ def prepare_trainer_step_payload(
     return inference
 
 
-def _softplus(value: float) -> float:
-    if value > 20.0:
-        return value
-    if value < -20.0:
-        return math.exp(value)
-    return math.log1p(math.exp(value))
-
-
-def _ensure_vector(z_state: Sequence[float]) -> list[float]:
-    vector = [float(v) for v in z_state]
-    if not vector:
-        raise ValueError("z_state must contain at least one value")
-    return vector
-
-
-def _rfft(values: Sequence[float]) -> list[complex]:
-    n = len(values)
-    if n == 0:
-        return []
-    freq: list[complex] = []
-    for k in range(n // 2 + 1):
-        real = 0.0
-        imag = 0.0
-        for t, val in enumerate(values):
-            angle = -2.0 * math.pi * k * t / max(1, n)
-            real += val * math.cos(angle)
-            imag += val * math.sin(angle)
-        freq.append(complex(real, imag))
-    return freq
-
-
-def _fractional_energy(values: Sequence[float], alpha: float) -> float:
-    spectrum = _rfft(values)
-    n = len(spectrum)
-    if n <= 1:
-        return 0.0
-    acc = 0.0
-    for idx, coeff in enumerate(spectrum):
-        omega = idx / max(1, n - 1)
-        weight = omega ** (2.0 * alpha)
-        acc += weight * abs(coeff) ** 2
-    return acc / n
-
-
-def _normalise_gradient(values: Sequence[float], length: int) -> list[float]:
-    if isinstance(values, MappingABC):
-        values = list(values.values())
-    grad = [float(v) for v in values]
-    if len(grad) < length:
-        grad.extend(0.0 for _ in range(length - len(grad)))
-    elif len(grad) > length:
-        grad = grad[:length]
-    scale = max(abs(v) for v in grad) if grad else 0.0
-    if scale <= 1.0:
-        return grad
-    return [math.tanh(v / scale) for v in grad]
-
-
 def _flatten_telemetry(
     payload: Mapping[str, Any], prefix: str = ""
 ) -> dict[str, float]:
@@ -1092,6 +1040,40 @@ def _native_zspace_fusion(function_name: str, payload: Any) -> dict[str, Any]:
     if not isinstance(contract, MappingABC):
         raise RuntimeError("native Z-space fusion returned a non-mapping payload")
     return dict(contract)
+
+
+def _native_zspace_posterior(
+    function_name: str,
+    request: Mapping[str, Any],
+    *,
+    expected_kind: str,
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, function_name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space posterior inference requires the compiled Rust semantic core; "
+            f"rebuild or reinstall SpiralTorch with {function_name}"
+        )
+    contract = operation(dict(request))
+    if not isinstance(contract, MappingABC):
+        raise RuntimeError("native Z-space posterior returned a non-mapping payload")
+    contract = dict(contract)
+    _validate_zspace_posterior_contract(contract, expected_kind=expected_kind)
+    return contract
+
+
+def _validate_zspace_posterior_contract(
+    contract: Mapping[str, Any], *, expected_kind: str
+) -> None:
+    if (
+        contract.get("kind") != expected_kind
+        or contract.get("contract_version") != _ZSPACE_POSTERIOR_CONTRACT_VERSION
+        or contract.get("semantic_owner") != _ZSPACE_POSTERIOR_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+    ):
+        raise RuntimeError("native Z-space posterior returned an untrusted contract")
 
 
 def _validate_zspace_fusion_contract(
@@ -1452,22 +1434,22 @@ class ZSpaceTelemetryFrame:
         }
 
 
-def _summarise_telemetry(
-    telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None,
-) -> ZSpaceTelemetryFrame | None:
-    if telemetry is None:
-        return None
-    if isinstance(telemetry, ZSpaceTelemetryFrame):
-        return telemetry
-    if not isinstance(telemetry, Mapping):
-        raise TypeError("telemetry payloads must be provided as mappings")
-    contract = zspace_telemetry_fusion(telemetry)
-    flattened = dict(contract["payload"])
-    stats = contract["summary"]
+def _telemetry_frame_from_fusion_contract(
+    contract: Mapping[str, Any],
+) -> ZSpaceTelemetryFrame:
+    _validate_zspace_fusion_contract(
+        contract,
+        kind=_ZSPACE_TELEMETRY_FUSION_KIND,
+        contract_version=_ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION,
+    )
+    flattened = contract.get("payload")
+    stats = contract.get("summary")
+    if not isinstance(flattened, MappingABC):
+        raise RuntimeError("native Z-space telemetry payload is malformed")
     if not isinstance(stats, MappingABC):
         raise RuntimeError("native Z-space telemetry summary is malformed")
     return ZSpaceTelemetryFrame(
-        MappingProxyType(dict(flattened)),
+        MappingProxyType({str(key): float(value) for key, value in flattened.items()}),
         mean=float(stats["mean"]),
         variance=float(stats["variance"]),
         amplitude=float(stats["amplitude"]),
@@ -1836,72 +1818,6 @@ def elliptic_partial_from_telemetry(
     )
 
 
-def _barycentric_from_metrics(
-    metrics: Mapping[str, float],
-) -> tuple[float, float, float]:
-    speed = float(metrics.get("speed", 0.0))
-    memory = float(metrics.get("memory", 0.0))
-    stability = float(metrics.get("stability", 0.0))
-    weights = [_softplus(speed), _softplus(memory), _softplus(stability)]
-    total = sum(weights)
-    if total <= 0.0:
-        return (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
-    return tuple(weight / total for weight in weights)
-
-
-def _compute_gradient(values: Sequence[float]) -> list[float]:
-    n = len(values)
-    if n == 0:
-        return []
-    grad: list[float] = []
-    for idx in range(n):
-        left = values[idx] - values[idx - 1] if idx > 0 else values[idx]
-        right = values[idx + 1] - values[idx] if idx + 1 < n else -values[idx]
-        grad.append(0.5 * (left + right))
-    return grad
-
-
-def _decode_metrics(
-    z_state: Sequence[float], alpha: float
-) -> tuple[dict[str, float], list[float], tuple[float, float, float], float, float]:
-    vector = _ensure_vector(z_state)
-    n = len(vector)
-    diffs = [vector[i + 1] - vector[i] for i in range(n - 1)]
-    curvature = [
-        vector[i + 1] - 2.0 * vector[i] + vector[i - 1] for i in range(1, n - 1)
-    ]
-    mean_velocity = sum(abs(v) for v in diffs) / max(1, len(diffs))
-    curvature_energy = sum(abs(v) for v in curvature) / max(1, len(curvature))
-    l2 = math.sqrt(sum(value * value for value in vector))
-    centre = sum(vector) / n
-    frac_energy = _fractional_energy(vector, alpha)
-    total_energy = sum(value * value for value in vector)
-    gradient = _normalise_gradient(_compute_gradient(vector), n)
-    speed = math.tanh(mean_velocity + 0.25 * l2 / max(1, n))
-    memory = math.tanh(centre + 0.25 * total_energy / max(1, n))
-    smoothness = 1.0 / (1.0 + curvature_energy)
-    drift = 1.0 / (1.0 + mean_velocity)
-    stability = math.tanh((smoothness + drift) * 1.5 - 1.0)
-    spectrum = _rfft(vector)
-    if len(spectrum) > 1:
-        half = max(1, len(spectrum) // 2)
-        high = sum(abs(coeff) ** 2 for coeff in spectrum[half:])
-        low = sum(abs(coeff) ** 2 for coeff in spectrum[:half])
-        drs = math.tanh((high - low) / (high + low + 1e-9))
-    else:
-        drs = 0.0
-    frac = math.tanh(frac_energy / (total_energy + 1e-9))
-    metrics = {
-        "speed": speed,
-        "memory": memory,
-        "stability": stability,
-        "frac": frac,
-        "drs": drs,
-    }
-    barycentric = _barycentric_from_metrics(metrics)
-    return metrics, gradient, barycentric, total_energy, frac_energy
-
-
 @dataclass(frozen=True)
 class ZSpaceDecoded:
     """Full set of metrics reconstructed from a latent Z vector."""
@@ -1923,6 +1839,106 @@ class ZSpaceDecoded:
             "frac_energy": self.frac_energy,
         }
         return data
+
+
+def _posterior_sequence(
+    payload: Mapping[str, Any], field: str, *, length: int | None = None
+) -> tuple[float, ...]:
+    raw = payload.get(field)
+    if not isinstance(raw, SequenceABC) or isinstance(raw, (str, bytes, bytearray)):
+        raise RuntimeError(f"native Z-space posterior field '{field}' is malformed")
+    values = tuple(float(value) for value in raw)
+    if length is not None and len(values) != length:
+        raise RuntimeError(f"native Z-space posterior field '{field}' has invalid length")
+    if any(not math.isfinite(value) for value in values):
+        raise RuntimeError(f"native Z-space posterior field '{field}' is not finite")
+    return values
+
+
+def _posterior_scalar(payload: Mapping[str, Any], field: str) -> float:
+    try:
+        value = float(payload[field])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"native Z-space posterior field '{field}' is malformed"
+        ) from exc
+    if not math.isfinite(value):
+        raise RuntimeError(f"native Z-space posterior field '{field}' is not finite")
+    return value
+
+
+def _decoded_from_posterior_contract(
+    contract: Mapping[str, Any],
+) -> ZSpaceDecoded:
+    _validate_zspace_posterior_contract(
+        contract, expected_kind=_ZSPACE_POSTERIOR_DECODE_KIND
+    )
+    metrics = contract.get("metrics")
+    if not isinstance(metrics, MappingABC):
+        raise RuntimeError("native Z-space posterior metrics are malformed")
+    z_state = _posterior_sequence(contract, "z_state")
+    gradient = _posterior_sequence(contract, "gradient", length=len(z_state))
+    barycentric = _posterior_sequence(contract, "barycentric", length=3)
+    return ZSpaceDecoded(
+        z_state=z_state,
+        metrics=MappingProxyType(
+            {str(key): float(value) for key, value in metrics.items()}
+        ),
+        gradient=gradient,
+        barycentric=(barycentric[0], barycentric[1], barycentric[2]),
+        energy=_posterior_scalar(contract, "energy"),
+        frac_energy=_posterior_scalar(contract, "frac_energy"),
+    )
+
+
+def zspace_posterior_decode(
+    z_state: Sequence[float], *, alpha: float = 0.35
+) -> dict[str, Any]:
+    """Decode a latent state through the canonical Rust posterior contract."""
+
+    request = {
+        "z_state": [float(value) for value in z_state],
+        "alpha": float(alpha),
+    }
+    return _native_zspace_posterior(
+        "_zspace_posterior_decode",
+        request,
+        expected_kind=_ZSPACE_POSTERIOR_DECODE_KIND,
+    )
+
+
+def zspace_posterior_project(
+    z_state: Sequence[float],
+    partial: Mapping[str, Any] | None = None,
+    *,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+) -> dict[str, Any]:
+    """Project partial observations through the canonical Rust posterior contract."""
+
+    if partial is None:
+        partial_input: dict[str, Any] = {}
+    elif isinstance(partial, Mapping):
+        partial_input = {}
+        for name, value in partial.items():
+            if not isinstance(name, str):
+                raise TypeError("partial observation names must be strings")
+            partial_input[name] = _metric_input(value)
+    else:
+        raise TypeError("partial observations must be provided as a mapping")
+    request = {
+        "z_state": [float(value) for value in z_state],
+        "alpha": float(alpha),
+        "partial": partial_input,
+        "smoothing": float(smoothing),
+        "telemetry": _telemetry_inputs([telemetry]),
+    }
+    return _native_zspace_posterior(
+        "_zspace_posterior_project",
+        request,
+        expected_kind=_ZSPACE_POSTERIOR_PROJECTION_KIND,
+    )
 
 
 @dataclass(frozen=True)
@@ -1955,9 +1971,10 @@ class ZSpacePosterior:
     """Posterior over Z-space metrics conditioned on a latent state."""
 
     def __init__(self, z_state: Sequence[float], *, alpha: float = 0.35) -> None:
-        self._z_state = tuple(_ensure_vector(z_state))
-        self._alpha = max(1e-6, float(alpha))
-        self._decoded: ZSpaceDecoded | None = None
+        contract = zspace_posterior_decode(z_state, alpha=alpha)
+        self._decoded = _decoded_from_posterior_contract(contract)
+        self._z_state = self._decoded.z_state
+        self._alpha = float(contract["alpha"])
 
     @property
     def z_state(self) -> list[float]:
@@ -1968,18 +1985,6 @@ class ZSpacePosterior:
         return self._alpha
 
     def decode(self) -> ZSpaceDecoded:
-        if self._decoded is None:
-            metrics, gradient, barycentric, energy, frac_energy = _decode_metrics(
-                self._z_state, self._alpha
-            )
-            self._decoded = ZSpaceDecoded(
-                z_state=self._z_state,
-                metrics=MappingProxyType(dict(metrics)),
-                gradient=tuple(gradient),
-                barycentric=barycentric,
-                energy=energy,
-                frac_energy=frac_energy,
-            )
         return self._decoded
 
     def project(
@@ -1989,52 +1994,39 @@ class ZSpacePosterior:
         smoothing: float = 0.35,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
-        decoded = self.decode()
-        metrics = dict(decoded.metrics)
-        gradient = list(decoded.gradient)
-        applied: Dict[str, Any] = {}
-        updates = _canonicalise_inputs(partial)
-        if "gradient" in updates:
-            gradient = _normalise_gradient(updates["gradient"], len(self._z_state))
-            applied["gradient"] = list(gradient)
-        for key, value in updates.items():
-            if key == "gradient":
-                continue
-            metrics[key] = float(value)
-            applied[key] = metrics[key]
-        override_bary = _barycentric_from_metrics(metrics)
-        base_bary = decoded.barycentric
-        blend = max(0.0, min(1.0, float(smoothing)))
-        barycentric = tuple(
-            blend * base + (1.0 - blend) * override
-            for base, override in zip(base_bary, override_bary)
+        contract = zspace_posterior_project(
+            self._z_state,
+            partial,
+            alpha=self._alpha,
+            smoothing=smoothing,
+            telemetry=telemetry,
         )
-        norm = sum(barycentric)
-        if norm <= 0.0:
-            barycentric = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
-        else:
-            barycentric = tuple(value / norm for value in barycentric)
-        diff = 0.0
-        for name, base_value in decoded.metrics.items():
-            diff += (metrics[name] - base_value) ** 2
-        residual = math.sqrt(diff / len(decoded.metrics)) if decoded.metrics else 0.0
-        confidence = math.exp(-residual)
-        telemetry_frame = _summarise_telemetry(telemetry)
-        if telemetry_frame is not None:
-            variance_damp = max(1.0, 1.0 + telemetry_frame.variance)
-            residual = residual / variance_damp
-            focus_gain = max(0.25, 1.0 + 0.25 * telemetry_frame.focus)
-            energy_gain = min(1.5, 1.0 + 0.05 * telemetry_frame.energy)
-            confidence = max(0.0, min(1.0, confidence * focus_gain * energy_gain))
-        else:
-            telemetry_frame = None
+        metrics = contract.get("metrics")
+        applied = contract.get("applied")
+        prior = contract.get("prior")
+        if not isinstance(metrics, MappingABC) or not isinstance(applied, MappingABC):
+            raise RuntimeError("native Z-space posterior projection is malformed")
+        if not isinstance(prior, MappingABC):
+            raise RuntimeError("native Z-space posterior prior is malformed")
+        gradient = _posterior_sequence(
+            contract, "gradient", length=len(self._z_state)
+        )
+        barycentric = _posterior_sequence(contract, "barycentric", length=3)
+        telemetry_contract = contract.get("telemetry")
+        telemetry_frame = None
+        if telemetry_contract is not None:
+            if not isinstance(telemetry_contract, MappingABC):
+                raise RuntimeError("native Z-space posterior telemetry is malformed")
+            telemetry_frame = _telemetry_frame_from_fusion_contract(telemetry_contract)
         return ZSpaceInference(
-            metrics=MappingProxyType(dict(metrics)),
+            metrics=MappingProxyType(
+                {str(key): float(value) for key, value in metrics.items()}
+            ),
             gradient=list(gradient),
-            barycentric=barycentric,
-            residual=residual,
-            confidence=confidence,
-            prior=decoded,
+            barycentric=(barycentric[0], barycentric[1], barycentric[2]),
+            residual=_posterior_scalar(contract, "residual"),
+            confidence=_posterior_scalar(contract, "confidence"),
+            prior=_decoded_from_posterior_contract(prior),
             applied=MappingProxyType(dict(applied)),
             telemetry=telemetry_frame,
         )

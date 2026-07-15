@@ -99,7 +99,7 @@ impl ZSpaceFusionStrategy {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ZSpaceMetricInput {
     Scalar(f64),

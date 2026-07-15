@@ -73,6 +73,36 @@ gradient axes are semantic; wider client vectors are explicitly zero-filled by R
 carry `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and
 direct Rust runs can be audited against one semantic core.
 
+Latent posterior decoding and partial projection use the same boundary. The
+browser passes state, partial observations, and telemetry to
+`st-core::inference::zspace_posterior`; Rust alone owns the DFT-derived
+fractional energy, gradient normalization, aliases, barycentric coordinates,
+residual/confidence update, and telemetry adjustment:
+
+```ts
+import {
+    zspacePosteriorDecodeObject,
+    zspacePosteriorProjectObject,
+} from "spiraltorch-wasm";
+
+const prior = zspacePosteriorDecodeObject({
+    z_state: [0.12, -0.03, 0.48, -0.2],
+    alpha: 0.35,
+});
+const projection = zspacePosteriorProjectObject({
+    z_state: prior.z_state,
+    partial: { speed: 0.3, mem: -0.2 },
+    telemetry: [{ psi: { energy: 2.0, focus: 0.4 } }],
+});
+
+console.log(projection.residual, projection.semantic_owner);
+```
+
+The corresponding `zspacePosteriorDecodeJson` and
+`zspacePosteriorProjectJson` functions expose identical worker/persistence
+contracts. WASM adds only `execution_client: "wasm"`; it has no JavaScript
+posterior fallback.
+
 Stateful temperature control follows the same contract. The browser carries
 controller state between calls, while Rust alone validates probability mass and
 computes entropy, Z-feedback, scale-memory, and gradient adjustments:

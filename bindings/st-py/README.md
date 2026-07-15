@@ -2132,6 +2132,24 @@ print("z:", trainer.state, "loss:", loss)
 print("last inference:", trainer.last_inference.residual, trainer.last_inference.confidence)
 ```
 
+`ZSpacePosterior`, `decode_zspace_embedding(...)`, and `infer_from_partial(...)`
+are Python orchestration surfaces over one Rust-owned posterior contract. The
+spectral decode, fractional energy, gradient normalization, metric aliases,
+barycentric projection, residual/confidence update, and telemetry adjustment
+live in `st-core::inference::zspace_posterior`; Python does not carry fallback
+formulas. Use `zspace_posterior_decode(...)` or
+`zspace_posterior_project(...)` when a versioned audit payload is preferable to
+the high-level dataclasses:
+
+```python
+contract = st.zspace_posterior_project(
+    [0.12, -0.03, 0.48, -0.2],
+    {"speed": 0.3, "mem": -0.2},
+    telemetry={"psi": {"energy": 2.0, "focus": 0.4}},
+)
+assert contract["semantic_owner"] == "st-core::inference::zspace_posterior"
+```
+
 ### SoT-3Dφ → TensorBiome quickstart
 
 ```bash

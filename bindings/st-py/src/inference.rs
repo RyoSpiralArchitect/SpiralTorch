@@ -15,6 +15,10 @@ use st_core::inference::imaginary_time_schrodinger::{
 use st_core::inference::temperature_control::{
     apply_temperature_control, TemperatureControlRequest,
 };
+use st_core::inference::zspace_posterior::{
+    decode_zspace_posterior, project_zspace_posterior, ZSpacePosteriorDecodeRequest,
+    ZSpacePosteriorProjectionRequest,
+};
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -176,6 +180,70 @@ fn _zspace_imaginary_time_schrodinger(
         .map_err(|error| json_error("Z-space imaginary-time Schrodinger failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space imaginary-time Schrodinger encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_posterior_decode(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space posterior decode request must be a mapping")
+    })?;
+    if request_object
+        .get("z_state")
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space posterior decode 'z_state' must be a sequence",
+        ));
+    }
+    let request: ZSpacePosteriorDecodeRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space posterior decode request", error))?;
+    let payload = py
+        .allow_threads(|| decode_zspace_posterior(request))
+        .map_err(|error| json_error("Z-space posterior decode failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space posterior decode encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space posterior projection request must be a mapping")
+    })?;
+    if request_object
+        .get("z_state")
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space posterior projection 'z_state' must be a sequence",
+        ));
+    }
+    if request_object
+        .get("partial")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space posterior projection 'partial' must be a mapping",
+        ));
+    }
+    if request_object
+        .get("telemetry")
+        .is_some_and(|value| !value.is_array())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space posterior projection 'telemetry' must be a sequence",
+        ));
+    }
+    let request: ZSpacePosteriorProjectionRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space posterior projection request", error))?;
+    let payload = py
+        .allow_threads(|| project_zspace_posterior(request))
+        .map_err(|error| json_error("Z-space posterior projection failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space posterior projection encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -404,6 +472,8 @@ pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_temperature_control, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_concept_diffusion, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_imaginary_time_schrodinger, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_posterior_decode, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_posterior_project, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;

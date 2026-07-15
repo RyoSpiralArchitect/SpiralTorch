@@ -211,6 +211,15 @@ const fused = zspacePartialFusionObject({
 });
 ```
 
+Posterior decoding follows that same Rust-first boundary. Python's
+`ZSpacePosterior` and the browser's `zspacePosteriorDecodeObject` /
+`zspacePosteriorProjectObject` are clients of
+`st-core::inference::zspace_posterior`; neither layer reconstructs spectral
+energy, gradients, barycentric weights, residual confidence, or telemetry
+adjustments. For an auditable Python payload, call
+`st.zspace_posterior_decode(...)` or `st.zspace_posterior_project(...)` and
+check the returned `contract_version` and `semantic_owner`.
+
 Runtime plan scoring follows the same ownership rule. Variational free energy
 is evaluated only by `st-core::heur::free_energy`; Python and WASM transport the
 same request and return the versioned Rust report. Missing or numerically tiny

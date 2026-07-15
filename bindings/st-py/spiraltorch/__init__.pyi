@@ -4037,6 +4037,23 @@ class ZSpaceInferencePipeline:
     ) -> ZSpaceInference: ...
 
 
+def zspace_posterior_decode(
+    z_state: Sequence[float],
+    *,
+    alpha: float = ...,
+) -> Dict[str, Any]: ...
+
+
+def zspace_posterior_project(
+    z_state: Sequence[float],
+    partial: Mapping[str, Any] | None = ...,
+    *,
+    alpha: float = ...,
+    smoothing: float = ...,
+    telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def decode_zspace_embedding(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *,
@@ -10987,6 +11004,8 @@ __all__ = [
     "ZSpaceTelemetryFrame",
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
+    "zspace_posterior_decode",
+    "zspace_posterior_project",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
