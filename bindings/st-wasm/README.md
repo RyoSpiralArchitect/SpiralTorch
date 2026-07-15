@@ -120,19 +120,26 @@ const projection = zspaceCoherenceProjectObject({
         normalized_weights: [0.5, 0.3, 0.2],
     },
     coherence: [0.6, 0.3, 0.1],
+    classification_policy: {
+        background_energy_ratio_max: 1e-5,
+        cascade_energy_ratio_min: 0.7,
+    },
 });
 
 console.log(
     projection.partial.speed,
     projection.derived.normalized_entropy,
+    projection.classification?.label,
+    projection.classification?.reason,
     projection.semantic_owner,
 );
 ```
 
 `zspaceCoherenceProjectJson` exposes the same worker/persistence boundary.
 Rust recomputes dimension-normalized entropy and normalized HHI concentration;
-WASM adds only `execution_client: "wasm"` and has no JavaScript coherence
-heuristic or normalization fallback.
+its versioned classification policy also emits the structural label, reason,
+formula, and thresholds. WASM adds only `execution_client: "wasm"` and has no
+JavaScript coherence heuristic, classifier, or normalization fallback.
 
 Stateful temperature control follows the same contract. The browser carries
 controller state between calls, while Rust alone validates probability mass and

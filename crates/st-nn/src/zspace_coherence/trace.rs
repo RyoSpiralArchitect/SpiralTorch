@@ -12,8 +12,7 @@
 
 use super::coherence_engine::DomainLinguisticProfile;
 use super::sequencer::{
-    CoherenceDiagnostics, CoherenceLabel, PreDiscardTelemetry, ZSpaceSequencerPlugin,
-    ZSpaceSequencerStage,
+    CoherenceDiagnostics, PreDiscardTelemetry, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
 use crate::language::{ConceptHint, NarrativeHint};
 use crate::{PureResult, Tensor};
@@ -98,6 +97,32 @@ pub struct CoherenceDiagnosticsSummary {
     pub mean_coherence: f32,
     pub energy_ratio: f32,
     pub entropy: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_entropy: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concentration: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_channels: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distribution_channels: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_invariant: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_contract_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_semantic_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_semantic_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_formula: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_energy_ratio_max: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cascade_energy_ratio_min: Option<f64>,
     pub fractional_order: f32,
     pub z_bias: f32,
     pub preserved_channels: usize,
@@ -119,12 +144,35 @@ pub struct CoherenceDiagnosticsSummary {
 
 impl CoherenceDiagnosticsSummary {
     fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Self {
-        let label: CoherenceLabel = diagnostics.observation().lift_to_label();
+        let distribution = diagnostics.distribution_summary().ok();
+        let classification = diagnostics.classify(Default::default()).ok();
+        let label = classification
+            .map(|payload| payload.label)
+            .unwrap_or_else(|| diagnostics.observation().lift_to_label());
         Self {
             dominant_channel: diagnostics.dominant_channel(),
             mean_coherence: diagnostics.mean_coherence(),
             energy_ratio: diagnostics.energy_ratio(),
             entropy: diagnostics.coherence_entropy(),
+            normalized_entropy: distribution.map(|summary| summary.normalized_entropy as f32),
+            concentration: distribution.map(|summary| summary.concentration as f32),
+            effective_channels: distribution.map(|summary| summary.effective_channels as f32),
+            distribution_channels: distribution.map(|summary| summary.channels),
+            swap_invariant: classification.map(|payload| payload.swap_invariant),
+            classification_kind: classification.map(|payload| payload.kind.to_owned()),
+            classification_reason: classification.map(|payload| payload.reason.to_owned()),
+            classification_contract_version: classification
+                .map(|payload| payload.contract_version.to_owned()),
+            classification_semantic_owner: classification
+                .map(|payload| payload.semantic_owner.to_owned()),
+            classification_semantic_backend: classification
+                .map(|payload| payload.semantic_backend.to_owned()),
+            classification_formula: classification
+                .map(|payload| payload.classification_formula.to_owned()),
+            background_energy_ratio_max: classification
+                .map(|payload| payload.policy.background_energy_ratio_max),
+            cascade_energy_ratio_min: classification
+                .map(|payload| payload.policy.cascade_energy_ratio_min),
             fractional_order: diagnostics.fractional_order(),
             z_bias: diagnostics.z_bias(),
             preserved_channels: diagnostics.preserved_channels(),
@@ -490,6 +538,19 @@ impl ZSpaceTraceEvent {
                 ),
                 "metrics": {
                     "coherence_entropy": diagnostics.entropy,
+                    "coherence_normalized_entropy": diagnostics.normalized_entropy,
+                    "coherence_concentration": diagnostics.concentration,
+                    "coherence_effective_channels": diagnostics.effective_channels,
+                    "coherence_distribution_channels": diagnostics.distribution_channels,
+                    "coherence_swap_invariant": diagnostics.swap_invariant,
+                    "coherence_classification_kind": diagnostics.classification_kind,
+                    "coherence_classification_reason": diagnostics.classification_reason,
+                    "coherence_classification_contract_version": diagnostics.classification_contract_version,
+                    "coherence_classification_semantic_owner": diagnostics.classification_semantic_owner,
+                    "coherence_classification_semantic_backend": diagnostics.classification_semantic_backend,
+                    "coherence_classification_formula": diagnostics.classification_formula,
+                    "coherence_background_energy_ratio_max": diagnostics.background_energy_ratio_max,
+                    "coherence_cascade_energy_ratio_min": diagnostics.cascade_energy_ratio_min,
                     "preserved_channels": diagnostics.preserved_channels,
                     "discarded_channels": diagnostics.discarded_channels,
                     "z_bias": diagnostics.z_bias,
@@ -914,6 +975,57 @@ mod tests {
         assert!(aggregated.noncollapse.is_some());
         assert!(aggregated.payload.contains_key("diagnostics"));
         assert!(aggregated.payload.contains_key("noncollapse_card"));
+        let diagnostics = aggregated.payload["diagnostics"]
+            .as_object()
+            .expect("aggregated diagnostics object");
+        assert!(diagnostics["normalized_entropy"].is_number());
+        assert!(diagnostics["concentration"].is_number());
+        assert!(diagnostics["effective_channels"].is_number());
+        assert!(diagnostics["distribution_channels"].is_number());
+        assert!(diagnostics["swap_invariant"].is_boolean());
+        assert_eq!(
+            diagnostics["classification_kind"],
+            "spiraltorch.zspace_coherence_classification"
+        );
+        assert!(diagnostics["classification_reason"].is_string());
+        assert_eq!(
+            diagnostics["classification_contract_version"],
+            "spiraltorch.zspace_coherence_classification.v1"
+        );
+        assert_eq!(
+            diagnostics["classification_semantic_owner"],
+            "st-core::inference::zspace_coherence"
+        );
+        assert_eq!(diagnostics["classification_semantic_backend"], "rust");
+        assert!(diagnostics["classification_formula"].is_string());
+        assert!(diagnostics["background_energy_ratio_max"].is_number());
+        assert!(diagnostics["cascade_energy_ratio_min"].is_number());
+    }
+
+    #[test]
+    fn legacy_diagnostics_summary_without_classification_fields_still_deserializes() {
+        let summary: CoherenceDiagnosticsSummary = serde_json::from_value(json!({
+            "dominant_channel": 2,
+            "mean_coherence": 0.25,
+            "energy_ratio": 0.75,
+            "entropy": 1.0,
+            "fractional_order": 0.5,
+            "z_bias": -0.25,
+            "preserved_channels": 3,
+            "discarded_channels": 1,
+            "label": "cascade_imbalance"
+        }))
+        .expect("legacy diagnostics summary should remain readable");
+
+        assert_eq!(summary.dominant_channel, Some(2));
+        assert_eq!(summary.label, "cascade_imbalance");
+        assert!(summary.normalized_entropy.is_none());
+        assert!(summary.concentration.is_none());
+        assert!(summary.effective_channels.is_none());
+        assert!(summary.classification_kind.is_none());
+        assert!(summary.classification_contract_version.is_none());
+        assert!(summary.background_energy_ratio_max.is_none());
+        assert!(summary.cascade_energy_ratio_min.is_none());
     }
 
     #[test]

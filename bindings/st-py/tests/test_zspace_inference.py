@@ -536,6 +536,31 @@ def test_coherence_diagnostics_projection_infers_metrics():
     assert contract["derived"]["normalized_entropy"] == pytest.approx(
         diagnostics.coherence_entropy / math.log(4.0)
     )
+    assert contract["classification"] == {
+        "kind": "spiraltorch.zspace_coherence_classification",
+        "contract_version": "spiraltorch.zspace_coherence_classification.v1",
+        "semantic_owner": "st-core::inference::zspace_coherence",
+        "semantic_backend": "rust",
+        "classification_formula": contract["classification"]["classification_formula"],
+        "label": "cascade_imbalance",
+        "reason": "dominant_energy_ratio_at_or_above_cascade_min",
+        "energy_ratio": pytest.approx(0.7),
+        "swap_invariant": False,
+        "policy": {
+            "background_energy_ratio_max": pytest.approx(1.0e-5),
+            "cascade_energy_ratio_min": pytest.approx(0.7),
+        },
+    }
+    assert contract["classification"]["classification_formula"]
+    custom = zspace_coherence_project(
+        diagnostics,
+        coherence=[0.6, 0.25, 0.1, 0.05],
+        cascade_energy_ratio_min=0.8,
+    )
+    assert custom["classification"]["label"] == "diffuse_drift"
+    assert custom["classification"]["policy"]["cascade_energy_ratio_min"] == (
+        pytest.approx(0.8)
+    )
     partial = coherence_partial_from_diagnostics(
         diagnostics, coherence=[0.6, 0.25, 0.1, 0.05]
     )
@@ -566,6 +591,12 @@ def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain()
 
     with pytest.raises(ValueError, match="speed_gain"):
         zspace_coherence_project(_DummyDiagnostics(), speed_gain=-1.0)
+    with pytest.raises(ValueError, match="background energy-ratio maximum"):
+        zspace_coherence_project(
+            _DummyDiagnostics(),
+            background_energy_ratio_max=0.8,
+            cascade_energy_ratio_min=0.7,
+        )
     with pytest.raises(ValueError, match="coherence.*3 channels.*4"):
         zspace_coherence_project(
             _DummyDiagnostics(),

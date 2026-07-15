@@ -74,6 +74,7 @@ use st_nn::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, LinguisticContour,
         PreDiscardPolicy, PreDiscardSnapshot, PreDiscardTelemetry,
+        ZSpaceCoherenceClassificationPolicy,
     },
     AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset,
     DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
@@ -8727,19 +8728,46 @@ pub(crate) struct PyCoherenceSignature {
     dominant_channel: Option<usize>,
     energy_ratio: f32,
     entropy: f32,
+    normalized_entropy: f32,
+    concentration: f32,
+    effective_channels: f32,
+    channels: usize,
     mean_coherence: f32,
     swap_invariant: bool,
+    label: String,
+    classification_kind: String,
+    classification_contract_version: String,
+    classification_semantic_owner: String,
+    classification_semantic_backend: String,
+    classification_formula: String,
+    classification_reason: String,
+    background_energy_ratio_max: f64,
+    cascade_energy_ratio_min: f64,
 }
 
 #[cfg(feature = "nn")]
 impl PyCoherenceSignature {
     fn from_signature(signature: &CoherenceSignature) -> Self {
+        let classification = signature.classification();
         Self {
             dominant_channel: signature.dominant_channel(),
             energy_ratio: signature.energy_ratio(),
             entropy: signature.entropy(),
+            normalized_entropy: signature.normalized_entropy(),
+            concentration: signature.concentration(),
+            effective_channels: signature.effective_channels(),
+            channels: signature.channels(),
             mean_coherence: signature.mean_coherence(),
             swap_invariant: signature.swap_invariant(),
+            label: signature.label().to_string(),
+            classification_kind: classification.kind.to_owned(),
+            classification_contract_version: classification.contract_version.to_owned(),
+            classification_semantic_owner: classification.semantic_owner.to_owned(),
+            classification_semantic_backend: classification.semantic_backend.to_owned(),
+            classification_formula: classification.classification_formula.to_owned(),
+            classification_reason: signature.classification_reason().to_owned(),
+            background_energy_ratio_max: classification.policy.background_energy_ratio_max,
+            cascade_energy_ratio_min: classification.policy.cascade_energy_ratio_min,
         }
     }
 }
@@ -8763,6 +8791,26 @@ impl PyCoherenceSignature {
     }
 
     #[getter]
+    fn normalized_entropy(&self) -> f32 {
+        self.normalized_entropy
+    }
+
+    #[getter]
+    fn concentration(&self) -> f32 {
+        self.concentration
+    }
+
+    #[getter]
+    fn effective_channels(&self) -> f32 {
+        self.effective_channels
+    }
+
+    #[getter]
+    fn channels(&self) -> usize {
+        self.channels
+    }
+
+    #[getter]
     fn mean_coherence(&self) -> f32 {
         self.mean_coherence
     }
@@ -8770,6 +8818,51 @@ impl PyCoherenceSignature {
     #[getter]
     fn swap_invariant(&self) -> bool {
         self.swap_invariant
+    }
+
+    #[getter]
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[getter]
+    fn classification_kind(&self) -> &str {
+        &self.classification_kind
+    }
+
+    #[getter]
+    fn classification_contract_version(&self) -> &str {
+        &self.classification_contract_version
+    }
+
+    #[getter]
+    fn classification_semantic_owner(&self) -> &str {
+        &self.classification_semantic_owner
+    }
+
+    #[getter]
+    fn classification_semantic_backend(&self) -> &str {
+        &self.classification_semantic_backend
+    }
+
+    #[getter]
+    fn classification_formula(&self) -> &str {
+        &self.classification_formula
+    }
+
+    #[getter]
+    fn classification_reason(&self) -> &str {
+        &self.classification_reason
+    }
+
+    #[getter]
+    fn background_energy_ratio_max(&self) -> f64 {
+        self.background_energy_ratio_max
+    }
+
+    #[getter]
+    fn cascade_energy_ratio_min(&self) -> f64 {
+        self.cascade_energy_ratio_min
     }
 }
 
@@ -9092,6 +9185,20 @@ impl PyCoherenceDiagnostics {
     fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
         Self { inner: diagnostics }
     }
+
+    fn classification_to_py(
+        &self,
+        py: Python<'_>,
+        policy: ZSpaceCoherenceClassificationPolicy,
+    ) -> PyResult<PyObject> {
+        let classification = self
+            .inner
+            .classify(policy)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let value = serde_json::to_value(classification)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -9197,6 +9304,27 @@ impl PyCoherenceDiagnostics {
     #[getter]
     fn observation(&self) -> PyCoherenceObservation {
         PyCoherenceObservation::from_observation(self.inner.observation())
+    }
+
+    #[getter]
+    fn classification(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.classification_to_py(py, ZSpaceCoherenceClassificationPolicy::default())
+    }
+
+    #[pyo3(signature = (*, background_energy_ratio_max=1.0e-5, cascade_energy_ratio_min=0.7))]
+    fn classify(
+        &self,
+        py: Python<'_>,
+        background_energy_ratio_max: f64,
+        cascade_energy_ratio_min: f64,
+    ) -> PyResult<PyObject> {
+        self.classification_to_py(
+            py,
+            ZSpaceCoherenceClassificationPolicy {
+                background_energy_ratio_max,
+                cascade_energy_ratio_min,
+            },
+        )
     }
 
     #[getter]

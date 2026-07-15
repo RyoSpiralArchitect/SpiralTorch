@@ -2175,6 +2175,7 @@ partial = st.coherence_partial_from_diagnostics(diagnostics, contour=contour)
 assert contract["contract_version"] == "spiraltorch.zspace_coherence_projection.v1"
 assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
 assert contract["derived"]["distribution_source"] == "normalized_weights"
+assert contract["classification"]["label"] == diagnostics.observation.label
 assert partial["speed"] == contract["partial"]["speed"]
 ```
 
@@ -2183,6 +2184,12 @@ probability simplex, so `speed` and `stability` do not drift merely because a
 model uses more Maxwell channels. Missing diagnostics, invalid probability
 mass, inconsistent channel counts, and invalid gains fail at the contract
 boundary instead of being silently replaced or clamped by Python.
+`diagnostics.observation.signature` exposes the same Rust-owned normalized
+entropy, concentration, effective channel count, label, reason, formula,
+contract version, and policy thresholds. Python never reclassifies the trace.
+Use `diagnostics.classify(...)` or pass `background_energy_ratio_max` and
+`cascade_energy_ratio_min` to `zspace_coherence_project(...)` to run a custom
+policy in Rust.
 
 ### SoT-3Dφ → TensorBiome quickstart
 

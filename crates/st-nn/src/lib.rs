@@ -155,9 +155,10 @@ pub use zspace_coherence::{
     LinguisticChannelReport, LinguisticContour, MellinBasis, MetaMembConfig, MetaMembSampler,
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
-    ZSpaceCoherenceSequencer, ZSpaceTextVae, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTraceRecord, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind,
-    ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationPolicy,
+    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceSequencer, ZSpaceTextVae, ZSpaceTrace,
+    ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord, ZSpaceTraceRecorder, ZSpaceVae,
+    ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "golden")]
 pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};

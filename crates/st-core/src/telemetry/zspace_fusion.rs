@@ -863,6 +863,7 @@ mod tests {
                 timbre_spread: Some(0.3),
             }),
             config: ZSpaceCoherenceProjectionConfig::default(),
+            classification_policy: Default::default(),
         })
         .expect("valid coherence projection");
         let expected_concentration = projection.partial["coherence_concentration"];

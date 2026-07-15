@@ -260,6 +260,40 @@ def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
     assert len(diagnostics.normalized_weights) == seq.maxwell_channels()
     assert math.isfinite(diagnostics.mean_coherence)
     assert math.isfinite(diagnostics.coherence_entropy)
+    observation = diagnostics.observation
+    classification = diagnostics.classification
+    assert classification["label"] == observation.label
+    assert classification["semantic_backend"] == "rust"
+    custom_classification = diagnostics.classify(cascade_energy_ratio_min=0.95)
+    assert custom_classification["policy"]["cascade_energy_ratio_min"] == pytest.approx(
+        0.95
+    )
+    assert observation.label in {
+        "background",
+        "symmetric_pulse",
+        "cascade_imbalance",
+        "diffuse_drift",
+    }
+    if observation.signature is not None:
+        signature = observation.signature
+        assert signature.label == observation.label
+        assert signature.channels == len(diagnostics.normalized_weights)
+        assert 0.0 <= signature.normalized_entropy <= 1.0
+        assert 0.0 <= signature.concentration <= 1.0
+        assert 1.0 <= signature.effective_channels <= signature.channels
+        assert signature.classification_kind == "spiraltorch.zspace_coherence_classification"
+        assert (
+            signature.classification_contract_version
+            == "spiraltorch.zspace_coherence_classification.v1"
+        )
+        assert signature.classification_semantic_owner == (
+            "st-core::inference::zspace_coherence"
+        )
+        assert signature.classification_semantic_backend == "rust"
+        assert signature.classification_formula
+        assert signature.classification_reason
+        assert signature.background_energy_ratio_max == pytest.approx(1.0e-5)
+        assert signature.cascade_energy_ratio_min == pytest.approx(0.7)
 
     contour = seq.emit_linguistic_contour(x)
     partial = st.coherence_partial_from_diagnostics(

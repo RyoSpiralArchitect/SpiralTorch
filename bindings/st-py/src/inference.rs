@@ -288,6 +288,14 @@ fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
             "Z-space coherence projection 'config' must be a mapping",
         ));
     }
+    if request_object
+        .get("classification_policy")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space coherence projection 'classification_policy' must be a mapping",
+        ));
+    }
     let request: ZSpaceCoherenceProjectionRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space coherence projection request", error))?;
     let payload = py

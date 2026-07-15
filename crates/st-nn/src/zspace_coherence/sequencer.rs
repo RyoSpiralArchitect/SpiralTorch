@@ -20,9 +20,15 @@ use crate::{
     Module, PureResult, Tensor,
 };
 use st_core::inference::zspace_coherence::{
-    project_zspace_coherence, ZSpaceCoherenceContourInput, ZSpaceCoherenceDiagnosticsInput,
+    classify_zspace_coherence, is_zspace_coherence_swap_invariant, project_zspace_coherence,
+    summarize_zspace_coherence_distribution, ZSpaceCoherenceClassificationPayload,
+    ZSpaceCoherenceClassificationRequest, ZSpaceCoherenceContourInput,
+    ZSpaceCoherenceDiagnosticsInput, ZSpaceCoherenceDistributionSummary,
     ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionError,
     ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionRequest,
+};
+pub use st_core::inference::zspace_coherence::{
+    ZSpaceCoherenceClassificationPolicy, ZSpaceCoherenceLabel as CoherenceLabel,
 };
 use st_core::maxwell::MaxwellZPulse;
 use st_core::telemetry::noncollapse::NonCollapseSnapshot;
@@ -273,8 +279,13 @@ pub struct CoherenceSignature {
     dominant_channel: Option<usize>,
     energy_ratio: f32,
     entropy: f32,
+    normalized_entropy: f32,
+    concentration: f32,
+    effective_channels: f32,
+    channels: usize,
     mean_coherence: f32,
     swap_invariant: bool,
+    classification: ZSpaceCoherenceClassificationPayload,
 }
 
 impl CoherenceSignature {
@@ -293,6 +304,26 @@ impl CoherenceSignature {
         self.entropy
     }
 
+    /// Shannon entropy normalized by the logarithm of the channel count.
+    pub fn normalized_entropy(&self) -> f32 {
+        self.normalized_entropy
+    }
+
+    /// Dimension-normalized HHI concentration of the coherence simplex.
+    pub fn concentration(&self) -> f32 {
+        self.concentration
+    }
+
+    /// Entropy-derived effective number of active channels.
+    pub fn effective_channels(&self) -> f32 {
+        self.effective_channels
+    }
+
+    /// Number of channels represented by this signature.
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
     /// Mean coherence level associated with the observation.
     pub fn mean_coherence(&self) -> f32 {
         self.mean_coherence
@@ -302,35 +333,20 @@ impl CoherenceSignature {
     pub fn swap_invariant(&self) -> bool {
         self.swap_invariant
     }
-}
 
-/// Semantic label attached to a coherence observation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CoherenceLabel {
-    /// No structural event detected – continue treating it as background.
-    Background,
-    /// Symmetric fluctuation, typically indicating a stable pulse.
-    SymmetricPulse,
-    /// Highly concentrated energy that risks collapsing into a cascade.
-    CascadeImbalance,
-    /// Diffuse fluctuation signalling distributed drift.
-    DiffuseDrift,
-}
-
-impl CoherenceLabel {
-    fn as_str(self) -> &'static str {
-        match self {
-            CoherenceLabel::Background => "background",
-            CoherenceLabel::SymmetricPulse => "symmetric_pulse",
-            CoherenceLabel::CascadeImbalance => "cascade_imbalance",
-            CoherenceLabel::DiffuseDrift => "diffuse_drift",
-        }
+    /// Canonical label selected by the Rust classification contract.
+    pub fn label(&self) -> CoherenceLabel {
+        self.classification.label
     }
-}
 
-impl std::fmt::Display for CoherenceLabel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+    /// Auditable reason emitted by the Rust classification contract.
+    pub fn classification_reason(&self) -> &'static str {
+        self.classification.reason
+    }
+
+    /// Complete canonical classification payload.
+    pub fn classification(&self) -> &ZSpaceCoherenceClassificationPayload {
+        &self.classification
     }
 }
 
@@ -339,40 +355,14 @@ impl CoherenceObservation {
     pub fn lift_to_label(&self) -> CoherenceLabel {
         match self {
             CoherenceObservation::Undetermined => CoherenceLabel::Background,
-            CoherenceObservation::Signature(signature) => {
-                if signature.swap_invariant {
-                    CoherenceLabel::SymmetricPulse
-                } else if signature.energy_ratio >= 0.7 && signature.mean_coherence >= 0.05 {
-                    CoherenceLabel::CascadeImbalance
-                } else {
-                    CoherenceLabel::DiffuseDrift
-                }
-            }
+            CoherenceObservation::Signature(signature) => signature.label(),
         }
     }
 }
 
 /// Returns whether the provided arrangement remains unchanged under pairwise swaps.
 pub fn is_swap_invariant(arrangement: &[f32]) -> bool {
-    if arrangement.len() <= 1 {
-        return true;
-    }
-
-    let filtered: Vec<f32> = arrangement
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .collect();
-    if filtered.is_empty() {
-        return true;
-    }
-
-    let mut sorted = filtered.clone();
-    sorted.sort_by(|a, b| a.total_cmp(b));
-    let first = sorted[0];
-    sorted
-        .iter()
-        .all(|value| (value - first).abs() <= (first.abs() * 1e-4).max(1e-6))
+    is_zspace_coherence_swap_invariant(arrangement)
 }
 
 fn finite_nonnegative_score(value: f32) -> f32 {
@@ -575,29 +565,66 @@ impl CoherenceDiagnostics {
                 timbre_spread: Some(contour.timbre_spread() as f64),
             }),
             config,
+            classification_policy: ZSpaceCoherenceClassificationPolicy::default(),
         })
+    }
+
+    /// Summarizes the measured simplex through the canonical Rust distribution contract.
+    pub fn distribution_summary(
+        &self,
+    ) -> Result<ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionError> {
+        summarize_zspace_coherence_distribution(&self.normalized_weights)
+    }
+
+    /// Classifies these diagnostics through the canonical Rust observation policy.
+    pub fn classify(
+        &self,
+        policy: ZSpaceCoherenceClassificationPolicy,
+    ) -> Result<ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceProjectionError> {
+        self.distribution_summary()?;
+        classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
+            energy_ratio: self.energy_ratio as f64,
+            swap_invariant: is_swap_invariant(&self.normalized_weights),
+            policy,
+        })
+    }
+
+    /// Detects structural events with an explicit canonical classification policy.
+    pub fn observation_with_policy(
+        &self,
+        policy: ZSpaceCoherenceClassificationPolicy,
+    ) -> Result<CoherenceObservation, ZSpaceCoherenceProjectionError> {
+        if self.coherence.is_empty() {
+            return Ok(CoherenceObservation::Undetermined);
+        }
+
+        let distribution = self.distribution_summary()?;
+        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
+            energy_ratio: self.energy_ratio as f64,
+            swap_invariant: is_swap_invariant(&self.normalized_weights),
+            policy,
+        })?;
+        if classification.label == CoherenceLabel::Background {
+            return Ok(CoherenceObservation::Undetermined);
+        }
+        Ok(CoherenceObservation::Signature(CoherenceSignature {
+            dominant_channel: self.dominant_channel,
+            energy_ratio: self.energy_ratio,
+            entropy: self.entropy,
+            normalized_entropy: distribution.normalized_entropy as f32,
+            concentration: distribution.concentration as f32,
+            effective_channels: distribution.effective_channels as f32,
+            channels: distribution.channels,
+            mean_coherence: self.mean_coherence,
+            swap_invariant: classification.swap_invariant,
+            classification,
+        }))
     }
 
     /// Detects structural events present in the coherence response.
     pub fn observation(&self) -> CoherenceObservation {
-        if self.coherence.is_empty() {
-            return CoherenceObservation::Undetermined;
-        }
-
-        let swap_invariant = is_swap_invariant(&self.normalized_weights);
-        let signature = CoherenceSignature {
-            dominant_channel: self.dominant_channel,
-            energy_ratio: self.energy_ratio,
-            entropy: self.entropy,
-            mean_coherence: self.mean_coherence,
-            swap_invariant,
-        };
-
-        if signature.energy_ratio <= 1e-5 && signature.entropy <= 1e-5 {
-            CoherenceObservation::Undetermined
-        } else {
-            CoherenceObservation::Signature(signature)
-        }
+        self.observation_with_policy(ZSpaceCoherenceClassificationPolicy::default())
+            .unwrap_or(CoherenceObservation::Undetermined)
     }
 
     /// Destructures the diagnostics into their core components.
@@ -3195,6 +3222,13 @@ mod tests {
         let observation = diagnostics.observation();
         assert!(matches!(observation, CoherenceObservation::Signature(_)));
         assert_eq!(observation.lift_to_label(), CoherenceLabel::SymmetricPulse);
+        let CoherenceObservation::Signature(signature) = observation else {
+            unreachable!("expected signature")
+        };
+        assert!(signature.normalized_entropy() > 0.99);
+        assert!(signature.concentration() < 1.0e-6);
+        assert_eq!(signature.channels(), 4);
+        assert_eq!(signature.classification_reason(), "swap_invariant");
     }
 
     #[test]
@@ -3204,7 +3238,7 @@ mod tests {
             vec![0.8, 0.07, 0.07, 0.06],
             0.85,
             0.5,
-            0.2,
+            0.25,
         );
         let observation = diagnostics.observation();
         assert!(matches!(observation, CoherenceObservation::Signature(_)));
@@ -3212,6 +3246,68 @@ mod tests {
             observation.lift_to_label(),
             CoherenceLabel::CascadeImbalance
         );
+    }
+
+    #[test]
+    fn observation_classification_is_dimension_invariant() {
+        fn concentrated_diagnostics(channels: usize) -> CoherenceDiagnostics {
+            let tail = 0.2 / (channels - 1) as f32;
+            let mut normalized = vec![tail; channels];
+            normalized[0] = 0.8;
+            let entropy = -normalized
+                .iter()
+                .filter(|weight| **weight > 0.0)
+                .map(|weight| *weight * weight.ln())
+                .sum::<f32>();
+            make_diagnostics(
+                normalized.clone(),
+                normalized,
+                0.85,
+                entropy,
+                1.0 / channels as f32,
+            )
+        }
+
+        for channels in [4, 64] {
+            let diagnostics = concentrated_diagnostics(channels);
+            let observation = diagnostics.observation();
+            assert_eq!(
+                observation.lift_to_label(),
+                CoherenceLabel::CascadeImbalance,
+                "channel count {channels} must not alter the regime"
+            );
+            let CoherenceObservation::Signature(signature) = observation else {
+                panic!("expected a signature for {channels} channels")
+            };
+            assert_eq!(signature.channels(), channels);
+            assert!(signature.concentration() > 0.5);
+            assert_eq!(
+                signature.classification_reason(),
+                "dominant_energy_ratio_at_or_above_cascade_min"
+            );
+        }
+    }
+
+    #[test]
+    fn observation_treats_zero_energy_as_background_and_supports_policy_override() {
+        let uniform = vec![0.25; 4];
+        let background = make_diagnostics(uniform.clone(), uniform, 0.0, 4.0_f32.ln(), 0.25);
+        assert_eq!(background.observation(), CoherenceObservation::Undetermined);
+
+        let cascade = make_diagnostics(
+            vec![0.8, 0.07, 0.07, 0.06],
+            vec![0.8, 0.07, 0.07, 0.06],
+            0.85,
+            0.5,
+            0.25,
+        );
+        let observation = cascade
+            .observation_with_policy(ZSpaceCoherenceClassificationPolicy {
+                cascade_energy_ratio_min: 0.9,
+                ..ZSpaceCoherenceClassificationPolicy::default()
+            })
+            .unwrap();
+        assert_eq!(observation.lift_to_label(), CoherenceLabel::DiffuseDrift);
     }
 
     #[test]

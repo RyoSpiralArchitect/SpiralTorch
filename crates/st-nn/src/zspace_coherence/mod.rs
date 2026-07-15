@@ -29,9 +29,11 @@ pub use psi_synchro::{
 pub use sequencer::{
     is_swap_invariant, CoherenceDiagnostics, CoherenceLabel, CoherenceObservation,
     CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
-    PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+    PreDiscardTelemetry, ZSpaceCoherenceClassificationPolicy, ZSpaceCoherenceSequencer,
+    ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
 pub use st_core::inference::zspace_coherence::{
+    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceDistributionSummary,
     ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionDerived,
     ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
 };
