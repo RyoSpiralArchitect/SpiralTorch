@@ -14,6 +14,7 @@ mod topos_control;
 mod topos_policy;
 mod topos_route;
 mod training_projection;
+mod zspace_coherence;
 mod zspace_fusion;
 mod zspace_optimizer;
 mod zspace_posterior;
@@ -55,6 +56,7 @@ pub use topos_route::*;
 pub use training_projection::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;
+pub use zspace_coherence::*;
 pub use zspace_fusion::*;
 pub use zspace_optimizer::*;
 pub use zspace_posterior::*;

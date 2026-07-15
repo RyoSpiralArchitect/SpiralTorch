@@ -89,6 +89,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "coherence_partial_from_diagnostics",
             "zspace_posterior_decode",
             "zspace_posterior_project",
+            "zspace_coherence_project",
             "decode_zspace_embedding",
             "blend_zspace_partials",
             "zspace_partial_fusion",

@@ -371,6 +371,67 @@ declare module "spiraltorch-wasm" {
         sources: ZSpacePartialSourceAudit[];
     };
 
+    export type ZSpaceCoherenceDiagnosticsInput = {
+        mean_coherence: number;
+        coherence_entropy: number;
+        energy_ratio: number;
+        z_bias: number;
+        fractional_order: number;
+        normalized_weights?: number[];
+        preserved_channels?: number | null;
+        discarded_channels?: number | null;
+        dominant_channel?: number | null;
+    };
+
+    export type ZSpaceCoherenceContourInput = {
+        coherence_strength: number;
+        prosody_index: number;
+        articulation_bias: number;
+        timbre_spread?: number | null;
+    };
+
+    export type ZSpaceCoherenceProjectionConfig = {
+        speed_gain?: number;
+        stability_gain?: number;
+        frac_gain?: number;
+        drs_gain?: number;
+    };
+
+    export type ZSpaceCoherenceProjectionRequest = {
+        diagnostics: ZSpaceCoherenceDiagnosticsInput;
+        coherence?: number[];
+        contour?: ZSpaceCoherenceContourInput | null;
+        config?: ZSpaceCoherenceProjectionConfig;
+    };
+
+    export type ZSpaceCoherenceProjectionDerived = {
+        channels: number;
+        distribution_source: "normalized_weights" | "diagnostic_entropy";
+        weight_mass: number;
+        weight_entropy: number;
+        normalized_entropy: number;
+        concentration: number;
+        effective_channels: number;
+        response_peak: number;
+        response_mean: number;
+    };
+
+    export type ZSpaceCoherenceProjection = {
+        kind: "spiraltorch.zspace_coherence_projection";
+        contract_version: "spiraltorch.zspace_coherence_projection.v1";
+        semantic_owner: "st-core::inference::zspace_coherence";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        projection_formula: string;
+        summary_formula: string;
+        diagnostics: ZSpaceCoherenceDiagnosticsInput;
+        coherence: number[];
+        contour?: ZSpaceCoherenceContourInput;
+        config: Required<ZSpaceCoherenceProjectionConfig>;
+        derived: ZSpaceCoherenceProjectionDerived;
+        partial: Record<string, number>;
+    };
+
     export type ZSpacePosteriorDecodeRequest = {
         z_state: number[];
         alpha?: number;
@@ -1063,6 +1124,10 @@ declare module "spiraltorch-wasm" {
     export function zspacePartialFusionObject(
         request: ZSpacePartialFusionRequest,
     ): ZSpacePartialFusion;
+    export function zspaceCoherenceProjectJson(requestJson: string): string;
+    export function zspaceCoherenceProjectObject(
+        request: ZSpaceCoherenceProjectionRequest,
+    ): ZSpaceCoherenceProjection;
     export function zspacePosteriorDecodeJson(requestJson: string): string;
     export function zspacePosteriorDecodeObject(
         request: ZSpacePosteriorDecodeRequest,

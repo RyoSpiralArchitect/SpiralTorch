@@ -4054,6 +4054,30 @@ def zspace_posterior_project(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_coherence_project(
+    diagnostics: Any,
+    *,
+    coherence: Any = ...,
+    contour: Any = ...,
+    speed_gain: float = ...,
+    stability_gain: float = ...,
+    frac_gain: float = ...,
+    drs_gain: float = ...,
+) -> Dict[str, Any]: ...
+
+
+def coherence_partial_from_diagnostics(
+    diagnostics: Any,
+    *,
+    coherence: Any = ...,
+    contour: Any = ...,
+    speed_gain: float = ...,
+    stability_gain: float = ...,
+    frac_gain: float = ...,
+    drs_gain: float = ...,
+) -> Dict[str, float]: ...
+
+
 def decode_zspace_embedding(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *,
@@ -6449,6 +6473,9 @@ class CoherenceDiagnostics:
     normalized_weights: List[float]
     normalization: float
     fractional_order: float
+    repaired_non_finite_weights: int
+    repaired_negative_weights: int
+    repaired_weights_total: int
     dominant_channel: int | None
     mean_coherence: float
     z_bias: float
@@ -6462,6 +6489,13 @@ class CoherenceDiagnostics:
     pre_discard: PreDiscardTelemetry | None
     observation: CoherenceObservation
     noncollapse_snapshot: NonCollapseSnapshot
+
+
+class LinguisticContour:
+    coherence_strength: float
+    articulation_bias: float
+    prosody_index: float
+    timbre_spread: float
 
 
 class PreDiscardTelemetry:
@@ -6963,6 +6997,8 @@ class _ZSpaceCoherenceSequencer:
     def forward_with_diagnostics(
         self, x: Tensor
     ) -> Tuple[Tensor, List[float], CoherenceDiagnostics]: ...
+
+    def emit_linguistic_contour(self, x: Tensor) -> LinguisticContour: ...
 
     def project_to_zspace(self, x: Tensor) -> Tensor: ...
 
@@ -8162,6 +8198,7 @@ class _NnModule(ModuleType):
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
     CoherenceDiagnostics: type[CoherenceDiagnostics]
+    LinguisticContour: type[LinguisticContour]
     ZSpaceCoherenceSequencer: type[_ZSpaceCoherenceSequencer]
     PreDiscardTelemetry: type[PreDiscardTelemetry]
     PreDiscardPolicy: type[PreDiscardPolicy]
@@ -11006,6 +11043,7 @@ __all__ = [
     "ZSpaceInferencePipeline",
     "zspace_posterior_decode",
     "zspace_posterior_project",
+    "zspace_coherence_project",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -11094,6 +11132,7 @@ __all__ = [
     "semantic_scale_stack_probe",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
+    "LinguisticContour",
     "step_many",
     "stream_zspace_training",
     "ImageTensor",
