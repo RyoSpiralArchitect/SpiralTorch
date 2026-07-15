@@ -27,6 +27,9 @@ pub const ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL: usize = 4_096;
 pub const ZSPACE_FUSION_MAX_GRADIENT_DIM: usize = 4_096;
 pub const ZSPACE_FUSION_MAX_TELEMETRY_ENTRIES: usize = 16_384;
 pub const ZSPACE_FUSION_MAX_TELEMETRY_DEPTH: usize = 64;
+pub const ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES: usize = 256;
+pub const ZSPACE_FUSION_MAX_ORIGIN_BYTES: usize = 4_096;
+pub const ZSPACE_FUSION_MAX_TELEMETRY_PATH_BYTES: usize = 4_096;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ZSpaceFusionError {
@@ -44,6 +47,18 @@ pub enum ZSpaceFusionError {
     NonFiniteGradientReduction { entry: usize },
     #[error("partial {index} has {actual} metrics, exceeding limit {max}")]
     TooManyMetrics {
+        index: usize,
+        actual: usize,
+        max: usize,
+    },
+    #[error("metric label at partial {index} has {actual} bytes, exceeding limit {max}")]
+    MetricLabelTooLong {
+        index: usize,
+        actual: usize,
+        max: usize,
+    },
+    #[error("origin at partial {index} has {actual} bytes, exceeding limit {max}")]
+    OriginTooLong {
         index: usize,
         actual: usize,
         max: usize,
@@ -73,6 +88,12 @@ pub enum ZSpaceFusionError {
     TelemetryNotObject { index: usize },
     #[error("telemetry payload {index} exceeds nesting limit {max_depth}")]
     TelemetryTooDeep { index: usize, max_depth: usize },
+    #[error("telemetry path in payload {index} has {actual} bytes, exceeding limit {max}")]
+    TelemetryPathTooLong {
+        index: usize,
+        actual: usize,
+        max: usize,
+    },
     #[error("flattened telemetry exceeds entry limit {max}")]
     TooManyTelemetryEntries { max: usize },
     #[error("telemetry value '{key}' in payload {index} must be finite")]
@@ -288,6 +309,29 @@ struct FlattenAudit {
     conflicts: usize,
 }
 
+fn checked_telemetry_path(
+    index: usize,
+    prefix: &str,
+    key: &str,
+) -> Result<String, ZSpaceFusionError> {
+    let actual = prefix
+        .len()
+        .saturating_add(usize::from(!prefix.is_empty()))
+        .saturating_add(key.len());
+    if actual > ZSPACE_FUSION_MAX_TELEMETRY_PATH_BYTES {
+        return Err(ZSpaceFusionError::TelemetryPathTooLong {
+            index,
+            actual,
+            max: ZSPACE_FUSION_MAX_TELEMETRY_PATH_BYTES,
+        });
+    }
+    Ok(if prefix.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{prefix}.{key}")
+    })
+}
+
 fn flatten_telemetry(
     value: &Value,
     index: usize,
@@ -307,11 +351,7 @@ fn flatten_telemetry(
         .ok_or(ZSpaceFusionError::TelemetryNotObject { index })?;
 
     for (key, value) in object {
-        let label = if prefix.is_empty() {
-            key.clone()
-        } else {
-            format!("{prefix}.{key}")
-        };
+        let label = checked_telemetry_path(index, prefix, key)?;
         if value.is_object() {
             flatten_telemetry(value, index, &label, depth + 1, output, audit)?;
             continue;
@@ -422,6 +462,9 @@ fn stable_weighted_mean<'a>(values: impl Iterator<Item = (&'a f64, &'a f64)>) ->
     let mut mean = 0.0;
     for (value, weight) in values {
         let scaled_weight = *weight / max_weight;
+        if scaled_weight == 0.0 {
+            continue;
+        }
         let next_weight = total_weight + scaled_weight;
         mean = mean * (total_weight / next_weight) + value * (scaled_weight / next_weight);
         total_weight = next_weight;
@@ -469,6 +512,9 @@ fn reduce_gradients(
             let mut total_weight = 0.0;
             for (gradient, weight) in gradients {
                 let scaled_weight = weight / max_weight;
+                if scaled_weight == 0.0 {
+                    continue;
+                }
                 let next_weight = total_weight + scaled_weight;
                 for (index, output) in result.iter_mut().enumerate() {
                     *output = *output * (total_weight / next_weight)
@@ -554,6 +600,15 @@ pub fn fuse_zspace_partials(
             });
             continue;
         };
+        if let Some(origin) = partial.origin.as_deref() {
+            if origin.len() > ZSPACE_FUSION_MAX_ORIGIN_BYTES {
+                return Err(ZSpaceFusionError::OriginTooLong {
+                    index,
+                    actual: origin.len(),
+                    max: ZSPACE_FUSION_MAX_ORIGIN_BYTES,
+                });
+            }
+        }
         let weight = request
             .weights
             .as_ref()
@@ -561,6 +616,24 @@ pub fn fuse_zspace_partials(
             .unwrap_or(partial.weight);
         if !weight.is_finite() {
             return Err(ZSpaceFusionError::NonFiniteWeight { index });
+        }
+        if partial.metrics.len() > ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL {
+            return Err(ZSpaceFusionError::TooManyMetrics {
+                index,
+                actual: partial.metrics.len(),
+                max: ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL,
+            });
+        }
+        if let Some(key) = partial
+            .metrics
+            .keys()
+            .find(|key| key.len() > ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES)
+        {
+            return Err(ZSpaceFusionError::MetricLabelTooLong {
+                index,
+                actual: key.len(),
+                max: ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES,
+            });
         }
         if weight <= 0.0 {
             suppressed_count += 1;
@@ -574,13 +647,6 @@ pub fn fuse_zspace_partials(
                 telemetry_entry_count: 0,
             });
             continue;
-        }
-        if partial.metrics.len() > ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL {
-            return Err(ZSpaceFusionError::TooManyMetrics {
-                index,
-                actual: partial.metrics.len(),
-                max: ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL,
-            });
         }
 
         let mut canonical_metrics: BTreeMap<&'static str, (String, ZSpaceMetricInput)> =
@@ -708,6 +774,9 @@ pub fn fuse_zspace_partials(
 
 /// Resolve a public Z-space metric alias to its canonical spelling.
 pub fn canonical_metric_name(name: &str) -> Option<&'static str> {
+    if name.len() > ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES {
+        return None;
+    }
     match name.to_ascii_lowercase().as_str() {
         "speed" | "velocity" => Some("speed"),
         "mem" | "memory" => Some("memory"),
@@ -1035,5 +1104,93 @@ mod tests {
 
         assert!(fused.metrics["speed"].is_finite());
         assert!(fused.gradient.expect("gradient")[0].is_finite());
+    }
+
+    #[test]
+    fn weighted_mean_skips_relative_weights_that_underflow_to_zero() {
+        let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                Some(partial(
+                    json!({"speed": -3.0, "gradient": [-3.0, 9.0]}),
+                    f64::MIN_POSITIVE,
+                    "tiny",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": 7.0, "gradient": [7.0, -5.0]}),
+                    f64::MAX,
+                    "dominant",
+                    None,
+                )),
+            ],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("underflowed relative weights are negligible, not invalid");
+
+        assert_eq!(fused.metrics["speed"], 7.0);
+        assert_eq!(fused.gradient, Some(vec![7.0, -5.0]));
+    }
+
+    #[test]
+    fn oversized_labels_and_origins_fail_before_normalization() {
+        let metric_label = "x".repeat(ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES + 1);
+        let metric_error = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(ZSpacePartialInput {
+                metrics: BTreeMap::from([(metric_label, ZSpaceMetricInput::Scalar(1.0))]),
+                weight: 1.0,
+                origin: None,
+                telemetry: None,
+            })],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect_err("oversized metric labels must fail closed");
+        assert!(matches!(
+            metric_error,
+            ZSpaceFusionError::MetricLabelTooLong { index: 0, .. }
+        ));
+
+        let suppressed_metric_error = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(ZSpacePartialInput {
+                metrics: BTreeMap::from([(
+                    "x".repeat(ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES + 1),
+                    ZSpaceMetricInput::Scalar(1.0),
+                )]),
+                weight: 1.0,
+                origin: None,
+                telemetry: None,
+            })],
+            weights: Some(vec![0.0]),
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect_err("suppression must not bypass metric label bounds");
+        assert!(matches!(
+            suppressed_metric_error,
+            ZSpaceFusionError::MetricLabelTooLong { index: 0, .. }
+        ));
+
+        let origin_error = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(partial(
+                json!({"speed": 1.0}),
+                1.0,
+                &"o".repeat(ZSPACE_FUSION_MAX_ORIGIN_BYTES + 1),
+                None,
+            ))],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect_err("oversized origins must fail closed");
+        assert!(matches!(
+            origin_error,
+            ZSpaceFusionError::OriginTooLong { index: 0, .. }
+        ));
+
+        let telemetry_key = "t".repeat(ZSPACE_FUSION_MAX_TELEMETRY_PATH_BYTES + 1);
+        let telemetry_error = fuse_zspace_telemetry(&[Value::Object(
+            [(telemetry_key, json!(1.0))].into_iter().collect(),
+        )])
+        .expect_err("oversized telemetry paths must fail closed");
+        assert!(matches!(
+            telemetry_error,
+            ZSpaceFusionError::TelemetryPathTooLong { index: 0, .. }
+        ));
     }
 }

@@ -114,7 +114,16 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     )
     assert diagnostics["effect"]["effective_gradient_bias_scale"] > 0.0
 
+    telemetry_contract = opt.topos_telemetry_contract()
+    assert telemetry_contract["kind"] == "spiraltorch.zspace_telemetry_fusion"
+    assert telemetry_contract["contract_version"] == (
+        "spiraltorch.zspace_telemetry_fusion.v1"
+    )
+    assert telemetry_contract["semantic_owner"] == "st-core::telemetry::zspace_fusion"
+    assert telemetry_contract["semantic_backend"] == "rust"
+    assert telemetry_contract["input_count"] == 3
     telemetry = opt.topos_telemetry_payload()
+    assert telemetry == telemetry_contract["payload"]
     assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
     assert telemetry["topos.training_hints.clip_scale"] == pytest.approx(hints["clip_scale"])
     assert telemetry["topos.optimizer_effect.rate_scale"] == pytest.approx(expected_scale)
@@ -130,6 +139,47 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     assert telemetry["topos.runtime_profile.control_energy"] == pytest.approx(
         diagnostics["runtime_profile"]["control_energy"]
     )
+
+
+def test_amegagrad_topos_telemetry_uses_rust_flattening_semantics() -> None:
+    _require_native()
+
+    opt = st.optim.Amegagrad((1, 1))
+    opt.last_topos_profile = {"control_energy": 0.25}
+    contract = opt.topos_telemetry_contract(
+        {
+            "closure_pressure": 0.5,
+            "numeric_string": "2.5",
+            "label": "ignored",
+        }
+    )
+
+    assert contract["input_count"] == 2
+    assert contract["payload"]["topos.closure_pressure"] == pytest.approx(0.5)
+    assert contract["payload"]["topos.numeric_string"] == pytest.approx(2.5)
+    assert contract["payload"]["topos.runtime_profile.control_energy"] == pytest.approx(
+        0.25
+    )
+    assert contract["ignored_value_count"] == 1
+    assert contract["sources"][0]["ignored_value_count"] == 1
+
+
+def test_amegagrad_rejects_incomplete_rust_training_plan(monkeypatch) -> None:
+    _require_native()
+
+    opt = st.optim.Amegagrad((1, 1), topos_control_gain=1.0)
+    monkeypatch.setattr(
+        st,
+        "topos_training_plan",
+        lambda *_args, **_kwargs: {"rate_scale": 0.5},
+    )
+
+    with pytest.raises(RuntimeError, match="learning_rate_scale"):
+        opt.tune(
+            control=_UnitRateControl(),
+            use_topos=True,
+            topos_hints={"learning_rate_scale": 0.5, "clip_scale": 1.0},
+        )
 
 
 def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:

@@ -64,25 +64,14 @@ def _finite_int(value: Any, *, default: int) -> int:
     return max(0, numeric)
 
 
-def _flatten_numeric_mapping(
-    payload: Mapping[str, Any],
-    *,
-    prefix: str,
-    out: dict[str, float],
-) -> None:
-    for key, value in payload.items():
-        path = f"{prefix}.{key}" if prefix else str(key)
-        if isinstance(value, Mapping):
-            _flatten_numeric_mapping(value, prefix=path, out=out)
-            continue
-        if isinstance(value, (str, bytes, bytearray)):
-            continue
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(numeric):
-            out[path] = numeric
+def _required_rust_plan_float(plan: Mapping[str, Any], field: str) -> float:
+    value = plan.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"Rust Topos training plan returned invalid '{field}'")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise RuntimeError(f"Rust Topos training plan returned non-finite '{field}'")
+    return numeric
 
 
 class Amegagrad:
@@ -279,19 +268,6 @@ class Amegagrad:
             return {}
         return dict(hints)
 
-    def _topos_rate_scale(self, hints: Mapping[str, Any]) -> tuple[float, float, float]:
-        learning_rate_scale = _finite_float(
-            hints.get("learning_rate_scale"),
-            default=1.0,
-        )
-        clip_scale = _finite_float(hints.get("clip_scale"), default=1.0)
-        raw_scale = max(0.01, min(2.0, learning_rate_scale * clip_scale))
-        blended_scale = 1.0 + self.topos_control_gain * (raw_scale - 1.0)
-        if not math.isfinite(blended_scale) or blended_scale <= 0.0:
-            blended_scale = 1.0
-        blended_scale = max(0.01, min(2.0, blended_scale))
-        return learning_rate_scale, clip_scale, blended_scale
-
     def _apply_topos_learning_rate_scale(
         self,
         hyper_target: float,
@@ -321,35 +297,23 @@ class Amegagrad:
                 {"training_hints": hints},
                 gain=self.topos_control_gain,
             )
-        learning_rate_scale = _finite_float(
-            plan.get("learning_rate_scale"),
-            default=_finite_float(hints.get("learning_rate_scale"), default=1.0),
-        )
-        clip_scale = _finite_float(
-            plan.get("clip_scale"),
-            default=_finite_float(hints.get("clip_scale"), default=1.0),
-        )
-        rate_scale = _finite_float(
-            plan.get("rate_scale"),
-            default=self._topos_rate_scale(hints)[2],
-        )
+        learning_rate_scale = _required_rust_plan_float(plan, "learning_rate_scale")
+        clip_scale = _required_rust_plan_float(plan, "clip_scale")
+        rate_scale = _required_rust_plan_float(plan, "rate_scale")
         hyper_scaled = hyper_target * rate_scale
         real_scaled = real_target * rate_scale
         self.last_topos_effect = {
             "learning_rate_scale": learning_rate_scale,
             "clip_scale": clip_scale,
-            "raw_rate_scale": _finite_float(
-                plan.get("raw_rate_scale"),
-                default=learning_rate_scale * clip_scale,
-            ),
+            "raw_rate_scale": _required_rust_plan_float(plan, "raw_rate_scale"),
             "rate_scale": rate_scale,
-            "effective_gradient_bias_scale": _finite_float(
-                plan.get("effective_gradient_bias_scale"),
-                default=0.0,
+            "effective_gradient_bias_scale": _required_rust_plan_float(
+                plan,
+                "effective_gradient_bias_scale",
             ),
-            "effective_momentum_damping": _finite_float(
-                plan.get("effective_momentum_damping"),
-                default=0.0,
+            "effective_momentum_damping": _required_rust_plan_float(
+                plan,
+                "effective_momentum_damping",
             ),
             "hyper_learning_rate": hyper_scaled,
             "real_learning_rate": real_scaled,
@@ -360,40 +324,54 @@ class Amegagrad:
         )
         return hyper_scaled, real_scaled
 
-    def topos_telemetry_payload(
+    def topos_telemetry_contract(
         self,
         signal: Mapping[str, Any] | None = None,
-    ) -> dict[str, float]:
-        """Flatten cached topos control state into `topos.*` telemetry keys."""
+    ) -> dict[str, Any]:
+        """Fuse cached Topos state through the canonical Rust telemetry contract."""
+
+        import spiraltorch as st
 
         if signal is None:
             signal = self.last_topos_signal
         if signal is None:
             signal = self.topos_control_signal()
-        telemetry: dict[str, float] = {}
         signal_payload = dict(signal)
         signal_payload.pop("runtime_profile", None)
-        _flatten_numeric_mapping(signal_payload, prefix="topos", out=telemetry)
+        sources: list[dict[str, Any]] = [{"topos": signal_payload}]
         profile = self.last_topos_profile
         if profile is None:
-            import spiraltorch as st
-
             profile = st.topos_runtime_profile(
                 signal,
                 training_gain=self.topos_control_gain,
             )
-        _flatten_numeric_mapping(
-            profile,
-            prefix="topos.runtime_profile",
-            out=telemetry,
-        )
-        if self.last_topos_effect is not None:
-            _flatten_numeric_mapping(
-                self.last_topos_effect,
-                prefix="topos.optimizer_effect",
-                out=telemetry,
+        if not isinstance(profile, Mapping):
+            raise RuntimeError(
+                "Rust Topos runtime profile returned a non-mapping payload"
             )
-        return telemetry
+        sources.append({"topos": {"runtime_profile": dict(profile)}})
+        if self.last_topos_effect is not None:
+            sources.append(
+                {"topos": {"optimizer_effect": dict(self.last_topos_effect)}}
+            )
+        contract = st.zspace_telemetry_fusion(sources)
+        if not isinstance(contract, Mapping):
+            raise RuntimeError(
+                "Rust Z-space telemetry fusion returned a non-mapping payload"
+            )
+        return dict(contract)
+
+    def topos_telemetry_payload(
+        self,
+        signal: Mapping[str, Any] | None = None,
+    ) -> dict[str, float]:
+        """Project the Rust-owned Topos telemetry contract to its flat payload."""
+
+        contract = self.topos_telemetry_contract(signal)
+        payload = contract.get("payload")
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("Rust Z-space telemetry fusion omitted its payload")
+        return {str(key): float(value) for key, value in payload.items()}
 
     def topos_diagnostics(self) -> dict[str, Any]:
         """Return the cached topos signal, hints, and optimizer effect."""
