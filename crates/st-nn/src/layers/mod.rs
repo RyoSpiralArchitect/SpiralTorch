@@ -35,7 +35,10 @@ pub use coherence_scan::ZSpaceCoherenceScan;
 pub use coherence_wave::ZSpaceCoherenceWaveBlock;
 pub use continuous_wavelet::ContinuousWaveletTransform;
 pub use dropout::Dropout;
-pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};
+pub use dynamic_field::{
+    HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerAudit,
+    StochasticSchrodingerBackwardAudit, StochasticSchrodingerConfig, StochasticSchrodingerLayer,
+};
 pub use embedding::Embedding;
 pub use gelu::Gelu;
 pub use identity::Identity;

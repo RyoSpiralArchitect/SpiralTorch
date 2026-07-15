@@ -27,6 +27,7 @@ pub mod backend;
 pub mod causal;
 pub mod config;
 pub mod distributed;
+pub mod dynamics;
 pub mod ecosystem;
 pub mod engine;
 pub mod heur;
