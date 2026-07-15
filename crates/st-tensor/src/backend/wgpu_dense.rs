@@ -4014,6 +4014,24 @@ mod tests {
     }
 
     #[test]
+    fn stochastic_schrodinger_boundary_rejects_non_finite_derived_values() {
+        let derived_forward =
+            dynamic_schrodinger_forward(&[1.0], &[0.0], &[0.0], 1, 1, f32::MAX, 2.0, 0.0, 0.0)
+                .expect_err("overflowing hopping angle must fail before dispatch");
+        assert!(derived_forward.contains("derived configuration"));
+
+        let phase_forward =
+            dynamic_schrodinger_forward(&[1.0], &[f32::MAX], &[0.0], 1, 1, f32::MAX, 0.0, 0.0, 0.0)
+                .expect_err("overflowing phase must fail before dispatch");
+        assert!(phase_forward.contains("derived phase at index 0"));
+
+        let derived_backward =
+            dynamic_schrodinger_backward(&[1.0], &[0.0], &[1.0], 1, 1, f32::MAX, 2.0, 0.0)
+                .expect_err("overflowing backward angle must fail before dispatch");
+        assert!(derived_backward.contains("derived configuration"));
+    }
+
+    #[test]
     fn matmul_shader_wgsl_is_valid() {
         let key = PipelineKey::new(
             ScalarType::F32,
@@ -6763,65 +6781,114 @@ pub fn dynamic_hamilton_jacobi_backward(
     Ok((grad_input, grad_potential))
 }
 
-#[allow(clippy::type_complexity)]
+// Keep the versioned semantic config in st-core; this boundary only flattens it
+// into the generic tensor-util shader parameter block.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn dynamic_schrodinger_forward(
     input: &[f32],
-    coherence: &[f32],
+    potential: &[f32],
+    standard_normal: &[f32],
     rows: usize,
     cols: usize,
-    decoherence_rate: f32,
+    time_step: f32,
+    hopping_rate: f32,
+    loss_rate: f32,
+    noise_scale: f32,
 ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
         checked_tensor_util_shape("dynamic_schrodinger_forward", input, rows, cols)?;
-    if coherence.len() != cols {
+    if potential.len() != cols {
         return Err(format!(
-            "dynamic_schrodinger_forward coherence length mismatch: expected {cols} elements, got {}",
-            coherence.len()
+            "dynamic_schrodinger_forward potential length mismatch: expected {cols} elements, got {}",
+            potential.len()
         ));
     }
-    if !decoherence_rate.is_finite() {
-        return Err("dynamic_schrodinger_forward decoherence rate must be finite".into());
+    if standard_normal.len() != volume {
+        return Err(format!(
+            "dynamic_schrodinger_forward noise length mismatch: expected {volume} elements, got {}",
+            standard_normal.len()
+        ));
+    }
+    if !time_step.is_finite()
+        || time_step < 0.0
+        || !hopping_rate.is_finite()
+        || !loss_rate.is_finite()
+        || loss_rate < 0.0
+        || !noise_scale.is_finite()
+        || noise_scale < 0.0
+    {
+        return Err("dynamic_schrodinger_forward configuration must be finite and non-negative where required".into());
+    }
+    let hopping_angle = hopping_rate * time_step;
+    let noise_step_scale = noise_scale * time_step.sqrt();
+    let loss_exponent = -0.5 * loss_rate * time_step;
+    if !hopping_angle.is_finite() || !noise_step_scale.is_finite() || !loss_exponent.is_finite() {
+        return Err("dynamic_schrodinger_forward derived configuration must be finite".into());
+    }
+    if input
+        .iter()
+        .chain(potential)
+        .chain(standard_normal)
+        .any(|value| !value.is_finite())
+    {
+        return Err("dynamic_schrodinger_forward inputs must be finite".into());
+    }
+    for (index, &sample) in standard_normal.iter().enumerate() {
+        let phase = potential[index % cols] * time_step + sample * noise_step_scale;
+        if !phase.is_finite() {
+            return Err(format!(
+                "dynamic_schrodinger_forward derived phase at index {index} must be finite"
+            ));
+        }
     }
     let output_elements = volume.checked_mul(3).ok_or_else(|| {
         "dynamic_schrodinger_forward output volume exceeds usize range".to_string()
     })?;
+    let mut aux = Vec::with_capacity(cols + volume);
+    aux.extend_from_slice(potential);
+    aux.extend_from_slice(standard_normal);
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
     let packed = tensor_util_internal(
         input,
-        Some(coherence),
+        Some(&aux),
         rows,
         cols,
         output_elements,
-        decoherence_rate,
-        0.0,
-        0.0,
-        0.0,
+        time_step,
+        hopping_rate,
+        loss_rate,
+        noise_scale,
         ctx.tensor_util_dynamic_schrodinger_forward_pipeline.clone(),
         workgroups,
         "dynamic_schrodinger_forward",
     )?;
-    let interference = packed[..volume].to_vec();
-    let amplitude = packed[volume..volume * 2].to_vec();
-    let decoherence = packed[volume * 2..volume * 3].to_vec();
-    Ok((interference, amplitude, decoherence))
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_schrodinger_forward produced non-finite output".into());
+    }
+    let output_real = packed[..volume].to_vec();
+    let output_imaginary = packed[volume..volume * 2].to_vec();
+    let phase = packed[volume * 2..volume * 3].to_vec();
+    Ok((output_real, output_imaginary, phase))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn dynamic_schrodinger_backward(
-    amplitude: &[f32],
-    decoherence: &[f32],
+    input: &[f32],
+    phase: &[f32],
     grad_output: &[f32],
-    coherence: &[f32],
     rows: usize,
     cols: usize,
-    decoherence_rate: f32,
+    time_step: f32,
+    hopping_rate: f32,
+    loss_rate: f32,
 ) -> Result<(Vec<f32>, Vec<f32>), String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
-        checked_tensor_util_shape("dynamic_schrodinger_backward", amplitude, rows, cols)?;
-    if decoherence.len() != volume {
+        checked_tensor_util_shape("dynamic_schrodinger_backward", input, rows, cols)?;
+    if phase.len() != volume {
         return Err(format!(
-            "dynamic_schrodinger_backward decoherence length mismatch: expected {volume} elements, got {}",
-            decoherence.len()
+            "dynamic_schrodinger_backward phase length mismatch: expected {volume} elements, got {}",
+            phase.len()
         ));
     }
     if grad_output.len() != volume {
@@ -6830,42 +6897,56 @@ pub fn dynamic_schrodinger_backward(
             grad_output.len()
         ));
     }
-    if coherence.len() != cols {
-        return Err(format!(
-            "dynamic_schrodinger_backward coherence length mismatch: expected {cols} elements, got {}",
-            coherence.len()
-        ));
+    if !time_step.is_finite()
+        || time_step < 0.0
+        || !hopping_rate.is_finite()
+        || !loss_rate.is_finite()
+        || loss_rate < 0.0
+    {
+        return Err("dynamic_schrodinger_backward configuration must be finite and non-negative where required".into());
     }
-    if !decoherence_rate.is_finite() {
-        return Err("dynamic_schrodinger_backward decoherence rate must be finite".into());
+    let hopping_angle = hopping_rate * time_step;
+    let loss_exponent = -0.5 * loss_rate * time_step;
+    if !hopping_angle.is_finite() || !loss_exponent.is_finite() {
+        return Err("dynamic_schrodinger_backward derived configuration must be finite".into());
     }
-    let mut aux = Vec::with_capacity(volume * 2 + cols);
+    if input
+        .iter()
+        .chain(phase)
+        .chain(grad_output)
+        .any(|value| !value.is_finite())
+    {
+        return Err("dynamic_schrodinger_backward inputs must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(volume * 2);
+    aux.extend_from_slice(phase);
     aux.extend_from_slice(grad_output);
-    aux.extend_from_slice(decoherence);
-    aux.extend_from_slice(coherence);
     let output_elements = volume.checked_add(cols).ok_or_else(|| {
         "dynamic_schrodinger_backward output volume exceeds usize range".to_string()
     })?;
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
     let packed = tensor_util_internal(
-        amplitude,
+        input,
         Some(aux.as_slice()),
         rows,
         cols,
         output_elements,
-        decoherence_rate,
-        0.0,
-        0.0,
+        time_step,
+        hopping_rate,
+        loss_rate,
         0.0,
         ctx.tensor_util_dynamic_schrodinger_backward_pipeline
             .clone(),
         workgroups,
         "dynamic_schrodinger_backward",
     )?;
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_schrodinger_backward produced non-finite output".into());
+    }
     let grad_input = packed[..volume].to_vec();
-    let grad_coherence = packed[volume..volume + cols].to_vec();
-    Ok((grad_input, grad_coherence))
+    let grad_potential = packed[volume..volume + cols].to_vec();
+    Ok((grad_input, grad_potential))
 }
 
 pub fn add_scaled(

@@ -11935,48 +11935,93 @@ mod tests {
             assert!((expected - hj_grad.1[c]).abs() < 1e-5);
         }
 
-        let sch_rate = 0.4;
-        let sch_coherence: Vec<f32> = (0..cols)
+        let sch_time_step = 0.15;
+        let sch_hopping_rate = 0.7;
+        let sch_loss_rate = 0.4;
+        let sch_noise_scale = 0.2;
+        let sch_potential: Vec<f32> = (0..cols)
             .map(|idx| (0.85 - idx as f32 * 0.03).max(0.1))
+            .collect();
+        let sch_noise: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx * 7 + 3) % 17) as f32 * 0.11 - 0.8)
             .collect();
         let sch_forward = unwrap_ok(wgpu_dense::dynamic_schrodinger_forward(
             &input,
-            &sch_coherence,
+            &sch_potential,
+            &sch_noise,
             rows,
             cols,
-            sch_rate,
+            sch_time_step,
+            sch_hopping_rate,
+            sch_loss_rate,
+            sch_noise_scale,
         ));
+        let hopping_angle = sch_hopping_rate * sch_time_step;
+        let hopping_cos = hopping_angle.cos();
+        let hopping_sin = hopping_angle.sin();
+        let damping = (-0.5 * sch_loss_rate * sch_time_step).exp();
+        let noise_step = sch_noise_scale * sch_time_step.sqrt();
         for r in 0..rows {
             for c in 0..cols {
                 let idx = r * cols + c;
-                let amp = input[idx].tanh();
-                let deco = 1.0 / (1.0 + sch_rate * amp.abs());
-                let expected = amp * sch_coherence[c] * deco;
-                assert!((expected - sch_forward.0[idx]).abs() < 1e-6);
-                assert!((amp - sch_forward.1[idx]).abs() < 1e-6);
-                assert!((deco - sch_forward.2[idx]).abs() < 1e-6);
+                let phase = sch_potential[c] * sch_time_step + sch_noise[idx] * noise_step;
+                let partner = if c.is_multiple_of(2) {
+                    (c + 1 < cols).then_some(c + 1)
+                } else {
+                    Some(c - 1)
+                };
+                let (expected_real, expected_imaginary) = if let Some(partner) = partner {
+                    let partner_idx = r * cols + partner;
+                    let partner_phase = sch_potential[partner] * sch_time_step
+                        + sch_noise[partner_idx] * noise_step;
+                    let mean_phase = 0.5 * phase + 0.5 * partner_phase;
+                    (
+                        damping
+                            * (hopping_cos * input[idx] * phase.cos()
+                                - hopping_sin * input[partner_idx] * mean_phase.sin()),
+                        damping
+                            * (-hopping_cos * input[idx] * phase.sin()
+                                - hopping_sin * input[partner_idx] * mean_phase.cos()),
+                    )
+                } else {
+                    (
+                        damping * input[idx] * phase.cos(),
+                        -damping * input[idx] * phase.sin(),
+                    )
+                };
+                assert!((expected_real - sch_forward.0[idx]).abs() < 1e-6);
+                assert!((expected_imaginary - sch_forward.1[idx]).abs() < 1e-6);
+                assert!((phase - sch_forward.2[idx]).abs() < 1e-6);
             }
         }
         let sch_grad = unwrap_ok(wgpu_dense::dynamic_schrodinger_backward(
-            &sch_forward.1,
+            &input,
             &sch_forward.2,
             &rhs,
-            &sch_coherence,
             rows,
             cols,
-            sch_rate,
+            sch_time_step,
+            sch_hopping_rate,
+            sch_loss_rate,
         ));
         for r in 0..rows {
             for c in 0..cols {
                 let idx = r * cols + c;
-                let amp = sch_forward.1[idx];
-                let deco = sch_forward.2[idx];
-                let denom = 1.0 + sch_rate * amp.abs();
-                let sign = if amp >= 0.0 { 1.0 } else { -1.0 };
-                let d_deco_d_amp = -sch_rate * sign / (denom * denom);
-                let base = deco + amp * d_deco_d_amp;
-                let d_amp_d_input = 1.0 - amp * amp;
-                let expected = rhs[idx] * sch_coherence[c] * base * d_amp_d_input;
+                let phase = sch_forward.2[idx];
+                let partner = if c.is_multiple_of(2) {
+                    (c + 1 < cols).then_some(c + 1)
+                } else {
+                    Some(c - 1)
+                };
+                let expected = if let Some(partner) = partner {
+                    let partner_idx = r * cols + partner;
+                    let mean_phase = 0.5 * phase + 0.5 * sch_forward.2[partner_idx];
+                    damping
+                        * (rhs[idx] * hopping_cos * phase.cos()
+                            - rhs[partner_idx] * hopping_sin * mean_phase.sin())
+                } else {
+                    damping * rhs[idx] * phase.cos()
+                };
                 assert!((expected - sch_grad.0[idx]).abs() < 1e-6);
             }
         }
@@ -11984,7 +12029,24 @@ mod tests {
             let mut expected = 0.0f32;
             for r in 0..rows {
                 let idx = r * cols + c;
-                expected += rhs[idx] * sch_forward.1[idx] * sch_forward.2[idx];
+                let phase = sch_forward.2[idx];
+                let partner = if c.is_multiple_of(2) {
+                    (c + 1 < cols).then_some(c + 1)
+                } else {
+                    Some(c - 1)
+                };
+                let grad_phase = if let Some(partner) = partner {
+                    let partner_idx = r * cols + partner;
+                    let mean_phase = 0.5 * phase + 0.5 * sch_forward.2[partner_idx];
+                    damping
+                        * (rhs[idx]
+                            * (-hopping_cos * input[idx] * phase.sin()
+                                - 0.5 * hopping_sin * input[partner_idx] * mean_phase.cos())
+                            - 0.5 * rhs[partner_idx] * hopping_sin * input[idx] * mean_phase.cos())
+                } else {
+                    -damping * rhs[idx] * input[idx] * phase.sin()
+                };
+                expected += grad_phase * sch_time_step;
             }
             assert!((expected - sch_grad.1[c]).abs() < 1e-5);
         }

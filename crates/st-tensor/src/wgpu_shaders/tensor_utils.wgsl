@@ -23,6 +23,23 @@ fn finite_sign(value: f32) -> f32 {
     return 1.0;
 }
 
+fn schrodinger_has_partner(col: u32, cols: u32) -> bool {
+    if (col % 2u == 0u) {
+        return col + 1u < cols;
+    }
+    return true;
+}
+
+fn schrodinger_partner_col(col: u32, cols: u32) -> u32 {
+    if (col % 2u == 0u) {
+        if (col + 1u < cols) {
+            return col + 1u;
+        }
+        return col;
+    }
+    return col - 1u;
+}
+
 fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     if (value != value || saturation <= 0.0) {
         return 0.0;
@@ -217,11 +234,32 @@ fn dynamic_schrodinger_forward(@builtin(global_invocation_id) global_id: vec3<u3
     let idx = global_id.x;
     if (idx < params.values) {
         let col = idx % params.cols;
-        let amp = tanh(input[idx]);
-        let deco = 1.0 / (1.0 + params.scalar * abs(amp));
-        output[idx] = amp * aux[col] * deco;
-        output[params.values + idx] = amp;
-        output[params.values * 2u + idx] = deco;
+        let row_start = idx - col;
+        let phase = aux[col] * params.scalar
+            + aux[params.cols + idx] * params._pad2 * sqrt(params.scalar);
+        let damping = exp(-0.5 * params.porosity * params.scalar);
+        if (schrodinger_has_partner(col, params.cols)) {
+            let partner_col = schrodinger_partner_col(col, params.cols);
+            let partner_idx = row_start + partner_col;
+            let partner_phase = aux[partner_col] * params.scalar
+                + aux[params.cols + partner_idx] * params._pad2 * sqrt(params.scalar);
+            let mean_phase = 0.5 * phase + 0.5 * partner_phase;
+            let hopping_angle = params.saturation * params.scalar;
+            let hopping_cos = cos(hopping_angle);
+            let hopping_sin = sin(hopping_angle);
+            output[idx] = damping * (
+                hopping_cos * input[idx] * cos(phase)
+                - hopping_sin * input[partner_idx] * sin(mean_phase)
+            );
+            output[params.values + idx] = damping * (
+                -hopping_cos * input[idx] * sin(phase)
+                - hopping_sin * input[partner_idx] * cos(mean_phase)
+            );
+        } else {
+            output[idx] = damping * input[idx] * cos(phase);
+            output[params.values + idx] = -damping * input[idx] * sin(phase);
+        }
+        output[params.values * 2u + idx] = phase;
     }
 }
 
@@ -230,29 +268,60 @@ fn dynamic_schrodinger_backward(@builtin(global_invocation_id) global_id: vec3<u
     let idx = global_id.x;
     if (idx < params.values) {
         let col = idx % params.cols;
-        let amp = input[idx];
-        let grad = aux[idx];
-        let deco = aux[params.values + idx];
-        let coherence = aux[params.values * 2u + col];
-        let denom = 1.0 + params.scalar * abs(amp);
-        let sign = finite_sign(amp);
-        let d_deco_d_amp = -params.scalar * sign / (denom * denom);
-        let base = deco + amp * d_deco_d_amp;
-        let d_amp_d_input = 1.0 - amp * amp;
-        output[idx] = grad * coherence * base * d_amp_d_input;
+        let row_start = idx - col;
+        let phase = aux[idx];
+        let grad = aux[params.values + idx];
+        let damping = exp(-0.5 * params.porosity * params.scalar);
+        let hopping_angle = params.saturation * params.scalar;
+        let hopping_cos = cos(hopping_angle);
+        let hopping_sin = sin(hopping_angle);
+        if (schrodinger_has_partner(col, params.cols)) {
+            let partner_col = schrodinger_partner_col(col, params.cols);
+            let partner_idx = row_start + partner_col;
+            let partner_phase = aux[partner_idx];
+            let partner_grad = aux[params.values + partner_idx];
+            let mean_phase = 0.5 * phase + 0.5 * partner_phase;
+            output[idx] = damping * (
+                grad * hopping_cos * cos(phase)
+                - partner_grad * hopping_sin * sin(mean_phase)
+            );
+        } else {
+            output[idx] = damping * grad * cos(phase);
+        }
     }
     if (idx < params.cols) {
-        var coherence_sum = 0.0;
+        var potential_sum = 0.0;
         var row = 0u;
         loop {
             if (row >= params.rows) {
                 break;
             }
             let value_idx = row * params.cols + idx;
-            coherence_sum = coherence_sum + aux[value_idx] * input[value_idx] * aux[params.values + value_idx];
+            let phase = aux[value_idx];
+            let grad = aux[params.values + value_idx];
+            let damping = exp(-0.5 * params.porosity * params.scalar);
+            let hopping_angle = params.saturation * params.scalar;
+            let hopping_cos = cos(hopping_angle);
+            let hopping_sin = sin(hopping_angle);
+            var grad_phase = -damping * grad * input[value_idx] * sin(phase);
+            if (schrodinger_has_partner(idx, params.cols)) {
+                let partner_col = schrodinger_partner_col(idx, params.cols);
+                let partner_idx = row * params.cols + partner_col;
+                let partner_phase = aux[partner_idx];
+                let partner_grad = aux[params.values + partner_idx];
+                let mean_phase = 0.5 * phase + 0.5 * partner_phase;
+                grad_phase = damping * (
+                    grad * (
+                        -hopping_cos * input[value_idx] * sin(phase)
+                        - 0.5 * hopping_sin * input[partner_idx] * cos(mean_phase)
+                    )
+                    - 0.5 * partner_grad * hopping_sin * input[value_idx] * cos(mean_phase)
+                );
+            }
+            potential_sum = potential_sum + grad_phase * params.scalar;
             row = row + 1u;
         }
-        output[params.values + idx] = coherence_sum;
+        output[params.values + idx] = potential_sum;
     }
 }
 

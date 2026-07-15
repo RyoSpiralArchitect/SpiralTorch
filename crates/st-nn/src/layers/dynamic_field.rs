@@ -7,8 +7,24 @@ use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
 use spiral_config::determinism;
+use st_core::dynamics::stochastic_schrodinger::{
+    apply_stochastic_schrodinger_step, audit_stochastic_schrodinger_backward,
+    backward_stochastic_schrodinger_step, validate_stochastic_schrodinger_state,
+    StochasticSchrodingerBackwardAuditRequest, STOCHASTIC_SCHRODINGER_CALCULUS,
+    STOCHASTIC_SCHRODINGER_CONTRACT_VERSION, STOCHASTIC_SCHRODINGER_HAMILTONIAN,
+    STOCHASTIC_SCHRODINGER_INTEGRATOR, STOCHASTIC_SCHRODINGER_NOISE_MODEL,
+    STOCHASTIC_SCHRODINGER_OPEN_SYSTEM_MODE, STOCHASTIC_SCHRODINGER_OUTPUT_OBSERVABLE,
+    STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND, STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER,
+};
+#[cfg(feature = "wgpu")]
+use st_core::dynamics::stochastic_schrodinger::{
+    audit_stochastic_schrodinger_step, StochasticSchrodingerAuditRequest,
+};
+pub use st_core::dynamics::stochastic_schrodinger::{
+    StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit, StochasticSchrodingerConfig,
+};
 #[cfg(feature = "wgpu")]
 use st_tensor::wgpu_dense;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
@@ -45,6 +61,13 @@ fn dynamic_field_wgpu_error(op_name: &'static str, message: String) -> TensorErr
     }
 }
 
+#[derive(Clone, Copy)]
+struct StochasticSchrodingerRouteMeta {
+    config: StochasticSchrodingerConfig,
+    audit: Option<StochasticSchrodingerAudit>,
+    backward_audit: Option<StochasticSchrodingerBackwardAudit>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_dynamic_field_route_meta(
     op_name: &'static str,
@@ -62,6 +85,88 @@ fn emit_dynamic_field_route_meta(
     gradient_reduction_backend: Option<&'static str>,
     gradient_scale_backend: Option<&'static str>,
     fallback: Option<String>,
+) {
+    emit_dynamic_field_route_meta_inner(
+        op_name,
+        field_model,
+        rows,
+        cols,
+        trainable_parameters,
+        estimated_ops_per_value,
+        backward,
+        gradient_scale,
+        backend,
+        requested_backend,
+        kernel,
+        input_gradient_backend,
+        gradient_reduction_backend,
+        gradient_scale_backend,
+        fallback,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_stochastic_schrodinger_route_meta(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    estimated_ops_per_value: usize,
+    backward: bool,
+    gradient_scale: Option<f32>,
+    backend: &'static str,
+    requested_backend: &'static str,
+    kernel: &'static str,
+    input_gradient_backend: Option<&'static str>,
+    gradient_reduction_backend: Option<&'static str>,
+    gradient_scale_backend: Option<&'static str>,
+    fallback: Option<String>,
+    config: StochasticSchrodingerConfig,
+    audit: Option<StochasticSchrodingerAudit>,
+    backward_audit: Option<StochasticSchrodingerBackwardAudit>,
+) {
+    emit_dynamic_field_route_meta_inner(
+        op_name,
+        "stochastic_schrodinger",
+        rows,
+        cols,
+        1,
+        estimated_ops_per_value,
+        backward,
+        gradient_scale,
+        backend,
+        requested_backend,
+        kernel,
+        input_gradient_backend,
+        gradient_reduction_backend,
+        gradient_scale_backend,
+        fallback,
+        Some(StochasticSchrodingerRouteMeta {
+            config,
+            audit,
+            backward_audit,
+        }),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_dynamic_field_route_meta_inner(
+    op_name: &'static str,
+    field_model: &'static str,
+    rows: usize,
+    cols: usize,
+    trainable_parameters: usize,
+    estimated_ops_per_value: usize,
+    backward: bool,
+    gradient_scale: Option<f32>,
+    backend: &'static str,
+    requested_backend: &'static str,
+    kernel: &'static str,
+    input_gradient_backend: Option<&'static str>,
+    gradient_reduction_backend: Option<&'static str>,
+    gradient_scale_backend: Option<&'static str>,
+    fallback: Option<String>,
+    stochastic: Option<StochasticSchrodingerRouteMeta>,
 ) {
     emit_tensor_op(op_name, &[rows, cols], &[rows, cols]);
     emit_tensor_op_meta(op_name, || {
@@ -87,6 +192,7 @@ fn emit_dynamic_field_route_meta(
             "deterministic_backend": deterministic_backend,
             "rng_backend": rng_backend,
             "kind": if backward { "dynamic_field_backward" } else { "dynamic_field_forward" },
+            "backward": backward,
             "field_model": field_model,
             "rows": rows,
             "cols": cols,
@@ -116,6 +222,70 @@ fn emit_dynamic_field_route_meta(
                     serde_json::json!({"from": "wgpu", "message": message}),
                 );
             }
+        }
+        if let (Some(map), Some(stochastic)) = (data.as_object_mut(), stochastic) {
+            let config = stochastic.config;
+            map.insert(
+                "contract_version".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_CONTRACT_VERSION),
+            );
+            map.insert(
+                "semantic_owner".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER),
+            );
+            map.insert(
+                "semantic_backend".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND),
+            );
+            map.insert(
+                "integrator".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_INTEGRATOR),
+            );
+            map.insert(
+                "stochastic_calculus".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_CALCULUS),
+            );
+            map.insert(
+                "hamiltonian".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_HAMILTONIAN),
+            );
+            map.insert(
+                "noise_model".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_NOISE_MODEL),
+            );
+            map.insert(
+                "open_system_mode".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_OPEN_SYSTEM_MODE),
+            );
+            map.insert(
+                "output_observable".to_string(),
+                serde_json::json!(STOCHASTIC_SCHRODINGER_OUTPUT_OBSERVABLE),
+            );
+            map.insert(
+                "time_step".to_string(),
+                serde_json::json!(config.time_step()),
+            );
+            map.insert(
+                "hopping_rate".to_string(),
+                serde_json::json!(config.hopping_rate()),
+            );
+            map.insert(
+                "loss_rate".to_string(),
+                serde_json::json!(config.loss_rate()),
+            );
+            map.insert(
+                "decoherence_rate".to_string(),
+                serde_json::json!(config.loss_rate()),
+            );
+            map.insert(
+                "noise_scale".to_string(),
+                serde_json::json!(config.noise_scale()),
+            );
+            map.insert("audit".to_string(), serde_json::json!(stochastic.audit));
+            map.insert(
+                "backward_audit".to_string(),
+                serde_json::json!(stochastic.backward_audit),
+            );
         }
         data
     });
@@ -824,37 +994,66 @@ impl Module for HamiltonJacobiFlow {
     }
 }
 
-/// Layer that models semantic interference through a stochastic Schrödinger
-/// style update. It keeps track of decoherence factors that can later be
-/// surfaced through [`crate::language::NarrativeHint`] quantum metadata.
+fn stochastic_schrodinger_error(error: impl std::fmt::Display) -> TensorError {
+    TensorError::Generic(format!("stochastic Schrodinger contract failed: {error}"))
+}
+
+#[derive(Clone, Debug)]
+struct StochasticSchrodingerStepCache {
+    input: Tensor,
+    imaginary: Tensor,
+    phase: Tensor,
+    audit: StochasticSchrodingerAudit,
+    backward_audit: Option<StochasticSchrodingerBackwardAudit>,
+}
+
+/// Audited real-time open-system Schrödinger step for real-valued tensor clients.
+///
+/// Each row enters as the real quadrature of a complex wavefunction. The Rust
+/// core owns the learned diagonal Hamiltonian, exact split subflows, second-order
+/// Strang composition, Gaussian Stratonovich phase diffusion, no-jump damping,
+/// analytic backward, and numerical audits. WGPU executes the same contract and
+/// is audited by the core.
 #[derive(Debug)]
 pub struct StochasticSchrodingerLayer {
+    // The compatibility name keeps existing state dictionaries loadable. Its
+    // canonical meaning is the learned diagonal Hamiltonian potential.
     coherence: Parameter,
-    decoherence_rate: f32,
-    noise_scale: f32,
+    config: StochasticSchrodingerConfig,
     rng: RefCell<StdRng>,
-    last_amplitude: RefCell<Option<Tensor>>,
-    last_decoherence: RefCell<Option<Tensor>>,
+    last_step: RefCell<Option<StochasticSchrodingerStepCache>>,
 }
 
 impl StochasticSchrodingerLayer {
-    /// Creates a stochastic layer using entropy-backed randomness.
+    /// Creates a stochastic layer using configured Gaussian phase noise.
     pub fn new(
         name: impl Into<String>,
         features: usize,
-        decoherence_rate: f32,
+        loss_rate: f32,
         noise_scale: f32,
     ) -> PureResult<Self> {
-        Self::with_seed(name, features, decoherence_rate, noise_scale, None)
+        Self::with_seed(name, features, loss_rate, noise_scale, None)
     }
 
-    /// Same as [`StochasticSchrodingerLayer::new`] but allows a deterministic seed
-    /// for reproducible experiments and unit tests.
+    /// Same as [`StochasticSchrodingerLayer::new`] with an optional deterministic
+    /// seed for pathwise CPU/WGPU replay and reproducible experiments.
     pub fn with_seed(
         name: impl Into<String>,
         features: usize,
-        decoherence_rate: f32,
+        loss_rate: f32,
         noise_scale: f32,
+        seed: Option<u64>,
+    ) -> PureResult<Self> {
+        let config = StochasticSchrodingerConfig::new(loss_rate, noise_scale)
+            .map_err(stochastic_schrodinger_error)?;
+        Self::with_seed_and_config(name, features, config, seed)
+    }
+
+    /// Creates a layer from the versioned Rust-core evolution contract.
+    pub fn with_seed_and_config(
+        name: impl Into<String>,
+        features: usize,
+        config: StochasticSchrodingerConfig,
         seed: Option<u64>,
     ) -> PureResult<Self> {
         if features == 0 {
@@ -863,37 +1062,139 @@ impl StochasticSchrodingerLayer {
                 cols: features,
             });
         }
-        if !decoherence_rate.is_finite() || decoherence_rate < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "schrodinger_decoherence",
-            });
-        }
-        if !noise_scale.is_finite() || noise_scale < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "schrodinger_noise",
-            });
-        }
+        config.validate().map_err(stochastic_schrodinger_error)?;
         let name = name.into();
-        let coherence = Tensor::from_fn(1, features, |_r, c| (0.85 - (c as f32 * 0.03)).max(0.1))?;
+        let potential = Tensor::from_fn(1, features, |_r, c| (0.85 - (c as f32 * 0.03)).max(0.1))?;
         let rng = determinism::rng_from_optional(seed, "st-nn/layers/stochastic_schrodinger");
         Ok(Self {
-            coherence: Parameter::new(format!("{name}::coherence"), coherence),
-            decoherence_rate,
-            noise_scale,
+            coherence: Parameter::new(format!("{name}::coherence"), potential),
+            config,
             rng: RefCell::new(rng),
-            last_amplitude: RefCell::new(None),
-            last_decoherence: RefCell::new(None),
+            last_step: RefCell::new(None),
         })
     }
 
-    /// Returns the configured decoherence rate.
-    pub fn decoherence_rate(&self) -> f32 {
-        self.decoherence_rate
+    /// Sets the real-time integration step.
+    pub fn with_time_step(mut self, time_step: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_time_step(time_step)
+            .map_err(stochastic_schrodinger_error)?;
+        Ok(self)
     }
 
-    /// Returns the coherence parameter.
-    pub fn coherence(&self) -> &Parameter {
+    /// Sets the Hermitian adjacent-pair hopping rate.
+    pub fn with_hopping_rate(mut self, hopping_rate: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_hopping_rate(hopping_rate)
+            .map_err(stochastic_schrodinger_error)?;
+        Ok(self)
+    }
+
+    /// Returns the complete versioned evolution configuration.
+    pub fn config(&self) -> StochasticSchrodingerConfig {
+        self.config
+    }
+
+    pub fn time_step(&self) -> f32 {
+        self.config.time_step()
+    }
+
+    pub fn hopping_rate(&self) -> f32 {
+        self.config.hopping_rate()
+    }
+
+    pub fn loss_rate(&self) -> f32 {
+        self.config.loss_rate()
+    }
+
+    /// Compatibility alias for [`StochasticSchrodingerLayer::loss_rate`].
+    pub fn decoherence_rate(&self) -> f32 {
+        self.loss_rate()
+    }
+
+    pub fn noise_scale(&self) -> f32 {
+        self.config.noise_scale()
+    }
+
+    /// Canonical accessor for the learned diagonal Hamiltonian potential.
+    pub fn potential(&self) -> &Parameter {
         &self.coherence
+    }
+
+    /// Compatibility alias for [`StochasticSchrodingerLayer::potential`].
+    pub fn coherence(&self) -> &Parameter {
+        self.potential()
+    }
+
+    /// Returns the imaginary quadrature retained from the latest forward step.
+    pub fn latest_imaginary_quadrature(&self) -> Option<Tensor> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .map(|step| step.imaginary.clone())
+    }
+
+    /// Returns the sampled diagonal phase from the latest forward step.
+    pub fn latest_phase(&self) -> Option<Tensor> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .map(|step| step.phase.clone())
+    }
+
+    /// Returns the fail-closed norm audit from the latest forward step.
+    pub fn latest_audit(&self) -> Option<StochasticSchrodingerAudit> {
+        self.last_step.borrow().as_ref().map(|step| step.audit)
+    }
+
+    /// Returns the Rust-core audit of the latest completed backward pass.
+    pub fn latest_backward_audit(&self) -> Option<StochasticSchrodingerBackwardAudit> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .and_then(|step| step.backward_audit)
+    }
+
+    fn sample_standard_normal(&self, volume: usize) -> Vec<f32> {
+        let mut rng = self.rng.borrow_mut();
+        (0..volume)
+            .map(|_| {
+                let sample: f32 = StandardNormal.sample(&mut *rng);
+                sample
+            })
+            .collect()
+    }
+
+    fn commit_step(
+        &self,
+        input: &Tensor,
+        output_real: Vec<f32>,
+        output_imaginary: Vec<f32>,
+        phase: Vec<f32>,
+        audit: StochasticSchrodingerAudit,
+    ) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        let output = Tensor::from_vec(rows, cols, output_real)?;
+        let imaginary = Tensor::from_vec(rows, cols, output_imaginary)?;
+        let phase = Tensor::from_vec(rows, cols, phase)?;
+        self.last_step
+            .borrow_mut()
+            .replace(StochasticSchrodingerStepCache {
+                input: input.clone(),
+                imaginary,
+                phase,
+                audit,
+                backward_audit: None,
+            });
+        Ok(output)
+    }
+
+    fn commit_backward_audit(&self, audit: StochasticSchrodingerBackwardAudit) {
+        if let Some(step) = self.last_step.borrow_mut().as_mut() {
+            step.backward_audit = Some(audit);
+        }
     }
 }
 
@@ -906,11 +1207,15 @@ impl Module for StochasticSchrodingerLayer {
                 right: self.coherence.value().shape(),
             });
         }
-        let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let volume = rows.checked_mul(cols).ok_or_else(|| {
+            TensorError::Generic("stochastic Schrodinger tensor volume overflow".to_string())
+        })?;
+        let potential = self.coherence.value().data();
+        validate_stochastic_schrodinger_state(input.data(), potential, rows, cols, self.config)
+            .map_err(stochastic_schrodinger_error)?;
+        let standard_normal = self.sample_standard_normal(volume);
+        let route_backend = current_tensor_util_backend_for_values(volume);
         let requested_backend = tensor_util_backend_label(route_backend);
-        let noise_scale = self.noise_scale;
-        let rate = self.decoherence_rate;
-        let coherence = self.coherence.value().data();
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -921,51 +1226,41 @@ impl Module for StochasticSchrodingerLayer {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_schrodinger_forward(
+                let wgpu_step = wgpu_dense::dynamic_schrodinger_forward(
                     input.data(),
-                    coherence,
+                    potential,
+                    &standard_normal,
                     rows,
                     cols,
-                    rate,
-                ) {
-                    Ok((mut output_values, amplitude_values, decoherence_values)) => {
-                        validate_finite_slice(
-                            "dynamic_schrodinger_forward_output",
-                            &output_values,
-                        )?;
-                        validate_finite_slice(
-                            "dynamic_schrodinger_forward_amplitude",
-                            &amplitude_values,
-                        )?;
-                        validate_finite_slice(
-                            "dynamic_schrodinger_forward_decoherence",
-                            &decoherence_values,
-                        )?;
-                        {
-                            let mut rng = self.rng.borrow_mut();
-                            for value in output_values.iter_mut() {
-                                let noise = (rng.gen::<f32>() - 0.5) * noise_scale;
-                                *value += noise;
-                                if !value.is_finite() {
-                                    return Err(TensorError::NonFiniteValue {
-                                        label: "dynamic_schrodinger_forward_output",
-                                        value: *value,
-                                    });
-                                }
-                            }
-                        }
-                        let output = Tensor::from_vec(rows, cols, output_values)?;
-                        let amplitude = Tensor::from_vec(rows, cols, amplitude_values)?;
-                        let decoherence = Tensor::from_vec(rows, cols, decoherence_values)?;
-                        self.last_amplitude.borrow_mut().replace(amplitude);
-                        self.last_decoherence.borrow_mut().replace(decoherence);
-                        emit_dynamic_field_route_meta(
+                    self.config.time_step(),
+                    self.config.hopping_rate(),
+                    self.config.loss_rate(),
+                    self.config.noise_scale(),
+                )
+                .and_then(|(output_real, output_imaginary, phase)| {
+                    audit_stochastic_schrodinger_step(StochasticSchrodingerAuditRequest {
+                        input: input.data(),
+                        potential,
+                        output_real: &output_real,
+                        output_imaginary: &output_imaginary,
+                        phase: &phase,
+                        standard_normal: &standard_normal,
+                        rows,
+                        features: cols,
+                        config: self.config,
+                    })
+                    .map(|audit| (output_real, output_imaginary, phase, audit))
+                    .map_err(|error| format!("Rust semantic audit failed: {error}"))
+                });
+                match wgpu_step {
+                    Ok((output_real, output_imaginary, phase, audit)) => {
+                        let output =
+                            self.commit_step(input, output_real, output_imaginary, phase, audit)?;
+                        emit_stochastic_schrodinger_route_meta(
                             "dynamic_field_stochastic_schrodinger_forward",
-                            "stochastic_schrodinger",
                             rows,
                             cols,
-                            1,
-                            14,
+                            36,
                             false,
                             None,
                             "wgpu_dense",
@@ -974,6 +1269,9 @@ impl Module for StochasticSchrodingerLayer {
                             None,
                             None,
                             None,
+                            None,
+                            self.config,
+                            Some(audit),
                             None,
                         );
                         return Ok(output);
@@ -991,51 +1289,33 @@ impl Module for StochasticSchrodingerLayer {
             }
         }
 
-        let mut output = Tensor::zeros(rows, cols)?;
-        let mut amplitude = Tensor::zeros(rows, cols)?;
-        let mut decoherence = Tensor::zeros(rows, cols)?;
-        {
-            let input_buf = input.data();
-            let out_buf = output.data_mut();
-            let amp_buf = amplitude.data_mut();
-            let deco_buf = decoherence.data_mut();
-            let mut rng = self.rng.borrow_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                let input_row = &input_buf[offset..offset + cols];
-                let out_row = &mut out_buf[offset..offset + cols];
-                let amp_row = &mut amp_buf[offset..offset + cols];
-                let deco_row = &mut deco_buf[offset..offset + cols];
-                for (((out, amp_slot), deco_slot), (&input, &coherence)) in out_row
-                    .iter_mut()
-                    .zip(amp_row.iter_mut())
-                    .zip(deco_row.iter_mut())
-                    .zip(input_row.iter().zip(coherence.iter()))
-                {
-                    let amp = input.tanh();
-                    let deco = 1.0 / (1.0 + rate * amp.abs());
-                    let interference = amp * coherence * deco;
-                    let noise = (rng.gen::<f32>() - 0.5) * noise_scale;
-                    *out = interference + noise;
-                    *amp_slot = amp;
-                    *deco_slot = deco;
-                }
-            }
-        }
-        self.last_amplitude.borrow_mut().replace(amplitude);
-        self.last_decoherence.borrow_mut().replace(decoherence);
-        emit_dynamic_field_route_meta(
-            "dynamic_field_stochastic_schrodinger_forward",
-            "stochastic_schrodinger",
+        let step = apply_stochastic_schrodinger_step(
+            input.data(),
+            potential,
+            &standard_normal,
             rows,
             cols,
-            1,
-            14,
+            self.config,
+        )
+        .map_err(stochastic_schrodinger_error)?;
+        let audit = step.audit;
+        let output = self.commit_step(
+            input,
+            step.output_real,
+            step.output_imaginary,
+            step.phase,
+            audit,
+        )?;
+        emit_stochastic_schrodinger_route_meta(
+            "dynamic_field_stochastic_schrodinger_forward",
+            rows,
+            cols,
+            36,
             false,
             None,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.apply_stochastic_schrodinger_step",
             None,
             None,
             None,
@@ -1049,30 +1329,45 @@ impl Module for StochasticSchrodingerLayer {
                     None
                 }
             },
+            self.config,
+            Some(audit),
+            None,
         );
         Ok(output)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let amplitude_guard = self.last_amplitude.borrow();
-        let Some(amplitude) = amplitude_guard.as_ref() else {
-            return Err(TensorError::InvalidValue {
-                label: "schrodinger_amplitude_cache",
-            });
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (cached_input, cached_phase, audit) = {
+            let cache = self.last_step.borrow();
+            let Some(cache) = cache.as_ref() else {
+                return Err(TensorError::InvalidValue {
+                    label: "schrodinger_forward_cache",
+                });
+            };
+            if input.shape() != cache.input.shape() {
+                return Err(TensorError::ShapeMismatch {
+                    left: input.shape(),
+                    right: cache.input.shape(),
+                });
+            }
+            if grad_output.shape() != cache.input.shape() {
+                return Err(TensorError::ShapeMismatch {
+                    left: grad_output.shape(),
+                    right: cache.input.shape(),
+                });
+            }
+            if input.data() != cache.input.data() {
+                return Err(TensorError::InvalidValue {
+                    label: "schrodinger_forward_input_mismatch",
+                });
+            }
+            (cache.input.clone(), cache.phase.clone(), cache.audit)
         };
-        let decoherence_guard = self.last_decoherence.borrow();
-        let Some(decoherence) = decoherence_guard.as_ref() else {
-            return Err(TensorError::InvalidValue {
-                label: "schrodinger_decoherence_cache",
-            });
-        };
-        let (rows, cols) = grad_output.shape();
+        let (rows, cols) = cached_input.shape();
         let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend = tensor_util_backend_label(route_backend);
         let scale_backend = current_tensor_util_backend_for_values(cols);
         let scale_backend_label = tensor_util_backend_label(scale_backend);
-        let coherence_values = self.coherence.value().data().to_vec();
-        let rate = self.decoherence_rate;
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -1083,42 +1378,59 @@ impl Module for StochasticSchrodingerLayer {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_schrodinger_backward(
-                    amplitude.data(),
-                    decoherence.data(),
+                let wgpu_backward = wgpu_dense::dynamic_schrodinger_backward(
+                    cached_input.data(),
+                    cached_phase.data(),
                     grad_output.data(),
-                    &coherence_values,
                     rows,
                     cols,
-                    rate,
-                ) {
-                    Ok((grad_input_values, grad_coherence_values)) => {
+                    self.config.time_step(),
+                    self.config.hopping_rate(),
+                    self.config.loss_rate(),
+                )
+                .and_then(|(grad_input, grad_potential)| {
+                    audit_stochastic_schrodinger_backward(
+                        StochasticSchrodingerBackwardAuditRequest {
+                            input: cached_input.data(),
+                            phase: cached_phase.data(),
+                            grad_output: grad_output.data(),
+                            grad_input: &grad_input,
+                            grad_potential: &grad_potential,
+                            rows,
+                            features: cols,
+                            config: self.config,
+                        },
+                    )
+                    .map(|audit| (grad_input, grad_potential, audit))
+                    .map_err(|error| format!("Rust semantic backward audit failed: {error}"))
+                });
+                match wgpu_backward {
+                    Ok((grad_input_values, grad_potential_values, backward_audit)) => {
                         validate_finite_slice(
                             "dynamic_schrodinger_backward_grad_input",
                             &grad_input_values,
                         )?;
                         validate_finite_slice(
-                            "dynamic_schrodinger_backward_grad_coherence",
-                            &grad_coherence_values,
+                            "dynamic_schrodinger_backward_grad_potential",
+                            &grad_potential_values,
                         )?;
                         let grad_input = Tensor::from_vec(rows, cols, grad_input_values)?;
-                        let grad_coherence = Tensor::from_vec(1, cols, grad_coherence_values)?;
+                        let grad_potential = Tensor::from_vec(1, cols, grad_potential_values)?;
                         let gradient_scale = if rows > 0 {
                             let scale = 1.0 / rows as f32;
                             self.coherence.accumulate_euclidean(
-                                &grad_coherence.scale_with_backend(scale, scale_backend)?,
+                                &grad_potential.scale_with_backend(scale, scale_backend)?,
                             )?;
                             Some(scale)
                         } else {
                             None
                         };
-                        emit_dynamic_field_route_meta(
+                        self.commit_backward_audit(backward_audit);
+                        emit_stochastic_schrodinger_route_meta(
                             "dynamic_field_stochastic_schrodinger_backward",
-                            "stochastic_schrodinger",
                             rows,
                             cols,
-                            1,
-                            18,
+                            32,
                             true,
                             gradient_scale,
                             "wgpu_dense",
@@ -1128,6 +1440,9 @@ impl Module for StochasticSchrodingerLayer {
                             Some("wgpu"),
                             Some(scale_backend_label),
                             None,
+                            self.config,
+                            Some(audit),
+                            Some(backward_audit),
                         );
                         return Ok(grad_input);
                     }
@@ -1144,51 +1459,48 @@ impl Module for StochasticSchrodingerLayer {
             }
         }
 
-        let mut grad_input = Tensor::zeros(rows, cols)?;
-        let mut grad_coherence = Tensor::zeros(1, cols)?;
-        {
-            let grad_output_buf = grad_output.data();
-            let grad_input_buf = grad_input.data_mut();
-            let amp_buf = amplitude.data();
-            let deco_buf = decoherence.data();
-            let grad_coherence_buf = grad_coherence.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let amp = amp_buf[idx];
-                    let deco = deco_buf[idx];
-                    let go = grad_output_buf[idx];
-                    let denom = 1.0 + rate * amp.abs();
-                    let sign = if amp >= 0.0 { 1.0 } else { -1.0 };
-                    let d_deco_d_amp = -rate * sign / (denom * denom);
-                    let base = deco + amp * d_deco_d_amp;
-                    let d_amp_d_input = 1.0 - amp * amp;
-                    grad_input_buf[idx] = go * coherence_values[c] * base * d_amp_d_input;
-                    grad_coherence_buf[c] += go * (amp * deco);
-                }
-            }
-        }
+        let backward = backward_stochastic_schrodinger_step(
+            cached_input.data(),
+            cached_phase.data(),
+            grad_output.data(),
+            rows,
+            cols,
+            self.config,
+        )
+        .map_err(stochastic_schrodinger_error)?;
+        let backward_audit =
+            audit_stochastic_schrodinger_backward(StochasticSchrodingerBackwardAuditRequest {
+                input: cached_input.data(),
+                phase: cached_phase.data(),
+                grad_output: grad_output.data(),
+                grad_input: &backward.grad_input,
+                grad_potential: &backward.grad_potential,
+                rows,
+                features: cols,
+                config: self.config,
+            })
+            .map_err(stochastic_schrodinger_error)?;
+        let grad_input = Tensor::from_vec(rows, cols, backward.grad_input)?;
+        let grad_potential = Tensor::from_vec(1, cols, backward.grad_potential)?;
         let gradient_scale = if rows > 0 {
             let scale = 1.0 / rows as f32;
             self.coherence
-                .accumulate_euclidean(&grad_coherence.scale_with_backend(scale, scale_backend)?)?;
+                .accumulate_euclidean(&grad_potential.scale_with_backend(scale, scale_backend)?)?;
             Some(scale)
         } else {
             None
         };
-        emit_dynamic_field_route_meta(
+        self.commit_backward_audit(backward_audit);
+        emit_stochastic_schrodinger_route_meta(
             "dynamic_field_stochastic_schrodinger_backward",
-            "stochastic_schrodinger",
             rows,
             cols,
-            1,
-            18,
+            32,
             true,
             gradient_scale,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.backward_stochastic_schrodinger_step",
             Some("cpu"),
             Some("cpu"),
             if gradient_scale.is_some() {
@@ -1206,6 +1518,9 @@ impl Module for StochasticSchrodingerLayer {
                     None
                 }
             },
+            self.config,
+            Some(audit),
+            Some(backward_audit),
         );
         Ok(grad_input)
     }
@@ -1317,18 +1632,24 @@ mod tests {
 
         let mut qs = StochasticSchrodingerLayer::with_seed("qs", 2, 0.4, 0.0, Some(7)).unwrap();
         let _ = qs.forward(&input).unwrap();
+        let phase = qs.latest_phase().expect("forward phase");
+        let expected_backward = backward_stochastic_schrodinger_step(
+            input.data(),
+            phase.data(),
+            grad.data(),
+            2,
+            2,
+            qs.config(),
+        )
+        .expect("core backward");
         let grad_input = qs.backward(&input, &grad).unwrap();
         assert_eq!(grad_input.shape(), input.shape());
         let coherence_grad = qs.coherence().gradient().expect("coherence gradient");
         for col in 0..2 {
-            let mut expected = 0.0f32;
-            for row in 0..2 {
-                let idx = row * 2 + col;
-                let amp = input.data()[idx].tanh();
-                let deco = 1.0 / (1.0 + 0.4 * amp.abs());
-                expected += grad.data()[idx] * amp * deco;
-            }
-            assert_close(coherence_grad.data()[col], expected * 0.5);
+            assert_close(
+                coherence_grad.data()[col],
+                expected_backward.grad_potential[col] * 0.5,
+            );
         }
     }
 
@@ -1427,11 +1748,31 @@ mod tests {
                 .unwrap_or_else(|| panic!("{op_name} metadata event"));
             assert_eq!(event.1["backend"], "cpu");
             assert_eq!(event.1["kind"], kind);
+            assert_eq!(event.1["backward"], kind == "dynamic_field_backward");
             assert_eq!(event.1["field_model"], field_model);
             if kind == "dynamic_field_backward" {
                 assert_eq!(event.1["gradient_scale"], 0.5);
                 assert_eq!(event.1["parameter_gradient_scale"], 0.5);
                 assert_eq!(event.1["input_gradient_scale"], 1.0);
+            }
+            if field_model == "stochastic_schrodinger" {
+                assert_eq!(
+                    event.1["contract_version"],
+                    STOCHASTIC_SCHRODINGER_CONTRACT_VERSION
+                );
+                assert_eq!(
+                    event.1["semantic_owner"],
+                    STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER
+                );
+                assert_eq!(event.1["semantic_backend"], "rust");
+                assert_eq!(event.1["stochastic_calculus"], "stratonovich");
+                assert_eq!(event.1["output_observable"], "real_quadrature");
+                assert_eq!(event.1["noise_model"], STOCHASTIC_SCHRODINGER_NOISE_MODEL);
+                assert!(event.1["audit"]["max_row_norm_error"].is_number());
+                if kind == "dynamic_field_backward" {
+                    assert!(event.1["backward_audit"]["max_grad_input_error"].is_number());
+                    assert!(event.1["backward_audit"]["max_grad_potential_error"].is_number());
+                }
             }
             assert!(event.1["estimated_total_ops"].as_u64().unwrap_or(0) > 0);
         }
@@ -1610,11 +1951,11 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let input = Tensor::from_fn(4, 3, |row, col| {
+        let input = Tensor::from_fn(257, 3, |row, col| {
             ((row * 17 + col * 5) % 23) as f32 * 0.031 - 0.33
         })
         .unwrap();
-        let grad = Tensor::from_fn(4, 3, |row, col| {
+        let grad = Tensor::from_fn(257, 3, |row, col| {
             ((row * 7 + col * 13) % 19) as f32 * 0.021 - 0.16
         })
         .unwrap();
@@ -1629,6 +1970,14 @@ mod tests {
             let _guard = push_backend_policy(cpu_policy);
             cpu_layer.backward(&input, &grad).unwrap()
         };
+        let cpu_imaginary = cpu_layer
+            .latest_imaginary_quadrature()
+            .expect("CPU imaginary quadrature");
+        let cpu_phase = cpu_layer.latest_phase().expect("CPU phase");
+        let cpu_audit = cpu_layer.latest_audit().expect("CPU audit");
+        let cpu_backward_audit = cpu_layer
+            .latest_backward_audit()
+            .expect("CPU backward audit");
 
         let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
         let mut wgpu_layer =
@@ -1640,6 +1989,14 @@ mod tests {
                 wgpu_layer.backward(&input, &grad).unwrap(),
             )
         };
+        let wgpu_imaginary = wgpu_layer
+            .latest_imaginary_quadrature()
+            .expect("WGPU imaginary quadrature");
+        let wgpu_phase = wgpu_layer.latest_phase().expect("WGPU phase");
+        let wgpu_audit = wgpu_layer.latest_audit().expect("WGPU audit");
+        let wgpu_backward_audit = wgpu_layer
+            .latest_backward_audit()
+            .expect("WGPU backward audit");
 
         st_tensor::set_thread_meta_observer(previous);
         match previous_threshold {
@@ -1648,11 +2005,18 @@ mod tests {
         }
 
         approx_eq(cpu_forward.data(), wgpu_forward.data());
+        approx_eq(cpu_imaginary.data(), wgpu_imaginary.data());
+        approx_eq(cpu_phase.data(), wgpu_phase.data());
         approx_eq(cpu_grad_input.data(), wgpu_grad_input.data());
         approx_eq(
             cpu_layer.coherence().gradient().unwrap().data(),
             wgpu_layer.coherence().gradient().unwrap().data(),
         );
+        assert!((cpu_audit.final_norm_squared - wgpu_audit.final_norm_squared).abs() < 1e-5);
+        assert!(wgpu_audit.max_row_norm_tolerance_ratio <= 1.0);
+        assert!(wgpu_audit.max_formula_tolerance_ratio <= 1.0);
+        assert_eq!(cpu_backward_audit.max_formula_tolerance_ratio, 0.0);
+        assert!(wgpu_backward_audit.max_formula_tolerance_ratio <= 1.0);
 
         let events = events.lock().unwrap();
         assert!(events.iter().any(|(op_name, data)| {
@@ -1667,18 +2031,82 @@ mod tests {
                 && data["backend"] == "wgpu_dense"
                 && data["input_gradient_backend"] == "wgpu"
                 && data["gradient_reduction_backend"] == "wgpu"
+                && data["backward_audit"]["max_formula_tolerance_ratio"].is_number()
         }));
     }
 
     #[test]
     fn stochastic_schrodinger_is_reproducible() {
-        let mut layer = StochasticSchrodingerLayer::with_seed("qs", 2, 0.4, 0.05, Some(7)).unwrap();
+        let mut first =
+            StochasticSchrodingerLayer::with_seed("qs_first", 2, 0.4, 0.05, Some(7)).unwrap();
+        let replay =
+            StochasticSchrodingerLayer::with_seed("qs_replay", 2, 0.4, 0.05, Some(7)).unwrap();
         let input = Tensor::from_vec(1, 2, vec![0.3, -0.7]).unwrap();
-        let output_a = layer.forward(&input).unwrap();
-        let output_b = layer.forward(&input).unwrap();
-        assert_ne!(output_a.data(), output_b.data());
+        let first_a = first.forward(&input).unwrap();
+        let replay_a = replay.forward(&input).unwrap();
+        let first_b = first.forward(&input).unwrap();
+        let replay_b = replay.forward(&input).unwrap();
+        assert_eq!(first_a.data(), replay_a.data());
+        assert_eq!(first_b.data(), replay_b.data());
+        assert_ne!(first_a.data(), first_b.data());
         let grad = Tensor::from_vec(1, 2, vec![0.1, -0.2]).unwrap();
-        let back = layer.backward(&input, &grad).unwrap();
+        let back = first.backward(&input, &grad).unwrap();
         assert_eq!(back.shape(), input.shape());
+    }
+
+    #[test]
+    fn stochastic_schrodinger_zero_time_is_exact_identity() {
+        let layer = StochasticSchrodingerLayer::with_seed("qs", 3, 0.4, 2.0, Some(7))
+            .unwrap()
+            .with_time_step(0.0)
+            .unwrap()
+            .with_hopping_rate(4.0)
+            .unwrap();
+        let input = Tensor::from_vec(2, 3, vec![0.3, -0.7, 1.1, -0.2, 0.4, 0.8]).unwrap();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output, input);
+        assert!(layer
+            .latest_imaginary_quadrature()
+            .unwrap()
+            .data()
+            .iter()
+            .all(|value| *value == 0.0));
+        let audit = layer.latest_audit().unwrap();
+        assert_eq!(audit.expected_norm_ratio, 1.0);
+        assert_eq!(audit.max_row_norm_error, 0.0);
+    }
+
+    #[test]
+    fn stochastic_schrodinger_backward_rejects_stale_or_mismatched_input() {
+        let input = Tensor::from_vec(1, 2, vec![0.3, -0.7]).unwrap();
+        let grad = Tensor::from_vec(1, 2, vec![0.1, -0.2]).unwrap();
+        let mut layer = StochasticSchrodingerLayer::with_seed("qs", 2, 0.4, 0.05, Some(7)).unwrap();
+        assert!(matches!(
+            layer.backward(&input, &grad),
+            Err(TensorError::InvalidValue {
+                label: "schrodinger_forward_cache"
+            })
+        ));
+
+        let _ = layer.forward(&input).unwrap();
+        let different = Tensor::from_vec(1, 2, vec![0.3, -0.6]).unwrap();
+        assert!(matches!(
+            layer.backward(&different, &grad),
+            Err(TensorError::InvalidValue {
+                label: "schrodinger_forward_input_mismatch"
+            })
+        ));
+    }
+
+    #[test]
+    fn stochastic_schrodinger_failed_forward_keeps_last_valid_audit() {
+        let layer = StochasticSchrodingerLayer::with_seed("qs", 2, 0.4, 0.05, Some(7)).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.3, -0.7]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let audit = layer.latest_audit().unwrap();
+
+        let non_finite = Tensor::from_vec(1, 2, vec![0.3, f32::NAN]).unwrap();
+        assert!(layer.forward(&non_finite).is_err());
+        assert_eq!(layer.latest_audit(), Some(audit));
     }
 }
