@@ -103,7 +103,7 @@ fn permeable_clamp(value: f32, limit: f32, permeability: f32) -> f32 {
     sign * (limit + headroom * softened.min(1.0))
 }
 
-fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
+pub(crate) fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     if !value.is_finite() {
         return 0.0;
     }
@@ -122,6 +122,26 @@ fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     let absorb = (porosity * 0.25).min(1.0);
     let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
     value.signum() * softened
+}
+
+fn porous_mix_slope(value: f32, saturation: f32, porosity: f32) -> f32 {
+    if !value.is_finite() || saturation <= 0.0 {
+        return 0.0;
+    }
+    let limit = saturation.abs();
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return 1.0;
+    }
+    if porosity <= f32::EPSILON {
+        return 0.0;
+    }
+    let absorb = (porosity * 0.25).min(1.0);
+    let denominator = magnitude + limit;
+    if denominator <= f32::EPSILON {
+        return 0.0;
+    }
+    -2.0 * limit * limit * absorb / (denominator * denominator)
 }
 
 fn finite_or(value: f32, default: f32) -> f32 {
@@ -2820,6 +2840,17 @@ impl OpenCartesianTopos {
         porous_mix(value, self.saturation, self.porosity)
     }
 
+    /// Saturates a scalar and returns the exact local slope of that rewrite.
+    ///
+    /// The slope is the canonical reverse-mode rule for every Rust adapter that
+    /// differentiates through the open-topos saturation boundary.
+    pub fn saturate_with_slope(&self, value: f32) -> (f32, f32) {
+        (
+            porous_mix(value, self.saturation, self.porosity),
+            porous_mix_slope(value, self.saturation, self.porosity),
+        )
+    }
+
     /// Saturates an entire slice in-place.
     pub fn saturate_slice(&self, slice: &mut [f32]) {
         for value in slice.iter_mut() {
@@ -5012,6 +5043,26 @@ mod tests {
         let porous_value = porous.saturate(sample);
         assert!(porous_value.abs() < rigid_value.abs());
         assert!(porous_value.abs() > rigid.saturation() * 0.8);
+    }
+
+    #[test]
+    fn topos_saturation_slope_matches_the_canonical_rewrite() {
+        let topos = unwrap_ok(
+            OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 8, 8)
+                .and_then(|topos| topos.with_porosity(0.8)),
+        );
+        let (inside, inside_slope) = topos.saturate_with_slope(0.5);
+        assert_eq!(inside, 0.5);
+        assert_eq!(inside_slope, 1.0);
+
+        let value = 2.0f32;
+        let (outside, outside_slope) = topos.saturate_with_slope(value);
+        let epsilon = 1e-3;
+        let numeric =
+            (topos.saturate(value + epsilon) - topos.saturate(value - epsilon)) / (2.0 * epsilon);
+        assert!(outside.abs() <= topos.saturation());
+        assert!((outside_slope - numeric).abs() < 1e-4);
+        assert!(outside_slope < 0.0);
     }
 
     #[test]

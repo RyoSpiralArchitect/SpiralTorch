@@ -155,31 +155,10 @@ fn wave_gate_wgpu_error(op_name: &'static str, message: String) -> TensorError {
     }
 }
 
-fn porous_saturation_backward_factor(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if !value.is_finite() || saturation <= 0.0 {
-        return 0.0;
-    }
-    let limit = saturation.abs();
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return 1.0;
-    }
-    if porosity <= f32::EPSILON {
-        return 0.0;
-    }
-    let absorb = (porosity * 0.25).min(1.0);
-    let denom = magnitude + limit;
-    if denom <= f32::EPSILON {
-        return 0.0;
-    }
-    -2.0 * limit * limit * absorb / (denom * denom)
-}
-
 fn porous_saturation_backward(
     pre_saturation: &Tensor,
     grad_saturated: &Tensor,
-    saturation: f32,
-    porosity: f32,
+    topos: &OpenCartesianTopos,
 ) -> PureResult<Tensor> {
     if pre_saturation.shape() != grad_saturated.shape() {
         return Err(TensorError::ShapeMismatch {
@@ -192,9 +171,7 @@ fn porous_saturation_backward(
         .data()
         .iter()
         .zip(grad_saturated.data().iter())
-        .map(|(&value, &grad)| {
-            grad * porous_saturation_backward_factor(value, saturation, porosity)
-        })
+        .map(|(&value, &grad)| grad * topos.saturate_with_slope(value).1)
         .collect();
     Tensor::from_vec(rows, cols, data)
 }
@@ -482,12 +459,8 @@ impl WaveGate {
         monad.rewrite_tensor("wave_gate_backward_preprojected_rewrite", &mut preprojected)?;
         let grad_saturated =
             poincare_projection_backward(&preprojected, grad_output, self.topos.curvature())?;
-        let grad_affine = porous_saturation_backward(
-            &pre_saturation,
-            &grad_saturated,
-            self.topos.saturation(),
-            self.topos.porosity(),
-        )?;
+        let grad_affine =
+            porous_saturation_backward(&pre_saturation, &grad_saturated, &self.topos)?;
         let gradient_scale = parameter_gradient_scale.unwrap_or(1.0 / (rows as f32));
         let grad_gate_product = grad_affine.hadamard_with_backend(input, reduction_backend)?;
         let mut grad_gate = Tensor::from_vec(

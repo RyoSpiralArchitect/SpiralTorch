@@ -103,9 +103,11 @@ pub use layers::{
     HamiltonJacobiTensorStep, KleinGordonAudit, KleinGordonBackwardAudit, KleinGordonConfig,
     KleinGordonPropagation, KleinGordonTensorBackward, KleinGordonTensorStep, LayerNorm, Lstm,
     Relu, Scaler, StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit,
-    StochasticSchrodingerConfig, StochasticSchrodingerLayer, ToposResonator, ZRelativityModule,
-    ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock,
-    ZSpaceLayerNorm, ZSpaceLayerNormTelemetry, ZSpaceMixer,
+    StochasticSchrodingerConfig, StochasticSchrodingerLayer, ToposResonator, ToposResonatorAudit,
+    ToposResonatorBackwardAudit, ToposResonatorConfig, ToposResonatorTensorBackward,
+    ToposResonatorTensorStep, ZRelativityModule, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry,
+    ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, ZSpaceLayerNorm, ZSpaceLayerNormTelemetry,
+    ZSpaceMixer,
 };
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,

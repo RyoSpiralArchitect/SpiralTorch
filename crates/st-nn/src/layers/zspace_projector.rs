@@ -64,31 +64,10 @@ fn emit_zspace_projector_meta(
     });
 }
 
-fn porous_saturation_backward_factor(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if !value.is_finite() || saturation <= 0.0 {
-        return 0.0;
-    }
-    let limit = saturation.abs();
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return 1.0;
-    }
-    if porosity <= f32::EPSILON {
-        return 0.0;
-    }
-    let absorb = (porosity * 0.25).min(1.0);
-    let denom = magnitude + limit;
-    if denom <= f32::EPSILON {
-        return 0.0;
-    }
-    -2.0 * limit * limit * absorb / (denom * denom)
-}
-
 fn porous_saturation_backward(
     pre_saturation: &Tensor,
     grad_saturated: &Tensor,
-    saturation: f32,
-    porosity: f32,
+    topos: &OpenCartesianTopos,
 ) -> PureResult<Tensor> {
     if pre_saturation.shape() != grad_saturated.shape() {
         return Err(TensorError::ShapeMismatch {
@@ -101,9 +80,7 @@ fn porous_saturation_backward(
         .data()
         .iter()
         .zip(grad_saturated.data().iter())
-        .map(|(&value, &grad)| {
-            grad * porous_saturation_backward_factor(value, saturation, porosity)
-        })
+        .map(|(&value, &grad)| grad * topos.saturate_with_slope(value).1)
         .collect();
     Tensor::from_vec(rows, cols, data)
 }
@@ -345,12 +322,7 @@ impl Module for ZSpaceProjector {
         monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut preprojected)?;
         let grad_saturated =
             poincare_projection_backward(&preprojected, grad_output, self.topos.curvature())?;
-        let projected_grad = porous_saturation_backward(
-            input,
-            &grad_saturated,
-            self.topos.saturation(),
-            self.topos.porosity(),
-        )?;
+        let projected_grad = porous_saturation_backward(input, &grad_saturated, &self.topos)?;
         let grad = if self.strength == 1.0 {
             projected_grad
         } else if self.strength == 0.0 {

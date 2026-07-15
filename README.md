@@ -2803,7 +2803,10 @@ let _ = trainer.train_epoch(&mut model, &mut mse, dataset, &schedule)?;
 **Rust (Z-space gating + projector)**
 ```rust
 use st_core::backend::device_caps::DeviceCaps;
-use st_nn::{ModuleTrainer, RoundtableConfig, Tensor, ToposResonator, WaveGate, ZSpaceProjector};
+use st_nn::{
+    ModuleTrainer, RoundtableConfig, Tensor, ToposResonator, ToposResonatorConfig,
+    WaveGate, ZSpaceProjector,
+};
 use st_tensor::{topos::OpenCartesianTopos, LanguageWaveEncoder};
 
 let encoder = LanguageWaveEncoder::new(-0.9, 0.7)?;
@@ -2813,7 +2816,7 @@ let text = projector.encode_text("SpiralTorch keeps the open topos alive")?;
 
 let mut gate = WaveGate::with_topos("gate", text.shape().1, encoder, topos.clone())?;
 let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
-trainer.prepare_with_topos(&mut gate, topos)?;
+trainer.prepare_with_topos(&mut gate, topos.clone())?;
 
 let forward = gate.forward(&text)?;
 let grad = forward.hadamard(&text)?.scale(1.0 / forward.shape().0 as f32)?;
@@ -2821,9 +2824,18 @@ let _ = gate.backward(&text, &grad)?;
 trainer.step(&mut gate)?;
 
 let (rows, cols) = forward.shape();
-let mut resonator = ToposResonator::new("res", rows, cols)?;
-resonator.parameter_mut().attach_hypergrad(-0.9, 0.02)?;
+let resonance = ToposResonatorConfig::new(0.25, 4)?;
+let mut resonator = ToposResonator::with_config_and_topos(
+    "res",
+    rows,
+    cols,
+    resonance,
+    topos.clone(),
+)?;
+// The same topos now guards both the finite Picard response and its hypergradient.
+resonator.attach_open_topos(-0.9, 0.02, topos)?;
 let activated = resonator.forward(&forward)?;
+println!("resonance audit: {:?}", resonator.latest_audit());
 let (act_rows, act_cols) = activated.shape();
 let schedule = trainer.roundtable(act_rows as u32, act_cols as u32, RoundtableConfig::default());
 let bands = schedule.split(&activated)?;
