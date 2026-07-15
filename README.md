@@ -1045,6 +1045,21 @@ Z-gradient with the normalised analytic fractional gradient and optional Topos
 bias. Topos `learning_rate_scale` changes the actual Adam learning rate, while
 `regularization_scale` changes the actual fractional weight.
 
+Native parameter training consumes that same report without rebuilding its
+semantics in Python:
+
+```python
+receipt = module_trainer.apply_zspace_meta_optimizer_report(
+    model,
+    trainer.last_optimizer_report,
+)
+```
+
+Rust re-derives the bounded Topos scale, applies it idempotently to all trainer
+learning rates, and rejects stale, conflicting, or modified reports before
+mutating optimizer state. WASM exposes the same verified control receipt as a
+peer-client transport, but does not pretend to own a browser parameter runtime.
+
 ### 11) Vision × Canvas
 
 ```python

@@ -28,14 +28,14 @@ gain during training using `adapt_projector_gain` to keep the projected radius w
 
 ## Optimisers and schedulers
 
-SpiralTorch ships a high-level `ZSpaceOptimizer` paired with the `WarmupCosineScheduler`, covering
+SpiralTorch ships a high-level `ZSpaceParameterOptimizer` paired with the `WarmupCosineScheduler`, covering
 the usual `torch.optim` experience while wiring in curvature-specific behaviour.
 
 ```rust
-use st_nn::{optim::{OptimizerMode, WarmupCosineScheduler, ZSpaceOptimizer}, layers::Linear, Tensor};
+use st_nn::{optim::{OptimizerMode, WarmupCosineScheduler, ZSpaceParameterOptimizer}, layers::Linear, Tensor};
 
 let mut layer = Linear::new("fc", 4, 2)?;
-let mut opt = ZSpaceOptimizer::new(1e-2)?;
+let mut opt = ZSpaceParameterOptimizer::new(1e-2)?;
 opt.set_mode(OptimizerMode::hypergrad(-1.0, 5e-3)?);
 opt.prepare_module(&mut layer)?; // attach the hyper-gradient tape
 
@@ -47,16 +47,23 @@ let lr = scheduler.step_optimizer(&mut opt, &mut layer)?; // cosine update with 
 injecting the curvature-aware step size logic required by Z-space training. The warmup cosine
 scheduler mirrors `torch.optim.lr_scheduler.CosineAnnealingLR` with an integrated burn-in phase.
 
+The name is deliberate: `st-core::runtime::zspace_optimizer::ZSpaceMetaOptimizer` owns the
+small latent Z-state transition, while `ZSpaceParameterOptimizer` applies gradients to model
+parameters. A parameter optimizer can consume a full Rust meta-optimizer report through
+`apply_zspace_meta_optimizer_report`; only the report's validated absolute learning-rate scale
+crosses that boundary. Replaying the same report is idempotent. The older `ZSpaceOptimizer` name
+remains as a source-compatible alias.
+
 ## Mixed precision training
 
 SpiralTorch offers an AMP-style API through `mixed_precision::GradScaler` and the `AutocastGuard`
 utility, closely matching `torch.cuda.amp` semantics.
 
 ```rust
-use st_nn::{mixed_precision::GradScaler, optim::{OptimizerMode, ZSpaceOptimizer}, Tensor};
+use st_nn::{mixed_precision::GradScaler, optim::{OptimizerMode, ZSpaceParameterOptimizer}, Tensor};
 
 let mut scaler = GradScaler::new(2.0, 2.0, 0.5, 200)?.with_limits(1.0, 1024.0);
-let mut opt = ZSpaceOptimizer::new(1e-3)?;
+let mut opt = ZSpaceParameterOptimizer::new(1e-3)?;
 opt.set_mode(OptimizerMode::realgrad(1e-3)?);
 opt.prepare_module(&mut model)?;
 
@@ -94,7 +101,7 @@ you can visualise curvature-aware representations without additional glue code.
 
 * Native Rust implementations of `BatchNorm1d`, `ZSpaceBatchNorm1d`, `ZSpaceLayerNorm`, `LayerNorm`, and `Lstm` mirror
   PyTorch ergonomics while exposing curvature-aware controls.
-* `ZSpaceOptimizer` and `WarmupCosineScheduler` cover the common optimisation rituals inside
+* `ZSpaceParameterOptimizer` and `WarmupCosineScheduler` cover the common optimisation rituals inside
   SpiralTorch.
 * `mixed_precision::GradScaler` plus `AutocastGuard` bring AMP-style workflows to Rust.
 * Z-space telemetry APIs simplify monitoring, debugging, and adapting hyperbolic training loops when

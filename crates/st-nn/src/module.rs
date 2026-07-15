@@ -552,14 +552,44 @@ impl Parameter {
         total
     }
 
-    /// Scales the learning rate inside the attached hypergrad tape, if present.
-    pub fn scale_learning_rate(&mut self, factor: f32) {
+    /// Validates a learning-rate scale against every attached tape without
+    /// mutating the parameter.
+    pub fn validate_learning_rate_scale(&self, factor: f32) -> PureResult<()> {
+        if factor <= 0.0 || !factor.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate { rate: factor });
+        }
+        if let Some(tape) = self.hypergrad.as_ref() {
+            let next = tape.learning_rate() * factor;
+            if next <= 0.0 || !next.is_finite() {
+                return Err(TensorError::NonPositiveLearningRate { rate: next });
+            }
+        }
+        if let Some(tape) = self.realgrad.as_ref() {
+            let next = tape.learning_rate() * factor;
+            if next <= 0.0 || !next.is_finite() {
+                return Err(TensorError::NonPositiveLearningRate { rate: next });
+            }
+        }
+        Ok(())
+    }
+
+    /// Scales attached tape learning rates after validating the complete local
+    /// update. Unlike [`Self::scale_learning_rate`], failures are explicit.
+    pub fn try_scale_learning_rate(&mut self, factor: f32) -> PureResult<()> {
+        self.validate_learning_rate_scale(factor)?;
         if let Some(tape) = self.hypergrad.as_mut() {
             tape.scale_learning_rate(factor);
         }
         if let Some(tape) = self.realgrad.as_mut() {
             tape.scale_learning_rate(factor);
         }
+        Ok(())
+    }
+
+    /// Scales attached tape learning rates when the requested update is valid.
+    /// Prefer [`Self::try_scale_learning_rate`] at optimizer boundaries.
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        let _ = self.try_scale_learning_rate(factor);
     }
 
     /// Ensures a prepacked representation of the parameter is available for matmul.

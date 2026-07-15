@@ -432,18 +432,18 @@ parameter count, and zero-update parameter ratio, so under-trained or
 over-dominant parameter groups can be spotted from the run comparison table.
 The direct `Parameter` update path now validates fallback learning rates before
 adapter scaling or accumulator mutation, so non-positive and non-finite rates
-cannot silently perturb gradients when callers bypass `ZSpaceOptimizer`.
+cannot silently perturb gradients when callers bypass `ZSpaceParameterOptimizer`.
 Fallback Euclidean updates plus HyperGrad/RealGrad tape applies and direct
 gradient scaling now preflight the computed delta, next parameter value, or
 scaled accumulator before any in-place write or accumulator reset. HyperGrad
 also scratch-builds raw accumulator candidates before topos saturation, so
 huge-but-finite local LR factors cannot leave weights or gradient buffers
 half-poisoned with `inf`.
-`ZSpaceOptimizer`, `SpectralLrAdapter`, and `ModuleTrainer` now expose copyable
+`ZSpaceParameterOptimizer`, `SpectralLrAdapter`, and `ModuleTrainer` now expose copyable
 state snapshots for learning-rate, mode, clipping, spectral-policy, and adapter
 EMA state. `TrainerStep` traces emit the same optimizer-state vocabulary before
 each update, and trainer-level global LR scaling now resets the spectral adapter
-just like `ZSpaceOptimizer::scale_learning_rate()` so local LR decisions do not
+just like `ZSpaceParameterOptimizer::scale_learning_rate()` so local LR decisions do not
 reuse stale pre-scale gradient statistics.
 Global LR scaling now also prevalidates every multiplied optimizer/trainer rate
 before mutating state, while the underlying HyperGrad/RealGrad tapes ignore
@@ -3630,12 +3630,24 @@ compatibility adapter with no pure-Python optimizer fallback. WASM exposes the
 same init/restore/step request and report, adding only its execution-client
 marker. This is scalar control-plane work; WGPU remains the tensor data plane.
 
-One naming and wiring boundary remains visible. `ZSpaceMetaOptimizer` in
-`st-core` controls the small latent Z state, while `st-nn::optim::ZSpaceOptimizer`
-applies accumulated gradients to module parameters. They are distinct today,
-but the next learning vertical should consume the meta-optimizer report through
-an explicit adapter or rename the module optimizer so the two responsibilities
-cannot be mistaken for competing semantic owners.
+The naming and wiring boundary is now explicit. `ZSpaceMetaOptimizer` in
+`st-core` controls the small latent Z state, while
+`st-nn::optim::ZSpaceParameterOptimizer` applies accumulated gradients to model
+parameters; `ZSpaceOptimizer` remains only as a compatibility alias. The core
+validates the complete meta report before projecting it to a narrow
+`ZSpaceParameterControl`. Only the bounded absolute learning-rate scale and
+source step cross this boundary. Latent gradient clipping, fractional
+regularization, and Topos bias do not leak into model-gradient semantics.
+
+Both `ZSpaceParameterOptimizer` and `ModuleTrainer` consume that same control,
+track the last absolute scale and source step, reject stale or conflicting
+replays, and convert a new absolute scale to a relative ratio inside Rust.
+Reapplying one report is therefore idempotent instead of multiplying learning
+rates repeatedly. Parameter tape rates are preflighted before optimizer state
+is mutated. Python's `ModuleTrainer.apply_zspace_meta_optimizer_report(...)`
+passes the full report to the Rust verifier; it does not select fields or
+calculate a ratio. WASM exposes the same verified control as a transport and
+audit surface, but does not pretend to own an `st-nn` parameter runtime.
 
 Next steps:
 

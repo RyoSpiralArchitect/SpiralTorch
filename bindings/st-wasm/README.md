@@ -106,6 +106,7 @@ controls, and Adam:
 ```ts
 import {
     zspaceMetaOptimizerInitObject,
+    zspaceMetaOptimizerParameterControlObject,
     zspaceMetaOptimizerStepObject,
 } from "spiraltorch-wasm";
 
@@ -123,19 +124,23 @@ const transition = zspaceMetaOptimizerStepObject({
         gradient: [0.05, -0.02, 0.01, 0.0],
     },
 });
+const parameterControl = zspaceMetaOptimizerParameterControlObject(transition);
 
 console.log(
     transition.state_after.z,
-    transition.adam.effective_learning_rate,
-    transition.semantic_owner,
+    parameterControl.absolute_learning_rate_scale,
+    parameterControl.source_step,
+    parameterControl.semantic_owner,
 );
 ```
 
 `zspaceMetaOptimizerInitJson`, `zspaceMetaOptimizerRestoreJson`, and
-`zspaceMetaOptimizerStepJson` provide the identical contract for workers and
-persistence. WASM adds only `execution_client: "wasm"`; it does not carry a
-browser Adam or FFT fallback. The shared Rust contract bounds step counters at
-JavaScript's largest exactly representable integer.
+`zspaceMetaOptimizerStepJson` provide the identical transition contract for
+workers and persistence. `zspaceMetaOptimizerParameterControlJson` verifies the
+complete report and projects the same narrow parameter-control receipt. WASM
+adds only `execution_client: "wasm"`; it does not carry a browser Adam, FFT
+fallback, or model-parameter optimizer. The shared Rust contract bounds step
+counters at JavaScript's largest exactly representable integer.
 
 Concept diffusion is also a peer contract rather than a browser-side
 approximation. Rust validates the labelled simplex and symmetric graph, applies

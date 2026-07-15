@@ -76,6 +76,72 @@ def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     assert pred_before.tolist() != pred_after.tolist()
 
 
+def test_module_trainer_applies_rust_meta_report_idempotently() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("meta_control", 2, 1))
+    trainer.prepare(model)
+    checkpoint = st.zspace_meta_optimizer_init(
+        {
+            "dimension": 2,
+            "learning_rate": 1e-2,
+            "topos_control_gain": 1.0,
+        }
+    )
+    report = st.zspace_meta_optimizer_step(
+        config=checkpoint["config"],
+        state=checkpoint["state"],
+        observation={
+            "gradient": [0.1, -0.2],
+            "telemetry": {
+                "topos.training_hints.learning_rate_scale": 0.5,
+            },
+        },
+    )
+
+    receipt = trainer.apply_zspace_meta_optimizer_report(model, report)
+
+    assert receipt["changed"] is True
+    assert (
+        receipt["control_contract_version"]
+        == "spiraltorch.zspace_parameter_control.v1"
+    )
+    assert receipt["semantic_backend"] == "rust"
+    assert receipt["absolute_learning_rate_scale"] == pytest.approx(0.5)
+    assert receipt["applied_learning_rate_ratio"] == pytest.approx(0.5)
+    assert trainer.meta_learning_rate_scale == pytest.approx(0.5)
+    assert trainer.meta_optimizer_step == 1
+    assert trainer.fallback_learning_rate == pytest.approx(5e-3)
+
+    replay = trainer.apply_zspace_meta_optimizer_report(model, report)
+    assert replay["changed"] is False
+    assert replay["applied_learning_rate_ratio"] == pytest.approx(1.0)
+    assert trainer.fallback_learning_rate == pytest.approx(5e-3)
+
+    tampered = dict(report)
+    tampered["transition_validated"] = False
+    with pytest.raises(ValueError, match="did not validate"):
+        trainer.apply_zspace_meta_optimizer_report(model, tampered)
+    assert trainer.fallback_learning_rate == pytest.approx(5e-3)
+
+    coordinated_tamper = json.loads(json.dumps(report))
+    coordinated_tamper["topos_control"]["learning_rate_scale"] = 0.75
+    coordinated_tamper["topos_control"]["effective_learning_rate"] = 0.0075
+    coordinated_tamper["adam"]["effective_learning_rate"] = 0.0075
+    with pytest.raises(ValueError, match="topos_control.learning_rate_scale"):
+        trainer.apply_zspace_meta_optimizer_report(model, coordinated_tamper)
+    assert trainer.fallback_learning_rate == pytest.approx(5e-3)
+
+
 def test_module_trainer_train_epochs_returns_history() -> None:
     st = _load_native()
     if st is None:

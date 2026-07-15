@@ -3,8 +3,8 @@ use serde::Serialize;
 use serde_json::Value;
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, restore_zspace_meta_optimizer,
-    transition_zspace_meta_optimizer, ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest,
-    ZSpaceMetaOptimizerStepRequest,
+    transition_zspace_meta_optimizer, zspace_parameter_control_from_value,
+    ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -67,6 +67,14 @@ pub fn zspace_meta_optimizer_step_value(
     response_value(&report)
 }
 
+pub fn zspace_meta_optimizer_parameter_control_value(report: Value) -> Result<Value, String> {
+    if !report.is_object() {
+        return Err("Z-space meta-optimizer report must be an object".to_owned());
+    }
+    let control = zspace_parameter_control_from_value(report).map_err(|error| error.to_string())?;
+    response_value(&control)
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = zspaceMetaOptimizerInitJson)]
 pub fn zspace_meta_optimizer_init_json(config_json: &str) -> Result<String, JsValue> {
@@ -123,6 +131,28 @@ pub fn zspace_meta_optimizer_step_object(request: &JsValue) -> Result<JsValue, J
     to_json_compatible_js(&payload)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceMetaOptimizerParameterControlJson)]
+pub fn zspace_meta_optimizer_parameter_control_json(report_json: &str) -> Result<String, JsValue> {
+    let report: Value = serde_json::from_str(report_json).map_err(|error| {
+        js_error(format!(
+            "invalid Z-space meta-optimizer report JSON: {error}"
+        ))
+    })?;
+    let payload = zspace_meta_optimizer_parameter_control_value(report).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceMetaOptimizerParameterControlObject)]
+pub fn zspace_meta_optimizer_parameter_control_object(
+    report: &JsValue,
+) -> Result<JsValue, JsValue> {
+    let report = serde_wasm_bindgen::from_value::<Value>(report.clone()).map_err(js_error)?;
+    let payload = zspace_meta_optimizer_parameter_control_value(report).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +199,64 @@ mod tests {
         assert_eq!(actual["semantic_backend"], "rust");
         assert_eq!(actual["execution_client"], "wasm");
         assert_eq!(actual["transition_validated"], true);
+    }
+
+    #[test]
+    fn wasm_exposes_rust_validated_parameter_control_without_applying_parameters() {
+        let request: ZSpaceMetaOptimizerStepRequest = serde_json::from_value(json!({
+            "config": {"dimension": 2, "topos_control_gain": 1.0},
+            "state": {
+                "z": [0.0, 0.0],
+                "first_moment": [0.0, 0.0],
+                "second_moment": [0.0, 0.0],
+                "step": 0
+            },
+            "observation": {
+                "gradient": [0.1, -0.2],
+                "telemetry": {
+                    "topos.training_hints.learning_rate_scale": 0.5
+                }
+            }
+        }))
+        .expect("request");
+        let report = transition_zspace_meta_optimizer(request).expect("Rust transition");
+
+        let control = zspace_meta_optimizer_parameter_control_value(
+            serde_json::to_value(report).expect("report value"),
+        )
+        .expect("parameter control");
+
+        assert_eq!(
+            control["contract_version"],
+            "spiraltorch.zspace_parameter_control.v1"
+        );
+        assert_eq!(control["semantic_backend"], "rust");
+        assert_eq!(control["absolute_learning_rate_scale"], 0.5);
+        assert_eq!(control["source_step"], 1);
+        assert_eq!(control["execution_client"], "wasm");
+    }
+
+    #[test]
+    fn wasm_parameter_control_rejects_tampered_report() {
+        let request: ZSpaceMetaOptimizerStepRequest = serde_json::from_value(json!({
+            "config": {"dimension": 2},
+            "state": {
+                "z": [0.0, 0.0],
+                "first_moment": [0.0, 0.0],
+                "second_moment": [0.0, 0.0],
+                "step": 0
+            },
+            "observation": {"gradient": [0.1, -0.2]}
+        }))
+        .expect("request");
+        let report = transition_zspace_meta_optimizer(request).expect("Rust transition");
+        let mut report = serde_json::to_value(report).expect("report value");
+        report["adam"]["effective_learning_rate"] = json!(0.5);
+
+        let error = zspace_meta_optimizer_parameter_control_value(report)
+            .expect_err("tampered report must fail");
+
+        assert!(error.contains("invariant"));
     }
 
     #[test]

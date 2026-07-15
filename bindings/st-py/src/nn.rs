@@ -38,6 +38,8 @@ use st_core::backend::runtime_probe::resolve_backend;
 #[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
+use st_core::runtime::zspace_optimizer::zspace_parameter_control_from_value;
+#[cfg(feature = "nn")]
 use st_core::{
     maxwell::MaxwellZPulse,
     theory::zpulse::ZScale,
@@ -85,8 +87,9 @@ use st_nn::{
     TextInfusionEvery, TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
     TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
     ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer,
-    ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
-    ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceParameterControlReceipt, ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState,
+    ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
@@ -4854,6 +4857,42 @@ fn training_run_report_to_pydict(
 }
 
 #[cfg(feature = "nn")]
+fn parameter_control_receipt_to_pydict(
+    py: Python<'_>,
+    receipt: ZSpaceParameterControlReceipt,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("control_contract_version", receipt.control_contract_version)?;
+    dict.set_item("control_kind", receipt.control_kind)?;
+    dict.set_item("semantic_owner", receipt.semantic_owner)?;
+    dict.set_item("semantic_backend", receipt.semantic_backend)?;
+    dict.set_item("source_meta_step", receipt.source_meta_step)?;
+    dict.set_item(
+        "previous_source_meta_step",
+        receipt.previous_source_meta_step,
+    )?;
+    dict.set_item(
+        "previous_absolute_learning_rate_scale",
+        receipt.previous_absolute_learning_rate_scale,
+    )?;
+    dict.set_item(
+        "absolute_learning_rate_scale",
+        receipt.absolute_learning_rate_scale,
+    )?;
+    dict.set_item(
+        "applied_learning_rate_ratio",
+        receipt.applied_learning_rate_ratio,
+    )?;
+    dict.set_item("source_learning_rate", receipt.source_learning_rate)?;
+    dict.set_item(
+        "source_effective_learning_rate",
+        receipt.source_effective_learning_rate,
+    )?;
+    dict.set_item("changed", receipt.changed)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "ModuleTrainer", unsendable)]
 pub(crate) struct PyNnModuleTrainer {
     inner: RustModuleTrainer,
@@ -5838,6 +5877,16 @@ impl PyNnModuleTrainer {
         self.inner.real_learning_rate()
     }
 
+    #[getter]
+    pub fn meta_learning_rate_scale(&self) -> f32 {
+        self.inner.meta_learning_rate_scale()
+    }
+
+    #[getter]
+    pub fn meta_optimizer_step(&self) -> Option<u64> {
+        self.inner.meta_optimizer_step()
+    }
+
     pub fn enable_realgrad(&mut self, learning_rate: f32) {
         self.inner.enable_realgrad(learning_rate);
     }
@@ -6009,6 +6058,27 @@ impl PyNnModuleTrainer {
         with_module_mut(module, |module_inner| {
             self.inner.mul_learning_rate(module_inner, factor)
         })
+    }
+
+    /// Applies a complete Rust meta-optimizer report to parameter learning
+    /// rates. Report validation and absolute-to-relative scale conversion both
+    /// remain in Rust.
+    #[pyo3(signature = (module, report))]
+    pub fn apply_zspace_meta_optimizer_report(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<PyAny>,
+        report: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let report = crate::json::py_to_json(report)?;
+        let control = zspace_parameter_control_from_value(report).map_err(|error| {
+            PyValueError::new_err(format!("invalid Z-space meta-optimizer report: {error}"))
+        })?;
+        let receipt = with_module_mut(module, |module_inner| {
+            self.inner
+                .apply_zspace_parameter_control(module_inner, &control)
+        })?;
+        parameter_control_receipt_to_pydict(py, receipt)
     }
 
     #[pyo3(signature = (text, *, every="epoch", mode="blend"))]
