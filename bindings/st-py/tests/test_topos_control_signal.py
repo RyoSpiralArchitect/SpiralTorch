@@ -93,6 +93,109 @@ def test_raw_topos_control_input_uses_native_bundle_ingress() -> None:
     assert signal["closure_pressure"] == pytest.approx(0.4)
 
 
+def test_topos_optimizer_snapshot_binds_control_and_prescribed_rate_application() -> None:
+    native = getattr(st, "_rs", None)
+    native_snapshot = getattr(
+        native, "_topos_optimizer_snapshot_from_observation", None
+    )
+    if not callable(native_snapshot):
+        pytest.skip("optimizer snapshots require a freshly built extension")
+
+    snapshot = st.topos_optimizer_snapshot(
+        {
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+        },
+        sequence=7,
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        gain=0.5,
+        training_hints={"learning_rate_scale": 0.6, "clip_scale": 0.8},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert snapshot["kind"] == "spiraltorch.topos_optimizer_snapshot"
+    assert snapshot["contract_version"] == "spiraltorch.topos_optimizer_snapshot.v1"
+    assert snapshot["semantic_owner"] == "st-tensor::pure::topos"
+    assert snapshot["semantic_backend"] == "rust"
+    assert snapshot["sequence"] == 7
+    assert snapshot["control"]["observed_depth"] == 4
+    assert snapshot["control"]["visited_volume"] == 25
+    application = snapshot["optimizer_application"]
+    assert application["scope"] == "learning_rate"
+    assert application["control_path"] == "control.training_plan.rate_scale"
+    assert application["rate_scale"] == pytest.approx(
+        snapshot["control"]["training_plan"]["rate_scale"]
+    )
+    assert application["hyper_learning_rate"] == pytest.approx(
+        0.04 * application["rate_scale"]
+    )
+    assert application["real_learning_rate"] == pytest.approx(
+        0.02 * application["rate_scale"]
+    )
+    assert "effective_gradient_bias_scale" not in application
+    assert "effective_momentum_damping" not in application
+
+
+def test_topos_optimizer_snapshot_rejects_unsafe_identity_and_rates() -> None:
+    native = getattr(st, "_rs", None)
+    native_snapshot = getattr(
+        native, "_topos_optimizer_snapshot_from_observation", None
+    )
+    if not callable(native_snapshot):
+        pytest.skip("optimizer snapshots require a freshly built extension")
+
+    with pytest.raises(ValueError, match="sequence"):
+        st.topos_optimizer_snapshot(
+            sequence=2**53,
+            hyper_learning_rate=0.04,
+            real_learning_rate=0.02,
+        )
+    with pytest.raises(ValueError, match="learning rate"):
+        st.topos_optimizer_snapshot(
+            sequence=1,
+            hyper_learning_rate=0.0,
+            real_learning_rate=0.02,
+        )
+
+
+def test_topos_optimizer_snapshot_rejects_non_rust_contracts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        zspace_inference_module,
+        "_native_topos_optimizer_snapshot_from_observation",
+        lambda *_args, **_kwargs: {
+            "kind": "spiraltorch.topos_optimizer_snapshot",
+            "contract_version": "spiraltorch.topos_optimizer_snapshot.v1",
+            "semantic_owner": "python",
+            "semantic_backend": "python",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="untrusted contract"):
+        st.topos_optimizer_snapshot(
+            sequence=1,
+            hyper_learning_rate=0.04,
+            real_learning_rate=0.02,
+        )
+
+
+def test_topos_control_signal_keeps_configured_training_gain_atomic() -> None:
+    signal = st.topos_control_signal(
+        {"max_depth": 8, "max_volume": 16},
+        training_gain=0.0,
+        observed_depth=4,
+        visited_volume=8,
+    )
+
+    assert signal["training_plan"]["gain"] == 0.0
+    assert signal["training_plan"]["rate_scale"] == pytest.approx(1.0)
+    assert signal["runtime_profile"]["training_gain"] == 0.0
+    assert signal["runtime_profile"]["training_rate_scale"] == pytest.approx(1.0)
+    assert signal["runtime_route"]["runtime_profile"] == signal["runtime_profile"]
+
+
 def test_topos_zspace_projection_uses_rust_contract_and_dimension_adaptation() -> None:
     projection = st.topos_zspace_projection(
         {
@@ -540,6 +643,7 @@ def test_topos_control_partial_consumes_projection_without_python_reconstruction
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_control_signal" in st.__all__
+    assert "topos_optimizer_snapshot" in st.__all__
     assert "topos_training_hints" in st.__all__
     assert "topos_training_plan" in st.__all__
     assert "topos_inference_hints" in st.__all__

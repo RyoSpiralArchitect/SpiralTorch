@@ -5120,6 +5120,26 @@ def hypergrad_topos(
 def topos_control_signal(
     topos: Any | None = ...,
     *,
+    training_gain: float = ...,
+    curvature: float = ...,
+    tolerance: float = ...,
+    saturation: float = ...,
+    max_depth: int = ...,
+    max_volume: int = ...,
+    porosity: float | None = ...,
+    observed_depth: int = ...,
+    visited_volume: int = ...,
+) -> Dict[str, object]: ...
+
+def topos_optimizer_snapshot(
+    topos: Any | None = ...,
+    *,
+    sequence: int = ...,
+    hyper_learning_rate: float,
+    real_learning_rate: float,
+    gain: float = ...,
+    training_hints: Mapping[str, Any] | None = ...,
+    inference_hints: Mapping[str, Any] | None = ...,
     curvature: float = ...,
     tolerance: float = ...,
     saturation: float = ...,

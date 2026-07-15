@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from collections.abc import Mapping
 from typing import Any
 
@@ -41,11 +42,23 @@ def _require_tensor(st: Any, value: Any, *, label: str) -> Any:
 
 def _set_tape_learning_rate(tape: Any, target: float) -> None:
     current = float(tape.learning_rate())
-    if current <= 0.0 or target <= 0.0:
-        return
+    if not math.isfinite(current) or current <= 0.0:
+        raise RuntimeError("gradient tape returned an invalid current learning rate")
+    if not math.isfinite(target) or target <= 0.0:
+        raise ValueError("gradient tape target learning rate must be finite and positive")
     factor = target / current
+    if not math.isfinite(factor) or factor <= 0.0:
+        raise ValueError("gradient tape learning-rate factor must be finite and positive")
     if factor != 1.0:
         tape.scale_learning_rate(float(factor))
+    applied = float(tape.learning_rate())
+    if not math.isfinite(applied) or not math.isclose(
+        applied,
+        target,
+        rel_tol=1e-6,
+        abs_tol=0.0,
+    ):
+        raise RuntimeError("gradient tape did not commit the requested learning rate")
 
 
 def _finite_float(value: Any, *, default: float) -> float:
@@ -64,13 +77,24 @@ def _finite_int(value: Any, *, default: int) -> int:
     return max(0, numeric)
 
 
-def _required_rust_plan_float(plan: Mapping[str, Any], field: str) -> float:
-    value = plan.get(field)
+def _required_rust_mapping(
+    payload: Mapping[str, Any], field: str, *, label: str
+) -> dict[str, Any]:
+    value = payload.get(field)
+    if not isinstance(value, Mapping):
+        raise RuntimeError(f"Rust {label} returned invalid '{field}'")
+    return dict(value)
+
+
+def _required_rust_float(
+    payload: Mapping[str, Any], field: str, *, label: str
+) -> float:
+    value = payload.get(field)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise RuntimeError(f"Rust Topos training plan returned invalid '{field}'")
+        raise RuntimeError(f"Rust {label} returned invalid '{field}'")
     numeric = float(value)
     if not math.isfinite(numeric):
-        raise RuntimeError(f"Rust Topos training plan returned non-finite '{field}'")
+        raise RuntimeError(f"Rust {label} returned non-finite '{field}'")
     return numeric
 
 
@@ -139,10 +163,51 @@ class Amegagrad:
         if self.topos_control_gain < 0.0:
             self.topos_control_gain = 0.0
         self.last_control: Any | None = None
-        self.last_topos_signal: dict[str, Any] | None = None
-        self.last_topos_hints: dict[str, Any] | None = None
-        self.last_topos_profile: dict[str, Any] | None = None
-        self.last_topos_effect: dict[str, float] | None = None
+        self._last_topos_signal: dict[str, Any] | None = None
+        self._last_topos_snapshot: dict[str, Any] | None = None
+        self._topos_snapshot_sequence = 0
+
+    @property
+    def last_topos_signal(self) -> dict[str, Any] | None:
+        return deepcopy(self._last_topos_signal)
+
+    @property
+    def last_topos_snapshot(self) -> dict[str, Any] | None:
+        return deepcopy(self._last_topos_snapshot)
+
+    def _snapshot_control(self) -> dict[str, Any] | None:
+        if self._last_topos_snapshot is None:
+            return None
+        return deepcopy(
+            _required_rust_mapping(
+                self._last_topos_snapshot,
+                "control",
+                label="Topos optimizer snapshot",
+            )
+        )
+
+    @property
+    def last_topos_hints(self) -> dict[str, Any] | None:
+        control = self._snapshot_control() or self.last_topos_signal
+        if control is None:
+            return None
+        hints = control.get("training_hints")
+        return dict(hints) if isinstance(hints, Mapping) else None
+
+    @property
+    def last_topos_profile(self) -> dict[str, Any] | None:
+        control = self._snapshot_control() or self.last_topos_signal
+        if control is None:
+            return None
+        profile = control.get("runtime_profile")
+        return dict(profile) if isinstance(profile, Mapping) else None
+
+    @property
+    def last_topos_effect(self) -> dict[str, Any] | None:
+        if self._last_topos_snapshot is None:
+            return None
+        application = self._last_topos_snapshot.get("optimizer_application")
+        return deepcopy(dict(application)) if isinstance(application, Mapping) else None
 
     def shape(self) -> tuple[int, int]:
         return self.hyper.shape()
@@ -236,18 +301,18 @@ class Amegagrad:
         used_visited_volume = (
             self.topos_visited_volume if visited_volume is None else int(visited_volume)
         )
+        used_training_gain = float(
+            signal_options.pop("training_gain", self.topos_control_gain)
+        )
         signal = st.topos_control_signal(
             guard,
+            training_gain=used_training_gain,
             observed_depth=used_observed_depth,
             visited_volume=used_visited_volume,
             **signal_options,
         )
-        self.last_topos_signal = dict(signal)
-        training_hints = signal.get("training_hints")
-        self.last_topos_hints = (
-            dict(training_hints) if isinstance(training_hints, Mapping) else None
-        )
-        return self.last_topos_signal
+        self._last_topos_signal = deepcopy(dict(signal))
+        return deepcopy(self._last_topos_signal)
 
     def topos_training_hints(
         self,
@@ -268,7 +333,7 @@ class Amegagrad:
             return {}
         return dict(hints)
 
-    def _apply_topos_learning_rate_scale(
+    def _prepare_topos_learning_rate_snapshot(
         self,
         hyper_target: float,
         real_target: float,
@@ -276,109 +341,135 @@ class Amegagrad:
         hints: Mapping[str, Any] | None = None,
         observed_depth: int | None = None,
         visited_volume: int | None = None,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, dict[str, Any]]:
         import spiraltorch as st
 
-        if hints is None:
-            signal = self.topos_control_signal(
-                observed_depth=observed_depth,
-                visited_volume=visited_volume,
-            )
-            profile_source: Mapping[str, Any] = signal
-            hints = signal.get("training_hints")
-            if not isinstance(hints, Mapping):
-                hints = {}
-            plan = st.topos_training_plan(signal, gain=self.topos_control_gain)
-        else:
-            hints = dict(hints)
-            self.last_topos_hints = dict(hints)
-            profile_source = self.last_topos_signal or {"training_hints": hints}
-            plan = st.topos_training_plan(
-                {"training_hints": hints},
-                gain=self.topos_control_gain,
-            )
-        learning_rate_scale = _required_rust_plan_float(plan, "learning_rate_scale")
-        clip_scale = _required_rust_plan_float(plan, "clip_scale")
-        rate_scale = _required_rust_plan_float(plan, "rate_scale")
-        hyper_scaled = hyper_target * rate_scale
-        real_scaled = real_target * rate_scale
-        self.last_topos_effect = {
-            "learning_rate_scale": learning_rate_scale,
-            "clip_scale": clip_scale,
-            "raw_rate_scale": _required_rust_plan_float(plan, "raw_rate_scale"),
-            "rate_scale": rate_scale,
-            "effective_gradient_bias_scale": _required_rust_plan_float(
-                plan,
-                "effective_gradient_bias_scale",
-            ),
-            "effective_momentum_damping": _required_rust_plan_float(
-                plan,
-                "effective_momentum_damping",
-            ),
-            "hyper_learning_rate": hyper_scaled,
-            "real_learning_rate": real_scaled,
-        }
-        self.last_topos_profile = st.topos_runtime_profile(
-            profile_source,
-            training_gain=self.topos_control_gain,
+        guard = self.topos if self.topos is not None else self._resolve_hyper_topos()
+        if guard is None:
+            raise RuntimeError("Amegagrad has no topos available for control hints")
+        used_observed_depth = (
+            self.topos_observed_depth if observed_depth is None else int(observed_depth)
         )
-        return hyper_scaled, real_scaled
+        used_visited_volume = (
+            self.topos_visited_volume if visited_volume is None else int(visited_volume)
+        )
+        next_sequence = self._topos_snapshot_sequence + 1
+        snapshot = st.topos_optimizer_snapshot(
+            guard,
+            sequence=next_sequence,
+            hyper_learning_rate=hyper_target,
+            real_learning_rate=real_target,
+            gain=self.topos_control_gain,
+            training_hints=hints,
+            observed_depth=used_observed_depth,
+            visited_volume=used_visited_volume,
+        )
+        if not isinstance(snapshot, Mapping):
+            raise RuntimeError(
+                "Rust Topos optimizer snapshot returned a non-mapping payload"
+            )
+        returned_sequence = snapshot.get("sequence")
+        if (
+            isinstance(returned_sequence, bool)
+            or not isinstance(returned_sequence, int)
+            or returned_sequence != next_sequence
+        ):
+            raise RuntimeError(
+                "Rust Topos optimizer snapshot returned an invalid sequence"
+            )
+        control = _required_rust_mapping(
+            snapshot,
+            "control",
+            label="Topos optimizer snapshot",
+        )
+        plan = _required_rust_mapping(control, "training_plan", label="Topos control")
+        application = _required_rust_mapping(
+            snapshot,
+            "optimizer_application",
+            label="Topos optimizer snapshot",
+        )
+        planned_rate_scale = _required_rust_float(
+            plan,
+            "rate_scale",
+            label="Topos training plan",
+        )
+        applied_rate_scale = _required_rust_float(
+            application,
+            "rate_scale",
+            label="Topos optimizer application",
+        )
+        if planned_rate_scale != applied_rate_scale:
+            raise RuntimeError(
+                "Rust Topos optimizer snapshot disagrees on planned and applied rate_scale"
+            )
+        hyper_scaled = _required_rust_float(
+            application,
+            "hyper_learning_rate",
+            label="Topos optimizer application",
+        )
+        real_scaled = _required_rust_float(
+            application,
+            "real_learning_rate",
+            label="Topos optimizer application",
+        )
 
-    def topos_telemetry_contract(
-        self,
-        signal: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        return hyper_scaled, real_scaled, dict(snapshot)
+
+    def topos_telemetry_contract(self) -> dict[str, Any]:
         """Fuse cached Topos state through the canonical Rust telemetry contract."""
 
         import spiraltorch as st
 
-        if signal is None:
-            signal = self.last_topos_signal
-        if signal is None:
-            signal = self.topos_control_signal()
-        signal_payload = dict(signal)
-        signal_payload.pop("runtime_profile", None)
-        sources: list[dict[str, Any]] = [{"topos": signal_payload}]
-        profile = self.last_topos_profile
-        if profile is None:
-            profile = st.topos_runtime_profile(
-                signal,
-                training_gain=self.topos_control_gain,
+        if self._last_topos_snapshot is None:
+            control = self.last_topos_signal or self.topos_control_signal()
+            topos_payload = dict(control)
+        else:
+            control = self._snapshot_control()
+            if control is None:  # pragma: no cover - guarded by snapshot validation
+                raise RuntimeError("Rust Topos optimizer snapshot omitted its control")
+            application = _required_rust_mapping(
+                self._last_topos_snapshot,
+                "optimizer_application",
+                label="Topos optimizer snapshot",
             )
-        if not isinstance(profile, Mapping):
-            raise RuntimeError(
-                "Rust Topos runtime profile returned a non-mapping payload"
-            )
-        sources.append({"topos": {"runtime_profile": dict(profile)}})
-        if self.last_topos_effect is not None:
-            sources.append(
-                {"topos": {"optimizer_effect": dict(self.last_topos_effect)}}
-            )
-        contract = st.zspace_telemetry_fusion(sources)
+            topos_payload = dict(control)
+            # Preserve historical flat telemetry names as projections of one snapshot.
+            topos_payload["optimizer_effect"] = application
+            topos_payload["optimizer_snapshot"] = {
+                "sequence": self._last_topos_snapshot["sequence"]
+            }
+        contract = st.zspace_telemetry_fusion([{"topos": topos_payload}])
         if not isinstance(contract, Mapping):
             raise RuntimeError(
                 "Rust Z-space telemetry fusion returned a non-mapping payload"
             )
         return dict(contract)
 
-    def topos_telemetry_payload(
-        self,
-        signal: Mapping[str, Any] | None = None,
-    ) -> dict[str, float]:
+    def topos_telemetry_payload(self) -> dict[str, float]:
         """Project the Rust-owned Topos telemetry contract to its flat payload."""
 
-        contract = self.topos_telemetry_contract(signal)
+        contract = self.topos_telemetry_contract()
         payload = contract.get("payload")
         if not isinstance(payload, Mapping):
             raise RuntimeError("Rust Z-space telemetry fusion omitted its payload")
         return {str(key): float(value) for key, value in payload.items()}
 
     def topos_diagnostics(self) -> dict[str, Any]:
-        """Return the cached topos signal, hints, and optimizer effect."""
+        """Return projections of the authoritative Topos optimizer snapshot."""
+
+        snapshot = self.last_topos_snapshot
+        signal = self._snapshot_control() or self.last_topos_signal
+        training_plan = None
+        if signal is not None and isinstance(signal.get("training_plan"), Mapping):
+            training_plan = dict(signal["training_plan"])
 
         return {
-            "signal": dict(self.last_topos_signal) if self.last_topos_signal else None,
-            "training_hints": dict(self.last_topos_hints) if self.last_topos_hints else None,
+            "snapshot": snapshot,
+            "signal": dict(signal) if signal else None,
+            "training_hints": dict(self.last_topos_hints)
+            if self.last_topos_hints
+            else None,
+            "training_plan": training_plan,
             "runtime_profile": dict(self.last_topos_profile)
             if self.last_topos_profile
             else None,
@@ -400,21 +491,51 @@ class Amegagrad:
 
         hyper_target = self.hyper_learning_rate * float(control.hyper_rate_scale())
         real_target = self.real_learning_rate * float(control.real_rate_scale())
-        self.last_control = control
         should_use_topos = self.topos_control_gain > 0.0 if use_topos is None else bool(use_topos)
+        pending_snapshot: dict[str, Any] | None = None
         if should_use_topos:
-            hyper_target, real_target = self._apply_topos_learning_rate_scale(
-                hyper_target,
-                real_target,
-                hints=topos_hints,
-                observed_depth=observed_depth,
-                visited_volume=visited_volume,
+            hyper_target, real_target, pending_snapshot = (
+                self._prepare_topos_learning_rate_snapshot(
+                    hyper_target,
+                    real_target,
+                    hints=topos_hints,
+                    observed_depth=observed_depth,
+                    visited_volume=visited_volume,
+                )
             )
+        previous_hyper = float(self.hyper.learning_rate())
+        previous_real = float(self.real.learning_rate())
+        try:
+            _set_tape_learning_rate(self.hyper, hyper_target)
+            _set_tape_learning_rate(self.real, real_target)
+        except Exception as error:
+            rollback_errors: list[Exception] = []
+            for tape, previous in (
+                (self.hyper, previous_hyper),
+                (self.real, previous_real),
+            ):
+                try:
+                    _set_tape_learning_rate(tape, previous)
+                except Exception as rollback_error:  # pragma: no cover - catastrophic tape failure
+                    rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise RuntimeError(
+                    "Amegagrad learning-rate transaction failed and could not roll back"
+                ) from error
+            raise
+
+        self.last_control = control
+        if pending_snapshot is None:
+            self._last_topos_snapshot = None
         else:
-            self.last_topos_profile = None
-            self.last_topos_effect = None
-        _set_tape_learning_rate(self.hyper, hyper_target)
-        _set_tape_learning_rate(self.real, real_target)
+            snapshot_control = _required_rust_mapping(
+                pending_snapshot,
+                "control",
+                label="Topos optimizer snapshot",
+            )
+            self._topos_snapshot_sequence = int(pending_snapshot["sequence"])
+            self._last_topos_snapshot = deepcopy(pending_snapshot)
+            self._last_topos_signal = deepcopy(snapshot_control)
         return control
 
     def step(

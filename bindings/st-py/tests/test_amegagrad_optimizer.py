@@ -103,16 +103,23 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     assert opt.hyper.learning_rate() == pytest.approx(0.04 * expected_scale)
     assert opt.real.learning_rate() == pytest.approx(0.02 * expected_scale)
     diagnostics = opt.topos_diagnostics()
-    assert diagnostics["training_hints"]["clip_scale"] == pytest.approx(hints["clip_scale"])
+    assert diagnostics["snapshot"]["kind"] == "spiraltorch.topos_optimizer_snapshot"
+    assert diagnostics["snapshot"]["sequence"] == 1
+    assert diagnostics["training_hints"]["clip_scale"] == pytest.approx(
+        hints["clip_scale"]
+    )
+    assert diagnostics["training_plan"]["rate_scale"] == pytest.approx(expected_scale)
     assert diagnostics["runtime_profile"]["training_rate_scale"] == pytest.approx(
         expected_scale
     )
     assert diagnostics["runtime_profile"]["control_energy"] > 0.0
     assert diagnostics["effect"]["rate_scale"] == pytest.approx(expected_scale)
-    assert diagnostics["effect"]["raw_rate_scale"] == pytest.approx(
+    assert diagnostics["training_plan"]["raw_rate_scale"] == pytest.approx(
         hints["learning_rate_scale"] * hints["clip_scale"]
     )
-    assert diagnostics["effect"]["effective_gradient_bias_scale"] > 0.0
+    assert diagnostics["training_plan"]["effective_gradient_bias_scale"] > 0.0
+    assert "effective_gradient_bias_scale" not in diagnostics["effect"]
+    assert "effective_momentum_damping" not in diagnostics["effect"]
 
     telemetry_contract = opt.topos_telemetry_contract()
     assert telemetry_contract["kind"] == "spiraltorch.zspace_telemetry_fusion"
@@ -121,18 +128,24 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     )
     assert telemetry_contract["semantic_owner"] == "st-core::telemetry::zspace_fusion"
     assert telemetry_contract["semantic_backend"] == "rust"
-    assert telemetry_contract["input_count"] == 3
+    assert telemetry_contract["input_count"] == 1
     telemetry = opt.topos_telemetry_payload()
     assert telemetry == telemetry_contract["payload"]
     assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
-    assert telemetry["topos.training_hints.clip_scale"] == pytest.approx(hints["clip_scale"])
-    assert telemetry["topos.optimizer_effect.rate_scale"] == pytest.approx(expected_scale)
-    assert telemetry["topos.optimizer_effect.raw_rate_scale"] == pytest.approx(
-        diagnostics["effect"]["raw_rate_scale"]
+    assert telemetry["topos.training_hints.clip_scale"] == pytest.approx(
+        hints["clip_scale"]
     )
-    assert telemetry["topos.optimizer_effect.effective_gradient_bias_scale"] == pytest.approx(
-        diagnostics["effect"]["effective_gradient_bias_scale"]
+    assert telemetry["topos.optimizer_effect.rate_scale"] == pytest.approx(
+        expected_scale
     )
+    assert telemetry["topos.training_plan.raw_rate_scale"] == pytest.approx(
+        diagnostics["training_plan"]["raw_rate_scale"]
+    )
+    assert telemetry[
+        "topos.training_plan.effective_gradient_bias_scale"
+    ] == pytest.approx(diagnostics["training_plan"]["effective_gradient_bias_scale"])
+    assert "topos.optimizer_effect.effective_gradient_bias_scale" not in telemetry
+    assert telemetry["topos.optimizer_snapshot.sequence"] == 1.0
     assert telemetry["topos.runtime_profile.training_rate_scale"] == pytest.approx(
         expected_scale
     )
@@ -141,45 +154,129 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     )
 
 
-def test_amegagrad_topos_telemetry_uses_rust_flattening_semantics() -> None:
+def test_amegagrad_topos_telemetry_projects_one_authoritative_snapshot() -> None:
     _require_native()
 
-    opt = st.optim.Amegagrad((1, 1))
-    opt.last_topos_profile = {"control_energy": 0.25}
-    contract = opt.topos_telemetry_contract(
-        {
-            "closure_pressure": 0.5,
-            "numeric_string": "2.5",
-            "label": "ignored",
-        }
+    guard = st.hypergrad_topos(max_depth=8, max_volume=16)
+    opt = st.optim.Amegagrad((1, 1), topos=guard, topos_control_gain=1.0)
+    opt.tune(
+        control=_UnitRateControl(),
+        use_topos=True,
+        observed_depth=4,
+        visited_volume=1,
     )
+    contract = opt.topos_telemetry_contract()
 
-    assert contract["input_count"] == 2
-    assert contract["payload"]["topos.closure_pressure"] == pytest.approx(0.5)
-    assert contract["payload"]["topos.numeric_string"] == pytest.approx(2.5)
+    assert contract["input_count"] == 1
+    assert contract["payload"]["topos.optimizer_snapshot.sequence"] == 1.0
+    assert contract["payload"]["topos.optimizer_effect.rate_scale"] == pytest.approx(
+        contract["payload"]["topos.training_plan.rate_scale"]
+    )
     assert contract["payload"]["topos.runtime_profile.control_energy"] == pytest.approx(
-        0.25
+        opt.topos_diagnostics()["runtime_profile"]["control_energy"]
     )
-    assert contract["ignored_value_count"] == 1
-    assert contract["sources"][0]["ignored_value_count"] == 1
+    assert (
+        "topos.optimizer_effect.effective_gradient_bias_scale"
+        not in contract["payload"]
+    )
 
 
-def test_amegagrad_rejects_incomplete_rust_training_plan(monkeypatch) -> None:
+def test_amegagrad_rejects_incomplete_rust_optimizer_snapshot(monkeypatch) -> None:
     _require_native()
 
     opt = st.optim.Amegagrad((1, 1), topos_control_gain=1.0)
     monkeypatch.setattr(
         st,
-        "topos_training_plan",
-        lambda *_args, **_kwargs: {"rate_scale": 0.5},
+        "topos_optimizer_snapshot",
+        lambda *_args, **_kwargs: {
+            "sequence": 1,
+            "control": {"training_plan": {"rate_scale": 0.5}},
+            "optimizer_application": {"rate_scale": 0.5},
+        },
     )
 
-    with pytest.raises(RuntimeError, match="learning_rate_scale"):
+    with pytest.raises(RuntimeError, match="hyper_learning_rate"):
         opt.tune(
             control=_UnitRateControl(),
             use_topos=True,
             topos_hints={"learning_rate_scale": 0.5, "clip_scale": 1.0},
         )
+
+
+def test_amegagrad_custom_hints_cannot_reuse_a_stale_topos_signal() -> None:
+    _require_native()
+
+    guard = st.hypergrad_topos(max_depth=8, max_volume=16)
+    opt = st.optim.Amegagrad(
+        (1, 2),
+        topos=guard,
+        topos_control_gain=1.0,
+    )
+    old_signal = opt.topos_control_signal(observed_depth=1, visited_volume=1)
+    assert old_signal["observed_depth"] == 1
+    old_signal["observed_depth"] = 0
+    assert opt.last_topos_signal["observed_depth"] == 1
+
+    opt.tune(
+        control=_UnitRateControl(),
+        use_topos=True,
+        topos_hints={"learning_rate_scale": 0.5, "clip_scale": 0.8},
+        observed_depth=7,
+        visited_volume=5,
+    )
+    first = opt.topos_diagnostics()["snapshot"]
+    assert first["sequence"] == 1
+    assert first["control"]["observed_depth"] == 7
+    assert first["control"]["visited_volume"] == 5
+    assert first["control"]["training_hints"]["learning_rate_scale"] == pytest.approx(
+        0.5
+    )
+    first["control"]["observed_depth"] = 0
+    assert opt.topos_diagnostics()["snapshot"]["control"]["observed_depth"] == 7
+
+    opt.tune(control=_UnitRateControl(), use_topos=True, observed_depth=6)
+    assert opt.topos_diagnostics()["snapshot"]["sequence"] == 2
+
+
+def test_amegagrad_rolls_back_rates_before_publishing_a_failed_snapshot(
+    monkeypatch,
+) -> None:
+    _require_native()
+
+    guard = st.hypergrad_topos(max_depth=8, max_volume=16)
+    opt = st.optim.Amegagrad(
+        (1, 2),
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        topos=guard,
+        topos_control_gain=1.0,
+    )
+    optimizer_globals = st.optim.Amegagrad.tune.__globals__
+    original_set_rate = optimizer_globals["_set_tape_learning_rate"]
+    rate_calls = 0
+
+    def _fail_first_real_rate(tape, target) -> None:
+        nonlocal rate_calls
+        rate_calls += 1
+        if rate_calls == 2:
+            raise RuntimeError("injected real-tape failure")
+        original_set_rate(tape, target)
+
+    monkeypatch.setitem(
+        optimizer_globals,
+        "_set_tape_learning_rate",
+        _fail_first_real_rate,
+    )
+    with pytest.raises(RuntimeError, match="injected real-tape failure"):
+        opt.tune(control=_UnitRateControl(), use_topos=True, observed_depth=4)
+
+    assert opt.hyper.learning_rate() == pytest.approx(0.04)
+    assert opt.real.learning_rate() == pytest.approx(0.02)
+    assert opt.topos_diagnostics()["snapshot"] is None
+
+    monkeypatch.setitem(optimizer_globals, "_set_tape_learning_rate", original_set_rate)
+    opt.tune(control=_UnitRateControl(), use_topos=True, observed_depth=4)
+    assert opt.topos_diagnostics()["snapshot"]["sequence"] == 1
 
 
 def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
@@ -283,8 +380,8 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert tuned_summary["metrics"]["realgrad.l2"]["nonzero"] == 2
     assert tuned_context["observed_count"] == 2
     assert tuned_context["optimizer_rate_scale"]["last"] < 1.0
-    assert tuned_context["optimizer_raw_rate_scale"]["last"] < 1.0
-    assert tuned_context["optimizer_effective_gradient_bias_scale"]["mean"] > 0.0
+    assert tuned_context["training_plan_raw_rate_scale"]["last"] < 1.0
+    assert tuned_context["training_plan_effective_gradient_bias_scale"]["mean"] > 0.0
     assert tuned_context["runtime_profile_training_rate_scale"]["last"] < 1.0
     assert tuned_context["runtime_profile_control_energy"]["mean"] > 0.0
 
@@ -300,15 +397,24 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert tuned_row["topos_runtime_training_rate_scale_mean"] == pytest.approx(
         tuned_context["runtime_profile_training_rate_scale"]["mean"]
     )
-    assert tuned_row["topos_optimizer_raw_rate_scale_mean"] == pytest.approx(
-        tuned_context["optimizer_raw_rate_scale"]["mean"]
+    assert tuned_row["topos_training_plan_raw_rate_scale_mean"] == pytest.approx(
+        tuned_context["training_plan_raw_rate_scale"]["mean"]
     )
-    assert tuned_row["topos_optimizer_effective_gradient_bias_scale_mean"] == pytest.approx(
-        tuned_context["optimizer_effective_gradient_bias_scale"]["mean"]
+    assert tuned_row["topos_training_plan_rate_scale_mean"] == pytest.approx(
+        tuned_context["training_plan_rate_scale"]["mean"]
     )
+    assert tuned_row[
+        "topos_training_plan_effective_gradient_bias_scale_mean"
+    ] == pytest.approx(
+        tuned_context["training_plan_effective_gradient_bias_scale"]["mean"]
+    )
+    assert tuned_row["topos_optimizer_raw_rate_scale_mean"] is None
+    assert tuned_row["topos_optimizer_effective_gradient_bias_scale_mean"] is None
 
     reloaded = st.compare_amegagrad_topos_training_traces(result["trace_paths"])
     assert reloaded["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
-    assert reloaded["winners"]["lowest_optimizer_raw_rate_scale"] == "topos_tuned"
-    assert reloaded["winners"]["highest_effective_gradient_bias"] == "topos_tuned"
+    assert reloaded["winners"]["lowest_training_plan_rate_scale"] == "topos_tuned"
+    assert reloaded["winners"]["highest_planned_gradient_bias"] == "topos_tuned"
+    assert reloaded["winners"]["lowest_optimizer_raw_rate_scale"] is None
+    assert reloaded["winners"]["highest_effective_gradient_bias"] is None
     assert reloaded["winners"]["lowest_runtime_training_rate_scale"] == "topos_tuned"

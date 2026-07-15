@@ -1,6 +1,8 @@
+use serde::Deserialize;
 use serde_json::Value;
 use st_tensor::{
-    TensorError, ToposControlSignal, ToposControlSignalInput, ToposZSpaceProjectionOptions,
+    TensorError, ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
+    ToposInferenceHintsInput, ToposTrainingHintsInput, ToposZSpaceProjectionOptions,
 };
 
 const TOPOS_CONTROL_SIGNAL_INPUT_KEYS: &[&str] = &[
@@ -14,16 +16,88 @@ const TOPOS_CONTROL_SIGNAL_INPUT_KEYS: &[&str] = &[
     "visited_volume",
 ];
 
-fn topos_control_signal_input_from_value(value: Value) -> Result<ToposControlSignalInput, String> {
+const TOPOS_OPTIMIZER_SNAPSHOT_INPUT_KEYS: &[&str] = &[
+    "signal",
+    "sequence",
+    "hyper_learning_rate",
+    "real_learning_rate",
+    "options",
+    "training_hints",
+    "inference_hints",
+];
+
+const TOPOS_CONTROL_OPTIONS_INPUT_KEYS: &[&str] = &["training_gain", "inference"];
+const TOPOS_INFERENCE_OPTIONS_INPUT_KEYS: &[&str] = &[
+    "gain",
+    "base_temperature",
+    "base_top_p",
+    "min_temperature",
+    "max_temperature",
+    "min_top_p",
+    "max_top_p",
+    "base_frequency_penalty",
+    "base_presence_penalty",
+];
+const TOPOS_TRAINING_HINTS_INPUT_KEYS: &[&str] = &[
+    "learning_rate_scale",
+    "regularization_scale",
+    "step_damping",
+    "gradient_bias_scale",
+    "clip_scale",
+    "momentum_damping",
+    "vector",
+];
+const TOPOS_INFERENCE_HINTS_INPUT_KEYS: &[&str] = &[
+    "temperature_scale",
+    "top_p_scale",
+    "sampling_focus",
+    "frequency_penalty_bias",
+    "presence_penalty_bias",
+    "context_weight",
+    "vector",
+];
+
+#[derive(Clone, Copy, Debug)]
+pub struct ToposOptimizerSnapshotRequest {
+    pub signal: ToposControlSignalInput,
+    pub sequence: u64,
+    pub hyper_learning_rate: f32,
+    pub real_learning_rate: f32,
+    pub options: ToposControlPlanOptions,
+    pub training_hints: Option<ToposTrainingHintsInput>,
+    pub inference_hints: Option<ToposInferenceHintsInput>,
+}
+
+#[derive(Deserialize)]
+struct ToposOptimizerSnapshotRequestWire {
+    signal: Value,
+    sequence: u64,
+    hyper_learning_rate: f32,
+    real_learning_rate: f32,
+    #[serde(default)]
+    options: Option<Value>,
+    #[serde(default)]
+    training_hints: Option<Value>,
+    #[serde(default)]
+    inference_hints: Option<Value>,
+}
+
+fn validate_value_keys(value: &Value, label: &str, allowed: &[&str]) -> Result<(), String> {
     let object = value
         .as_object()
-        .ok_or_else(|| "Topos control signal input must be an object".to_owned())?;
-    if let Some(key) = object
-        .keys()
-        .find(|key| !TOPOS_CONTROL_SIGNAL_INPUT_KEYS.contains(&key.as_str()))
-    {
-        return Err(format!("unsupported Topos control signal key: {key}"));
+        .ok_or_else(|| format!("{label} must be an object"))?;
+    if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(format!("unsupported {label} key: {key}"));
     }
+    Ok(())
+}
+
+fn topos_control_signal_input_from_value(value: Value) -> Result<ToposControlSignalInput, String> {
+    validate_value_keys(
+        &value,
+        "Topos control signal",
+        TOPOS_CONTROL_SIGNAL_INPUT_KEYS,
+    )?;
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
@@ -34,9 +108,82 @@ fn topos_control_signal_input_from_json(
     topos_control_signal_input_from_value(value)
 }
 
+fn topos_optimizer_snapshot_request_from_value(
+    value: Value,
+) -> Result<ToposOptimizerSnapshotRequest, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Topos optimizer snapshot input must be an object".to_owned())?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !TOPOS_OPTIMIZER_SNAPSHOT_INPUT_KEYS.contains(&key.as_str()))
+    {
+        return Err(format!("unsupported Topos optimizer snapshot key: {key}"));
+    }
+    let wire: ToposOptimizerSnapshotRequestWire =
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
+    let options = match wire.options {
+        Some(options) => {
+            validate_value_keys(
+                &options,
+                "Topos control options",
+                TOPOS_CONTROL_OPTIONS_INPUT_KEYS,
+            )?;
+            if let Some(inference) = options.get("inference") {
+                validate_value_keys(
+                    inference,
+                    "Topos inference options",
+                    TOPOS_INFERENCE_OPTIONS_INPUT_KEYS,
+                )?;
+            }
+            serde_json::from_value(options).map_err(|error| error.to_string())?
+        }
+        None => ToposControlPlanOptions::default(),
+    };
+    let training_hints = match wire.training_hints {
+        Some(hints) => {
+            validate_value_keys(
+                &hints,
+                "Topos training hints",
+                TOPOS_TRAINING_HINTS_INPUT_KEYS,
+            )?;
+            Some(serde_json::from_value(hints).map_err(|error| error.to_string())?)
+        }
+        None => None,
+    };
+    let inference_hints = match wire.inference_hints {
+        Some(hints) => {
+            validate_value_keys(
+                &hints,
+                "Topos inference hints",
+                TOPOS_INFERENCE_HINTS_INPUT_KEYS,
+            )?;
+            Some(serde_json::from_value(hints).map_err(|error| error.to_string())?)
+        }
+        None => None,
+    };
+    Ok(ToposOptimizerSnapshotRequest {
+        signal: topos_control_signal_input_from_value(wire.signal)?,
+        sequence: wire.sequence,
+        hyper_learning_rate: wire.hyper_learning_rate,
+        real_learning_rate: wire.real_learning_rate,
+        options,
+        training_hints,
+        inference_hints,
+    })
+}
+
+fn topos_optimizer_snapshot_request_from_json(
+    input_json: &str,
+) -> Result<ToposOptimizerSnapshotRequest, String> {
+    let value = serde_json::from_str(input_json).map_err(|error| error.to_string())?;
+    topos_optimizer_snapshot_request_from_value(value)
+}
+
 #[cfg(test)]
 use st_tensor::{
-    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
+    TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
+    TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE, TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
     TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM,
 };
 
@@ -79,6 +226,31 @@ pub fn topos_control_signal_value(input: ToposControlSignalInput) -> Result<Valu
     Ok(payload)
 }
 
+/// Build one optimizer application snapshot through the shared Rust contract.
+pub fn topos_optimizer_snapshot_value(
+    request: ToposOptimizerSnapshotRequest,
+) -> Result<Value, TensorError> {
+    let signal = ToposControlSignal::from_input(request.signal)?;
+    let snapshot = signal.optimizer_snapshot(
+        request.sequence,
+        request.hyper_learning_rate,
+        request.real_learning_rate,
+        request.options,
+        request.training_hints,
+        request.inference_hints,
+    )?;
+    let mut payload =
+        serde_json::to_value(snapshot).expect("Topos optimizer snapshot payload is serializable");
+    payload
+        .as_object_mut()
+        .expect("Topos optimizer snapshot payload is an object")
+        .insert(
+            "execution_client".to_owned(),
+            Value::String("wasm".to_owned()),
+        );
+    Ok(payload)
+}
+
 /// Project a Topos control signal through the shared Rust Z-space contract.
 pub fn topos_zspace_projection_value(
     input: ToposControlSignalInput,
@@ -112,6 +284,23 @@ pub fn topos_control_signal_object(input: &JsValue) -> Result<JsValue, JsValue> 
     let input = serde_wasm_bindgen::from_value::<Value>(input.clone()).map_err(js_error)?;
     let input = topos_control_signal_input_from_value(input).map_err(js_error)?;
     let payload = topos_control_signal_value(input).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = toposOptimizerSnapshotJson)]
+pub fn topos_optimizer_snapshot_json(input_json: &str) -> Result<String, JsValue> {
+    let request = topos_optimizer_snapshot_request_from_json(input_json).map_err(js_error)?;
+    let payload = topos_optimizer_snapshot_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = toposOptimizerSnapshotObject)]
+pub fn topos_optimizer_snapshot_object(input: &JsValue) -> Result<JsValue, JsValue> {
+    let input = serde_wasm_bindgen::from_value::<Value>(input.clone()).map_err(js_error)?;
+    let request = topos_optimizer_snapshot_request_from_value(input).map_err(js_error)?;
+    let payload = topos_optimizer_snapshot_value(request).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -206,6 +395,112 @@ mod tests {
             .expect_err("unknown Topos control key must fail closed");
 
         assert!(error.contains("unsupported Topos control signal key: porostiy"));
+    }
+
+    #[test]
+    fn wasm_optimizer_snapshot_matches_rust_except_client_metadata() {
+        let request = ToposOptimizerSnapshotRequest {
+            signal: ToposControlSignalInput {
+                porosity: 0.25,
+                max_depth: 10,
+                max_volume: 100,
+                observed_depth: 4,
+                visited_volume: 25,
+                ..ToposControlSignalInput::default()
+            },
+            sequence: 7,
+            hyper_learning_rate: 0.04,
+            real_learning_rate: 0.02,
+            options: ToposControlPlanOptions {
+                training_gain: 0.5,
+                ..ToposControlPlanOptions::default()
+            },
+            training_hints: Some(ToposTrainingHintsInput {
+                learning_rate_scale: Some(0.7),
+                clip_scale: Some(0.8),
+                ..ToposTrainingHintsInput::default()
+            }),
+            inference_hints: None,
+        };
+        let signal = ToposControlSignal::from_input(request.signal).expect("valid signal");
+        let expected = serde_json::to_value(
+            signal
+                .optimizer_snapshot(
+                    request.sequence,
+                    request.hyper_learning_rate,
+                    request.real_learning_rate,
+                    request.options,
+                    request.training_hints,
+                    request.inference_hints,
+                )
+                .expect("valid Rust snapshot"),
+        )
+        .expect("serializable Rust snapshot");
+        let mut actual =
+            topos_optimizer_snapshot_value(request).expect("valid WASM snapshot payload");
+        actual
+            .as_object_mut()
+            .expect("WASM snapshot object")
+            .remove("execution_client");
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual["contract_version"],
+            TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION
+        );
+        assert_eq!(actual["sequence"], 7);
+        assert_eq!(
+            actual["optimizer_application"]["rate_scale"],
+            actual["control"]["training_plan"]["rate_scale"]
+        );
+    }
+
+    #[test]
+    fn wasm_optimizer_snapshot_ingress_and_numeric_boundaries_fail_closed() {
+        let unknown = topos_optimizer_snapshot_request_from_json(
+            r#"{"signal":{},"sequence":1,"hyper_learning_rate":0.04,"real_learning_rate":0.02,"commander":"python"}"#,
+        )
+        .expect_err("unknown snapshot key must fail closed");
+        assert!(unknown.contains("unsupported Topos optimizer snapshot key: commander"));
+
+        let unknown_hint = topos_optimizer_snapshot_request_from_json(
+            r#"{"signal":{},"sequence":1,"hyper_learning_rate":0.04,"real_learning_rate":0.02,"training_hints":{"clip_sclae":0.5}}"#,
+        )
+        .expect_err("unknown training hint must fail closed");
+        assert!(unknown_hint.contains("unsupported Topos training hints key: clip_sclae"));
+
+        let unknown_option = topos_optimizer_snapshot_request_from_json(
+            r#"{"signal":{},"sequence":1,"hyper_learning_rate":0.04,"real_learning_rate":0.02,"options":{"inference":{"base_temperatur":0.8}}}"#,
+        )
+        .expect_err("unknown inference option must fail closed");
+        assert!(unknown_option.contains("unsupported Topos inference options key: base_temperatur"));
+
+        let unsafe_sequence = topos_optimizer_snapshot_value(ToposOptimizerSnapshotRequest {
+            signal: ToposControlSignalInput::default(),
+            sequence: TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE + 1,
+            hyper_learning_rate: 0.04,
+            real_learning_rate: 0.02,
+            options: ToposControlPlanOptions::default(),
+            training_hints: None,
+            inference_hints: None,
+        })
+        .expect_err("unsafe sequence must fail closed");
+        assert!(matches!(unsafe_sequence, TensorError::InvalidValue { .. }));
+
+        let zero_rate = topos_optimizer_snapshot_value(ToposOptimizerSnapshotRequest {
+            signal: ToposControlSignalInput::default(),
+            sequence: 1,
+            hyper_learning_rate: 0.0,
+            real_learning_rate: 0.02,
+            options: ToposControlPlanOptions::default(),
+            training_hints: None,
+            inference_hints: None,
+        })
+        .expect_err("zero learning rate must fail closed");
+        assert!(matches!(
+            zero_rate,
+            TensorError::NonPositiveLearningRate { .. }
+        ));
     }
 
     #[test]

@@ -47,6 +47,7 @@ TOPOS_CONTEXT_METRIC_KEYS = (
     ("training_gradient_bias_scale", "topos.training_hints.gradient_bias_scale"),
     ("training_clip_scale", "topos.training_hints.clip_scale"),
     ("training_momentum_damping", "topos.training_hints.momentum_damping"),
+    ("training_plan_raw_rate_scale", "topos.training_plan.raw_rate_scale"),
     ("training_plan_rate_scale", "topos.training_plan.rate_scale"),
     (
         "training_plan_effective_gradient_bias_scale",
