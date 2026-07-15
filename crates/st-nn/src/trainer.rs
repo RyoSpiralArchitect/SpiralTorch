@@ -833,6 +833,25 @@ pub struct ZSpaceTraceCoherenceBridge {
 }
 
 impl ZSpaceTraceCoherenceBridge {
+    fn replace_latest(latest: &Mutex<Option<CoherenceSignal>>, signal: Option<CoherenceSignal>) {
+        let mut guard = latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = signal;
+    }
+
+    fn replace_latest_from_trace_event(
+        latest: &Mutex<Option<CoherenceSignal>>,
+        trace_event: &ZSpaceTraceEvent,
+    ) {
+        if matches!(trace_event, ZSpaceTraceEvent::Aggregated { .. }) {
+            Self::replace_latest(
+                latest,
+                CoherenceSignal::from_zspace_trace_event(trace_event),
+            );
+        }
+    }
+
     pub fn subscribe() -> Self {
         let bus = global_registry().event_bus().clone();
         let latest: Arc<Mutex<Option<CoherenceSignal>>> = Arc::new(Mutex::new(None));
@@ -843,17 +862,16 @@ impl ZSpaceTraceCoherenceBridge {
                 let Some(payload) = event.downcast_data::<serde_json::Value>() else {
                     return;
                 };
+                let is_aggregated =
+                    payload.get("kind").and_then(Value::as_str) == Some("Aggregated");
                 let Ok(trace_event) = serde_json::from_value::<ZSpaceTraceEvent>(payload.clone())
                 else {
+                    if is_aggregated {
+                        Self::replace_latest(&latest_clone, None);
+                    }
                     return;
                 };
-                let Some(signal) = CoherenceSignal::from_zspace_trace_event(&trace_event) else {
-                    return;
-                };
-                let mut guard = latest_clone
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                *guard = Some(signal);
+                Self::replace_latest_from_trace_event(&latest_clone, &trace_event);
             }),
         );
         Self {
@@ -8960,6 +8978,9 @@ mod tests {
             .expect("current Rust trace contract should be accepted");
         assert_eq!(signal.control().kind, ZSPACE_COHERENCE_CONTROL_KIND);
         assert_eq!(signal.control().semantic_backend, "rust");
+        let latest = Mutex::new(None);
+        ZSpaceTraceCoherenceBridge::replace_latest_from_trace_event(&latest, &event);
+        assert!(latest.lock().unwrap().is_some());
 
         let mut legacy = event.clone();
         let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut legacy else {
@@ -8988,6 +9009,8 @@ mod tests {
         };
         diagnostics.spectral_pressure = diagnostics.spectral_pressure.map(|value| value + 0.1);
         assert!(CoherenceSignal::from_zspace_trace_event(&tampered).is_none());
+        ZSpaceTraceCoherenceBridge::replace_latest_from_trace_event(&latest, &tampered);
+        assert!(latest.lock().unwrap().is_none());
     }
 
     #[test]
