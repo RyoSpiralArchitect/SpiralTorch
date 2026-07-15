@@ -4134,6 +4134,18 @@ def zspace_temperature_control(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_concept_diffusion(
+    tags: Sequence[str],
+    state: Sequence[float | int],
+    affinity: Sequence[Sequence[float | int]],
+    *,
+    diffusion_tensor: Sequence[Sequence[float | int]] | None = ...,
+    z_bias: Sequence[float | int] = ...,
+    observation: Mapping[str, object] | None = ...,
+    config: Mapping[str, object] | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10905,6 +10917,7 @@ __all__ = [
     "zspace_partial_fusion",
     "zspace_telemetry_fusion",
     "training_telemetry_projection",
+    "zspace_concept_diffusion",
     "zspace_generation_control",
     "zspace_temperature_control",
     "inference_to_mapping",

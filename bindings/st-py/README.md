@@ -83,6 +83,9 @@ PY
   scale, and gradient-temperature transitions. Python transports `config` and
   `state`; `st-core::inference::temperature_control` validates the request,
   computes every adjustment, and returns the auditable `next_state`.
+- `zspace_concept_diffusion(...)` for labelled probability-simplex heat flow.
+  Rust owns observation blending, Z-bias tilt, symmetric conductivity, CFL
+  substeps, and entropy/Dirichlet invariants; Python only carries graph state.
 - `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
   scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
   FT/runtime probes over local-HF embeddings.
