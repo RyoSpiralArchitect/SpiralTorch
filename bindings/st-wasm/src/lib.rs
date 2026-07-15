@@ -5,6 +5,7 @@ mod concept_diffusion;
 mod cosmology;
 mod fractal_field;
 mod generation_control;
+mod imaginary_time_schrodinger;
 mod reports;
 mod scale_stack;
 mod temperature_control;
@@ -38,6 +39,7 @@ pub use cosmology::*;
 pub use fft::*;
 pub use fractal_field::*;
 pub use generation_control::*;
+pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use reports::*;
