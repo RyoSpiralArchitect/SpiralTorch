@@ -121,53 +121,182 @@ fn row_affine(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
+fn klein_gordon_previous_index(index: u32) -> u32 {
+    let col = index % params.cols;
+    let row_start = index - col;
+    if (col == 0u) {
+        return row_start + params.cols - 1u;
+    }
+    return index - 1u;
+}
+
+fn klein_gordon_next_index(index: u32) -> u32 {
+    let col = index % params.cols;
+    let row_start = index - col;
+    if (col + 1u == params.cols) {
+        return row_start;
+    }
+    return index + 1u;
+}
+
+fn klein_gordon_laplacian_from_input(index: u32) -> f32 {
+    if (params.cols == 1u) {
+        return 0.0;
+    }
+    let previous = klein_gordon_previous_index(index);
+    let next = klein_gordon_next_index(index);
+    return input[previous] - 2.0 * input[index] + input[next];
+}
+
+// Forward aux layout: momentum[values], mass_squared[cols], source[cols].
+fn klein_gordon_forward_force_initial(index: u32) -> f32 {
+    let col = index % params.cols;
+    let mass = aux[params.values + col];
+    let source = aux[params.values + params.cols + col];
+    let field = input[index];
+    return params.porosity * klein_gordon_laplacian_from_input(index)
+        - mass * field
+        - params._pad2 * field * field * field
+        + source;
+}
+
+fn klein_gordon_forward_momentum_half(index: u32) -> f32 {
+    return params.saturation * aux[index]
+        + 0.5 * params.scalar * klein_gordon_forward_force_initial(index);
+}
+
+fn klein_gordon_forward_field(index: u32) -> f32 {
+    return input[index] + params.scalar * klein_gordon_forward_momentum_half(index);
+}
+
+fn klein_gordon_forward_force_final(index: u32) -> f32 {
+    let col = index % params.cols;
+    let mass = aux[params.values + col];
+    let source = aux[params.values + params.cols + col];
+    let field = klein_gordon_forward_field(index);
+    var laplacian = 0.0;
+    if (params.cols > 1u) {
+        let previous = klein_gordon_previous_index(index);
+        let next = klein_gordon_next_index(index);
+        laplacian = klein_gordon_forward_field(previous)
+            - 2.0 * field
+            + klein_gordon_forward_field(next);
+    }
+    return params.porosity * laplacian
+        - mass * field
+        - params._pad2 * field * field * field
+        + source;
+}
+
 @compute @workgroup_size(256)
 fn dynamic_klein_gordon_forward(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
-    if (idx < params.values) {
-        let col = idx % params.cols;
-        let wave = input[idx];
-        let mass = aux[col];
-        let spin = aux[params.cols + col];
-        let amplitude = tanh(wave);
-        let kg_coeff = 1.0 - params.scalar * params.saturation - params.scalar * params.scalar * mass;
-        let dirac_coeff = params.scalar * spin;
-        output[idx] = wave * kg_coeff + dirac_coeff * amplitude;
+    let index = global_id.x;
+    if (index < params.values) {
+        output[index] = klein_gordon_forward_field(index);
+        output[params.values + index] = params.saturation * (
+            klein_gordon_forward_momentum_half(index)
+            + 0.5 * params.scalar * klein_gordon_forward_force_final(index)
+        );
     }
+}
+
+// Backward aux layout: input_momentum[values], output_field[values],
+// grad_output_field[values], grad_output_momentum[values],
+// mass_squared[cols], source[cols].
+fn klein_gordon_backward_output_field(index: u32) -> f32 {
+    return aux[params.values + index];
+}
+
+fn klein_gordon_backward_grad_output_field(index: u32) -> f32 {
+    return aux[2u * params.values + index];
+}
+
+fn klein_gordon_backward_grad_output_momentum(index: u32) -> f32 {
+    return aux[3u * params.values + index];
+}
+
+fn klein_gordon_backward_mass_squared(index: u32) -> f32 {
+    let col = index % params.cols;
+    return aux[4u * params.values + col];
+}
+
+fn klein_gordon_backward_adjoint_force_final(index: u32) -> f32 {
+    return 0.5 * params.scalar * params.saturation
+        * klein_gordon_backward_grad_output_momentum(index);
+}
+
+fn klein_gordon_backward_adjoint_field_final(index: u32) -> f32 {
+    let field = klein_gordon_backward_output_field(index);
+    let adjoint = klein_gordon_backward_adjoint_force_final(index);
+    var laplacian_adjoint = 0.0;
+    if (params.cols > 1u) {
+        let previous = klein_gordon_previous_index(index);
+        let next = klein_gordon_next_index(index);
+        laplacian_adjoint = klein_gordon_backward_adjoint_force_final(previous)
+            - 2.0 * adjoint
+            + klein_gordon_backward_adjoint_force_final(next);
+    }
+    let curvature = klein_gordon_backward_mass_squared(index)
+        + 3.0 * params._pad2 * field * field;
+    return klein_gordon_backward_grad_output_field(index)
+        + params.porosity * laplacian_adjoint
+        - curvature * adjoint;
+}
+
+fn klein_gordon_backward_adjoint_momentum_half(index: u32) -> f32 {
+    return params.saturation * klein_gordon_backward_grad_output_momentum(index)
+        + params.scalar * klein_gordon_backward_adjoint_field_final(index);
+}
+
+fn klein_gordon_backward_adjoint_force_initial(index: u32) -> f32 {
+    return 0.5 * params.scalar * klein_gordon_backward_adjoint_momentum_half(index);
+}
+
+fn klein_gordon_backward_grad_field(index: u32) -> f32 {
+    let field = input[index];
+    let adjoint = klein_gordon_backward_adjoint_force_initial(index);
+    var laplacian_adjoint = 0.0;
+    if (params.cols > 1u) {
+        let previous = klein_gordon_previous_index(index);
+        let next = klein_gordon_next_index(index);
+        laplacian_adjoint = klein_gordon_backward_adjoint_force_initial(previous)
+            - 2.0 * adjoint
+            + klein_gordon_backward_adjoint_force_initial(next);
+    }
+    let curvature = klein_gordon_backward_mass_squared(index)
+        + 3.0 * params._pad2 * field * field;
+    return klein_gordon_backward_adjoint_field_final(index)
+        + params.porosity * laplacian_adjoint
+        - curvature * adjoint;
 }
 
 @compute @workgroup_size(256)
 fn dynamic_klein_gordon_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
-    if (idx < params.values) {
-        let col = idx % params.cols;
-        let wave = input[idx];
-        let grad = aux[idx];
-        let mass = aux[params.values + col];
-        let spin = aux[params.values + params.cols + col];
-        let amplitude = tanh(wave);
-        let sech2 = 1.0 - amplitude * amplitude;
-        let kg_coeff = 1.0 - params.scalar * params.saturation - params.scalar * params.scalar * mass;
-        let dirac_coeff = params.scalar * spin;
-        output[idx] = grad * (kg_coeff + dirac_coeff * sech2);
+    let index = global_id.x;
+    if (index < params.values) {
+        output[index] = klein_gordon_backward_grad_field(index);
+        output[params.values + index] = params.saturation
+            * klein_gordon_backward_adjoint_momentum_half(index);
     }
-    if (idx < params.cols) {
+    if (index < params.cols) {
         var mass_sum = 0.0;
-        var spin_sum = 0.0;
+        var source_sum = 0.0;
         var row = 0u;
         loop {
             if (row >= params.rows) {
                 break;
             }
-            let value_idx = row * params.cols + idx;
-            let wave = input[value_idx];
-            let grad = aux[value_idx];
-            mass_sum = mass_sum + grad * (-params.scalar * params.scalar * wave);
-            spin_sum = spin_sum + grad * (params.scalar * tanh(wave));
+            let value_index = row * params.cols + index;
+            let adjoint_final = klein_gordon_backward_adjoint_force_final(value_index);
+            let adjoint_initial = klein_gordon_backward_adjoint_force_initial(value_index);
+            mass_sum = mass_sum
+                - klein_gordon_backward_output_field(value_index) * adjoint_final
+                - input[value_index] * adjoint_initial;
+            source_sum = source_sum + adjoint_final + adjoint_initial;
             row = row + 1u;
         }
-        output[params.values + idx] = mass_sum;
-        output[params.values + params.cols + idx] = spin_sum;
+        output[2u * params.values + index] = mass_sum;
+        output[2u * params.values + params.cols + index] = source_sum;
     }
 }
 

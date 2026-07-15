@@ -11811,66 +11811,143 @@ mod tests {
             }
         }
 
+        let kg_momentum: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx * 5 + 2) % 19) as f32 * 0.013 - 0.09)
+            .collect();
         let kg_mass: Vec<f32> = (0..cols).map(|idx| 0.05 + idx as f32 * 0.017).collect();
-        let kg_spin: Vec<f32> = (0..cols)
+        let kg_source: Vec<f32> = (0..cols)
             .map(|idx| (idx as f32 * 0.19).sin() * 0.1)
             .collect();
         let kg_time_step = 0.2;
-        let kg_damping = 0.1;
-        let kg_forward = unwrap_ok(wgpu_dense::dynamic_klein_gordon_forward(
+        let kg_damping_half = (-0.5f32 * 0.1 * kg_time_step).exp();
+        let kg_laplacian_scale = 0.7f32 * 0.7;
+        let kg_self_coupling = 0.03;
+        let laplacian = |values: &[f32], idx: usize| {
+            if cols == 1 {
+                0.0
+            } else {
+                let col = idx % cols;
+                let row_start = idx - col;
+                let previous = row_start + if col == 0 { cols - 1 } else { col - 1 };
+                let next = row_start + if col + 1 == cols { 0 } else { col + 1 };
+                values[previous] - 2.0 * values[idx] + values[next]
+            }
+        };
+        let kg_force = |values: &[f32], idx: usize| {
+            let col = idx % cols;
+            let value = values[idx];
+            kg_laplacian_scale * laplacian(values, idx)
+                - kg_mass[col] * value
+                - kg_self_coupling * value * value * value
+                + kg_source[col]
+        };
+        let force_initial: Vec<f32> = (0..rows * cols).map(|idx| kg_force(&input, idx)).collect();
+        let momentum_half: Vec<f32> = kg_momentum
+            .iter()
+            .zip(&force_initial)
+            .map(|(momentum, force)| kg_damping_half * momentum + 0.5 * kg_time_step * force)
+            .collect();
+        let expected_field: Vec<f32> = input
+            .iter()
+            .zip(&momentum_half)
+            .map(|(field, momentum)| field + kg_time_step * momentum)
+            .collect();
+        let force_final: Vec<f32> = (0..rows * cols)
+            .map(|idx| kg_force(&expected_field, idx))
+            .collect();
+        let expected_momentum: Vec<f32> = momentum_half
+            .iter()
+            .zip(&force_final)
+            .map(|(momentum, force)| kg_damping_half * (momentum + 0.5 * kg_time_step * force))
+            .collect();
+        let (kg_field, kg_momentum_output) = unwrap_ok(wgpu_dense::dynamic_klein_gordon_forward(
             &input,
+            &kg_momentum,
             &kg_mass,
-            &kg_spin,
+            &kg_source,
             rows,
             cols,
             kg_time_step,
-            kg_damping,
+            kg_damping_half,
+            kg_laplacian_scale,
+            kg_self_coupling,
         ));
-        for r in 0..rows {
-            for c in 0..cols {
-                let idx = r * cols + c;
-                let wave = input[idx];
-                let amplitude = wave.tanh();
-                let kg_coeff =
-                    1.0 - kg_time_step * kg_damping - kg_time_step * kg_time_step * kg_mass[c];
-                let dirac_coeff = kg_time_step * kg_spin[c];
-                let expected = wave * kg_coeff + dirac_coeff * amplitude;
-                assert!((expected - kg_forward[idx]).abs() < 1e-6);
-            }
+        for (expected, actual) in expected_field.iter().zip(&kg_field) {
+            assert!((expected - actual).abs() < 2e-6);
+        }
+        for (expected, actual) in expected_momentum.iter().zip(&kg_momentum_output) {
+            assert!((expected - actual).abs() < 2e-6);
+        }
+
+        let kg_grad_momentum_output: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx * 3 + 1) % 11) as f32 * 0.017 - 0.07)
+            .collect();
+        let adjoint_force_final: Vec<f32> = kg_grad_momentum_output
+            .iter()
+            .map(|grad| 0.5 * kg_time_step * kg_damping_half * grad)
+            .collect();
+        let mut adjoint_field_final = rhs.clone();
+        for idx in 0..rows * cols {
+            let col = idx % cols;
+            adjoint_field_final[idx] += kg_laplacian_scale * laplacian(&adjoint_force_final, idx)
+                - (kg_mass[col]
+                    + 3.0 * kg_self_coupling * expected_field[idx] * expected_field[idx])
+                    * adjoint_force_final[idx];
+        }
+        let adjoint_momentum_half: Vec<f32> = kg_grad_momentum_output
+            .iter()
+            .zip(&adjoint_field_final)
+            .map(|(grad, adjoint)| kg_damping_half * grad + kg_time_step * adjoint)
+            .collect();
+        let adjoint_force_initial: Vec<f32> = adjoint_momentum_half
+            .iter()
+            .map(|adjoint| 0.5 * kg_time_step * adjoint)
+            .collect();
+        let mut expected_grad_field = adjoint_field_final.clone();
+        for idx in 0..rows * cols {
+            let col = idx % cols;
+            expected_grad_field[idx] += kg_laplacian_scale * laplacian(&adjoint_force_initial, idx)
+                - (kg_mass[col] + 3.0 * kg_self_coupling * input[idx] * input[idx])
+                    * adjoint_force_initial[idx];
+        }
+        let expected_grad_momentum: Vec<f32> = adjoint_momentum_half
+            .iter()
+            .map(|adjoint| kg_damping_half * adjoint)
+            .collect();
+        let mut expected_grad_mass = vec![0.0; cols];
+        let mut expected_grad_source = vec![0.0; cols];
+        for idx in 0..rows * cols {
+            let col = idx % cols;
+            expected_grad_mass[col] += -expected_field[idx] * adjoint_force_final[idx]
+                - input[idx] * adjoint_force_initial[idx];
+            expected_grad_source[col] += adjoint_force_final[idx] + adjoint_force_initial[idx];
         }
         let kg_grad = unwrap_ok(wgpu_dense::dynamic_klein_gordon_backward(
             &input,
+            &kg_momentum,
+            &kg_field,
             &rhs,
+            &kg_grad_momentum_output,
             &kg_mass,
-            &kg_spin,
+            &kg_source,
             rows,
             cols,
             kg_time_step,
-            kg_damping,
+            kg_damping_half,
+            kg_laplacian_scale,
+            kg_self_coupling,
         ));
-        for r in 0..rows {
-            for c in 0..cols {
-                let idx = r * cols + c;
-                let wave = input[idx];
-                let amplitude = wave.tanh();
-                let sech2 = 1.0 - amplitude * amplitude;
-                let kg_coeff =
-                    1.0 - kg_time_step * kg_damping - kg_time_step * kg_time_step * kg_mass[c];
-                let dirac_coeff = kg_time_step * kg_spin[c];
-                let expected = rhs[idx] * (kg_coeff + dirac_coeff * sech2);
-                assert!((expected - kg_grad.0[idx]).abs() < 1e-6);
-            }
+        for (expected, actual) in expected_grad_field.iter().zip(&kg_grad.0) {
+            assert!((expected - actual).abs() < 3e-6);
         }
-        for c in 0..cols {
-            let mut expected_mass = 0.0f32;
-            let mut expected_spin = 0.0f32;
-            for r in 0..rows {
-                let idx = r * cols + c;
-                expected_mass += rhs[idx] * (-kg_time_step * kg_time_step * input[idx]);
-                expected_spin += rhs[idx] * (kg_time_step * input[idx].tanh());
-            }
-            assert!((expected_mass - kg_grad.1[c]).abs() < 1e-5);
-            assert!((expected_spin - kg_grad.2[c]).abs() < 1e-5);
+        for (expected, actual) in expected_grad_momentum.iter().zip(&kg_grad.1) {
+            assert!((expected - actual).abs() < 3e-6);
+        }
+        for (expected, actual) in expected_grad_mass.iter().zip(&kg_grad.2) {
+            assert!((expected - actual).abs() < 1e-5);
+        }
+        for (expected, actual) in expected_grad_source.iter().zip(&kg_grad.3) {
+            assert!((expected - actual).abs() < 1e-5);
         }
 
         let hj_potential: Vec<f32> = (0..cols)

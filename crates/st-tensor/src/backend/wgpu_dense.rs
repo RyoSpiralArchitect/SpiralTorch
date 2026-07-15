@@ -4032,6 +4032,47 @@ mod tests {
     }
 
     #[test]
+    fn klein_gordon_boundary_rejects_invalid_derived_values_before_dispatch() {
+        let invalid_damping =
+            dynamic_klein_gordon_forward(&[0.2], &[0.0], &[0.1], &[0.0], 1, 1, 0.1, 1.1, 0.0, 0.0)
+                .expect_err("damping half factor above one must fail before dispatch");
+        assert!(invalid_damping.contains("derived parameters"));
+
+        let non_finite_state = dynamic_klein_gordon_forward(
+            &[f32::NAN],
+            &[0.0],
+            &[0.1],
+            &[0.0],
+            1,
+            1,
+            0.1,
+            1.0,
+            0.0,
+            0.0,
+        )
+        .expect_err("non-finite field must fail before dispatch");
+        assert!(non_finite_state.contains("inputs must be finite"));
+
+        let invalid_backward = dynamic_klein_gordon_backward(
+            &[0.2],
+            &[0.0],
+            &[0.2],
+            &[1.0],
+            &[0.0],
+            &[0.1],
+            &[0.0],
+            1,
+            1,
+            0.1,
+            1.0,
+            0.0,
+            -0.1,
+        )
+        .expect_err("negative self-coupling must fail before dispatch");
+        assert!(invalid_backward.contains("derived parameters"));
+    }
+
+    #[test]
     fn matmul_shader_wgsl_is_valid() {
         let key = PipelineKey::new(
             ScalarType::F32,
@@ -6575,120 +6616,209 @@ pub fn row_affine(
     )
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn dynamic_klein_gordon_forward(
-    input: &[f32],
-    mass: &[f32],
-    spin: &[f32],
+    field: &[f32],
+    momentum: &[f32],
+    mass_squared: &[f32],
+    source: &[f32],
     rows: usize,
     cols: usize,
     time_step: f32,
-    damping: f32,
-) -> Result<Vec<f32>, String> {
+    damping_half_factor: f32,
+    laplacian_scale: f32,
+    self_coupling: f32,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
-        checked_tensor_util_shape("dynamic_klein_gordon_forward", input, rows, cols)?;
-    if mass.len() != cols {
+        checked_tensor_util_shape("dynamic_klein_gordon_forward", field, rows, cols)?;
+    if momentum.len() != volume {
         return Err(format!(
-            "dynamic_klein_gordon_forward mass length mismatch: expected {cols} elements, got {}",
-            mass.len()
+            "dynamic_klein_gordon_forward momentum length mismatch: expected {volume} elements, got {}",
+            momentum.len()
         ));
     }
-    if spin.len() != cols {
+    if mass_squared.len() != cols {
         return Err(format!(
-            "dynamic_klein_gordon_forward spin length mismatch: expected {cols} elements, got {}",
-            spin.len()
+            "dynamic_klein_gordon_forward mass-squared length mismatch: expected {cols} elements, got {}",
+            mass_squared.len()
         ));
     }
-    if !time_step.is_finite() || !damping.is_finite() {
-        return Err("dynamic_klein_gordon_forward parameters must be finite".into());
+    if source.len() != cols {
+        return Err(format!(
+            "dynamic_klein_gordon_forward source length mismatch: expected {cols} elements, got {}",
+            source.len()
+        ));
     }
-    let mut aux = Vec::with_capacity(cols * 2);
-    aux.extend_from_slice(mass);
-    aux.extend_from_slice(spin);
+    if !field.iter().all(|value| value.is_finite())
+        || !momentum.iter().all(|value| value.is_finite())
+        || !mass_squared.iter().all(|value| value.is_finite())
+        || !source.iter().all(|value| value.is_finite())
+    {
+        return Err("dynamic_klein_gordon_forward inputs must be finite".into());
+    }
+    if !time_step.is_finite()
+        || time_step <= 0.0
+        || !damping_half_factor.is_finite()
+        || !(0.0..=1.0).contains(&damping_half_factor)
+        || !laplacian_scale.is_finite()
+        || laplacian_scale < 0.0
+        || !self_coupling.is_finite()
+        || self_coupling < 0.0
+    {
+        return Err("dynamic_klein_gordon_forward derived parameters are invalid".into());
+    }
+    let aux_elements = cols
+        .checked_mul(2)
+        .and_then(|parameter_values| volume.checked_add(parameter_values))
+        .ok_or_else(|| "dynamic_klein_gordon_forward aux volume exceeds usize range".to_string())?;
+    let mut aux = Vec::with_capacity(aux_elements);
+    aux.extend_from_slice(momentum);
+    aux.extend_from_slice(mass_squared);
+    aux.extend_from_slice(source);
+    let output_elements = volume.checked_mul(2).ok_or_else(|| {
+        "dynamic_klein_gordon_forward output volume exceeds usize range".to_string()
+    })?;
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
-    tensor_util_internal(
-        input,
+    let packed = tensor_util_internal(
+        field,
         Some(aux.as_slice()),
         rows,
         cols,
-        volume,
+        output_elements,
         time_step,
-        damping,
-        0.0,
-        0.0,
+        damping_half_factor,
+        laplacian_scale,
+        self_coupling,
         ctx.tensor_util_dynamic_klein_gordon_forward_pipeline
             .clone(),
         workgroups,
         "dynamic_klein_gordon_forward",
-    )
+    )?;
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_klein_gordon_forward produced non-finite output".into());
+    }
+    Ok((packed[..volume].to_vec(), packed[volume..].to_vec()))
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn dynamic_klein_gordon_backward(
-    input: &[f32],
-    grad_output: &[f32],
-    mass: &[f32],
-    spin: &[f32],
+    field: &[f32],
+    momentum: &[f32],
+    output_field: &[f32],
+    grad_output_field: &[f32],
+    grad_output_momentum: &[f32],
+    mass_squared: &[f32],
+    source: &[f32],
     rows: usize,
     cols: usize,
     time_step: f32,
-    damping: f32,
-) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    damping_half_factor: f32,
+    laplacian_scale: f32,
+    self_coupling: f32,
+) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>), String> {
     let (volume, _rows_u32, _cols_u32, volume_u32) =
-        checked_tensor_util_shape("dynamic_klein_gordon_backward", input, rows, cols)?;
-    if grad_output.len() != volume {
+        checked_tensor_util_shape("dynamic_klein_gordon_backward", field, rows, cols)?;
+    for (name, values) in [
+        ("momentum", momentum),
+        ("output field", output_field),
+        ("field gradient", grad_output_field),
+        ("momentum gradient", grad_output_momentum),
+    ] {
+        if values.len() != volume {
+            return Err(format!(
+                "dynamic_klein_gordon_backward {name} length mismatch: expected {volume} elements, got {}",
+                values.len()
+            ));
+        }
+    }
+    if mass_squared.len() != cols {
         return Err(format!(
-            "dynamic_klein_gordon_backward grad length mismatch: expected {volume} elements, got {}",
-            grad_output.len()
+            "dynamic_klein_gordon_backward mass-squared length mismatch: expected {cols} elements, got {}",
+            mass_squared.len()
         ));
     }
-    if mass.len() != cols {
+    if source.len() != cols {
         return Err(format!(
-            "dynamic_klein_gordon_backward mass length mismatch: expected {cols} elements, got {}",
-            mass.len()
+            "dynamic_klein_gordon_backward source length mismatch: expected {cols} elements, got {}",
+            source.len()
         ));
     }
-    if spin.len() != cols {
-        return Err(format!(
-            "dynamic_klein_gordon_backward spin length mismatch: expected {cols} elements, got {}",
-            spin.len()
-        ));
+    if [
+        field,
+        momentum,
+        output_field,
+        grad_output_field,
+        grad_output_momentum,
+        mass_squared,
+        source,
+    ]
+    .iter()
+    .any(|values| values.iter().any(|value| !value.is_finite()))
+    {
+        return Err("dynamic_klein_gordon_backward inputs must be finite".into());
     }
-    if !time_step.is_finite() || !damping.is_finite() {
-        return Err("dynamic_klein_gordon_backward parameters must be finite".into());
+    if !time_step.is_finite()
+        || time_step <= 0.0
+        || !damping_half_factor.is_finite()
+        || !(0.0..=1.0).contains(&damping_half_factor)
+        || !laplacian_scale.is_finite()
+        || laplacian_scale < 0.0
+        || !self_coupling.is_finite()
+        || self_coupling < 0.0
+    {
+        return Err("dynamic_klein_gordon_backward derived parameters are invalid".into());
     }
-    let mut aux = Vec::with_capacity(volume + cols * 2);
-    aux.extend_from_slice(grad_output);
-    aux.extend_from_slice(mass);
-    aux.extend_from_slice(spin);
+    let aux_elements = volume
+        .checked_mul(4)
+        .and_then(|value| {
+            cols.checked_mul(2)
+                .and_then(|parameter_values| value.checked_add(parameter_values))
+        })
+        .ok_or_else(|| {
+            "dynamic_klein_gordon_backward aux volume exceeds usize range".to_string()
+        })?;
+    let mut aux = Vec::with_capacity(aux_elements);
+    aux.extend_from_slice(momentum);
+    aux.extend_from_slice(output_field);
+    aux.extend_from_slice(grad_output_field);
+    aux.extend_from_slice(grad_output_momentum);
+    aux.extend_from_slice(mass_squared);
+    aux.extend_from_slice(source);
     let output_elements = volume
-        .checked_add(cols.checked_mul(2).ok_or_else(|| {
-            "dynamic_klein_gordon_backward output volume exceeds usize range".to_string()
-        })?)
+        .checked_mul(2)
+        .and_then(|value| {
+            cols.checked_mul(2)
+                .and_then(|parameter_values| value.checked_add(parameter_values))
+        })
         .ok_or_else(|| {
             "dynamic_klein_gordon_backward output volume exceeds usize range".to_string()
         })?;
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
     let packed = tensor_util_internal(
-        input,
+        field,
         Some(aux.as_slice()),
         rows,
         cols,
         output_elements,
         time_step,
-        damping,
-        0.0,
-        0.0,
+        damping_half_factor,
+        laplacian_scale,
+        self_coupling,
         ctx.tensor_util_dynamic_klein_gordon_backward_pipeline
             .clone(),
         workgroups,
         "dynamic_klein_gordon_backward",
     )?;
-    let grad_input = packed[..volume].to_vec();
-    let grad_mass = packed[volume..volume + cols].to_vec();
-    let grad_spin = packed[volume + cols..volume + cols * 2].to_vec();
-    Ok((grad_input, grad_mass, grad_spin))
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("dynamic_klein_gordon_backward produced non-finite output".into());
+    }
+    let grad_field = packed[..volume].to_vec();
+    let grad_momentum = packed[volume..volume * 2].to_vec();
+    let grad_mass_squared = packed[volume * 2..volume * 2 + cols].to_vec();
+    let grad_source = packed[volume * 2 + cols..].to_vec();
+    Ok((grad_field, grad_momentum, grad_mass_squared, grad_source))
 }
 
 pub fn dynamic_hamilton_jacobi_forward(

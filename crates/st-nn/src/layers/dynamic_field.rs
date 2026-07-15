@@ -9,6 +9,18 @@ use crate::{PureResult, Tensor, TensorError};
 use rand::rngs::StdRng;
 use rand_distr::{Distribution, StandardNormal};
 use spiral_config::determinism;
+use st_core::dynamics::klein_gordon::{
+    apply_klein_gordon_step, audit_klein_gordon_backward, backward_klein_gordon_step,
+    validate_klein_gordon_state, KleinGordonBackwardAuditRequest, KleinGordonBackwardRequest,
+    KLEIN_GORDON_BACKWARD, KLEIN_GORDON_BOUNDARY, KLEIN_GORDON_CONTRACT_VERSION,
+    KLEIN_GORDON_EQUATION, KLEIN_GORDON_INTEGRATOR, KLEIN_GORDON_SEMANTIC_BACKEND,
+    KLEIN_GORDON_SEMANTIC_OWNER, KLEIN_GORDON_SOURCE_MODEL, KLEIN_GORDON_STATE,
+};
+#[cfg(feature = "wgpu")]
+use st_core::dynamics::klein_gordon::{audit_klein_gordon_step, KleinGordonAuditRequest};
+pub use st_core::dynamics::klein_gordon::{
+    KleinGordonAudit, KleinGordonBackwardAudit, KleinGordonConfig,
+};
 use st_core::dynamics::stochastic_schrodinger::{
     apply_stochastic_schrodinger_step, audit_stochastic_schrodinger_backward,
     backward_stochastic_schrodinger_step, validate_stochastic_schrodinger_state,
@@ -66,6 +78,19 @@ struct StochasticSchrodingerRouteMeta {
     config: StochasticSchrodingerConfig,
     audit: Option<StochasticSchrodingerAudit>,
     backward_audit: Option<StochasticSchrodingerBackwardAudit>,
+}
+
+#[derive(Clone, Copy)]
+struct KleinGordonRouteMeta {
+    config: KleinGordonConfig,
+    audit: Option<KleinGordonAudit>,
+    backward_audit: Option<KleinGordonBackwardAudit>,
+}
+
+#[derive(Clone, Copy)]
+enum DynamicFieldContractMeta {
+    KleinGordon(KleinGordonRouteMeta),
+    StochasticSchrodinger(StochasticSchrodingerRouteMeta),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -141,11 +166,58 @@ fn emit_stochastic_schrodinger_route_meta(
         gradient_reduction_backend,
         gradient_scale_backend,
         fallback,
-        Some(StochasticSchrodingerRouteMeta {
-            config,
-            audit,
-            backward_audit,
-        }),
+        Some(DynamicFieldContractMeta::StochasticSchrodinger(
+            StochasticSchrodingerRouteMeta {
+                config,
+                audit,
+                backward_audit,
+            },
+        )),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_klein_gordon_route_meta(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    estimated_ops_per_value: usize,
+    backward: bool,
+    gradient_scale: Option<f32>,
+    backend: &'static str,
+    requested_backend: &'static str,
+    kernel: &'static str,
+    input_gradient_backend: Option<&'static str>,
+    gradient_reduction_backend: Option<&'static str>,
+    gradient_scale_backend: Option<&'static str>,
+    fallback: Option<String>,
+    config: KleinGordonConfig,
+    audit: Option<KleinGordonAudit>,
+    backward_audit: Option<KleinGordonBackwardAudit>,
+) {
+    emit_dynamic_field_route_meta_inner(
+        op_name,
+        "klein_gordon",
+        rows,
+        cols,
+        2,
+        estimated_ops_per_value,
+        backward,
+        gradient_scale,
+        backend,
+        requested_backend,
+        kernel,
+        input_gradient_backend,
+        gradient_reduction_backend,
+        gradient_scale_backend,
+        fallback,
+        Some(DynamicFieldContractMeta::KleinGordon(
+            KleinGordonRouteMeta {
+                config,
+                audit,
+                backward_audit,
+            },
+        )),
     );
 }
 
@@ -166,7 +238,7 @@ fn emit_dynamic_field_route_meta_inner(
     gradient_reduction_backend: Option<&'static str>,
     gradient_scale_backend: Option<&'static str>,
     fallback: Option<String>,
-    stochastic: Option<StochasticSchrodingerRouteMeta>,
+    contract: Option<DynamicFieldContractMeta>,
 ) {
     emit_tensor_op(op_name, &[rows, cols], &[rows, cols]);
     emit_tensor_op_meta(op_name, || {
@@ -223,84 +295,191 @@ fn emit_dynamic_field_route_meta_inner(
                 );
             }
         }
-        if let (Some(map), Some(stochastic)) = (data.as_object_mut(), stochastic) {
-            let config = stochastic.config;
-            map.insert(
-                "contract_version".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_CONTRACT_VERSION),
-            );
-            map.insert(
-                "semantic_owner".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER),
-            );
-            map.insert(
-                "semantic_backend".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND),
-            );
-            map.insert(
-                "integrator".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_INTEGRATOR),
-            );
-            map.insert(
-                "stochastic_calculus".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_CALCULUS),
-            );
-            map.insert(
-                "hamiltonian".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_HAMILTONIAN),
-            );
-            map.insert(
-                "noise_model".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_NOISE_MODEL),
-            );
-            map.insert(
-                "open_system_mode".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_OPEN_SYSTEM_MODE),
-            );
-            map.insert(
-                "output_observable".to_string(),
-                serde_json::json!(STOCHASTIC_SCHRODINGER_OUTPUT_OBSERVABLE),
-            );
-            map.insert(
-                "time_step".to_string(),
-                serde_json::json!(config.time_step()),
-            );
-            map.insert(
-                "hopping_rate".to_string(),
-                serde_json::json!(config.hopping_rate()),
-            );
-            map.insert(
-                "loss_rate".to_string(),
-                serde_json::json!(config.loss_rate()),
-            );
-            map.insert(
-                "decoherence_rate".to_string(),
-                serde_json::json!(config.loss_rate()),
-            );
-            map.insert(
-                "noise_scale".to_string(),
-                serde_json::json!(config.noise_scale()),
-            );
-            map.insert("audit".to_string(), serde_json::json!(stochastic.audit));
-            map.insert(
-                "backward_audit".to_string(),
-                serde_json::json!(stochastic.backward_audit),
-            );
+        if let (Some(map), Some(contract)) = (data.as_object_mut(), contract) {
+            match contract {
+                DynamicFieldContractMeta::KleinGordon(klein_gordon) => {
+                    let config = klein_gordon.config;
+                    map.insert(
+                        "contract_version".to_string(),
+                        serde_json::json!(KLEIN_GORDON_CONTRACT_VERSION),
+                    );
+                    map.insert(
+                        "semantic_owner".to_string(),
+                        serde_json::json!(KLEIN_GORDON_SEMANTIC_OWNER),
+                    );
+                    map.insert(
+                        "semantic_backend".to_string(),
+                        serde_json::json!(KLEIN_GORDON_SEMANTIC_BACKEND),
+                    );
+                    map.insert(
+                        "equation".to_string(),
+                        serde_json::json!(KLEIN_GORDON_EQUATION),
+                    );
+                    map.insert(
+                        "integrator".to_string(),
+                        serde_json::json!(KLEIN_GORDON_INTEGRATOR),
+                    );
+                    map.insert(
+                        "boundary".to_string(),
+                        serde_json::json!(KLEIN_GORDON_BOUNDARY),
+                    );
+                    map.insert(
+                        "phase_space_state".to_string(),
+                        serde_json::json!(KLEIN_GORDON_STATE),
+                    );
+                    map.insert(
+                        "source_model".to_string(),
+                        serde_json::json!(KLEIN_GORDON_SOURCE_MODEL),
+                    );
+                    map.insert(
+                        "backward_contract".to_string(),
+                        serde_json::json!(KLEIN_GORDON_BACKWARD),
+                    );
+                    map.insert(
+                        "time_step".to_string(),
+                        serde_json::json!(config.time_step()),
+                    );
+                    map.insert("damping".to_string(), serde_json::json!(config.damping()));
+                    map.insert(
+                        "wave_speed".to_string(),
+                        serde_json::json!(config.wave_speed()),
+                    );
+                    map.insert(
+                        "lattice_spacing".to_string(),
+                        serde_json::json!(config.lattice_spacing()),
+                    );
+                    map.insert(
+                        "self_coupling".to_string(),
+                        serde_json::json!(config.self_coupling()),
+                    );
+                    map.insert(
+                        "phase_space_output_values".to_string(),
+                        serde_json::json!(values.saturating_mul(2)),
+                    );
+                    map.insert("audit".to_string(), serde_json::json!(klein_gordon.audit));
+                    map.insert(
+                        "backward_audit".to_string(),
+                        serde_json::json!(klein_gordon.backward_audit),
+                    );
+                }
+                DynamicFieldContractMeta::StochasticSchrodinger(stochastic) => {
+                    let config = stochastic.config;
+                    map.insert(
+                        "contract_version".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_CONTRACT_VERSION),
+                    );
+                    map.insert(
+                        "semantic_owner".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER),
+                    );
+                    map.insert(
+                        "semantic_backend".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND),
+                    );
+                    map.insert(
+                        "integrator".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_INTEGRATOR),
+                    );
+                    map.insert(
+                        "stochastic_calculus".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_CALCULUS),
+                    );
+                    map.insert(
+                        "hamiltonian".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_HAMILTONIAN),
+                    );
+                    map.insert(
+                        "noise_model".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_NOISE_MODEL),
+                    );
+                    map.insert(
+                        "open_system_mode".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_OPEN_SYSTEM_MODE),
+                    );
+                    map.insert(
+                        "output_observable".to_string(),
+                        serde_json::json!(STOCHASTIC_SCHRODINGER_OUTPUT_OBSERVABLE),
+                    );
+                    map.insert(
+                        "time_step".to_string(),
+                        serde_json::json!(config.time_step()),
+                    );
+                    map.insert(
+                        "hopping_rate".to_string(),
+                        serde_json::json!(config.hopping_rate()),
+                    );
+                    map.insert(
+                        "loss_rate".to_string(),
+                        serde_json::json!(config.loss_rate()),
+                    );
+                    map.insert(
+                        "decoherence_rate".to_string(),
+                        serde_json::json!(config.loss_rate()),
+                    );
+                    map.insert(
+                        "noise_scale".to_string(),
+                        serde_json::json!(config.noise_scale()),
+                    );
+                    map.insert("audit".to_string(), serde_json::json!(stochastic.audit));
+                    map.insert(
+                        "backward_audit".to_string(),
+                        serde_json::json!(stochastic.backward_audit),
+                    );
+                }
+            }
         }
         data
     });
 }
 
-/// Propagates semantic amplitudes using a discrete Klein–Gordon style update
-/// blended with a Dirac spinor coupling. This treats the incoming activations as
-/// narrative field intensities and modulates them with a learnable mass/phase
-/// pair.
+fn klein_gordon_error(error: impl std::fmt::Display) -> TensorError {
+    TensorError::Generic(format!("Klein-Gordon contract failed: {error}"))
+}
+
+#[derive(Clone, Debug)]
+struct KleinGordonStepCache {
+    input_field: Tensor,
+    input_momentum: Tensor,
+    mass_squared: Tensor,
+    source: Tensor,
+    output_field: Tensor,
+    output_momentum: Tensor,
+    audit: KleinGordonAudit,
+    backward_audit: Option<KleinGordonBackwardAudit>,
+    grad_input_momentum: Option<Tensor>,
+}
+
+/// One canonical Klein-Gordon phase-space transition exposed as tensors.
+#[derive(Clone, Debug)]
+pub struct KleinGordonTensorStep {
+    pub field: Tensor,
+    pub momentum: Tensor,
+    pub audit: KleinGordonAudit,
+}
+
+/// Discrete-adjoint gradients for both components of the phase-space input.
+#[derive(Clone, Debug)]
+pub struct KleinGordonTensorBackward {
+    pub grad_field: Tensor,
+    pub grad_momentum: Tensor,
+    pub audit: KleinGordonBackwardAudit,
+}
+
+/// Audited damped Klein-Gordon propagation on a periodic feature lattice.
+///
+/// Rust core owns the second-order field equation, exact damping split,
+/// velocity-Verlet integration, stability gate, energy observation, and
+/// analytic discrete adjoint. The ordinary [`Module`] path starts each sample
+/// with zero momentum. [`KleinGordonPropagation::step_phase_space`] exposes the
+/// complete `(field, momentum)` transition for explicit recurrent evolution.
 #[derive(Debug)]
 pub struct KleinGordonPropagation {
+    // Compatibility keys preserve existing state dictionaries. Canonically
+    // these are signed mass-squared and a static scalar-condensate source.
     mass: Parameter,
     spinor: Parameter,
-    time_step: f32,
-    damping: f32,
+    config: KleinGordonConfig,
+    last_step: RefCell<Option<KleinGordonStepCache>>,
 }
 
 impl KleinGordonPropagation {
@@ -311,67 +490,199 @@ impl KleinGordonPropagation {
         time_step: f32,
         damping: f32,
     ) -> PureResult<Self> {
+        let config = KleinGordonConfig::new(time_step, damping).map_err(klein_gordon_error)?;
+        Self::with_config(name, features, config)
+    }
+
+    /// Creates a layer from the versioned Rust-core phase-space contract.
+    pub fn with_config(
+        name: impl Into<String>,
+        features: usize,
+        config: KleinGordonConfig,
+    ) -> PureResult<Self> {
         if features == 0 {
             return Err(TensorError::InvalidDimensions {
                 rows: 1,
                 cols: features,
             });
         }
-        if !time_step.is_finite() || time_step <= 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "klein_gordon_time_step",
-            });
-        }
-        if !damping.is_finite() || damping < 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "klein_gordon_damping",
-            });
-        }
+        config.validate().map_err(klein_gordon_error)?;
         let name = name.into();
-        let mass = Tensor::from_fn(1, features, |_r, c| 0.05 + (c as f32 * 0.01))?;
-        let spinor = Tensor::from_fn(1, features, |_r, c| ((c as f32 + 1.0) * 0.37).sin() * 0.1)?;
+        let mass_squared = Tensor::from_fn(1, features, |_r, c| 0.05 + c as f32 * 0.01)?;
+        let source = Tensor::from_fn(1, features, |_r, c| ((c as f32 + 1.0) * 0.37).sin() * 0.1)?;
         Ok(Self {
-            mass: Parameter::new(format!("{name}::mass"), mass),
-            spinor: Parameter::new(format!("{name}::spinor"), spinor),
-            time_step,
-            damping,
+            mass: Parameter::new(format!("{name}::mass"), mass_squared),
+            spinor: Parameter::new(format!("{name}::spinor"), source),
+            config,
+            last_step: RefCell::new(None),
         })
     }
 
-    /// Returns the configured time step used during propagation.
+    pub fn with_wave_speed(mut self, wave_speed: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_wave_speed(wave_speed)
+            .map_err(klein_gordon_error)?;
+        Ok(self)
+    }
+
+    pub fn with_lattice_spacing(mut self, lattice_spacing: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_lattice_spacing(lattice_spacing)
+            .map_err(klein_gordon_error)?;
+        Ok(self)
+    }
+
+    pub fn with_self_coupling(mut self, self_coupling: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_self_coupling(self_coupling)
+            .map_err(klein_gordon_error)?;
+        Ok(self)
+    }
+
+    pub fn config(&self) -> KleinGordonConfig {
+        self.config
+    }
+
     pub fn time_step(&self) -> f32 {
-        self.time_step
+        self.config.time_step()
     }
 
-    /// Returns the configured damping factor.
     pub fn damping(&self) -> f32 {
-        self.damping
+        self.config.damping()
     }
 
-    /// Returns a reference to the internal mass parameter.
-    pub fn mass(&self) -> &Parameter {
+    pub fn wave_speed(&self) -> f32 {
+        self.config.wave_speed()
+    }
+
+    pub fn lattice_spacing(&self) -> f32 {
+        self.config.lattice_spacing()
+    }
+
+    pub fn self_coupling(&self) -> f32 {
+        self.config.self_coupling()
+    }
+
+    /// Canonical accessor for the learned signed mass-squared coefficient.
+    pub fn mass_squared(&self) -> &Parameter {
         &self.mass
     }
 
-    /// Returns a reference to the internal spinor parameter.
-    pub fn spinor(&self) -> &Parameter {
+    /// Compatibility alias for [`KleinGordonPropagation::mass_squared`].
+    pub fn mass(&self) -> &Parameter {
+        self.mass_squared()
+    }
+
+    /// Canonical accessor for the learned static scalar-condensate source.
+    pub fn source(&self) -> &Parameter {
         &self.spinor
     }
-}
 
-impl Module for KleinGordonPropagation {
-    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let (rows, cols) = input.shape();
+    /// Compatibility alias for [`KleinGordonPropagation::source`].
+    pub fn spinor(&self) -> &Parameter {
+        self.source()
+    }
+
+    pub fn latest_momentum(&self) -> Option<Tensor> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .map(|step| step.output_momentum.clone())
+    }
+
+    pub fn latest_audit(&self) -> Option<KleinGordonAudit> {
+        self.last_step.borrow().as_ref().map(|step| step.audit)
+    }
+
+    pub fn latest_backward_audit(&self) -> Option<KleinGordonBackwardAudit> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .and_then(|step| step.backward_audit)
+    }
+
+    pub fn latest_input_momentum_gradient(&self) -> Option<Tensor> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .and_then(|step| step.grad_input_momentum.clone())
+    }
+
+    fn commit_step(
+        &self,
+        input_field: &Tensor,
+        input_momentum: &Tensor,
+        output_field: Vec<f32>,
+        output_momentum: Vec<f32>,
+        audit: KleinGordonAudit,
+    ) -> PureResult<KleinGordonTensorStep> {
+        let (rows, cols) = input_field.shape();
+        let output_field = Tensor::from_vec(rows, cols, output_field)?;
+        let output_momentum = Tensor::from_vec(rows, cols, output_momentum)?;
+        self.last_step.borrow_mut().replace(KleinGordonStepCache {
+            input_field: input_field.clone(),
+            input_momentum: input_momentum.clone(),
+            mass_squared: self.mass.value().clone(),
+            source: self.spinor.value().clone(),
+            output_field: output_field.clone(),
+            output_momentum: output_momentum.clone(),
+            audit,
+            backward_audit: None,
+            grad_input_momentum: None,
+        });
+        Ok(KleinGordonTensorStep {
+            field: output_field,
+            momentum: output_momentum,
+            audit,
+        })
+    }
+
+    fn commit_backward(&self, audit: KleinGordonBackwardAudit, grad_input_momentum: &Tensor) {
+        if let Some(step) = self.last_step.borrow_mut().as_mut() {
+            step.backward_audit = Some(audit);
+            step.grad_input_momentum = Some(grad_input_momentum.clone());
+        }
+    }
+
+    /// Advances an explicit canonical `(field, momentum)` state by one step.
+    pub fn step_phase_space(
+        &self,
+        field: &Tensor,
+        momentum: &Tensor,
+    ) -> PureResult<KleinGordonTensorStep> {
+        let (rows, cols) = field.shape();
+        if momentum.shape() != field.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: momentum.shape(),
+                right: field.shape(),
+            });
+        }
         if cols != self.mass.value().shape().1 {
             return Err(TensorError::ShapeMismatch {
-                left: input.shape(),
+                left: field.shape(),
                 right: self.mass.value().shape(),
             });
         }
-        let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let volume = rows.checked_mul(cols).ok_or_else(|| {
+            TensorError::Generic("Klein-Gordon tensor volume overflow".to_string())
+        })?;
+        let mass_squared = self.mass.value().data();
+        let source = self.spinor.value().data();
+        validate_klein_gordon_state(
+            field.data(),
+            momentum.data(),
+            mass_squared,
+            source,
+            rows,
+            cols,
+            self.config,
+        )
+        .map_err(klein_gordon_error)?;
+        let route_backend = current_tensor_util_backend_for_values(volume);
         let requested_backend = tensor_util_backend_label(route_backend);
-        let mass = self.mass.value().data();
-        let spin = self.spinor.value().data();
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -382,25 +693,52 @@ impl Module for KleinGordonPropagation {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_klein_gordon_forward(
-                    input.data(),
-                    mass,
-                    spin,
+                let wgpu_step = wgpu_dense::dynamic_klein_gordon_forward(
+                    field.data(),
+                    momentum.data(),
+                    mass_squared,
+                    source,
                     rows,
                     cols,
-                    self.time_step,
-                    self.damping,
-                ) {
-                    Ok(buffer) => {
-                        validate_finite_slice("dynamic_klein_gordon_forward_output", &buffer)?;
-                        let output = Tensor::from_vec(rows, cols, buffer)?;
-                        emit_dynamic_field_route_meta(
+                    self.config.time_step(),
+                    self.config.damping_half_factor(),
+                    self.config.laplacian_scale(),
+                    self.config.self_coupling(),
+                )
+                .and_then(|(output_field, output_momentum)| {
+                    audit_klein_gordon_step(KleinGordonAuditRequest {
+                        field: field.data(),
+                        momentum: momentum.data(),
+                        mass_squared,
+                        source,
+                        output_field: &output_field,
+                        output_momentum: &output_momentum,
+                        rows,
+                        features: cols,
+                        config: self.config,
+                    })
+                    .map(|audit| (output_field, output_momentum, audit))
+                    .map_err(|error| format!("Rust semantic audit failed: {error}"))
+                });
+                match wgpu_step {
+                    Ok((output_field, output_momentum, audit)) => {
+                        validate_finite_slice("dynamic_klein_gordon_forward_field", &output_field)?;
+                        validate_finite_slice(
+                            "dynamic_klein_gordon_forward_momentum",
+                            &output_momentum,
+                        )?;
+                        let step = self.commit_step(
+                            field,
+                            momentum,
+                            output_field,
+                            output_momentum,
+                            audit,
+                        )?;
+                        emit_klein_gordon_route_meta(
                             "dynamic_field_klein_gordon_forward",
-                            "klein_gordon",
                             rows,
                             cols,
-                            2,
-                            10,
+                            52,
                             false,
                             None,
                             "wgpu_dense",
@@ -410,8 +748,11 @@ impl Module for KleinGordonPropagation {
                             None,
                             None,
                             None,
+                            self.config,
+                            Some(audit),
+                            None,
                         );
-                        return Ok(output);
+                        return Ok(step);
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(dynamic_field_wgpu_error(
@@ -426,36 +767,29 @@ impl Module for KleinGordonPropagation {
             }
         }
 
-        let mut output = Tensor::zeros(rows, cols)?;
-        let time_step = self.time_step;
-        let damping = self.damping;
-        {
-            let input_buf = input.data();
-            let out_buf = output.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let wave = input_buf[idx];
-                    let amplitude = wave.tanh();
-                    let kg_coeff = 1.0 - time_step * damping - time_step * time_step * mass[c];
-                    let dirac_coeff = time_step * spin[c];
-                    out_buf[idx] = wave * kg_coeff + dirac_coeff * amplitude;
-                }
-            }
-        }
-        emit_dynamic_field_route_meta(
-            "dynamic_field_klein_gordon_forward",
-            "klein_gordon",
+        let step = apply_klein_gordon_step(
+            field.data(),
+            momentum.data(),
+            mass_squared,
+            source,
             rows,
             cols,
-            2,
-            10,
+            self.config,
+        )
+        .map_err(klein_gordon_error)?;
+        let audit = step.audit;
+        let tensor_step =
+            self.commit_step(field, momentum, step.field, step.momentum, step.audit)?;
+        emit_klein_gordon_route_meta(
+            "dynamic_field_klein_gordon_forward",
+            rows,
+            cols,
+            52,
             false,
             None,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.apply_klein_gordon_step",
             None,
             None,
             None,
@@ -469,26 +803,83 @@ impl Module for KleinGordonPropagation {
                     None
                 }
             },
+            self.config,
+            Some(audit),
+            None,
         );
-        Ok(output)
+        Ok(tensor_step)
     }
 
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let (rows, cols) = input.shape();
-        if grad_output.shape() != (rows, cols) {
+    /// Runs the complete discrete adjoint for a cached phase-space transition.
+    pub fn backward_phase_space(
+        &mut self,
+        field: &Tensor,
+        momentum: &Tensor,
+        grad_output_field: &Tensor,
+        grad_output_momentum: &Tensor,
+    ) -> PureResult<KleinGordonTensorBackward> {
+        let cache = self
+            .last_step
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(TensorError::InvalidValue {
+                label: "klein_gordon_forward_cache",
+            })?;
+        if field.shape() != cache.input_field.shape() {
             return Err(TensorError::ShapeMismatch {
-                left: grad_output.shape(),
-                right: (rows, cols),
+                left: field.shape(),
+                right: cache.input_field.shape(),
             });
         }
+        if momentum.shape() != cache.input_momentum.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: momentum.shape(),
+                right: cache.input_momentum.shape(),
+            });
+        }
+        if grad_output_field.shape() != cache.output_field.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output_field.shape(),
+                right: cache.output_field.shape(),
+            });
+        }
+        if grad_output_momentum.shape() != cache.output_momentum.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output_momentum.shape(),
+                right: cache.output_momentum.shape(),
+            });
+        }
+        if field.data() != cache.input_field.data() {
+            return Err(TensorError::InvalidValue {
+                label: "klein_gordon_forward_field_mismatch",
+            });
+        }
+        if momentum.data() != cache.input_momentum.data() {
+            return Err(TensorError::InvalidValue {
+                label: "klein_gordon_forward_momentum_mismatch",
+            });
+        }
+        let (rows, cols) = field.shape();
         let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend = tensor_util_backend_label(route_backend);
         let scale_backend = current_tensor_util_backend_for_values(cols);
         let scale_backend_label = tensor_util_backend_label(scale_backend);
-        let time_step = self.time_step;
-        let damping = self.damping;
-        let mass = self.mass.value().data();
-        let spin = self.spinor.value().data();
+        // The discrete adjoint belongs to the exact parameters used by the
+        // cached forward, even if an external caller mutated live parameters.
+        let mass_squared = cache.mass_squared.data();
+        let source = cache.source.data();
+        let core_request = KleinGordonBackwardRequest {
+            field: field.data(),
+            momentum: momentum.data(),
+            mass_squared,
+            source,
+            grad_output_field: grad_output_field.data(),
+            grad_output_momentum: grad_output_momentum.data(),
+            rows,
+            features: cols,
+            config: self.config,
+        };
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -499,51 +890,73 @@ impl Module for KleinGordonPropagation {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_klein_gordon_backward(
-                    input.data(),
-                    grad_output.data(),
-                    mass,
-                    spin,
+                let wgpu_backward = wgpu_dense::dynamic_klein_gordon_backward(
+                    field.data(),
+                    momentum.data(),
+                    cache.output_field.data(),
+                    grad_output_field.data(),
+                    grad_output_momentum.data(),
+                    mass_squared,
+                    source,
                     rows,
                     cols,
-                    time_step,
-                    damping,
-                ) {
-                    Ok((grad_input_values, grad_mass_values, grad_spin_values)) => {
+                    self.config.time_step(),
+                    self.config.damping_half_factor(),
+                    self.config.laplacian_scale(),
+                    self.config.self_coupling(),
+                )
+                .and_then(
+                    |(grad_field, grad_momentum, grad_mass_squared, grad_source)| {
+                        audit_klein_gordon_backward(KleinGordonBackwardAuditRequest {
+                            request: core_request,
+                            grad_field: &grad_field,
+                            grad_momentum: &grad_momentum,
+                            grad_mass_squared: &grad_mass_squared,
+                            grad_source: &grad_source,
+                        })
+                        .map(|audit| {
+                            (
+                                grad_field,
+                                grad_momentum,
+                                grad_mass_squared,
+                                grad_source,
+                                audit,
+                            )
+                        })
+                        .map_err(|error| format!("Rust semantic backward audit failed: {error}"))
+                    },
+                );
+                match wgpu_backward {
+                    Ok((grad_field, grad_momentum, grad_mass, grad_source, backward_audit)) => {
+                        validate_finite_slice("dynamic_klein_gordon_grad_field", &grad_field)?;
                         validate_finite_slice(
-                            "dynamic_klein_gordon_backward_grad_input",
-                            &grad_input_values,
+                            "dynamic_klein_gordon_grad_momentum",
+                            &grad_momentum,
                         )?;
-                        validate_finite_slice(
-                            "dynamic_klein_gordon_backward_grad_mass",
-                            &grad_mass_values,
-                        )?;
-                        validate_finite_slice(
-                            "dynamic_klein_gordon_backward_grad_spin",
-                            &grad_spin_values,
-                        )?;
-                        let grad_input = Tensor::from_vec(rows, cols, grad_input_values)?;
-                        let grad_mass = Tensor::from_vec(1, cols, grad_mass_values)?;
-                        let grad_spin = Tensor::from_vec(1, cols, grad_spin_values)?;
+                        validate_finite_slice("dynamic_klein_gordon_grad_mass", &grad_mass)?;
+                        validate_finite_slice("dynamic_klein_gordon_grad_source", &grad_source)?;
+                        let grad_field = Tensor::from_vec(rows, cols, grad_field)?;
+                        let grad_momentum = Tensor::from_vec(rows, cols, grad_momentum)?;
+                        let grad_mass = Tensor::from_vec(1, cols, grad_mass)?;
+                        let grad_source = Tensor::from_vec(1, cols, grad_source)?;
                         let gradient_scale = if rows > 0 {
                             let scale = 1.0 / rows as f32;
                             self.mass.accumulate_euclidean(
                                 &grad_mass.scale_with_backend(scale, scale_backend)?,
                             )?;
                             self.spinor.accumulate_euclidean(
-                                &grad_spin.scale_with_backend(scale, scale_backend)?,
+                                &grad_source.scale_with_backend(scale, scale_backend)?,
                             )?;
                             Some(scale)
                         } else {
                             None
                         };
-                        emit_dynamic_field_route_meta(
+                        self.commit_backward(backward_audit, &grad_momentum);
+                        emit_klein_gordon_route_meta(
                             "dynamic_field_klein_gordon_backward",
-                            "klein_gordon",
                             rows,
                             cols,
-                            2,
-                            16,
+                            88,
                             true,
                             gradient_scale,
                             "wgpu_dense",
@@ -553,8 +966,15 @@ impl Module for KleinGordonPropagation {
                             Some("wgpu"),
                             Some(scale_backend_label),
                             None,
+                            self.config,
+                            Some(cache.audit),
+                            Some(backward_audit),
                         );
-                        return Ok(grad_input);
+                        return Ok(KleinGordonTensorBackward {
+                            grad_field,
+                            grad_momentum,
+                            audit: backward_audit,
+                        });
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(dynamic_field_wgpu_error(
@@ -569,53 +989,40 @@ impl Module for KleinGordonPropagation {
             }
         }
 
-        let mut grad_input = Tensor::zeros(rows, cols)?;
-        let mut grad_mass = Tensor::zeros(1, cols)?;
-        let mut grad_spin = Tensor::zeros(1, cols)?;
-        {
-            let input_buf = input.data();
-            let grad_output_buf = grad_output.data();
-            let grad_input_buf = grad_input.data_mut();
-            let grad_mass_buf = grad_mass.data_mut();
-            let grad_spin_buf = grad_spin.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let wave = input_buf[idx];
-                    let amplitude = wave.tanh();
-                    let sech2 = 1.0 - amplitude * amplitude;
-                    let kg_coeff = 1.0 - time_step * damping - time_step * time_step * mass[c];
-                    let dirac_coeff = time_step * spin[c];
-                    let go = grad_output_buf[idx];
-                    grad_input_buf[idx] = go * (kg_coeff + dirac_coeff * sech2);
-                    grad_mass_buf[c] += go * (-time_step * time_step * wave);
-                    grad_spin_buf[c] += go * (time_step * amplitude);
-                }
-            }
-        }
+        let backward = backward_klein_gordon_step(core_request).map_err(klein_gordon_error)?;
+        let backward_audit = audit_klein_gordon_backward(KleinGordonBackwardAuditRequest {
+            request: core_request,
+            grad_field: &backward.grad_field,
+            grad_momentum: &backward.grad_momentum,
+            grad_mass_squared: &backward.grad_mass_squared,
+            grad_source: &backward.grad_source,
+        })
+        .map_err(klein_gordon_error)?;
+        let grad_field = Tensor::from_vec(rows, cols, backward.grad_field)?;
+        let grad_momentum = Tensor::from_vec(rows, cols, backward.grad_momentum)?;
+        let grad_mass = Tensor::from_vec(1, cols, backward.grad_mass_squared)?;
+        let grad_source = Tensor::from_vec(1, cols, backward.grad_source)?;
         let gradient_scale = if rows > 0 {
             let scale = 1.0 / rows as f32;
             self.mass
                 .accumulate_euclidean(&grad_mass.scale_with_backend(scale, scale_backend)?)?;
             self.spinor
-                .accumulate_euclidean(&grad_spin.scale_with_backend(scale, scale_backend)?)?;
+                .accumulate_euclidean(&grad_source.scale_with_backend(scale, scale_backend)?)?;
             Some(scale)
         } else {
             None
         };
-        emit_dynamic_field_route_meta(
+        self.commit_backward(backward_audit, &grad_momentum);
+        emit_klein_gordon_route_meta(
             "dynamic_field_klein_gordon_backward",
-            "klein_gordon",
             rows,
             cols,
-            2,
-            16,
+            88,
             true,
             gradient_scale,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.backward_klein_gordon_step",
             Some("cpu"),
             Some("cpu"),
             if gradient_scale.is_some() {
@@ -633,8 +1040,39 @@ impl Module for KleinGordonPropagation {
                     None
                 }
             },
+            self.config,
+            Some(cache.audit),
+            Some(backward_audit),
         );
-        Ok(grad_input)
+        Ok(KleinGordonTensorBackward {
+            grad_field,
+            grad_momentum,
+            audit: backward_audit,
+        })
+    }
+}
+
+impl Module for KleinGordonPropagation {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        let zero_momentum = Tensor::zeros(rows, cols)?;
+        Ok(self.step_phase_space(input, &zero_momentum)?.field)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let momentum = self
+            .last_step
+            .borrow()
+            .as_ref()
+            .map(|step| step.input_momentum.clone())
+            .ok_or(TensorError::InvalidValue {
+                label: "klein_gordon_forward_cache",
+            })?;
+        let (rows, cols) = grad_output.shape();
+        let zero_grad_momentum = Tensor::zeros(rows, cols)?;
+        Ok(self
+            .backward_phase_space(input, &momentum, grad_output, &zero_grad_momentum)?
+            .grad_field)
     }
 
     fn visit_parameters(
@@ -1573,6 +2011,129 @@ mod tests {
         let input = Tensor::from_vec(3, 4, vec![0.1; 12]).unwrap();
         let output = layer.forward(&input).unwrap();
         assert_eq!(output.shape(), input.shape());
+        assert_eq!(layer.latest_momentum().unwrap().shape(), input.shape());
+        let audit = layer.latest_audit().expect("Klein-Gordon audit");
+        assert!(audit.stability_margin > 0.0);
+        assert_eq!(audit.max_field_error, 0.0);
+    }
+
+    #[test]
+    fn klein_gordon_explicit_phase_space_and_adjoint_match_core() {
+        let input = Tensor::from_vec(2, 3, vec![0.2, -0.3, 0.1, -0.15, 0.25, 0.4]).unwrap();
+        let momentum = Tensor::from_vec(2, 3, vec![0.05, -0.02, 0.08, -0.04, 0.03, 0.01]).unwrap();
+        let grad_field = Tensor::from_vec(2, 3, vec![0.4, -0.2, 0.1, 0.3, 0.05, -0.25]).unwrap();
+        let grad_momentum =
+            Tensor::from_vec(2, 3, vec![0.03, -0.04, 0.02, 0.01, 0.05, -0.02]).unwrap();
+        let mut layer = KleinGordonPropagation::new("kg", 3, 0.08, 0.06)
+            .unwrap()
+            .with_wave_speed(0.7)
+            .unwrap()
+            .with_self_coupling(0.03)
+            .unwrap();
+        let step = layer.step_phase_space(&input, &momentum).unwrap();
+        assert_eq!(step.field.shape(), input.shape());
+        assert_eq!(step.momentum.shape(), input.shape());
+        let expected = backward_klein_gordon_step(KleinGordonBackwardRequest {
+            field: input.data(),
+            momentum: momentum.data(),
+            mass_squared: layer.mass_squared().value().data(),
+            source: layer.source().value().data(),
+            grad_output_field: grad_field.data(),
+            grad_output_momentum: grad_momentum.data(),
+            rows: 2,
+            features: 3,
+            config: layer.config(),
+        })
+        .unwrap();
+        let backward = layer
+            .backward_phase_space(&input, &momentum, &grad_field, &grad_momentum)
+            .unwrap();
+        for (observed, expected) in backward.grad_field.data().iter().zip(&expected.grad_field) {
+            assert_close(*observed, *expected);
+        }
+        for (observed, expected) in backward
+            .grad_momentum
+            .data()
+            .iter()
+            .zip(&expected.grad_momentum)
+        {
+            assert_close(*observed, *expected);
+        }
+        assert_eq!(backward.audit.max_grad_field_error, 0.0);
+        assert!(layer.latest_input_momentum_gradient().is_some());
+    }
+
+    #[test]
+    fn klein_gordon_backward_rejects_missing_or_stale_phase_state() {
+        let input = Tensor::from_vec(1, 2, vec![0.2, -0.1]).unwrap();
+        let grad = Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap();
+        let mut layer = KleinGordonPropagation::new("kg", 2, 0.1, 0.0).unwrap();
+        assert!(matches!(
+            layer.backward(&input, &grad),
+            Err(TensorError::InvalidValue {
+                label: "klein_gordon_forward_cache"
+            })
+        ));
+        let _ = layer.forward(&input).unwrap();
+        let stale = Tensor::from_vec(1, 2, vec![0.2, -0.11]).unwrap();
+        assert!(matches!(
+            layer.backward(&stale, &grad),
+            Err(TensorError::InvalidValue {
+                label: "klein_gordon_forward_field_mismatch"
+            })
+        ));
+    }
+
+    #[test]
+    fn klein_gordon_backward_uses_forward_parameter_snapshot() {
+        let input = Tensor::from_vec(1, 3, vec![0.2, -0.1, 0.35]).unwrap();
+        let grad = Tensor::from_vec(1, 3, vec![0.4, -0.25, 0.1]).unwrap();
+        let mut layer = KleinGordonPropagation::new("kg", 3, 0.1, 0.02).unwrap();
+        let mass = layer.mass_squared().value().data().to_vec();
+        let source = layer.source().value().data().to_vec();
+        let _ = layer.forward(&input).unwrap();
+        let expected = backward_klein_gordon_step(KleinGordonBackwardRequest {
+            field: input.data(),
+            momentum: &[0.0; 3],
+            mass_squared: &mass,
+            source: &source,
+            grad_output_field: grad.data(),
+            grad_output_momentum: &[0.0; 3],
+            rows: 1,
+            features: 3,
+            config: layer.config(),
+        })
+        .unwrap();
+        layer
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.value_mut().data_mut()[0] += 0.75;
+                Ok(())
+            })
+            .unwrap();
+        let observed = layer.backward(&input, &grad).unwrap();
+        for (observed, expected) in observed.data().iter().zip(&expected.grad_field) {
+            assert_close(*observed, *expected);
+        }
+        for (observed, expected) in layer
+            .mass_squared()
+            .gradient()
+            .unwrap()
+            .data()
+            .iter()
+            .zip(&expected.grad_mass_squared)
+        {
+            assert_close(*observed, *expected);
+        }
+        for (observed, expected) in layer
+            .source()
+            .gradient()
+            .unwrap()
+            .data()
+            .iter()
+            .zip(&expected.grad_source)
+        {
+            assert_close(*observed, *expected);
+        }
     }
 
     #[test]
@@ -1599,22 +2160,34 @@ mod tests {
         let grad = Tensor::from_vec(2, 2, vec![0.4, -0.1, 0.2, 0.5]).unwrap();
 
         let mut kg = KleinGordonPropagation::new("kg", 2, 0.2, 0.1).unwrap();
+        let _ = kg.forward(&input).unwrap();
+        let zero_momentum = vec![0.0; 4];
+        let zero_grad_momentum = vec![0.0; 4];
+        let expected_backward = backward_klein_gordon_step(KleinGordonBackwardRequest {
+            field: input.data(),
+            momentum: &zero_momentum,
+            mass_squared: kg.mass_squared().value().data(),
+            source: kg.source().value().data(),
+            grad_output_field: grad.data(),
+            grad_output_momentum: &zero_grad_momentum,
+            rows: 2,
+            features: 2,
+            config: kg.config(),
+        })
+        .unwrap();
         let grad_input = kg.backward(&input, &grad).unwrap();
         assert_eq!(grad_input.shape(), input.shape());
         let mass_grad = kg.mass().gradient().expect("mass gradient");
         let spin_grad = kg.spinor().gradient().expect("spinor gradient");
         for col in 0..2 {
-            let mut expected_mass = 0.0f32;
-            let mut expected_spin = 0.0f32;
-            for row in 0..2 {
-                let idx = row * 2 + col;
-                let wave = input.data()[idx];
-                let go = grad.data()[idx];
-                expected_mass += go * (-(0.2f32 * 0.2) * wave);
-                expected_spin += go * (0.2 * wave.tanh());
-            }
-            assert_close(mass_grad.data()[col], expected_mass * 0.5);
-            assert_close(spin_grad.data()[col], expected_spin * 0.5);
+            assert_close(
+                mass_grad.data()[col],
+                expected_backward.grad_mass_squared[col] * 0.5,
+            );
+            assert_close(
+                spin_grad.data()[col],
+                expected_backward.grad_source[col] * 0.5,
+            );
         }
 
         let mut hj = HamiltonJacobiFlow::new("hj", 2, 0.1).unwrap();
@@ -1755,6 +2328,22 @@ mod tests {
                 assert_eq!(event.1["parameter_gradient_scale"], 0.5);
                 assert_eq!(event.1["input_gradient_scale"], 1.0);
             }
+            if field_model == "klein_gordon" {
+                assert_eq!(event.1["contract_version"], KLEIN_GORDON_CONTRACT_VERSION);
+                assert_eq!(event.1["semantic_owner"], KLEIN_GORDON_SEMANTIC_OWNER);
+                assert_eq!(event.1["semantic_backend"], "rust");
+                assert_eq!(event.1["equation"], KLEIN_GORDON_EQUATION);
+                assert_eq!(event.1["integrator"], KLEIN_GORDON_INTEGRATOR);
+                assert_eq!(event.1["boundary"], KLEIN_GORDON_BOUNDARY);
+                assert_eq!(event.1["phase_space_state"], KLEIN_GORDON_STATE);
+                assert_eq!(event.1["phase_space_output_values"], 12);
+                assert!(event.1["audit"]["stability_margin"].is_number());
+                assert!(event.1["audit"]["output_energy"].is_number());
+                if kind == "dynamic_field_backward" {
+                    assert!(event.1["backward_audit"]["max_grad_field_error"].is_number());
+                    assert!(event.1["backward_audit"]["max_grad_mass_squared_error"].is_number());
+                }
+            }
             if field_model == "stochastic_schrodinger" {
                 assert_eq!(
                     event.1["contract_version"],
@@ -1797,32 +2386,54 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let input = Tensor::from_fn(4, 3, |row, col| {
-            ((row * 11 + col * 5) % 17) as f32 * 0.041 - 0.27
+        let input = Tensor::from_fn(257, 5, |row, col| {
+            ((row * 11 + col * 5) % 29) as f32 * 0.021 - 0.27
         })
         .unwrap();
-        let grad = Tensor::from_fn(4, 3, |row, col| {
-            ((row * 7 + col * 3) % 13) as f32 * 0.029 - 0.18
+        let momentum = Tensor::from_fn(257, 5, |row, col| {
+            ((row * 3 + col * 7) % 23) as f32 * 0.011 - 0.12
+        })
+        .unwrap();
+        let grad_field = Tensor::from_fn(257, 5, |row, col| {
+            ((row * 7 + col * 3) % 19) as f32 * 0.017 - 0.15
+        })
+        .unwrap();
+        let grad_momentum = Tensor::from_fn(257, 5, |row, col| {
+            ((row * 13 + col * 2) % 17) as f32 * 0.013 - 0.09
         })
         .unwrap();
         let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
-        let mut cpu_layer = KleinGordonPropagation::new("kg_cpu", 3, 0.2, 0.1).unwrap();
-        let cpu_forward = {
+        let mut cpu_layer = KleinGordonPropagation::new("kg_cpu", 5, 0.12, 0.1)
+            .unwrap()
+            .with_wave_speed(0.8)
+            .unwrap()
+            .with_self_coupling(0.04)
+            .unwrap();
+        let cpu_step = {
             let _guard = push_backend_policy(cpu_policy);
-            cpu_layer.forward(&input).unwrap()
+            cpu_layer.step_phase_space(&input, &momentum).unwrap()
         };
-        let cpu_grad_input = {
+        let cpu_backward = {
             let _guard = push_backend_policy(cpu_policy);
-            cpu_layer.backward(&input, &grad).unwrap()
+            cpu_layer
+                .backward_phase_space(&input, &momentum, &grad_field, &grad_momentum)
+                .unwrap()
         };
 
         let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
-        let mut wgpu_layer = KleinGordonPropagation::new("kg_wgpu", 3, 0.2, 0.1).unwrap();
-        let (wgpu_forward, wgpu_grad_input) = {
+        let mut wgpu_layer = KleinGordonPropagation::new("kg_wgpu", 5, 0.12, 0.1)
+            .unwrap()
+            .with_wave_speed(0.8)
+            .unwrap()
+            .with_self_coupling(0.04)
+            .unwrap();
+        let (wgpu_step, wgpu_backward) = {
             let _guard = push_backend_policy(wgpu_policy);
             (
-                wgpu_layer.forward(&input).unwrap(),
-                wgpu_layer.backward(&input, &grad).unwrap(),
+                wgpu_layer.step_phase_space(&input, &momentum).unwrap(),
+                wgpu_layer
+                    .backward_phase_space(&input, &momentum, &grad_field, &grad_momentum)
+                    .unwrap(),
             )
         };
 
@@ -1832,8 +2443,16 @@ mod tests {
             None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
         }
 
-        approx_eq(cpu_forward.data(), wgpu_forward.data());
-        approx_eq(cpu_grad_input.data(), wgpu_grad_input.data());
+        approx_eq(cpu_step.field.data(), wgpu_step.field.data());
+        approx_eq(cpu_step.momentum.data(), wgpu_step.momentum.data());
+        approx_eq(
+            cpu_backward.grad_field.data(),
+            wgpu_backward.grad_field.data(),
+        );
+        approx_eq(
+            cpu_backward.grad_momentum.data(),
+            wgpu_backward.grad_momentum.data(),
+        );
         approx_eq(
             cpu_layer.mass().gradient().unwrap().data(),
             wgpu_layer.mass().gradient().unwrap().data(),
@@ -1842,6 +2461,10 @@ mod tests {
             cpu_layer.spinor().gradient().unwrap().data(),
             wgpu_layer.spinor().gradient().unwrap().data(),
         );
+        assert!(wgpu_step.audit.max_field_error <= 1.0e-5);
+        assert!(wgpu_step.audit.max_momentum_error <= 1.0e-5);
+        assert!(wgpu_backward.audit.max_grad_field_error <= 1.0e-5);
+        assert!(wgpu_backward.audit.max_grad_momentum_error <= 1.0e-5);
 
         let events = events.lock().unwrap();
         assert!(events.iter().any(|(op_name, data)| {
