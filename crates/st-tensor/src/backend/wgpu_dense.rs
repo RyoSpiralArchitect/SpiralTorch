@@ -60,6 +60,7 @@ const REDUCE_DB_WORKGROUP: u32 = 256;
 const LAYER_NORM_WORKGROUP: u32 = 256;
 const TENSOR_UTIL_WORKGROUP: u32 = 256;
 const LSTM_BACKWARD_SCAN_WORKGROUP: u32 = 64;
+const MAX_TOPOS_RESONATOR_ITERATIONS: usize = 4096;
 
 const FLAG_USE_BIAS: u32 = 1 << 0;
 const FLAG_FUSED_RELU: u32 = 1 << 1;
@@ -412,6 +413,8 @@ struct GpuContext {
     tensor_util_hadamard_pipeline: Arc<ComputePipeline>,
     tensor_util_mul_row_pipeline: Arc<ComputePipeline>,
     tensor_util_row_affine_pipeline: Arc<ComputePipeline>,
+    tensor_util_topos_resonator_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_topos_resonator_backward_pipeline: Arc<ComputePipeline>,
     tensor_util_dynamic_klein_gordon_forward_pipeline: Arc<ComputePipeline>,
     tensor_util_dynamic_klein_gordon_backward_pipeline: Arc<ComputePipeline>,
     tensor_util_dynamic_hamilton_jacobi_forward_pipeline: Arc<ComputePipeline>,
@@ -1172,6 +1175,10 @@ impl GpuContext {
         let tensor_util_hadamard_pipeline = tensor_util_pipeline("hadamard")?;
         let tensor_util_mul_row_pipeline = tensor_util_pipeline("mul_row")?;
         let tensor_util_row_affine_pipeline = tensor_util_pipeline("row_affine")?;
+        let tensor_util_topos_resonator_forward_pipeline =
+            tensor_util_pipeline("topos_resonator_forward")?;
+        let tensor_util_topos_resonator_backward_pipeline =
+            tensor_util_pipeline("topos_resonator_backward")?;
         let tensor_util_dynamic_klein_gordon_forward_pipeline =
             tensor_util_pipeline("dynamic_klein_gordon_forward")?;
         let tensor_util_dynamic_klein_gordon_backward_pipeline =
@@ -1516,6 +1523,8 @@ impl GpuContext {
             tensor_util_hadamard_pipeline,
             tensor_util_mul_row_pipeline,
             tensor_util_row_affine_pipeline,
+            tensor_util_topos_resonator_forward_pipeline,
+            tensor_util_topos_resonator_backward_pipeline,
             tensor_util_dynamic_klein_gordon_forward_pipeline,
             tensor_util_dynamic_klein_gordon_backward_pipeline,
             tensor_util_dynamic_hamilton_jacobi_forward_pipeline,
@@ -4091,6 +4100,22 @@ mod tests {
     }
 
     #[test]
+    fn topos_resonator_boundary_rejects_invalid_values_before_dispatch() {
+        let invalid_coupling = topos_resonator_forward(&[0.2], &[1.0], 1, 1, 1.0, 1.0, 0.2, 4)
+            .expect_err("non-contracting coupling must fail before dispatch");
+        assert!(invalid_coupling.contains("coupling"));
+
+        let invalid_iterations =
+            topos_resonator_backward(&[0.2], &[1.0], &[0.3], 1, 1, 0.2, 1.0, 0.2, 0)
+                .expect_err("zero iterations must fail before dispatch");
+        assert!(invalid_iterations.contains("iterations"));
+
+        let non_finite_drive = topos_resonator_forward(&[f32::MAX], &[2.0], 1, 1, 0.2, 1.0, 0.2, 4)
+            .expect_err("overflowing drive must fail before dispatch");
+        assert!(non_finite_drive.contains("drive"));
+    }
+
+    #[test]
     fn matmul_shader_wgsl_is_valid() {
         let key = PipelineKey::new(
             ScalarType::F32,
@@ -6632,6 +6657,160 @@ pub fn row_affine(
         workgroups,
         "row_affine",
     )
+}
+
+fn validate_topos_resonator_executor(
+    op: &'static str,
+    coupling: f32,
+    saturation: f32,
+    porosity: f32,
+    iterations: usize,
+) -> Result<(), String> {
+    if !coupling.is_finite() || !(0.0..1.0).contains(&coupling) {
+        return Err(format!("{op} coupling must be finite and in [0, 1)"));
+    }
+    if !saturation.is_finite() || saturation <= 0.0 {
+        return Err(format!("{op} saturation must be finite and positive"));
+    }
+    if !porosity.is_finite() || !(0.0..=1.0).contains(&porosity) {
+        return Err(format!("{op} porosity must be finite and in [0, 1]"));
+    }
+    if iterations == 0 || iterations > MAX_TOPOS_RESONATOR_ITERATIONS {
+        return Err(format!(
+            "{op} iterations must be in 1..={MAX_TOPOS_RESONATOR_ITERATIONS}"
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn topos_resonator_forward(
+    input: &[f32],
+    gate: &[f32],
+    rows: usize,
+    cols: usize,
+    coupling: f32,
+    saturation: f32,
+    porosity: f32,
+    iterations: usize,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("topos_resonator_forward", input, rows, cols)?;
+    if gate.len() != volume {
+        return Err(format!(
+            "topos_resonator_forward gate length mismatch: expected {volume} elements, got {}",
+            gate.len()
+        ));
+    }
+    validate_topos_resonator_executor(
+        "topos_resonator_forward",
+        coupling,
+        saturation,
+        porosity,
+        iterations,
+    )?;
+    if input.iter().chain(gate).any(|value| !value.is_finite()) {
+        return Err("topos_resonator_forward inputs must be finite".into());
+    }
+    if input
+        .iter()
+        .zip(gate)
+        .any(|(&input, &gate)| !(input * gate).is_finite())
+    {
+        return Err("topos_resonator_forward drive must be finite".into());
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let output = tensor_util_internal(
+        input,
+        Some(gate),
+        rows,
+        cols,
+        volume,
+        coupling,
+        saturation,
+        porosity,
+        iterations as f32,
+        ctx.tensor_util_topos_resonator_forward_pipeline.clone(),
+        workgroups,
+        "topos_resonator_forward",
+    )?;
+    if output.iter().any(|value| !value.is_finite()) {
+        return Err("topos_resonator_forward produced non-finite output".into());
+    }
+    Ok(output)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn topos_resonator_backward(
+    input: &[f32],
+    gate: &[f32],
+    grad_output: &[f32],
+    rows: usize,
+    cols: usize,
+    coupling: f32,
+    saturation: f32,
+    porosity: f32,
+    iterations: usize,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("topos_resonator_backward", input, rows, cols)?;
+    for (name, values) in [("gate", gate), ("grad_output", grad_output)] {
+        if values.len() != volume {
+            return Err(format!(
+                "topos_resonator_backward {name} length mismatch: expected {volume} elements, got {}",
+                values.len()
+            ));
+        }
+    }
+    validate_topos_resonator_executor(
+        "topos_resonator_backward",
+        coupling,
+        saturation,
+        porosity,
+        iterations,
+    )?;
+    if input
+        .iter()
+        .chain(gate)
+        .chain(grad_output)
+        .any(|value| !value.is_finite())
+    {
+        return Err("topos_resonator_backward inputs must be finite".into());
+    }
+    if input
+        .iter()
+        .zip(gate)
+        .any(|(&input, &gate)| !(input * gate).is_finite())
+    {
+        return Err("topos_resonator_backward drive must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(volume.saturating_mul(2));
+    aux.extend_from_slice(gate);
+    aux.extend_from_slice(grad_output);
+    let output_elements = volume
+        .checked_mul(2)
+        .ok_or_else(|| "topos_resonator_backward output volume exceeds usize range".to_string())?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let packed = tensor_util_internal(
+        input,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        output_elements,
+        coupling,
+        saturation,
+        porosity,
+        iterations as f32,
+        ctx.tensor_util_topos_resonator_backward_pipeline.clone(),
+        workgroups,
+        "topos_resonator_backward",
+    )?;
+    if packed.iter().any(|value| !value.is_finite()) {
+        return Err("topos_resonator_backward produced non-finite output".into());
+    }
+    Ok((packed[..volume].to_vec(), packed[volume..].to_vec()))
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]

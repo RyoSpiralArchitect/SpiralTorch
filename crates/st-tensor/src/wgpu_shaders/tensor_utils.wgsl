@@ -121,6 +121,54 @@ fn row_affine(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
+@compute @workgroup_size(256)
+fn topos_resonator_forward(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    if (index < params.values) {
+        let drive = input[index] * aux[index];
+        var resonance = 0.0;
+        var iteration = 0u;
+        let iterations = u32(params._pad2);
+        loop {
+            if (iteration >= iterations) {
+                break;
+            }
+            let raw = drive + params.scalar * resonance;
+            resonance = porous_mix(raw, params.saturation, params.porosity);
+            iteration = iteration + 1u;
+        }
+        output[index] = resonance;
+    }
+}
+
+// Backward aux layout: gate[values], grad_output[values]. The exact unrolled
+// drive derivative is propagated alongside the forward recurrence.
+@compute @workgroup_size(256)
+fn topos_resonator_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    if (index < params.values) {
+        let gate = aux[index];
+        let drive = input[index] * gate;
+        var resonance = 0.0;
+        var drive_sensitivity = 0.0;
+        var iteration = 0u;
+        let iterations = u32(params._pad2);
+        loop {
+            if (iteration >= iterations) {
+                break;
+            }
+            let raw = drive + params.scalar * resonance;
+            let slope = porous_mix_backward_factor(raw, params.saturation, params.porosity);
+            drive_sensitivity = slope * (1.0 + params.scalar * drive_sensitivity);
+            resonance = porous_mix(raw, params.saturation, params.porosity);
+            iteration = iteration + 1u;
+        }
+        let grad_drive = aux[params.values + index] * drive_sensitivity;
+        output[index] = grad_drive * gate;
+        output[params.values + index] = grad_drive * input[index];
+    }
+}
+
 fn periodic_feature_previous_index(index: u32) -> u32 {
     let col = index % params.cols;
     let row_start = index - col;

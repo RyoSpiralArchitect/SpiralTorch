@@ -972,21 +972,7 @@ fn row_l2_projection_stats(data: &[f32], rows: usize, cols: usize) -> (usize, f3
 }
 
 fn porous_mix_value(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if !value.is_finite() || saturation <= 0.0 {
-        return 0.0;
-    }
-    let limit = saturation.abs();
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return value;
-    }
-    if porosity <= f32::EPSILON {
-        return value.signum() * limit;
-    }
-    let bleed = (magnitude - limit) / (magnitude + limit);
-    let absorb = (porosity * 0.25).min(1.0);
-    let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
-    value.signum() * softened
+    topos::porous_mix(value, saturation, porosity)
 }
 
 #[cfg(feature = "wgpu")]

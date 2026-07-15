@@ -2989,6 +2989,19 @@ work. Comparisons expose `topos_res_fwd_composite` and
 `topos_res_bwd_composite`, which keeps resonance-layer semantics visible without
 pretending the wrapper itself is a separate GPU kernel.
 
+That historical Hadamard-only implementation has now been superseded by the
+versioned `st-core::dynamics::topos_resonator` contract. The layer evaluates the
+strict contraction `r[n+1] = j_topos(input * gate + coupling * r[n])`, reports
+fixed-point residual, amplification, closure adjustment, and convergence, and
+requires backward to match the cached input/gate/topos transition. CPU and the
+fused WGPU forward/backward kernels are both audited against the Rust recurrence
+and exact unrolled derivative before their results are committed. New traces
+therefore expose `topos_res_fwd_wgpu`, `topos_res_bwd_wgpu`,
+`topos_res_fwd_cpu`, and `topos_res_bwd_cpu`; the old composite counters remain
+readable only for historical run cards. The generic `ModuleTrainer::prepare()`
+and `prepare_with_topos()` routes are overridden by the layer so the forward
+guard and hypergradient tape cannot silently acquire different topoi.
+
 Accumulator-style `add_scaled` has now joined that utility family. The WGPU
 kernel evaluates `input + scale * aux`, `Tensor::add_scaled_with_backend()` uses
 the same strict/fallback metadata contract as the other tensor utilities, and

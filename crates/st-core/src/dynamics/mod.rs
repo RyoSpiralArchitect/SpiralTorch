@@ -5,3 +5,4 @@
 pub mod hamilton_jacobi;
 pub mod klein_gordon;
 pub mod stochastic_schrodinger;
+pub mod topos_resonator;
