@@ -16,6 +16,13 @@ pub const ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: &str = "spiraltorch.zspace_met
 pub const ZSPACE_META_OPTIMIZER_KIND: &str = "spiraltorch.zspace_meta_optimizer";
 pub const ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
 pub const ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND: &str = "rust";
+pub const ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_parameter_control.v1";
+pub const ZSPACE_PARAMETER_CONTROL_KIND: &str = "spiraltorch.zspace_parameter_control";
+pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
+pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND: &str = "rust";
+pub const ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE: f64 = 0.1;
+pub const ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE: f64 = 1.25;
 /// Allocation and transform guard for state carried by untrusted clients.
 pub const ZSPACE_META_OPTIMIZER_MAX_DIMENSION: usize = 4_096;
 /// Largest step represented exactly by Python, JSON, and JavaScript clients.
@@ -336,6 +343,100 @@ pub struct ZSpaceMetaOptimizerStepReport {
     pub state_after: ZSpaceMetaOptimizerState,
 }
 
+/// Validated control-plane instruction emitted from one meta-optimizer report.
+///
+/// This is intentionally narrower than [`ZSpaceMetaOptimizerStepReport`]. The
+/// latent gradient, clipping, regularization, and Topos bias remain owned by
+/// the latent transition; only its bounded absolute learning-rate scale crosses
+/// into model-parameter optimization.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct ZSpaceParameterControl {
+    contract_version: &'static str,
+    kind: &'static str,
+    semantic_owner: &'static str,
+    semantic_backend: &'static str,
+    source_contract_version: &'static str,
+    source_semantic_owner: &'static str,
+    source_step: u64,
+    absolute_learning_rate_scale: f64,
+    source_learning_rate: f64,
+    source_effective_learning_rate: f64,
+}
+
+impl ZSpaceParameterControl {
+    pub fn contract_version(&self) -> &'static str {
+        self.contract_version
+    }
+
+    pub fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    pub fn semantic_owner(&self) -> &'static str {
+        self.semantic_owner
+    }
+
+    pub fn semantic_backend(&self) -> &'static str {
+        self.semantic_backend
+    }
+
+    pub fn source_contract_version(&self) -> &'static str {
+        self.source_contract_version
+    }
+
+    pub fn source_semantic_owner(&self) -> &'static str {
+        self.source_semantic_owner
+    }
+
+    pub fn source_step(&self) -> u64 {
+        self.source_step
+    }
+
+    pub fn absolute_learning_rate_scale(&self) -> f64 {
+        self.absolute_learning_rate_scale
+    }
+
+    pub fn source_learning_rate(&self) -> f64 {
+        self.source_learning_rate
+    }
+
+    pub fn source_effective_learning_rate(&self) -> f64 {
+        self.source_effective_learning_rate
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ParameterControlReportProof {
+    contract_version: String,
+    kind: String,
+    semantic_owner: String,
+    semantic_backend: String,
+    transition_validated: bool,
+    config: ZSpaceMetaOptimizerConfig,
+    observation: ZSpaceMetaObservation,
+    topos_control: ParameterControlToposProof,
+    adam: ParameterControlAdamProof,
+    state_before: ParameterControlStateProof,
+    state_after: ParameterControlStateProof,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParameterControlToposProof {
+    learning_rate_scale: f64,
+    effective_learning_rate: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParameterControlAdamProof {
+    step: u64,
+    effective_learning_rate: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParameterControlStateProof {
+    step: u64,
+}
+
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum ZSpaceMetaOptimizerError {
     #[error("Z-space optimizer dimension must be positive, received {dimension}")]
@@ -373,6 +474,28 @@ pub enum ZSpaceMetaOptimizerError {
         field: String,
         residual: f64,
         tolerance: f64,
+    },
+    #[error("malformed Z-space meta-optimizer report: {message}")]
+    MalformedReport { message: String },
+    #[error("untrusted {field}: expected {expected}, received {actual}")]
+    ContractMismatch {
+        field: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
+    #[error("Z-space meta-optimizer report did not validate its transition")]
+    UnvalidatedTransition,
+    #[error(
+        "inconsistent Z-space meta-optimizer steps: before={before}, after={after}, adam={adam}"
+    )]
+    InconsistentReportStep { before: u64, after: u64, adam: u64 },
+    #[error(
+        "parameter learning-rate scale must remain in [{minimum}, {maximum}], received {value}"
+    )]
+    ParameterControlScaleOutOfRange {
+        value: f64,
+        minimum: f64,
+        maximum: f64,
     },
 }
 
@@ -675,6 +798,169 @@ pub fn transition_zspace_meta_optimizer(
         },
         state_before,
         state_after,
+    })
+}
+
+/// Extracts the model-parameter control that is semantically safe to share
+/// from a typed meta-optimizer report.
+pub fn zspace_parameter_control_from_report(
+    report: &ZSpaceMetaOptimizerStepReport,
+) -> Result<ZSpaceParameterControl, ZSpaceMetaOptimizerError> {
+    validate_parameter_control_fields(
+        report.contract_version,
+        report.kind,
+        report.semantic_owner,
+        report.semantic_backend,
+        report.transition_validated,
+        &report.config,
+        &report.observation,
+        report.topos_control.learning_rate_scale,
+        report.topos_control.effective_learning_rate,
+        report.adam.effective_learning_rate,
+        report.state_before.step,
+        report.state_after.step,
+        report.adam.step,
+    )
+}
+
+/// Validates a serialized meta-optimizer report before extracting parameter
+/// control. Language bindings should pass the complete report here instead of
+/// rebuilding the control from selected fields.
+pub fn zspace_parameter_control_from_value(
+    report: serde_json::Value,
+) -> Result<ZSpaceParameterControl, ZSpaceMetaOptimizerError> {
+    let proof: ParameterControlReportProof = serde_json::from_value(report).map_err(|error| {
+        ZSpaceMetaOptimizerError::MalformedReport {
+            message: error.to_string(),
+        }
+    })?;
+    validate_parameter_control_fields(
+        proof.contract_version.as_str(),
+        proof.kind.as_str(),
+        proof.semantic_owner.as_str(),
+        proof.semantic_backend.as_str(),
+        proof.transition_validated,
+        &proof.config,
+        &proof.observation,
+        proof.topos_control.learning_rate_scale,
+        proof.topos_control.effective_learning_rate,
+        proof.adam.effective_learning_rate,
+        proof.state_before.step,
+        proof.state_after.step,
+        proof.adam.step,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_parameter_control_fields(
+    contract_version: &str,
+    kind: &str,
+    semantic_owner: &str,
+    semantic_backend: &str,
+    transition_validated: bool,
+    config: &ZSpaceMetaOptimizerConfig,
+    observation: &ZSpaceMetaObservation,
+    absolute_learning_rate_scale: f64,
+    topos_effective_learning_rate: f64,
+    adam_effective_learning_rate: f64,
+    state_before_step: u64,
+    state_after_step: u64,
+    adam_step: u64,
+) -> Result<ZSpaceParameterControl, ZSpaceMetaOptimizerError> {
+    require_contract_field(
+        "report.contract_version",
+        contract_version,
+        ZSPACE_META_OPTIMIZER_CONTRACT_VERSION,
+    )?;
+    require_contract_field("report.kind", kind, ZSPACE_META_OPTIMIZER_KIND)?;
+    require_contract_field(
+        "report.semantic_owner",
+        semantic_owner,
+        ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER,
+    )?;
+    require_contract_field(
+        "report.semantic_backend",
+        semantic_backend,
+        ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND,
+    )?;
+    if !transition_validated {
+        return Err(ZSpaceMetaOptimizerError::UnvalidatedTransition);
+    }
+
+    config.validate()?;
+    observation.validate()?;
+    let canonical_topos =
+        resolve_topos_control(config, &observation.telemetry, config.weights.fractional)?;
+    verify_scalar_invariant(
+        "topos_control.learning_rate_scale",
+        absolute_learning_rate_scale,
+        canonical_topos.learning_rate_scale,
+    )?;
+    let source_learning_rate = config.learning_rate;
+    require_positive("report.config.learning_rate", source_learning_rate)?;
+    require_positive(
+        "report.topos_control.learning_rate_scale",
+        absolute_learning_rate_scale,
+    )?;
+    if !(ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE
+        ..=ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE)
+        .contains(&absolute_learning_rate_scale)
+    {
+        return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
+            value: absolute_learning_rate_scale,
+            minimum: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+            maximum: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+        });
+    }
+
+    let expected_step = state_before_step.checked_add(1).ok_or(
+        ZSpaceMetaOptimizerError::InconsistentReportStep {
+            before: state_before_step,
+            after: state_after_step,
+            adam: adam_step,
+        },
+    )?;
+    if expected_step != state_after_step || state_after_step != adam_step {
+        return Err(ZSpaceMetaOptimizerError::InconsistentReportStep {
+            before: state_before_step,
+            after: state_after_step,
+            adam: adam_step,
+        });
+    }
+    if state_after_step > ZSPACE_META_OPTIMIZER_MAX_SAFE_STEP {
+        return Err(ZSpaceMetaOptimizerError::StepLimit {
+            step: state_after_step,
+            maximum: ZSPACE_META_OPTIMIZER_MAX_SAFE_STEP,
+        });
+    }
+
+    let expected_effective_learning_rate = checked_mul(
+        "parameter_control.effective_learning_rate",
+        source_learning_rate,
+        absolute_learning_rate_scale,
+    )?;
+    verify_scalar_invariant(
+        "topos_control.effective_learning_rate",
+        topos_effective_learning_rate,
+        expected_effective_learning_rate,
+    )?;
+    verify_scalar_invariant(
+        "adam.effective_learning_rate",
+        adam_effective_learning_rate,
+        expected_effective_learning_rate,
+    )?;
+
+    Ok(ZSpaceParameterControl {
+        contract_version: ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION,
+        kind: ZSPACE_PARAMETER_CONTROL_KIND,
+        semantic_owner: ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND,
+        source_contract_version: ZSPACE_META_OPTIMIZER_CONTRACT_VERSION,
+        source_semantic_owner: ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER,
+        source_step: state_after_step,
+        absolute_learning_rate_scale,
+        source_learning_rate,
+        source_effective_learning_rate: expected_effective_learning_rate,
     })
 }
 
@@ -1127,6 +1413,41 @@ fn verify_parameter_delta(
     Ok(())
 }
 
+fn verify_scalar_invariant(
+    field: &str,
+    actual: f64,
+    expected: f64,
+) -> Result<(), ZSpaceMetaOptimizerError> {
+    require_derived_finite(field, actual)?;
+    require_derived_finite(&format!("{field}.expected"), expected)?;
+    let scale = actual.abs().max(expected.abs()).max(1.0);
+    let residual = (actual - expected).abs();
+    let tolerance = DERIVED_TOLERANCE * scale;
+    if residual > tolerance {
+        return Err(ZSpaceMetaOptimizerError::InvariantViolation {
+            field: field.to_owned(),
+            residual,
+            tolerance,
+        });
+    }
+    Ok(())
+}
+
+fn require_contract_field(
+    field: &'static str,
+    actual: &str,
+    expected: &'static str,
+) -> Result<(), ZSpaceMetaOptimizerError> {
+    if actual != expected {
+        return Err(ZSpaceMetaOptimizerError::ContractMismatch {
+            field,
+            expected,
+            actual: actual.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 fn require_vector_length(
     field: &str,
     values: &[f64],
@@ -1387,6 +1708,77 @@ mod tests {
         assert_relative_eq!(
             report.objective.fractional_term,
             report.fractional_regularizer.energy * report.topos_control.effective_fractional_weight
+        );
+    }
+
+    #[test]
+    fn parameter_control_is_identical_for_typed_and_serialized_reports() {
+        let mut request = default_request();
+        request.config.topos_control_gain = 0.5;
+        request.observation.telemetry =
+            BTreeMap::from([("topos.training_hints.learning_rate_scale".to_owned(), 0.5)]);
+        let report = transition_zspace_meta_optimizer(request).expect("valid step");
+
+        let typed = zspace_parameter_control_from_report(&report).expect("typed control");
+        let serialized = zspace_parameter_control_from_value(
+            serde_json::to_value(&report).expect("serialized report"),
+        )
+        .expect("serialized control");
+
+        assert_eq!(typed, serialized);
+        assert_eq!(
+            typed.contract_version(),
+            ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION
+        );
+        assert_eq!(typed.kind(), ZSPACE_PARAMETER_CONTROL_KIND);
+        assert_eq!(
+            typed.semantic_backend(),
+            ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND
+        );
+        assert_eq!(typed.source_step(), 1);
+        assert_relative_eq!(typed.absolute_learning_rate_scale(), 0.75);
+        assert_relative_eq!(
+            typed.source_effective_learning_rate(),
+            typed.source_learning_rate() * typed.absolute_learning_rate_scale()
+        );
+        let encoded = serde_json::to_value(typed).expect("serialized control");
+        assert_eq!(
+            encoded["contract_version"],
+            ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION
+        );
+        assert_eq!(encoded["kind"], ZSPACE_PARAMETER_CONTROL_KIND);
+        assert_eq!(
+            encoded["semantic_owner"],
+            ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER
+        );
+    }
+
+    #[test]
+    fn parameter_control_rejects_tampered_report_invariants() {
+        let report = transition_zspace_meta_optimizer(default_request()).expect("valid step");
+        let mut encoded = serde_json::to_value(&report).expect("serialized report");
+        encoded["topos_control"]["effective_learning_rate"] = serde_json::json!(0.5);
+
+        assert!(matches!(
+            zspace_parameter_control_from_value(encoded),
+            Err(ZSpaceMetaOptimizerError::InvariantViolation { .. })
+        ));
+
+        let mut coordinated_tamper = serde_json::to_value(&report).expect("serialized report");
+        coordinated_tamper["topos_control"]["learning_rate_scale"] = serde_json::json!(0.5);
+        coordinated_tamper["topos_control"]["effective_learning_rate"] = serde_json::json!(0.005);
+        coordinated_tamper["adam"]["effective_learning_rate"] = serde_json::json!(0.005);
+        assert!(matches!(
+            zspace_parameter_control_from_value(coordinated_tamper),
+            Err(ZSpaceMetaOptimizerError::InvariantViolation { ref field, .. })
+                if field == "topos_control.learning_rate_scale"
+        ));
+
+        let mut unvalidated = serde_json::to_value(&report).expect("serialized report");
+        unvalidated["transition_validated"] = serde_json::json!(false);
+        assert_eq!(
+            zspace_parameter_control_from_value(unvalidated),
+            Err(ZSpaceMetaOptimizerError::UnvalidatedTransition)
         );
     }
 

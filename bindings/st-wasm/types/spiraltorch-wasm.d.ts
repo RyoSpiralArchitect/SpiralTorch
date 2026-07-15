@@ -620,6 +620,20 @@ declare module "spiraltorch-wasm" {
         state_after: ZSpaceMetaOptimizerState;
     };
 
+    export type ZSpaceParameterControl = {
+        contract_version: "spiraltorch.zspace_parameter_control.v1";
+        kind: "spiraltorch.zspace_parameter_control";
+        semantic_owner: "st-core::runtime::zspace_optimizer";
+        semantic_backend: "rust";
+        source_contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        source_semantic_owner: "st-core::runtime::zspace_optimizer";
+        source_step: number;
+        absolute_learning_rate_scale: number;
+        source_learning_rate: number;
+        source_effective_learning_rate: number;
+        execution_client: "wasm";
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -1004,6 +1018,12 @@ declare module "spiraltorch-wasm" {
     export function zspaceMetaOptimizerStepObject(
         request: ZSpaceMetaOptimizerStepRequest,
     ): ZSpaceMetaOptimizerStepReport;
+    export function zspaceMetaOptimizerParameterControlJson(
+        reportJson: string,
+    ): string;
+    export function zspaceMetaOptimizerParameterControlObject(
+        report: ZSpaceMetaOptimizerStepReport,
+    ): ZSpaceParameterControl;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

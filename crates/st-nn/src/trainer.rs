@@ -39,7 +39,11 @@ use crate::language::{
 };
 use crate::loss::Loss;
 use crate::module::Module;
-use crate::optim::{LocalLearningRateAdapter, SpectralLrAdapter, SpectralLrAdapterState};
+use crate::optim::{
+    emit_parameter_control_receipt, parameter_control_error, plan_zspace_parameter_control,
+    scale_module_learning_rates, LocalLearningRateAdapter, SpectralLrAdapter,
+    SpectralLrAdapterState, ZSpaceParameterControlReceipt,
+};
 use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
@@ -69,6 +73,9 @@ use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
+use st_core::runtime::zspace_optimizer::{
+    zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
+};
 #[cfg(feature = "collapse")]
 use st_core::telemetry::hub::CollapsePulse;
 use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
@@ -2540,6 +2547,8 @@ pub struct ModuleTrainer {
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
+    meta_learning_rate_scale: f32,
+    meta_optimizer_step: Option<u64>,
     grad_clip_max_norm: Option<f32>,
     real_learning_rate: Option<f32>,
     blackcat: Option<BlackCatRuntime>,
@@ -2604,11 +2613,13 @@ impl core::fmt::Debug for ModuleTrainer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "ModuleTrainer(curv={},lr_h={},lr_f={},lr_r={:?})",
+            "ModuleTrainer(curv={},lr_h={},lr_f={},lr_r={:?},meta_scale={},meta_step={:?})",
             self.curvature,
             self.hyper_learning_rate,
             self.fallback_learning_rate,
-            self.real_learning_rate
+            self.real_learning_rate,
+            self.meta_learning_rate_scale,
+            self.meta_optimizer_step,
         )
     }
 }
@@ -2621,6 +2632,8 @@ pub struct TrainerOptimizerState {
     pub hyper_learning_rate: f32,
     pub fallback_learning_rate: f32,
     pub real_learning_rate: Option<f32>,
+    pub meta_learning_rate_scale: f32,
+    pub meta_optimizer_step: Option<u64>,
     pub grad_clip_max_norm: Option<f32>,
     pub spectral_policy_enabled: bool,
     pub curvature_scheduler_enabled: bool,
@@ -2642,6 +2655,13 @@ impl TrainerOptimizerState {
             "optim_state_fallback_lr".to_string(),
             self.fallback_learning_rate as f64,
         );
+        extra.insert(
+            "optim_state_meta_lr_scale".to_string(),
+            self.meta_learning_rate_scale as f64,
+        );
+        if let Some(step) = self.meta_optimizer_step {
+            extra.insert("optim_state_meta_step".to_string(), step as f64);
+        }
         extra.insert(
             "optim_state_realgrad_enabled".to_string(),
             if self.real_learning_rate.is_some() {
@@ -4481,6 +4501,8 @@ impl ModuleTrainer {
             curvature,
             hyper_learning_rate,
             fallback_learning_rate,
+            meta_learning_rate_scale: 1.0,
+            meta_optimizer_step: None,
             grad_clip_max_norm: None,
             real_learning_rate: None,
             blackcat: None,
@@ -5336,6 +5358,8 @@ impl ModuleTrainer {
             hyper_learning_rate: self.hyper_learning_rate,
             fallback_learning_rate: self.fallback_learning_rate,
             real_learning_rate: self.real_learning_rate,
+            meta_learning_rate_scale: self.meta_learning_rate_scale,
+            meta_optimizer_step: self.meta_optimizer_step,
             grad_clip_max_norm: self.grad_clip_max_norm,
             spectral_policy_enabled: self.spectral_policy.is_some(),
             curvature_scheduler_enabled: self.curvature_scheduler.is_some(),
@@ -5389,6 +5413,50 @@ impl ModuleTrainer {
         factor: f32,
     ) -> PureResult<()> {
         self.scale_learning_rates(module, factor)
+    }
+
+    /// Returns the latest absolute meta-optimizer scale applied to parameter
+    /// learning rates.
+    pub fn meta_learning_rate_scale(&self) -> f32 {
+        self.meta_learning_rate_scale
+    }
+
+    /// Returns the latest accepted meta-optimizer step, if any.
+    pub fn meta_optimizer_step(&self) -> Option<u64> {
+        self.meta_optimizer_step
+    }
+
+    /// Applies the model-parameter projection of a typed Rust meta-optimizer
+    /// report without importing latent-gradient semantics into the trainer.
+    pub fn apply_zspace_meta_optimizer_report<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        report: &ZSpaceMetaOptimizerStepReport,
+    ) -> PureResult<ZSpaceParameterControlReceipt> {
+        let control =
+            zspace_parameter_control_from_report(report).map_err(parameter_control_error)?;
+        self.apply_zspace_parameter_control(module, &control)
+    }
+
+    /// Applies a control previously validated by the Rust semantic core.
+    pub fn apply_zspace_parameter_control<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        control: &ZSpaceParameterControl,
+    ) -> PureResult<ZSpaceParameterControlReceipt> {
+        let plan = plan_zspace_parameter_control(
+            self.meta_learning_rate_scale,
+            self.meta_optimizer_step,
+            control,
+        )?;
+        let receipt = plan.receipt();
+        if receipt.changed {
+            self.scale_learning_rates(module, receipt.applied_learning_rate_ratio)?;
+        }
+        self.meta_learning_rate_scale = receipt.absolute_learning_rate_scale;
+        self.meta_optimizer_step = Some(receipt.source_meta_step);
+        emit_parameter_control_receipt("module_trainer", receipt);
+        Ok(receipt)
     }
 
     /// Returns the optional gradient clipping threshold.
@@ -7048,7 +7116,7 @@ impl ModuleTrainer {
         factor: f32,
     ) -> PureResult<()> {
         if !factor.is_finite() || factor <= 0.0 {
-            return Ok(());
+            return Err(TensorError::NonPositiveLearningRate { rate: factor });
         }
         let next_fallback_learning_rate =
             Self::checked_scaled_learning_rate(self.fallback_learning_rate, factor)?;
@@ -7058,16 +7126,14 @@ impl ModuleTrainer {
             .real_learning_rate
             .map(|rate| Self::checked_scaled_learning_rate(rate, factor))
             .transpose()?;
+        scale_module_learning_rates(module, factor)?;
         self.fallback_learning_rate = next_fallback_learning_rate;
         self.hyper_learning_rate = next_hyper_learning_rate;
         if let Some(rate) = self.real_learning_rate.as_mut() {
             *rate = next_real_learning_rate.expect("real learning rate");
         }
         self.spectral_adapter.on_global_scale(factor);
-        module.visit_parameters_mut(&mut |param| {
-            param.scale_learning_rate(factor);
-            Ok(())
-        })
+        Ok(())
     }
 
     fn checked_scaled_learning_rate(rate: f32, factor: f32) -> PureResult<f32> {
@@ -7545,15 +7611,42 @@ mod tests {
     use crate::CouncilEvidence;
     use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_core::runtime::zspace_optimizer::{
+        transition_zspace_meta_optimizer, ZSpaceMetaObservation, ZSpaceMetaOptimizerConfig,
+        ZSpaceMetaOptimizerState, ZSpaceMetaOptimizerStepRequest,
+    };
     use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
     use st_core::telemetry::xai::GraphFlowTracer;
     use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
     use st_core::theory::zpulse::ZSource;
     use st_tensor::topos::OpenCartesianTopos;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
+
+    fn parameter_control_report(
+        state: ZSpaceMetaOptimizerState,
+        learning_rate_scale: f64,
+    ) -> ZSpaceMetaOptimizerStepReport {
+        transition_zspace_meta_optimizer(ZSpaceMetaOptimizerStepRequest {
+            config: ZSpaceMetaOptimizerConfig {
+                dimension: 2,
+                topos_control_gain: 1.0,
+                ..ZSpaceMetaOptimizerConfig::default()
+            },
+            state,
+            observation: ZSpaceMetaObservation {
+                gradient: vec![0.1, -0.2],
+                telemetry: BTreeMap::from([(
+                    "topos.training_hints.learning_rate_scale".to_owned(),
+                    learning_rate_scale,
+                )]),
+                ..ZSpaceMetaObservation::default()
+            },
+        })
+        .expect("parameter control report")
+    }
 
     fn build_language_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -8168,6 +8261,39 @@ mod tests {
         assert_eq!(after_scale.spectral_adapter.avg_curvature, 0.0);
         assert_eq!(after_scale.spectral_adapter.avg_spin, 0.0);
         assert_eq!(after_scale.spectral_adapter.avg_energy, 0.0);
+    }
+
+    #[test]
+    fn trainer_consumes_meta_reports_as_idempotent_parameter_control() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_realgrad(0.02);
+        let mut module = Linear::new("trainer_meta_control", 2, 2).unwrap();
+        trainer.prepare(&mut module).unwrap();
+        let first = parameter_control_report(ZSpaceMetaOptimizerState::zeros(2), 0.5);
+
+        let receipt = trainer
+            .apply_zspace_meta_optimizer_report(&mut module, &first)
+            .unwrap();
+        assert!(receipt.changed);
+        assert_eq!(trainer.meta_learning_rate_scale(), 0.5);
+        assert_eq!(trainer.meta_optimizer_step(), Some(1));
+        assert!((trainer.fallback_learning_rate() - 0.005).abs() < 1.0e-8);
+        assert!((trainer.hyper_learning_rate() - 0.025).abs() < 1.0e-8);
+        assert!((trainer.real_learning_rate().unwrap() - 0.01).abs() < 1.0e-8);
+
+        let replay = trainer
+            .apply_zspace_meta_optimizer_report(&mut module, &first)
+            .unwrap();
+        assert!(!replay.changed);
+        assert!((trainer.fallback_learning_rate() - 0.005).abs() < 1.0e-8);
+
+        let second = parameter_control_report(first.state_after.clone(), 1.0);
+        trainer
+            .apply_zspace_meta_optimizer_report(&mut module, &second)
+            .unwrap();
+        assert_eq!(trainer.meta_learning_rate_scale(), 1.0);
+        assert_eq!(trainer.meta_optimizer_step(), Some(2));
+        assert!((trainer.fallback_learning_rate() - 0.01).abs() < 1.0e-8);
     }
 
     #[test]

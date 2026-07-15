@@ -2052,6 +2052,31 @@ successful Rust report. Native FFT work releases the GIL. The low-level
 `zspace_meta_optimizer_step` functions expose the same versioned contract for
 custom orchestrators.
 
+The same report can control native model-parameter learning rates without
+reimplementing its Topos rules in Python:
+
+```python
+model = st.nn.Sequential()
+model.add(st.nn.Linear("controlled", 3, 2))
+module_trainer = st.nn.ModuleTrainer(
+    backend="cpu",
+    curvature=-0.9,
+    hyper_learning_rate=0.03,
+    fallback_learning_rate=0.02,
+)
+module_trainer.prepare(model)
+receipt = module_trainer.apply_zspace_meta_optimizer_report(
+    model,
+    trainer.last_optimizer_report,
+)
+print(receipt["absolute_learning_rate_scale"], receipt["changed"])
+```
+
+Rust validates the complete report, re-derives its Topos learning-rate scale,
+rejects stale or conflicting steps, and converts the absolute scale to an
+idempotent relative update. Latent clipping, fractional regularization, and
+gradient bias remain inside the latent optimizer.
+
 ### AmegagradSession quickstart
 
 ```bash

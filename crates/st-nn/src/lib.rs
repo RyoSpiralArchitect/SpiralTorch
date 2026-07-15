@@ -118,6 +118,7 @@ pub use module::{Module, Parameter};
 pub use optim::{
     LocalLearningRateAdapter, LrScheduler, OptimizerMode, SpectralLrAdapter,
     SpectralLrAdapterState, WarmupCosineScheduler, ZSpaceOptimizer, ZSpaceOptimizerState,
+    ZSpaceParameterControlReceipt, ZSpaceParameterOptimizer, ZSpaceParameterOptimizerState,
 };
 pub use plan::RankPlanner;
 pub use roundtable::{

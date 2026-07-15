@@ -5,7 +5,7 @@
 
 use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::Module;
-use crate::optim::ZSpaceOptimizer;
+use crate::optim::ZSpaceParameterOptimizer;
 use crate::{PureResult, Tensor};
 use st_tensor::TensorError;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -190,7 +190,7 @@ impl GradScaler {
     /// Returns `true` when the optimiser step was executed, `false` otherwise.
     pub fn step<M: Module>(
         &mut self,
-        optimizer: &mut ZSpaceOptimizer,
+        optimizer: &mut ZSpaceParameterOptimizer,
         module: &mut M,
     ) -> PureResult<bool> {
         self.unscale_module(module)?;
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn grad_scaler_scales_and_steps_optimizer() {
         let mut layer = Linear::new("amp", 2, 2).unwrap();
-        let mut optimizer = ZSpaceOptimizer::new(0.05).unwrap();
+        let mut optimizer = ZSpaceParameterOptimizer::new(0.05).unwrap();
         optimizer.set_mode(OptimizerMode::realgrad(0.05).unwrap());
         optimizer.prepare_module(&mut layer).unwrap();
         let mut scaler = GradScaler::new(2.0, 2.0, 0.5, 2)
