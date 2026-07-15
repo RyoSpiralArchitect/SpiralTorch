@@ -243,6 +243,36 @@ def zspace_trace_event_to_atlas_frame(
         discarded = _as_float(diagnostics.get("discarded_channels"))
         dominant = _as_float(diagnostics.get("dominant_channel"))
         label = diagnostics.get("label")
+        rust_distribution_metrics = (
+            (
+                "coherence_normalized_entropy",
+                _as_float(diagnostics.get("normalized_entropy")),
+            ),
+            (
+                "coherence_concentration",
+                _as_float(diagnostics.get("concentration")),
+            ),
+            (
+                "coherence_effective_channels",
+                _as_float(diagnostics.get("effective_channels")),
+            ),
+            (
+                "coherence_distribution_channels",
+                _as_float(diagnostics.get("distribution_channels")),
+            ),
+            (
+                "coherence_swap_invariant",
+                _as_metric_float(diagnostics.get("swap_invariant")),
+            ),
+            (
+                "coherence_background_energy_ratio_max",
+                _as_float(diagnostics.get("background_energy_ratio_max")),
+            ),
+            (
+                "coherence_cascade_energy_ratio_min",
+                _as_float(diagnostics.get("cascade_energy_ratio_min")),
+            ),
+        )
 
         required = (
             mean_coherence,
@@ -330,8 +360,23 @@ def zspace_trace_event_to_atlas_frame(
             ):
                 if metric_value is not None:
                     fragment.push_metric(metric_name, metric_value, district)
+        # Exact Rust trace values take precedence over entropy-only projection fallbacks.
+        for metric_name, metric_value in rust_distribution_metrics:
+            if metric_value is not None:
+                fragment.push_metric(metric_name, metric_value, district)
         if label is not None:
             fragment.push_note(f"zspace.trace.label={label}")
+        for field in (
+            "classification_kind",
+            "classification_reason",
+            "classification_contract_version",
+            "classification_semantic_owner",
+            "classification_semantic_backend",
+            "classification_formula",
+        ):
+            value = diagnostics.get(field)
+            if isinstance(value, str) and value:
+                fragment.push_note(f"zspace.trace.{field}={value}")
 
     _push_noncollapse_overlay(fragment, normalised, district)
 

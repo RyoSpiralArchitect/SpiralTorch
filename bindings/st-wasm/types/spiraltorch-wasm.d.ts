@@ -402,6 +402,7 @@ declare module "spiraltorch-wasm" {
         coherence?: number[];
         contour?: ZSpaceCoherenceContourInput | null;
         config?: ZSpaceCoherenceProjectionConfig;
+        classification_policy?: ZSpaceCoherenceClassificationPolicy;
     };
 
     export type ZSpaceCoherenceProjectionDerived = {
@@ -414,6 +415,30 @@ declare module "spiraltorch-wasm" {
         effective_channels: number;
         response_peak: number;
         response_mean: number;
+    };
+
+    export type ZSpaceCoherenceLabel =
+        | "background"
+        | "symmetric_pulse"
+        | "cascade_imbalance"
+        | "diffuse_drift";
+
+    export type ZSpaceCoherenceClassificationPolicy = {
+        background_energy_ratio_max: number;
+        cascade_energy_ratio_min: number;
+    };
+
+    export type ZSpaceCoherenceClassification = {
+        kind: "spiraltorch.zspace_coherence_classification";
+        contract_version: "spiraltorch.zspace_coherence_classification.v1";
+        semantic_owner: "st-core::inference::zspace_coherence";
+        semantic_backend: "rust";
+        classification_formula: string;
+        label: ZSpaceCoherenceLabel;
+        reason: string;
+        energy_ratio: number;
+        swap_invariant: boolean;
+        policy: ZSpaceCoherenceClassificationPolicy;
     };
 
     export type ZSpaceCoherenceProjection = {
@@ -429,6 +454,7 @@ declare module "spiraltorch-wasm" {
         contour?: ZSpaceCoherenceContourInput;
         config: Required<ZSpaceCoherenceProjectionConfig>;
         derived: ZSpaceCoherenceProjectionDerived;
+        classification?: ZSpaceCoherenceClassification;
         partial: Record<string, number>;
     };
 

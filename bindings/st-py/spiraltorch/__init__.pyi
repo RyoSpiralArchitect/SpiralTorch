@@ -4063,6 +4063,8 @@ def zspace_coherence_project(
     stability_gain: float = ...,
     frac_gain: float = ...,
     drs_gain: float = ...,
+    background_energy_ratio_max: float = ...,
+    cascade_energy_ratio_min: float = ...,
 ) -> Dict[str, Any]: ...
 
 
@@ -6458,8 +6460,21 @@ class CoherenceSignature:
     dominant_channel: int | None
     energy_ratio: float
     entropy: float
+    normalized_entropy: float
+    concentration: float
+    effective_channels: float
+    channels: int
     mean_coherence: float
     swap_invariant: bool
+    label: str
+    classification_kind: str
+    classification_contract_version: str
+    classification_semantic_owner: str
+    classification_semantic_backend: str
+    classification_formula: str
+    classification_reason: str
+    background_energy_ratio_max: float
+    cascade_energy_ratio_min: float
 
 
 class CoherenceObservation:
@@ -6488,7 +6503,14 @@ class CoherenceDiagnostics:
     discarded_channels: int
     pre_discard: PreDiscardTelemetry | None
     observation: CoherenceObservation
+    classification: Dict[str, object]
     noncollapse_snapshot: NonCollapseSnapshot
+    def classify(
+        self,
+        *,
+        background_energy_ratio_max: float = ...,
+        cascade_energy_ratio_min: float = ...,
+    ) -> Dict[str, object]: ...
 
 
 class LinguisticContour:

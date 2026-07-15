@@ -49,6 +49,14 @@ fn request_from_value(value: Value) -> Result<ZSpaceCoherenceProjectionRequest, 
     {
         return Err("Z-space coherence projection 'config' must be an object".to_owned());
     }
+    if request
+        .get("classification_policy")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(
+            "Z-space coherence projection 'classification_policy' must be an object".to_owned(),
+        );
+    }
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
@@ -128,6 +136,12 @@ mod tests {
             .remove("execution_client");
 
         assert_eq!(actual, expected);
+        assert_eq!(actual["classification"]["label"], "cascade_imbalance");
+        assert_eq!(
+            actual["classification"]["reason"],
+            "dominant_energy_ratio_at_or_above_cascade_min"
+        );
+        assert_eq!(actual["classification"]["semantic_backend"], "rust");
     }
 
     #[test]
@@ -137,6 +151,17 @@ mod tests {
         )
         .expect("trace alias");
         assert_eq!(parsed.diagnostics.coherence_entropy, 0.3);
+
+        let custom = request_from_json(
+            r#"{"diagnostics":{"mean_coherence":0.3333333333333333,"coherence_entropy":1.0296530140645737,"energy_ratio":0.7,"z_bias":0.1,"fractional_order":0.5,"normalized_weights":[0.5,0.3,0.2]},"classification_policy":{"background_energy_ratio_max":0.0001,"cascade_energy_ratio_min":0.8}}"#,
+        )
+        .expect("custom classification policy");
+        let custom = zspace_coherence_project_value(custom).expect("custom projection");
+        assert_eq!(custom["classification"]["label"], "diffuse_drift");
+        assert_eq!(
+            custom["classification"]["policy"]["cascade_energy_ratio_min"],
+            0.8
+        );
 
         assert!(request_from_json("[]")
             .expect_err("array request must fail")
@@ -151,5 +176,10 @@ mod tests {
         )
         .expect_err("null config must fail")
         .contains("config' must be an object"));
+        assert!(request_from_json(
+            r#"{"diagnostics":{"mean_coherence":0.2,"coherence_entropy":0.3,"energy_ratio":0.6,"z_bias":0.1,"fractional_order":0.5},"classification_policy":null}"#,
+        )
+        .expect_err("null classification policy must fail")
+        .contains("classification_policy' must be an object"));
     }
 }

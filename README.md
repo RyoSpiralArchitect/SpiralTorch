@@ -223,8 +223,8 @@ check the returned `contract_version` and `semantic_owner`.
 Coherence diagnostics follow the same rule. `ZSpaceCoherenceSequencer` exposes
 the complete Rust diagnostics and linguistic contour, while
 `st.zspace_coherence_project(...)` delegates gain validation, base metric
-projection, dimension-normalized entropy/concentration summaries, and contour metrics to
-`st-core::inference::zspace_coherence`:
+projection, dimension-normalized entropy/concentration summaries, structural
+classification, and contour metrics to `st-core::inference::zspace_coherence`:
 
 ```python
 import spiraltorch as st
@@ -241,12 +241,19 @@ contract = st.zspace_coherence_project(
 )
 assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
 assert contract["derived"]["distribution_source"] == "normalized_weights"
+assert contract["classification"]["label"] == diagnostics.observation.label
 ```
 
 Python remains the orchestrator; it does not reconstruct the Rust diagnostics
 or carry a second projection formula. Rust preserves raw `mean_coherence` for
 audit, but derives control-facing `speed` and `stability` from normalized HHI
 concentration and `H / ln(N)` so channel count alone cannot change the result.
+The same versioned Rust policy emits `background`, `symmetric_pulse`,
+`cascade_imbalance`, or `diffuse_drift` with an explicit reason and thresholds;
+trace, Python, and WASM only transport that decision. Call
+`diagnostics.classify(...)` or pass `background_energy_ratio_max` and
+`cascade_energy_ratio_min` to `st.zspace_coherence_project(...)` to select a
+different Rust policy.
 
 Runtime plan scoring follows the same ownership rule. Variational free energy
 is evaluated only by `st-core::heur::free_energy`; Python and WASM transport the

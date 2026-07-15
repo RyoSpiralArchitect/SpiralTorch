@@ -3023,6 +3023,8 @@ def zspace_coherence_project(
     stability_gain: float = 1.0,
     frac_gain: float = 1.0,
     drs_gain: float = 1.0,
+    background_energy_ratio_max: float = 1.0e-5,
+    cascade_energy_ratio_min: float = 0.7,
 ) -> dict[str, Any]:
     """Project coherence diagnostics through the canonical Rust contract."""
 
@@ -3081,6 +3083,10 @@ def zspace_coherence_project(
             "stability_gain": float(stability_gain),
             "frac_gain": float(frac_gain),
             "drs_gain": float(drs_gain),
+        },
+        "classification_policy": {
+            "background_energy_ratio_max": float(background_energy_ratio_max),
+            "cascade_energy_ratio_min": float(cascade_energy_ratio_min),
         },
     }
     return _native_zspace_coherence_projection(request)

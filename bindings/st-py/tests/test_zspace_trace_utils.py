@@ -272,7 +272,13 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
 
     def project(diagnostics, *, coherence):
         calls.append((dict(diagnostics), list(coherence)))
-        return {"partial": {"speed": 0.777, "coherence_mean": 0.22}}
+        return {
+            "partial": {
+                "speed": 0.777,
+                "coherence_mean": 0.22,
+                "coherence_concentration": 0.01,
+            }
+        }
 
     monkeypatch.setattr(st, "zspace_coherence_project", project)
     frame = zspace_trace_event_to_atlas_frame(
@@ -288,6 +294,25 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
                 "preserved_channels": 2,
                 "discarded_channels": 0,
                 "dominant_channel": 0,
+                "normalized_entropy": 0.42,
+                "concentration": 0.73,
+                "effective_channels": 1.6,
+                "distribution_channels": 2,
+                "swap_invariant": False,
+                "classification_kind": "spiraltorch.zspace_coherence_classification",
+                "classification_reason": (
+                    "dominant_energy_ratio_at_or_above_cascade_min"
+                ),
+                "classification_contract_version": (
+                    "spiraltorch.zspace_coherence_classification.v1"
+                ),
+                "classification_semantic_owner": (
+                    "st-core::inference::zspace_coherence"
+                ),
+                "classification_semantic_backend": "rust",
+                "classification_formula": "canonical Rust formula",
+                "background_energy_ratio_max": 1.0e-5,
+                "cascade_energy_ratio_min": 0.7,
             },
         }
     )
@@ -310,6 +335,37 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
     ]
     assert frame.metric_value("speed") == pytest.approx(0.777)
     assert frame.metric_value("coherence_mean") == pytest.approx(0.22)
+    assert frame.metric_value("coherence_normalized_entropy") == pytest.approx(0.42)
+    assert frame.metric_value("coherence_concentration") == pytest.approx(0.73)
+    assert frame.metric_value("coherence_effective_channels") == pytest.approx(1.6)
+    assert frame.metric_value("coherence_distribution_channels") == pytest.approx(2.0)
+    assert frame.metric_value("coherence_swap_invariant") == pytest.approx(0.0)
+    assert frame.metric_value("coherence_background_energy_ratio_max") == pytest.approx(
+        1.0e-5
+    )
+    assert frame.metric_value("coherence_cascade_energy_ratio_min") == pytest.approx(0.7)
+    assert (
+        "zspace.trace.classification_kind="
+        "spiraltorch.zspace_coherence_classification"
+        in frame.notes()
+    )
+    assert (
+        "zspace.trace.classification_reason="
+        "dominant_energy_ratio_at_or_above_cascade_min"
+        in frame.notes()
+    )
+    assert (
+        "zspace.trace.classification_contract_version="
+        "spiraltorch.zspace_coherence_classification.v1"
+        in frame.notes()
+    )
+    assert (
+        "zspace.trace.classification_semantic_owner="
+        "st-core::inference::zspace_coherence"
+        in frame.notes()
+    )
+    assert "zspace.trace.classification_semantic_backend=rust" in frame.notes()
+    assert "zspace.trace.classification_formula=canonical Rust formula" in frame.notes()
 
 
 def test_zspace_trace_atlas_omits_malformed_optional_count_without_aborting(
