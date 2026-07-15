@@ -2,4 +2,5 @@
 
 //! Canonical dynamical systems used by training and inference adapters.
 
+pub mod klein_gordon;
 pub mod stochastic_schrodinger;

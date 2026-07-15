@@ -3207,27 +3207,32 @@ The dynamic-field layer family is now trace-visible as well. Klein-Gordon,
 Hamilton-Jacobi, and stochastic-Schrodinger forward/backward paths emit
 `dynamic_field_*_{forward,backward}` metadata with field model, trainable
 parameter count, estimated work, selected backend, and backward gradient scale.
-Klein-Gordon and Hamilton-Jacobi now leave the scalar-only island:
-`dynamic_klein_gordon_forward` computes the wave update on WGPU,
-`dynamic_klein_gordon_backward` returns packed input/mass/spinor gradients,
+Klein-Gordon is no longer a scalar `tanh` heuristic. The versioned
+`st-core::dynamics::klein_gordon` contract advances explicit canonical
+`(field, momentum)` state on a periodic feature lattice with exact half damping
+around velocity-Verlet, a learned signed mass-squared term, a static scalar
+source, optional cubic self-coupling, a curvature/CFL stability gate, energy
+observations, and an analytic discrete adjoint. The ordinary `Module` adapter
+starts with zero momentum; `step_phase_space()` exposes recurrent state without
+hiding it in Python or WGPU. `dynamic_klein_gordon_forward` returns packed
+field/momentum state on WGPU, while `dynamic_klein_gordon_backward` returns
+field, momentum, mass-squared, and source gradients. Rust audits both GPU paths
+against the canonical transition before state or gradients are committed.
+
+Hamilton-Jacobi remains a traced tensor utility:
 `dynamic_hamilton_jacobi_forward` evaluates the temporal stencil with boundary
 rows, and `dynamic_hamilton_jacobi_backward` gathers neighbouring upstream
 signals without atomics before returning packed input/potential gradients.
-Stochastic-Schrodinger now splits along an honest composite boundary:
-`dynamic_schrodinger_forward` computes deterministic interference plus
-amplitude/decoherence caches on WGPU, CPU still consumes the RNG stream and adds
-noise in the original row-major order, and `dynamic_schrodinger_backward`
-computes packed input/coherence gradients from the cached tensors. The existing
-batch scale/accumulator contract is still applied after those kernels. Their
-broadcast feature parameters now follow the same batch-normalised update
-contract as the other one-row gates: input gradients remain unaveraged
-chain-rule signals, parameter gradients are scaled by `1 / rows`, and zero-row
-batches do not install empty mass/spinor/potential/coherence updates. The
-comparison table now separates `dynamic_field_fwd_wgpu` /
-`dynamic_field_bwd_wgpu` for all three field models from remaining
-`dynamic_field_fwd_cpu` / `dynamic_field_bwd_cpu` residuals, while raw traces
-preserve which field model is responsible and mark stochastic forward with
-`rng_backend=cpu`.
+Stochastic-Schrodinger likewise has a versioned Rust semantic contract: CPU and
+WGPU replay the same caller-supplied Gaussian innovations, and Rust audits the
+complex quadratures, norm law, and analytic backward. The existing batch
+scale/accumulator contract is applied after these kernels. Broadcast feature
+parameter gradients are scaled by `1 / rows`, input and phase-space gradients
+remain unaveraged chain-rule signals, and zero-row batches do not install empty
+updates. The comparison table separates `dynamic_field_fwd_wgpu` /
+`dynamic_field_bwd_wgpu` from CPU residuals, while raw traces retain contract
+version, semantic owner, integrator, stability/energy audit, field model, and
+stochastic RNG backend.
 
 Recurrent layers now protect their cached-time boundary more deliberately.
 `WaveRnn` and `SpiralRnn` clear stale forward caches at the start of a new
