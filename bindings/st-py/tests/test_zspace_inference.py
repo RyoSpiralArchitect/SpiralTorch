@@ -552,6 +552,22 @@ def test_coherence_diagnostics_projection_infers_metrics():
         },
     }
     assert contract["classification"]["classification_formula"]
+    assert contract["control"]["kind"] == "spiraltorch.zspace_coherence_control"
+    assert (
+        contract["control"]["contract_version"]
+        == "spiraltorch.zspace_coherence_control.v1"
+    )
+    assert contract["control"]["semantic_backend"] == "rust"
+    assert contract["control"]["spectral_radius"] == pytest.approx(
+        contract["derived"]["concentration"]
+    )
+    assert contract["control"]["spectral_entropy"] == pytest.approx(
+        contract["derived"]["normalized_entropy"]
+    )
+    assert contract["control"]["spectral_pressure"] == pytest.approx(
+        diagnostics.energy_ratio * (1.0 - contract["derived"]["normalized_entropy"])
+    )
+    assert contract["control"]["control_formula"]
     custom = zspace_coherence_project(
         diagnostics,
         coherence=[0.6, 0.25, 0.1, 0.05],
@@ -588,6 +604,7 @@ def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain()
     )
     assert contract["partial"]["coherence_entropy"] == pytest.approx(0.3)
     assert contract["partial"]["coherence_response_peak"] == pytest.approx(0.4)
+    assert "control" not in contract
 
     with pytest.raises(ValueError, match="speed_gain"):
         zspace_coherence_project(_DummyDiagnostics(), speed_gain=-1.0)

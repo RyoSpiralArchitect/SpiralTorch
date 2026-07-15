@@ -298,6 +298,7 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
                 "concentration": 0.73,
                 "effective_channels": 1.6,
                 "distribution_channels": 2,
+                "distribution_weight_mass": 1.0,
                 "swap_invariant": False,
                 "classification_kind": "spiraltorch.zspace_coherence_classification",
                 "classification_reason": (
@@ -313,6 +314,14 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
                 "classification_formula": "canonical Rust formula",
                 "background_energy_ratio_max": 1.0e-5,
                 "cascade_energy_ratio_min": 0.7,
+                "control_kind": "spiraltorch.zspace_coherence_control",
+                "control_contract_version": "spiraltorch.zspace_coherence_control.v1",
+                "control_semantic_owner": "st-core::inference::zspace_coherence",
+                "control_semantic_backend": "rust",
+                "control_formula": "canonical Rust control formula",
+                "spectral_radius": 0.73,
+                "spectral_entropy": 0.42,
+                "spectral_pressure": 0.31,
             },
         }
     )
@@ -339,11 +348,15 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
     assert frame.metric_value("coherence_concentration") == pytest.approx(0.73)
     assert frame.metric_value("coherence_effective_channels") == pytest.approx(1.6)
     assert frame.metric_value("coherence_distribution_channels") == pytest.approx(2.0)
+    assert frame.metric_value("coherence_distribution_weight_mass") == pytest.approx(1.0)
     assert frame.metric_value("coherence_swap_invariant") == pytest.approx(0.0)
     assert frame.metric_value("coherence_background_energy_ratio_max") == pytest.approx(
         1.0e-5
     )
     assert frame.metric_value("coherence_cascade_energy_ratio_min") == pytest.approx(0.7)
+    assert frame.metric_value("coherence_spectral_radius") == pytest.approx(0.73)
+    assert frame.metric_value("coherence_spectral_entropy") == pytest.approx(0.42)
+    assert frame.metric_value("coherence_spectral_pressure") == pytest.approx(0.31)
     assert (
         "zspace.trace.classification_kind="
         "spiraltorch.zspace_coherence_classification"
@@ -366,6 +379,22 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
     )
     assert "zspace.trace.classification_semantic_backend=rust" in frame.notes()
     assert "zspace.trace.classification_formula=canonical Rust formula" in frame.notes()
+    assert (
+        "zspace.trace.control_kind=spiraltorch.zspace_coherence_control"
+        in frame.notes()
+    )
+    assert (
+        "zspace.trace.control_contract_version="
+        "spiraltorch.zspace_coherence_control.v1"
+        in frame.notes()
+    )
+    assert (
+        "zspace.trace.control_semantic_owner="
+        "st-core::inference::zspace_coherence"
+        in frame.notes()
+    )
+    assert "zspace.trace.control_semantic_backend=rust" in frame.notes()
+    assert "zspace.trace.control_formula=canonical Rust control formula" in frame.notes()
 
 
 def test_zspace_trace_atlas_omits_malformed_optional_count_without_aborting(

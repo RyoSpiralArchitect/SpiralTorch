@@ -6504,6 +6504,7 @@ class CoherenceDiagnostics:
     pre_discard: PreDiscardTelemetry | None
     observation: CoherenceObservation
     classification: Dict[str, object]
+    control: Dict[str, object]
     noncollapse_snapshot: NonCollapseSnapshot
     def classify(
         self,
@@ -8109,6 +8110,8 @@ class _NnModuleTrainer:
     ) -> None: ...
 
     def disable_spectral_learning_rate(self) -> None: ...
+
+    def push_coherence_diagnostics(self, diagnostics: CoherenceDiagnostics) -> bool: ...
 
     def spectral_metrics(self) -> Dict[str, object] | None: ...
 

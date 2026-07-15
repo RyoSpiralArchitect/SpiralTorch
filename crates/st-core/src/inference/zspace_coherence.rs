@@ -21,6 +21,11 @@ pub const ZSPACE_COHERENCE_CLASSIFICATION_KIND: &str =
     "spiraltorch.zspace_coherence_classification";
 pub const ZSPACE_COHERENCE_CLASSIFICATION_FORMULA: &str =
     "threshold comparisons tolerate one relative f32 epsilon;background if energy_ratio<=background_energy_ratio_max;symmetric_pulse if swap_invariant;cascade_imbalance if energy_ratio>=cascade_energy_ratio_min;diffuse_drift otherwise";
+pub const ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_coherence_control.v1";
+pub const ZSPACE_COHERENCE_CONTROL_KIND: &str = "spiraltorch.zspace_coherence_control";
+pub const ZSPACE_COHERENCE_CONTROL_FORMULA: &str =
+    "p=w/sum(w);rho(p*p^T)=sum(p^2);spectral_radius=(rho-1/N)/(1-1/N)=C_HHI (N=1 => 1);spectral_entropy=H/ln(N) (N=1 => 0);spectral_pressure=energy_ratio*(1-spectral_entropy);N_eff=exp(H)";
 pub const ZSPACE_COHERENCE_MAX_CHANNELS: usize = 4096;
 pub const ZSPACE_COHERENCE_PARTIAL_METRICS: [&str; 22] = [
     "coherence_mean",
@@ -189,6 +194,24 @@ pub struct ZSpaceCoherenceDistributionSummary {
     pub effective_channels: f64,
 }
 
+/// Dimensionless coherence controls derived by the canonical Rust contract.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct ZSpaceCoherenceControlPayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub control_formula: &'static str,
+    pub channels: usize,
+    pub raw_mean_coherence: f64,
+    pub raw_coherence_entropy: f64,
+    pub spectral_radius: f64,
+    pub spectral_entropy: f64,
+    pub spectral_pressure: f64,
+    pub effective_channels: f64,
+    pub energy_ratio: f64,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZSpaceCoherenceProjectionRequest {
@@ -219,6 +242,8 @@ pub struct ZSpaceCoherenceProjectionPayload {
     pub derived: ZSpaceCoherenceProjectionDerived,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classification: Option<ZSpaceCoherenceClassificationPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control: Option<ZSpaceCoherenceControlPayload>,
     pub partial: BTreeMap<String, f64>,
 }
 
@@ -282,6 +307,14 @@ pub enum ZSpaceCoherenceProjectionError {
     InvalidClassificationPolicy {
         background_energy_ratio_max: f64,
         cascade_energy_ratio_min: f64,
+    },
+    #[error(
+        "Z-space coherence distribution metric '{field}' is inconsistent: received {value}, expected {expected}"
+    )]
+    InconsistentDistributionMetric {
+        field: &'static str,
+        value: f64,
+        expected: f64,
     },
 }
 
@@ -417,6 +450,121 @@ where
         normalized_entropy,
         concentration,
         effective_channels: weight_entropy.exp().min(channels as f64),
+    })
+}
+
+/// Derive dimensionless trainer/runtime controls from a canonical distribution summary.
+pub fn derive_zspace_coherence_control(
+    distribution: ZSpaceCoherenceDistributionSummary,
+    energy_ratio: f64,
+    raw_mean_coherence: f64,
+) -> Result<ZSpaceCoherenceControlPayload, ZSpaceCoherenceProjectionError> {
+    if distribution.channels == 0 {
+        return Err(ZSpaceCoherenceProjectionError::EmptyChannels);
+    }
+    if distribution.channels > ZSPACE_COHERENCE_MAX_CHANNELS {
+        return Err(ZSpaceCoherenceProjectionError::ChannelLimit {
+            actual: distribution.channels,
+            max: ZSPACE_COHERENCE_MAX_CHANNELS,
+        });
+    }
+    validate_range("energy_ratio", energy_ratio, 0.0, 1.0)?;
+    validate_range("mean_coherence", raw_mean_coherence, 0.0, 1.0)?;
+    validate_range(
+        "normalized_entropy",
+        distribution.normalized_entropy,
+        0.0,
+        1.0,
+    )?;
+    validate_range("concentration", distribution.concentration, 0.0, 1.0)?;
+    validate_range(
+        "effective_channels",
+        distribution.effective_channels,
+        1.0,
+        distribution.channels as f64,
+    )?;
+    validate_scalar("weight_mass", distribution.weight_mass)?;
+    validate_scalar("weight_entropy", distribution.weight_entropy)?;
+    let mass_tolerance = f32_accumulation_tolerance(distribution.channels, 1.0);
+    if (distribution.weight_mass - 1.0).abs() > mass_tolerance {
+        return Err(ZSpaceCoherenceProjectionError::InvalidWeightMass {
+            mass: distribution.weight_mass,
+        });
+    }
+
+    let maximum_entropy = if distribution.channels > 1 {
+        (distribution.channels as f64).ln()
+    } else {
+        0.0
+    };
+    let entropy_tolerance = f32_accumulation_tolerance(distribution.channels, maximum_entropy);
+    if distribution.weight_entropy < 0.0
+        || distribution.weight_entropy > maximum_entropy + entropy_tolerance
+    {
+        return Err(ZSpaceCoherenceProjectionError::ScalarOutOfRange {
+            field: "weight_entropy",
+            value: distribution.weight_entropy,
+            min: 0.0,
+            max: maximum_entropy,
+        });
+    }
+    let expected_normalized_entropy = if maximum_entropy > 0.0 {
+        (distribution.weight_entropy / maximum_entropy).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    if (distribution.normalized_entropy - expected_normalized_entropy).abs() > entropy_tolerance {
+        return Err(
+            ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                field: "normalized_entropy",
+                value: distribution.normalized_entropy,
+                expected: expected_normalized_entropy,
+            },
+        );
+    }
+    let expected_effective_channels = distribution
+        .weight_entropy
+        .exp()
+        .min(distribution.channels as f64);
+    if (distribution.effective_channels - expected_effective_channels).abs() > entropy_tolerance {
+        return Err(
+            ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                field: "effective_channels",
+                value: distribution.effective_channels,
+                expected: expected_effective_channels,
+            },
+        );
+    }
+
+    let spectral_radius = distribution.concentration;
+    let spectral_entropy = distribution.normalized_entropy;
+    let spectral_pressure = energy_ratio * (1.0 - spectral_entropy);
+    for (metric, value) in [
+        ("spectral_radius", spectral_radius),
+        ("spectral_entropy", spectral_entropy),
+        ("spectral_pressure", spectral_pressure),
+    ] {
+        if !value.is_finite() {
+            return Err(ZSpaceCoherenceProjectionError::NonFiniteDerived {
+                metric: metric.to_owned(),
+            });
+        }
+    }
+
+    Ok(ZSpaceCoherenceControlPayload {
+        kind: ZSPACE_COHERENCE_CONTROL_KIND,
+        contract_version: ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION,
+        semantic_owner: ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
+        control_formula: ZSPACE_COHERENCE_CONTROL_FORMULA,
+        channels: distribution.channels,
+        raw_mean_coherence,
+        raw_coherence_entropy: distribution.weight_entropy,
+        spectral_radius,
+        spectral_entropy,
+        spectral_pressure,
+        effective_channels: distribution.effective_channels,
+        energy_ratio,
     })
 }
 
@@ -833,6 +981,22 @@ pub fn project_zspace_coherence(
             },
         )?)
     };
+    let control = if diagnostics.normalized_weights.is_empty() {
+        None
+    } else {
+        Some(derive_zspace_coherence_control(
+            ZSpaceCoherenceDistributionSummary {
+                channels: derived.channels,
+                weight_mass: derived.weight_mass,
+                weight_entropy: derived.weight_entropy,
+                normalized_entropy: derived.normalized_entropy,
+                concentration: derived.concentration,
+                effective_channels: derived.effective_channels,
+            },
+            diagnostics.energy_ratio,
+            diagnostics.mean_coherence,
+        )?)
+    };
 
     Ok(ZSpaceCoherenceProjectionPayload {
         kind: ZSPACE_COHERENCE_PROJECTION_KIND,
@@ -847,6 +1011,7 @@ pub fn project_zspace_coherence(
         config: request.config,
         derived,
         classification,
+        control,
         partial,
     })
 }
@@ -891,6 +1056,28 @@ mod tests {
         assert_eq!(
             classification.reason,
             "dominant_energy_ratio_at_or_above_cascade_min"
+        );
+        let control = payload.control.expect("weight control");
+        assert_eq!(control.kind, ZSPACE_COHERENCE_CONTROL_KIND);
+        assert_eq!(
+            control.contract_version,
+            ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION
+        );
+        assert_eq!(control.semantic_backend, "rust");
+        assert_relative_eq!(
+            control.spectral_radius,
+            expected_concentration,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            control.spectral_entropy,
+            expected_normalized_entropy,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            control.spectral_pressure,
+            0.7 * (1.0 - expected_normalized_entropy),
+            epsilon = 1e-14
         );
         assert_relative_eq!(
             payload.partial["speed"],
@@ -1013,6 +1200,26 @@ mod tests {
             uniform_sixteen.classification.unwrap().label,
             ZSpaceCoherenceLabel::SymmetricPulse
         );
+        let uniform_four_control = uniform_four.control.unwrap();
+        let uniform_sixteen_control = uniform_sixteen.control.unwrap();
+        assert_relative_eq!(uniform_four_control.spectral_radius, 0.0, epsilon = 1e-14);
+        assert_relative_eq!(uniform_four_control.spectral_entropy, 1.0, epsilon = 1e-14);
+        assert_relative_eq!(uniform_four_control.spectral_pressure, 0.0, epsilon = 1e-14);
+        assert_relative_eq!(
+            uniform_four_control.spectral_radius,
+            uniform_sixteen_control.spectral_radius,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            uniform_four_control.spectral_entropy,
+            uniform_sixteen_control.spectral_entropy,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            uniform_four_control.spectral_pressure,
+            uniform_sixteen_control.spectral_pressure,
+            epsilon = 1e-14
+        );
 
         let concentrated_four = project_zspace_coherence(distribution_request(4, true)).unwrap();
         let concentrated_sixteen =
@@ -1040,6 +1247,66 @@ mod tests {
             concentrated_sixteen.classification.unwrap().label,
             ZSpaceCoherenceLabel::CascadeImbalance
         );
+        let concentrated_four_control = concentrated_four.control.unwrap();
+        let concentrated_sixteen_control = concentrated_sixteen.control.unwrap();
+        assert_relative_eq!(
+            concentrated_four_control.spectral_radius,
+            concentrated_sixteen_control.spectral_radius,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            concentrated_four_control.spectral_entropy,
+            concentrated_sixteen_control.spectral_entropy,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            concentrated_four_control.spectral_pressure,
+            concentrated_sixteen_control.spectral_pressure,
+            epsilon = 1e-14
+        );
+        assert_relative_eq!(
+            concentrated_four_control.spectral_pressure,
+            0.85,
+            epsilon = 1e-14
+        );
+    }
+
+    #[test]
+    fn control_rejects_inconsistent_or_non_simplex_distribution_summaries() {
+        let summary = summarize_zspace_coherence_distribution(&[0.5_f64, 0.3, 0.2]).unwrap();
+        let mut inconsistent = summary;
+        inconsistent.normalized_entropy = 0.0;
+        assert!(matches!(
+            derive_zspace_coherence_control(inconsistent, 0.5, 1.0 / 3.0),
+            Err(
+                ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                    field: "normalized_entropy",
+                    ..
+                }
+            )
+        ));
+
+        let mut invalid_mass = summary;
+        invalid_mass.weight_mass = 0.5;
+        assert!(matches!(
+            derive_zspace_coherence_control(invalid_mass, 0.5, 1.0 / 3.0),
+            Err(ZSpaceCoherenceProjectionError::InvalidWeightMass { .. })
+        ));
+
+        for (field, mut non_finite) in [("weight_mass", summary), ("weight_entropy", summary)] {
+            if field == "weight_mass" {
+                non_finite.weight_mass = f64::NAN;
+            } else {
+                non_finite.weight_entropy = f64::NAN;
+            }
+            assert!(matches!(
+                derive_zspace_coherence_control(non_finite, 0.5, 1.0 / 3.0),
+                Err(ZSpaceCoherenceProjectionError::NonFiniteScalar {
+                    field: rejected,
+                    ..
+                }) if rejected == field
+            ));
+        }
     }
 
     #[test]

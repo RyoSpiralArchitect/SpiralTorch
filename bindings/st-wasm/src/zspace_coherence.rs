@@ -142,6 +142,24 @@ mod tests {
             "dominant_energy_ratio_at_or_above_cascade_min"
         );
         assert_eq!(actual["classification"]["semantic_backend"], "rust");
+        assert_eq!(
+            actual["control"]["kind"],
+            "spiraltorch.zspace_coherence_control"
+        );
+        assert_eq!(
+            actual["control"]["contract_version"],
+            "spiraltorch.zspace_coherence_control.v1"
+        );
+        assert_eq!(actual["control"]["semantic_backend"], "rust");
+        assert!(actual["control"]["control_formula"].is_string());
+        assert_eq!(
+            actual["control"]["spectral_radius"],
+            actual["derived"]["concentration"]
+        );
+        assert_eq!(
+            actual["control"]["spectral_entropy"],
+            actual["derived"]["normalized_entropy"]
+        );
     }
 
     #[test]

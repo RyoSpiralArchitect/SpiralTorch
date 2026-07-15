@@ -441,6 +441,22 @@ declare module "spiraltorch-wasm" {
         policy: ZSpaceCoherenceClassificationPolicy;
     };
 
+    export type ZSpaceCoherenceControl = {
+        kind: "spiraltorch.zspace_coherence_control";
+        contract_version: "spiraltorch.zspace_coherence_control.v1";
+        semantic_owner: "st-core::inference::zspace_coherence";
+        semantic_backend: "rust";
+        control_formula: string;
+        channels: number;
+        raw_mean_coherence: number;
+        raw_coherence_entropy: number;
+        spectral_radius: number;
+        spectral_entropy: number;
+        spectral_pressure: number;
+        effective_channels: number;
+        energy_ratio: number;
+    };
+
     export type ZSpaceCoherenceProjection = {
         kind: "spiraltorch.zspace_coherence_projection";
         contract_version: "spiraltorch.zspace_coherence_projection.v1";
@@ -455,6 +471,7 @@ declare module "spiraltorch-wasm" {
         config: Required<ZSpaceCoherenceProjectionConfig>;
         derived: ZSpaceCoherenceProjectionDerived;
         classification?: ZSpaceCoherenceClassification;
+        control?: ZSpaceCoherenceControl;
         partial: Record<string, number>;
     };
 

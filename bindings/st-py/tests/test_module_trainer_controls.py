@@ -380,6 +380,79 @@ def test_module_trainer_spectral_metrics_include_band_snapshot() -> None:
     assert metrics["band_stability"] >= 0.0
 
 
+def test_module_trainer_consumes_rust_coherence_control_contract() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    trainer.enable_spectral_learning_rate()
+
+    topos = st.OpenCartesianTopos(-1.0, 1e-5, 10.0, 256, 8192)
+    sequencer = st.ZSpaceCoherenceSequencer(8, 4, -1.0, topos=topos)
+    diagnostics = sequencer.diagnostics(
+        st.Tensor((1, 8), data=[0.9, 0.8, 0.1, 0.05, 0.02, 0.01, 0.0, 0.0])
+    )
+    assert trainer.push_coherence_diagnostics(diagnostics) is True
+
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("control_l1", 2, 3))
+    trainer.prepare(model)
+    loss = st.nn.MeanSquaredError()
+    schedule = trainer.roundtable(
+        1,
+        3,
+        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-6),
+    )
+    stats = trainer.train_epoch(
+        model,
+        loss,
+        [(st.Tensor.rand(1, 2, seed=51), st.Tensor.rand(1, 3, seed=52))],
+        schedule,
+    )
+    assert stats.batches == 1
+
+    metrics = trainer.spectral_metrics()
+    assert isinstance(metrics, dict)
+    assert metrics["source"] == "combined"
+    adjustment = metrics["adjustment"]
+    assert isinstance(adjustment, dict)
+    control = diagnostics.control
+    assert adjustment["control_kind"] == "spiraltorch.zspace_coherence_control"
+    assert (
+        adjustment["control_contract_version"]
+        == "spiraltorch.zspace_coherence_control.v1"
+    )
+    assert adjustment["control_semantic_owner"] == (
+        "st-core::inference::zspace_coherence"
+    )
+    assert adjustment["control_semantic_backend"] == "rust"
+    assert adjustment["control_formula"] == control["control_formula"]
+    assert adjustment["spectral_radius"] == pytest.approx(control["spectral_radius"])
+    assert adjustment["spectral_entropy"] == pytest.approx(control["spectral_entropy"])
+    assert adjustment["spectral_pressure"] == pytest.approx(control["spectral_pressure"])
+    assert adjustment["effective_channels"] == pytest.approx(
+        control["effective_channels"]
+    )
+    assert adjustment["distribution_channels"] == control["channels"]
+    assert adjustment["raw_mean_coherence"] == pytest.approx(
+        control["raw_mean_coherence"]
+    )
+    assert adjustment["raw_coherence_entropy"] == pytest.approx(
+        control["raw_coherence_entropy"]
+    )
+    assert adjustment["classification_reason"]
+    assert adjustment["classification_contract_version"] == (
+        "spiraltorch.zspace_coherence_classification.v1"
+    )
+    assert adjustment["classification_formula"]
+
+
 def test_summarize_trainer_trace_events_collects_numeric_metrics(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")

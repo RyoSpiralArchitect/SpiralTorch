@@ -33,9 +33,10 @@ pub use sequencer::{
     ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
 pub use st_core::inference::zspace_coherence::{
-    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceDistributionSummary,
-    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionDerived,
-    ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
+    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceControlPayload,
+    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionConfig,
+    ZSpaceCoherenceProjectionDerived, ZSpaceCoherenceProjectionError,
+    ZSpaceCoherenceProjectionPayload,
 };
 pub use text_vae::ZSpaceTextVae;
 pub use trace::{

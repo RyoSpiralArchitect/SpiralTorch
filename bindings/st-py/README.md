@@ -2165,6 +2165,7 @@ sequencer = st.ZSpaceCoherenceSequencer(16, 2, -0.9, topos=topos)
 x = st.Tensor((1, 16), data=[0.1] * 8 + [0.8] * 8)
 _, coherence, diagnostics = sequencer.forward_with_diagnostics(x)
 contour = sequencer.emit_linguistic_contour(x)
+control = diagnostics.control
 contract = st.zspace_coherence_project(
     diagnostics,
     coherence=coherence,
@@ -2176,6 +2177,8 @@ assert contract["contract_version"] == "spiraltorch.zspace_coherence_projection.
 assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
 assert contract["derived"]["distribution_source"] == "normalized_weights"
 assert contract["classification"]["label"] == diagnostics.observation.label
+assert control["contract_version"] == "spiraltorch.zspace_coherence_control.v1"
+assert contract["control"]["spectral_pressure"] == control["spectral_pressure"]
 assert partial["speed"] == contract["partial"]["speed"]
 ```
 
@@ -2184,6 +2187,10 @@ probability simplex, so `speed` and `stability` do not drift merely because a
 model uses more Maxwell channels. Missing diagnostics, invalid probability
 mass, inconsistent channel counts, and invalid gains fail at the contract
 boundary instead of being silently replaced or clamped by Python.
+`ModuleTrainer.push_coherence_diagnostics(diagnostics)` feeds that same Rust
+control payload into learning; raw mean coherence and raw Shannon entropy remain
+audit metrics, while normalized radius, entropy, and pressure drive the policy.
+Trace replay is guarded and rejects missing, legacy, or tampered control fields.
 `diagnostics.observation.signature` exposes the same Rust-owned normalized
 entropy, concentration, effective channel count, label, reason, formula,
 contract version, and policy thresholds. Python never reclassifies the trace.
