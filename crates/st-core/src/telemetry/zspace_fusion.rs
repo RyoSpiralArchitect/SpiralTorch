@@ -617,6 +617,24 @@ pub fn fuse_zspace_partials(
         if !weight.is_finite() {
             return Err(ZSpaceFusionError::NonFiniteWeight { index });
         }
+        if partial.metrics.len() > ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL {
+            return Err(ZSpaceFusionError::TooManyMetrics {
+                index,
+                actual: partial.metrics.len(),
+                max: ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL,
+            });
+        }
+        if let Some(key) = partial
+            .metrics
+            .keys()
+            .find(|key| key.len() > ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES)
+        {
+            return Err(ZSpaceFusionError::MetricLabelTooLong {
+                index,
+                actual: key.len(),
+                max: ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES,
+            });
+        }
         if weight <= 0.0 {
             suppressed_count += 1;
             sources.push(ZSpacePartialSourceAudit {
@@ -630,24 +648,10 @@ pub fn fuse_zspace_partials(
             });
             continue;
         }
-        if partial.metrics.len() > ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL {
-            return Err(ZSpaceFusionError::TooManyMetrics {
-                index,
-                actual: partial.metrics.len(),
-                max: ZSPACE_FUSION_MAX_METRICS_PER_PARTIAL,
-            });
-        }
 
         let mut canonical_metrics: BTreeMap<&'static str, (String, ZSpaceMetricInput)> =
             BTreeMap::new();
         for (key, value) in partial.metrics {
-            if key.len() > ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES {
-                return Err(ZSpaceFusionError::MetricLabelTooLong {
-                    index,
-                    actual: key.len(),
-                    max: ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES,
-                });
-            }
             let Some(canonical) = canonical_metric_name(&key) else {
                 return Err(ZSpaceFusionError::UnknownMetric { index, metric: key });
             };
@@ -1142,6 +1146,25 @@ mod tests {
         .expect_err("oversized metric labels must fail closed");
         assert!(matches!(
             metric_error,
+            ZSpaceFusionError::MetricLabelTooLong { index: 0, .. }
+        ));
+
+        let suppressed_metric_error = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(ZSpacePartialInput {
+                metrics: BTreeMap::from([(
+                    "x".repeat(ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES + 1),
+                    ZSpaceMetricInput::Scalar(1.0),
+                )]),
+                weight: 1.0,
+                origin: None,
+                telemetry: None,
+            })],
+            weights: Some(vec![0.0]),
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect_err("suppression must not bypass metric label bounds");
+        assert!(matches!(
+            suppressed_metric_error,
             ZSpaceFusionError::MetricLabelTooLong { index: 0, .. }
         ));
 
