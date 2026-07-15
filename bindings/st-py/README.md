@@ -2042,6 +2042,8 @@ weights = st.Tensor(1, 3, [0.2, -0.1, 0.05])
 opt.accumulate_wave(st.Tensor(1, 3, [0.4, -0.6, 0.2]))
 opt.step(weights)  # tunes rates via DesireGradientControl + applies both tapes
 print("weights:", weights.tolist())
+topos_audit = opt.topos_telemetry_contract()
+print(topos_audit["semantic_owner"], topos_audit["summary"])
 
 trainer = st.ZSpaceTrainer(z_dim=4)
 loss = trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
@@ -2052,9 +2054,11 @@ print("optimizer audit:", trainer.last_optimizer_report["adam"])
 The class contains no Python Adam or fractional-FFT fallback. Initialization,
 checkpoint restore, observation normalisation, the FFT-derived periodic
 fractional Sobolev gradient, bounded Topos controls, and the complete Adam
-transition are owned by `st-core::runtime::zspace_optimizer`. Python fuses payloads and caches inference
-metadata, then serializes transition-plus-commit per trainer and commits only a
-successful Rust report. Native FFT work releases the GIL. The low-level
+transition are owned by `st-core::runtime::zspace_optimizer`. Z-space partial
+and telemetry fusion, including Amegagrad's `topos.*` flattening and audit
+summary, is owned by `st-core::telemetry::zspace_fusion`; Python only collects
+sources, caches inference metadata, serializes transition-plus-commit per
+trainer, and commits a successful Rust report. Native FFT work releases the GIL. The low-level
 `zspace_meta_optimizer_init`, `zspace_meta_optimizer_restore`, and
 `zspace_meta_optimizer_step` functions expose the same versioned contract for
 custom orchestrators.
