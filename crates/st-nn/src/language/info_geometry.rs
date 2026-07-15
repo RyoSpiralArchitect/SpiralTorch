@@ -42,6 +42,14 @@ fn validate_intensity(hint: &NarrativeHint) -> PureResult<f64> {
     Ok(intensity)
 }
 
+fn finite_kl(value: Option<f64>, direction: &'static str) -> PureResult<f64> {
+    value.ok_or_else(|| {
+        TensorError::Generic(format!(
+            "information geometry {direction} KL divergence is infinite"
+        ))
+    })
+}
+
 /// A categorical Fisher-Rao atlas over narrative tags.
 ///
 /// Co-occurrence defines the graph used by diffusion, while probability
@@ -189,11 +197,11 @@ impl InformationGeometryMetric {
     }
 
     pub fn kl_divergence(&self, left: &NarrativeHint, right: &NarrativeHint) -> PureResult<f64> {
-        Ok(self.compare(left, right)?.forward_kl)
+        finite_kl(self.compare(left, right)?.forward_kl, "forward")
     }
 
     pub fn symmetric_kl(&self, left: &NarrativeHint, right: &NarrativeHint) -> PureResult<f64> {
-        Ok(self.compare(left, right)?.symmetric_kl)
+        finite_kl(self.compare(left, right)?.symmetric_kl, "symmetric")
     }
 
     pub fn fisher_rao_distance(
@@ -247,10 +255,11 @@ impl InformationGeometryMetric {
         let fisher_left = self.fisher_metric(left)?;
         let fisher_right = self.fisher_metric(right)?;
         let comparison = self.compare(left, right)?;
+        let symmetric_kl = finite_kl(comparison.symmetric_kl, "symmetric")?;
         Ok(NarrativeBridgeCurvature {
             channel_a: left.channel().to_owned(),
             channel_b: right.channel().to_owned(),
-            symmetric_kl: comparison.symmetric_kl,
+            symmetric_kl,
             fisher_rao_distance: comparison.fisher_rao_distance,
             bhattacharyya_coefficient: comparison.bhattacharyya_coefficient,
             sectional_curvature: comparison.sectional_curvature,

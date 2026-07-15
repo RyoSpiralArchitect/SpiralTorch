@@ -22,7 +22,6 @@ pub const ZSPACE_CONCEPT_DIFFUSION_EXECUTION_BACKEND: &str = "f64_cpu";
 const BASE_PROBABILITY_SUM_TOLERANCE: f64 = 1.0e-6;
 const F32_SUM_TOLERANCE_MULTIPLIER: f64 = 4.0;
 const INTERNAL_INVARIANT_TOLERANCE: f64 = 1.0e-10;
-pub const FISHER_RAO_KL_FLOOR: f64 = 1.0e-12;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ConceptDiffusionError {
@@ -461,15 +460,52 @@ pub struct ConceptDiffusionPayload {
 /// Fisher-Rao comparison for two categorical probability distributions.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct FisherRaoComparison {
-    /// Directed KL values use `kl_floor` at zero-probability denominators.
-    pub forward_kl: f64,
-    pub reverse_kl: f64,
-    pub symmetric_kl: f64,
-    pub kl_floor: f64,
+    /// `None` represents the exact `+infinity` boundary value.
+    pub forward_kl: Option<f64>,
+    /// `None` represents the exact `+infinity` boundary value.
+    pub reverse_kl: Option<f64>,
+    /// `None` when either directed divergence is `+infinity`.
+    pub symmetric_kl: Option<f64>,
     pub bhattacharyya_coefficient: f64,
     pub fisher_rao_distance: f64,
     /// The categorical simplex is a sphere of radius two under the square-root map.
     pub sectional_curvature: Option<f64>,
+}
+
+fn directed_kl(
+    left: &[f64],
+    right: &[f64],
+    field: &'static str,
+    term_field: &'static str,
+) -> Result<Option<f64>, ConceptDiffusionError> {
+    let mut divergence = 0.0;
+    for (&left_value, &right_value) in left.iter().zip(right) {
+        if left_value == 0.0 {
+            continue;
+        }
+        if right_value == 0.0 {
+            return Ok(None);
+        }
+        divergence = checked_add(
+            field,
+            divergence,
+            require_derived_finite(
+                term_field,
+                left_value * (left_value.ln() - right_value.ln()),
+            )?,
+        )?;
+    }
+    if divergence < 0.0 {
+        if divergence >= -INTERNAL_INVARIANT_TOLERANCE {
+            divergence = 0.0;
+        } else {
+            return Err(ConceptDiffusionError::Negative {
+                field,
+                value: divergence,
+            });
+        }
+    }
+    Ok(Some(divergence))
 }
 
 pub fn compare_fisher_rao(
@@ -478,32 +514,17 @@ pub fn compare_fisher_rao(
 ) -> Result<FisherRaoComparison, ConceptDiffusionError> {
     let left = validate_distribution("left_probability", left, None)?;
     let right = validate_distribution("right_probability", right, Some(left.values.len()))?;
-    let mut forward_kl = 0.0;
-    let mut backward_kl = 0.0;
+    let forward_kl = directed_kl(&left.values, &right.values, "forward_kl", "forward_kl_term")?;
+    let reverse_kl = directed_kl(&right.values, &left.values, "reverse_kl", "reverse_kl_term")?;
+    let symmetric_kl = match (forward_kl, reverse_kl) {
+        (Some(forward), Some(reverse)) => Some(require_derived_finite(
+            "symmetric_kl",
+            0.5 * (forward + reverse),
+        )?),
+        _ => None,
+    };
     let mut coefficient = 0.0;
     for (&left_value, &right_value) in left.values.iter().zip(&right.values) {
-        if left_value > 0.0 {
-            let denominator = right_value.max(FISHER_RAO_KL_FLOOR);
-            forward_kl = checked_add(
-                "forward_kl",
-                forward_kl,
-                require_derived_finite(
-                    "forward_kl_term",
-                    left_value * (left_value / denominator).ln(),
-                )?,
-            )?;
-        }
-        if right_value > 0.0 {
-            let denominator = left_value.max(FISHER_RAO_KL_FLOOR);
-            backward_kl = checked_add(
-                "backward_kl",
-                backward_kl,
-                require_derived_finite(
-                    "backward_kl_term",
-                    right_value * (right_value / denominator).ln(),
-                )?,
-            )?;
-        }
         coefficient = checked_add(
             "bhattacharyya_coefficient",
             coefficient,
@@ -515,9 +536,8 @@ pub fn compare_fisher_rao(
         require_derived_finite("fisher_rao_distance", 2.0 * coefficient.acos())?;
     Ok(FisherRaoComparison {
         forward_kl,
-        reverse_kl: backward_kl,
-        symmetric_kl: require_derived_finite("symmetric_kl", 0.5 * (forward_kl + backward_kl))?,
-        kl_floor: FISHER_RAO_KL_FLOOR,
+        reverse_kl,
+        symmetric_kl,
         bhattacharyya_coefficient: coefficient,
         fisher_rao_distance,
         sectional_curvature: (left.values.len() >= 3).then_some(0.25),
@@ -1057,19 +1077,26 @@ mod tests {
     fn fisher_rao_geometry_matches_the_square_root_embedding() {
         let identical =
             compare_fisher_rao(&[0.5, 0.25, 0.25], &[0.5, 0.25, 0.25]).expect("valid comparison");
-        assert!(identical.forward_kl.abs() < 1.0e-12);
-        assert!(identical.reverse_kl.abs() < 1.0e-12);
-        assert_eq!(identical.kl_floor, FISHER_RAO_KL_FLOOR);
+        assert_eq!(identical.forward_kl, Some(0.0));
+        assert_eq!(identical.reverse_kl, Some(0.0));
+        assert_eq!(identical.symmetric_kl, Some(0.0));
         assert!(identical.fisher_rao_distance.abs() < 1.0e-12);
         assert!((identical.bhattacharyya_coefficient - 1.0).abs() < 1.0e-12);
         assert_eq!(identical.sectional_curvature, Some(0.25));
 
         let orthogonal = compare_fisher_rao(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0])
             .expect("valid boundary comparison");
-        assert!(orthogonal.forward_kl > 0.0);
-        assert_eq!(orthogonal.forward_kl, orthogonal.reverse_kl);
+        assert_eq!(orthogonal.forward_kl, None);
+        assert_eq!(orthogonal.reverse_kl, None);
+        assert_eq!(orthogonal.symmetric_kl, None);
         assert!((orthogonal.fisher_rao_distance - std::f64::consts::PI).abs() < 1.0e-12);
         assert_eq!(orthogonal.bhattacharyya_coefficient, 0.0);
+
+        let tiny = compare_fisher_rao(&[1.0 - 1.0e-13, 1.0e-13], &[1.0 - 1.0e-13, 1.0e-13])
+            .expect("valid sparse interior comparison");
+        assert_eq!(tiny.forward_kl, Some(0.0));
+        assert_eq!(tiny.reverse_kl, Some(0.0));
+        assert_eq!(tiny.symmetric_kl, Some(0.0));
     }
 
     #[test]
