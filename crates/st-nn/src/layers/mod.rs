@@ -36,10 +36,11 @@ pub use coherence_wave::ZSpaceCoherenceWaveBlock;
 pub use continuous_wavelet::ContinuousWaveletTransform;
 pub use dropout::Dropout;
 pub use dynamic_field::{
-    HamiltonJacobiFlow, KleinGordonAudit, KleinGordonBackwardAudit, KleinGordonConfig,
-    KleinGordonPropagation, KleinGordonTensorBackward, KleinGordonTensorStep,
-    StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit, StochasticSchrodingerConfig,
-    StochasticSchrodingerLayer,
+    HamiltonJacobiAudit, HamiltonJacobiBackwardAudit, HamiltonJacobiConfig, HamiltonJacobiFlow,
+    HamiltonJacobiTensorBackward, HamiltonJacobiTensorStep, KleinGordonAudit,
+    KleinGordonBackwardAudit, KleinGordonConfig, KleinGordonPropagation, KleinGordonTensorBackward,
+    KleinGordonTensorStep, StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit,
+    StochasticSchrodingerConfig, StochasticSchrodingerLayer,
 };
 pub use embedding::Embedding;
 pub use gelu::Gelu;

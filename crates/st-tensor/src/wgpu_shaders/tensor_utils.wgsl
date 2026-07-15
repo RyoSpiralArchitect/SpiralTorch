@@ -121,7 +121,7 @@ fn row_affine(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-fn klein_gordon_previous_index(index: u32) -> u32 {
+fn periodic_feature_previous_index(index: u32) -> u32 {
     let col = index % params.cols;
     let row_start = index - col;
     if (col == 0u) {
@@ -130,7 +130,7 @@ fn klein_gordon_previous_index(index: u32) -> u32 {
     return index - 1u;
 }
 
-fn klein_gordon_next_index(index: u32) -> u32 {
+fn periodic_feature_next_index(index: u32) -> u32 {
     let col = index % params.cols;
     let row_start = index - col;
     if (col + 1u == params.cols) {
@@ -143,8 +143,8 @@ fn klein_gordon_laplacian_from_input(index: u32) -> f32 {
     if (params.cols == 1u) {
         return 0.0;
     }
-    let previous = klein_gordon_previous_index(index);
-    let next = klein_gordon_next_index(index);
+    let previous = periodic_feature_previous_index(index);
+    let next = periodic_feature_next_index(index);
     return input[previous] - 2.0 * input[index] + input[next];
 }
 
@@ -176,8 +176,8 @@ fn klein_gordon_forward_force_final(index: u32) -> f32 {
     let field = klein_gordon_forward_field(index);
     var laplacian = 0.0;
     if (params.cols > 1u) {
-        let previous = klein_gordon_previous_index(index);
-        let next = klein_gordon_next_index(index);
+        let previous = periodic_feature_previous_index(index);
+        let next = periodic_feature_next_index(index);
         laplacian = klein_gordon_forward_field(previous)
             - 2.0 * field
             + klein_gordon_forward_field(next);
@@ -230,8 +230,8 @@ fn klein_gordon_backward_adjoint_field_final(index: u32) -> f32 {
     let adjoint = klein_gordon_backward_adjoint_force_final(index);
     var laplacian_adjoint = 0.0;
     if (params.cols > 1u) {
-        let previous = klein_gordon_previous_index(index);
-        let next = klein_gordon_next_index(index);
+        let previous = periodic_feature_previous_index(index);
+        let next = periodic_feature_next_index(index);
         laplacian_adjoint = klein_gordon_backward_adjoint_force_final(previous)
             - 2.0 * adjoint
             + klein_gordon_backward_adjoint_force_final(next);
@@ -257,8 +257,8 @@ fn klein_gordon_backward_grad_field(index: u32) -> f32 {
     let adjoint = klein_gordon_backward_adjoint_force_initial(index);
     var laplacian_adjoint = 0.0;
     if (params.cols > 1u) {
-        let previous = klein_gordon_previous_index(index);
-        let next = klein_gordon_next_index(index);
+        let previous = periodic_feature_previous_index(index);
+        let next = periodic_feature_next_index(index);
         laplacian_adjoint = klein_gordon_backward_adjoint_force_initial(previous)
             - 2.0 * adjoint
             + klein_gordon_backward_adjoint_force_initial(next);
@@ -300,61 +300,66 @@ fn dynamic_klein_gordon_backward(@builtin(global_invocation_id) global_id: vec3<
     }
 }
 
-@compute @workgroup_size(256)
-fn dynamic_hamilton_jacobi_forward(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
-    if (idx < params.values) {
-        let row = idx / params.cols;
-        let col = idx % params.cols;
-        let current = input[idx];
-        var prev = current;
-        if (row > 0u) {
-            prev = input[idx - params.cols];
-        }
-        var next = current;
-        if (row + 1u < params.rows) {
-            next = input[idx + params.cols];
-        }
-        let potential = aux[col];
-        let grad = (2.0 * current - prev - next) + potential * current;
-        output[idx] = current - params.scalar * grad;
+fn hamilton_jacobi_gradient(index: u32) -> f32 {
+    if (params.cols == 1u) {
+        return 0.0;
     }
+    let previous = periodic_feature_previous_index(index);
+    let next = periodic_feature_next_index(index);
+    return (input[next] - input[previous]) * params.saturation;
 }
 
 @compute @workgroup_size(256)
-fn dynamic_hamilton_jacobi_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
-    if (idx < params.values) {
-        let row = idx / params.cols;
-        let col = idx % params.cols;
-        let potential = aux[params.values + col];
-        var factor = 1.0 - params.scalar * (2.0 + potential);
-        if (params.rows == 1u) {
-            factor = 1.0 - params.scalar * potential;
-        } else if (row == 0u || row + 1u == params.rows) {
-            factor = 1.0 - params.scalar * (1.0 + potential);
+fn dynamic_hamilton_jacobi_forward(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    if (index < params.values) {
+        let col = index % params.cols;
+        let current = input[index];
+        var laplacian_delta = 0.0;
+        if (params.cols > 1u) {
+            let previous = periodic_feature_previous_index(index);
+            let next = periodic_feature_next_index(index);
+            laplacian_delta = input[previous] - 2.0 * current + input[next];
         }
-        var grad = aux[idx] * factor;
-        if (row > 0u) {
-            grad = grad + aux[idx - params.cols] * params.scalar;
-        }
-        if (row + 1u < params.rows) {
-            grad = grad + aux[idx + params.cols] * params.scalar;
-        }
-        output[idx] = grad;
+        let gradient = hamilton_jacobi_gradient(index);
+        let hamiltonian = 0.5 * params.porosity * gradient * gradient + aux[col];
+        output[index] = current - params.scalar * hamiltonian
+            + params._pad2 * laplacian_delta;
     }
-    if (idx < params.cols) {
+}
+
+// Backward aux layout: grad_output_action[values].
+@compute @workgroup_size(256)
+fn dynamic_hamilton_jacobi_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    if (index < params.values) {
+        var grad = aux[index];
+        if (params.cols > 1u) {
+            let previous = periodic_feature_previous_index(index);
+            let next = periodic_feature_next_index(index);
+            let kinetic_scale = params.scalar * params.porosity * params.saturation;
+            grad = aux[index] * (1.0 - 2.0 * params._pad2);
+            grad = grad + aux[next] * (
+                params._pad2 + kinetic_scale * hamilton_jacobi_gradient(next)
+            );
+            grad = grad + aux[previous] * (
+                params._pad2 - kinetic_scale * hamilton_jacobi_gradient(previous)
+            );
+        }
+        output[index] = grad;
+    }
+    if (index < params.cols) {
         var potential_sum = 0.0;
         var row = 0u;
         loop {
             if (row >= params.rows) {
                 break;
             }
-            let value_idx = row * params.cols + idx;
-            potential_sum = potential_sum + (-params.scalar * input[value_idx] * aux[value_idx]);
+            let value_index = row * params.cols + index;
+            potential_sum = potential_sum - params.scalar * aux[value_index];
             row = row + 1u;
         }
-        output[params.values + idx] = potential_sum;
+        output[params.values + index] = potential_sum;
     }
 }
 

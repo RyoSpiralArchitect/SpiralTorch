@@ -3219,10 +3219,24 @@ field/momentum state on WGPU, while `dynamic_klein_gordon_backward` returns
 field, momentum, mass-squared, and source gradients. Rust audits both GPU paths
 against the canonical transition before state or gradients are committed.
 
-Hamilton-Jacobi remains a traced tensor utility:
-`dynamic_hamilton_jacobi_forward` evaluates the temporal stencil with boundary
-rows, and `dynamic_hamilton_jacobi_backward` gathers neighbouring upstream
-signals without atomics before returning packed input/potential gradients.
+Hamilton-Jacobi is likewise a versioned Rust semantic contract rather than a
+temporal smoothing heuristic. `st-core::dynamics::hamilton_jacobi` evolves each
+row as a scalar action field on a periodic feature lattice under
+`dS/dt + |grad S|^2 / (2m) + V = viscosity * laplacian(S)`. A global
+Lax-Friedrichs numerical Hamiltonian supplies monotone shock regularisation;
+the configured characteristic-speed bound is checked against both input and
+output, and the combined numerical/physical viscosity must satisfy a guarded
+CFL limit. Audits expose characteristic margins, CFL margins, Hamiltonian and
+residual magnitudes, action means, and total variation. The analytic discrete
+adjoint returns action and learned-potential gradients. The `st-nn` adapter
+preserves the existing `::potential` state key and `step_size()` accessor but
+adds fallible builders for the coupled time-step, characteristic, lattice, and
+viscosity controls, and requires backward to match a cached forward. WGPU
+receives only Rust-derived gradient, inverse-mass, and diffusion coefficients;
+Rust audits both
+`dynamic_hamilton_jacobi_forward` and `dynamic_hamilton_jacobi_backward` before
+committing state or gradients.
+
 Stochastic-Schrodinger likewise has a versioned Rust semantic contract: CPU and
 WGPU replay the same caller-supplied Gaussian innovations, and Rust audits the
 complex quadratures, norm law, and analytic backward. The existing batch
@@ -3231,8 +3245,8 @@ parameter gradients are scaled by `1 / rows`, input and phase-space gradients
 remain unaveraged chain-rule signals, and zero-row batches do not install empty
 updates. The comparison table separates `dynamic_field_fwd_wgpu` /
 `dynamic_field_bwd_wgpu` from CPU residuals, while raw traces retain contract
-version, semantic owner, integrator, stability/energy audit, field model, and
-stochastic RNG backend.
+version, semantic owner, equation/scheme, stability and dynamics audits, field
+model, and stochastic RNG backend.
 
 Recurrent layers now protect their cached-time boundary more deliberately.
 `WaveRnn` and `SpiralRnn` clear stale forward caches at the start of a new

@@ -9,6 +9,19 @@ use crate::{PureResult, Tensor, TensorError};
 use rand::rngs::StdRng;
 use rand_distr::{Distribution, StandardNormal};
 use spiral_config::determinism;
+use st_core::dynamics::hamilton_jacobi::{
+    apply_hamilton_jacobi_step, audit_hamilton_jacobi_backward, backward_hamilton_jacobi_step,
+    validate_hamilton_jacobi_state, HamiltonJacobiBackwardAuditRequest,
+    HamiltonJacobiBackwardRequest, HAMILTON_JACOBI_BACKWARD, HAMILTON_JACOBI_BOUNDARY,
+    HAMILTON_JACOBI_CONTRACT_VERSION, HAMILTON_JACOBI_EQUATION, HAMILTON_JACOBI_HAMILTONIAN,
+    HAMILTON_JACOBI_SCHEME, HAMILTON_JACOBI_SEMANTIC_BACKEND, HAMILTON_JACOBI_SEMANTIC_OWNER,
+    HAMILTON_JACOBI_STABILITY, HAMILTON_JACOBI_STATE,
+};
+#[cfg(feature = "wgpu")]
+use st_core::dynamics::hamilton_jacobi::{audit_hamilton_jacobi_step, HamiltonJacobiAuditRequest};
+pub use st_core::dynamics::hamilton_jacobi::{
+    HamiltonJacobiAudit, HamiltonJacobiBackwardAudit, HamiltonJacobiConfig,
+};
 use st_core::dynamics::klein_gordon::{
     apply_klein_gordon_step, audit_klein_gordon_backward, backward_klein_gordon_step,
     validate_klein_gordon_state, KleinGordonBackwardAuditRequest, KleinGordonBackwardRequest,
@@ -88,18 +101,24 @@ struct KleinGordonRouteMeta {
 }
 
 #[derive(Clone, Copy)]
+struct HamiltonJacobiRouteMeta {
+    config: HamiltonJacobiConfig,
+    audit: Option<HamiltonJacobiAudit>,
+    backward_audit: Option<HamiltonJacobiBackwardAudit>,
+}
+
+#[derive(Clone, Copy)]
 enum DynamicFieldContractMeta {
+    HamiltonJacobi(HamiltonJacobiRouteMeta),
     KleinGordon(KleinGordonRouteMeta),
     StochasticSchrodinger(StochasticSchrodingerRouteMeta),
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_dynamic_field_route_meta(
+fn emit_hamilton_jacobi_route_meta(
     op_name: &'static str,
-    field_model: &'static str,
     rows: usize,
     cols: usize,
-    trainable_parameters: usize,
     estimated_ops_per_value: usize,
     backward: bool,
     gradient_scale: Option<f32>,
@@ -110,13 +129,16 @@ fn emit_dynamic_field_route_meta(
     gradient_reduction_backend: Option<&'static str>,
     gradient_scale_backend: Option<&'static str>,
     fallback: Option<String>,
+    config: HamiltonJacobiConfig,
+    audit: Option<HamiltonJacobiAudit>,
+    backward_audit: Option<HamiltonJacobiBackwardAudit>,
 ) {
     emit_dynamic_field_route_meta_inner(
         op_name,
-        field_model,
+        "hamilton_jacobi",
         rows,
         cols,
-        trainable_parameters,
+        1,
         estimated_ops_per_value,
         backward,
         gradient_scale,
@@ -127,7 +149,13 @@ fn emit_dynamic_field_route_meta(
         gradient_reduction_backend,
         gradient_scale_backend,
         fallback,
-        None,
+        Some(DynamicFieldContractMeta::HamiltonJacobi(
+            HamiltonJacobiRouteMeta {
+                config,
+                audit,
+                backward_audit,
+            },
+        )),
     );
 }
 
@@ -297,6 +325,82 @@ fn emit_dynamic_field_route_meta_inner(
         }
         if let (Some(map), Some(contract)) = (data.as_object_mut(), contract) {
             match contract {
+                DynamicFieldContractMeta::HamiltonJacobi(hamilton_jacobi) => {
+                    let config = hamilton_jacobi.config;
+                    map.insert(
+                        "contract_version".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_CONTRACT_VERSION),
+                    );
+                    map.insert(
+                        "semantic_owner".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_SEMANTIC_OWNER),
+                    );
+                    map.insert(
+                        "semantic_backend".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_SEMANTIC_BACKEND),
+                    );
+                    map.insert(
+                        "equation".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_EQUATION),
+                    );
+                    map.insert(
+                        "hamiltonian".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_HAMILTONIAN),
+                    );
+                    map.insert(
+                        "scheme".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_SCHEME),
+                    );
+                    map.insert(
+                        "boundary".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_BOUNDARY),
+                    );
+                    map.insert(
+                        "action_state".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_STATE),
+                    );
+                    map.insert(
+                        "stability_contract".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_STABILITY),
+                    );
+                    map.insert(
+                        "backward_contract".to_string(),
+                        serde_json::json!(HAMILTON_JACOBI_BACKWARD),
+                    );
+                    map.insert(
+                        "time_step".to_string(),
+                        serde_json::json!(config.time_step()),
+                    );
+                    map.insert("mass".to_string(), serde_json::json!(config.mass()));
+                    map.insert(
+                        "lattice_spacing".to_string(),
+                        serde_json::json!(config.lattice_spacing()),
+                    );
+                    map.insert(
+                        "characteristic_speed_limit".to_string(),
+                        serde_json::json!(config.characteristic_speed_limit()),
+                    );
+                    map.insert(
+                        "physical_viscosity".to_string(),
+                        serde_json::json!(config.viscosity()),
+                    );
+                    map.insert(
+                        "numerical_viscosity".to_string(),
+                        serde_json::json!(config.numerical_viscosity()),
+                    );
+                    map.insert(
+                        "monotone_cfl".to_string(),
+                        serde_json::json!(config.monotone_cfl()),
+                    );
+                    map.insert(
+                        "audit".to_string(),
+                        serde_json::json!(hamilton_jacobi.audit),
+                    );
+                    map.insert(
+                        "backward_audit".to_string(),
+                        serde_json::json!(hamilton_jacobi.backward_audit),
+                    );
+                }
                 DynamicFieldContractMeta::KleinGordon(klein_gordon) => {
                     let config = klein_gordon.config;
                     map.insert(
@@ -1094,52 +1198,201 @@ impl Module for KleinGordonPropagation {
     }
 }
 
-/// Hamilton–Jacobi style flow that nudges timelines towards minimal-action
-/// trajectories. Each column receives an independent potential term that
-/// encourages smoothness across the temporal dimension.
+fn hamilton_jacobi_error(error: impl std::fmt::Display) -> TensorError {
+    TensorError::Generic(format!("Hamilton-Jacobi contract failed: {error}"))
+}
+
+#[derive(Clone, Debug)]
+struct HamiltonJacobiStepCache {
+    input: Tensor,
+    potential: Tensor,
+    output: Tensor,
+    audit: HamiltonJacobiAudit,
+    backward_audit: Option<HamiltonJacobiBackwardAudit>,
+}
+
+/// One audited Hamilton-Jacobi action-field transition exposed as tensors.
+#[derive(Clone, Debug)]
+pub struct HamiltonJacobiTensorStep {
+    pub action: Tensor,
+    pub audit: HamiltonJacobiAudit,
+}
+
+/// Discrete-adjoint gradient for a cached Hamilton-Jacobi transition.
+#[derive(Clone, Debug)]
+pub struct HamiltonJacobiTensorBackward {
+    pub grad_action: Tensor,
+    pub audit: HamiltonJacobiBackwardAudit,
+}
+
+/// Audited Hamilton-Jacobi evolution on a periodic feature lattice.
+///
+/// Rust core owns the scalar action equation, convex quadratic Hamiltonian,
+/// global Lax-Friedrichs scheme, characteristic-speed bound, monotone CFL gate,
+/// and analytic discrete adjoint. Each tensor row is an independent action
+/// field; WGPU only executes coefficients derived from this contract.
 #[derive(Debug)]
 pub struct HamiltonJacobiFlow {
     potential: Parameter,
-    step_size: f32,
+    config: HamiltonJacobiConfig,
+    last_step: RefCell<Option<HamiltonJacobiStepCache>>,
 }
 
 impl HamiltonJacobiFlow {
-    /// Creates a flow model for the provided feature count.
+    /// Creates an action-field layer with the default Hamiltonian configuration.
     pub fn new(name: impl Into<String>, features: usize, step_size: f32) -> PureResult<Self> {
+        let config = HamiltonJacobiConfig::new(step_size).map_err(hamilton_jacobi_error)?;
+        Self::with_config(name, features, config)
+    }
+
+    /// Creates a layer from the versioned Rust-core Hamilton-Jacobi contract.
+    pub fn with_config(
+        name: impl Into<String>,
+        features: usize,
+        config: HamiltonJacobiConfig,
+    ) -> PureResult<Self> {
         if features == 0 {
             return Err(TensorError::InvalidDimensions {
                 rows: 1,
                 cols: features,
             });
         }
-        if !step_size.is_finite() || step_size <= 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "hamilton_jacobi_step",
-            });
-        }
+        config.validate().map_err(hamilton_jacobi_error)?;
         let name = name.into();
         let potential = Tensor::from_fn(1, features, |_r, c| {
             ((c as f32 + 1.0) * 0.13).sin().abs() + 0.1
         })?;
         Ok(Self {
             potential: Parameter::new(format!("{name}::potential"), potential),
-            step_size,
+            config,
+            last_step: RefCell::new(None),
         })
     }
 
-    /// Returns the internal potential parameter.
+    pub fn with_mass(mut self, mass: f32) -> PureResult<Self> {
+        self.config = self.config.with_mass(mass).map_err(hamilton_jacobi_error)?;
+        self.last_step.get_mut().take();
+        Ok(self)
+    }
+
+    pub fn with_time_step(mut self, time_step: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_time_step(time_step)
+            .map_err(hamilton_jacobi_error)?;
+        self.last_step.get_mut().take();
+        Ok(self)
+    }
+
+    pub fn with_lattice_spacing(mut self, lattice_spacing: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_lattice_spacing(lattice_spacing)
+            .map_err(hamilton_jacobi_error)?;
+        self.last_step.get_mut().take();
+        Ok(self)
+    }
+
+    pub fn with_characteristic_speed_limit(
+        mut self,
+        characteristic_speed_limit: f32,
+    ) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_characteristic_speed_limit(characteristic_speed_limit)
+            .map_err(hamilton_jacobi_error)?;
+        self.last_step.get_mut().take();
+        Ok(self)
+    }
+
+    pub fn with_viscosity(mut self, viscosity: f32) -> PureResult<Self> {
+        self.config = self
+            .config
+            .with_viscosity(viscosity)
+            .map_err(hamilton_jacobi_error)?;
+        self.last_step.get_mut().take();
+        Ok(self)
+    }
+
+    pub fn config(&self) -> HamiltonJacobiConfig {
+        self.config
+    }
+
+    /// Compatibility name for the Hamilton-Jacobi integration time step.
+    pub fn step_size(&self) -> f32 {
+        self.config.time_step()
+    }
+
+    pub fn mass(&self) -> f32 {
+        self.config.mass()
+    }
+
+    pub fn lattice_spacing(&self) -> f32 {
+        self.config.lattice_spacing()
+    }
+
+    pub fn characteristic_speed_limit(&self) -> f32 {
+        self.config.characteristic_speed_limit()
+    }
+
+    pub fn viscosity(&self) -> f32 {
+        self.config.viscosity()
+    }
+
+    /// Returns the learned static potential `V(x)`.
     pub fn potential(&self) -> &Parameter {
         &self.potential
     }
 
-    /// Returns the configured gradient descent step size.
-    pub fn step_size(&self) -> f32 {
-        self.step_size
+    pub fn latest_action(&self) -> Option<Tensor> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .map(|step| step.output.clone())
     }
-}
 
-impl Module for HamiltonJacobiFlow {
-    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+    pub fn latest_audit(&self) -> Option<HamiltonJacobiAudit> {
+        self.last_step.borrow().as_ref().map(|step| step.audit)
+    }
+
+    pub fn latest_backward_audit(&self) -> Option<HamiltonJacobiBackwardAudit> {
+        self.last_step
+            .borrow()
+            .as_ref()
+            .and_then(|step| step.backward_audit)
+    }
+
+    fn commit_step(
+        &self,
+        input: &Tensor,
+        output: Vec<f32>,
+        audit: HamiltonJacobiAudit,
+    ) -> PureResult<HamiltonJacobiTensorStep> {
+        let (rows, cols) = input.shape();
+        let output = Tensor::from_vec(rows, cols, output)?;
+        self.last_step
+            .borrow_mut()
+            .replace(HamiltonJacobiStepCache {
+                input: input.clone(),
+                potential: self.potential.value().clone(),
+                output: output.clone(),
+                audit,
+                backward_audit: None,
+            });
+        Ok(HamiltonJacobiTensorStep {
+            action: output,
+            audit,
+        })
+    }
+
+    fn commit_backward(&self, audit: HamiltonJacobiBackwardAudit) {
+        if let Some(step) = self.last_step.borrow_mut().as_mut() {
+            step.backward_audit = Some(audit);
+        }
+    }
+
+    /// Advances one scalar action field through the canonical Rust contract.
+    pub fn step_action(&self, input: &Tensor) -> PureResult<HamiltonJacobiTensorStep> {
         let (rows, cols) = input.shape();
         if cols != self.potential.value().shape().1 {
             return Err(TensorError::ShapeMismatch {
@@ -1147,10 +1400,14 @@ impl Module for HamiltonJacobiFlow {
                 right: self.potential.value().shape(),
             });
         }
-        let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
-        let requested_backend = tensor_util_backend_label(route_backend);
-        let step = self.step_size;
+        let volume = rows.checked_mul(cols).ok_or_else(|| {
+            TensorError::Generic("Hamilton-Jacobi tensor volume overflow".to_string())
+        })?;
         let potential = self.potential.value().data();
+        validate_hamilton_jacobi_state(input.data(), potential, rows, cols, self.config)
+            .map_err(hamilton_jacobi_error)?;
+        let route_backend = current_tensor_util_backend_for_values(volume);
+        let requested_backend = tensor_util_backend_label(route_backend);
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -1161,23 +1418,37 @@ impl Module for HamiltonJacobiFlow {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_hamilton_jacobi_forward(
+                let wgpu_step = wgpu_dense::dynamic_hamilton_jacobi_forward(
                     input.data(),
                     potential,
                     rows,
                     cols,
-                    step,
-                ) {
-                    Ok(buffer) => {
-                        validate_finite_slice("dynamic_hamilton_jacobi_forward_output", &buffer)?;
-                        let output = Tensor::from_vec(rows, cols, buffer)?;
-                        emit_dynamic_field_route_meta(
+                    self.config.time_step(),
+                    self.config.central_gradient_scale(),
+                    self.config.inverse_mass(),
+                    self.config.diffusion_step_coefficient(),
+                )
+                .and_then(|output| {
+                    audit_hamilton_jacobi_step(HamiltonJacobiAuditRequest {
+                        action: input.data(),
+                        potential,
+                        output_action: &output,
+                        rows,
+                        features: cols,
+                        config: self.config,
+                    })
+                    .map(|audit| (output, audit))
+                    .map_err(|error| format!("Rust semantic audit failed: {error}"))
+                });
+                match wgpu_step {
+                    Ok((output, audit)) => {
+                        validate_finite_slice("dynamic_hamilton_jacobi_forward_output", &output)?;
+                        let step = self.commit_step(input, output, audit)?;
+                        emit_hamilton_jacobi_route_meta(
                             "dynamic_field_hamilton_jacobi_forward",
-                            "hamilton_jacobi",
                             rows,
                             cols,
-                            1,
-                            8,
+                            24,
                             false,
                             None,
                             "wgpu_dense",
@@ -1187,8 +1458,11 @@ impl Module for HamiltonJacobiFlow {
                             None,
                             None,
                             None,
+                            self.config,
+                            Some(audit),
+                            None,
                         );
-                        return Ok(output);
+                        return Ok(step);
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(dynamic_field_wgpu_error(
@@ -1196,55 +1470,25 @@ impl Module for HamiltonJacobiFlow {
                             message,
                         ));
                     }
-                    Err(message) => {
-                        wgpu_failure = Some(message);
-                    }
+                    Err(message) => wgpu_failure = Some(message),
                 }
             }
         }
 
-        let mut output = Tensor::zeros(rows, cols)?;
-        {
-            let input_buf = input.data();
-            let out_buf = output.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                let input_row = &input_buf[offset..offset + cols];
-                let prev_row = if r > 0 {
-                    &input_buf[offset - cols..offset]
-                } else {
-                    input_row
-                };
-                let next_row = if r + 1 < rows {
-                    &input_buf[offset + cols..offset + 2 * cols]
-                } else {
-                    input_row
-                };
-                let out_row = &mut out_buf[offset..offset + cols];
-
-                for (((out, &current), &potential), (&prev, &next)) in out_row
-                    .iter_mut()
-                    .zip(input_row.iter())
-                    .zip(potential.iter())
-                    .zip(prev_row.iter().zip(next_row.iter()))
-                {
-                    let grad = (2.0 * current - prev - next) + potential * current;
-                    *out = current - step * grad;
-                }
-            }
-        }
-        emit_dynamic_field_route_meta(
+        let step = apply_hamilton_jacobi_step(input.data(), potential, rows, cols, self.config)
+            .map_err(hamilton_jacobi_error)?;
+        let audit = step.audit;
+        let tensor_step = self.commit_step(input, step.action, audit)?;
+        emit_hamilton_jacobi_route_meta(
             "dynamic_field_hamilton_jacobi_forward",
-            "hamilton_jacobi",
             rows,
             cols,
-            1,
-            8,
+            24,
             false,
             None,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.apply_hamilton_jacobi_step",
             None,
             None,
             None,
@@ -1258,24 +1502,58 @@ impl Module for HamiltonJacobiFlow {
                     None
                 }
             },
+            self.config,
+            Some(audit),
+            None,
         );
-        Ok(output)
+        Ok(tensor_step)
     }
 
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let (rows, cols) = input.shape();
-        if grad_output.shape() != (rows, cols) {
+    /// Runs the complete discrete adjoint for the matching cached transition.
+    pub fn backward_action(
+        &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+    ) -> PureResult<HamiltonJacobiTensorBackward> {
+        let cache = self
+            .last_step
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(TensorError::InvalidValue {
+                label: "hamilton_jacobi_forward_cache",
+            })?;
+        if input.shape() != cache.input.shape() {
             return Err(TensorError::ShapeMismatch {
-                left: grad_output.shape(),
-                right: (rows, cols),
+                left: input.shape(),
+                right: cache.input.shape(),
             });
         }
+        if grad_output.shape() != cache.output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: cache.output.shape(),
+            });
+        }
+        if input.data() != cache.input.data() {
+            return Err(TensorError::InvalidValue {
+                label: "hamilton_jacobi_forward_input_mismatch",
+            });
+        }
+        let (rows, cols) = input.shape();
         let route_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend = tensor_util_backend_label(route_backend);
         let scale_backend = current_tensor_util_backend_for_values(cols);
         let scale_backend_label = tensor_util_backend_label(scale_backend);
-        let step = self.step_size;
-        let potential = self.potential.value().data();
+        let potential = cache.potential.data();
+        let core_request = HamiltonJacobiBackwardRequest {
+            action: input.data(),
+            potential,
+            grad_output_action: grad_output.data(),
+            rows,
+            features: cols,
+            config: self.config,
+        };
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -1286,25 +1564,38 @@ impl Module for HamiltonJacobiFlow {
                 && cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::dynamic_hamilton_jacobi_backward(
+                let wgpu_backward = wgpu_dense::dynamic_hamilton_jacobi_backward(
                     input.data(),
                     grad_output.data(),
                     potential,
                     rows,
                     cols,
-                    step,
-                ) {
-                    Ok((grad_input_values, grad_potential_values)) => {
+                    self.config.time_step(),
+                    self.config.central_gradient_scale(),
+                    self.config.inverse_mass(),
+                    self.config.diffusion_step_coefficient(),
+                )
+                .and_then(|(grad_action, grad_potential)| {
+                    audit_hamilton_jacobi_backward(HamiltonJacobiBackwardAuditRequest {
+                        request: core_request,
+                        grad_action: &grad_action,
+                        grad_potential: &grad_potential,
+                    })
+                    .map(|audit| (grad_action, grad_potential, audit))
+                    .map_err(|error| format!("Rust semantic backward audit failed: {error}"))
+                });
+                match wgpu_backward {
+                    Ok((grad_action, grad_potential, backward_audit)) => {
                         validate_finite_slice(
-                            "dynamic_hamilton_jacobi_backward_grad_input",
-                            &grad_input_values,
+                            "dynamic_hamilton_jacobi_backward_grad_action",
+                            &grad_action,
                         )?;
                         validate_finite_slice(
                             "dynamic_hamilton_jacobi_backward_grad_potential",
-                            &grad_potential_values,
+                            &grad_potential,
                         )?;
-                        let grad_input = Tensor::from_vec(rows, cols, grad_input_values)?;
-                        let grad_potential = Tensor::from_vec(1, cols, grad_potential_values)?;
+                        let grad_action = Tensor::from_vec(rows, cols, grad_action)?;
+                        let grad_potential = Tensor::from_vec(1, cols, grad_potential)?;
                         let gradient_scale = if rows > 0 {
                             let scale = 1.0 / rows as f32;
                             self.potential.accumulate_euclidean(
@@ -1314,13 +1605,12 @@ impl Module for HamiltonJacobiFlow {
                         } else {
                             None
                         };
-                        emit_dynamic_field_route_meta(
+                        self.commit_backward(backward_audit);
+                        emit_hamilton_jacobi_route_meta(
                             "dynamic_field_hamilton_jacobi_backward",
-                            "hamilton_jacobi",
                             rows,
                             cols,
-                            1,
-                            12,
+                            32,
                             true,
                             gradient_scale,
                             "wgpu_dense",
@@ -1330,8 +1620,14 @@ impl Module for HamiltonJacobiFlow {
                             Some("wgpu"),
                             Some(scale_backend_label),
                             None,
+                            self.config,
+                            Some(cache.audit),
+                            Some(backward_audit),
                         );
-                        return Ok(grad_input);
+                        return Ok(HamiltonJacobiTensorBackward {
+                            grad_action,
+                            audit: backward_audit,
+                        });
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(dynamic_field_wgpu_error(
@@ -1339,43 +1635,21 @@ impl Module for HamiltonJacobiFlow {
                             message,
                         ));
                     }
-                    Err(message) => {
-                        wgpu_failure = Some(message);
-                    }
+                    Err(message) => wgpu_failure = Some(message),
                 }
             }
         }
 
-        let mut grad_input = Tensor::zeros(rows, cols)?;
-        let mut grad_potential = Tensor::zeros(1, cols)?;
-        {
-            let input_buf = input.data();
-            let grad_output_buf = grad_output.data();
-            let grad_input_buf = grad_input.data_mut();
-            let grad_potential_buf = grad_potential.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let current = input_buf[idx];
-                    let go = grad_output_buf[idx];
-                    if rows == 1 {
-                        grad_input_buf[idx] += go * (1.0 - step * potential[c]);
-                    } else if r == 0 {
-                        grad_input_buf[idx] += go * (1.0 - step * (1.0 + potential[c]));
-                        grad_input_buf[idx + cols] += go * step;
-                    } else if r + 1 == rows {
-                        grad_input_buf[idx] += go * (1.0 - step * (1.0 + potential[c]));
-                        grad_input_buf[idx - cols] += go * step;
-                    } else {
-                        grad_input_buf[idx] += go * (1.0 - step * (2.0 + potential[c]));
-                        grad_input_buf[idx - cols] += go * step;
-                        grad_input_buf[idx + cols] += go * step;
-                    }
-                    grad_potential_buf[c] += -step * current * go;
-                }
-            }
-        }
+        let backward =
+            backward_hamilton_jacobi_step(core_request).map_err(hamilton_jacobi_error)?;
+        let backward_audit = audit_hamilton_jacobi_backward(HamiltonJacobiBackwardAuditRequest {
+            request: core_request,
+            grad_action: &backward.grad_action,
+            grad_potential: &backward.grad_potential,
+        })
+        .map_err(hamilton_jacobi_error)?;
+        let grad_action = Tensor::from_vec(rows, cols, backward.grad_action)?;
+        let grad_potential = Tensor::from_vec(1, cols, backward.grad_potential)?;
         let gradient_scale = if rows > 0 {
             let scale = 1.0 / rows as f32;
             self.potential
@@ -1384,18 +1658,17 @@ impl Module for HamiltonJacobiFlow {
         } else {
             None
         };
-        emit_dynamic_field_route_meta(
+        self.commit_backward(backward_audit);
+        emit_hamilton_jacobi_route_meta(
             "dynamic_field_hamilton_jacobi_backward",
-            "hamilton_jacobi",
             rows,
             cols,
-            1,
-            12,
+            32,
             true,
             gradient_scale,
             "cpu",
             requested_backend,
-            "dynamic_field.scalar",
+            "st_core.backward_hamilton_jacobi_step",
             Some("cpu"),
             Some("cpu"),
             if gradient_scale.is_some() {
@@ -1413,8 +1686,24 @@ impl Module for HamiltonJacobiFlow {
                     None
                 }
             },
+            self.config,
+            Some(cache.audit),
+            Some(backward_audit),
         );
-        Ok(grad_input)
+        Ok(HamiltonJacobiTensorBackward {
+            grad_action,
+            audit: backward_audit,
+        })
+    }
+}
+
+impl Module for HamiltonJacobiFlow {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        Ok(self.step_action(input)?.action)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        Ok(self.backward_action(input, grad_output)?.grad_action)
     }
 
     fn visit_parameters(
@@ -2137,7 +2426,7 @@ mod tests {
     }
 
     #[test]
-    fn hamilton_jacobi_smooths_edges() {
+    fn hamilton_jacobi_evolves_action_and_exposes_audit() {
         let mut layer = HamiltonJacobiFlow::new("hj", 3, 0.1).unwrap();
         let input = Tensor::from_vec(
             4,
@@ -2149,9 +2438,89 @@ mod tests {
         .unwrap();
         let output = layer.forward(&input).unwrap();
         assert_eq!(output.shape(), input.shape());
+        let audit = layer.latest_audit().expect("Hamilton-Jacobi audit");
+        assert!(audit.characteristic_margin >= 0.0);
+        assert!(audit.cfl_margin > 0.0);
+        assert!(audit.max_abs_hamiltonian > 0.0);
+        assert_eq!(audit.max_action_error, 0.0);
         let grad = Tensor::from_vec(4, 3, vec![0.2; 12]).unwrap();
         let back = layer.backward(&input, &grad).unwrap();
         assert_eq!(back.shape(), input.shape());
+        assert_eq!(
+            layer
+                .latest_backward_audit()
+                .expect("backward audit")
+                .max_grad_action_error,
+            0.0
+        );
+    }
+
+    #[test]
+    fn hamilton_jacobi_adjoint_matches_core_contract() {
+        let input = Tensor::from_vec(2, 3, vec![0.2, -0.3, 0.1, -0.15, 0.25, 0.4]).unwrap();
+        let grad = Tensor::from_vec(2, 3, vec![0.4, -0.2, 0.1, 0.3, 0.05, -0.25]).unwrap();
+        let mut layer = HamiltonJacobiFlow::new("hj", 3, 0.07)
+            .unwrap()
+            .with_mass(1.3)
+            .unwrap()
+            .with_lattice_spacing(0.9)
+            .unwrap()
+            .with_characteristic_speed_limit(1.8)
+            .unwrap()
+            .with_viscosity(0.02)
+            .unwrap();
+        let step = layer.step_action(&input).unwrap();
+        assert_eq!(step.action.shape(), input.shape());
+        let expected = backward_hamilton_jacobi_step(HamiltonJacobiBackwardRequest {
+            action: input.data(),
+            potential: layer.potential().value().data(),
+            grad_output_action: grad.data(),
+            rows: 2,
+            features: 3,
+            config: layer.config(),
+        })
+        .unwrap();
+        let backward = layer.backward_action(&input, &grad).unwrap();
+        for (observed, expected) in backward
+            .grad_action
+            .data()
+            .iter()
+            .zip(&expected.grad_action)
+        {
+            assert_close(*observed, *expected);
+        }
+        for (observed, expected) in layer
+            .potential()
+            .gradient()
+            .unwrap()
+            .data()
+            .iter()
+            .zip(&expected.grad_potential)
+        {
+            assert_close(*observed, *expected * 0.5);
+        }
+        assert_eq!(backward.audit.max_grad_action_error, 0.0);
+    }
+
+    #[test]
+    fn hamilton_jacobi_backward_rejects_missing_or_stale_action() {
+        let input = Tensor::from_vec(1, 3, vec![0.2, -0.1, 0.3]).unwrap();
+        let grad = Tensor::from_vec(1, 3, vec![0.4, 0.2, -0.3]).unwrap();
+        let mut layer = HamiltonJacobiFlow::new("hj", 3, 0.1).unwrap();
+        assert!(matches!(
+            layer.backward(&input, &grad),
+            Err(TensorError::InvalidValue {
+                label: "hamilton_jacobi_forward_cache"
+            })
+        ));
+        let _ = layer.forward(&input).unwrap();
+        let stale = Tensor::from_vec(1, 3, vec![0.2, -0.11, 0.3]).unwrap();
+        assert!(matches!(
+            layer.backward(&stale, &grad),
+            Err(TensorError::InvalidValue {
+                label: "hamilton_jacobi_forward_input_mismatch"
+            })
+        ));
     }
 
     #[test]
@@ -2191,6 +2560,7 @@ mod tests {
         }
 
         let mut hj = HamiltonJacobiFlow::new("hj", 2, 0.1).unwrap();
+        let _ = hj.forward(&input).unwrap();
         let grad_input = hj.backward(&input, &grad).unwrap();
         assert_eq!(grad_input.shape(), input.shape());
         let potential_grad = hj.potential().gradient().expect("potential gradient");
@@ -2198,7 +2568,7 @@ mod tests {
             let mut expected = 0.0f32;
             for row in 0..2 {
                 let idx = row * 2 + col;
-                expected += -0.1 * input.data()[idx] * grad.data()[idx];
+                expected += -0.1 * grad.data()[idx];
             }
             assert_close(potential_grad.data()[col], expected * 0.5);
         }
@@ -2342,6 +2712,27 @@ mod tests {
                 if kind == "dynamic_field_backward" {
                     assert!(event.1["backward_audit"]["max_grad_field_error"].is_number());
                     assert!(event.1["backward_audit"]["max_grad_mass_squared_error"].is_number());
+                }
+            }
+            if field_model == "hamilton_jacobi" {
+                assert_eq!(
+                    event.1["contract_version"],
+                    HAMILTON_JACOBI_CONTRACT_VERSION
+                );
+                assert_eq!(event.1["semantic_owner"], HAMILTON_JACOBI_SEMANTIC_OWNER);
+                assert_eq!(event.1["semantic_backend"], "rust");
+                assert_eq!(event.1["equation"], HAMILTON_JACOBI_EQUATION);
+                assert_eq!(event.1["hamiltonian"], HAMILTON_JACOBI_HAMILTONIAN);
+                assert_eq!(event.1["scheme"], HAMILTON_JACOBI_SCHEME);
+                assert_eq!(event.1["boundary"], HAMILTON_JACOBI_BOUNDARY);
+                assert_eq!(event.1["action_state"], HAMILTON_JACOBI_STATE);
+                assert_eq!(event.1["stability_contract"], HAMILTON_JACOBI_STABILITY);
+                assert!(event.1["audit"]["characteristic_margin"].is_number());
+                assert!(event.1["audit"]["monotone_cfl"].is_number());
+                assert!(event.1["audit"]["max_abs_hamiltonian"].is_number());
+                if kind == "dynamic_field_backward" {
+                    assert!(event.1["backward_audit"]["max_grad_action_error"].is_number());
+                    assert!(event.1["backward_audit"]["max_grad_potential_error"].is_number());
                 }
             }
             if field_model == "stochastic_schrodinger" {
@@ -2499,16 +2890,25 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let input = Tensor::from_fn(5, 3, |row, col| {
+        let input = Tensor::from_fn(257, 5, |row, col| {
             ((row * 13 + col * 7) % 19) as f32 * 0.037 - 0.29
         })
         .unwrap();
-        let grad = Tensor::from_fn(5, 3, |row, col| {
+        let grad = Tensor::from_fn(257, 5, |row, col| {
             ((row * 5 + col * 11) % 17) as f32 * 0.023 - 0.15
         })
         .unwrap();
         let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
-        let mut cpu_layer = HamiltonJacobiFlow::new("hj_cpu", 3, 0.1).unwrap();
+        let mut cpu_layer = HamiltonJacobiFlow::new("hj_cpu", 5, 0.1)
+            .unwrap()
+            .with_mass(1.2)
+            .unwrap()
+            .with_lattice_spacing(0.9)
+            .unwrap()
+            .with_characteristic_speed_limit(1.5)
+            .unwrap()
+            .with_viscosity(0.03)
+            .unwrap();
         let cpu_forward = {
             let _guard = push_backend_policy(cpu_policy);
             cpu_layer.forward(&input).unwrap()
@@ -2519,7 +2919,16 @@ mod tests {
         };
 
         let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
-        let mut wgpu_layer = HamiltonJacobiFlow::new("hj_wgpu", 3, 0.1).unwrap();
+        let mut wgpu_layer = HamiltonJacobiFlow::new("hj_wgpu", 5, 0.1)
+            .unwrap()
+            .with_mass(1.2)
+            .unwrap()
+            .with_lattice_spacing(0.9)
+            .unwrap()
+            .with_characteristic_speed_limit(1.5)
+            .unwrap()
+            .with_viscosity(0.03)
+            .unwrap();
         let (wgpu_forward, wgpu_grad_input) = {
             let _guard = push_backend_policy(wgpu_policy);
             (
@@ -2540,6 +2949,14 @@ mod tests {
             cpu_layer.potential().gradient().unwrap().data(),
             wgpu_layer.potential().gradient().unwrap().data(),
         );
+        let wgpu_audit = wgpu_layer.latest_audit().expect("WGPU forward audit");
+        let wgpu_backward_audit = wgpu_layer
+            .latest_backward_audit()
+            .expect("WGPU backward audit");
+        assert!(wgpu_audit.max_action_error <= 1.0e-5);
+        assert!(wgpu_audit.characteristic_margin >= 0.0);
+        assert!(wgpu_backward_audit.max_grad_action_error <= 1.0e-5);
+        assert!(wgpu_backward_audit.max_grad_potential_error <= 1.0e-5);
 
         let events = events.lock().unwrap();
         assert!(events.iter().any(|(op_name, data)| {
