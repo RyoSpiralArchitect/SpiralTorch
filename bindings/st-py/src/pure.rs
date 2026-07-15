@@ -11,13 +11,16 @@ use st_tensor::measure::{
     z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
 };
 use st_tensor::{
-    AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
-    DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome, ToposControlPlanOptions, ToposControlSignal,
-    ToposControlSignalInput, ToposInferenceHints, ToposInferenceHintsInput, ToposInferencePlan,
-    ToposInferencePlanOptions, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
+    apply_amegagrad_step, configure_amegagrad_optimizer, AmegaHypergrad, AmegaRealgrad,
+    Complex32 as StComplex32, ComplexTensor, DesireGradientControl, DesireGradientInterpretation,
+    GradientSummary, HypergradTelemetry, LanguageWaveEncoder, OpenCartesianTopos, Tensor,
+    TensorBiome, ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
+    ToposInferenceHints, ToposInferenceHintsInput, ToposInferencePlan, ToposInferencePlanOptions,
+    ToposOptimizerStateControl, ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeRoute,
     ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingPlan, ToposZSpaceProjectionOptions,
-    ZBox, ZBoxSite,
+    ZBox, ZBoxSite, TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+    TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+    TOPOS_OPTIMIZER_MOMENTUM_RULE,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -43,6 +46,55 @@ fn serialized_payload_to_py<T: serde::Serialize>(
         PyRuntimeError::new_err(format!("failed to serialize {label}: {error}"))
     })?;
     crate::json::json_to_py(py, &value)
+}
+
+#[derive(serde::Deserialize)]
+struct ToposOptimizerStateControlInput {
+    gradient_bias_rule: String,
+    gradient_bias_normalization: String,
+    effective_gradient_bias_scale: f32,
+    gradient_bias_basis_dim: usize,
+    gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+    momentum_rule: String,
+    effective_momentum_damping: f32,
+}
+
+fn topos_optimizer_state_control_from_py(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<ToposOptimizerStateControl> {
+    let value = crate::json::py_to_json(value)?;
+    let input: ToposOptimizerStateControlInput =
+        serde_json::from_value(value).map_err(|error| {
+            PyValueError::new_err(format!(
+                "invalid Rust Topos optimizer-state contract: {error}"
+            ))
+        })?;
+    if input.gradient_bias_rule != TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state gradient_bias_rule does not match the Rust contract",
+        ));
+    }
+    if input.gradient_bias_normalization != TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state gradient_bias_normalization does not match the Rust contract",
+        ));
+    }
+    if input.gradient_bias_basis_dim != TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state gradient_bias_basis_dim does not match the Rust contract",
+        ));
+    }
+    if input.momentum_rule != TOPOS_OPTIMIZER_MOMENTUM_RULE {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state momentum_rule does not match the Rust contract",
+        ));
+    }
+    ToposOptimizerStateControl::new(
+        input.effective_gradient_bias_scale,
+        input.gradient_bias_basis,
+        input.effective_momentum_damping,
+    )
+    .map_err(tensor_err_to_py)
 }
 
 fn topos_control_signal_to_pydict(
@@ -1518,6 +1570,36 @@ impl PyHypergrad {
         self.inner.gradient().to_vec()
     }
 
+    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<PyObject> {
+        serialized_payload_to_py(
+            py,
+            "Topos optimizer-state control",
+            self.inner.optimizer_state_control(),
+        )
+    }
+
+    pub fn optimizer_momentum(&self) -> Vec<f32> {
+        self.inner.optimizer_momentum().to_vec()
+    }
+
+    pub fn configure_optimizer_state(
+        &mut self,
+        py: Python<'_>,
+        control: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let control = topos_optimizer_state_control_from_py(control)?;
+        self.inner.configure_optimizer_state(control);
+        serialized_payload_to_py(py, "Topos optimizer-state control", control)
+    }
+
+    pub fn disable_optimizer_state_control(&mut self) {
+        self.inner.disable_optimizer_state_control();
+    }
+
+    pub fn reset_optimizer_state(&mut self) {
+        self.inner.reset_optimizer_state();
+    }
+
     pub fn summary(&self) -> PyGradientSummary {
         self.inner.summary().into()
     }
@@ -1663,6 +1745,36 @@ impl PyRealgrad {
         self.inner.gradient().to_vec()
     }
 
+    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<PyObject> {
+        serialized_payload_to_py(
+            py,
+            "Topos optimizer-state control",
+            self.inner.optimizer_state_control(),
+        )
+    }
+
+    pub fn optimizer_momentum(&self) -> Vec<f32> {
+        self.inner.optimizer_momentum().to_vec()
+    }
+
+    pub fn configure_optimizer_state(
+        &mut self,
+        py: Python<'_>,
+        control: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let control = topos_optimizer_state_control_from_py(control)?;
+        self.inner.configure_optimizer_state(control);
+        serialized_payload_to_py(py, "Topos optimizer-state control", control)
+    }
+
+    pub fn disable_optimizer_state_control(&mut self) {
+        self.inner.disable_optimizer_state_control();
+    }
+
+    pub fn reset_optimizer_state(&mut self) {
+        self.inner.reset_optimizer_state();
+    }
+
     pub fn summary(&self) -> PyGradientSummary {
         self.inner.summary().into()
     }
@@ -1704,6 +1816,39 @@ impl PyRealgrad {
             .apply(&mut weights.inner)
             .map_err(tensor_err_to_py)
     }
+}
+
+#[pyfunction(name = "_apply_amegagrad_step")]
+fn py_apply_amegagrad_step(
+    mut hyper: PyRefMut<'_, PyHypergrad>,
+    mut real: PyRefMut<'_, PyRealgrad>,
+    mut weights: PyRefMut<'_, PyTensor>,
+) -> PyResult<()> {
+    apply_amegagrad_step(&mut hyper.inner, &mut real.inner, &mut weights.inner)
+        .map_err(tensor_err_to_py)
+}
+
+#[pyfunction(name = "_configure_amegagrad_optimizer")]
+#[pyo3(signature = (hyper, real, hyper_learning_rate, real_learning_rate, optimizer_state=None))]
+fn py_configure_amegagrad_optimizer(
+    mut hyper: PyRefMut<'_, PyHypergrad>,
+    mut real: PyRefMut<'_, PyRealgrad>,
+    hyper_learning_rate: f32,
+    real_learning_rate: f32,
+    optimizer_state: Option<&Bound<'_, PyAny>>,
+) -> PyResult<()> {
+    let optimizer_state_control = optimizer_state
+        .map(topos_optimizer_state_control_from_py)
+        .transpose()?
+        .unwrap_or_else(ToposOptimizerStateControl::neutral);
+    configure_amegagrad_optimizer(
+        &mut hyper.inner,
+        &mut real.inner,
+        hyper_learning_rate,
+        real_learning_rate,
+        optimizer_state_control,
+    )
+    .map_err(tensor_err_to_py)
 }
 
 #[pyclass(module = "spiraltorch", name = "TensorBiome", unsendable)]
@@ -1918,6 +2063,8 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;
+    m.add_function(wrap_pyfunction!(py_apply_amegagrad_step, m)?)?;
+    m.add_function(wrap_pyfunction!(py_configure_amegagrad_optimizer, m)?)?;
     m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
     m.add_function(wrap_pyfunction!(
         py_topos_control_signal_from_observation,

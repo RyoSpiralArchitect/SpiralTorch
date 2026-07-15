@@ -93,7 +93,7 @@ def test_raw_topos_control_input_uses_native_bundle_ingress() -> None:
     assert signal["closure_pressure"] == pytest.approx(0.4)
 
 
-def test_topos_optimizer_snapshot_binds_control_and_prescribed_rate_application() -> None:
+def test_topos_optimizer_snapshot_binds_control_and_optimizer_state_application() -> None:
     native = getattr(st, "_rs", None)
     native_snapshot = getattr(
         native, "_topos_optimizer_snapshot_from_observation", None
@@ -117,15 +117,15 @@ def test_topos_optimizer_snapshot_binds_control_and_prescribed_rate_application(
     )
 
     assert snapshot["kind"] == "spiraltorch.topos_optimizer_snapshot"
-    assert snapshot["contract_version"] == "spiraltorch.topos_optimizer_snapshot.v1"
+    assert snapshot["contract_version"] == "spiraltorch.topos_optimizer_snapshot.v2"
     assert snapshot["semantic_owner"] == "st-tensor::pure::topos"
     assert snapshot["semantic_backend"] == "rust"
     assert snapshot["sequence"] == 7
     assert snapshot["control"]["observed_depth"] == 4
     assert snapshot["control"]["visited_volume"] == 25
     application = snapshot["optimizer_application"]
-    assert application["scope"] == "learning_rate"
-    assert application["control_path"] == "control.training_plan.rate_scale"
+    assert application["scope"] == "learning_rate_and_gradient_state"
+    assert application["control_path"] == "control.training_plan"
     assert application["rate_scale"] == pytest.approx(
         snapshot["control"]["training_plan"]["rate_scale"]
     )
@@ -135,8 +135,21 @@ def test_topos_optimizer_snapshot_binds_control_and_prescribed_rate_application(
     assert application["real_learning_rate"] == pytest.approx(
         0.02 * application["rate_scale"]
     )
-    assert "effective_gradient_bias_scale" not in application
-    assert "effective_momentum_damping" not in application
+    assert application["effective_gradient_bias_scale"] == pytest.approx(
+        snapshot["control"]["training_plan"]["effective_gradient_bias_scale"]
+    )
+    assert application["effective_momentum_damping"] == pytest.approx(
+        snapshot["control"]["training_plan"]["effective_momentum_damping"]
+    )
+    assert application["gradient_bias_normalization"] == "raw_gradient_rms"
+    assert application["gradient_bias_rule"] == (
+        "g_biased[i]=g[i]+rms(g)*bias_scale*basis[i%10]"
+    )
+    assert application["momentum_rule"] == (
+        "m_t=damping*m_(t-1)+(1-damping)*g_biased"
+    )
+    assert application["gradient_bias_basis_dim"] == 10
+    assert len(application["gradient_bias_basis"]) == 10
 
 
 def test_topos_optimizer_snapshot_rejects_unsafe_identity_and_rates() -> None:
@@ -167,7 +180,7 @@ def test_topos_optimizer_snapshot_rejects_non_rust_contracts(monkeypatch) -> Non
         "_native_topos_optimizer_snapshot_from_observation",
         lambda *_args, **_kwargs: {
             "kind": "spiraltorch.topos_optimizer_snapshot",
-            "contract_version": "spiraltorch.topos_optimizer_snapshot.v1",
+            "contract_version": "spiraltorch.topos_optimizer_snapshot.v2",
             "semantic_owner": "python",
             "semantic_backend": "python",
         },

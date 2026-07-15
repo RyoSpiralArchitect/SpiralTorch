@@ -40,25 +40,29 @@ def _require_tensor(st: Any, value: Any, *, label: str) -> Any:
     raise TypeError(f"{label} must be a SpiralTorch Tensor. {_NATIVE_EXTENSION_HINT}")
 
 
-def _set_tape_learning_rate(tape: Any, target: float) -> None:
-    current = float(tape.learning_rate())
-    if not math.isfinite(current) or current <= 0.0:
-        raise RuntimeError("gradient tape returned an invalid current learning rate")
-    if not math.isfinite(target) or target <= 0.0:
-        raise ValueError("gradient tape target learning rate must be finite and positive")
-    factor = target / current
-    if not math.isfinite(factor) or factor <= 0.0:
-        raise ValueError("gradient tape learning-rate factor must be finite and positive")
-    if factor != 1.0:
-        tape.scale_learning_rate(float(factor))
-    applied = float(tape.learning_rate())
-    if not math.isfinite(applied) or not math.isclose(
-        applied,
-        target,
-        rel_tol=1e-6,
-        abs_tol=0.0,
-    ):
-        raise RuntimeError("gradient tape did not commit the requested learning rate")
+def _configure_amegagrad_optimizer(
+    hyper: Any,
+    real: Any,
+    hyper_learning_rate: float,
+    real_learning_rate: float,
+    optimizer_state: Mapping[str, Any] | None,
+) -> None:
+    import spiraltorch as st
+
+    native = getattr(st, "_rs", None)
+    configure = getattr(native, "_configure_amegagrad_optimizer", None)
+    if not callable(configure):
+        raise RuntimeError(
+            "Amegagrad.tune requires the Rust atomic optimizer-configuration contract"
+        )
+    transported_state = dict(optimizer_state) if optimizer_state is not None else None
+    configure(
+        hyper,
+        real,
+        float(hyper_learning_rate),
+        float(real_learning_rate),
+        transported_state,
+    )
 
 
 def _finite_float(value: Any, *, default: float) -> float:
@@ -333,7 +337,7 @@ class Amegagrad:
             return {}
         return dict(hints)
 
-    def _prepare_topos_learning_rate_snapshot(
+    def _prepare_topos_optimizer_snapshot(
         self,
         hyper_target: float,
         real_target: float,
@@ -495,7 +499,7 @@ class Amegagrad:
         pending_snapshot: dict[str, Any] | None = None
         if should_use_topos:
             hyper_target, real_target, pending_snapshot = (
-                self._prepare_topos_learning_rate_snapshot(
+                self._prepare_topos_optimizer_snapshot(
                     hyper_target,
                     real_target,
                     hints=topos_hints,
@@ -503,26 +507,22 @@ class Amegagrad:
                     visited_volume=visited_volume,
                 )
             )
-        previous_hyper = float(self.hyper.learning_rate())
-        previous_real = float(self.real.learning_rate())
-        try:
-            _set_tape_learning_rate(self.hyper, hyper_target)
-            _set_tape_learning_rate(self.real, real_target)
-        except Exception as error:
-            rollback_errors: list[Exception] = []
-            for tape, previous in (
-                (self.hyper, previous_hyper),
-                (self.real, previous_real),
-            ):
-                try:
-                    _set_tape_learning_rate(tape, previous)
-                except Exception as rollback_error:  # pragma: no cover - catastrophic tape failure
-                    rollback_errors.append(rollback_error)
-            if rollback_errors:
-                raise RuntimeError(
-                    "Amegagrad learning-rate transaction failed and could not roll back"
-                ) from error
-            raise
+        application = (
+            None
+            if pending_snapshot is None
+            else _required_rust_mapping(
+                pending_snapshot,
+                "optimizer_application",
+                label="Topos optimizer snapshot",
+            )
+        )
+        _configure_amegagrad_optimizer(
+            self.hyper,
+            self.real,
+            hyper_target,
+            real_target,
+            application,
+        )
 
         self.last_control = control
         if pending_snapshot is None:
@@ -562,8 +562,13 @@ class Amegagrad:
                 observed_depth=observed_depth,
                 visited_volume=visited_volume,
             )
-        self.hyper.apply(weights)
-        self.real.apply(weights)
+        native = getattr(st, "_rs", None)
+        apply_step = getattr(native, "_apply_amegagrad_step", None)
+        if not callable(apply_step):
+            raise RuntimeError(
+                "Amegagrad.step requires the Rust atomic combined-step contract"
+            )
+        apply_step(self.hyper, self.real, weights)
         return weights
 
 

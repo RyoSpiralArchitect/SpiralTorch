@@ -54,6 +54,32 @@ def test_amegagrad_step_updates_weights() -> None:
     assert after != before
 
 
+def test_amegagrad_step_rolls_back_late_real_tape_failure() -> None:
+    _require_native()
+
+    opt = st.optim.Amegagrad(
+        (1, 1),
+        hyper_learning_rate=0.05,
+        real_learning_rate=3.4028235e38,
+    )
+    weights = st.Tensor((1, 1), data=[0.0])
+    opt.accumulate_wave(st.Tensor((1, 1), data=[2.0]))
+    weights_before = weights.tolist()
+    hyper_gradient_before = opt.hyper.gradient()
+    real_gradient_before = opt.real.gradient()
+    hyper_momentum_before = opt.hyper.optimizer_momentum()
+    real_momentum_before = opt.real.optimizer_momentum()
+
+    with pytest.raises(ValueError, match="realgrad_delta"):
+        opt.step(weights, tune=False)
+
+    assert weights.tolist() == weights_before
+    assert opt.hyper.gradient() == hyper_gradient_before
+    assert opt.real.gradient() == real_gradient_before
+    assert opt.hyper.optimizer_momentum() == hyper_momentum_before
+    assert opt.real.optimizer_momentum() == real_momentum_before
+
+
 def test_amegagrad_absorb_text_handles_variable_length() -> None:
     _require_native()
     if not hasattr(st, "LanguageWaveEncoder"):
@@ -118,8 +144,17 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
         hints["learning_rate_scale"] * hints["clip_scale"]
     )
     assert diagnostics["training_plan"]["effective_gradient_bias_scale"] > 0.0
-    assert "effective_gradient_bias_scale" not in diagnostics["effect"]
-    assert "effective_momentum_damping" not in diagnostics["effect"]
+    assert diagnostics["effect"]["effective_gradient_bias_scale"] == pytest.approx(
+        diagnostics["training_plan"]["effective_gradient_bias_scale"]
+    )
+    assert diagnostics["effect"]["effective_momentum_damping"] == pytest.approx(
+        diagnostics["training_plan"]["effective_momentum_damping"]
+    )
+    assert diagnostics["effect"]["gradient_bias_normalization"] == "raw_gradient_rms"
+    assert opt.hyper.optimizer_state_control() == opt.real.optimizer_state_control()
+    assert opt.hyper.optimizer_state_control()[
+        "effective_gradient_bias_scale"
+    ] == pytest.approx(diagnostics["effect"]["effective_gradient_bias_scale"])
 
     telemetry_contract = opt.topos_telemetry_contract()
     assert telemetry_contract["kind"] == "spiraltorch.zspace_telemetry_fusion"
@@ -144,7 +179,12 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     assert telemetry[
         "topos.training_plan.effective_gradient_bias_scale"
     ] == pytest.approx(diagnostics["training_plan"]["effective_gradient_bias_scale"])
-    assert "topos.optimizer_effect.effective_gradient_bias_scale" not in telemetry
+    assert telemetry[
+        "topos.optimizer_effect.effective_gradient_bias_scale"
+    ] == pytest.approx(diagnostics["effect"]["effective_gradient_bias_scale"])
+    assert telemetry[
+        "topos.optimizer_effect.effective_momentum_damping"
+    ] == pytest.approx(diagnostics["effect"]["effective_momentum_damping"])
     assert telemetry["topos.optimizer_snapshot.sequence"] == 1.0
     assert telemetry["topos.runtime_profile.training_rate_scale"] == pytest.approx(
         expected_scale
@@ -175,9 +215,10 @@ def test_amegagrad_topos_telemetry_projects_one_authoritative_snapshot() -> None
     assert contract["payload"]["topos.runtime_profile.control_energy"] == pytest.approx(
         opt.topos_diagnostics()["runtime_profile"]["control_energy"]
     )
-    assert (
+    assert contract["payload"][
         "topos.optimizer_effect.effective_gradient_bias_scale"
-        not in contract["payload"]
+    ] == pytest.approx(
+        contract["payload"]["topos.training_plan.effective_gradient_bias_scale"]
     )
 
 
@@ -238,7 +279,7 @@ def test_amegagrad_custom_hints_cannot_reuse_a_stale_topos_signal() -> None:
     assert opt.topos_diagnostics()["snapshot"]["sequence"] == 2
 
 
-def test_amegagrad_rolls_back_rates_before_publishing_a_failed_snapshot(
+def test_amegagrad_does_not_publish_a_failed_native_configuration(
     monkeypatch,
 ) -> None:
     _require_native()
@@ -252,31 +293,57 @@ def test_amegagrad_rolls_back_rates_before_publishing_a_failed_snapshot(
         topos_control_gain=1.0,
     )
     optimizer_globals = st.optim.Amegagrad.tune.__globals__
-    original_set_rate = optimizer_globals["_set_tape_learning_rate"]
-    rate_calls = 0
+    original_configure = optimizer_globals["_configure_amegagrad_optimizer"]
+    hyper_state_before = opt.hyper.optimizer_state_control()
+    real_state_before = opt.real.optimizer_state_control()
+    hyper_momentum_before = opt.hyper.optimizer_momentum()
+    real_momentum_before = opt.real.optimizer_momentum()
 
-    def _fail_first_real_rate(tape, target) -> None:
-        nonlocal rate_calls
-        rate_calls += 1
-        if rate_calls == 2:
-            raise RuntimeError("injected real-tape failure")
-        original_set_rate(tape, target)
+    def _fail_configuration(*_args, **_kwargs) -> None:
+        raise RuntimeError("injected native configuration failure")
 
     monkeypatch.setitem(
         optimizer_globals,
-        "_set_tape_learning_rate",
-        _fail_first_real_rate,
+        "_configure_amegagrad_optimizer",
+        _fail_configuration,
     )
-    with pytest.raises(RuntimeError, match="injected real-tape failure"):
+    with pytest.raises(RuntimeError, match="injected native configuration failure"):
         opt.tune(control=_UnitRateControl(), use_topos=True, observed_depth=4)
 
     assert opt.hyper.learning_rate() == pytest.approx(0.04)
     assert opt.real.learning_rate() == pytest.approx(0.02)
+    assert opt.hyper.optimizer_state_control() == hyper_state_before
+    assert opt.real.optimizer_state_control() == real_state_before
+    assert opt.hyper.optimizer_momentum() == hyper_momentum_before
+    assert opt.real.optimizer_momentum() == real_momentum_before
     assert opt.topos_diagnostics()["snapshot"] is None
 
-    monkeypatch.setitem(optimizer_globals, "_set_tape_learning_rate", original_set_rate)
+    monkeypatch.setitem(
+        optimizer_globals,
+        "_configure_amegagrad_optimizer",
+        original_configure,
+    )
     opt.tune(control=_UnitRateControl(), use_topos=True, observed_depth=4)
     assert opt.topos_diagnostics()["snapshot"]["sequence"] == 1
+
+
+def test_gradient_tapes_reject_rewritten_topos_optimizer_rules() -> None:
+    _require_native()
+
+    snapshot = st.topos_optimizer_snapshot(
+        sequence=1,
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        gain=1.0,
+        observed_depth=1,
+        visited_volume=1,
+    )
+    application = dict(snapshot["optimizer_application"])
+    application["momentum_rule"] = "python_reconstruction"
+    tape = st.hypergrad((1, 1))
+
+    with pytest.raises(ValueError, match="momentum_rule"):
+        tape.configure_optimizer_state(application)
 
 
 def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
@@ -409,12 +476,19 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
         tuned_context["training_plan_effective_gradient_bias_scale"]["mean"]
     )
     assert tuned_row["topos_optimizer_raw_rate_scale_mean"] is None
-    assert tuned_row["topos_optimizer_effective_gradient_bias_scale_mean"] is None
+    assert tuned_row[
+        "topos_optimizer_effective_gradient_bias_scale_mean"
+    ] == pytest.approx(
+        tuned_context["optimizer_effective_gradient_bias_scale"]["mean"]
+    )
+    assert tuned_row[
+        "topos_optimizer_effective_momentum_damping_mean"
+    ] == pytest.approx(tuned_context["optimizer_effective_momentum_damping"]["mean"])
 
     reloaded = st.compare_amegagrad_topos_training_traces(result["trace_paths"])
     assert reloaded["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
     assert reloaded["winners"]["lowest_training_plan_rate_scale"] == "topos_tuned"
     assert reloaded["winners"]["highest_planned_gradient_bias"] == "topos_tuned"
     assert reloaded["winners"]["lowest_optimizer_raw_rate_scale"] is None
-    assert reloaded["winners"]["highest_effective_gradient_bias"] is None
+    assert reloaded["winners"]["highest_effective_gradient_bias"] == "topos_tuned"
     assert reloaded["winners"]["lowest_runtime_training_rate_scale"] == "topos_tuned"

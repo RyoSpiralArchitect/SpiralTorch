@@ -9,6 +9,7 @@
 
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::{Deserialize, Serialize};
+use st_tensor::topos_optimizer_gradient_bias_basis;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -1232,18 +1233,18 @@ fn resolve_topos_control(
     } else {
         0.0
     };
-    let basis = [
-        closure - 0.5,
-        volume - 0.5,
-        depth - 0.5,
-        guard - 0.5,
-        damping - 0.5,
-        focus - 0.5,
-        1.0 - learning_rate_hint,
-        regularization_scale - 1.0,
-        0.5 - openness,
-        0.5 - exploration,
-    ];
+    let basis = topos_optimizer_gradient_bias_basis(
+        closure,
+        volume,
+        depth,
+        guard,
+        damping,
+        focus,
+        learning_rate_hint,
+        regularization_scale,
+        openness,
+        exploration,
+    );
     let gradient_bias = (0..config.dimension)
         .map(|index| {
             checked_mul(

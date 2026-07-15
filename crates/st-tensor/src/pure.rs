@@ -28,20 +28,23 @@ pub use self::measure::{
     BarycenterIntermediate, TeslaTail, TeslaTailLine, ZSpaceBarycenter,
 };
 pub use self::topos::{
-    GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard, ModalityProfile, MultiModalAtlas,
-    MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
-    RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlPlanOptions,
-    ToposControlSignal, ToposControlSignalInput, ToposControlSignalPayload, ToposInferenceHints,
-    ToposInferenceHintsInput, ToposInferenceHintsPayload, ToposInferencePlan,
-    ToposInferencePlanOptions, ToposInferencePlanPayload, ToposOptimizerApplicationPayload,
-    ToposOptimizerSnapshotPayload, ToposRuntimeMode, ToposRuntimeProfile, ToposRuntimeProfileInput,
-    ToposRuntimeProfilePayload, ToposRuntimeRoute, ToposRuntimeRoutePayload,
-    ToposRuntimeRouteScores, ToposRuntimeRouteScoresPayload, ToposTrainingHints,
-    ToposTrainingHintsInput, ToposTrainingHintsPayload, ToposTrainingPlan,
+    topos_optimizer_gradient_bias_basis, GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard,
+    ModalityProfile, MultiModalAtlas, MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos,
+    RewardBoundary, RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas,
+    ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
+    ToposControlSignalPayload, ToposInferenceHints, ToposInferenceHintsInput,
+    ToposInferenceHintsPayload, ToposInferencePlan, ToposInferencePlanOptions,
+    ToposInferencePlanPayload, ToposOptimizerApplicationPayload, ToposOptimizerGradientStep,
+    ToposOptimizerSnapshotPayload, ToposOptimizerStateControl, ToposRuntimeMode,
+    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeProfilePayload, ToposRuntimeRoute,
+    ToposRuntimeRoutePayload, ToposRuntimeRouteScores, ToposRuntimeRouteScoresPayload,
+    ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingHintsPayload, ToposTrainingPlan,
     ToposTrainingPlanPayload, ToposZSpaceProjection, ToposZSpaceProjectionOptions,
     ToposZSpaceProjectionPayload, ZBox, ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
     TOPOS_CONTROL_SIGNAL_KIND, TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND,
-    TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER, TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
+    TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER, TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+    TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+    TOPOS_OPTIMIZER_MOMENTUM_RULE, TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
     TOPOS_OPTIMIZER_SNAPSHOT_KIND, TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE,
     TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND, TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_OWNER,
     TOPOS_RUNTIME_ROUTE_CONTRACT_VERSION, TOPOS_RUNTIME_ROUTE_KIND,
@@ -7602,6 +7605,22 @@ pub struct AmegaHypergrad {
     max_dirty: Cell<bool>,
     linf_dirty: Cell<bool>,
     topos: topos::OpenCartesianTopos,
+    optimizer_state_control: ToposOptimizerStateControl,
+    optimizer_momentum: Vec<f32>,
+}
+
+struct PreparedAmegaUpdate {
+    weights: Tensor,
+    next_momentum: Option<Vec<f32>>,
+}
+
+struct PreparedHypergradUpdate {
+    update: PreparedAmegaUpdate,
+    optimizer_gradient: GradientSummary,
+    momentum_before: GradientSummary,
+    momentum_after: GradientSummary,
+    raw_gradient_rms: f32,
+    gradient_bias_amplitude: f32,
 }
 
 /// Euclidean gradient accumulator that mirrors the hypergradient API while
@@ -8956,6 +8975,8 @@ pub struct AmegaRealgrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
+    optimizer_state_control: ToposOptimizerStateControl,
+    optimizer_momentum: Vec<f32>,
 }
 
 impl AmegaHypergrad {
@@ -8993,6 +9014,8 @@ impl AmegaHypergrad {
             max_dirty: Cell::new(false),
             linf_dirty: Cell::new(false),
             topos,
+            optimizer_state_control: ToposOptimizerStateControl::neutral(),
+            optimizer_momentum: Vec::new(),
         })
     }
 
@@ -9037,6 +9060,8 @@ impl AmegaHypergrad {
             max_dirty: Cell::new(false),
             linf_dirty: Cell::new(false),
             topos,
+            optimizer_state_control: ToposOptimizerStateControl::neutral(),
+            optimizer_momentum: Vec::new(),
         })
     }
 
@@ -9058,6 +9083,34 @@ impl AmegaHypergrad {
     /// Provides read-only access to the accumulated gradient buffer.
     pub fn gradient(&self) -> &[f32] {
         &self.gradient
+    }
+
+    /// Returns the Rust-owned Topos gradient-state control configured on this tape.
+    pub fn optimizer_state_control(&self) -> ToposOptimizerStateControl {
+        self.optimizer_state_control
+    }
+
+    /// Returns the persistent momentum state used by controlled updates.
+    pub fn optimizer_momentum(&self) -> &[f32] {
+        &self.optimizer_momentum
+    }
+
+    /// Configures a validated Topos gradient-state contract without mutating its history.
+    pub fn configure_optimizer_state(&mut self, control: ToposOptimizerStateControl) {
+        if !control.is_neutral() && self.optimizer_momentum.len() != self.gradient.len() {
+            self.optimizer_momentum = vec![0.0; self.gradient.len()];
+        }
+        self.optimizer_state_control = control;
+    }
+
+    /// Restores stateless gradient semantics while retaining history for explicit inspection.
+    pub fn disable_optimizer_state_control(&mut self) {
+        self.optimizer_state_control = ToposOptimizerStateControl::neutral();
+    }
+
+    /// Clears momentum without discarding an accumulated raw gradient.
+    pub fn reset_optimizer_state(&mut self) {
+        self.optimizer_momentum.fill(0.0);
     }
 
     /// Provides mutable access to the accumulated gradient buffer.
@@ -9517,6 +9570,7 @@ impl AmegaHypergrad {
         self.learning_rate = learning_rate;
         self.topos = topos;
         self.reset();
+        self.reset_optimizer_state();
         Ok(())
     }
 
@@ -9550,10 +9604,10 @@ impl AmegaHypergrad {
         }
     }
 
-    fn updated_weights_tensor(&self, weights: &Tensor) -> PureResult<Tensor> {
+    fn updated_weights_tensor(&self, weights: &Tensor, gradient: &[f32]) -> PureResult<Tensor> {
         let tolerance = self.topos.tolerance();
         let mut updated = weights.clone();
-        for (value, grad) in updated.data_mut().iter_mut().zip(self.gradient.iter()) {
+        for (value, grad) in updated.data_mut().iter_mut().zip(gradient.iter()) {
             let original = *value;
             let denom = 1.0 - self.curvature * original * original;
             let step = self.learning_rate / denom.abs().max(tolerance);
@@ -9883,9 +9937,69 @@ impl AmegaHypergrad {
         weights: &mut Tensor,
         backend: TensorUtilBackend,
     ) -> PureResult<()> {
+        let prepared = self.prepare_apply_with_backend(weights, backend)?;
+        self.emit_prepared_update(weights, backend, &prepared);
+        self.commit_prepared_update(prepared.update, weights);
+        Ok(())
+    }
+
+    fn prepare_apply_with_backend(
+        &self,
+        weights: &Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<PreparedHypergradUpdate> {
         self.assert_tensor_shape(weights)?;
         self.topos.guard_tensor("hypergrad_weights", weights)?;
-        let updated_weights = self.updated_weights_tensor(weights)?;
+        let gradient_step = if self.optimizer_state_control.is_neutral() {
+            None
+        } else {
+            Some(
+                self.optimizer_state_control
+                    .gradient_step(&self.gradient, &self.optimizer_momentum)?,
+            )
+        };
+        let applied_gradient = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::applied_gradient)
+            .unwrap_or(&self.gradient);
+        let updated_weights = self.updated_weights_tensor(weights, applied_gradient)?;
+        let raw_momentum = GradientSummary::from_slice(&self.optimizer_momentum);
+        let next_momentum_summary = gradient_step.as_ref().map_or(raw_momentum, |step| {
+            GradientSummary::from_slice(step.next_momentum())
+        });
+        let raw_gradient_rms = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::raw_gradient_rms)
+            .unwrap_or_else(|| self.summary().rms());
+        let gradient_bias_amplitude = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::gradient_bias_amplitude)
+            .unwrap_or(0.0);
+        let optimizer_gradient = GradientSummary::from_slice(applied_gradient);
+        let projected =
+            updated_weights.project_to_poincare_with_backend(self.curvature, backend)?;
+        self.topos
+            .guard_tensor("hypergrad_weights_post_projection", &projected)?;
+        let next_momentum = gradient_step.map(ToposOptimizerGradientStep::into_next_momentum);
+        Ok(PreparedHypergradUpdate {
+            update: PreparedAmegaUpdate {
+                weights: projected,
+                next_momentum,
+            },
+            optimizer_gradient,
+            momentum_before: raw_momentum,
+            momentum_after: next_momentum_summary,
+            raw_gradient_rms,
+            gradient_bias_amplitude,
+        })
+    }
+
+    fn emit_prepared_update(
+        &self,
+        weights: &Tensor,
+        backend: TensorUtilBackend,
+        prepared: &PreparedHypergradUpdate,
+    ) {
         crate::emit_tensor_op(
             "hypergrad_apply_update",
             &[weights.rows, weights.cols, self.rows, self.cols],
@@ -9910,6 +10024,30 @@ impl AmegaHypergrad {
                     serde_json::json!(backend.label()),
                 );
                 data.insert(
+                    "topos_gradient_bias_rule".to_string(),
+                    serde_json::json!(self.optimizer_state_control.gradient_bias_rule()),
+                );
+                data.insert(
+                    "topos_gradient_bias_scale".to_string(),
+                    serde_json::json!(self.optimizer_state_control.gradient_bias_scale()),
+                );
+                data.insert(
+                    "topos_gradient_bias_amplitude".to_string(),
+                    serde_json::json!(prepared.gradient_bias_amplitude),
+                );
+                data.insert(
+                    "topos_raw_gradient_rms".to_string(),
+                    serde_json::json!(prepared.raw_gradient_rms),
+                );
+                data.insert(
+                    "topos_momentum_rule".to_string(),
+                    serde_json::json!(self.optimizer_state_control.momentum_rule()),
+                );
+                data.insert(
+                    "topos_momentum_damping".to_string(),
+                    serde_json::json!(self.optimizer_state_control.momentum_damping()),
+                );
+                data.insert(
                     "weight_non_finite_values".to_string(),
                     serde_json::json!(weights
                         .data()
@@ -9918,15 +10056,31 @@ impl AmegaHypergrad {
                         .count()),
                 );
                 insert_gradient_summary_meta(data, "gradient", self.summary());
+                insert_gradient_summary_meta(
+                    data,
+                    "optimizer_gradient",
+                    prepared.optimizer_gradient,
+                );
+                insert_gradient_summary_meta(
+                    data,
+                    "optimizer_momentum_before",
+                    prepared.momentum_before,
+                );
+                insert_gradient_summary_meta(
+                    data,
+                    "optimizer_momentum_after",
+                    prepared.momentum_after,
+                );
             },
         );
-        let projected =
-            updated_weights.project_to_poincare_with_backend(self.curvature, backend)?;
-        *weights = projected;
-        self.topos
-            .guard_tensor("hypergrad_weights_post_projection", weights)?;
+    }
+
+    fn commit_prepared_update(&mut self, prepared: PreparedAmegaUpdate, weights: &mut Tensor) {
+        *weights = prepared.weights;
+        if let Some(next_momentum) = prepared.next_momentum {
+            self.optimizer_momentum = next_momentum;
+        }
         self.reset();
-        Ok(())
     }
 
     /// Integrates the barycenter intermediate curve so the tape converges towards
@@ -9971,6 +10125,8 @@ impl AmegaRealgrad {
             rows,
             cols,
             gradient: vec![0.0; rows * cols],
+            optimizer_state_control: ToposOptimizerStateControl::neutral(),
+            optimizer_momentum: Vec::new(),
         })
     }
 
@@ -9997,6 +10153,34 @@ impl AmegaRealgrad {
     /// Read-only view into the accumulated gradient.
     pub fn gradient(&self) -> &[f32] {
         &self.gradient
+    }
+
+    /// Returns the Rust-owned Topos gradient-state control configured on this tape.
+    pub fn optimizer_state_control(&self) -> ToposOptimizerStateControl {
+        self.optimizer_state_control
+    }
+
+    /// Returns the persistent momentum state used by controlled updates.
+    pub fn optimizer_momentum(&self) -> &[f32] {
+        &self.optimizer_momentum
+    }
+
+    /// Configures a validated Topos gradient-state contract without mutating its history.
+    pub fn configure_optimizer_state(&mut self, control: ToposOptimizerStateControl) {
+        if !control.is_neutral() && self.optimizer_momentum.len() != self.gradient.len() {
+            self.optimizer_momentum = vec![0.0; self.gradient.len()];
+        }
+        self.optimizer_state_control = control;
+    }
+
+    /// Restores stateless gradient semantics while retaining history for explicit inspection.
+    pub fn disable_optimizer_state_control(&mut self) {
+        self.optimizer_state_control = ToposOptimizerStateControl::neutral();
+    }
+
+    /// Clears momentum without discarding an accumulated raw gradient.
+    pub fn reset_optimizer_state(&mut self) {
+        self.optimizer_momentum.fill(0.0);
     }
 
     /// Mutable access to the gradient buffer.
@@ -10047,8 +10231,8 @@ impl AmegaRealgrad {
         Ok(())
     }
 
-    fn validate_update(&self, weights: &Tensor) -> PureResult<()> {
-        for (&weight, &grad) in weights.data().iter().zip(self.gradient.iter()) {
+    fn validate_update(&self, weights: &Tensor, gradient: &[f32]) -> PureResult<()> {
+        for (&weight, &grad) in weights.data().iter().zip(gradient.iter()) {
             let delta = self.learning_rate * grad;
             if !delta.is_finite() {
                 return Err(TensorError::NonFiniteValue {
@@ -10198,13 +10382,130 @@ impl AmegaRealgrad {
         weights: &mut Tensor,
         backend: TensorUtilBackend,
     ) -> PureResult<()> {
-        self.assert_tensor_shape(weights)?;
-        self.validate_update(weights)?;
-        let gradient = Tensor::from_vec(self.rows, self.cols, self.gradient.clone())?;
-        weights.add_scaled_with_backend(&gradient, -self.learning_rate, backend)?;
-        self.reset();
+        let prepared = self.prepare_apply_with_backend(weights, backend)?;
+        self.commit_prepared_update(prepared, weights);
         Ok(())
     }
+
+    fn prepare_apply_with_backend(
+        &self,
+        weights: &Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<PreparedAmegaUpdate> {
+        self.assert_tensor_shape(weights)?;
+        let gradient_step = if self.optimizer_state_control.is_neutral() {
+            None
+        } else {
+            Some(
+                self.optimizer_state_control
+                    .gradient_step(&self.gradient, &self.optimizer_momentum)?,
+            )
+        };
+        let applied_gradient = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::applied_gradient)
+            .unwrap_or(&self.gradient);
+        self.validate_update(weights, applied_gradient)?;
+        let gradient = Tensor::from_vec(self.rows, self.cols, applied_gradient.to_vec())?;
+        let mut updated_weights = weights.clone();
+        updated_weights.add_scaled_with_backend(&gradient, -self.learning_rate, backend)?;
+        let next_momentum = gradient_step.map(ToposOptimizerGradientStep::into_next_momentum);
+        Ok(PreparedAmegaUpdate {
+            weights: updated_weights,
+            next_momentum,
+        })
+    }
+
+    fn commit_prepared_update(&mut self, prepared: PreparedAmegaUpdate, weights: &mut Tensor) {
+        *weights = prepared.weights;
+        if let Some(next_momentum) = prepared.next_momentum {
+            self.optimizer_momentum = next_momentum;
+        }
+        self.reset();
+    }
+}
+
+/// Configures both Amega tapes through one atomic optimizer boundary.
+///
+/// Validation and any required momentum allocation complete before rates or
+/// controls are mutated, so callers never observe a partially configured pair.
+pub fn configure_amegagrad_optimizer(
+    hyper: &mut AmegaHypergrad,
+    real: &mut AmegaRealgrad,
+    hyper_learning_rate: f32,
+    real_learning_rate: f32,
+    optimizer_state_control: ToposOptimizerStateControl,
+) -> PureResult<()> {
+    if hyper.shape() != real.shape() {
+        return Err(TensorError::ShapeMismatch {
+            left: hyper.shape(),
+            right: real.shape(),
+        });
+    }
+    if hyper_learning_rate <= 0.0 || !hyper_learning_rate.is_finite() {
+        return Err(TensorError::NonPositiveLearningRate {
+            rate: hyper_learning_rate,
+        });
+    }
+    if real_learning_rate <= 0.0 || !real_learning_rate.is_finite() {
+        return Err(TensorError::NonPositiveLearningRate {
+            rate: real_learning_rate,
+        });
+    }
+
+    let hyper_momentum = (!optimizer_state_control.is_neutral()
+        && hyper.optimizer_momentum.len() != hyper.gradient.len())
+    .then(|| vec![0.0; hyper.gradient.len()]);
+    let real_momentum = (!optimizer_state_control.is_neutral()
+        && real.optimizer_momentum.len() != real.gradient.len())
+    .then(|| vec![0.0; real.gradient.len()]);
+
+    hyper.learning_rate = hyper_learning_rate;
+    real.learning_rate = real_learning_rate;
+    hyper.optimizer_state_control = optimizer_state_control;
+    real.optimizer_state_control = optimizer_state_control;
+    if let Some(momentum) = hyper_momentum {
+        hyper.optimizer_momentum = momentum;
+    }
+    if let Some(momentum) = real_momentum {
+        real.optimizer_momentum = momentum;
+    }
+    Ok(())
+}
+
+/// Applies one authoritative Topos optimizer application to both Amega tapes.
+pub fn configure_amegagrad_optimizer_application(
+    hyper: &mut AmegaHypergrad,
+    real: &mut AmegaRealgrad,
+    application: &ToposOptimizerApplicationPayload,
+) -> PureResult<()> {
+    configure_amegagrad_optimizer(
+        hyper,
+        real,
+        application.hyper_learning_rate,
+        application.real_learning_rate,
+        application.optimizer_state_control(),
+    )
+}
+
+/// Applies hyperbolic and Euclidean Amega tapes as one atomic optimizer step.
+///
+/// Both candidate updates are validated before any state is committed. A
+/// failure in either tape therefore leaves weights, accumulated gradients, and
+/// momentum intact without cloning either tape.
+pub fn apply_amegagrad_step(
+    hyper: &mut AmegaHypergrad,
+    real: &mut AmegaRealgrad,
+    weights: &mut Tensor,
+) -> PureResult<()> {
+    let hyper_update = hyper.prepare_apply_with_backend(weights, TensorUtilBackend::Auto)?;
+    let real_update =
+        real.prepare_apply_with_backend(&hyper_update.update.weights, TensorUtilBackend::Auto)?;
+
+    hyper.emit_prepared_update(weights, TensorUtilBackend::Auto, &hyper_update);
+    hyper.commit_prepared_update(hyper_update.update, weights);
+    real.commit_prepared_update(real_update, weights);
+    Ok(())
 }
 
 const PARALLEL_GEMM_THRESHOLD: usize = 32 * 32 * 32;
@@ -14693,6 +14994,164 @@ mod tests {
         assert!((weights.data()[0] + 0.1).abs() < 1e-6);
         assert!((weights.data()[1] - 0.2).abs() < 1e-6);
         assert!((weights.data()[2] + 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_realgrad_applies_rust_owned_topos_bias_and_momentum() {
+        let mut basis = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+        basis[0] = 1.0;
+        basis[1] = -1.0;
+        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 0.5));
+        let mut tape = unwrap_ok(AmegaRealgrad::new(0.1, 1, 2));
+        tape.configure_optimizer_state(control);
+        let wave = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, -1.0]));
+        let mut weights = unwrap_ok(Tensor::zeros(1, 2));
+
+        unwrap_ok(tape.accumulate_wave(&wave));
+        unwrap_ok(tape.apply(&mut weights));
+        assert!((tape.optimizer_momentum()[0] - 0.6).abs() < 1e-6);
+        assert!((tape.optimizer_momentum()[1] + 0.6).abs() < 1e-6);
+        assert!((weights.data()[0] + 0.06).abs() < 1e-6);
+        assert!((weights.data()[1] - 0.06).abs() < 1e-6);
+
+        unwrap_ok(tape.accumulate_wave(&wave));
+        unwrap_ok(tape.apply(&mut weights));
+        assert!((tape.optimizer_momentum()[0] - 0.9).abs() < 1e-6);
+        assert!((tape.optimizer_momentum()[1] + 0.9).abs() < 1e-6);
+        assert!((weights.data()[0] + 0.15).abs() < 1e-6);
+        assert!((weights.data()[1] - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_tapes_accept_one_optimizer_snapshot_state_contract() {
+        let signal = unwrap_ok(ToposControlSignal::from_input(ToposControlSignalInput {
+            observed_depth: 4,
+            visited_volume: 4,
+            max_depth: 8,
+            max_volume: 8,
+            ..ToposControlSignalInput::default()
+        }));
+        let snapshot = unwrap_ok(signal.optimizer_snapshot(
+            1,
+            0.05,
+            0.01,
+            ToposControlPlanOptions {
+                training_gain: 1.0,
+                ..ToposControlPlanOptions::default()
+            },
+            None,
+            None,
+        ));
+        let mut hyper = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));
+        let mut real = unwrap_ok(AmegaRealgrad::new(0.01, 1, 2));
+        unwrap_ok(configure_amegagrad_optimizer_application(
+            &mut hyper,
+            &mut real,
+            &snapshot.optimizer_application,
+        ));
+
+        assert_eq!(
+            hyper.optimizer_state_control(),
+            snapshot.optimizer_application.optimizer_state_control()
+        );
+        assert_eq!(
+            real.optimizer_state_control(),
+            hyper.optimizer_state_control()
+        );
+        assert_eq!(
+            hyper.learning_rate(),
+            snapshot.optimizer_application.hyper_learning_rate
+        );
+        assert_eq!(
+            real.learning_rate(),
+            snapshot.optimizer_application.real_learning_rate
+        );
+        assert!(hyper.optimizer_state_control().gradient_bias_scale() > 0.0);
+        assert!(hyper.optimizer_state_control().momentum_damping() > 0.0);
+    }
+
+    #[test]
+    fn amegagrad_optimizer_configuration_is_atomic() {
+        let control = unwrap_ok(ToposOptimizerStateControl::new(
+            0.2,
+            [0.25; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            0.4,
+        ));
+        let mut hyper = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));
+        let mut real = unwrap_ok(AmegaRealgrad::new(0.01, 1, 2));
+
+        let error =
+            configure_amegagrad_optimizer(&mut hyper, &mut real, 0.02, f32::INFINITY, control)
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            TensorError::NonPositiveLearningRate { rate } if rate.is_infinite()
+        ));
+        assert_eq!(hyper.learning_rate(), 0.05);
+        assert_eq!(real.learning_rate(), 0.01);
+        assert!(hyper.optimizer_state_control().is_neutral());
+        assert!(real.optimizer_state_control().is_neutral());
+        assert!(hyper.optimizer_momentum().is_empty());
+        assert!(real.optimizer_momentum().is_empty());
+
+        unwrap_ok(configure_amegagrad_optimizer(
+            &mut hyper, &mut real, 0.02, 0.03, control,
+        ));
+        assert_eq!(hyper.learning_rate(), 0.02);
+        assert_eq!(real.learning_rate(), 0.03);
+        assert_eq!(hyper.optimizer_state_control(), control);
+        assert_eq!(real.optimizer_state_control(), control);
+        assert_eq!(hyper.optimizer_momentum(), &[0.0, 0.0]);
+        assert_eq!(real.optimizer_momentum(), &[0.0, 0.0]);
+    }
+
+    #[test]
+    fn amegagrad_combined_step_commits_both_tapes_atomically() {
+        let wave = unwrap_ok(Tensor::from_vec(1, 2, vec![0.5, -0.25]));
+        let mut hyper = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));
+        let mut real = unwrap_ok(AmegaRealgrad::new(0.1, 1, 2));
+        unwrap_ok(hyper.accumulate_wave(&wave));
+        unwrap_ok(real.accumulate_wave(&wave));
+        let mut weights = unwrap_ok(Tensor::zeros(1, 2));
+
+        unwrap_ok(apply_amegagrad_step(&mut hyper, &mut real, &mut weights));
+
+        assert!(weights.squared_l2_norm() > 0.0);
+        assert!(hyper.gradient().iter().all(|value| *value == 0.0));
+        assert!(real.gradient().iter().all(|value| *value == 0.0));
+        assert!(hyper.optimizer_momentum().iter().all(|value| *value == 0.0));
+        assert!(real.optimizer_momentum().iter().all(|value| *value == 0.0));
+    }
+
+    #[test]
+    fn amegagrad_combined_step_rolls_back_a_late_realgrad_failure() {
+        let mut hyper = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 1));
+        let mut real = unwrap_ok(AmegaRealgrad::new(f32::MAX, 1, 1));
+        let hyper_wave = unwrap_ok(Tensor::from_vec(1, 1, vec![0.5]));
+        let real_wave = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        unwrap_ok(hyper.accumulate_wave(&hyper_wave));
+        unwrap_ok(real.accumulate_wave(&real_wave));
+        let mut weights = unwrap_ok(Tensor::zeros(1, 1));
+        let weights_before = weights.clone();
+        let hyper_gradient_before = hyper.gradient().to_vec();
+        let real_gradient_before = real.gradient().to_vec();
+        let hyper_momentum_before = hyper.optimizer_momentum().to_vec();
+        let real_momentum_before = real.optimizer_momentum().to_vec();
+
+        let error = apply_amegagrad_step(&mut hyper, &mut real, &mut weights).unwrap_err();
+
+        assert!(matches!(
+            error,
+            TensorError::NonFiniteValue {
+                label: "realgrad_delta",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(weights, weights_before);
+        assert_eq!(hyper.gradient(), hyper_gradient_before.as_slice());
+        assert_eq!(real.gradient(), real_gradient_before.as_slice());
+        assert_eq!(hyper.optimizer_momentum(), hyper_momentum_before.as_slice());
+        assert_eq!(real.optimizer_momentum(), real_momentum_before.as_slice());
     }
 
     #[test]
