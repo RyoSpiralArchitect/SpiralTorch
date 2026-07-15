@@ -697,6 +697,7 @@ from .zspace_inference import (
 )
 from .training_telemetry import training_telemetry_projection
 from .concept_diffusion import zspace_concept_diffusion
+from .free_energy import zspace_free_energy
 from .generation_control import zspace_generation_control
 from .imaginary_time_schrodinger import zspace_imaginary_time_schrodinger
 from .temperature_control import zspace_temperature_control
@@ -8155,6 +8156,7 @@ _EXTRAS.extend(
         "zspace_telemetry_fusion",
         "training_telemetry_projection",
         "zspace_concept_diffusion",
+        "zspace_free_energy",
         "zspace_generation_control",
         "zspace_imaginary_time_schrodinger",
         "zspace_temperature_control",

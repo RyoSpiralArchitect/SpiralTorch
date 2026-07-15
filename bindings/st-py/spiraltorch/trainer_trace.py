@@ -114,6 +114,12 @@ TOPOS_CONTEXT_METRIC_KEYS = (
 TRACE_SPOTLIGHT_KEYS = (
     "loss_weighted",
     "loss_weighted_base",
+    "roundtable_loss_quality",
+    "free_energy",
+    "free_energy_utility",
+    "free_energy_acceptance_probability",
+    "free_energy_kl",
+    "free_energy_band_potential",
     "spectral_label",
     "spectral_turnover",
     "spectral_lr_scale",

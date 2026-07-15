@@ -4,6 +4,7 @@ mod cobol;
 mod concept_diffusion;
 mod cosmology;
 mod fractal_field;
+mod free_energy;
 mod generation_control;
 mod imaginary_time_schrodinger;
 mod reports;
@@ -38,6 +39,7 @@ pub use cosmology::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;
 pub use fractal_field::*;
+pub use free_energy::*;
 pub use generation_control::*;
 pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]

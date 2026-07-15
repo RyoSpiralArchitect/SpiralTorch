@@ -937,7 +937,9 @@ impl BlackcatModerator {
             (summary.wilson_high - summary.wilson_low) as f64,
             summary.events as f64,
         ];
-        ctx.resize(self.runtime.context_dim().max(7), 0.0);
+        let context_dim = self.runtime.context_dim();
+        ctx.truncate(context_dim);
+        ctx.resize(context_dim, 0.0);
         ctx
     }
 
@@ -1331,6 +1333,40 @@ mod tests {
         let outcome_b = moderator.ingest(summary_b);
         assert!(outcome_b.proposal.is_some());
         assert_eq!(moderator.minutes().len(), 2);
+    }
+
+    #[test]
+    fn moderator_respects_custom_runtime_context_dimension() {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([(
+                "agenda".to_string(),
+                vec!["focus".to_string(), "branch".to_string()],
+            )]),
+        };
+        let runtime =
+            BlackCatRuntime::new(ZMetaParams::default(), groups, 4, SoftBanditMode::TS, None);
+        let mut moderator = BlackcatModerator::new(runtime, 0.5, 2);
+        let outcome = moderator.ingest(MetaSummary {
+            node_id: "a".into(),
+            plan_signature: "compact-plan".into(),
+            script_hint: "soft(compact-plan)".into(),
+            rank_kind: RankKind::TopK,
+            winner: OutcomeBand::Here,
+            mean_score: 0.6,
+            wilson_low: 0.4,
+            wilson_high: 0.7,
+            mean_psi: 0.2,
+            mean_z: 0.1,
+            support: 0.5,
+            events: 2,
+            issued_at: SystemTime::now(),
+        });
+
+        assert_eq!(
+            outcome.minutes.picks.get("agenda").map(String::as_str),
+            Some("focus")
+        );
+        assert!(outcome.minutes.reward.is_finite());
     }
 
     #[test]

@@ -211,6 +211,37 @@ const fused = zspacePartialFusionObject({
 });
 ```
 
+Runtime plan scoring follows the same ownership rule. Variational free energy
+is evaluated only by `st-core::heur::free_energy`; Python and WASM transport the
+same request and return the versioned Rust report. Missing or numerically tiny
+band evidence returns to the configured prior, band potentials are centred on
+that prior, and `acceptance_probability` is the explicit two-state Gibbs
+probability against a neutral `F=0` candidate rather than a calibrated
+confidence claim:
+
+```python
+import spiraltorch as st
+
+report = st.zspace_free_energy(
+    reference_loss=0.8,
+    candidate_loss=0.5,
+    step_time_ms=12.0,
+    memory_mb=256.0,
+    band={"above": 0.6, "here": 0.3, "beneath": 0.1},
+)
+print(report["free_energy"], report["acceptance_probability"])
+```
+
+```ts
+const report = zspaceFreeEnergyObject({
+  observation: {
+    reference_loss: 0.8,
+    candidate_loss: 0.5,
+    band: { above: 0.6, here: 0.3, beneath: 0.1 },
+  },
+});
+```
+
 ### Why SpiralTorch  
 
 Modern ML stacks were built around CUDA—fast, but closed and rigid.  
@@ -2758,11 +2789,13 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 
 The derivative-free ZMeta ES and contextual bandits can ride alongside the
 roundtable loop. Attach the runtime once and it will ingest per-step metrics,
-log Above/Here/Beneath energy, estimate the BlackCat drift band, and
+evaluate the canonical Rust variational free-energy report, log
+Above/Here/Beneath energy, estimate the BlackCat drift band, and
 opportunistically promote winning `soft(...)` snippets behind a Wilson lower
-bound. When you call `install_blackcat_moderator` a dedicated runtime is spun
-up for the moderator so the training loop and the distributed consensus stay
-decoupled.
+bound. Invalid reward, adaptation, or context inputs are rejected before ES,
+bandit, statistics, or telemetry state changes. When you call
+`install_blackcat_moderator` a dedicated runtime is spun up for the moderator
+so the training loop and the distributed consensus stay decoupled.
 
 ```rust
 use std::collections::HashMap;
@@ -2797,7 +2830,10 @@ let dataset = vec![
 ];
 trainer.prepare(&mut model)?;
 let _ = trainer.train_epoch(&mut model, &mut mse, dataset, &schedule)?;
-// At this point rt.post_step() has consumed metrics and can append # blackcat heuristics.
+let report = trainer
+    .blackcat_free_energy_report()
+    .expect("BlackCat committed a guarded free-energy report");
+println!("F={} p_accept={}", report.free_energy, report.acceptance_probability);
 ```
 
 **Rust (Z-space gating + projector)**
