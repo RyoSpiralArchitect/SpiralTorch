@@ -8,6 +8,7 @@ mod free_energy;
 mod generation_control;
 mod imaginary_time_schrodinger;
 mod reports;
+mod runtime_route;
 mod scale_stack;
 mod temperature_control;
 mod topos_control;
@@ -48,6 +49,7 @@ pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use reports::*;
+pub use runtime_route::*;
 pub use scale_stack::*;
 pub use temperature_control::*;
 pub use topos_control::*;

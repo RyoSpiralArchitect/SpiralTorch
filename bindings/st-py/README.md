@@ -65,8 +65,15 @@ runtime = st.runtime_import_preflight_report(
 )
 print("HF runtime ready:", runtime["runtime_import_preflight_passed"])
 print("WGPU status:", runtime["runtime_device_report_statuses"])
+print("route contract:", runtime["runtime_device_route_contract_version"])
 PY
 ```
+
+`describe_runtime_devices()` and HF preflight collect observations in Python, but direct
+readiness, surrogate readiness, fallback identity, and required-backend gates are owned by
+`st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly
+`native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
+`evaluate_runtime_device_route(...)` when another orchestrator already has device rows.
 
 ## What's included
 
