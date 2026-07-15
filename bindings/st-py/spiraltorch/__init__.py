@@ -698,6 +698,7 @@ from .zspace_inference import (
 from .training_telemetry import training_telemetry_projection
 from .concept_diffusion import zspace_concept_diffusion
 from .generation_control import zspace_generation_control
+from .imaginary_time_schrodinger import zspace_imaginary_time_schrodinger
 from .temperature_control import zspace_temperature_control
 
 from .api_llm_runtime import (
@@ -8155,6 +8156,7 @@ _EXTRAS.extend(
         "training_telemetry_projection",
         "zspace_concept_diffusion",
         "zspace_generation_control",
+        "zspace_imaginary_time_schrodinger",
         "zspace_temperature_control",
         "inference_to_mapping",
         "inference_to_zmetrics",

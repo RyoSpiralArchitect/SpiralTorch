@@ -86,6 +86,10 @@ PY
 - `zspace_concept_diffusion(...)` for labelled probability-simplex heat flow.
   Rust owns observation blending, Z-bias tilt, symmetric conductivity, CFL
   substeps, and entropy/Dirichlet invariants; Python only carries graph state.
+- `zspace_imaginary_time_schrodinger(...)` for positive-amplitude evolution under
+  a Rust-owned Hermitian graph Hamiltonian, including spectral step bounds,
+  potential-gauge normalization, and Rayleigh-energy audit fields. The payload
+  reports its current `f64_cpu` execution backend and WGPU route blocker.
 - `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
   scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
   FT/runtime probes over local-HF embeddings.

@@ -4146,6 +4146,16 @@ def zspace_concept_diffusion(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_imaginary_time_schrodinger(
+    tags: Sequence[str],
+    potential: Sequence[float | int],
+    edges: Sequence[Mapping[str, object]],
+    *,
+    initial_amplitude: Sequence[float | int] = ...,
+    config: Mapping[str, object] | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def infer_with_partials(
     z_state: Sequence[float] | ZSpacePosterior | object,
     *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
@@ -10919,6 +10929,7 @@ __all__ = [
     "training_telemetry_projection",
     "zspace_concept_diffusion",
     "zspace_generation_control",
+    "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
     "inference_to_mapping",
     "inference_to_zmetrics",

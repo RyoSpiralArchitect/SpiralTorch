@@ -119,6 +119,28 @@ console.log(transition.next_state); // [0.75, 0.25]
 `zspaceConceptDiffusionJson` returns the identical versioned payload for worker
 and persistence boundaries. JavaScript never reconstructs the heat equation.
 
+Imaginary-time Schrodinger evolution uses the same peer-client boundary. Rust
+alone constructs the weighted graph Laplacian, shifts the scalar-potential
+gauge, chooses a spectral-safe positive substep, evolves the amplitude in the
+log domain, and audits the Rayleigh energy:
+
+```ts
+import { zspaceImaginaryTimeSchrodingerObject } from "spiraltorch-wasm";
+
+const groundState = zspaceImaginaryTimeSchrodingerObject({
+    tags: ["left", "right"],
+    potential: [0.0, 2.0],
+    edges: [{ left: 0, right: 1, weight: 1.0 }],
+    config: { imaginary_time: 1.0 },
+});
+
+console.log(groundState.probability, groundState.effects.rayleigh_energy_drop);
+```
+
+`zspaceImaginaryTimeSchrodingerJson` exposes the exact same payload for workers
+and persistence. Browser code never owns a second Hamiltonian or normalization
+heuristic.
+
 Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
 while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
 tie-breaking, reward projection, and selected-route resolution:

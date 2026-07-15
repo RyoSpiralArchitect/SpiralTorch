@@ -9,6 +9,9 @@ use st_core::inference::concept_diffusion::{apply_concept_diffusion, ConceptDiff
 use st_core::inference::generation_control::{
     apply_zspace_generation_control, ZSpaceGenerationControlRequest,
 };
+use st_core::inference::imaginary_time_schrodinger::{
+    apply_imaginary_time_schrodinger, ImaginaryTimeSchrodingerRequest,
+};
 use st_core::inference::temperature_control::{
     apply_temperature_control, TemperatureControlRequest,
 };
@@ -137,6 +140,42 @@ fn _zspace_concept_diffusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
         .map_err(|error| json_error("Z-space concept diffusion failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space concept diffusion encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_imaginary_time_schrodinger(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request_object = request.as_object().ok_or_else(|| {
+        PyValueError::new_err("Z-space imaginary-time Schrodinger request must be a mapping")
+    })?;
+    for field in ["tags", "potential", "edges", "initial_amplitude"] {
+        if request_object
+            .get(field)
+            .is_some_and(|value| !value.is_array())
+        {
+            return Err(PyValueError::new_err(format!(
+                "Z-space imaginary-time Schrodinger '{field}' must be a sequence"
+            )));
+        }
+    }
+    if request_object
+        .get("config")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(PyValueError::new_err(
+            "Z-space imaginary-time Schrodinger 'config' must be a mapping",
+        ));
+    }
+    let request: ImaginaryTimeSchrodingerRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space imaginary-time Schrodinger request", error))?;
+    let payload = apply_imaginary_time_schrodinger(request)
+        .map_err(|error| json_error("Z-space imaginary-time Schrodinger failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space imaginary-time Schrodinger encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -364,6 +403,7 @@ pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_generation_control, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_temperature_control, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_concept_diffusion, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_imaginary_time_schrodinger, m)?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;

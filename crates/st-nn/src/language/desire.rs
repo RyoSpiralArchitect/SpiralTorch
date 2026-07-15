@@ -481,7 +481,7 @@ impl DesireLagrangian {
             &weights,
             &concepts,
             self.lookahead,
-        );
+        )?;
 
         let phase = self.classify_phase(&weights);
         if phase != self.phase {
