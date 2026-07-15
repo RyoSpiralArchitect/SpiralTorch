@@ -64,6 +64,7 @@ use st_core::ecosystem::{
 };
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
+use st_core::heur::free_energy::FreeEnergyReport;
 use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
 use st_core::runtime::autopilot::Autopilot;
@@ -4950,6 +4951,13 @@ impl ModuleTrainer {
         self.blackcat.as_ref().map(|rt| rt.stats())
     }
 
+    /// Returns the last canonical Rust free-energy report committed by BlackCat.
+    pub fn blackcat_free_energy_report(&self) -> Option<&FreeEnergyReport> {
+        self.blackcat
+            .as_ref()
+            .and_then(BlackCatRuntime::last_free_energy_report)
+    }
+
     /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
     pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
         if let Some(moderator) = self.blackcat_moderator.as_mut() {
@@ -6125,12 +6133,19 @@ impl ModuleTrainer {
                 };
                 let signature = plan_signature(plan, outcome);
                 let script_hint = plan.choice.to_unison_script(plan.kind).replace('\n', "; ");
+                // This is a local bounded loss-quality signal for distributed
+                // consensus, not the BlackCat variational reward computed later.
+                let roundtable_loss_quality = (1.0 / (1.0 + weighted_loss.abs())).clamp(0.0, 1.0);
+                extra.insert(
+                    "roundtable_loss_quality".to_string(),
+                    roundtable_loss_quality as f64,
+                );
                 if let Some(summary) = node.record_decision(
                     signature,
                     script_hint,
                     plan.kind,
                     outcome,
-                    (1.0 / (1.0 + weighted_loss.abs())).clamp(0.0, 1.0),
+                    roundtable_loss_quality,
                     psi_total_opt,
                     (band_energy.above, band_energy.here, band_energy.beneath),
                     band_energy.drift,
@@ -6514,16 +6529,57 @@ impl ModuleTrainer {
             }
             extra.insert("step_loss".to_string(), step_loss as f64);
             extra.insert("loss_weighted".to_string(), weighted_loss as f64);
+            extra.insert("reference_loss".to_string(), step_loss as f64);
+            extra.insert("candidate_loss".to_string(), weighted_loss as f64);
             #[cfg(feature = "psychoid")]
             {
                 extra.insert("psychoid_events".to_string(), psychoid_events as f64);
             }
-            let metrics = StepMetrics {
+            let mut metrics = StepMetrics {
                 step_time_ms: elapsed_ms,
                 mem_peak_mb: 0.0,
                 retry_rate: 0.0,
                 extra,
             };
+            if let Some(ap) = self.autopilot.as_mut() {
+                ap.report(&metrics);
+            }
+            let mut free_energy_report = None;
+            if let Some(rt) = self.blackcat.as_mut() {
+                let report =
+                    rt.try_post_step_report(&metrics)
+                        .map_err(|_| TensorError::InvalidValue {
+                            label: "blackcat free-energy reward",
+                        })?;
+                let reward = report.utility;
+                metrics
+                    .extra
+                    .insert("free_energy".to_string(), report.free_energy);
+                metrics
+                    .extra
+                    .insert("free_energy_utility".to_string(), report.utility);
+                metrics.extra.insert(
+                    "free_energy_acceptance_probability".to_string(),
+                    report.acceptance_probability,
+                );
+                metrics.extra.insert(
+                    "free_energy_kl".to_string(),
+                    report.distribution.kl_divergence,
+                );
+                metrics.extra.insert(
+                    "free_energy_band_potential".to_string(),
+                    report.components.band_potential,
+                );
+                if reward > 0.0 {
+                    let plan = schedule.above();
+                    let script = plan
+                        .choice
+                        .to_unison_script(RankKind::TopK)
+                        .replace('\n', "; ");
+                    let _ = rt.try_adopt_soft(&script, 1, 1, 0.5);
+                }
+                free_energy_report = Some(report);
+            }
             bus.publish(&PluginEvent::custom(
                 "TrainerStep",
                 serde_json::json!({
@@ -6535,22 +6591,9 @@ impl ModuleTrainer {
                         "retry_rate": metrics.retry_rate,
                         "extra": &metrics.extra,
                     },
+                    "free_energy": free_energy_report.as_ref(),
                 }),
             ));
-            if let Some(ap) = self.autopilot.as_mut() {
-                ap.report(&metrics);
-            }
-            if let Some(rt) = self.blackcat.as_mut() {
-                let reward = rt.post_step(&metrics);
-                if reward > 0.0 {
-                    let plan = schedule.above();
-                    let script = plan
-                        .choice
-                        .to_unison_script(RankKind::TopK)
-                        .replace('\n', "; ");
-                    let _ = rt.try_adopt_soft(&script, 1, 1, 0.5);
-                }
-            }
         }
         let stats = EpochStats {
             batches: steps,
@@ -8682,7 +8725,19 @@ mod tests {
                 retry_rate: 0.05,
                 extra,
             };
-            let _ = rt.post_step(&metrics);
+            let report = rt
+                .try_post_step_report(&metrics)
+                .expect("trainer metrics produce a guarded reward");
+            assert_eq!(
+                report.semantic_owner,
+                st_core::heur::free_energy::FREE_ENERGY_SEMANTIC_OWNER
+            );
+            assert_eq!(
+                rt.last_free_energy_report()
+                    .expect("report retained")
+                    .utility,
+                report.utility
+            );
         }
         let stats = trainer
             .blackcat_runtime_stats()
@@ -9075,6 +9130,84 @@ mod tests {
         assert!(extra
             .keys()
             .any(|key| key.starts_with("tensor_backend_") && key != "tensor_backend_fallbacks"));
+    }
+
+    #[test]
+    fn trainer_step_trace_carries_canonical_free_energy_report() {
+        let bus = global_registry().event_bus().clone();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let captured = events.clone();
+        let subscription_id = bus.subscribe(
+            "TrainerStep",
+            Arc::new(move |event: &PluginEvent| {
+                if let Some(payload) = event.downcast_data::<serde_json::Value>() {
+                    captured
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(payload.clone());
+                }
+            }),
+        );
+
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let mut trainer =
+            ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_blackcat(runtime);
+        let mut model = Linear::new("free_energy_trace_linear", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(2, 2, vec![0.5, -1.0, 1.5, 0.25]).unwrap(),
+            Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+        let result = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule);
+        let _ = bus.unsubscribe("TrainerStep", subscription_id);
+        result.unwrap();
+
+        let retained_utility = trainer
+            .blackcat_free_energy_report()
+            .map(|report| report.utility)
+            .expect("BlackCat retained canonical report");
+        let events = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let event = events
+            .iter()
+            .find(|event| {
+                event
+                    .get("free_energy")
+                    .and_then(|report| report.get("semantic_owner"))
+                    .and_then(|owner| owner.as_str())
+                    == Some(st_core::heur::free_energy::FREE_ENERGY_SEMANTIC_OWNER)
+            })
+            .expect("TrainerStep carries canonical free-energy report");
+        let report = event.get("free_energy").expect("free-energy payload");
+        let traced_utility = report
+            .get("utility")
+            .and_then(|value| value.as_f64())
+            .expect("numeric utility");
+        let extra_utility = event
+            .get("metrics")
+            .and_then(|metrics| metrics.get("extra"))
+            .and_then(|extra| extra.get("free_energy_utility"))
+            .and_then(|value| value.as_f64())
+            .expect("utility spotlight metric");
+        assert_eq!(traced_utility, retained_utility);
+        assert_eq!(extra_utility, retained_utility);
+        assert_eq!(
+            report
+                .get("contract_version")
+                .and_then(|value| value.as_str()),
+            Some(st_core::heur::free_energy::FREE_ENERGY_CONTRACT_VERSION)
+        );
     }
 
     #[test]

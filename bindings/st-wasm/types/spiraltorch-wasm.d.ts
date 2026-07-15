@@ -371,6 +371,106 @@ declare module "spiraltorch-wasm" {
         sources: ZSpacePartialSourceAudit[];
     };
 
+    export type FreeEnergyBandInput = {
+        above: number;
+        here: number;
+        beneath: number;
+    };
+
+    export type FreeEnergyBandPriorInput = Partial<FreeEnergyBandInput>;
+
+    export type FreeEnergyConfigInput = {
+        loss_scale?: number;
+        step_time_scale_ms?: number;
+        memory_scale_mb?: number;
+        retry_scale?: number;
+        observation_entropy_scale?: number;
+        loss_weight?: number;
+        speed_weight?: number;
+        memory_weight?: number;
+        retry_weight?: number;
+        uncertainty_weight?: number;
+        external_penalty_weight?: number;
+        temperature?: number;
+        prior?: FreeEnergyBandPriorInput;
+        band_potentials?: Partial<FreeEnergyBandInput>;
+    };
+
+    export type FreeEnergyObservationInput = {
+        reference_loss?: number;
+        candidate_loss?: number;
+        step_time_ms?: number;
+        memory_mb?: number;
+        retry_rate?: number;
+        observation_entropy?: number;
+        external_penalty?: number;
+        band?: FreeEnergyBandInput;
+    };
+
+    export type FreeEnergyRequest = {
+        observation?: FreeEnergyObservationInput;
+        config?: FreeEnergyConfigInput;
+    };
+
+    export type FreeEnergyReport = {
+        kind: "spiraltorch.variational_free_energy";
+        contract_version: "spiraltorch.variational_free_energy.v1";
+        semantic_owner: "st-core::heur::free_energy";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        formula: "F(q)=E_observed+(E_q[V]-E_prior[V])+temperature*KL(q||prior)";
+        acceptance_rule: "P(accept)=1/(1+exp(F_candidate-F_neutral)),F_neutral=0";
+        config: Required<Omit<FreeEnergyConfigInput, "prior" | "band_potentials">> & {
+            prior: FreeEnergyBandInput;
+            band_potentials: FreeEnergyBandInput;
+        };
+        observation: Required<Omit<FreeEnergyObservationInput, "band">> & {
+            band: FreeEnergyBandInput;
+        };
+        normalized: {
+            loss_delta: number;
+            step_time: number;
+            memory: number;
+            retry: number;
+            observation_entropy: number;
+            external_penalty: number;
+        };
+        distribution: {
+            status: "normalized" | "prior_zero_mass";
+            raw_total: number;
+            zero_mass_threshold: number;
+            above: number;
+            here: number;
+            beneath: number;
+            prior_above: number;
+            prior_here: number;
+            prior_beneath: number;
+            entropy: number;
+            normalized_entropy: number;
+            cross_entropy: number;
+            kl_divergence: number;
+            variational_identity_residual: number;
+            dominant_band: "above" | "here" | "beneath";
+        };
+        components: {
+            loss: number;
+            speed: number;
+            memory: number;
+            retry: number;
+            uncertainty: number;
+            external_penalty: number;
+            observed_energy: number;
+            band_potential_expectation: number;
+            prior_band_potential: number;
+            band_potential: number;
+            relative_entropy: number;
+        };
+        free_energy: number;
+        utility: number;
+        acceptance_probability: number;
+        component_sum_residual: number;
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -739,6 +839,10 @@ declare module "spiraltorch-wasm" {
     export function zspacePartialFusionObject(
         request: ZSpacePartialFusionRequest,
     ): ZSpacePartialFusion;
+    export function zspaceFreeEnergyJson(requestJson: string): string;
+    export function zspaceFreeEnergyObject(
+        request: FreeEnergyRequest,
+    ): FreeEnergyReport;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

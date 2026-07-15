@@ -6,6 +6,7 @@ use pyo3::{Bound, Py};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::introspect::PySoftlogicZFeedback;
+use st_core::heur::free_energy::{evaluate_free_energy, FreeEnergyRequest};
 use st_core::telemetry::atlas;
 use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasMetric, AtlasRoute};
 use st_core::telemetry::dashboard::{
@@ -44,6 +45,23 @@ fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResul
         .map_err(|error| json_error("Z-space partial fusion failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space partial contract encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_free_energy(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    if !request.is_object() {
+        return Err(PyValueError::new_err(
+            "variational free-energy request must be a mapping",
+        ));
+    }
+    let request: FreeEnergyRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid variational free-energy request", error))?;
+    let payload = evaluate_free_energy(request)
+        .map_err(|error| json_error("variational free-energy evaluation failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("variational free-energy contract encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -712,6 +730,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(current, &module)?)?;
     module.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, &module)?)?;
     module.add_function(wrap_pyfunction!(_zspace_partial_fusion, &module)?)?;
+    module.add_function(wrap_pyfunction!(_zspace_free_energy, &module)?)?;
     module.add_function(wrap_pyfunction!(_training_telemetry_projection, &module)?)?;
     module.add(
         "__all__",
@@ -736,6 +755,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add("DashboardRing", module.getattr("DashboardRing")?)?;
     parent.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_partial_fusion, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_free_energy, parent)?)?;
     parent.add_function(wrap_pyfunction!(_training_telemetry_projection, parent)?)?;
     if let Ok(zspace) = parent.getattr("zspace") {
         if let Ok(feedback_cls) = zspace.getattr("SoftlogicZFeedback") {

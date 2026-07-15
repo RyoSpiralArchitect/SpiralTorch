@@ -7,6 +7,7 @@ use crate::execution::current_tensor_util_backend_for_values;
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::backend::unison_heuristics::Choice;
+use st_core::heur::free_energy::{BandEnergy as CoreBandEnergy, FreeEnergyError};
 use st_core::ops::rank_entry::RankPlan;
 use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError, SpectralFeatureSample};
 use st_tensor::TensorError;
@@ -599,25 +600,39 @@ impl BandEnergy {
 
     /// Returns the L1 norm of the band magnitudes.
     pub fn l1(&self) -> f32 {
-        self.above.abs() + self.here.abs() + self.beneath.abs()
+        self.free_energy_band().l1()
     }
 
-    /// Normalises the energy so the Above/Here/Beneath components sum to one.
-    pub fn norm(self) -> Self {
-        let sum = self.l1();
-        if sum <= f32::EPSILON {
-            return Self {
-                above: 1.0 / 3.0,
-                here: 1.0 / 3.0,
-                beneath: 1.0 / 3.0,
-                drift: self.drift,
-                spectral: self.spectral,
-            };
+    /// Projects the roundtable signal into the canonical Rust free-energy type.
+    pub fn free_energy_band(&self) -> CoreBandEnergy {
+        CoreBandEnergy {
+            above: self.above,
+            here: self.here,
+            beneath: self.beneath,
         }
+    }
+
+    /// Strictly normalises finite, non-negative band energy while preserving
+    /// the higher-layer drift and spectral annotations.
+    pub fn try_norm(self) -> Result<Self, FreeEnergyError> {
+        let normalized = self.free_energy_band().try_norm()?;
+        Ok(Self {
+            above: normalized.above,
+            here: normalized.here,
+            beneath: normalized.beneath,
+            drift: self.drift,
+            spectral: self.spectral,
+        })
+    }
+
+    /// Compatibility normalisation through the canonical Rust primitive.
+    /// Guarded training paths validate first and may use [`Self::try_norm`].
+    pub fn norm(self) -> Self {
+        let normalized = self.free_energy_band().norm();
         Self {
-            above: (self.above / sum).clamp(0.0, 1.0),
-            here: (self.here / sum).clamp(0.0, 1.0),
-            beneath: (self.beneath / sum).clamp(0.0, 1.0),
+            above: normalized.above,
+            here: normalized.here,
+            beneath: normalized.beneath,
             drift: self.drift,
             spectral: self.spectral,
         }
@@ -692,6 +707,32 @@ mod tests {
         assert_eq!(bands.above().data(), &[2.0, -4.0]);
         assert_eq!(bands.here().data(), &[f32::MAX * 0.25, 0.125]);
         assert_eq!(bands.beneath().data(), &[1.5, -2.0]);
+    }
+
+    #[test]
+    fn band_energy_normalization_delegates_to_strict_core_contract() {
+        let spectral = SpectralFeatureSample {
+            energy: 0.7,
+            ..SpectralFeatureSample::default()
+        };
+        let normalized = BandEnergy::new(6.0, 3.0, 1.0)
+            .with_drift(0.2)
+            .with_spectral(spectral)
+            .try_norm()
+            .expect("valid non-negative bands");
+        assert!((normalized.above - 0.6).abs() < 1e-6);
+        assert!((normalized.here - 0.3).abs() < 1e-6);
+        assert!((normalized.beneath - 0.1).abs() < 1e-6);
+        assert_eq!(normalized.drift, 0.2);
+        assert_eq!(normalized.spectral, spectral);
+
+        let invalid = BandEnergy::new(-1.0, 1.0, 1.0);
+        assert!(matches!(
+            invalid.try_norm(),
+            Err(FreeEnergyError::Negative { .. })
+        ));
+        let fallback = invalid.norm();
+        assert!((fallback.above + fallback.here + fallback.beneath - 1.0).abs() < 1e-6);
     }
 
     #[cfg(feature = "psi")]

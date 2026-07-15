@@ -3566,6 +3566,47 @@ rejects non-finite forward inputs, backward inputs, upstream gradients, and mask
 payloads before the random mask can hide a bad activation or gradient as a
 dropped value; training masks are cached only after the masked output is finite.
 
+## Rust-Owned Runtime Policy
+
+Variational plan scoring now has one semantic owner:
+`st-core::heur::free_energy`. The contract normalises dimensional loss,
+step-time, memory, retry, and observation-entropy inputs against explicit
+reference scales, then evaluates
+`F(q) = E_observed + (E_q[V] - E_prior[V]) + temperature * KL(q || prior)`.
+Subtracting the prior potential fixes the arbitrary energy gauge. Missing or
+sub-`f32::EPSILON` band mass uses the configured prior, so numerical replay
+noise cannot perturb a plan. The report carries the full decomposition, KL and
+component residuals, and `acceptance_probability = sigmoid(-F)` under an
+explicit two-state Gibbs comparison against a neutral `F=0` candidate. It is
+not labelled as calibrated confidence.
+
+`st-core::runtime::blackcat` consumes that report as its reward source and
+validates the ZMeta state, proposed fractional penalty, gradient norm, loss
+variance, fixed-width bandit context, and derived selection scores before
+atomically committing ES, temperature, bandit, statistics, and EMA state.
+Monitoring and plugin publication occur only after that core commit.
+`ModuleTrainer` maps
+`reference_loss` to the unweighted step loss and `candidate_loss` to the same
+step's weighted loss; these names deliberately do not claim temporal
+before/after improvement. The separate `roundtable_loss_quality` remains a
+bounded local consensus signal and is trace-labelled as such, not presented as
+a second BlackCat reward.
+
+Python's `zspace_free_energy(...)` and WASM's `zspaceFreeEnergy*` functions are
+thin clients: request parsing, validation, normalisation, heuristics, and
+reduction remain in Rust. This is control-plane scalar work, so forcing it onto
+WGPU would add dispatch cost without creating a useful common execution path;
+WGPU remains the tensor data plane while all clients consume the same Rust
+contract.
+
+One migration boundary is intentionally still visible. The legacy Python
+`ZSpaceTrainer` and `tools/python/zspace_trainer.py` retain their own `tanh`
+resource penalty, finite-difference fractional regulariser, and Adam update.
+They are exploratory clients, not the canonical runtime-policy implementation.
+The next Rust-first vertical should move that optimizer/regulariser state
+machine behind a versioned Rust contract, then leave Python to orchestrate and
+WASM to consume the same transition.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op

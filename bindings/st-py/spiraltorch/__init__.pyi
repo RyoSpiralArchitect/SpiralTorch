@@ -4102,6 +4102,20 @@ def training_telemetry_projection(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_free_energy(
+    *,
+    reference_loss: float = ...,
+    candidate_loss: float = ...,
+    step_time_ms: float = ...,
+    memory_mb: float = ...,
+    retry_rate: float = ...,
+    observation_entropy: float = ...,
+    external_penalty: float = ...,
+    band: Mapping[str, float] | None = ...,
+    config: Mapping[str, object] | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def zspace_generation_control(
     logits: Sequence[float | int],
     token_ids: Sequence[int],
@@ -10928,6 +10942,7 @@ __all__ = [
     "zspace_telemetry_fusion",
     "training_telemetry_projection",
     "zspace_concept_diffusion",
+    "zspace_free_energy",
     "zspace_generation_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

@@ -10,12 +10,31 @@ use bandit::{SoftBandit, SoftBanditMode};
 use rewrite::HeurStore;
 use spiral_config::determinism;
 use st_frac::FracBackend;
-use tracing::{debug, instrument};
+use thiserror::Error;
+use tracing::{debug, instrument, warn};
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
+use crate::heur::free_energy::{
+    evaluate_free_energy, BandEnergy, FreeEnergyConfig, FreeEnergyError, FreeEnergyObservation,
+    FreeEnergyReport, FreeEnergyRequest,
+};
 use crate::plugin::{global_registry, PluginEvent};
 use crate::telemetry::{monitoring::MonitoringHub, trace_init};
+
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum BlackCatError {
+    #[error(transparent)]
+    FreeEnergy(#[from] FreeEnergyError),
+    #[error("BlackCat field '{field}' must be finite, got {value}")]
+    NonFinite { field: &'static str, value: f64 },
+    #[error("BlackCat field '{field}' must be non-negative, got {value}")]
+    Negative { field: &'static str, value: f64 },
+    #[error("BlackCat context dimension mismatch: expected {expected}, got {actual}")]
+    ContextDimension { expected: usize, actual: usize },
+    #[error("BlackCat adaptation state is invalid at '{field}'")]
+    InvalidAdaptationState { field: &'static str },
+}
 
 /// Metrics reported by a training loop back into the runtime.
 #[derive(Clone, Debug, Default)]
@@ -26,7 +45,46 @@ pub struct StepMetrics {
     pub extra: HashMap<String, f64>,
 }
 
-/// Reward shaping configuration that blends timing, memory, and stability.
+impl StepMetrics {
+    fn extra_first(&self, keys: &[&str]) -> Option<f64> {
+        keys.iter().find_map(|key| self.extra.get(*key).copied())
+    }
+
+    /// Translate runtime metrics into the canonical free-energy observation.
+    /// Missing optional signals are neutral; supplied values remain strict.
+    pub fn free_energy_observation(&self, external_penalty: f64) -> FreeEnergyObservation {
+        let reference_loss = self
+            .extra_first(&[
+                "reference_loss",
+                "loss_before",
+                "step_loss",
+                "loss_weighted",
+            ])
+            .unwrap_or(0.0);
+        let candidate_loss = self
+            .extra_first(&["candidate_loss", "loss_after", "loss_weighted"])
+            .unwrap_or(reference_loss);
+        FreeEnergyObservation {
+            reference_loss,
+            candidate_loss,
+            step_time_ms: self.step_time_ms,
+            memory_mb: self.mem_peak_mb,
+            retry_rate: self.retry_rate,
+            observation_entropy: self
+                .extra_first(&["observation_entropy", "attn_entropy", "entropy"])
+                .unwrap_or(0.0),
+            external_penalty,
+            band: BandEnergy {
+                above: self.extra.get("band_above").copied().unwrap_or(0.0) as f32,
+                here: self.extra.get("band_here").copied().unwrap_or(0.0) as f32,
+                beneath: self.extra.get("band_beneath").copied().unwrap_or(0.0) as f32,
+            },
+        }
+    }
+}
+
+/// Reward shaping configuration that supplies scales and weights to the
+/// canonical variational free-energy evaluator.
 #[derive(Clone, Debug)]
 pub struct RewardCfg {
     pub lam_speed: f64,
@@ -51,13 +109,45 @@ impl Default for RewardCfg {
 }
 
 impl RewardCfg {
+    pub fn free_energy_config(&self) -> Result<FreeEnergyConfig, FreeEnergyError> {
+        FreeEnergyConfig::default()
+            .with_resource_scales(self.scale_speed, self.scale_mem, self.scale_stab)?
+            .with_component_weights(
+                1.0,
+                self.lam_speed,
+                self.lam_mem,
+                self.lam_stab,
+                self.lam_stab,
+                1.0,
+            )
+    }
+
+    pub fn report(
+        &self,
+        metrics: &StepMetrics,
+        frac_penalty: f64,
+    ) -> Result<FreeEnergyReport, FreeEnergyError> {
+        evaluate_free_energy(FreeEnergyRequest {
+            observation: metrics.free_energy_observation(frac_penalty),
+            config: self.free_energy_config()?,
+        })
+    }
+
+    pub fn try_score(
+        &self,
+        metrics: &StepMetrics,
+        frac_penalty: f64,
+    ) -> Result<f64, FreeEnergyError> {
+        self.report(metrics, frac_penalty)
+            .map(|report| report.utility)
+    }
+
+    /// Compatibility scalar. Guarded runtime paths should use [`Self::report`]
+    /// or [`Self::try_score`] so invalid observations cannot be mistaken for a
+    /// legitimate reward.
     pub fn score(&self, metrics: &StepMetrics, frac_penalty: f64) -> f64 {
-        let mut s = 0.0;
-        s -= self.lam_speed * (metrics.step_time_ms / self.scale_speed.max(1e-9));
-        s -= self.lam_mem * (metrics.mem_peak_mb / self.scale_mem.max(1e-9));
-        s -= self.lam_stab * (metrics.retry_rate / self.scale_stab.max(1e-9));
-        s -= frac_penalty;
-        s
+        self.try_score(metrics, frac_penalty)
+            .unwrap_or(f64::NEG_INFINITY)
     }
 }
 
@@ -68,6 +158,7 @@ pub struct ChoiceGroups {
 }
 
 /// Multi-armed contextual bandit that operates over named groups.
+#[derive(Clone)]
 pub struct MultiBandit {
     arms: HashMap<String, SoftBandit>,
 }
@@ -75,8 +166,11 @@ pub struct MultiBandit {
 impl MultiBandit {
     pub fn new(groups: &ChoiceGroups, feat_dim: usize, mode: SoftBanditMode) -> Self {
         let mut arms = HashMap::new();
+        let feat_dim = feat_dim.max(1);
         for (name, opts) in &groups.groups {
-            arms.insert(name.clone(), SoftBandit::new(opts.clone(), feat_dim, mode));
+            if !opts.is_empty() {
+                arms.insert(name.clone(), SoftBandit::new(opts.clone(), feat_dim, mode));
+            }
         }
         Self { arms }
     }
@@ -95,6 +189,18 @@ impl MultiBandit {
             bandit.update_last(context, reward);
         }
     }
+
+    fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
+        self.arms
+            .values()
+            .try_for_each(|bandit| bandit.validate_state(context_dim))
+    }
+
+    fn validate_selection_scores(&self, context: &[f64]) -> Result<(), &'static str> {
+        self.arms
+            .values()
+            .try_for_each(|bandit| bandit.validate_selection_scores(context))
+    }
 }
 
 /// BlackCat orchestrator that joins ES search with contextual bandits.
@@ -112,6 +218,7 @@ pub struct BlackCatRuntime {
     reward_mean: f64,
     reward_m2: f64,
     last_reward: f64,
+    last_free_energy_report: Option<FreeEnergyReport>,
     metrics_ema: MetricsEma,
     frac_penalty_ema: RollingEma,
     extra_ema: HashMap<String, RollingEma>,
@@ -150,6 +257,7 @@ impl BlackCatRuntime {
             reward_mean: 0.0,
             reward_m2: 0.0,
             last_reward: 0.0,
+            last_free_energy_report: None,
             metrics_ema: MetricsEma::new(stats_alpha),
             frac_penalty_ema: RollingEma::new(stats_alpha),
             extra_ema: HashMap::new(),
@@ -203,8 +311,41 @@ impl BlackCatRuntime {
     /// Choose all groups at once, storing the picks and context internally.
     #[instrument(skip(self, context), fields(context_len = context.len()))]
     pub fn choose(&mut self, context: Vec<f64>) -> HashMap<String, String> {
-        let picks = self.bandits.select_all(&context);
-        self.context_dim = context.len().max(1);
+        match self.try_choose(context) {
+            Ok(picks) => picks,
+            Err(error) => {
+                warn!(error = %error, "blackcat context rejected");
+                let bus = global_registry().event_bus();
+                if bus.has_listeners("BlackCatChooseRejected") {
+                    bus.publish(&PluginEvent::custom(
+                        "BlackCatChooseRejected",
+                        serde_json::json!({"error": error.to_string()}),
+                    ));
+                }
+                HashMap::new()
+            }
+        }
+    }
+
+    /// Guarded choice path. Context shape and finiteness are checked before
+    /// any bandit or runtime state is changed.
+    pub fn try_choose(
+        &mut self,
+        context: Vec<f64>,
+    ) -> Result<HashMap<String, String>, BlackCatError> {
+        self.validate_context(&context)?;
+        self.bandits
+            .validate_state(self.context_dim)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let mut next_bandits = self.bandits.clone();
+        next_bandits
+            .validate_selection_scores(&context)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let picks = next_bandits.select_all(&context);
+        next_bandits
+            .validate_state(self.context_dim)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.bandits = next_bandits;
         self.last_context = context;
         self.last_picks = picks.clone();
         debug!(picks = ?self.last_picks, "blackcat bandit picks");
@@ -218,54 +359,118 @@ impl BlackCatRuntime {
                 }),
             ));
         }
-        picks
+        Ok(picks)
     }
 
-    /// Update both the ES search and contextual bandits after a step.
+    /// Compatibility update path. Invalid observations are rejected before any
+    /// ES, bandit, or telemetry state is mutated.
     #[instrument(skip(self, metrics), fields(step_time = metrics.step_time_ms, retry_rate = metrics.retry_rate))]
     pub fn post_step(&mut self, metrics: &StepMetrics) -> f64 {
+        match self.try_post_step_report(metrics) {
+            Ok(report) => report.utility,
+            Err(error) => {
+                warn!(error = %error, "blackcat free-energy reward rejected");
+                let bus = global_registry().event_bus();
+                if bus.has_listeners("BlackCatRewardRejected") {
+                    bus.publish(&PluginEvent::custom(
+                        "BlackCatRewardRejected",
+                        serde_json::json!({
+                            "error": error.to_string(),
+                            "semantic_owner": crate::heur::free_energy::FREE_ENERGY_SEMANTIC_OWNER,
+                            "contract_version": crate::heur::free_energy::FREE_ENERGY_CONTRACT_VERSION,
+                        }),
+                    ));
+                }
+                f64::NEG_INFINITY
+            }
+        }
+    }
+
+    /// Guarded scalar update for callers that need explicit failure handling.
+    pub fn try_post_step(&mut self, metrics: &StepMetrics) -> Result<f64, BlackCatError> {
+        self.try_post_step_report(metrics)
+            .map(|report| report.utility)
+    }
+
+    /// Update both the ES search and contextual bandits from one canonical
+    /// free-energy report, committing state only after validation succeeds.
+    #[instrument(skip(self, metrics), fields(step_time = metrics.step_time_ms, retry_rate = metrics.retry_rate))]
+    pub fn try_post_step_report(
+        &mut self,
+        metrics: &StepMetrics,
+    ) -> Result<FreeEnergyReport, BlackCatError> {
         let curr_penalty = self.z.frac_penalty();
-        let reward_current = self.reward.score(metrics, curr_penalty);
+        let report = self.reward.report(metrics, curr_penalty)?;
+        let reward_current = report.utility;
         let proposed_penalty = self.z.frac_penalty_proposed();
-        self.z.update(
-            reward_current,
-            reward_current - (proposed_penalty - curr_penalty),
-            Some(&self.last_context),
-        );
+        validate_blackcat_non_negative("zmeta.proposed_frac_penalty", proposed_penalty)?;
+        self.z
+            .validate_adaptation_state()
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.bandits
+            .validate_state(self.context_dim)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.validate_statistics_state()?;
+        self.validate_context(&self.last_context)?;
         let grad_norm = metrics.extra.get("grad_norm").copied().unwrap_or(0.0);
+        validate_blackcat_non_negative("grad_norm", grad_norm)?;
         let loss_var = metrics
             .extra
             .get("loss_var")
             .or_else(|| metrics.extra.get("loss_variance"))
             .copied()
             .unwrap_or(1.0);
-        self.z
-            .temp_schedule(metrics.retry_rate, grad_norm, loss_var);
-        self.bandits.update_all(&self.last_context, reward_current);
-        self.stats_steps = self.stats_steps.saturating_add(1);
+        validate_blackcat_non_negative("loss_variance", loss_var)?;
+        let proposed_reward = reward_current - (proposed_penalty - curr_penalty);
+        validate_blackcat_finite("zmeta.proposed_reward", proposed_reward)?;
+
+        let mut next_z = self.z.clone();
+        next_z.update(reward_current, proposed_reward, Some(&self.last_context));
+        next_z.temp_schedule(metrics.retry_rate, grad_norm, loss_var);
+        next_z
+            .validate_adaptation_state()
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        validate_blackcat_non_negative("zmeta.next_frac_penalty", next_z.frac_penalty())?;
+        validate_blackcat_non_negative(
+            "zmeta.next_proposed_frac_penalty",
+            next_z.frac_penalty_proposed(),
+        )?;
+
+        let mut next_bandits = self.bandits.clone();
+        next_bandits.update_all(&self.last_context, reward_current);
+        next_bandits
+            .validate_state(self.context_dim)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+
+        let (next_stats_steps, next_reward_mean, next_reward_m2) =
+            self.next_reward_statistics(reward_current)?;
+        let mut next_metrics_ema = self.metrics_ema.clone();
+        next_metrics_ema.try_update(metrics)?;
+        let mut next_frac_penalty_ema = self.frac_penalty_ema.clone();
+        next_frac_penalty_ema.try_update("statistics.frac_penalty_ema", curr_penalty)?;
+        let mut next_extra_ema = self.extra_ema.clone();
+        for (key, value) in &metrics.extra {
+            next_extra_ema
+                .entry(key.clone())
+                .or_insert_with(|| RollingEma::new(self.stats_alpha))
+                .try_update("statistics.extra_ema", *value)?;
+        }
+
+        self.z = next_z;
+        self.bandits = next_bandits;
+        self.stats_steps = next_stats_steps;
+        self.reward_mean = next_reward_mean;
+        self.reward_m2 = next_reward_m2;
+        self.metrics_ema = next_metrics_ema;
+        self.frac_penalty_ema = next_frac_penalty_ema;
+        self.extra_ema = next_extra_ema;
+        self.last_reward = reward_current;
+        self.last_free_energy_report = Some(report.clone());
         debug!(
             reward = reward_current,
             frac_penalty = curr_penalty,
             "blackcat step complete"
         );
-        let delta = reward_current - self.reward_mean;
-        if self.stats_steps == 1 {
-            self.reward_mean = reward_current;
-            self.reward_m2 = 0.0;
-        } else {
-            self.reward_mean += delta / self.stats_steps as f64;
-            let delta2 = reward_current - self.reward_mean;
-            self.reward_m2 += delta * delta2;
-        }
-        self.last_reward = reward_current;
-        self.metrics_ema.update(metrics);
-        self.frac_penalty_ema.update(curr_penalty);
-        for (key, value) in metrics.extra.iter() {
-            self.extra_ema
-                .entry(key.clone())
-                .or_insert_with(|| RollingEma::new(self.stats_alpha))
-                .update(*value);
-        }
         let _ = self.monitoring.observe(metrics, reward_current);
         let bus = global_registry().event_bus();
         if bus.has_listeners("BlackCatPostStep") {
@@ -274,6 +479,7 @@ impl BlackCatRuntime {
                 serde_json::json!({
                     "reward": reward_current,
                     "frac_penalty": curr_penalty,
+                    "free_energy": &report,
                     "picks": &self.last_picks,
                     "metrics": {
                         "step_time_ms": metrics.step_time_ms,
@@ -284,7 +490,90 @@ impl BlackCatRuntime {
                 }),
             ));
         }
-        reward_current
+        Ok(report)
+    }
+
+    fn validate_statistics_state(&self) -> Result<(), BlackCatError> {
+        for (field, value) in [
+            ("statistics.alpha", self.stats_alpha),
+            ("statistics.reward_mean", self.reward_mean),
+            ("statistics.reward_m2", self.reward_m2),
+            ("statistics.last_reward", self.last_reward),
+        ] {
+            validate_blackcat_finite(field, value)?;
+        }
+        if !(0.0..=1.0).contains(&self.stats_alpha) {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "statistics.alpha",
+            });
+        }
+        if self.reward_m2 < 0.0 {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "statistics.reward_m2",
+            });
+        }
+        self.metrics_ema.validate_state()?;
+        self.frac_penalty_ema
+            .validate_state("statistics.frac_penalty_ema")?;
+        self.extra_ema
+            .values()
+            .try_for_each(|ema| ema.validate_state("statistics.extra_ema"))
+    }
+
+    fn next_reward_statistics(&self, reward: f64) -> Result<(u64, f64, f64), BlackCatError> {
+        let steps =
+            self.stats_steps
+                .checked_add(1)
+                .ok_or(BlackCatError::InvalidAdaptationState {
+                    field: "statistics.steps",
+                })?;
+        if steps == 1 {
+            return Ok((steps, reward, 0.0));
+        }
+
+        let delta = validate_blackcat_finite("statistics.reward_delta", reward - self.reward_mean)?;
+        let mean = validate_blackcat_finite(
+            "statistics.reward_mean",
+            self.reward_mean + delta / steps as f64,
+        )?;
+        let delta_after_mean =
+            validate_blackcat_finite("statistics.reward_delta_after_mean", reward - mean)?;
+        let m2 = validate_blackcat_finite(
+            "statistics.reward_m2",
+            self.reward_m2 + delta * delta_after_mean,
+        )?;
+        if m2 < 0.0 {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "statistics.reward_m2",
+            });
+        }
+        Ok((steps, mean, m2))
+    }
+
+    /// Preview the current reward without mutating runtime state.
+    pub fn preview_reward_report(
+        &self,
+        metrics: &StepMetrics,
+    ) -> Result<FreeEnergyReport, FreeEnergyError> {
+        self.reward.report(metrics, self.z.frac_penalty())
+    }
+
+    /// Most recent report that was committed to the runtime.
+    pub fn last_free_energy_report(&self) -> Option<&FreeEnergyReport> {
+        self.last_free_energy_report.as_ref()
+    }
+
+    fn validate_context(&self, context: &[f64]) -> Result<(), BlackCatError> {
+        if context.len() != self.context_dim {
+            return Err(BlackCatError::ContextDimension {
+                expected: self.context_dim,
+                actual: context.len(),
+            });
+        }
+        for value in context {
+            validate_blackcat_finite("context", *value)?;
+        }
+        Ok(())
     }
 
     /// Access the embedded monitoring hub for instrumentation.
@@ -383,6 +672,23 @@ impl BlackCatRuntime {
     }
 }
 
+fn validate_blackcat_finite(field: &'static str, value: f64) -> Result<f64, BlackCatError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(BlackCatError::NonFinite { field, value })
+    }
+}
+
+fn validate_blackcat_non_negative(field: &'static str, value: f64) -> Result<f64, BlackCatError> {
+    validate_blackcat_finite(field, value)?;
+    if value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(BlackCatError::Negative { field, value })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct BlackcatRuntimeStats {
     pub steps: u64,
@@ -412,10 +718,19 @@ impl MetricsEma {
         }
     }
 
-    fn update(&mut self, metrics: &StepMetrics) {
-        self.step_time.update(metrics.step_time_ms);
-        self.mem_peak.update(metrics.mem_peak_mb);
-        self.retry_rate.update(metrics.retry_rate);
+    fn try_update(&mut self, metrics: &StepMetrics) -> Result<(), BlackCatError> {
+        self.step_time
+            .try_update("statistics.step_time_ema", metrics.step_time_ms)?;
+        self.mem_peak
+            .try_update("statistics.mem_peak_ema", metrics.mem_peak_mb)?;
+        self.retry_rate
+            .try_update("statistics.retry_rate_ema", metrics.retry_rate)
+    }
+
+    fn validate_state(&self) -> Result<(), BlackCatError> {
+        self.step_time.validate_state("statistics.step_time_ema")?;
+        self.mem_peak.validate_state("statistics.mem_peak_ema")?;
+        self.retry_rate.validate_state("statistics.retry_rate_ema")
     }
 
     fn step_time(&self) -> f64 {
@@ -447,16 +762,29 @@ impl RollingEma {
         }
     }
 
-    fn update(&mut self, sample: f64) {
+    fn try_update(&mut self, field: &'static str, sample: f64) -> Result<(), BlackCatError> {
         if !sample.is_finite() {
-            return;
+            return Ok(());
         }
-        if !self.initialized {
-            self.value = sample;
-            self.initialized = true;
+        let value = if self.initialized {
+            validate_blackcat_finite(field, self.alpha * sample + (1.0 - self.alpha) * self.value)?
         } else {
-            self.value = self.alpha * sample + (1.0 - self.alpha) * self.value;
+            sample
+        };
+        self.value = value;
+        self.initialized = true;
+        Ok(())
+    }
+
+    fn validate_state(&self, field: &'static str) -> Result<(), BlackCatError> {
+        validate_blackcat_finite(field, self.alpha)?;
+        if !(0.0..=1.0).contains(&self.alpha) {
+            return Err(BlackCatError::InvalidAdaptationState { field });
         }
+        if self.initialized {
+            validate_blackcat_finite(field, self.value)?;
+        }
+        Ok(())
     }
 
     fn value(&self) -> Option<f64> {
@@ -515,6 +843,194 @@ mod tests {
         assert!(stats2.step_time_ms_ema <= stats1.step_time_ms_ema);
         assert!(stats2.extras.get("grad_norm").cloned().unwrap() <= 0.5);
         assert!(stats2.frac_penalty_ema >= 0.0);
+        let report = runtime
+            .last_free_energy_report()
+            .expect("committed report is retained");
+        assert_eq!(
+            report.contract_version,
+            crate::heur::free_energy::FREE_ENERGY_CONTRACT_VERSION
+        );
+        assert_eq!(report.utility, stats2.last_reward);
+    }
+
+    #[test]
+    fn runtime_reward_uses_loss_and_band_observations() {
+        let reward = RewardCfg::default();
+        let mut above = StepMetrics::default();
+        above.extra.insert("reference_loss".into(), 0.8);
+        above.extra.insert("candidate_loss".into(), 0.5);
+        above.extra.insert("band_above".into(), 1.0);
+        let mut beneath = above.clone();
+        beneath.extra.remove("band_above");
+        beneath.extra.insert("band_beneath".into(), 1.0);
+
+        let above_report = reward.report(&above, 0.0).expect("above report");
+        let beneath_report = reward.report(&beneath, 0.0).expect("beneath report");
+        assert!((above_report.components.loss + 0.3).abs() < 1e-12);
+        assert_eq!(above_report.distribution.dominant_band, "above");
+        assert_eq!(beneath_report.distribution.dominant_band, "beneath");
+        assert!(above_report.utility > beneath_report.utility);
+    }
+
+    #[test]
+    fn rejected_reward_does_not_mutate_runtime() {
+        let mut runtime = sample_runtime();
+        let metrics = StepMetrics {
+            step_time_ms: f64::NAN,
+            ..StepMetrics::default()
+        };
+
+        let error = runtime
+            .try_post_step_report(&metrics)
+            .expect_err("non-finite metrics must fail closed");
+        assert!(matches!(
+            error,
+            BlackCatError::FreeEnergy(FreeEnergyError::NonFinite { .. })
+        ));
+        assert_eq!(runtime.stats().steps, 0);
+        assert!(runtime.last_free_energy_report().is_none());
+
+        assert_eq!(runtime.post_step(&metrics), f64::NEG_INFINITY);
+        assert_eq!(runtime.stats().steps, 0);
+        assert!(runtime.last_free_energy_report().is_none());
+    }
+
+    #[test]
+    fn rejected_adaptation_signal_does_not_mutate_runtime() {
+        let mut runtime = sample_runtime();
+        let initial_temperature = runtime.temperature();
+        let mut metrics = StepMetrics::default();
+        metrics.extra.insert("grad_norm".into(), f64::NAN);
+
+        let error = runtime
+            .try_post_step_report(&metrics)
+            .expect_err("non-finite adaptation input must fail closed");
+        assert!(matches!(
+            error,
+            BlackCatError::NonFinite {
+                field: "grad_norm",
+                ..
+            }
+        ));
+        assert_eq!(runtime.stats().steps, 0);
+        assert_eq!(runtime.temperature(), initial_temperature);
+        assert!(runtime.last_free_energy_report().is_none());
+    }
+
+    #[test]
+    fn guarded_choice_rejects_context_drift_without_state_changes() {
+        let mut runtime = sample_runtime();
+        let initial_context = runtime.last_context().to_vec();
+
+        let dimension_error = runtime
+            .try_choose(vec![1.0, 2.0])
+            .expect_err("context dimension drift must fail closed");
+        assert_eq!(
+            dimension_error,
+            BlackCatError::ContextDimension {
+                expected: 4,
+                actual: 2,
+            }
+        );
+        let finite_error = runtime
+            .try_choose(vec![1.0, 0.0, f64::NAN, 0.0])
+            .expect_err("non-finite context must fail closed");
+        assert!(matches!(
+            finite_error,
+            BlackCatError::NonFinite {
+                field: "context",
+                ..
+            }
+        ));
+        assert_eq!(runtime.last_context(), initial_context);
+        assert!(runtime.last_picks().is_empty());
+    }
+
+    #[test]
+    fn bandit_overflow_rejects_the_whole_runtime_update() {
+        let mut runtime = sample_runtime();
+        runtime
+            .try_choose(vec![f64::MAX, 0.0, 0.0, 0.0])
+            .expect("finite context can be selected before posterior update");
+        let z_before = runtime.z.z().to_vec();
+        let temperature_before = runtime.temperature();
+
+        let error = runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect_err("overflowing posterior update must fail closed");
+        assert_eq!(
+            error,
+            BlackCatError::InvalidAdaptationState {
+                field: "bandit.posterior_state",
+            }
+        );
+        assert_eq!(runtime.z.z(), z_before);
+        assert_eq!(runtime.temperature(), temperature_before);
+        assert_eq!(runtime.stats().steps, 0);
+        assert!(runtime.last_free_energy_report().is_none());
+    }
+
+    #[test]
+    fn guarded_choice_rejects_non_finite_derived_scores() {
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let mut runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::UCB,
+            None,
+        );
+        let initial_context = runtime.last_context().to_vec();
+
+        let error = runtime
+            .try_choose(vec![f64::MAX, 0.0, 0.0, 0.0])
+            .expect_err("non-finite UCB score must fail closed");
+        assert_eq!(
+            error,
+            BlackCatError::InvalidAdaptationState {
+                field: "bandit.selection_score",
+            }
+        );
+        assert_eq!(runtime.last_context(), initial_context);
+        assert!(runtime.last_picks().is_empty());
+    }
+
+    #[test]
+    fn reward_statistics_overflow_rejects_the_whole_runtime_update() {
+        let mut runtime = sample_runtime();
+        let magnitude = f64::MAX * 0.75;
+        let mut negative = StepMetrics::default();
+        negative.extra.insert("candidate_loss".into(), magnitude);
+        let committed = runtime
+            .try_post_step_report(&negative)
+            .expect("first extreme but finite reward is representable");
+        let stats_before = runtime.stats();
+        let z_before = runtime.z.z().to_vec();
+        let temperature_before = runtime.temperature();
+
+        let mut positive = StepMetrics::default();
+        positive.extra.insert("reference_loss".into(), magnitude);
+        positive.extra.insert("candidate_loss".into(), 0.0);
+        let error = runtime
+            .try_post_step_report(&positive)
+            .expect_err("overflowing reward delta must fail closed");
+        assert!(matches!(
+            error,
+            BlackCatError::NonFinite {
+                field: "statistics.reward_delta",
+                ..
+            }
+        ));
+
+        let stats_after = runtime.stats();
+        assert_eq!(stats_after.steps, stats_before.steps);
+        assert_eq!(stats_after.reward_mean, stats_before.reward_mean);
+        assert_eq!(stats_after.reward_std, stats_before.reward_std);
+        assert_eq!(stats_after.last_reward, stats_before.last_reward);
+        assert_eq!(runtime.z.z(), z_before);
+        assert_eq!(runtime.temperature(), temperature_before);
+        assert_eq!(runtime.last_free_energy_report(), Some(&committed));
     }
 }
 
@@ -550,6 +1066,7 @@ pub mod zmeta {
         }
     }
 
+    #[derive(Clone)]
     pub struct ZMetaES {
         z: Vec<f64>,
         dir: Vec<f64>,
@@ -643,6 +1160,71 @@ pub mod zmeta {
             )
         }
 
+        pub(super) fn validate_adaptation_state(&self) -> Result<(), &'static str> {
+            if self.z.len() != self.params.dim
+                || self.dir.len() != self.params.dim
+                || self.structural.len() != self.params.dim
+            {
+                return Err("zmeta.vector_shape");
+            }
+            for (field, value) in [
+                ("zmeta.params.sigma", self.params.sigma),
+                ("zmeta.params.lr", self.params.lr),
+                ("zmeta.params.alpha_frac", self.params.alpha_frac),
+                ("zmeta.params.lam_frac", self.params.lam_frac),
+                ("zmeta.params.orientation_eta", self.params.orientation_eta),
+                ("zmeta.params.orientation_eps", self.params.orientation_eps),
+                ("zmeta.temperature", self.temp),
+                ("zmeta.temperature_min", self.temp_min),
+                ("zmeta.temperature_max", self.temp_max),
+            ] {
+                if !value.is_finite() {
+                    return Err(field);
+                }
+            }
+            for (field, value) in [
+                ("zmeta.params.sigma", self.params.sigma),
+                ("zmeta.params.lr", self.params.lr),
+                ("zmeta.params.alpha_frac", self.params.alpha_frac),
+                ("zmeta.params.lam_frac", self.params.lam_frac),
+                ("zmeta.params.orientation_eta", self.params.orientation_eta),
+            ] {
+                if value < 0.0 {
+                    return Err(field);
+                }
+            }
+            if self.params.orientation_eps <= 0.0 {
+                return Err("zmeta.params.orientation_eps");
+            }
+            if self.temp_min < 0.0
+                || self.temp_max < self.temp_min
+                || self.temp < self.temp_min
+                || self.temp > self.temp_max
+            {
+                return Err("zmeta.temperature_bounds");
+            }
+            if self
+                .z
+                .iter()
+                .chain(self.dir.iter())
+                .chain(self.structural.iter())
+                .any(|value| !value.is_finite())
+            {
+                return Err("zmeta.vector_state");
+            }
+            let direction_norm = stable_norm(&self.dir);
+            if !direction_norm.is_finite()
+                || (!self.dir.is_empty() && (direction_norm - 1.0).abs() > 1.0e-6)
+            {
+                return Err("zmeta.direction_norm");
+            }
+            let structural_norm = stable_norm(&self.structural);
+            if !structural_norm.is_finite() || structural_norm > 1.0 + 1.0e-6 {
+                return Err("zmeta.structural_norm");
+            }
+            Ok(())
+        }
+
         pub fn update(
             &mut self,
             reward_current: f64,
@@ -701,12 +1283,8 @@ pub mod zmeta {
                 return None;
             }
 
-            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if norm <= 1e-9 {
+            if !normalize_above(&mut new_vec, 1.0e-9) {
                 return None;
-            }
-            for value in new_vec.iter_mut() {
-                *value /= norm;
             }
 
             let prev = self.structural.clone();
@@ -740,12 +1318,8 @@ pub mod zmeta {
                 return None;
             }
 
-            let norm = (new_vec.iter().map(|v| v * v).sum::<f64>()).sqrt();
-            if norm <= 1e-9 {
+            if !normalize_above(&mut new_vec, 1.0e-9) {
                 return None;
-            }
-            for value in new_vec.iter_mut() {
-                *value /= norm;
             }
 
             let prev = self.structural.clone();
@@ -769,7 +1343,7 @@ pub mod zmeta {
                 return;
             }
 
-            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            let delta_norm = stable_norm(&delta);
             if delta_norm <= 1e-9 {
                 return;
             }
@@ -790,7 +1364,7 @@ pub mod zmeta {
                 return;
             }
 
-            let delta_norm = (delta.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            let delta_norm = stable_norm(&delta);
             if delta_norm <= 1e-9 {
                 return;
             }
@@ -853,8 +1427,8 @@ pub mod zmeta {
                 return;
             }
 
-            let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1.0e-12 {
+            let structural_norm = stable_norm(&self.structural);
+            if structural_norm <= 1.0e-6 {
                 return;
             }
 
@@ -864,7 +1438,7 @@ pub mod zmeta {
                 projected.push(d - dot_nd * n);
             }
 
-            let proj_norm = (projected.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            let proj_norm = stable_norm(&projected);
             if proj_norm <= 1.0e-12 {
                 return;
             }
@@ -897,10 +1471,29 @@ pub mod zmeta {
     }
 
     fn normalize(vec: &mut [f64]) {
-        let norm = (vec.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1.0e-12);
-        for v in vec.iter_mut() {
-            *v /= norm;
+        let _ = normalize_above(vec, 0.0);
+    }
+
+    fn normalize_above(vec: &mut [f64], minimum_norm: f64) -> bool {
+        let scale = vec.iter().map(|value| value.abs()).fold(0.0f64, f64::max);
+        if !scale.is_finite() || scale == 0.0 {
+            return false;
         }
+        let scaled_norm = vec
+            .iter()
+            .map(|value| value / scale)
+            .fold(0.0f64, |norm, value| norm.hypot(value));
+        if !scaled_norm.is_finite() || scaled_norm == 0.0 || scale <= minimum_norm / scaled_norm {
+            return false;
+        }
+        for value in vec {
+            *value = (*value / scale) / scaled_norm;
+        }
+        true
+    }
+
+    fn stable_norm(vec: &[f64]) -> f64 {
+        vec.iter().fold(0.0, |norm, value| norm.hypot(*value))
     }
 
     fn dot(a: &[f64], b: &[f64]) -> f64 {
@@ -969,6 +1562,24 @@ pub mod zmeta {
                 .sqrt();
             assert!(delta_dir > 1e-6);
         }
+
+        #[test]
+        fn structural_normalisation_handles_large_finite_contexts() {
+            let mut es = ZMetaES::new(ZMetaParams {
+                dim: 3,
+                seed: 11,
+                ..Default::default()
+            });
+            let delta = es
+                .ingest_structural(Some(&[f64::MAX, f64::MAX, 0.0]))
+                .expect("large finite context remains representable");
+
+            assert!(delta.iter().all(|value| value.is_finite()));
+            assert!((norm(&es.structural) - 1.0).abs() < 1.0e-12);
+            es.apply_structural_drive(delta, 0.25);
+            es.validate_adaptation_state()
+                .expect("stable normalisation preserves valid state");
+        }
     }
 
     mod randless {
@@ -978,6 +1589,7 @@ pub mod zmeta {
             fn gauss(&self, mu: f64, sigma: f64) -> f64;
         }
 
+        #[derive(Clone)]
         pub struct StdRng {
             state: Cell<u64>,
         }
@@ -1058,8 +1670,33 @@ pub mod bandit {
                 *bi += reward * xi;
             }
         }
+
+        fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
+            let matrix_len = self
+                .dim
+                .checked_mul(self.dim)
+                .ok_or("bandit.posterior_shape")?;
+            if self.dim != context_dim || self.a.len() != matrix_len || self.b.len() != self.dim {
+                return Err("bandit.posterior_shape");
+            }
+            if self
+                .a
+                .iter()
+                .chain(self.b.iter())
+                .any(|value| !value.is_finite())
+            {
+                return Err("bandit.posterior_state");
+            }
+            for index in 0..self.dim {
+                if self.a[index * self.dim + index] <= 0.0 {
+                    return Err("bandit.posterior_diagonal");
+                }
+            }
+            Ok(())
+        }
     }
 
+    #[derive(Clone)]
     pub struct SoftBandit {
         choices: Vec<String>,
         arms: Vec<LinTSArm>,
@@ -1101,6 +1738,34 @@ pub mod bandit {
             if let Some(arm) = self.arms.get_mut(self.last_index) {
                 arm.update(x, reward);
             }
+        }
+
+        pub(super) fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
+            if self.choices.is_empty()
+                || self.choices.len() != self.arms.len()
+                || self.last_index >= self.choices.len()
+            {
+                return Err("bandit.choice_state");
+            }
+            self.arms
+                .iter()
+                .try_for_each(|arm| arm.validate_state(context_dim))
+        }
+
+        pub(super) fn validate_selection_scores(
+            &self,
+            context: &[f64],
+        ) -> Result<(), &'static str> {
+            for arm in &self.arms {
+                let score = match self.mode {
+                    SoftBanditMode::TS => arm.sample_score(context),
+                    SoftBanditMode::UCB => arm.ucb_score(context, 1.0),
+                };
+                if !score.is_finite() {
+                    return Err("bandit.selection_score");
+                }
+            }
+            Ok(())
         }
     }
 
