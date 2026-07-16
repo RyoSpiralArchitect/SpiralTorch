@@ -4,6 +4,8 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::soft_logic::SoftRule;
+#[cfg(feature = "kdsl")]
+use super::spiralk_fft::canonical_fft_tile_hint;
 use super::wgpu_heuristics::{Choice, DslOverrides};
 #[cfg(feature = "kdsl")]
 use super::wgpu_heuristics::{
@@ -105,6 +107,8 @@ fn emit_kdsl_env_bridge_meta(
             "status": status,
             "hard_present": hard_present,
             "soft_count": soft_count,
+            "has_override_use_2ce": overrides.use_2ce.is_some(),
+            "override_use_2ce": overrides.use_2ce.unwrap_or(false),
             "override_algo_topk": overrides.algo_topk,
             "override_mode_midk": overrides.mode_midk,
             "override_mode_bottomk": overrides.mode_bottomk,
@@ -225,7 +229,7 @@ pub fn parse_env_dsl_plus_kind(
             sg: subgroup,
             sgc: if subgroup { 8 } else { 1 },
             kc,
-            tile_cols: ((cols.max(1) + 255) / 256) as u32,
+            tile_cols: canonical_fft_tile_hint(cols),
             radix: if k.is_power_of_two() { 4 } else { 2 },
             segments: if cols > 131_072 {
                 4
@@ -285,7 +289,7 @@ pub fn parse_env_dsl_plus_kind(
                 tile_cols: out
                     .hard
                     .tile_cols
-                    .unwrap_or(cols.max(1).div_ceil(1024) * 1024),
+                    .unwrap_or_else(|| canonical_fft_tile_hint(cols)),
                 radix: out
                     .hard
                     .radix
@@ -359,6 +363,7 @@ pub fn parse_env_dsl_plus_kind(
                 }),
             }
         }
+        ov.use_2ce = out.hard.use_2ce;
         if let Some(a) = out.hard.algo {
             ov.algo_topk = a;
         }
@@ -393,7 +398,7 @@ pub fn parse_env_dsl_plus_kind(
             soft.len(),
             ov,
         );
-        return (hard, soft, ov);
+        (hard, soft, ov)
     }
     #[cfg(not(feature = "kdsl"))]
     {
@@ -446,7 +451,7 @@ pub fn parse_env_dsl_plus_kind_explain(
         sg: subgroup,
         sgc: if subgroup { 8 } else { 1 },
         kc,
-        tile_cols: ((cols.max(1) + 255) / 256) as u32,
+        tile_cols: canonical_fft_tile_hint(cols),
         radix: if k.is_power_of_two() { 4 } else { 2 },
         segments: if cols > 131_072 {
             4
@@ -508,7 +513,7 @@ pub fn parse_env_dsl_plus_kind_explain(
             tile_cols: out
                 .hard
                 .tile_cols
-                .unwrap_or(cols.max(1).div_ceil(1024) * 1024),
+                .unwrap_or_else(|| canonical_fft_tile_hint(cols)),
             radix: out
                 .hard
                 .radix
@@ -584,6 +589,7 @@ pub fn parse_env_dsl_plus_kind_explain(
         }
     }
 
+    ov.use_2ce = out.hard.use_2ce;
     if let Some(a) = out.hard.algo {
         ov.algo_topk = a;
     }
@@ -683,7 +689,8 @@ pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
                         ctile: getu("ctile").unwrap_or(0),
                         mode_midk: getu("mode_midk").unwrap_or(0) as u8,
                         mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
-                        tile_cols: getu("tile_cols").unwrap_or(cols.max(1).div_ceil(1024) * 1024),
+                        tile_cols: getu("tile_cols")
+                            .unwrap_or_else(|| canonical_fft_tile_hint(cols)),
                         radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
                         segments: getu("segments").unwrap_or(if cols > 131_072 {
                             4
@@ -744,6 +751,19 @@ mod tests {
 
     fn with_spiral_heur_k<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
         with_env_var("SPIRAL_HEUR_K", value, f)
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[test]
+    fn kdsl_defaults_use_the_canonical_fft_tile_contract() {
+        let _env_lock = env_lock();
+        let (hard, _, overrides) = with_spiral_heur_k(Some("algo: 2; u2: false;"), || {
+            parse_env_dsl_plus_kind(32, 5_000, 128, true, "topk")
+        });
+        let hard = hard.expect("hard KDSL choice");
+        assert_eq!(hard.tile_cols, 8_192);
+        assert!(hard.tile_cols.is_power_of_two());
+        assert_eq!(overrides.use_2ce, Some(false));
     }
 
     #[test]

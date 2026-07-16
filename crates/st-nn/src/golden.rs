@@ -751,7 +751,11 @@ impl GoldenRetriever {
             rank,
             DeviceCaps::wgpu(32, true, 256),
         );
-        let leech_bias = (plan.fft_plan().tile_cols.max(1) as f32).log2();
+        let leech_bias = (plan
+            .fft_plan()
+            .expect("rank planner must emit a validated FFT contract")
+            .tile_cols() as f32)
+            .log2();
         let curvature = 1.0 / rank as f32;
         let guard = (leech_bias * curvature).tanh();
         for value in accum.iter_mut() {

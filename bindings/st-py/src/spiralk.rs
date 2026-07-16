@@ -37,40 +37,39 @@ pub(crate) struct PySpiralKFftPlan {
 #[pymethods]
 impl PySpiralKFftPlan {
     #[new]
-    pub fn new(radix: u32, tile_cols: u32, segments: u32, subgroup: bool) -> Self {
-        let plan = SpiralKFftPlan {
-            radix,
-            tile_cols,
-            segments,
-            subgroup,
-        };
-        Self { inner: plan }
+    pub fn new(radix: u32, tile_cols: u32, segments: u32, subgroup: bool) -> PyResult<Self> {
+        let inner = SpiralKFftPlan::try_new(radix, tile_cols, segments, subgroup)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(Self { inner })
     }
 
     #[staticmethod]
-    pub fn from_rank_plan(plan: &PyRankPlan) -> Self {
-        let inner = plan.plan().fft_plan();
-        Self { inner }
+    pub fn from_rank_plan(plan: &PyRankPlan) -> PyResult<Self> {
+        let inner = plan
+            .plan()
+            .fft_plan()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(Self { inner })
     }
 
     #[getter]
     fn radix(&self) -> u32 {
-        self.inner.radix
+        self.inner.radix()
     }
 
     #[getter]
     fn tile_cols(&self) -> u32 {
-        self.inner.tile_cols
+        self.inner.tile_cols()
     }
 
     #[getter]
     fn segments(&self) -> u32 {
-        self.inner.segments
+        self.inner.segments()
     }
 
     #[getter]
     fn subgroup(&self) -> bool {
-        self.inner.subgroup
+        self.inner.subgroup()
     }
 
     fn workgroup_size(&self) -> u32 {
@@ -83,6 +82,33 @@ impl PySpiralKFftPlan {
 
     fn emit_spiralk_hint(&self) -> String {
         self.inner.emit_spiralk_hint()
+    }
+
+    fn dispatch_manifest_json(&self) -> PyResult<String> {
+        self.inner
+            .dispatch_manifest_json()
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod fft_plan_tests {
+    use super::*;
+
+    #[test]
+    fn python_fft_plan_preserves_rust_validation_and_manifest() {
+        assert!(PySpiralKFftPlan::new(3, 2048, 1, false).is_err());
+        let plan = PySpiralKFftPlan::new(4, 2048, 2, true).expect("valid Rust FFT plan");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &plan
+                .dispatch_manifest_json()
+                .expect("serializable dispatch manifest"),
+        )
+        .expect("JSON manifest");
+
+        assert_eq!(manifest["semantic_backend"], "rust");
+        assert_eq!(manifest["contract_version"], "spiraltorch.fft_plan.v1");
+        assert!(manifest["dispatches"].as_array().unwrap().len() > 1);
     }
 }
 

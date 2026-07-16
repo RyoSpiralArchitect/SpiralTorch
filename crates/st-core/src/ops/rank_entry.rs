@@ -11,7 +11,10 @@
 //!   execute_rank(&plan, backend_impl, tensors);
 use crate::backend::device_caps::{DeviceCaps, DeviceCapsError};
 use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
-use crate::backend::spiralk_fft::SpiralKFftPlan;
+use crate::backend::rank_directives::RankDirectiveError;
+#[cfg(feature = "kdsl")]
+use crate::backend::rank_directives::RankDirectives;
+use crate::backend::spiralk_fft::{SpiralKFftPlan, SpiralKFftPlanError};
 use crate::backend::unison::{self, Choice, RankKind};
 use serde::Serialize;
 use thiserror::Error;
@@ -62,6 +65,63 @@ pub enum RankPlanError {
     },
     #[error(transparent)]
     InvalidDeviceCaps(#[from] DeviceCapsError),
+}
+
+impl From<RankDirectiveError> for RankPlanError {
+    fn from(error: RankDirectiveError) -> Self {
+        match error {
+            RankDirectiveError::InvalidValue {
+                field,
+                value,
+                expected,
+            } => Self::InvalidChoiceValue {
+                field,
+                value: u32::from(value),
+                expected,
+            },
+            RankDirectiveError::ConflictingTwoStage {
+                use_two_stage,
+                mode_field,
+                mode,
+            } => Self::ConflictingTwoStageOverrides {
+                use_two_stage,
+                mode_field,
+                mode,
+            },
+        }
+    }
+}
+
+impl From<SpiralKFftPlanError> for RankPlanError {
+    fn from(error: SpiralKFftPlanError) -> Self {
+        match error {
+            SpiralKFftPlanError::UnsupportedRadix { radix } => Self::InvalidChoiceValue {
+                field: "fft_radix",
+                value: radix,
+                expected: "2 or 4",
+            },
+            SpiralKFftPlanError::TileTooSmall { tile_cols } => Self::InvalidChoiceValue {
+                field: "fft_tile",
+                value: tile_cols,
+                expected: "a power of two greater than or equal to 2",
+            },
+            SpiralKFftPlanError::TileNotPowerOfTwo { tile_cols } => Self::InvalidChoiceValue {
+                field: "fft_tile",
+                value: tile_cols,
+                expected: "a power of two greater than or equal to 2",
+            },
+            SpiralKFftPlanError::TileTooLarge { tile_cols } => Self::InvalidChoiceValue {
+                field: "fft_tile",
+                value: tile_cols,
+                expected: "a power of two no greater than 1048576",
+            },
+            SpiralKFftPlanError::InvalidSegments { segments } => Self::InvalidChoiceValue {
+                field: "fft_segments",
+                value: segments,
+                expected: "a value from 1 through 4",
+            },
+        }
+    }
 }
 
 /// Explicit choice overrides accepted by the Rust semantic core.
@@ -235,7 +295,7 @@ impl RankPlan {
         } else {
             3
         };
-        let fft = self.fft_plan();
+        let fft = self.fft_plan()?;
         Ok(st_kdsl::Ctx {
             r: self.rows,
             c: self.cols,
@@ -243,76 +303,29 @@ impl RankPlan {
             sg: self.choice.subgroup,
             sgc: subgroup_capacity,
             kc: kernel_capacity,
-            tile_cols: fft.tile_cols,
-            radix: fft.radix,
-            segments: fft.segments,
+            tile_cols: fft.tile_cols(),
+            radix: fft.radix(),
+            segments: fft.segments(),
         })
     }
 
     /// Interprets a SpiralK hard result through the Rust-owned rank contract.
     #[cfg(feature = "kdsl")]
     pub fn try_with_spiralk_hard(&self, hard: &st_kdsl::Hard) -> Result<Self, RankPlanError> {
-        for (field, mode) in [("midk", hard.midk), ("bottomk", hard.bottomk)] {
-            if let Some(value) = mode {
-                if value > 2 {
-                    return Err(RankPlanError::InvalidChoiceValue {
-                        field,
-                        value: u32::from(value),
-                        expected: "0 (auto), 1 (one-stage), or 2 (two-stage)",
-                    });
-                }
-            }
-        }
-        if let Some(value) = hard.algo {
-            if value > 3 {
-                return Err(RankPlanError::InvalidChoiceValue {
-                    field: "algo",
-                    value: u32::from(value),
-                    expected: "0 (auto), 1 (heap), 2 (bitonic), or 3 (k-way)",
-                });
-            }
-        }
-
-        let (mode_field, mode) = match self.kind {
-            RankKind::TopK => (None, None),
-            RankKind::MidK => (Some("midk"), hard.midk),
-            RankKind::BottomK => (Some("bottomk"), hard.bottomk),
-        };
-        let mode_use_two_stage = mode.and_then(|value| match value {
-            1 => Some(false),
-            2 => Some(true),
-            _ => None,
-        });
-        if let (Some(use_two_stage), Some(mode_use_two_stage), Some(mode_field), Some(mode)) =
-            (hard.use_2ce, mode_use_two_stage, mode_field, mode)
-        {
-            if use_two_stage != mode_use_two_stage {
-                return Err(RankPlanError::ConflictingTwoStageOverrides {
-                    use_two_stage,
-                    mode_field,
-                    mode,
-                });
-            }
-        }
-
-        let (merge_kind, merge_detail) = if matches!(self.kind, RankKind::TopK) {
-            match hard.algo {
-                Some(1) => (Some(1), Some(1)), // shared heap
-                Some(2) => (Some(0), Some(3)), // bitonic
-                Some(3) => (Some(1), Some(2)), // shared k-way
-                _ => (None, None),
-            }
-        } else {
-            (None, None)
-        };
+        let directives = RankDirectives::try_from_codes(
+            hard.algo.unwrap_or(0),
+            hard.midk.unwrap_or(0),
+            hard.bottomk.unwrap_or(0),
+        )?;
+        let resolved = directives.resolve(self.kind, hard.use_2ce)?;
 
         self.try_with_choice_overrides(RankPlanChoiceOverrides {
-            use_two_stage: mode_use_two_stage.or(hard.use_2ce),
+            use_two_stage: resolved.use_two_stage,
             workgroup: hard.wg,
             lanes: hard.kl,
             channel_stride: hard.ch,
-            merge_kind,
-            merge_detail,
+            merge_kind: resolved.merge_kind,
+            merge_detail: resolved.merge_detail,
             compaction_tile: hard.ctile,
             fft_tile: hard.tile_cols,
             fft_radix: hard.radix,
@@ -375,23 +388,24 @@ impl RankPlan {
     }
 
     /// Build a SpiralK FFT plan that mirrors the heuristic choice associated with this rank plan.
-    pub fn fft_plan(&self) -> SpiralKFftPlan {
-        SpiralKFftPlan {
-            radix: self.choice.fft_radix.clamp(2, 4),
-            tile_cols: self.choice.fft_tile.max(1),
-            segments: self.choice.fft_segments.max(1),
-            subgroup: self.choice.subgroup,
-        }
+    pub fn fft_plan(&self) -> Result<SpiralKFftPlan, RankPlanError> {
+        SpiralKFftPlan::try_new(
+            self.choice.fft_radix,
+            self.choice.fft_tile,
+            self.choice.fft_segments,
+            self.choice.subgroup,
+        )
+        .map_err(Into::into)
     }
 
     /// Emit a WGSL kernel derived from the underlying FFT plan.
-    pub fn fft_wgsl(&self) -> String {
-        self.fft_plan().emit_wgsl()
+    pub fn fft_wgsl(&self) -> Result<String, RankPlanError> {
+        Ok(self.fft_plan()?.emit_wgsl())
     }
 
     /// Emit the SpiralK hint associated with the FFT plan so DSL consumers can record the decision.
-    pub fn fft_spiralk_hint(&self) -> String {
-        self.fft_plan().emit_spiralk_hint()
+    pub fn fft_spiralk_hint(&self) -> Result<String, RankPlanError> {
+        Ok(self.fft_plan()?.emit_spiralk_hint())
     }
 
     /// Returns the fallback contract captured when this plan was created.
@@ -529,20 +543,12 @@ fn validate_rank_choice(
             expected: "a value from 0 through 5",
         });
     }
-    if !matches!(choice.fft_radix, 2 | 4) {
-        return Err(RankPlanError::InvalidChoiceValue {
-            field: "fft_radix",
-            value: choice.fft_radix,
-            expected: "2 or 4",
-        });
-    }
-    if choice.fft_segments > 4 {
-        return Err(RankPlanError::InvalidChoiceValue {
-            field: "fft_segments",
-            value: choice.fft_segments,
-            expected: "a value from 1 through 4",
-        });
-    }
+    SpiralKFftPlan::try_new(
+        choice.fft_radix,
+        choice.fft_tile,
+        choice.fft_segments,
+        choice.subgroup,
+    )?;
     if choice.subgroup != caps.subgroup {
         return Err(RankPlanError::SubgroupMismatch {
             choice_subgroup: choice.subgroup,
@@ -577,20 +583,20 @@ mod tests {
     fn fft_plan_carries_subgroup_hint() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let plan = plan_rank(RankKind::TopK, 128, 8192, 64, caps);
-        let fft = plan.fft_plan();
-        assert!(fft.tile_cols >= 1024);
-        assert!(matches!(fft.radix, 2 | 4));
-        assert!(fft.segments >= 1);
-        assert!(fft.subgroup);
+        let fft = plan.fft_plan().expect("validated rank FFT plan");
+        assert!(fft.tile_cols() >= 1024);
+        assert!(matches!(fft.radix(), 2 | 4));
+        assert!(fft.segments() >= 1);
+        assert!(fft.subgroup());
     }
 
     #[test]
     fn fft_helpers_emit_artifacts() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let plan = plan_rank(RankKind::TopK, 64, 4096, 32, caps);
-        let wgsl = plan.fft_wgsl();
+        let wgsl = plan.fft_wgsl().expect("validated WGSL plan");
         assert!(wgsl.contains("@compute"));
-        let hint = plan.fft_spiralk_hint();
+        let hint = plan.fft_spiralk_hint().expect("validated SpiralK FFT hint");
         assert!(hint.contains("tile_cols"));
     }
 

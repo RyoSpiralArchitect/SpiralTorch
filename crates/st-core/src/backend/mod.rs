@@ -34,6 +34,7 @@ pub mod hip_exec;
 #[cfg(feature = "hip-real")]
 pub mod hip_runtime;
 pub mod kdsl_bridge;
+pub mod rank_directives;
 pub mod rankk_launch;
 pub mod rankk_software;
 pub mod runtime_probe;

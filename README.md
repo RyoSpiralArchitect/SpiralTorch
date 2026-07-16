@@ -2604,7 +2604,7 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`. Hard SpiralK rewrites return a newly validated Rust `RankPlan`; malformed workgroups, FFT settings, or conflicting 1CE/2CE directives are rejected rather than repaired by a binding.
 - **Introspectable compute plans**
-  Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
+  Unified `RankPlan`s expose a validated FFT execution contract directly. Call `plan.fft_plan()?` to inspect the radix/segment shape and ordered ping-pong dispatches, `plan.fft_wgsl()?` to emit their shared WGSL module, or `plan.fft_spiralk_hint()?` to log the same choice back into SpiralK. Invalid radix, non-power-of-two tiles, and out-of-range segment counts fail closed in Rust.
 - **SpiralK DSL** (K×Lisp-inspired)
   Hard assigns (`mk:`, `tile:`) and soft rules (`soft(mk, …)`, `soft(tile, …)`) that blend with measurements.
 - **SoftLogic (finite-domain solver)**
@@ -3294,11 +3294,14 @@ Default policy: if **B** exists use it; otherwise the runtime invites **A** and 
 Want to materialise the FFT path straight from the chosen plan? Call the new helpers and feed the result to your browser/WASM runtime:
 
 ```rust
-use st_core::backend::wgpu_heuristics::{auto_fft_spiralk, auto_fft_wgsl};
+use st_core::backend::wgpu_heuristics::{auto_fft_plan, auto_fft_spiralk};
 
-let wgsl = auto_fft_wgsl(rows, cols, k, subgroup).expect("heuristics available");
+let plan = auto_fft_plan(rows, cols, k, subgroup).expect("heuristics available");
+let wgsl = plan.emit_wgsl();
+let dispatches = plan.dispatches();
 let spiralk = auto_fft_spiralk(rows, cols, k, subgroup).unwrap();
-// ship `wgsl` to your WebGPU runtime and persist `spiralk` if you want the DSL to learn it.
+// Bind primary + scratch buffers, then issue `dispatches` in order with the
+// listed entry point/radix/span. Persist `spiralk` if the DSL should learn it.
 ```
 
 Prefer to cache the tuned plan for JavaScript without re-running the heuristics? The WASM bindings now serialise plans as JSON or plain JS objects:
@@ -3311,7 +3314,8 @@ if (planJson) {
   const plan = WasmFftPlan.fromJson(planJson);
   await persistPlan(plan.toJson());
   const wgsl = plan.wgsl();
-  // dispatch `wgsl` and reuse `plan` across workers or page reloads.
+  const manifest = plan.dispatchManifestObject();
+  // Dispatch `manifest.dispatches` in order and ping-pong the listed buffers.
 }
 ```
 
@@ -3332,11 +3336,11 @@ runtime queries after SpiralK/SoftLogic have spoken. Because the JSON format is
 portable, you can ship the same file to a WebWorker, bake a table offline, and
 let the browser pick overrides without re-running the tuner in production.
 
-### Fractional FFT / SpiralK roadmap
+### Fractional FFT / SpiralK execution path
 
-- **Radix-2 → Radix-4 pipeline**: `st-frac::fft` still mirrors the GPU
-  butterfly structure, and the new `SpiralKFftPlan` bridge turns the resulting
-  `Choice` into auto-generated WGSL kernels for WebGPU.
+- **Validated radix-2 / radix-4 pipeline**: `SpiralKFftPlan` rejects ambiguous
+  shapes, emits bit-reversal plus mathematically checked butterfly stages, and
+  publishes the same ordered dispatch manifest to Rust, Python, and WASM.
 - **Wilson-aware automation**: `st-kdsl::auto` turns latency deltas into
   high-confidence `soft(...)` rewrites, wiring tuned `radix`, `tile_cols`, and
   `segments` into `heur.kdsl` without manual editing.

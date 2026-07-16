@@ -10,53 +10,16 @@
 
 use super::device_caps::{BackendKind, DeviceCaps};
 use super::kdsl_bridge;
+use super::rank_directives::{RankDirectiveResolution, RankDirectives};
+pub use super::rank_directives::{RankKind, RankKindParseError};
+use super::spiralk_fft::{canonical_fft_radix_hint, canonical_fft_tile_hint, SpiralKFftPlan};
 use super::wgpu_heuristics;
 use crate::backend::temporal_fusion::TemporalSpectralFusion;
-use std::str::FromStr;
-use thiserror::Error;
 
 mod foreign;
 use crate::ops::realgrad::GradientSummary;
 use crate::telemetry::hub;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RankKind {
-    TopK,
-    MidK,
-    BottomK,
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum RankKindParseError {
-    #[error("unknown rank kind '{value}', expected 'topk', 'midk', or 'bottomk'")]
-    Unknown { value: String },
-}
-
-impl RankKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RankKind::TopK => "topk",
-            RankKind::MidK => "midk",
-            RankKind::BottomK => "bottomk",
-        }
-    }
-}
-
-impl FromStr for RankKind {
-    type Err = RankKindParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "topk" | "top_k" => Ok(Self::TopK),
-            "midk" | "mid_k" => Ok(Self::MidK),
-            "bottomk" | "bottom_k" => Ok(Self::BottomK),
-            _ => Err(RankKindParseError::Unknown {
-                value: value.to_owned(),
-            }),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JuliaSpan {
@@ -1256,7 +1219,7 @@ fn fallback_with_scenario(scenario: RankScenario<'_>) -> Choice {
         use_2ce = false;
     }
 
-    let fft_tile = align_to_lanes(scenario.cols().max(1), 1024);
+    let fft_tile = canonical_fft_tile_hint(scenario.cols());
     let fft_radix = if scenario.k().is_power_of_two() { 4 } else { 2 };
     let fft_segments = scenario.fft_segments_hint();
 
@@ -1468,9 +1431,13 @@ impl WeightedChoice {
         choice.mkd = round_u32(self.mkd * inv, baseline.mkd);
         choice.tile = round_u32(self.tile * inv, baseline.tile);
         choice.ctile = round_u32(self.ctile * inv, baseline.ctile);
-        choice.fft_tile = round_u32(self.fft_tile * inv, baseline.fft_tile);
-        choice.fft_radix = round_u32(self.fft_radix * inv, baseline.fft_radix);
-        choice.fft_segments = round_u32(self.fft_segments * inv, baseline.fft_segments);
+        choice.fft_tile =
+            canonical_fft_tile_hint(round_u32(self.fft_tile * inv, baseline.fft_tile));
+        choice.fft_radix = canonical_fft_radix_hint(
+            round_u32(self.fft_radix * inv, baseline.fft_radix),
+            baseline.fft_radix,
+        );
+        choice.fft_segments = round_u32(self.fft_segments * inv, baseline.fft_segments).clamp(1, 4);
 
         choice
     }
@@ -1594,12 +1561,13 @@ fn refine_choice(mut choice: Choice, baseline: Choice, scenario: RankScenario<'_
     if choice.fft_tile == 0 {
         choice.fft_tile = baseline.fft_tile;
     }
-    choice.fft_tile = caps.preferred_tile(scenario.cols(), choice.fft_tile);
+    choice.fft_tile =
+        canonical_fft_tile_hint(caps.preferred_tile(scenario.cols(), choice.fft_tile));
 
     if choice.fft_radix == 0 {
         choice.fft_radix = baseline.fft_radix;
     }
-    choice.fft_radix = choice.fft_radix.clamp(2, 4);
+    choice.fft_radix = canonical_fft_radix_hint(choice.fft_radix, baseline.fft_radix);
 
     if choice.fft_segments == 0 {
         choice.fft_segments = baseline.fft_segments;
@@ -1718,8 +1686,37 @@ fn score_choice(choice: &Choice, baseline: &Choice, scenario: RankScenario<'_>) 
     score
 }
 
-fn convert_wgpu_choice(choice: wgpu_heuristics::Choice, subgroup: bool) -> Choice {
-    Choice {
+#[derive(Clone, Copy, Debug)]
+struct ConvertedWgpuChoice {
+    choice: Choice,
+    directives: RankDirectiveResolution,
+}
+
+fn apply_directive_resolution(choice: &mut Choice, directives: RankDirectiveResolution) {
+    if let Some(use_two_stage) = directives.use_two_stage {
+        choice.use_2ce = use_two_stage;
+    }
+    if let Some(merge_kind) = directives.merge_kind {
+        choice.mk = merge_kind;
+    }
+    if let Some(merge_detail) = directives.merge_detail {
+        choice.mkd = merge_detail;
+    }
+}
+
+fn convert_wgpu_choice(
+    choice: wgpu_heuristics::Choice,
+    subgroup: bool,
+    kind: RankKind,
+    explicit_two_stage: Option<bool>,
+) -> Option<ConvertedWgpuChoice> {
+    SpiralKFftPlan::from_choice(&choice, subgroup).ok()?;
+    let directives =
+        RankDirectives::try_from_codes(choice.algo_topk, choice.mode_midk, choice.mode_bottomk)
+            .ok()?
+            .resolve(kind, explicit_two_stage)
+            .ok()?;
+    let mut converted = Choice {
         use_2ce: choice.use_2ce,
         wg: choice.wg,
         kl: choice.kl,
@@ -1733,7 +1730,33 @@ fn convert_wgpu_choice(choice: wgpu_heuristics::Choice, subgroup: bool) -> Choic
         fft_radix: choice.radix,
         fft_segments: choice.segments,
         latency_window: None,
-    }
+    };
+    apply_directive_resolution(&mut converted, directives);
+    Some(ConvertedWgpuChoice {
+        choice: converted,
+        directives,
+    })
+}
+
+fn refine_wgpu_choice(
+    choice: wgpu_heuristics::Choice,
+    baseline: Choice,
+    scenario: RankScenario<'_>,
+    explicit_two_stage: Option<bool>,
+) -> Option<Choice> {
+    let converted = convert_wgpu_choice(
+        choice,
+        scenario.caps().subgroup,
+        scenario.kind(),
+        explicit_two_stage,
+    )?;
+    let mut refined = refine_choice(converted.choice, baseline, scenario);
+
+    // Refinement is allowed to adjust heuristic defaults, but not to erase an
+    // explicitly selected algorithm/mode. Device safety remains the final gate.
+    apply_directive_resolution(&mut refined, converted.directives);
+    enforce_shared_memory(&mut refined, scenario.caps(), scenario.k());
+    Some(refined)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1956,7 +1979,7 @@ fn choose_unified_rank_with_realgrad(
     let mut candidate_count = 1usize;
 
     // Hard DSL overrides from the environment.
-    let (dsl_hard, _, _) = kdsl_bridge::parse_env_dsl_plus_kind(
+    let (dsl_hard, _, dsl_overrides) = kdsl_bridge::parse_env_dsl_plus_kind(
         rows,
         cols,
         k,
@@ -1968,26 +1991,28 @@ fn choose_unified_rank_with_realgrad(
         },
     );
     if let Some(hard) = dsl_hard {
-        candidate_count += 1;
-        let refined = refine_choice(convert_wgpu_choice(hard, caps.subgroup), baseline, scenario);
-        let score = score_choice(&refined, &baseline, scenario);
-        candidate_scores.kdsl_env = Some(score);
-        if score > best_score {
-            best = refined;
-            best_score = score;
-            best_source = "kdsl_env";
+        if let Some(refined) = refine_wgpu_choice(hard, baseline, scenario, dsl_overrides.use_2ce) {
+            candidate_count += 1;
+            let score = score_choice(&refined, &baseline, scenario);
+            candidate_scores.kdsl_env = Some(score);
+            if score > best_score {
+                best = refined;
+                best_score = score;
+                best_source = "kdsl_env";
+            }
         }
     }
 
     if let Some(kv) = kdsl_bridge::choose_from_kv(rows, cols, k, caps.subgroup) {
-        candidate_count += 1;
-        let refined = refine_choice(convert_wgpu_choice(kv, caps.subgroup), baseline, scenario);
-        let score = score_choice(&refined, &baseline, scenario);
-        candidate_scores.kdsl_kv = Some(score);
-        if score > best_score {
-            best = refined;
-            best_score = score;
-            best_source = "kdsl_kv";
+        if let Some(refined) = refine_wgpu_choice(kv, baseline, scenario, None) {
+            candidate_count += 1;
+            let score = score_choice(&refined, &baseline, scenario);
+            candidate_scores.kdsl_kv = Some(score);
+            if score > best_score {
+                best = refined;
+                best_score = score;
+                best_source = "kdsl_kv";
+            }
         }
     }
 
@@ -1995,18 +2020,15 @@ fn choose_unified_rank_with_realgrad(
         if let Some(choice) =
             wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, caps.subgroup)
         {
-            candidate_count += 1;
-            let refined = refine_choice(
-                convert_wgpu_choice(choice, caps.subgroup),
-                baseline,
-                scenario,
-            );
-            let score = score_choice(&refined, &baseline, scenario);
-            candidate_scores.wgpu_generated = Some(score);
-            if score > best_score {
-                best = refined;
-                best_score = score;
-                best_source = "wgpu_generated";
+            if let Some(refined) = refine_wgpu_choice(choice, baseline, scenario, None) {
+                candidate_count += 1;
+                let score = score_choice(&refined, &baseline, scenario);
+                candidate_scores.wgpu_generated = Some(score);
+                if score > best_score {
+                    best = refined;
+                    best_score = score;
+                    best_source = "wgpu_generated";
+                }
             }
         }
     }
@@ -2175,6 +2197,71 @@ mod tests {
         assert_eq!(choice.fft_radix, 4);
         assert!(choice.fft_segments >= 1);
         assert!(choice.subgroup);
+    }
+
+    fn directive_choice() -> wgpu_heuristics::Choice {
+        wgpu_heuristics::Choice {
+            use_2ce: false,
+            wg: 256,
+            kl: 32,
+            ch: 0,
+            algo_topk: 0,
+            ctile: 256,
+            mode_midk: 0,
+            mode_bottomk: 0,
+            tile_cols: 2048,
+            radix: 4,
+            segments: 1,
+        }
+    }
+
+    #[test]
+    fn wgpu_rank_directives_survive_unison_refinement() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+
+        let mut midk = directive_choice();
+        midk.mode_midk = 2;
+        let midk_scenario = RankScenario::new(4, 4_096, 32, &caps, RankKind::MidK);
+        let midk_baseline = fallback_with_scenario(midk_scenario);
+        let midk = refine_wgpu_choice(midk, midk_baseline, midk_scenario, None)
+            .expect("valid mid-k directive choice");
+        assert!(midk.use_2ce, "explicit 2CE mode must survive refinement");
+
+        let mut topk = directive_choice();
+        topk.algo_topk = 2;
+        let topk_scenario = RankScenario::new(64, 4_096, 32, &caps, RankKind::TopK);
+        let topk_baseline = fallback_with_scenario(topk_scenario);
+        let topk = refine_wgpu_choice(topk, topk_baseline, topk_scenario, None)
+            .expect("valid top-k directive choice");
+        assert_eq!((topk.mk, topk.mkd), (0, 3));
+    }
+
+    #[test]
+    fn invalid_wgpu_rank_directives_are_not_candidates() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let scenario = RankScenario::new(64, 4_096, 32, &caps, RankKind::TopK);
+        let baseline = fallback_with_scenario(scenario);
+        let mut invalid = directive_choice();
+        invalid.algo_topk = 9;
+        assert!(refine_wgpu_choice(invalid, baseline, scenario, None).is_none());
+    }
+
+    #[test]
+    fn explicit_two_stage_directive_survives_and_conflicts_fail_closed() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let scenario = RankScenario::new(1_024, 65_536, 256, &caps, RankKind::BottomK);
+        let baseline = fallback_with_scenario(scenario);
+        assert!(baseline.use_2ce);
+
+        let mut one_stage = directive_choice();
+        one_stage.mode_bottomk = 1;
+        let resolved = refine_wgpu_choice(one_stage, baseline, scenario, Some(false))
+            .expect("matching one-stage directives");
+        assert!(!resolved.use_2ce);
+
+        let mut conflicting = directive_choice();
+        conflicting.mode_bottomk = 2;
+        assert!(refine_wgpu_choice(conflicting, baseline, scenario, Some(false)).is_none());
     }
 
     #[test]
@@ -2773,9 +2860,16 @@ mod tests {
         assert_eq!(choice.wg, 203);
         assert_eq!(choice.tile, 1621);
         assert_eq!(choice.ctile, 320);
-        assert_eq!(choice.fft_tile, 1621);
-        assert_eq!(choice.fft_radix, 3);
+        assert_eq!(choice.fft_tile, 2048);
+        assert_eq!(choice.fft_radix, 4);
         assert_eq!(choice.fft_segments, 2);
+        assert!(SpiralKFftPlan::try_new(
+            choice.fft_radix,
+            choice.fft_tile,
+            choice.fft_segments,
+            choice.subgroup,
+        )
+        .is_ok());
 
         let window = choice.latency_window.expect("latency window retained");
         assert!(window.lower >= 256);
