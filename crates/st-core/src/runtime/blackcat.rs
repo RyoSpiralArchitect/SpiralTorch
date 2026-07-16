@@ -1279,6 +1279,11 @@ impl BlackCatRuntime {
         self.heur.path()
     }
 
+    /// Returns the startup witness when the former default store was imported.
+    pub fn heuristic_store_startup_legacy_import(&self) -> Option<&rewrite::HeurStoreLegacyImport> {
+        self.heur.startup_legacy_import()
+    }
+
     pub fn heuristic_adoption_config(&self) -> SoftHeuristicAdoptionConfig {
         self.heuristic_adoption
     }
@@ -1321,38 +1326,7 @@ impl BlackCatRuntime {
         self.validate_configuration()?;
         self.heuristic_adoption.validate()?;
         let (rule, rule_id) = canonical_heuristic_rule(rule_text)?;
-        if self.adopted_heuristics.contains(&rule_id) {
-            let evidence = self.heuristic_evidence.get(&rule_id).copied().ok_or(
-                BlackCatError::InvalidAdaptationState {
-                    field: "heuristic_adoption.adopted_evidence",
-                },
-            )?;
-            if evidence.mode != SoftHeuristicEvidenceMode::StreamingStep
-                || evidence.config != self.heuristic_adoption
-            {
-                return Err(BlackCatError::InvalidAdaptationState {
-                    field: "heuristic_adoption.evidence_policy",
-                });
-            }
-            let interval = try_wilson_interval(
-                evidence.successes,
-                evidence.trials,
-                evidence.config.confidence_z,
-            )?;
-            let report = self.soft_adoption_report(
-                rule,
-                rule_id,
-                interval,
-                evidence.config,
-                true,
-                SoftHeuristicAdoptionDecision::AlreadyAdopted,
-                None,
-                None,
-            );
-            self.commit_soft_adoption_report(report.clone());
-            return Ok(report);
-        }
-
+        let already_adopted = self.adopted_heuristics.contains(&rule_id);
         let mut next_evidence = self.heuristic_evidence.clone();
         if !next_evidence.contains_key(&rule_id)
             && next_evidence.len() >= BLACKCAT_MAX_TRACKED_HEURISTICS
@@ -1406,7 +1380,9 @@ impl BlackCatRuntime {
         let eligible =
             enough_trials && interval.lower > self.heuristic_adoption.baseline_probability;
         let mut next_adopted = self.adopted_heuristics.clone();
-        let (decision, persistence, persistence_error) = if !enough_trials {
+        let (decision, persistence, persistence_error) = if already_adopted {
+            (SoftHeuristicAdoptionDecision::AlreadyAdopted, None, None)
+        } else if !enough_trials {
             (SoftHeuristicAdoptionDecision::Collecting, None, None)
         } else if !eligible {
             (SoftHeuristicAdoptionDecision::BelowThreshold, None, None)
@@ -2820,12 +2796,14 @@ mod tests {
 
         let repeated = runtime
             .try_observe_soft(rule, false)
-            .expect("an adopted rule is stable");
+            .expect("an adopted rule keeps accumulating evidence");
         assert_eq!(
             repeated.decision,
             SoftHeuristicAdoptionDecision::AlreadyAdopted
         );
-        assert_eq!(repeated.interval.trials, 4);
+        assert_eq!(repeated.interval.successes, 4);
+        assert_eq!(repeated.interval.trials, 5);
+        assert!(!repeated.eligible);
         assert_eq!(fs::read(&path).expect("unchanged rule file"), persisted);
         assert_eq!(runtime.tracked_heuristic_count(), 1);
         assert_eq!(runtime.last_heuristic_adoption_report(), Some(&repeated));
@@ -5187,6 +5165,9 @@ pub mod rewrite {
 
     pub const HEUR_STORE_CONTRACT: &str = "spiraltorch.blackcat.heur_store";
     pub const HEUR_STORE_CONTRACT_VERSION: u32 = 1;
+    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT: &str =
+        "spiraltorch.blackcat.heur_store.legacy_import";
+    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION: u32 = 1;
     pub const HEUR_STORE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
     #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -5220,6 +5201,15 @@ pub mod rewrite {
     }
 
     #[derive(Clone, Debug, PartialEq, Serialize)]
+    pub struct HeurStoreLegacyImport {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub source_path: PathBuf,
+        pub source_bytes: u64,
+        pub source_sha256: String,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize)]
     pub struct HeurStoreReceipt {
         pub contract: &'static str,
         pub contract_version: u32,
@@ -5229,6 +5219,7 @@ pub mod rewrite {
         pub bytes_before: u64,
         pub bytes_after: u64,
         pub durable_sync: bool,
+        pub legacy_import: Option<HeurStoreLegacyImport>,
     }
 
     #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -5244,17 +5235,24 @@ pub mod rewrite {
     #[derive(Clone, Debug)]
     pub struct HeurStore {
         path: PathBuf,
+        legacy_path: Option<PathBuf>,
+        startup_legacy_import: Option<HeurStoreLegacyImport>,
     }
 
     impl HeurStore {
         pub fn new(custom: Option<String>) -> Self {
-            Self::try_new(custom).unwrap_or_else(|_| Self {
-                path: default_path(),
+            Self::try_new(custom).unwrap_or_else(|_| {
+                let (path, legacy_path) = default_paths();
+                Self {
+                    path,
+                    legacy_path,
+                    startup_legacy_import: None,
+                }
             })
         }
 
         pub fn try_new(custom: Option<String>) -> Result<Self, HeurStoreError> {
-            let path = match custom {
+            let (path, legacy_path) = match custom {
                 Some(path) if path.trim().is_empty() => {
                     return Err(store_error(
                         "configure",
@@ -5263,9 +5261,16 @@ pub mod rewrite {
                         "custom heuristic path must not be empty",
                     ));
                 }
-                Some(path) => PathBuf::from(path),
-                None => default_path(),
+                Some(path) => (PathBuf::from(path), None),
+                None => default_paths(),
             };
+            Self::try_new_paths(path, legacy_path)
+        }
+
+        fn try_new_paths(
+            path: PathBuf,
+            legacy_path: Option<PathBuf>,
+        ) -> Result<Self, HeurStoreError> {
             if path.as_os_str().is_empty() {
                 return Err(store_error(
                     "configure",
@@ -5274,7 +5279,13 @@ pub mod rewrite {
                     "heuristic path must not be empty",
                 ));
             }
-            Ok(Self { path })
+            let mut store = Self {
+                path,
+                legacy_path,
+                startup_legacy_import: None,
+            };
+            store.startup_legacy_import = store.migrate_legacy_snapshot()?;
+            Ok(store)
         }
 
         pub fn append_once(
@@ -5299,7 +5310,7 @@ pub mod rewrite {
                     .map_err(|source| io_error("create_parent", &self.path, source))?;
             }
             let _store_lock = HeurStoreLock::acquire(&self.path)?;
-            let mut bytes = read_bounded(&self.path)?;
+            let bytes = read_bounded(&self.path)?;
             let bytes_before = u64::try_from(bytes.len()).map_err(|_| {
                 store_error(
                     "read",
@@ -5308,6 +5319,7 @@ pub mod rewrite {
                     "existing heuristic file length is not representable",
                 )
             })?;
+            let (mut bytes, legacy_import) = self.import_legacy(bytes)?;
             let existing = std::str::from_utf8(&bytes).map_err(|source| {
                 store_error(
                     "decode",
@@ -5321,6 +5333,12 @@ pub mod rewrite {
                 if line == canonical {
                     return true;
                 }
+                if line
+                    .split_once("  # ")
+                    .is_some_and(|(legacy_rule, _)| legacy_rule.trim() == canonical)
+                {
+                    return true;
+                }
                 line.strip_prefix("# blackcat ")
                     .and_then(|metadata| serde_json::from_str::<serde_json::Value>(metadata).ok())
                     .and_then(|metadata| {
@@ -5332,6 +5350,19 @@ pub mod rewrite {
                     .unwrap_or(false)
             });
             if already_present {
+                let durable_sync = legacy_import.is_some();
+                if durable_sync {
+                    atomic_write(&self.path, &bytes)
+                        .map_err(|source| io_error("atomic_write", &self.path, source))?;
+                }
+                let bytes_after = u64::try_from(bytes.len()).map_err(|_| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "migrated heuristic file length is not representable",
+                    )
+                })?;
                 return Ok(HeurStoreReceipt {
                     contract: HEUR_STORE_CONTRACT,
                     contract_version: HEUR_STORE_CONTRACT_VERSION,
@@ -5339,8 +5370,9 @@ pub mod rewrite {
                     rule_id: record.rule_id.clone(),
                     disposition: HeurStoreDisposition::AlreadyPresent,
                     bytes_before,
-                    bytes_after: bytes_before,
-                    durable_sync: false,
+                    bytes_after,
+                    durable_sync,
+                    legacy_import,
                 });
             }
 
@@ -5394,11 +5426,157 @@ pub mod rewrite {
                 bytes_before,
                 bytes_after,
                 durable_sync: true,
+                legacy_import,
             })
         }
 
         pub fn path(&self) -> &Path {
             &self.path
+        }
+
+        pub fn startup_legacy_import(&self) -> Option<&HeurStoreLegacyImport> {
+            self.startup_legacy_import.as_ref()
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        fn migrate_legacy_snapshot(&self) -> Result<Option<HeurStoreLegacyImport>, HeurStoreError> {
+            Ok(None)
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        fn migrate_legacy_snapshot(&self) -> Result<Option<HeurStoreLegacyImport>, HeurStoreError> {
+            let Some(source_path) = self.legacy_path.as_ref() else {
+                return Ok(None);
+            };
+            match fs::metadata(source_path) {
+                Ok(metadata) if metadata.len() == 0 => return Ok(None),
+                Ok(_) => {}
+                Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(source) => return Err(io_error("metadata_legacy", source_path, source)),
+            }
+            if let Some(dir) = self.path.parent() {
+                fs::create_dir_all(dir)
+                    .map_err(|source| io_error("create_parent", &self.path, source))?;
+            }
+            let _store_lock = HeurStoreLock::acquire(&self.path)?;
+            let current = read_bounded(&self.path)?;
+            let (merged, legacy_import) = self.import_legacy(current)?;
+            if legacy_import.is_some() {
+                atomic_write(&self.path, &merged)
+                    .map_err(|source| io_error("atomic_write", &self.path, source))?;
+            }
+            Ok(legacy_import)
+        }
+
+        fn import_legacy(
+            &self,
+            current: Vec<u8>,
+        ) -> Result<(Vec<u8>, Option<HeurStoreLegacyImport>), HeurStoreError> {
+            let Some(source_path) = self.legacy_path.as_ref() else {
+                return Ok((current, None));
+            };
+            if source_path == &self.path {
+                return Ok((current, None));
+            }
+            let remaining = HEUR_STORE_MAX_BYTES
+                .checked_sub(current.len() as u64)
+                .ok_or_else(|| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "canonical heuristic file exceeds the guarded byte limit",
+                    )
+                })?;
+            let legacy = read_bounded_with_limit(source_path, remaining)?;
+            if legacy.is_empty() {
+                return Ok((current, None));
+            }
+            std::str::from_utf8(&legacy).map_err(|source| {
+                store_error(
+                    "decode_legacy",
+                    source_path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let current_text = std::str::from_utf8(&current).map_err(|source| {
+                store_error(
+                    "decode",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let source_bytes = u64::try_from(legacy.len()).map_err(|_| {
+                store_error(
+                    "migrate",
+                    source_path.clone(),
+                    "capacity",
+                    "legacy heuristic file length is not representable",
+                )
+            })?;
+            let legacy_import = HeurStoreLegacyImport {
+                contract: HEUR_STORE_LEGACY_IMPORT_CONTRACT,
+                contract_version: HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION,
+                source_path: source_path.clone(),
+                source_bytes,
+                source_sha256: sha256_hex(&legacy),
+            };
+            let metadata = serde_json::to_string(&legacy_import).map_err(|source| {
+                store_error(
+                    "encode_migration",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let marker = format!("# blackcat-migration {metadata}");
+            if current_text.lines().any(|line| line == marker) {
+                return Ok((current, None));
+            }
+
+            let separator_bytes = usize::from(!legacy.ends_with(b"\n"));
+            let marker_bytes = marker.len().checked_add(1).ok_or_else(|| {
+                store_error(
+                    "migrate",
+                    self.path.clone(),
+                    "capacity",
+                    "legacy migration marker length overflowed",
+                )
+            })?;
+            let next_len = legacy
+                .len()
+                .checked_add(separator_bytes)
+                .and_then(|length| length.checked_add(marker_bytes))
+                .and_then(|length| length.checked_add(current.len()))
+                .ok_or_else(|| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "merged heuristic file length overflowed",
+                    )
+                })?;
+            if next_len as u64 > HEUR_STORE_MAX_BYTES {
+                return Err(store_error(
+                    "migrate",
+                    self.path.clone(),
+                    "capacity",
+                    format!(
+                        "merged heuristic file would have {next_len} bytes, maximum is {HEUR_STORE_MAX_BYTES}"
+                    ),
+                ));
+            }
+            let mut merged = Vec::with_capacity(next_len);
+            merged.extend_from_slice(&legacy);
+            if !legacy.ends_with(b"\n") {
+                merged.push(b'\n');
+            }
+            merged.extend_from_slice(marker.as_bytes());
+            merged.push(b'\n');
+            merged.extend_from_slice(&current);
+            Ok((merged, Some(legacy_import)))
         }
     }
 
@@ -5432,19 +5610,24 @@ pub mod rewrite {
         }
     }
 
-    fn default_path() -> PathBuf {
+    fn default_paths() -> (PathBuf, Option<PathBuf>) {
         if let Ok(path) = std::env::var("SPIRAL_HEUR_FILE") {
             if !path.trim().is_empty() {
-                return PathBuf::from(path);
+                return (PathBuf::from(path), None);
             }
         }
-        dirs::home_dir()
+        let root = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".spiraltorch/heur.kdsl")
+            .join(".spiraltorch");
+        (root.join("heur.kdsl"), Some(root.join("heur/heur.kdsl")))
     }
 
     pub fn rule_id(rule_text: &str) -> String {
-        let digest = Sha256::digest(rule_text.as_bytes());
+        sha256_hex(rule_text.as_bytes())
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let digest = Sha256::digest(bytes);
         let mut encoded = String::with_capacity(64);
         for byte in digest {
             use std::fmt::Write as _;
@@ -5454,6 +5637,10 @@ pub mod rewrite {
     }
 
     fn read_bounded(path: &Path) -> Result<Vec<u8>, HeurStoreError> {
+        read_bounded_with_limit(path, HEUR_STORE_MAX_BYTES)
+    }
+
+    fn read_bounded_with_limit(path: &Path, limit: u64) -> Result<Vec<u8>, HeurStoreError> {
         let file = match File::open(path) {
             Ok(file) => file,
             Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -5462,13 +5649,13 @@ pub mod rewrite {
         let metadata = file
             .metadata()
             .map_err(|source| io_error("metadata", path, source))?;
-        if metadata.len() > HEUR_STORE_MAX_BYTES {
+        if metadata.len() > limit {
             return Err(store_error(
                 "read",
                 path.to_path_buf(),
                 "capacity",
                 format!(
-                    "existing heuristic file has {} bytes, maximum is {HEUR_STORE_MAX_BYTES}",
+                    "existing heuristic file has {} bytes, remaining maximum is {limit}",
                     metadata.len()
                 ),
             ));
@@ -5482,15 +5669,15 @@ pub mod rewrite {
             )
         })?;
         let mut bytes = Vec::with_capacity(capacity);
-        file.take(HEUR_STORE_MAX_BYTES + 1)
+        file.take(limit.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|source| io_error("read", path, source))?;
-        if bytes.len() as u64 > HEUR_STORE_MAX_BYTES {
+        if bytes.len() as u64 > limit {
             return Err(store_error(
                 "read",
                 path.to_path_buf(),
                 "capacity",
-                format!("heuristic file grew beyond {HEUR_STORE_MAX_BYTES} bytes while reading"),
+                format!("heuristic file grew beyond {limit} bytes while reading"),
             ));
         }
         Ok(bytes)
@@ -5567,6 +5754,73 @@ pub mod rewrite {
             assert_eq!(second.bytes_after, first.bytes_after);
             assert!(!second.durable_sync);
             assert_eq!(fs::read(&path).expect("unchanged bytes"), expected);
+        }
+
+        #[test]
+        fn default_store_imports_legacy_history_once_without_deleting_it() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join(".spiraltorch/heur.kdsl");
+            let legacy_path = temp.path().join(".spiraltorch/heur/heur.kdsl");
+            fs::create_dir_all(legacy_path.parent().expect("legacy parent"))
+                .expect("legacy directory");
+            let legacy_bytes = b"legacy-rule  # {\"wins\":4,\"trials\":4}\n";
+            let canonical_bytes = b"canonical-rule\n";
+            fs::write(&legacy_path, legacy_bytes).expect("legacy snapshot");
+            fs::write(&path, canonical_bytes).expect("canonical snapshot");
+            let store = HeurStore::try_new_paths(path.clone(), Some(legacy_path.clone()))
+                .expect("default-path store imports legacy history at startup");
+            let import = store
+                .startup_legacy_import()
+                .expect("typed startup legacy import witness");
+            assert_eq!(import.contract, HEUR_STORE_LEGACY_IMPORT_CONTRACT);
+            assert_eq!(import.source_path, legacy_path);
+            assert_eq!(import.source_bytes, legacy_bytes.len() as u64);
+            assert_eq!(import.source_sha256, sha256_hex(legacy_bytes));
+
+            let migrated = fs::read(&path).expect("migrated canonical snapshot");
+            let migrated_text = std::str::from_utf8(&migrated).expect("UTF-8 snapshot");
+            let legacy_position = migrated_text.find("legacy-rule").expect("legacy rule");
+            let marker_position = migrated_text
+                .find("# blackcat-migration ")
+                .expect("migration marker");
+            let canonical_position = migrated_text
+                .find("canonical-rule")
+                .expect("canonical rule");
+            assert!(legacy_position < marker_position);
+            assert!(marker_position < canonical_position);
+            assert_eq!(
+                fs::read(&legacy_path).expect("legacy retained"),
+                legacy_bytes
+            );
+
+            let receipt = store
+                .append_once("legacy-rule", &record("legacy-rule"))
+                .expect("legacy inline rule is recognized after migration");
+            assert_eq!(receipt.disposition, HeurStoreDisposition::AlreadyPresent);
+            assert_eq!(receipt.bytes_before, migrated.len() as u64);
+            assert_eq!(receipt.bytes_after, migrated.len() as u64);
+            assert!(!receipt.durable_sync);
+            assert!(receipt.legacy_import.is_none());
+            assert_eq!(fs::read(&path).expect("stable canonical bytes"), migrated);
+
+            let extended_legacy =
+                b"legacy-rule  # {\"wins\":4,\"trials\":4}\nlate-rule  # {\"wins\":8,\"trials\":8}\n";
+            fs::write(&legacy_path, extended_legacy).expect("late legacy update");
+            let late = store
+                .append_once("late-rule", &record("late-rule"))
+                .expect("a late legacy update is imported under the same lock");
+            assert_eq!(late.disposition, HeurStoreDisposition::AlreadyPresent);
+            assert!(late.durable_sync);
+            assert_eq!(
+                late.legacy_import
+                    .as_ref()
+                    .expect("late import witness")
+                    .source_sha256,
+                sha256_hex(extended_legacy)
+            );
+            assert!(fs::read_to_string(&path)
+                .expect("late canonical snapshot")
+                .contains("late-rule"));
         }
 
         #[test]

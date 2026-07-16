@@ -2697,7 +2697,9 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
   Wilson interval before appending `soft(...)` rules. The shared store honours
   `SPIRAL_HEUR_FILE`, otherwise writes `~/.spiraltorch/heur.kdsl`, and returns a
   durable append-once receipt rather than hiding persistence failures. Transcripts
-  land in `roundtable.log` so you can replay how every choice surfaced.
+  land in `roundtable.log` so you can replay how every choice surfaced. Opening
+  the default store imports the legacy `~/.spiraltorch/heur/heur.kdsl` history
+  with a hashed migration witness and leaves the source file intact.
   
 ---
 
@@ -2993,8 +2995,10 @@ epoch requires at least eight observations and promotes a rule only when the
 95% Wilson lower bound clears the configured baseline. The interval, threshold,
 decision, and typed persistence result are retained in
 `SoftHeuristicAdoptionReport`; a store error is reported without pretending that
-the rule was adopted, and a later observation retries the write. Persisted rules
-use a stable SHA-256 identity and an atomically synced append-once snapshot.
+the rule was adopted, and a later observation retries the write. Observations
+continue to update the Wilson witness after adoption without rewriting the rule;
+automatic retraction is a separate policy. Persisted rules use a stable SHA-256
+identity and an atomically synced append-once snapshot.
 ZMeta's fractional penalty
 reuses the same periodic Sobolev evaluator as `runtime::zspace_optimizer`, so a
 CPU/WGPU route request cannot change the mathematical objective. Invalid reward,
