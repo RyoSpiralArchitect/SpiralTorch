@@ -895,11 +895,12 @@ def test_coherence_diagnostics_projection_infers_metrics():
     assert contract["kind"] == "spiraltorch.zspace_coherence_projection"
     assert (
         contract["contract_version"]
-        == "spiraltorch.zspace_coherence_projection.v1"
+        == "spiraltorch.zspace_coherence_projection.v2"
     )
     assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
     assert contract["semantic_backend"] == "rust"
     assert "speed=tanh(speed_gain*C)" in contract["projection_formula"]
+    assert "coherence_entropy~=H(p)" in contract["evidence_validation_formula"]
     assert contract["derived"]["distribution_source"] == "normalized_weights"
     assert contract["derived"]["normalized_entropy"] == pytest.approx(
         diagnostics.coherence_entropy / math.log(4.0)
@@ -962,7 +963,7 @@ def test_coherence_diagnostics_projection_infers_metrics():
 def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain():
     contract = zspace_coherence_project(
         {
-            "mean_coherence": 0.2,
+            "mean_coherence": 0.7 / 3.0,
             "entropy": 0.3,
             "energy_ratio": 0.6,
             "z_bias": 0.1,
@@ -986,6 +987,28 @@ def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain()
         zspace_coherence_project(
             _DummyDiagnostics(),
             coherence=[0.6, 0.3, 0.1],
+        )
+
+    inconsistent_entropy = _DummyDiagnostics()
+    inconsistent_entropy.coherence_entropy = 0.5
+    with pytest.raises(ValueError, match="coherence_entropy.*inconsistent"):
+        zspace_coherence_project(inconsistent_entropy)
+
+    inconsistent_support = _DummyDiagnostics()
+    inconsistent_support.preserved_channels = 4
+    inconsistent_support.discarded_channels = 0
+    with pytest.raises(ValueError, match="preserved_channels.*4.*observed 3"):
+        zspace_coherence_project(inconsistent_support)
+
+    inconsistent_dominant = _DummyDiagnostics()
+    inconsistent_dominant.dominant_channel = 1
+    with pytest.raises(ValueError, match="dominant coherence channel 1"):
+        zspace_coherence_project(inconsistent_dominant)
+
+    with pytest.raises(ValueError, match="mean_coherence.*inconsistent"):
+        zspace_coherence_project(
+            _DummyDiagnostics(),
+            coherence=[0.8, 0.2, 0.1, 0.1],
         )
 
 

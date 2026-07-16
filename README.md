@@ -308,6 +308,12 @@ trace, Python, and WASM only transport that decision. Call
 `cascade_energy_ratio_min` to `st.zspace_coherence_project(...)` to select a
 different Rust policy.
 
+Projection contract v2 also validates that all supplied evidence describes one
+observation: entropy, support counts, and the dominant channel must agree with
+`normalized_weights`, while `mean_coherence` must agree with the raw
+`coherence` response when present. Python and WASM surface the resulting Rust
+error instead of repairing or reinterpreting contradictory evidence.
+
 Runtime plan scoring follows the same ownership rule. Variational free energy
 is evaluated only by `st-core::heur::free_energy`; Python and WASM transport the
 same request and return the versioned Rust report. Missing or numerically tiny

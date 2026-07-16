@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub const ZSPACE_COHERENCE_PROJECTION_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_coherence_projection.v1";
+    "spiraltorch.zspace_coherence_projection.v2";
 pub const ZSPACE_COHERENCE_PROJECTION_KIND: &str = "spiraltorch.zspace_coherence_projection";
 pub const ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER: &str = "st-core::inference::zspace_coherence";
 pub const ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND: &str = "rust";
@@ -15,6 +15,8 @@ pub const ZSPACE_COHERENCE_PROJECTION_FORMULA: &str =
     "speed=tanh(speed_gain*C);C=C_HHI(normalized_weights)|1-H_norm(diagnostic_entropy);memory=tanh(z_bias);stability=tanh(stability_gain*(1-2*H_norm));frac=tanh(frac_gain*fractional_order);drs=tanh(drs_gain*(energy_ratio-0.5))";
 pub const ZSPACE_COHERENCE_SUMMARY_FORMULA: &str =
     "p=w/sum(w);H=-sum(p*ln(p));H_norm=H/ln(N);C_HHI=(sum(p^2)-1/N)/(1-1/N);N_eff=exp(H);response_mean=mean(coherence);peak=max(values)";
+pub const ZSPACE_COHERENCE_EVIDENCE_VALIDATION_FORMULA: &str =
+    "normalized_weights=>coherence_entropy~=H(p),preserved_channels=count(p>0),discarded_channels=count(p=0),dominant_channel in argmax(p);coherence=>mean_coherence~=mean(coherence);comparisons use channel-scaled f32 tolerance";
 pub const ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_coherence_classification.v1";
 pub const ZSPACE_COHERENCE_CLASSIFICATION_KIND: &str =
@@ -234,6 +236,7 @@ pub struct ZSpaceCoherenceProjectionPayload {
     pub semantic_backend: &'static str,
     pub projection_formula: &'static str,
     pub summary_formula: &'static str,
+    pub evidence_validation_formula: &'static str,
     pub diagnostics: ZSpaceCoherenceDiagnosticsInput,
     pub coherence: Vec<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +318,22 @@ pub enum ZSpaceCoherenceProjectionError {
         field: &'static str,
         value: f64,
         expected: f64,
+    },
+    #[error(
+        "Z-space coherence field '{field}' reports {actual} supported channels, observed {expected}"
+    )]
+    InconsistentChannelSupport {
+        field: &'static str,
+        actual: usize,
+        expected: usize,
+    },
+    #[error(
+        "dominant coherence channel {dominant} has normalized weight {value}, below observed peak {peak}"
+    )]
+    InconsistentDominantChannel {
+        dominant: usize,
+        value: f64,
+        peak: f64,
     },
 }
 
@@ -568,29 +587,27 @@ pub fn derive_zspace_coherence_control(
     })
 }
 
-/// Return whether every finite coherence channel is equal within the shared tolerance.
+/// Return whether a non-empty, fully finite arrangement is equal within the shared tolerance.
 pub fn is_zspace_coherence_swap_invariant<T>(arrangement: &[T]) -> bool
 where
     T: Copy,
     f64: From<T>,
 {
-    if arrangement.len() <= 1 {
-        return true;
+    if arrangement.is_empty() {
+        return false;
     }
-    let mut filtered: Vec<f64> = arrangement
-        .iter()
-        .copied()
-        .map(f64::from)
-        .filter(|value| value.is_finite())
-        .collect();
-    if filtered.is_empty() {
-        return true;
+
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    for value in arrangement.iter().copied().map(f64::from) {
+        if !value.is_finite() {
+            return false;
+        }
+        minimum = minimum.min(value);
+        maximum = maximum.max(value);
     }
-    filtered.sort_by(f64::total_cmp);
-    let first = filtered[0];
-    filtered
-        .iter()
-        .all(|value| (value - first).abs() <= (first.abs() * 1.0e-4).max(1.0e-6))
+    let scale = minimum.abs().max(maximum.abs());
+    maximum - minimum <= (scale * 1.0e-4).max(NUMERIC_TOLERANCE_FLOOR)
 }
 
 /// Classify a coherence observation through the canonical Rust policy.
@@ -676,9 +693,35 @@ fn request_channel_count(request: &ZSpaceCoherenceProjectionRequest) -> usize {
         .max(request.coherence.len())
 }
 
+fn stable_mean(values: &[f64]) -> f64 {
+    let scale = values
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+    if scale == 0.0 {
+        return 0.0;
+    }
+    let mut normalized_sum = 0.0;
+    let mut compensation = 0.0;
+    for value in values.iter().map(|value| value / scale) {
+        let next = normalized_sum + value;
+        // Neumaier compensation retains small residuals when large terms cancel.
+        compensation += if normalized_sum.abs() >= value.abs() {
+            (normalized_sum - next) + value
+        } else {
+            (value - next) + normalized_sum
+        };
+        normalized_sum = next;
+    }
+    let normalized_mean = (normalized_sum + compensation) / values.len() as f64;
+    scale * normalized_mean.clamp(-1.0, 1.0)
+}
+
 fn validate_request(
     request: &ZSpaceCoherenceProjectionRequest,
-) -> Result<(), ZSpaceCoherenceProjectionError> {
+) -> Result<Option<ZSpaceCoherenceDistributionSummary>, ZSpaceCoherenceProjectionError> {
     let diagnostics = &request.diagnostics;
     validate_range("mean_coherence", diagnostics.mean_coherence, 0.0, 1.0)?;
     validate_range(
@@ -691,9 +734,9 @@ fn validate_request(
     validate_scalar("z_bias", diagnostics.z_bias)?;
     validate_range("fractional_order", diagnostics.fractional_order, 0.0, 1.0)?;
 
-    if !diagnostics.normalized_weights.is_empty() {
-        summarize_zspace_coherence_distribution(&diagnostics.normalized_weights)?;
-    }
+    let distribution = (!diagnostics.normalized_weights.is_empty())
+        .then(|| summarize_zspace_coherence_distribution(&diagnostics.normalized_weights))
+        .transpose()?;
     for (index, value) in request.coherence.iter().enumerate() {
         if !value.is_finite() {
             return Err(ZSpaceCoherenceProjectionError::NonFiniteVector {
@@ -800,7 +843,91 @@ fn validate_request(
             });
         }
     }
-    Ok(())
+
+    if let Some(distribution) = distribution {
+        let metric_tolerance = f32_accumulation_tolerance(
+            distribution.channels,
+            diagnostics
+                .coherence_entropy
+                .abs()
+                .max(distribution.weight_entropy.abs()),
+        );
+        if (diagnostics.coherence_entropy - distribution.weight_entropy).abs() > metric_tolerance {
+            return Err(
+                ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                    field: "coherence_entropy",
+                    value: diagnostics.coherence_entropy,
+                    expected: distribution.weight_entropy,
+                },
+            );
+        }
+
+        let preserved = diagnostics
+            .normalized_weights
+            .iter()
+            .filter(|weight| **weight > 0.0)
+            .count();
+        let discarded = distribution.channels - preserved;
+        for (field, actual, expected) in [
+            (
+                "preserved_channels",
+                diagnostics.preserved_channels,
+                preserved,
+            ),
+            (
+                "discarded_channels",
+                diagnostics.discarded_channels,
+                discarded,
+            ),
+        ] {
+            if let Some(actual) = actual {
+                if actual != expected {
+                    return Err(ZSpaceCoherenceProjectionError::InconsistentChannelSupport {
+                        field,
+                        actual,
+                        expected,
+                    });
+                }
+            }
+        }
+
+        if let Some(dominant) = diagnostics.dominant_channel {
+            let dominant_weight = diagnostics.normalized_weights[dominant];
+            let observed_peak = peak(&diagnostics.normalized_weights);
+            let peak_tolerance = f32_accumulation_tolerance(
+                distribution.channels,
+                dominant_weight.abs().max(observed_peak.abs()),
+            );
+            if observed_peak - dominant_weight > peak_tolerance {
+                return Err(
+                    ZSpaceCoherenceProjectionError::InconsistentDominantChannel {
+                        dominant,
+                        value: dominant_weight,
+                        peak: observed_peak,
+                    },
+                );
+            }
+        }
+    }
+
+    if !request.coherence.is_empty() {
+        let observed_mean = stable_mean(&request.coherence);
+        let mean_tolerance = f32_accumulation_tolerance(
+            request.coherence.len(),
+            diagnostics.mean_coherence.abs().max(observed_mean.abs()),
+        );
+        if (diagnostics.mean_coherence - observed_mean).abs() > mean_tolerance {
+            return Err(
+                ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                    field: "mean_coherence",
+                    value: diagnostics.mean_coherence,
+                    expected: observed_mean,
+                },
+            );
+        }
+    }
+
+    Ok(distribution)
 }
 
 fn peak(values: &[f64]) -> f64 {
@@ -809,16 +936,17 @@ fn peak(values: &[f64]) -> f64 {
 
 fn derive_projection_summary(
     request: &ZSpaceCoherenceProjectionRequest,
+    distribution: Option<ZSpaceCoherenceDistributionSummary>,
 ) -> Result<ZSpaceCoherenceProjectionDerived, ZSpaceCoherenceProjectionError> {
     let channels = request_channel_count(request);
     let diagnostics = &request.diagnostics;
     let response_mean = if request.coherence.is_empty() {
         0.0
     } else {
-        request.coherence.iter().sum::<f64>() / request.coherence.len() as f64
+        stable_mean(&request.coherence)
     };
 
-    if diagnostics.normalized_weights.is_empty() {
+    let Some(distribution) = distribution else {
         let maximum_entropy = if channels > 1 {
             (channels as f64).ln()
         } else {
@@ -840,9 +968,7 @@ fn derive_projection_summary(
             response_peak: peak(&request.coherence),
             response_mean,
         });
-    }
-
-    let distribution = summarize_zspace_coherence_distribution(&diagnostics.normalized_weights)?;
+    };
 
     Ok(ZSpaceCoherenceProjectionDerived {
         channels,
@@ -861,10 +987,10 @@ fn derive_projection_summary(
 pub fn project_zspace_coherence(
     request: ZSpaceCoherenceProjectionRequest,
 ) -> Result<ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionError> {
-    validate_request(&request)?;
+    let distribution = validate_request(&request)?;
     let diagnostics = &request.diagnostics;
     let config = &request.config;
-    let derived = derive_projection_summary(&request)?;
+    let derived = derive_projection_summary(&request, distribution)?;
     let channels = derived.channels;
     let observed_preserved = if !diagnostics.normalized_weights.is_empty() {
         diagnostics
@@ -970,9 +1096,7 @@ pub fn project_zspace_coherence(
             metric: metric.clone(),
         });
     }
-    let classification = if diagnostics.normalized_weights.is_empty() {
-        None
-    } else {
+    let classification = if distribution.is_some() {
         Some(classify_zspace_coherence(
             ZSpaceCoherenceClassificationRequest {
                 energy_ratio: diagnostics.energy_ratio,
@@ -980,22 +1104,17 @@ pub fn project_zspace_coherence(
                 policy: request.classification_policy,
             },
         )?)
-    };
-    let control = if diagnostics.normalized_weights.is_empty() {
-        None
     } else {
+        None
+    };
+    let control = if let Some(distribution) = distribution {
         Some(derive_zspace_coherence_control(
-            ZSpaceCoherenceDistributionSummary {
-                channels: derived.channels,
-                weight_mass: derived.weight_mass,
-                weight_entropy: derived.weight_entropy,
-                normalized_entropy: derived.normalized_entropy,
-                concentration: derived.concentration,
-                effective_channels: derived.effective_channels,
-            },
+            distribution,
             diagnostics.energy_ratio,
             diagnostics.mean_coherence,
         )?)
+    } else {
+        None
     };
 
     Ok(ZSpaceCoherenceProjectionPayload {
@@ -1005,6 +1124,7 @@ pub fn project_zspace_coherence(
         semantic_backend: ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
         projection_formula: ZSPACE_COHERENCE_PROJECTION_FORMULA,
         summary_formula: ZSPACE_COHERENCE_SUMMARY_FORMULA,
+        evidence_validation_formula: ZSPACE_COHERENCE_EVIDENCE_VALIDATION_FORMULA,
         diagnostics: request.diagnostics,
         coherence: request.coherence,
         contour: request.contour,
@@ -1050,6 +1170,14 @@ mod tests {
         let expected_normalized_entropy = 1.0296530140645737_f64 / 4.0_f64.ln();
 
         assert_eq!(payload.semantic_backend, "rust");
+        assert_eq!(
+            payload.contract_version,
+            "spiraltorch.zspace_coherence_projection.v2"
+        );
+        assert_eq!(
+            payload.evidence_validation_formula,
+            ZSPACE_COHERENCE_EVIDENCE_VALIDATION_FORMULA
+        );
         assert_eq!(payload.derived.distribution_source, "normalized_weights");
         let classification = payload.classification.expect("weight classification");
         assert_eq!(classification.label, ZSpaceCoherenceLabel::CascadeImbalance);
@@ -1168,8 +1296,8 @@ mod tests {
                     z_bias: 0.0,
                     fractional_order: 0.5,
                     normalized_weights: weights.clone(),
-                    preserved_channels: Some(channels),
-                    discarded_channels: Some(0),
+                    preserved_channels: Some(if concentrated { 1 } else { channels }),
+                    discarded_channels: Some(if concentrated { channels - 1 } else { 0 }),
                     dominant_channel: Some(0),
                 },
                 coherence: weights,
@@ -1360,13 +1488,53 @@ mod tests {
             invalid,
             Err(ZSpaceCoherenceProjectionError::InvalidClassificationPolicy { .. })
         ));
+
+        assert!(is_zspace_coherence_swap_invariant(&[0.5_f64, 0.5]));
+        assert!(!is_zspace_coherence_swap_invariant(&[] as &[f64]));
+        assert!(!is_zspace_coherence_swap_invariant(&[f64::NAN, f64::NAN]));
+        assert!(!is_zspace_coherence_swap_invariant(&[0.5, f64::INFINITY]));
+    }
+
+    #[test]
+    fn projection_accepts_f32_diagnostics_at_the_channel_limit() {
+        let channels = ZSPACE_COHERENCE_MAX_CHANNELS;
+        let weight = 1.0_f32 / channels as f32;
+        let weights = vec![weight; channels];
+        let entropy = -weights
+            .iter()
+            .map(|weight| *weight * weight.ln())
+            .sum::<f32>();
+        let payload = project_zspace_coherence(ZSpaceCoherenceProjectionRequest {
+            diagnostics: ZSpaceCoherenceDiagnosticsInput {
+                mean_coherence: f64::from(weight),
+                coherence_entropy: f64::from(entropy),
+                energy_ratio: 0.8,
+                z_bias: 0.0,
+                fractional_order: 0.5,
+                normalized_weights: weights.iter().map(|value| f64::from(*value)).collect(),
+                preserved_channels: Some(channels),
+                discarded_channels: Some(0),
+                dominant_channel: Some(0),
+            },
+            coherence: weights.iter().map(|value| f64::from(*value)).collect(),
+            contour: None,
+            config: ZSpaceCoherenceProjectionConfig::default(),
+            classification_policy: ZSpaceCoherenceClassificationPolicy::default(),
+        })
+        .expect("f32 accumulation drift must remain inside the shared tolerance");
+
+        assert_eq!(payload.derived.channels, channels);
+        assert_eq!(
+            payload.classification.expect("classification").label,
+            ZSpaceCoherenceLabel::SymmetricPulse
+        );
     }
 
     #[test]
     fn trace_entropy_alias_and_contour_are_part_of_the_same_contract() {
         let request: ZSpaceCoherenceProjectionRequest = serde_json::from_value(json!({
             "diagnostics": {
-                "mean_coherence": 0.2,
+                "mean_coherence": 0.23333333333333334,
                 "entropy": 0.3,
                 "energy_ratio": 0.6,
                 "z_bias": 0.1,
@@ -1450,6 +1618,49 @@ mod tests {
         ));
 
         let mut invalid = request();
+        invalid.diagnostics.coherence_entropy = 0.5;
+        assert!(matches!(
+            project_zspace_coherence(invalid),
+            Err(
+                ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                    field: "coherence_entropy",
+                    ..
+                }
+            )
+        ));
+
+        let mut invalid = request();
+        invalid.diagnostics.preserved_channels = Some(4);
+        invalid.diagnostics.discarded_channels = Some(0);
+        assert!(matches!(
+            project_zspace_coherence(invalid),
+            Err(ZSpaceCoherenceProjectionError::InconsistentChannelSupport {
+                field: "preserved_channels",
+                actual: 4,
+                expected: 3,
+            })
+        ));
+
+        let mut invalid = request();
+        invalid.diagnostics.dominant_channel = Some(1);
+        assert!(matches!(
+            project_zspace_coherence(invalid),
+            Err(ZSpaceCoherenceProjectionError::InconsistentDominantChannel { dominant: 1, .. })
+        ));
+
+        let mut invalid = request();
+        invalid.coherence = vec![0.8, 0.2, 0.1, 0.1];
+        assert!(matches!(
+            project_zspace_coherence(invalid),
+            Err(
+                ZSpaceCoherenceProjectionError::InconsistentDistributionMetric {
+                    field: "mean_coherence",
+                    ..
+                }
+            )
+        ));
+
+        let mut invalid = request();
         invalid.coherence[0] = f64::NAN;
         assert!(matches!(
             project_zspace_coherence(invalid),
@@ -1479,11 +1690,17 @@ mod tests {
             Err(ZSpaceCoherenceProjectionError::EmptyChannels)
         );
 
-        let mut invalid = request();
-        invalid.coherence = vec![f64::MAX; 4];
-        assert!(matches!(
-            project_zspace_coherence(invalid),
-            Err(ZSpaceCoherenceProjectionError::NonFiniteDerived { .. })
-        ));
+        let mut high_dynamic_range = request();
+        high_dynamic_range.coherence = vec![1.0e300, 1.0, -1.0e300, 0.0];
+        let projected = project_zspace_coherence(high_dynamic_range)
+            .expect("finite high-dynamic-range residual must survive cancellation");
+        assert_relative_eq!(projected.derived.response_mean, 0.25, epsilon = 1.0e-15);
+        assert_eq!(projected.derived.response_peak, 1.0e300);
+
+        let mut permuted = request();
+        permuted.coherence = vec![1.0e300, -1.0e300, 1.0, 0.0];
+        let permuted = project_zspace_coherence(permuted)
+            .expect("response mean must not depend on cancellation order");
+        assert_relative_eq!(permuted.derived.response_mean, 0.25, epsilon = 1.0e-15);
     }
 }

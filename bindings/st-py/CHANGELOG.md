@@ -2,6 +2,10 @@
 
 ## 0.4.13
 
+- Z-space coherence projection v2: validate entropy, support counts, dominant
+  channel, and raw response mean against their supplied Rust-side evidence;
+  reject non-finite symmetry probes; and expose the same validation formula and
+  failures through Python and WASM without host-language repair.
 - Topos Z-space projection v2: the Rust payload now names its six-axis gradient
   basis, exact resize rule, and ordered semantic channels. Python and WASM
   transport that identity into posterior controls instead of attaching an
