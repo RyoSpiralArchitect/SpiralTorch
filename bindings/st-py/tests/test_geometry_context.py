@@ -90,6 +90,8 @@ def test_geometry_probe_router_accepts_supported_probe_kinds() -> None:
     assert partials[0].origin == "scale_stack:scalar"
     assert partials[1].origin == "fractal_field:branching_field"
     assert partials[2].origin == "log_z_series:projection"
+    assert all(partial.gradient_basis is not None for partial in partials)
+    assert len({partial.gradient_basis for partial in partials}) == 3
 
 
 def test_build_geometry_probe_context_feeds_api_llm_prompt() -> None:
@@ -143,11 +145,15 @@ def test_geometry_probe_consensus_partial_blends_probe_families() -> None:
     assert consensus.weight == pytest.approx(1.7)
     assert metadata["consensus"]["strategy"] == "mean"
     assert metadata["consensus"]["metric_count"] == len(metrics)
-    assert {"speed", "memory", "stability", "drs", "gradient"} <= set(metrics)
-    assert len(metrics["gradient"]) == 4
+    assert {"speed", "memory", "stability", "drs"} <= set(metrics)
+    assert "gradient" not in metrics
+    assert consensus.gradient_basis is None
+    assert metadata["consensus"]["gradient_preserved"] is False
     assert telemetry is not None
     assert telemetry["geometry.consensus.probe_count"] == pytest.approx(3.0)
     assert telemetry["geometry.consensus.family_count"] == pytest.approx(3.0)
+    assert telemetry["geometry.consensus.gradient_basis_count"] == pytest.approx(3.0)
+    assert telemetry["geometry.consensus.gradient_preserved"] == pytest.approx(0.0)
     assert telemetry["geometry.consensus.family_scale_stack_count"] == pytest.approx(1.0)
     assert telemetry[
         "geometry.consensus.log_z_series_projection_stability_mean"
@@ -225,6 +231,7 @@ def test_geometry_probe_context_artifact_round_trips(tmp_path) -> None:
     assert metadata["artifact_schema"] == "spiraltorch.geometry_probe_context.v1"
     assert metadata["probe_count"] == 2
     assert len(partials[0].resolved()["gradient"]) == 3
+    assert partials[0].gradient_basis is not None
 
 
 def test_geometry_probe_router_rejects_unknown_kind() -> None:

@@ -114,6 +114,42 @@ def test_failed_transition_preserves_python_state_and_cached_report() -> None:
     assert trainer.last_optimizer_report == report_before
 
 
+def test_tagged_latent_gradient_requires_the_exact_state_dimension() -> None:
+    trainer = st.ZSpaceTrainer(z_dim=4)
+    state_before = copy.deepcopy(trainer.state_dict())
+
+    with pytest.raises(
+        ValueError,
+        match="latent-coordinate gradient dimension must match Z state",
+    ):
+        trainer.step(
+            st.ZMetrics(
+                speed=0.0,
+                memory=0.0,
+                stability=0.0,
+                gradient=[0.1, -0.2],
+                gradient_basis=st.ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS,
+            )
+        )
+
+    assert trainer.state_dict() == state_before
+    assert trainer.last_optimizer_report is None
+
+
+def test_untagged_legacy_gradient_keeps_configured_projection_behavior() -> None:
+    trainer = st.ZSpaceTrainer(z_dim=4)
+
+    trainer.step({"gradient": [0.1, -0.2]})
+
+    assert trainer.state_dict()["step"] == 1
+    assert trainer.last_optimizer_report is not None
+    assert trainer.last_optimizer_report["gradient"]["projected_normalized"] == (
+        pytest.approx(
+            [math.tanh(0.1), math.tanh(-0.2), math.tanh(0.1), math.tanh(-0.2)]
+        )
+    )
+
+
 def test_malformed_native_checkpoint_is_rejected_before_python_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

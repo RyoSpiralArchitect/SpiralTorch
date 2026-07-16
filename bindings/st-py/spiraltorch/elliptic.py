@@ -194,6 +194,7 @@ def elliptic_warp_partial(
     aggregate: str = "mean",
     gradient_alignment: str = "strict",
     gradient_source: str = "rotor_transport",
+    gradient_basis: str | None = None,
     extra_telemetry: Mapping[str, Any] | None = None,
     return_features: bool = False,
 ):
@@ -215,6 +216,8 @@ def elliptic_warp_partial(
             ``"pad_zero"`` explicitly enables legacy zero padding.
         gradient_source: Telemetry vector used to seed the gradient channel;
             defaults to ``rotor_transport``.
+        gradient_basis: Explicit coordinate identity for custom gradient
+            sources. Known elliptic vectors use their canonical basis.
         extra_telemetry: Additional telemetry mapping merged into the bundle.
         return_features: When ``True``, also return the raw feature tensor.
 
@@ -235,6 +238,7 @@ def elliptic_warp_partial(
         aggregate=aggregate,
         gradient_alignment=gradient_alignment,
         gradient_source=gradient_source,
+        gradient_basis=gradient_basis,
         extra_telemetry=extra_telemetry,
     )
     if return_features:

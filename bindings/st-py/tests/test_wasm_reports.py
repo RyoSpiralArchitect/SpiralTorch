@@ -162,6 +162,7 @@ def test_summarize_canvas_wasm_report_and_convert_to_partial() -> None:
     metrics = partial.resolved()
 
     assert partial.origin == "wasm:canvas"
+    assert partial.gradient_basis == "spiraltorch.wasm.report.summary_features.v1"
     assert metrics["stability"] == pytest.approx(0.82)
     assert len(metrics["gradient"]) == 6
     telemetry = partial.telemetry_payload()

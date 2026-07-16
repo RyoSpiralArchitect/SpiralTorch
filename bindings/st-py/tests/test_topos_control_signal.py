@@ -235,10 +235,19 @@ def test_topos_zspace_projection_uses_rust_contract_and_dimension_adaptation() -
     assert projection["kind"] == "spiraltorch.topos_zspace_projection"
     assert (
         projection["contract_version"]
-        == "spiraltorch.topos_zspace_projection.v1"
+        == "spiraltorch.topos_zspace_projection.v2"
     )
     assert projection["semantic_owner"] == "st-tensor::pure::topos"
     assert projection["semantic_backend"] == "rust"
+    assert projection["gradient_basis"] == "spiraltorch.topos.control_signal.axes.v1"
+    assert projection["gradient_channels"] == [
+        "openness",
+        "guard_strength",
+        "stability_hint",
+        "exploration_hint",
+        "depth_pressure",
+        "volume_pressure",
+    ]
     assert projection["gradient_dim"] == 8
     assert projection["base_gradient_dim"] == 6
     assert projection["speed"] == pytest.approx(0.41477418)
@@ -286,7 +295,7 @@ def test_topos_zspace_projection_rejects_untrusted_native_contract(monkeypatch) 
         "_native_topos_zspace_projection_from_observation",
         lambda *_args, **_kwargs: {
             "kind": "spiraltorch.topos_control_signal",
-            "contract_version": "spiraltorch.topos_zspace_projection.v1",
+            "contract_version": "spiraltorch.topos_zspace_projection.v2",
             "semantic_owner": "st-tensor::pure::topos",
             "semantic_backend": "rust",
         },
@@ -612,6 +621,7 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     telemetry = partial.telemetry_payload()
 
     assert partial.origin == "topos:control"
+    assert partial.gradient_basis == "spiraltorch.topos.control_signal.axes.v1"
     assert resolved["memory"] == pytest.approx(0.5)
     assert resolved["stability"] > 0.0
     assert resolved["frac"] > 0.0
@@ -640,9 +650,19 @@ def test_topos_control_partial_consumes_projection_without_python_reconstruction
 ) -> None:
     projection = {
         "kind": "spiraltorch.topos_zspace_projection",
-        "contract_version": "spiraltorch.topos_zspace_projection.v1",
+        "contract_version": "spiraltorch.topos_zspace_projection.v2",
         "semantic_owner": "st-tensor::pure::topos",
         "semantic_backend": "rust",
+        "gradient_basis": "spiraltorch.topos.control_signal.axes.v1",
+        "gradient_formula": "rust-owned-test-formula",
+        "gradient_channels": [
+            "openness",
+            "guard_strength",
+            "stability_hint",
+            "exploration_hint",
+            "depth_pressure",
+            "volume_pressure",
+        ],
         "gradient_dim": 3,
         "base_gradient_dim": 6,
         "speed": 0.11,
@@ -667,6 +687,7 @@ def test_topos_control_partial_consumes_projection_without_python_reconstruction
     assert partial.resolved()["drs"] == pytest.approx(-0.44)
     assert partial.resolved()["frac"] == pytest.approx(0.55)
     assert partial.resolved()["gradient"] == pytest.approx([0.66, -0.77, 0.88])
+    assert partial.gradient_basis == projection["gradient_basis"]
 
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
@@ -700,6 +721,8 @@ def test_pipeline_add_topos_control_blends_into_inference() -> None:
     inference = pipeline.infer()
 
     assert bundle.origin == "topos:control"
+    assert inference.control_gradient is not None
+    assert inference.control_gradient.basis == bundle.gradient_basis
     assert inference.telemetry is not None
     assert inference.telemetry.payload["topos.volume_pressure"] == pytest.approx(0.5)
     assert inference.metrics["memory"] == pytest.approx(bundle.resolved()["memory"])

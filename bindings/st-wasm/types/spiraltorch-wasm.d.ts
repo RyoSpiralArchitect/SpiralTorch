@@ -535,10 +535,20 @@ declare module "spiraltorch-wasm" {
 
     export type ToposZSpaceProjection = {
         kind: "spiraltorch.topos_zspace_projection";
-        contract_version: "spiraltorch.topos_zspace_projection.v1";
+        contract_version: "spiraltorch.topos_zspace_projection.v2";
         semantic_owner: "st-tensor::pure::topos";
         semantic_backend: "rust";
         execution_client: "wasm";
+        gradient_basis: "spiraltorch.topos.control_signal.axes.v1";
+        gradient_formula: "gradient=resize([openness,guard_strength,stability_hint,exploration_hint,depth_pressure,volume_pressure],gradient_dim,0)";
+        gradient_channels: [
+            "openness",
+            "guard_strength",
+            "stability_hint",
+            "exploration_hint",
+            "depth_pressure",
+            "volume_pressure",
+        ];
         gradient_dim: number;
         base_gradient_dim: 6;
         speed: number;
@@ -786,13 +796,15 @@ declare module "spiraltorch-wasm" {
 
     export type ZSpacePosteriorDecode = {
         kind: "spiraltorch.zspace_posterior_decode";
-        contract_version: "spiraltorch.zspace_posterior.v1";
+        contract_version: "spiraltorch.zspace_posterior.v2";
         semantic_owner: "st-core::inference::zspace_posterior";
         semantic_backend: "rust";
         execution_client: "wasm";
         metric_formula: string;
         fractional_formula: string;
+        spectral_formula: string;
         gradient_formula: string;
+        gradient_basis: "spiraltorch.zspace.latent.central_difference.zero_boundary.v1";
         barycentric_formula: string;
         z_state: number[];
         alpha: number;
@@ -800,7 +812,11 @@ declare module "spiraltorch-wasm" {
         gradient: number[];
         barycentric: [number, number, number];
         energy: number;
+        spectral_energy: number;
+        parseval_relative_error: number;
         frac_energy: number;
+        fractional_energy_ratio: number;
+        spectral_centroid: number;
         spectral_bins: number;
     };
 
@@ -808,21 +824,31 @@ declare module "spiraltorch-wasm" {
         z_state: number[];
         alpha?: number;
         partial?: Record<string, number | number[]>;
+        gradient_basis?: string | null;
         smoothing?: number;
         telemetry?: Array<Record<string, unknown>>;
     };
 
     export type ZSpacePosteriorTelemetryAdjustment = {
-        variance_damping: number;
-        focus_gain: number;
-        energy_gain: number;
+        variance_reliability: number;
+        focus_reliability: number;
+        combined_reliability: number;
         residual_before: number;
         confidence_before: number;
     };
 
+    export type ZSpacePosteriorControlGradient = {
+        source: "partial";
+        basis: string;
+        values: number[];
+        dimension: number;
+        l2: number;
+        linf: number;
+    };
+
     export type ZSpacePosteriorProjection = {
         kind: "spiraltorch.zspace_posterior_projection";
-        contract_version: "spiraltorch.zspace_posterior.v1";
+        contract_version: "spiraltorch.zspace_posterior.v2";
         semantic_owner: "st-core::inference::zspace_posterior";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -831,9 +857,14 @@ declare module "spiraltorch-wasm" {
         smoothing: number;
         metrics: Record<string, number>;
         gradient: number[];
+        gradient_basis: "spiraltorch.zspace.latent.central_difference.zero_boundary.v1";
+        gradient_source: "latent_state";
+        control_gradient?: ZSpacePosteriorControlGradient;
         barycentric: [number, number, number];
         residual: number;
+        residual_metric_count: number;
         confidence: number;
+        telemetry_reliability: number;
         applied: Record<string, number | number[]>;
         prior: ZSpacePosteriorDecode;
         telemetry?: ZSpaceTelemetryFusion;

@@ -3867,6 +3867,7 @@ class ZMetrics:
     gradient: Optional[Sequence[float]]
     drs: float
     telemetry: Optional[Mapping[str, float]]
+    gradient_basis: Optional[str]
 
 def z_metrics(
     *,
@@ -3875,17 +3876,35 @@ def z_metrics(
     stability: float | None = ...,
     drs: float | None = ...,
     gradient: object | None = ...,
+    gradient_basis: str | None = ...,
     telemetry: object | None = ...,
     **aliases: object,
 ) -> ZMetrics: ...
+
+class ZSpaceControlGradient:
+    source: str
+    basis: str
+    values: Tuple[float, ...]
+    dimension: int
+    l2: float
+    linf: float
+
+    def as_dict(self) -> Dict[str, object]: ...
+
 
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
     metrics: Mapping[str, float]
     gradient: Tuple[float, ...]
+    gradient_basis: str
     barycentric: Tuple[float, float, float]
     energy: float
+    spectral_energy: float
+    parseval_relative_error: float
     frac_energy: float
+    fractional_energy_ratio: float
+    spectral_centroid: float
+    spectral_bins: int
 
     def as_dict(self) -> Dict[str, object]: ...
 
@@ -3924,12 +3943,17 @@ class ZSpacePartialBundle:
 class ZSpaceInference:
     metrics: Mapping[str, float]
     gradient: Sequence[float]
+    gradient_basis: str
+    control_gradient: Optional[ZSpaceControlGradient]
     barycentric: Tuple[float, float, float]
     residual: float
+    residual_metric_count: int
     confidence: float
+    telemetry_reliability: float
     prior: ZSpaceDecoded
     applied: Mapping[str, object]
     telemetry: Optional[ZSpaceTelemetryFrame]
+    fusion: Optional[Mapping[str, Any]]
 
     def as_dict(self) -> Dict[str, object]: ...
 
@@ -3958,6 +3982,7 @@ class ZSpacePosterior:
         partial: Mapping[str, object] | None,
         *,
         smoothing: float = ...,
+        gradient_basis: str | None = ...,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
     ) -> ZSpaceInference: ...
 
@@ -3983,6 +4008,8 @@ class ZSpaceInferenceRuntime:
     def telemetry(self) -> Mapping[str, float]: ...
     @property
     def cached_observations(self) -> Mapping[str, Any]: ...
+    @property
+    def gradient_basis(self) -> str | None: ...
 
     def clear(self) -> None: ...
     def set_telemetry(
@@ -3993,12 +4020,14 @@ class ZSpaceInferenceRuntime:
         self,
         partial: Mapping[str, Any] | None = ...,
         *,
+        gradient_basis: str | None = ...,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
     ) -> ZSpaceInference: ...
     def infer(
         self,
         partial: Mapping[str, Any] | None = ...,
         *,
+        gradient_basis: str | None = ...,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
     ) -> ZSpaceInference: ...
 
@@ -4034,6 +4063,7 @@ class ZSpaceInferencePipeline:
         weight: float | None = ...,
         origin: str | None = ...,
         telemetry: Mapping[str, Any] | None = ...,
+        gradient_basis: str | None = ...,
     ) -> ZSpacePartialBundle: ...
     def add_elliptic_telemetry(
         self,
@@ -4045,8 +4075,24 @@ class ZSpaceInferencePipeline:
         aggregate: str = ...,
         gradient_alignment: str | None = ...,
         gradient_source: str = ...,
+        gradient_basis: str | None = ...,
         extra_telemetry: Mapping[str, Any] | None = ...,
     ) -> ZSpacePartialBundle: ...
+    def add_elliptic_autograd(
+        self,
+        warp: Any,
+        orientation: Any,
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        aggregate: str = ...,
+        gradient_alignment: str | None = ...,
+        gradient_source: str = ...,
+        gradient_basis: str | None = ...,
+        extra_telemetry: Mapping[str, Any] | None = ...,
+        return_features: bool = ...,
+    ) -> ZSpacePartialBundle | Tuple[Any, ZSpacePartialBundle]: ...
     def add_canvas_snapshot(self, snapshot: Any, **kwargs: Any) -> ZSpacePartialBundle: ...
     def add_coherence_diagnostics(
         self,
@@ -4115,8 +4161,39 @@ def zspace_posterior_project(
     *,
     alpha: float = ...,
     smoothing: float = ...,
+    gradient_basis: str | None = ...,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
 ) -> Dict[str, Any]: ...
+
+
+def elliptic_partial_from_telemetry(
+    telemetry: Any,
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    aggregate: str = ...,
+    gradient_alignment: str = ...,
+    gradient_source: str = ...,
+    gradient_basis: str | None = ...,
+    extra_telemetry: Mapping[str, Any] | None = ...,
+) -> ZSpacePartialBundle: ...
+
+
+def elliptic_warp_partial(
+    warp: Any,
+    orientation: Any,
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    aggregate: str = ...,
+    gradient_alignment: str = ...,
+    gradient_source: str = ...,
+    gradient_basis: str | None = ...,
+    extra_telemetry: Mapping[str, Any] | None = ...,
+    return_features: bool = ...,
+) -> ZSpacePartialBundle | Tuple[Any, ZSpacePartialBundle]: ...
 
 
 def zspace_coherence_project(
@@ -4158,6 +4235,7 @@ def infer_from_partial(
     *,
     alpha: float = ...,
     smoothing: float = ...,
+    gradient_basis: str | None = ...,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
 ) -> ZSpaceInference: ...
 
@@ -4174,6 +4252,9 @@ def blend_zspace_partials(
 
 ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS: Literal[
     "spiraltorch.zspace.canonical_metric_cycle.v1"
+]
+ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS: Literal[
+    "spiraltorch.zspace.latent.central_difference.zero_boundary.v1"
 ]
 
 
@@ -4312,6 +4393,7 @@ def compile_inference(
     *,
     alpha: float = ...,
     smoothing: float = ...,
+    gradient_basis: str | None = ...,
 ) -> Callable[..., ZSpaceInference]: ...
 
 
@@ -4967,6 +5049,7 @@ class ZSpaceTrainer:
         *,
         alpha: float | None = ...,
         smoothing: float = ...,
+        gradient_basis: str | None = ...,
         telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
     ) -> ZSpaceInference: ...
     def step_partial(
@@ -4975,6 +5058,7 @@ class ZSpaceTrainer:
         *,
         alpha: float | None = ...,
         smoothing: float = ...,
+        gradient_basis: str | None = ...,
         telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
         prefer_applied: bool = ...,
     ) -> float: ...
@@ -11181,6 +11265,7 @@ __all__ = [
     "BarycenterIntermediate",
     "z_space_barycenter",
     "ZMetrics",
+    "ZSpaceControlGradient",
     "ZSpaceDecoded",
     "ZSpaceInference",
     "ZSpacePosterior",
@@ -11189,6 +11274,7 @@ __all__ = [
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
     "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
+    "ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS",
     "zspace_posterior_decode",
     "zspace_posterior_project",
     "zspace_coherence_project",

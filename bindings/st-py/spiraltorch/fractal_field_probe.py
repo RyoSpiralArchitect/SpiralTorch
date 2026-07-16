@@ -5,10 +5,15 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 __all__ = [
+    "FRACTAL_FIELD_PROBE_GRADIENT_BASIS",
     "fractal_field_partial",
     "fractal_field_probe",
     "fractal_field_probe_to_zspace_partial",
 ]
+
+FRACTAL_FIELD_PROBE_GRADIENT_BASIS = (
+    "spiraltorch.geometry.fractal_field.probe_features.v1"
+)
 
 
 def _optional_float(value: Any) -> float | None:
@@ -224,6 +229,7 @@ def fractal_field_probe_to_zspace_partial(
         weight=max(0.0, float(bundle_weight)),
         origin=origin or "fractal_field:branching_field",
         telemetry=telemetry,
+        gradient_basis=FRACTAL_FIELD_PROBE_GRADIENT_BASIS,
     )
 
 

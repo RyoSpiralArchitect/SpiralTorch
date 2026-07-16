@@ -2172,7 +2172,14 @@ python bindings/st-py/examples/zspace_inference_quickstart.py
 import spiraltorch as st
 
 trainer = st.ZSpaceTrainer(z_dim=4)
-loss = trainer.step_partial({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": [0.1, 0.0, 0.0, 0.0]})
+checkpoint = trainer.state_dict()
+checkpoint["z"] = [0.12, -0.03, 0.48, -0.2]
+trainer.load_state_dict(checkpoint)
+control = st.ZSpacePartialBundle(
+    {"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": [0.1, 0.0, 0.0, 0.0]},
+    gradient_basis="example.observed.control.v1",
+)
+loss = trainer.step_partial(control)
 print("z:", trainer.state, "loss:", loss)
 print("last inference:", trainer.last_inference.residual, trainer.last_inference.confidence)
 ```
@@ -2184,15 +2191,28 @@ barycentric projection, residual/confidence update, and telemetry adjustment
 live in `st-core::inference::zspace_posterior`; Python does not carry fallback
 formulas. Use `zspace_posterior_decode(...)` or
 `zspace_posterior_project(...)` when a versioned audit payload is preferable to
-the high-level dataclasses:
+the high-level dataclasses. Contract v2 reports Parseval-normalized
+`spectral_energy`, `parseval_relative_error`, `fractional_energy_ratio`,
+`spectral_centroid`, and `spectral_bins`. Its `gradient` is always the latent
+finite-difference gradient in
+`ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS`; basis-tagged external gradients are
+preserved separately as `control_gradient` and are never padded, normalized, or
+used to replace the latent gradient. `ZSpaceTrainer.step_partial(...)` therefore
+trains from the Rust latent gradient; it retains the external control for audit
+but does not apply it without a future explicit control-to-latent projection.
+Confidence is `exp(-observed_metric_rms)`
+times a conservative telemetry reliability no greater than one:
 
 ```python
 contract = st.zspace_posterior_project(
     [0.12, -0.03, 0.48, -0.2],
-    {"speed": 0.3, "mem": -0.2},
+    {"speed": 0.3, "mem": -0.2, "gradient": [0.2, -0.1]},
+    gradient_basis="example.optimizer.control.v1",
     telemetry={"psi": {"energy": 2.0, "focus": 0.4}},
 )
 assert contract["semantic_owner"] == "st-core::inference::zspace_posterior"
+assert contract["gradient_basis"] == st.ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+assert contract["control_gradient"]["basis"] == "example.optimizer.control.v1"
 ```
 
 Coherence-to-Z-space projection is also Rust-owned. Native

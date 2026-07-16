@@ -9,7 +9,7 @@ from typing import Any
 from .fractal_field_probe import fractal_field_probe_to_zspace_partial
 from .log_z_series_probe import log_z_series_probe_to_zspace_partial
 from .scale_stack_probe import scale_stack_probe_to_zspace_partial
-from .zspace_inference import ZSpacePartialBundle, blend_zspace_partials
+from .zspace_inference import ZSpacePartialBundle, zspace_partial_fusion
 
 __all__ = [
     "build_geometry_probe_context",
@@ -125,6 +125,7 @@ def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
         "weight": partial.weight,
         "origin": partial.origin,
         "telemetry": None if telemetry is None else dict(telemetry),
+        "gradient_basis": partial.gradient_basis,
     }
 
 
@@ -137,11 +138,15 @@ def _partial_from_payload(payload: Any) -> ZSpacePartialBundle:
     telemetry = payload.get("telemetry")
     if telemetry is not None and not isinstance(telemetry, Mapping):
         raise ValueError("geometry context partial telemetry must be an object")
+    gradient_basis = payload.get("gradient_basis")
+    if gradient_basis is not None and not isinstance(gradient_basis, str):
+        raise ValueError("geometry context partial gradient_basis must be a string")
     return ZSpacePartialBundle(
         dict(metrics),
         weight=float(payload.get("weight", 1.0)),
         origin=None if payload.get("origin") is None else str(payload.get("origin")),
         telemetry=None if telemetry is None else dict(telemetry),
+        gradient_basis=gradient_basis,
     )
 
 
@@ -292,18 +297,57 @@ def _consensus_partial_from_context(
     origin: str,
 ) -> ZSpacePartialBundle:
     strategy = _normalise_consensus_strategy(strategy)
-    metrics = blend_zspace_partials(partials, strategy=strategy)
+    resolved = [(partial, partial.resolved()) for partial in partials]
+    gradient_bases = {
+        partial.gradient_basis
+        for partial, metrics in resolved
+        if "gradient" in metrics and partial.gradient_basis is not None
+    }
+    gradient_count = sum("gradient" in metrics for _, metrics in resolved)
+    preserve_gradient = (
+        gradient_count == len(resolved)
+        and len(gradient_bases) == 1
+        and None not in {
+            partial.gradient_basis
+            for partial, metrics in resolved
+            if "gradient" in metrics
+        }
+    )
+    fusion_inputs: list[ZSpacePartialBundle]
+    if preserve_gradient:
+        fusion_inputs = list(partials)
+    else:
+        fusion_inputs = [
+            ZSpacePartialBundle(
+                {key: value for key, value in metrics.items() if key != "gradient"},
+                weight=partial.weight,
+                origin=partial.origin,
+                telemetry=partial.telemetry,
+            )
+            for partial, metrics in resolved
+        ]
+    fusion = zspace_partial_fusion(fusion_inputs, strategy=strategy)
+    metrics = dict(fusion["metrics"])
+    gradient = fusion.get("gradient")
+    gradient_basis = fusion.get("gradient_basis")
+    if preserve_gradient and gradient is not None:
+        metrics["gradient"] = list(gradient)
     telemetry = _consensus_telemetry(
         metadata,
         telemetry_prefix=telemetry_prefix,
         strategy=strategy,
         metric_count=len(metrics),
     )
+    consensus_prefix = f"{telemetry_prefix or 'geometry'}.consensus"
+    telemetry[f"{consensus_prefix}.gradient_source_count"] = float(gradient_count)
+    telemetry[f"{consensus_prefix}.gradient_basis_count"] = float(len(gradient_bases))
+    telemetry[f"{consensus_prefix}.gradient_preserved"] = float(preserve_gradient)
     return ZSpacePartialBundle(
         metrics,
         weight=max(0.0, float(bundle_weight)),
         origin=origin or "geometry:consensus",
         telemetry=telemetry,
+        gradient_basis=gradient_basis if preserve_gradient else None,
     )
 
 
@@ -344,6 +388,8 @@ def geometry_probe_consensus_partial(
         "strategy": _normalise_consensus_strategy(strategy),
         "weight": consensus.weight,
         "metric_count": len(consensus.resolved()),
+        "gradient_basis": consensus.gradient_basis,
+        "gradient_preserved": "gradient" in consensus.resolved(),
     }
     return consensus, consensus_metadata
 
@@ -422,6 +468,8 @@ def build_geometry_probe_context(
             "strategy": _normalise_consensus_strategy(consensus_strategy),
             "weight": consensus.weight,
             "metric_count": len(consensus.resolved()),
+            "gradient_basis": consensus.gradient_basis,
+            "gradient_preserved": "gradient" in consensus.resolved(),
             "source_origin_count": len(metadata["source_origins"]),
         }
         if consensus_only:

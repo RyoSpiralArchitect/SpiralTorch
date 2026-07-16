@@ -5,10 +5,15 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 __all__ = [
+    "LOG_Z_SERIES_PROBE_GRADIENT_BASIS",
     "log_z_series_partial",
     "log_z_series_probe",
     "log_z_series_probe_to_zspace_partial",
 ]
+
+LOG_Z_SERIES_PROBE_GRADIENT_BASIS = (
+    "spiraltorch.geometry.log_z_series.probe_features.v1"
+)
 
 
 def _optional_float(value: Any) -> float | None:
@@ -261,6 +266,7 @@ def log_z_series_probe_to_zspace_partial(
         weight=max(0.0, float(bundle_weight)),
         origin=origin or "log_z_series:projection",
         telemetry=telemetry,
+        gradient_basis=LOG_Z_SERIES_PROBE_GRADIENT_BASIS,
     )
 
 

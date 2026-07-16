@@ -184,6 +184,7 @@ mod tests {
             "z_state": [0.12, -0.03, 0.48, -0.2],
             "alpha": 0.35,
             "partial": {"speed": 0.3, "mem": -0.2, "gradient": [2.0, -1.0]},
+            "gradient_basis": "test.posterior.control.v1",
             "smoothing": 0.35,
             "telemetry": [{"psi": {"energy": 2.0, "focus": 0.4}}]
         }))
@@ -228,5 +229,12 @@ mod tests {
         let error = zspace_posterior_project_value(request)
             .expect_err("out-of-range smoothing must fail closed");
         assert_eq!(error, ZSpacePosteriorError::InvalidSmoothing { value: 1.1 });
+
+        let request =
+            projection_request_from_json(r#"{"z_state":[0.1],"partial":{"gradient":[0.2]}}"#)
+                .expect("syntactically valid untagged control gradient");
+        let error = zspace_posterior_project_value(request)
+            .expect_err("untagged external controls must fail closed");
+        assert_eq!(error, ZSpacePosteriorError::MissingControlGradientBasis);
     }
 }

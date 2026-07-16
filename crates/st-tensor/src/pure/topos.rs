@@ -89,7 +89,7 @@ pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION: &str = "raw_gradient_rms"
 pub const TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION: &str = "biased_gradient_rms";
 
 /// Stable contract identifier shared by Rust, Python, and WASM Z-space clients.
-pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v1";
+pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v2";
 
 /// Stable payload kind for a Topos control signal projected into Z-space metrics.
 pub const TOPOS_ZSPACE_PROJECTION_KIND: &str = "spiraltorch.topos_zspace_projection";
@@ -102,6 +102,23 @@ pub const TOPOS_ZSPACE_PROJECTION_SEMANTIC_BACKEND: &str = "rust";
 
 /// Number of meaningful axes in the canonical Topos gradient basis.
 pub const TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM: usize = 6;
+
+/// Stable identity for the six semantic control axes emitted by this projection.
+pub const TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS: &str = "spiraltorch.topos.control_signal.axes.v1";
+
+/// Exact coordinate rule used before client-requested truncation or zero-padding.
+pub const TOPOS_ZSPACE_PROJECTION_GRADIENT_FORMULA: &str =
+    "gradient=resize([openness,guard_strength,stability_hint,exploration_hint,depth_pressure,volume_pressure],gradient_dim,0)";
+
+/// Ordered semantic channels in the canonical Topos control basis.
+pub const TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS: [&str; 6] = [
+    "openness",
+    "guard_strength",
+    "stability_hint",
+    "exploration_hint",
+    "depth_pressure",
+    "volume_pressure",
+];
 
 /// Allocation guard for client-requested projection vectors.
 pub const TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM: usize = 4096;
@@ -1280,6 +1297,9 @@ pub struct ToposZSpaceProjectionPayload {
     pub contract_version: &'static str,
     pub semantic_owner: &'static str,
     pub semantic_backend: &'static str,
+    pub gradient_basis: &'static str,
+    pub gradient_formula: &'static str,
+    pub gradient_channels: [&'static str; TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM],
     pub gradient_dim: usize,
     pub base_gradient_dim: usize,
     pub speed: f32,
@@ -2445,6 +2465,9 @@ impl ToposZSpaceProjection {
             contract_version: TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
             semantic_owner: TOPOS_ZSPACE_PROJECTION_SEMANTIC_OWNER,
             semantic_backend: TOPOS_ZSPACE_PROJECTION_SEMANTIC_BACKEND,
+            gradient_basis: TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS,
+            gradient_formula: TOPOS_ZSPACE_PROJECTION_GRADIENT_FORMULA,
+            gradient_channels: TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS,
             gradient_dim: self.gradient.len(),
             base_gradient_dim: TOPOS_ZSPACE_PROJECTION_BASE_GRADIENT_DIM,
             speed: self.speed,
@@ -5919,6 +5942,18 @@ mod tests {
             TOPOS_ZSPACE_PROJECTION_SEMANTIC_OWNER
         );
         assert_eq!(payload.semantic_backend, "rust");
+        assert_eq!(
+            payload.gradient_basis,
+            TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS
+        );
+        assert_eq!(
+            payload.gradient_formula,
+            TOPOS_ZSPACE_PROJECTION_GRADIENT_FORMULA
+        );
+        assert_eq!(
+            payload.gradient_channels,
+            TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS
+        );
         assert_eq!(payload.gradient_dim, 8);
         assert_eq!(payload.base_gradient_dim, 6);
         assert_eq!(payload.vector, projection.vector());

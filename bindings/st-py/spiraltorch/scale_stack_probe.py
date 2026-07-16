@@ -5,6 +5,7 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "SCALE_STACK_PROBE_GRADIENT_BASIS",
     "scale_stack_probe",
     "scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial",
@@ -12,6 +13,10 @@ __all__ = [
     "semantic_scale_stack_partial",
     "semantic_scale_stack_probe",
 ]
+
+SCALE_STACK_PROBE_GRADIENT_BASIS = (
+    "spiraltorch.geometry.scale_stack.probe_features.v1"
+)
 
 
 def _spiraltorch() -> Any:
@@ -227,6 +232,7 @@ def scale_stack_probe_to_zspace_partial(
         weight=max(0.0, float(bundle_weight)),
         origin=origin or f"scale_stack:{mode}",
         telemetry=telemetry,
+        gradient_basis=SCALE_STACK_PROBE_GRADIENT_BASIS,
     )
 
 

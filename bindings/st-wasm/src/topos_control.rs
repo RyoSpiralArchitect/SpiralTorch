@@ -184,6 +184,7 @@ fn topos_optimizer_snapshot_request_from_json(
 use st_tensor::{
     TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION, TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
     TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE, TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION,
+    TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS, TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS,
     TOPOS_ZSPACE_PROJECTION_MAX_GRADIENT_DIM,
 };
 
@@ -564,6 +565,14 @@ mod tests {
             TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION
         );
         assert_eq!(expected["semantic_backend"], "rust");
+        assert_eq!(
+            expected["gradient_basis"],
+            TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS
+        );
+        assert_eq!(
+            expected["gradient_channels"],
+            serde_json::json!(TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS)
+        );
         assert_eq!(expected["gradient_dim"], 8);
         assert_eq!(expected["gradient"].as_array().map(Vec::len), Some(8));
     }
