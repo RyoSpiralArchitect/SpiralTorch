@@ -2965,7 +2965,11 @@ pub mod bandit {
                 }
                 scores.push(score);
             }
-            let mut idx = hint_index.unwrap_or(0);
+            let mut idx = if equivalent_hint_prior {
+                hint_index.unwrap_or(0)
+            } else {
+                0
+            };
             let mut best = scores[idx];
             for (index, score) in scores.iter().copied().enumerate() {
                 if score > best {
@@ -3257,6 +3261,35 @@ pub mod bandit {
                 .expect("learned posterior");
             assert!(second.sampling_applied);
             assert_eq!(second.chosen, "b");
+        }
+
+        #[test]
+        fn non_equivalent_ucb_score_ties_ignore_the_hint() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["canonical".to_string(), "hinted".to_string()],
+                1,
+                SoftBanditMode::UCB,
+                23,
+            );
+            bandit.arms[1].a[0] = 4.0;
+            bandit.arms[1].b[0] = 2.0;
+            bandit.arms[1].observations = 3;
+
+            let decision = bandit
+                .try_select_with_hint(&[1.0], Some("hinted"))
+                .expect("valid tied UCB decision");
+            assert_ne!(
+                decision.arms[0].posterior_mean,
+                decision.arms[1].posterior_mean
+            );
+            assert_ne!(
+                decision.arms[0].predictive_stddev,
+                decision.arms[1].predictive_stddev
+            );
+            assert!(
+                (decision.arms[0].decision_score - decision.arms[1].decision_score).abs() < 1.0e-12
+            );
+            assert_eq!(decision.chosen, "canonical");
         }
 
         #[test]
