@@ -112,6 +112,10 @@ mod tests {
         assert_eq!(wasm["routes"][0]["native_ready"], false);
         assert_eq!(wasm["routes"][0]["route_readiness"], "ready");
         assert_eq!(wasm["routes"][0]["route_ready"], true);
+        assert_eq!(wasm["runtime_readiness"], "ready");
+        assert_eq!(wasm["runtime_ready"], true);
+        assert_eq!(wasm["runtime_ready_basis"], "required_ready_backends");
+        assert_eq!(wasm["runtime_missing_ready_backends"], json!([]));
         assert_eq!(wasm["passed"], true);
     }
 
@@ -136,6 +140,9 @@ mod tests {
         assert_eq!(payload["route_readiness_unknown_backends"], json!(["cpu"]));
         assert_eq!(payload["required_ready_backends_unknown"], json!(["cpu"]));
         assert_eq!(payload["required_ready_backends_passed"], false);
+        assert_eq!(payload["runtime_readiness"], "unknown");
+        assert_eq!(payload["runtime_ready"], false);
+        assert_eq!(payload["runtime_unknown_ready_backends"], json!(["cpu"]));
         assert_eq!(
             payload["failures"],
             json!(["runtime_device_readiness_unknown:cpu"])

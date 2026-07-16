@@ -432,7 +432,7 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertTrue(fields["runtime_device_report_requested"])
         self.assertEqual(
             fields["runtime_device_route_contract_version"],
-            "spiraltorch.runtime_device_route.v2",
+            "spiraltorch.runtime_device_route.v3",
         )
         self.assertEqual(
             fields["runtime_device_route_semantic_owner"],

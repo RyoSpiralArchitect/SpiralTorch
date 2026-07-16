@@ -89,13 +89,17 @@ def test_describe_runtime_devices_collects_backend_readiness(
 
     monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
 
-    summary = st.describe_runtime_devices(["wgpu", "cpu", "mps"], workgroup=128)
+    summary = st.describe_runtime_devices(
+        ["wgpu", "cpu", "mps"],
+        required_ready_backends=["wgpu", "mps"],
+        workgroup=128,
+    )
 
     assert "describe_runtime_devices" in st.__all__
     assert st.planner.describe_runtime_devices is st.describe_runtime_devices
     assert summary["backends"] == ["wgpu", "cpu", "mps"]
     assert summary["kind"] == "spiraltorch.runtime_device_route"
-    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v2"
+    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v3"
     assert summary["semantic_owner"] == "st-core::backend::runtime_route"
     assert summary["semantic_backend"] == "rust"
     assert summary["ready_backends"] == ["wgpu"]
@@ -108,6 +112,10 @@ def test_describe_runtime_devices_collects_backend_readiness(
     }
     assert summary["all_ready"] is False
     assert summary["has_errors"] is True
+    assert summary["runtime_readiness"] == "not_ready"
+    assert summary["runtime_ready"] is False
+    assert summary["runtime_ready_basis"] == "required_ready_backends"
+    assert summary["runtime_missing_ready_backends"] == ["mps"]
     assert summary["reports"][2]["error"] == "mps placeholder"
     assert calls == [
         ("wgpu", {"workgroup": 128}),

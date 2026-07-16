@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .generation_control import zspace_generation_control
+from .runtime_imports import _require_trusted_runtime_device_route_contract
 
 __all__ = [
     "ZSpaceActivationProbeHook",
@@ -3768,8 +3769,14 @@ def zspace_inference_distortion_runtime_preflight(
             "recommendation": "spiraltorch.describe_runtime_devices is unavailable",
         }
     try:
-        summary = _runtime_device_summary_mapping(
-            describe(backend_labels, continue_on_error=True, **kwargs)
+        describe_kwargs = dict(kwargs)
+        describe_kwargs["required_ready_backends"] = required_labels
+        summary = _require_trusted_runtime_device_route_contract(
+            describe(
+                backend_labels,
+                continue_on_error=True,
+                **describe_kwargs,
+            )
         )
     except Exception as exc:
         return {
@@ -3793,12 +3800,21 @@ def zspace_inference_distortion_runtime_preflight(
     ready_backends = _runtime_device_backends(summary.get("ready_backends"))
     not_ready_backends = _runtime_device_backends(summary.get("not_ready_backends"))
     status_by_backend = _runtime_device_summary_mapping(summary.get("status_by_backend"))
-    missing_ready = [
-        backend for backend in required_labels if backend not in set(ready_backends)
-    ]
-    runtime_ready = not missing_ready if required_labels else bool(ready_backends)
+    missing_ready = _runtime_device_backends(
+        summary.get("runtime_missing_ready_backends")
+    )
+    unknown_ready = _runtime_device_backends(
+        summary.get("runtime_unknown_ready_backends")
+    )
+    runtime_readiness = str(summary.get("runtime_readiness", "unknown"))
+    runtime_ready = summary.get("runtime_ready") is True
+    runtime_ready_basis = str(summary.get("runtime_ready_basis", "unknown"))
     if missing_ready:
         recommendation = "enable ready runtime backends: " + ", ".join(missing_ready)
+    elif runtime_readiness == "unknown" and unknown_ready:
+        recommendation = "collect runtime readiness evidence: " + ", ".join(
+            unknown_ready
+        )
     elif ready_backends:
         recommendation = "ready runtime backends: " + ", ".join(ready_backends)
     else:
@@ -3812,7 +3828,10 @@ def zspace_inference_distortion_runtime_preflight(
         "ready_backends": ready_backends,
         "not_ready_backends": not_ready_backends,
         "missing_ready_backends": missing_ready,
+        "unknown_ready_backends": unknown_ready,
+        "runtime_readiness": runtime_readiness,
         "runtime_ready": runtime_ready,
+        "runtime_ready_basis": runtime_ready_basis,
         "all_ready": bool(summary.get("all_ready")),
         "has_errors": bool(summary.get("has_errors")),
         "device_kwargs": kwargs,

@@ -2,6 +2,10 @@
 
 ## 0.4.13
 
+- Runtime-device route v3: move payload-level execution readiness into the
+  Rust-owned contract, preserve `ready` / `not_ready` / `unknown` evidence,
+  expose the all-required versus any-ready basis to Python and WASM, and make
+  HF preflight reject host-language readiness reconstructions.
 - Runtime-device route v2: preserve native and effective readiness as explicit
   `ready` / `not_ready` / `unknown` evidence states in the Rust-owned contract,
   keep execution gates fail-closed, and distinguish unknown-evidence failures
