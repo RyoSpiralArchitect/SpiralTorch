@@ -341,6 +341,29 @@ def test_wasm_report_context_artifact_roundtrips_into_api_llm_suite(tmp_path) ->
     assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
 
 
+def test_wasm_context_artifact_preserves_suppressed_partial_metrics(tmp_path) -> None:
+    artifact = tmp_path / "suppressed-wasm-context.json"
+    st.write_wasm_report_context_artifact(
+        artifact,
+        [_canvas_report(last_loss=0.01)],
+        bundle_weight=0.0,
+        gradient_dim=4,
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    row = payload["context_partials"][0]
+    assert row["weight"] == pytest.approx(0.0)
+    assert row["metrics"]["speed"] > 0.0
+    assert len(row["metrics"]["gradient"]) == 4
+
+    context, _ = st.load_wasm_report_context_artifact(artifact)
+    assert context[0].weight == pytest.approx(0.0)
+    assert context[0].resolved()["speed"] == pytest.approx(row["metrics"]["speed"])
+    assert context[0].resolved()["gradient"] == pytest.approx(
+        row["metrics"]["gradient"]
+    )
+
+
 def test_wasm_context_artifact_rejects_false_gradient_metadata(tmp_path) -> None:
     artifact = tmp_path / "wasm-context.json"
     st.write_wasm_report_context_artifact(

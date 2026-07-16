@@ -881,10 +881,16 @@ def build_wasm_report_context(
     return context_partials, metadata
 
 
+def _validated_partial_metrics(partial: ZSpacePartialBundle) -> dict[str, Any]:
+    blend_zspace_partials([partial])
+    # Preserve the observation independently from its current contribution weight.
+    return blend_zspace_partials([partial], weights=[1.0])
+
+
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
     telemetry = partial.telemetry_payload()
     return {
-        "metrics": blend_zspace_partials([partial]),
+        "metrics": _validated_partial_metrics(partial),
         "weight": partial.weight,
         "origin": partial.origin,
         "gradient_basis": partial.gradient_basis,
@@ -911,7 +917,7 @@ def _partial_from_payload(payload: Any) -> ZSpacePartialBundle:
         telemetry=None if telemetry is None else dict(telemetry),
         gradient_basis=gradient_basis,
     )
-    blend_zspace_partials([partial])
+    _validated_partial_metrics(partial)
     return partial
 
 
