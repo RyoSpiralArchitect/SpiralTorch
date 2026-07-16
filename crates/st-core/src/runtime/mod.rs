@@ -7,5 +7,6 @@ pub mod autopilot;
 pub mod blackcat;
 #[cfg(feature = "golden")]
 pub mod golden;
+pub(crate) mod persistence;
 pub mod topos_route_policy;
 pub mod zspace_optimizer;

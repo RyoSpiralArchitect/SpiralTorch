@@ -10,6 +10,11 @@ SpiralTorch exposes training loop statistics through the `StepMetrics` structure
 - Memory: `mem_peak_mb`
 - Stability: `retry_rate`
 - Rich contextual signals inserted into the `extra` hash map (e.g. gradient norms, band energies, step losses)
+- BlackCat heuristic evidence (`blackcat_heuristic_successes`, `blackcat_heuristic_trials`, `blackcat_heuristic_wilson_lower`, eligibility, persistence, and persistence-failure flags)
+
+Each `TrainerStep` also carries the typed `heuristic_adoption` report. Treat this
+Rust witness as authoritative: the numeric `extra` fields are dashboard
+spotlights, not a second implementation of the adoption policy.
 
 These metrics power internal components under `crates/st-core/src/telemetry/`, including:
 

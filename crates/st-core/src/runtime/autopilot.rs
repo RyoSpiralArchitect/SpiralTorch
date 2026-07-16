@@ -12,8 +12,8 @@
 //! clients should expose this contract rather than reconstruct its semantics.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ use thiserror::Error;
 use crate::backend::device_caps::DeviceCaps;
 use crate::plugin::{global_registry, PluginEvent};
 use crate::runtime::blackcat::{BlackCatError, BlackCatRuntime, StepMetrics};
+use crate::runtime::persistence::atomic_write;
 use crate::telemetry::trace_init;
 use spiral_config::determinism;
 use tracing::{debug, info, instrument, warn};
@@ -1354,92 +1355,7 @@ fn save_profile(
     let mut bytes = serde_json::to_vec_pretty(&persisted)
         .map_err(|error| profile_format(&path, format!("JSON encode failed: {error}")))?;
     bytes.push(b'\n');
-    atomic_write(&path, &bytes)
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AutopilotError> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("autopilot.prof");
-    let mut last_collision = None;
-    for nonce in 0..128_u32 {
-        let temporary = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), nonce));
-        let mut file = match OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-        {
-            Ok(file) => file,
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                last_collision = Some(source);
-                continue;
-            }
-            Err(source) => return Err(profile_io(temporary, source)),
-        };
-        let result = (|| {
-            file.write_all(bytes)?;
-            file.flush()?;
-            file.sync_all()?;
-            drop(file);
-            atomic_replace(&temporary, path)?;
-            #[cfg(unix)]
-            File::open(parent)?.sync_all()?;
-            Ok::<(), std::io::Error>(())
-        })();
-        if let Err(source) = result {
-            let _ = fs::remove_file(&temporary);
-            return Err(profile_io(path.to_path_buf(), source));
-        }
-        return Ok(());
-    }
-    Err(profile_io(
-        path.to_path_buf(),
-        last_collision.unwrap_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "could not reserve an atomic profile file",
-            )
-        }),
-    ))
-}
-
-#[cfg(not(windows))]
-fn atomic_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
-    fs::rename(source, destination)
-}
-
-#[cfg(windows)]
-fn atomic_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // Both paths are NUL-terminated and remain alive for the duration of the call.
-    let replaced = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if replaced == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    atomic_write(&path, &bytes).map_err(|source| profile_io(path, source))
 }
 
 fn validate_profile_value(path: &Path, field: &str, value: f64) -> Result<(), AutopilotError> {

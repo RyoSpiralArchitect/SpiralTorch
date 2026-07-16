@@ -49,6 +49,7 @@ rustc-hash  = "1.1"
 rustfft     = "6"
 num-complex = "0.4"
 tracing     = "0.1"
+sha2        = "0.10"
 
 once_cell   = { version = "1.21", optional = true }
 bytemuck    = { version = "1.25", optional = true, features = ["derive"] }
