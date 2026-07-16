@@ -892,8 +892,10 @@ def _validated_partial_metrics(partial: ZSpacePartialBundle) -> dict[str, Any]:
 
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
     telemetry = partial.telemetry_payload()
+    metrics = _validated_partial_metrics(partial)
+    metrics.pop("gradient_basis", None)
     return {
-        "metrics": _validated_partial_metrics(partial),
+        "metrics": metrics,
         "weight": partial.weight,
         "origin": partial.origin,
         "gradient_basis": partial.gradient_basis,

@@ -120,8 +120,10 @@ def _normalise_consensus_strategy(strategy: str) -> str:
 
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
     telemetry = partial.telemetry_payload()
+    metrics = partial.resolved()
+    metrics.pop("gradient_basis", None)
     return {
-        "metrics": partial.resolved(),
+        "metrics": metrics,
         "weight": partial.weight,
         "origin": partial.origin,
         "telemetry": None if telemetry is None else dict(telemetry),
@@ -319,7 +321,11 @@ def _consensus_partial_from_context(
     else:
         fusion_inputs = [
             ZSpacePartialBundle(
-                {key: value for key, value in metrics.items() if key != "gradient"},
+                {
+                    key: value
+                    for key, value in metrics.items()
+                    if key not in {"gradient", "gradient_basis"}
+                },
                 weight=partial.weight,
                 origin=partial.origin,
                 telemetry=partial.telemetry,
@@ -383,13 +389,15 @@ def geometry_probe_consensus_partial(
         origin=origin,
     )
     consensus_metadata = dict(metadata)
+    resolved_consensus = consensus.resolved()
     consensus_metadata["consensus"] = {
         "origin": consensus.origin,
         "strategy": _normalise_consensus_strategy(strategy),
         "weight": consensus.weight,
-        "metric_count": len(consensus.resolved()),
+        "metric_count": len(resolved_consensus)
+        - int("gradient_basis" in resolved_consensus),
         "gradient_basis": consensus.gradient_basis,
-        "gradient_preserved": "gradient" in consensus.resolved(),
+        "gradient_preserved": "gradient" in resolved_consensus,
     }
     return consensus, consensus_metadata
 
@@ -463,13 +471,15 @@ def build_geometry_probe_context(
             strategy=consensus_strategy,
             origin=consensus_origin,
         )
+        resolved_consensus = consensus.resolved()
         metadata["consensus"] = {
             "origin": consensus.origin,
             "strategy": _normalise_consensus_strategy(consensus_strategy),
             "weight": consensus.weight,
-            "metric_count": len(consensus.resolved()),
+            "metric_count": len(resolved_consensus)
+            - int("gradient_basis" in resolved_consensus),
             "gradient_basis": consensus.gradient_basis,
-            "gradient_preserved": "gradient" in consensus.resolved(),
+            "gradient_preserved": "gradient" in resolved_consensus,
             "source_origin_count": len(metadata["source_origins"]),
         }
         if consensus_only:

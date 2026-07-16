@@ -2766,9 +2766,10 @@ class _ZSpaceNotation:
             source = args[0]
             if isinstance(source, ZSpacePartialBundle):
                 base_metrics = source.resolved()
+                embedded_basis = base_metrics.pop("gradient_basis", None)
                 base_weight = float(source.weight)
                 base_origin = source.origin
-                base_gradient_basis = source.gradient_basis
+                base_gradient_basis = source.gradient_basis or embedded_basis
                 telemetry_payload = dict(source.telemetry_payload() or {}) or None
             elif isinstance(source, ZMetrics):
                 base_metrics = _metrics_to_mapping(source)

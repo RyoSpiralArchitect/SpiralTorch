@@ -1760,7 +1760,7 @@ class ZSpacePartialBundle:
     gradient_basis: str | None = None
 
     def resolved(self) -> dict[str, Any]:
-        """Return the canonicalised metric mapping."""
+        """Return canonical metrics and any Rust-preserved gradient basis."""
 
         return _canonicalise_inputs(
             self.metrics,
@@ -1984,12 +1984,21 @@ def _metrics_from_fusion_contract(contract: Mapping[str, Any]) -> dict[str, Any]
         raise RuntimeError("native Z-space partial fusion returned malformed metrics")
     fused: dict[str, Any] = dict(metrics)
     gradient = contract.get("gradient")
+    gradient_basis = contract.get("gradient_basis")
     if gradient is not None:
         if not isinstance(gradient, Sequence) or isinstance(
             gradient, (str, bytes, bytearray, memoryview)
         ):
             raise RuntimeError("native Z-space partial fusion returned malformed gradient")
         fused["gradient"] = [float(value) for value in gradient]
+        if gradient_basis is not None:
+            if not isinstance(gradient_basis, str) or not gradient_basis:
+                raise RuntimeError(
+                    "native Z-space partial fusion returned malformed gradient basis"
+                )
+            fused["gradient_basis"] = gradient_basis
+    elif gradient_basis is not None:
+        raise RuntimeError("native Z-space partial fusion returned a basis without a gradient")
     return fused
 
 
@@ -2021,6 +2030,9 @@ def blend_zspace_partials(
     metric_gradient_dimension:
         When set, Rust replaces positional input gradients with one canonical
         projection of the fused named base metrics at this dimension.
+
+    The returned mapping preserves Rust's ``gradient_basis`` whenever the fused
+    payload contains a basis-tagged gradient.
     """
 
     return _metrics_from_fusion_contract(
@@ -2569,6 +2581,7 @@ class ZSpaceInferenceRuntime:
             partial, gradient_basis
         )
         updates = _canonicalise_inputs(partial, gradient_basis=gradient_basis)
+        fused_gradient_basis = updates.pop("gradient_basis", None)
         if not self._accumulate:
             self._cached = {}
             self._gradient_basis = None
@@ -2576,7 +2589,7 @@ class ZSpaceInferenceRuntime:
             gradient = updates.pop("gradient")
             if gradient is not None:
                 self._cached["gradient"] = gradient
-                self._gradient_basis = gradient_basis
+                self._gradient_basis = fused_gradient_basis
             else:
                 self._cached.pop("gradient", None)
                 self._gradient_basis = None

@@ -248,6 +248,44 @@ def test_blend_partials_supports_weighted_mean_and_gradient():
     assert len(blended["gradient"]) == 2
 
 
+def test_flattened_fusion_preserves_gradient_basis_for_composition():
+    basis = "test.compose.control.v1"
+    bundle = ZSpacePartialBundle(
+        {"speed": 0.4, "gradient": [0.25, -0.1]},
+        gradient_basis=basis,
+    )
+
+    resolved = bundle.resolved()
+    blended = blend_zspace_partials([bundle])
+
+    for payload in (resolved, blended):
+        assert payload["gradient_basis"] == basis
+        inference = infer_from_partial([0.3, -0.05, 0.22, -0.11], payload)
+        assert inference.control_gradient is not None
+        assert inference.control_gradient.basis == basis
+        assert inference.control_gradient.values == pytest.approx([0.25, -0.1])
+
+
+def test_runtime_keeps_fused_gradient_basis_out_of_metric_cache():
+    basis = "test.runtime.control.v1"
+    runtime = ZSpaceInferenceRuntime([0.3, -0.05, 0.22, -0.11])
+    partial = blend_zspace_partials(
+        [
+            ZSpacePartialBundle(
+                {"speed": 0.4, "gradient": [0.25, -0.1]},
+                gradient_basis=basis,
+            )
+        ]
+    )
+
+    inference = runtime.update(partial)
+
+    assert runtime.gradient_basis == basis
+    assert "gradient_basis" not in runtime.cached_observations
+    assert inference.control_gradient is not None
+    assert inference.control_gradient.basis == basis
+
+
 def test_telemetry_fusion_exposes_rust_owned_contract():
     contract = zspace_telemetry_fusion(
         {"psi": {"energy": 2.0, "ready": True}, "ignored": [1.0]},
