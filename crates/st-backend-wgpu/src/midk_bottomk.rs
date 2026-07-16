@@ -252,8 +252,8 @@ impl Stage {
 
     fn workgroups_x(self, tiles_x: u32) -> u32 {
         match self {
-            Stage::MiddleMax => 1,
-            _ => tiles_x,
+            Stage::RowPrefix | Stage::MiddleMax => 1,
+            Stage::Scan | Stage::Apply => tiles_x,
         }
     }
 }
@@ -291,44 +291,42 @@ fn bind_group_entries<'a>(
     args: &'a DispatchArgs<'a>,
     params: &'a wgpu::Buffer,
 ) -> Vec<BindGroupEntry<'a>> {
-    let mut entries = Vec::with_capacity(match stage {
-        Stage::MiddleMax => 7,
-        _ => 6,
-    });
-    entries.push(BindGroupEntry {
-        binding: 0,
-        resource: args.values.as_entire_binding(),
-    });
-    entries.push(BindGroupEntry {
-        binding: 1,
-        resource: args.mask.as_entire_binding(),
-    });
-    entries.push(BindGroupEntry {
-        binding: 2,
-        resource: args.out_positions.as_entire_binding(),
-    });
-    entries.push(BindGroupEntry {
-        binding: 3,
-        resource: args.out_values.as_entire_binding(),
-    });
-    entries.push(BindGroupEntry {
-        binding: 4,
-        resource: params.as_entire_binding(),
-    });
-    entries.push(BindGroupEntry {
-        binding: 5,
-        resource: args.prefix.as_entire_binding(),
-    });
-    if stage == Stage::MiddleMax {
-        let out = args.out_middlemax.expect(
-            "DispatchArgs::out_middlemax must be provided when dispatching the middlemax stage",
-        );
-        entries.push(BindGroupEntry {
-            binding: 6,
-            resource: out.as_entire_binding(),
-        });
+    match stage {
+        Stage::Scan => vec![
+            buffer_entry(1, args.mask),
+            buffer_entry(4, params),
+            buffer_entry(5, args.prefix),
+        ],
+        Stage::RowPrefix => vec![
+            buffer_entry(2, args.out_positions),
+            buffer_entry(4, params),
+            buffer_entry(5, args.prefix),
+        ],
+        Stage::Apply => vec![
+            buffer_entry(0, args.values),
+            buffer_entry(1, args.mask),
+            buffer_entry(3, args.out_values),
+            buffer_entry(4, params),
+            buffer_entry(5, args.prefix),
+        ],
+        Stage::MiddleMax => vec![
+            buffer_entry(0, args.values),
+            buffer_entry(1, args.mask),
+            buffer_entry(4, params),
+            buffer_entry(
+                6,
+                args.out_middlemax
+                    .expect("DispatchArgs::out_middlemax must be provided for the middlemax stage"),
+            ),
+        ],
     }
-    entries
+}
+
+fn buffer_entry(binding: u32, buffer: &wgpu::Buffer) -> BindGroupEntry<'_> {
+    BindGroupEntry {
+        binding,
+        resource: buffer.as_entire_binding(),
+    }
 }
 
 #[repr(C)]
@@ -597,8 +595,12 @@ pub fn create_pipelines(
 #[cfg(test)]
 mod tests {
     use super::{
-        element_counts_for_dims, tiles_for_cols, validate_geometry, DispatchValidationError,
+        dispatch, element_counts_for_dims, tiles_for_cols, validate_geometry, ApplyStrategy,
+        Builder, DispatchArgs, DispatchValidationError, Kind, Stage,
     };
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use wgpu::util::DeviceExt;
 
     #[test]
     fn tiles_for_cols_rounds_up() {
@@ -639,5 +641,202 @@ mod tests {
         assert_eq!(counts.out_values, 3 * 512);
         assert_eq!(counts.out_middlemax, 3);
         assert_eq!(counts.prefix, 3 * 2);
+    }
+
+    #[test]
+    fn row_prefix_dispatches_once_per_row_while_tile_stages_cover_every_tile() {
+        assert_eq!(Stage::Scan.workgroups_x(7), 7);
+        assert_eq!(Stage::Apply.workgroups_x(7), 7);
+        assert_eq!(Stage::RowPrefix.workgroups_x(7), 1);
+        assert_eq!(Stage::MiddleMax.workgroups_x(7), 1);
+    }
+
+    #[test]
+    fn multi_tile_compaction_preserves_row_stride_when_runtime_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipping compaction runtime test: no WGPU adapter");
+            return;
+        };
+        let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
+        let pipelines = Builder::new(&device, shader_dir)
+            .build()
+            .expect("portable compaction pipelines");
+
+        let rows = 2u32;
+        let cols = 300u32;
+        let row_stride = 320u32;
+        let mut values = vec![-777.0f32; (rows * row_stride) as usize];
+        let mut mask = vec![0u32; values.len()];
+        let selected = [&[0u32, 2, 255, 256, 299][..], &[1u32, 257, 298][..]];
+        for row in 0..rows as usize {
+            for col in 0..cols as usize {
+                values[row * row_stride as usize + col] = (row * 1_000 + col) as f32;
+            }
+            for &col in selected[row] {
+                mask[row * row_stride as usize + col as usize] = 1;
+            }
+        }
+
+        let values_buffer = initialized_storage(&device, "test.compaction.values", &values);
+        let mask_buffer = initialized_storage(&device, "test.compaction.mask", &mask);
+        let positions_buffer = initialized_storage_copy_src(
+            &device,
+            "test.compaction.positions",
+            &vec![0u32; rows as usize],
+        );
+        let sentinel = -9_999.0f32;
+        let output_buffer = initialized_storage_copy_src(
+            &device,
+            "test.compaction.output",
+            &vec![sentinel; values.len()],
+        );
+        let middlemax_buffer = initialized_storage_copy_src(
+            &device,
+            "test.compaction.middlemax",
+            &vec![sentinel; rows as usize],
+        );
+        let prefix_buffer = initialized_storage(
+            &device,
+            "test.compaction.prefix",
+            &vec![0u32; (rows * cols.div_ceil(256)) as usize],
+        );
+
+        dispatch(
+            &device,
+            &queue,
+            &pipelines,
+            DispatchArgs {
+                rows,
+                cols,
+                row_stride,
+                kind: Kind::BottomK,
+                values: &values_buffer,
+                mask: &mask_buffer,
+                out_positions: &positions_buffer,
+                out_values: &output_buffer,
+                out_middlemax: Some(&middlemax_buffer),
+                prefix: &prefix_buffer,
+            },
+            ApplyStrategy::Fallback,
+        )
+        .expect("multi-tile compaction dispatch");
+
+        let counts = read_u32(&device, &queue, &positions_buffer, rows as usize);
+        assert_eq!(counts, vec![5, 3]);
+        assert_eq!(
+            read_f32(&device, &queue, &middlemax_buffer, rows as usize),
+            vec![299.0, 1_298.0]
+        );
+        let output = read_f32(&device, &queue, &output_buffer, values.len());
+        assert_eq!(&output[..5], &[0.0, 2.0, 255.0, 256.0, 299.0]);
+        assert!(output[5..row_stride as usize]
+            .iter()
+            .all(|value| value.to_bits() == sentinel.to_bits()));
+        let row_one = row_stride as usize;
+        assert_eq!(&output[row_one..row_one + 3], &[1_001.0, 1_257.0, 1_298.0]);
+        assert!(output[cols as usize..row_one]
+            .iter()
+            .all(|value| value.to_bits() == sentinel.to_bits()));
+    }
+
+    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
+        let features = adapter.features() & wgpu::Features::SUBGROUP;
+        pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("st.midk_bottomk.test_device"),
+                required_features: features,
+                required_limits: adapter.limits(),
+            },
+            None,
+        ))
+        .ok()
+    }
+
+    fn initialized_storage<T: bytemuck::Pod>(
+        device: &wgpu::Device,
+        label: &'static str,
+        values: &[T],
+    ) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(values),
+            usage: wgpu::BufferUsages::STORAGE,
+        })
+    }
+
+    fn initialized_storage_copy_src<T: bytemuck::Pod>(
+        device: &wgpu::Device,
+        label: &'static str,
+        values: &[T],
+    ) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(values),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        })
+    }
+
+    fn read_u32(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Buffer,
+        len: usize,
+    ) -> Vec<u32> {
+        read_bytes(device, queue, source, len * 4)
+            .chunks_exact(4)
+            .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
+    fn read_f32(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Buffer,
+        len: usize,
+    ) -> Vec<f32> {
+        read_bytes(device, queue, source, len * 4)
+            .chunks_exact(4)
+            .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
+    fn read_bytes(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Buffer,
+        bytes: usize,
+    ) -> Vec<u8> {
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("test.compaction.staging"),
+            size: bytes as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("test.compaction.readback"),
+        });
+        encoder.copy_buffer_to_buffer(source, 0, &staging, 0, bytes as u64);
+        queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            tx.send(result).unwrap();
+        });
+        device.poll(wgpu::Maintain::Wait);
+        rx.recv().unwrap().unwrap();
+        let view = slice.get_mapped_range();
+        let data = view.to_vec();
+        drop(view);
+        staging.unmap();
+        data
     }
 }

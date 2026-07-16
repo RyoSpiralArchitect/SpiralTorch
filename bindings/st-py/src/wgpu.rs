@@ -87,6 +87,7 @@ fn rank_report_to_dict(
     request.set_item("fft_tile", report.request.fft_tile)?;
     request.set_item("fft_radix", report.request.fft_radix)?;
     request.set_item("fft_segments", report.request.fft_segments)?;
+    request.set_item("rank_tile", report.request.rank_tile)?;
     request.set_item("compaction_tile", report.request.compaction_tile)?;
     dict.set_item("request", request)?;
     dict.set_item("primary", descriptor_to_dict(py, report.primary)?)?;
@@ -177,7 +178,7 @@ fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<PyObject> {
 
 #[cfg(feature = "wgpu")]
 #[pyfunction]
-#[pyo3(signature = (kind, rows, cols, k, *, subgroup=false, use_two_stage=false, fft_tile=0, fft_radix=0, fft_segments=0, compaction_tile=0))]
+#[pyo3(signature = (kind, rows, cols, k, *, subgroup=false, use_two_stage=false, fft_tile=0, fft_radix=0, fft_segments=0, rank_tile=0, compaction_tile=0))]
 fn wgpu_rank_kernel_report(
     py: Python<'_>,
     kind: &str,
@@ -189,6 +190,7 @@ fn wgpu_rank_kernel_report(
     fft_tile: u32,
     fft_radix: u32,
     fft_segments: u32,
+    rank_tile: u32,
     compaction_tile: u32,
 ) -> PyResult<PyObject> {
     let request = st_backend_wgpu::WgpuRankKernelRequest {
@@ -201,6 +203,7 @@ fn wgpu_rank_kernel_report(
         fft_tile,
         fft_radix,
         fft_segments,
+        rank_tile,
         compaction_tile,
     };
     rank_report_to_dict(py, st_backend_wgpu::rank_kernel_report(request))
@@ -208,7 +211,7 @@ fn wgpu_rank_kernel_report(
 
 #[cfg(not(feature = "wgpu"))]
 #[pyfunction]
-#[pyo3(signature = (kind, rows, cols, k, *, subgroup=false, use_two_stage=false, fft_tile=0, fft_radix=0, fft_segments=0, compaction_tile=0))]
+#[pyo3(signature = (kind, rows, cols, k, *, subgroup=false, use_two_stage=false, fft_tile=0, fft_radix=0, fft_segments=0, rank_tile=0, compaction_tile=0))]
 fn wgpu_rank_kernel_report(
     py: Python<'_>,
     kind: &str,
@@ -220,6 +223,7 @@ fn wgpu_rank_kernel_report(
     fft_tile: u32,
     fft_radix: u32,
     fft_segments: u32,
+    rank_tile: u32,
     compaction_tile: u32,
 ) -> PyResult<PyObject> {
     let _ = (
@@ -233,6 +237,7 @@ fn wgpu_rank_kernel_report(
         fft_tile,
         fft_radix,
         fft_segments,
+        rank_tile,
         compaction_tile,
     );
     Err(wgpu_unavailable())
@@ -255,6 +260,7 @@ fn wgpu_kernel_report_from_rank_plan(
         fft_tile: plan.choice.fft_tile,
         fft_radix: plan.choice.fft_radix,
         fft_segments: plan.choice.fft_segments,
+        rank_tile: plan.choice.tile,
         compaction_tile: plan.choice.ctile,
     };
     rank_report_to_dict(py, st_backend_wgpu::rank_kernel_report(request))

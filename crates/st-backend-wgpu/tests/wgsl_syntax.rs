@@ -26,6 +26,10 @@ const SHADERS: &[(&str, &str)] = &[
         include_str!("../src/shaders/midk_bottomk_compaction.wgsl"),
     ),
     (
+        "rankk_exact_2ce",
+        include_str!("../src/shaders/rankk_exact_2ce.wgsl"),
+    ),
+    (
         "topk_keepk_workgroup",
         include_str!("../src/shaders/topk_keepk_workgroup.wgsl"),
     ),

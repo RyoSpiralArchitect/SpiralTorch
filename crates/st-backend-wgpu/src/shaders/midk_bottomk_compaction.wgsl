@@ -27,28 +27,22 @@ var<workgroup> temp_max: array<f32, 256u>;
 
 @compute @workgroup_size(256)
 fn midk_compact_scan_tiles(
-    @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
 ) {
     let r = wid.y;
-    let tile = gid.x;
+    let tile = wid.x;
     if (r >= CP.rows || tile >= CP.tiles_x) {
         return;
     }
 
     let start = tile * 256u;
     var v: u32 = 0u;
-    var c = lid.x;
-    loop {
-        let col = start + c;
-        if (col >= CP.cols) {
-            break;
-        }
+    let col = start + lid.x;
+    if (col < CP.cols) {
         if (CMASK[r * CP.row_stride + col] != 0u) {
-            v = v + 1u;
+            v = 1u;
         }
-        c = c + 256u;
     }
     temp[lid.x] = v;
     workgroupBarrier();
@@ -153,18 +147,18 @@ fn midk_compact_row_prefix(
 }
 
 var<workgroup> wg_sg_base: atomic<u32>;
-var<workgroup> sg_bases: array<u32, 8u>;
+// WebGPU subgroup sizes may be as small as four lanes: 256 / 4 = 64 groups.
+var<workgroup> sg_bases: array<u32, 64u>;
 
 @compute @workgroup_size(256)
 fn midk_compact_apply_sg(
-    @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(subgroup_size) sg_size: u32,
     @builtin(subgroup_invocation_id) sg_lane: u32,
 ) {
     let r = wid.y;
-    let tile = gid.x;
+    let tile = wid.x;
     if (r >= CP.rows || tile >= CP.tiles_x) {
         return;
     }
@@ -209,23 +203,22 @@ fn midk_compact_apply_sg(
 
     if (flag == 1u && col < CP.cols) {
         let pos = base + my_base + local_excl;
-        OUTVAL[r * CP.cols + pos] = CX[r * CP.row_stride + col];
+        OUTVAL[r * CP.row_stride + pos] = CX[r * CP.row_stride + col];
     }
 }
 
-var<workgroup> sg_totals: array<u32, 8u>;
-var<workgroup> sg_temp: array<u32, 8u>;
+var<workgroup> sg_totals: array<u32, 64u>;
+var<workgroup> sg_temp: array<u32, 64u>;
 
 @compute @workgroup_size(256)
 fn midk_compact_apply_sg2(
-    @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(subgroup_size) sg_size: u32,
     @builtin(subgroup_invocation_id) sg_lane: u32,
 ) {
     let r = wid.y;
-    let tile = gid.x;
+    let tile = wid.x;
     if (r >= CP.rows || tile >= CP.tiles_x) {
         return;
     }
@@ -313,7 +306,7 @@ fn midk_compact_apply_sg2(
 
     if (flag == 1u && col < CP.cols) {
         let pos = base + sg_base + local_excl;
-        OUTVAL[r * CP.cols + pos] = CX[r * CP.row_stride + col];
+        OUTVAL[r * CP.row_stride + pos] = CX[r * CP.row_stride + col];
     }
 }
 
@@ -321,12 +314,11 @@ var<workgroup> temp2: array<u32, 256u>;
 
 @compute @workgroup_size(256)
 fn midk_compact_apply(
-    @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
 ) {
     let r = wid.y;
-    let tile = gid.x;
+    let tile = wid.x;
     if (r >= CP.rows || tile >= CP.tiles_x) {
         return;
     }
@@ -386,7 +378,7 @@ fn midk_compact_apply(
 
     if (col0 < CP.cols && flag == 1u) {
         let pos = base + temp2[lid.x];
-        OUTVAL[r * CP.cols + pos] = CX[r * CP.row_stride + col0];
+        OUTVAL[r * CP.row_stride + pos] = CX[r * CP.row_stride + col0];
     }
 }
 

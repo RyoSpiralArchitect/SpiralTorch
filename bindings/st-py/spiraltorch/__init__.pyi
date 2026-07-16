@@ -5601,6 +5601,7 @@ def wgpu_rank_kernel_report(
     fft_tile: int = ...,
     fft_radix: int = ...,
     fft_segments: int = ...,
+    rank_tile: int = ...,
     compaction_tile: int = ...,
 ) -> Dict[str, Any]: ...
 
@@ -9766,6 +9767,7 @@ class _WgpuModule(ModuleType):
         fft_tile: int = ...,
         fft_radix: int = ...,
         fft_segments: int = ...,
+        rank_tile: int = ...,
         compaction_tile: int = ...,
     ) -> Dict[str, Any]: ...
 

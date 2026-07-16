@@ -13,6 +13,7 @@ pub mod middlemax;
 pub mod midk_bottomk;
 pub mod nd_indexer;
 pub mod nerf;
+pub mod rankk_exact_2ce;
 pub mod render;
 pub mod softmax;
 pub mod topk_keepk;
@@ -26,6 +27,12 @@ pub use midk_bottomk::{
     DispatchArgs as MidkBottomkDispatchArgs,
     DispatchValidationError as MidkBottomkDispatchValidationError,
     ElementCounts as MidkBottomkElementCounts, Kind as MidkBottomkKind,
+};
+
+pub use rankk_exact_2ce::{
+    dispatch_host as dispatch_exact_rank_2ce_host, DispatchError as ExactRank2CeDispatchError,
+    Kind as ExactRank2CeKind, Output as ExactRank2CeOutput, Pipelines as ExactRank2CePipelines,
+    Plan as ExactRank2CePlan, PlanError as ExactRank2CePlanError,
 };
 
 pub use middlemax::{

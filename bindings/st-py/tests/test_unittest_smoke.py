@@ -1731,6 +1731,7 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertIn("softmax_workgroup", names)
         self.assertIn("topk_keepk_workgroup", names)
         self.assertIn("midk_bottomk_apply_subgroup_v2", names)
+        self.assertIn("rankk_exact_2ce_row_merge", names)
         self.assertIn("fused_attention_online", names)
 
         descriptor = st.wgpu.wgpu_kernel_descriptor("softmax_workgroup.wgsl")
@@ -1755,8 +1756,11 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             fft_tile=2048,
             fft_radix=4,
             fft_segments=2,
+            rank_tile=512,
         )
-        self.assertEqual(bottom["primary"]["name"], "midk_bottomk_apply_subgroup_v2")
+        self.assertEqual(bottom["primary"]["name"], "rankk_exact_2ce_row_merge")
+        self.assertEqual(bottom["stages"], ["tile_sort", "row_merge"])
+        self.assertEqual(bottom["request"]["rank_tile"], 512)
         self.assertEqual(bottom["dispatch"]["workgroups"], (4, 8, 1))
         self.assertEqual(bottom["fft"]["tile_cols"], 2048)
 

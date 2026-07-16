@@ -3443,6 +3443,7 @@ dependencies = [
  "sha2",
  "spiral-config",
  "st-backend-hip",
+ "st-backend-wgpu",
  "st-frac",
  "st-kdsl",
  "st-kv",
