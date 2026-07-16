@@ -192,6 +192,7 @@ def elliptic_warp_partial(
     origin: str | None = "elliptic",
     telemetry_prefix: str = "elliptic",
     aggregate: str = "mean",
+    gradient_alignment: str = "strict",
     gradient_source: str = "rotor_transport",
     extra_telemetry: Mapping[str, Any] | None = None,
     return_features: bool = False,
@@ -208,8 +209,10 @@ def elliptic_warp_partial(
         bundle_weight: Weight assigned to the resulting partial bundle.
         origin: Optional origin label recorded on the partial bundle.
         telemetry_prefix: Prefix applied to flattened telemetry payload keys.
-        aggregate: Reduction strategy (``"mean"``, ``"max"``, ``"min"`` or
-            ``"last"``) applied when multiple telemetry samples are provided.
+        aggregate: Rust-owned reduction strategy applied when multiple
+            telemetry samples are provided.
+        gradient_alignment: ``"strict"`` rejects ragged gradient vectors;
+            ``"pad_zero"`` explicitly enables legacy zero padding.
         gradient_source: Telemetry vector used to seed the gradient channel;
             defaults to ``rotor_transport``.
         extra_telemetry: Additional telemetry mapping merged into the bundle.
@@ -230,6 +233,7 @@ def elliptic_warp_partial(
         origin=origin,
         telemetry_prefix=telemetry_prefix,
         aggregate=aggregate,
+        gradient_alignment=gradient_alignment,
         gradient_source=gradient_source,
         extra_telemetry=extra_telemetry,
     )

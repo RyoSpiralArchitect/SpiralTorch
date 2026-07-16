@@ -479,7 +479,15 @@ declare module "spiraltorch-wasm" {
         vector: number[];
     };
 
-    export type ZSpaceFusionStrategy = "mean" | "last" | "max" | "min";
+    export type ZSpaceFusionStrategy =
+        | "mean"
+        | "last"
+        | "max"
+        | "min"
+        | "median"
+        | "sum";
+
+    export type ZSpaceGradientAlignment = "strict" | "pad_zero";
 
     export type ZSpaceTelemetrySummary = {
         count: number;
@@ -529,6 +537,7 @@ declare module "spiraltorch-wasm" {
         partials: Array<ZSpacePartialInput | null>;
         weights?: number[] | null;
         strategy?: ZSpaceFusionStrategy;
+        gradient_alignment?: ZSpaceGradientAlignment;
         telemetry?: Array<Record<string, unknown>>;
     };
 
@@ -538,17 +547,20 @@ declare module "spiraltorch-wasm" {
         weight: number | null;
         status: "active" | "suppressed" | "null";
         metric_count: number;
+        gradient_present: boolean;
         gradient_dim: number;
+        gradient_padded: boolean;
         telemetry_entry_count: number;
     };
 
     export type ZSpacePartialFusion = {
         kind: "spiraltorch.zspace_partial_fusion";
-        contract_version: "spiraltorch.zspace_partial_fusion.v1";
+        contract_version: "spiraltorch.zspace_partial_fusion.v2";
         semantic_owner: "st-core::telemetry::zspace_fusion";
         semantic_backend: "rust";
         execution_client: "wasm";
         strategy: ZSpaceFusionStrategy;
+        gradient_alignment: ZSpaceGradientAlignment;
         metrics: Record<string, number>;
         gradient?: number[];
         telemetry: ZSpaceTelemetryFusion;
@@ -556,6 +568,10 @@ declare module "spiraltorch-wasm" {
         active_count: number;
         suppressed_count: number;
         null_count: number;
+        gradient_input_count: number;
+        gradient_dim: number;
+        gradient_padding_applied: boolean;
+        gradient_padded_source_count: number;
         sources: ZSpacePartialSourceAudit[];
     };
 

@@ -84,6 +84,36 @@ partials with latent states, while `ZSpaceTrainer` and `stream_zspace_training`
 provide an optimiser-friendly wrapper that incrementally adapts a posterior to
 incoming metrics.
 
+Partial fusion is a versioned Rust contract owned by
+`st-core::telemetry::zspace_fusion`; Python and WASM only translate requests and
+return its audit payload. Contract v2 uses `gradient_alignment="strict"` by
+default, so active gradients with different dimensions fail with both source
+indices rather than being silently repaired. Use `"pad_zero"` only when replaying
+legacy ragged inputs. That compatibility mode reports the target dimension,
+padding count, and padded sources:
+
+```python
+import spiraltorch as st
+
+fused = st.zspace_partial_fusion(
+    [
+        {"speed": 0.2, "gradient": [0.1, -0.1]},
+        {"speed": 0.6, "gradient": [0.5]},
+    ],
+    strategy="mean",
+    gradient_alignment="pad_zero",
+)
+assert fused["gradient_padding_applied"]
+assert fused["sources"][1]["gradient_padded"]
+```
+
+The `mean`, `last`, `max`, `min`, `median`, and `sum` strategies reduce scalar
+metrics and each aligned gradient coordinate identically. Positive partial
+weights drive the weighted mean, weighted median, and compensated weighted sum;
+for `last`, `max`, and `min` they determine participation. Non-positive weights
+suppress the source for every strategy. Elliptic telemetry uses this same Rust
+reducer, rather than maintaining a second Python implementation.
+
 `ZSpaceTrainer` delegates its state transition to the versioned Rust
 `ZSpaceMetaOptimizer`. The core report distinguishes the observed resource
 objective from the supplied Z-gradient, evaluates the periodic fractional

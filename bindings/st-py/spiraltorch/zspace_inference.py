@@ -142,7 +142,7 @@ _ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION = (
     "spiraltorch.zspace_telemetry_fusion.v1"
 )
 _ZSPACE_PARTIAL_FUSION_KIND = "spiraltorch.zspace_partial_fusion"
-_ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION = "spiraltorch.zspace_partial_fusion.v1"
+_ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION = "spiraltorch.zspace_partial_fusion.v2"
 _ZSPACE_POSTERIOR_CONTRACT_VERSION = "spiraltorch.zspace_posterior.v1"
 _ZSPACE_POSTERIOR_DECODE_KIND = "spiraltorch.zspace_posterior_decode"
 _ZSPACE_POSTERIOR_PROJECTION_KIND = "spiraltorch.zspace_posterior_projection"
@@ -1767,6 +1767,7 @@ def zspace_partial_fusion(
     *,
     weights: Sequence[float] | None = None,
     strategy: str = "mean",
+    gradient_alignment: str = "strict",
     telemetry: Mapping[str, Any]
     | ZSpaceTelemetryFrame
     | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
@@ -1781,6 +1782,7 @@ def zspace_partial_fusion(
     request: dict[str, Any] = {
         "partials": [_partial_fusion_input(partial) for partial in partials],
         "strategy": str(strategy),
+        "gradient_alignment": str(gradient_alignment),
         "telemetry": _partial_telemetry_inputs(telemetry),
     }
     if weights is not None:
@@ -1822,6 +1824,7 @@ def blend_zspace_partials(
     *,
     weights: Sequence[float] | None = None,
     strategy: str = "mean",
+    gradient_alignment: str = "strict",
 ) -> dict[str, Any]:
     """Fuse several partial observations into a single mapping.
 
@@ -1835,33 +1838,21 @@ def blend_zspace_partials(
         weight. Negative or zero weights suppress that partial.
     strategy:
         Reduction strategy used when multiple partials define the same metric.
-        Supported values are ``"mean"`` (default), ``"last"``, ``"max"`` and
-        ``"min"``.
+        Supported values are ``"mean"`` (default), ``"last"``, ``"max"``,
+        ``"min"``, ``"median"`` and ``"sum"``.
+    gradient_alignment:
+        ``"strict"`` rejects ragged active gradients. Use ``"pad_zero"`` only
+        when explicitly preserving the legacy zero-padding behavior.
     """
 
     return _metrics_from_fusion_contract(
-        zspace_partial_fusion(partials, weights=weights, strategy=strategy)
+        zspace_partial_fusion(
+            partials,
+            weights=weights,
+            strategy=strategy,
+            gradient_alignment=gradient_alignment,
+        )
     )
-
-
-def _aggregate_values(values: Sequence[float], mode: str) -> float:
-    if not values:
-        return 0.0
-    if mode == "max":
-        return max(values)
-    if mode == "min":
-        return min(values)
-    if mode == "last":
-        return values[-1]
-    if mode == "median":
-        ordered = sorted(values)
-        mid = len(ordered) // 2
-        if len(ordered) % 2:
-            return ordered[mid]
-        return 0.5 * (ordered[mid - 1] + ordered[mid])
-    if mode == "sum":
-        return sum(values)
-    return sum(values) / len(values)
 
 
 def elliptic_partial_from_telemetry(
@@ -1871,10 +1862,16 @@ def elliptic_partial_from_telemetry(
     origin: str | None = "elliptic",
     telemetry_prefix: str = "elliptic",
     aggregate: str = "mean",
+    gradient_alignment: str = "strict",
     gradient_source: str = "rotor_transport",
     extra_telemetry: Mapping[str, Any] | None = None,
 ) -> ZSpacePartialBundle:
-    """Convert elliptic telemetry samples into a :class:`ZSpacePartialBundle`."""
+    """Convert elliptic telemetry through the Rust-owned partial fusion contract.
+
+    ``aggregate`` applies to both scalar metrics and gradient coordinates.
+    Ragged gradients fail by default; ``gradient_alignment="pad_zero"`` opts
+    into the audited legacy compatibility path.
+    """
 
     samples = [
         mapping
@@ -1886,17 +1883,13 @@ def elliptic_partial_from_telemetry(
         raise ValueError("elliptic telemetry payload is empty")
 
     mode = aggregate.lower()
-    if mode not in {"mean", "max", "min", "last", "median", "sum"}:
-        raise ValueError(
-            f"unsupported aggregate mode '{aggregate}' for elliptic telemetry"
-        )
 
-    metric_values: dict[str, list[float]] = {
-        key: [] for key in _ELLIPTIC_METRIC_SOURCES
-    }
-    gradient_vectors: list[list[float]] = []
+    fusion_inputs: list[dict[str, Any]] = []
+    summary_values: list[float] = []
+    has_scalar_metrics = False
 
     for payload in samples:
+        sample_partial: dict[str, Any] = {}
         for canonical, source in _ELLIPTIC_METRIC_SOURCES.items():
             value = payload.get(source)
             if value is None:
@@ -1905,7 +1898,9 @@ def elliptic_partial_from_telemetry(
                 numeric = float(value)
             except (TypeError, ValueError):
                 continue
-            metric_values[canonical].append(numeric)
+            sample_partial[canonical] = numeric
+            summary_values.append(numeric)
+            has_scalar_metrics = True
 
         vector_candidate: Any | None = (
             payload.get(gradient_source) if gradient_source else None
@@ -1917,29 +1912,19 @@ def elliptic_partial_from_telemetry(
                     break
         gradient = _coerce_float_list(vector_candidate)
         if gradient:
-            gradient_vectors.append(gradient)
+            sample_partial["gradient"] = gradient
+        if sample_partial:
+            fusion_inputs.append(sample_partial)
 
-    partial: dict[str, Any] = {}
-    summary_values: list[float] = []
-    for key, values in metric_values.items():
-        if not values:
-            continue
-        summary_values.extend(values)
-        partial[key] = _aggregate_values(values, mode)
-
-    if not partial:
+    if not has_scalar_metrics:
         raise ValueError("no elliptic metrics could be derived from telemetry")
-
-    if gradient_vectors:
-        length = max(len(vector) for vector in gradient_vectors)
-        if length > 0:
-            accumulator = [0.0] * length
-            for vector in gradient_vectors:
-                for idx in range(length):
-                    value = vector[idx] if idx < len(vector) else 0.0
-                    accumulator[idx] += value
-            count = len(gradient_vectors)
-            partial["gradient"] = [accumulator[idx] / count for idx in range(length)]
+    partial = _metrics_from_fusion_contract(
+        zspace_partial_fusion(
+            fusion_inputs,
+            strategy=mode,
+            gradient_alignment=gradient_alignment,
+        )
+    )
 
     telemetry_sources: list[Mapping[str, Any]] = list(samples)
     if extra_telemetry is not None:
@@ -1966,10 +1951,9 @@ def elliptic_partial_from_telemetry(
         telemetry_map.setdefault(f"{prefix}.focus", stats["focus"])
         telemetry_map.setdefault(f"{prefix}.count", stats["count"])
 
-    weight = max(0.0, float(bundle_weight))
     return ZSpacePartialBundle(
         partial,
-        weight=weight,
+        weight=float(bundle_weight),
         origin=origin,
         telemetry=telemetry_map or None,
     )
@@ -2304,6 +2288,7 @@ class ZSpaceInferencePipeline:
         alpha: float = 0.35,
         smoothing: float = 0.35,
         strategy: str = "mean",
+        gradient_alignment: str = "strict",
         telemetry: Mapping[str, Any] | None = None,
     ) -> None:
         self._runtime = ZSpaceInferenceRuntime(
@@ -2314,6 +2299,7 @@ class ZSpaceInferencePipeline:
             telemetry=telemetry,
         )
         self._strategy = strategy
+        self._gradient_alignment = gradient_alignment
         self._partials: list[ZSpacePartialBundle] = []
 
     @property
@@ -2321,6 +2307,12 @@ class ZSpaceInferencePipeline:
         """Return the blending strategy used for partial fusion."""
 
         return self._strategy
+
+    @property
+    def gradient_alignment(self) -> str:
+        """Return the Rust fusion policy used for active gradient dimensions."""
+
+        return self._gradient_alignment
 
     @property
     def posterior(self) -> ZSpacePosterior:
@@ -2364,6 +2356,7 @@ class ZSpaceInferencePipeline:
         origin: str | None = "elliptic",
         telemetry_prefix: str = "elliptic",
         aggregate: str = "mean",
+        gradient_alignment: str | None = None,
         gradient_source: str = "rotor_transport",
         extra_telemetry: Mapping[str, Any] | None = None,
     ) -> ZSpacePartialBundle:
@@ -2375,6 +2368,11 @@ class ZSpaceInferencePipeline:
             origin=origin,
             telemetry_prefix=telemetry_prefix,
             aggregate=aggregate,
+            gradient_alignment=(
+                self._gradient_alignment
+                if gradient_alignment is None
+                else gradient_alignment
+            ),
             gradient_source=gradient_source,
             extra_telemetry=extra_telemetry,
         )
@@ -2389,6 +2387,7 @@ class ZSpaceInferencePipeline:
         origin: str | None = "elliptic",
         telemetry_prefix: str = "elliptic",
         aggregate: str = "mean",
+        gradient_alignment: str | None = None,
         gradient_source: str = "rotor_transport",
         extra_telemetry: Mapping[str, Any] | None = None,
         return_features: bool = False,
@@ -2404,6 +2403,11 @@ class ZSpaceInferencePipeline:
             origin=origin,
             telemetry_prefix=telemetry_prefix,
             aggregate=aggregate,
+            gradient_alignment=(
+                self._gradient_alignment
+                if gradient_alignment is None
+                else gradient_alignment
+            ),
             gradient_source=gradient_source,
             extra_telemetry=extra_telemetry,
             return_features=return_features,
@@ -2517,16 +2521,23 @@ class ZSpaceInferencePipeline:
         self,
         *,
         strategy: str | None = None,
+        gradient_alignment: str | None = None,
         weights: Sequence[float] | None = None,
         clear: bool = True,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
         """Blend registered partials and compute the Z-space inference."""
 
-        chosen_strategy = strategy or self._strategy
+        chosen_strategy = self._strategy if strategy is None else strategy
+        chosen_gradient_alignment = (
+            self._gradient_alignment
+            if gradient_alignment is None
+            else gradient_alignment
+        )
         fusion = zspace_partial_fusion(
             self._partials,
             strategy=chosen_strategy,
+            gradient_alignment=chosen_gradient_alignment,
             weights=weights,
             telemetry=telemetry,
         )
@@ -2545,6 +2556,7 @@ class ZSpaceInferencePipeline:
         trainer: Any,
         *,
         strategy: str | None = None,
+        gradient_alignment: str | None = None,
         weights: Sequence[float] | None = None,
         clear: bool = True,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
@@ -2556,6 +2568,7 @@ class ZSpaceInferencePipeline:
         Args:
             trainer: Object exposing a ``step`` method.
             strategy: Optional blend strategy override.
+            gradient_alignment: Optional Rust gradient-alignment policy override.
             weights: Optional blend weights.
             clear: Whether to clear buffered partials after inference.
             telemetry: Additional telemetry forwarded to the runtime.
@@ -2572,6 +2585,7 @@ class ZSpaceInferencePipeline:
 
         inference = self.infer(
             strategy=strategy,
+            gradient_alignment=gradient_alignment,
             weights=weights,
             clear=clear,
             telemetry=telemetry,
@@ -2625,6 +2639,7 @@ def infer_with_partials(
     alpha: float = 0.35,
     smoothing: float = 0.35,
     strategy: str = "mean",
+    gradient_alignment: str = "strict",
     weights: Sequence[float] | None = None,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
 ) -> ZSpaceInference:
@@ -2634,6 +2649,7 @@ def infer_with_partials(
         partials,
         weights=weights,
         strategy=strategy,
+        gradient_alignment=gradient_alignment,
         telemetry=telemetry,
     )
     blended = _metrics_from_fusion_contract(fusion)
@@ -3013,6 +3029,7 @@ def canvas_coherence_partial(
     coherence: Any = None,
     contour: Any = None,
     strategy: str = "mean",
+    gradient_alignment: str = "strict",
     weights: Sequence[float] | None = None,
     canvas_kwargs: Mapping[str, Any] | None = None,
     coherence_kwargs: Mapping[str, Any] | None = None,
@@ -3033,7 +3050,12 @@ def canvas_coherence_partial(
         ZSpacePartialBundle(canvas_partial, origin="canvas"),
         ZSpacePartialBundle(coherence_partial, origin="coherence"),
     ]
-    return blend_zspace_partials(bundles, strategy=strategy, weights=weights)
+    return blend_zspace_partials(
+        bundles,
+        strategy=strategy,
+        gradient_alignment=gradient_alignment,
+        weights=weights,
+    )
 
 
 def infer_canvas_snapshot(
@@ -3314,6 +3336,7 @@ def infer_canvas_with_coherence(
     alpha: float = 0.35,
     smoothing: float = 0.35,
     strategy: str = "mean",
+    gradient_alignment: str = "strict",
     weights: Sequence[float] | None = None,
     canvas_kwargs: Mapping[str, Any] | None = None,
     coherence_kwargs: Mapping[str, Any] | None = None,
@@ -3326,6 +3349,7 @@ def infer_canvas_with_coherence(
         coherence=coherence,
         contour=contour,
         strategy=strategy,
+        gradient_alignment=gradient_alignment,
         weights=weights,
         canvas_kwargs=canvas_kwargs,
         coherence_kwargs=coherence_kwargs,

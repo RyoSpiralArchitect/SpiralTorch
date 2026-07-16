@@ -2801,6 +2801,7 @@ class _ZSpaceNotation:
         self,
         *partials: _Any,
         strategy: str = "mean",
+        gradient_alignment: str = "strict",
         weights: _Sequence[float] | None = None,
     ) -> dict[str, _Any]:
         if len(partials) == 1 and isinstance(partials[0], _SequenceABC):
@@ -2831,7 +2832,12 @@ class _ZSpaceNotation:
                 "z.bundle() expects partial bundles, mappings, or ZMetrics entries"
             )
 
-        return blend_zspace_partials(normalised, strategy=strategy, weights=weights)
+        return blend_zspace_partials(
+            normalised,
+            strategy=strategy,
+            gradient_alignment=gradient_alignment,
+            weights=weights,
+        )
 
     blend = bundle
 

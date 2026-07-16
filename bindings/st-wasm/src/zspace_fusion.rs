@@ -148,6 +148,7 @@ mod tests {
                 }
             ],
             "strategy": "mean",
+            "gradient_alignment": "pad_zero",
             "telemetry": [{"browser": {"webgpu_ready": true}}]
         }))
         .expect("valid partial request");
@@ -174,9 +175,33 @@ mod tests {
         assert!(unknown.contains("unknown field"));
 
         let invalid_strategy =
-            partial_fusion_request_from_json(r#"{"partials":[],"strategy":"median"}"#)
+            partial_fusion_request_from_json(r#"{"partials":[],"strategy":"product"}"#)
                 .expect_err("unknown strategies must fail closed");
         assert!(invalid_strategy.contains("unknown variant"));
+
+        let invalid_alignment =
+            partial_fusion_request_from_json(r#"{"partials":[],"gradient_alignment":"truncate"}"#)
+                .expect_err("unknown gradient alignment must fail closed");
+        assert!(invalid_alignment.contains("unknown variant"));
+    }
+
+    #[test]
+    fn wasm_partial_fusion_inherits_strict_gradient_alignment() {
+        let request = partial_fusion_request_from_json(
+            r#"{
+                "partials": [
+                    {"metrics": {"gradient": [1.0, 2.0]}},
+                    {"metrics": {"gradient": [3.0]}}
+                ]
+            }"#,
+        )
+        .expect("defaulted request is valid");
+        let error = zspace_partial_fusion_value(request)
+            .expect_err("WASM must inherit Rust's strict default");
+        assert!(matches!(
+            error,
+            ZSpaceFusionError::GradientDimensionMismatch { index: 1, .. }
+        ));
     }
 
     #[test]

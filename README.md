@@ -207,9 +207,19 @@ const fused = zspacePartialFusionObject({
     { metrics: { speed: 0.8 }, weight: 2.0, origin: "webgpu" },
   ],
   strategy: "mean",
+  gradient_alignment: "strict",
   telemetry: [{ browser: { webgpu_ready: true } }],
 });
 ```
+
+Partial fusion contract v2 rejects ragged active gradients by default instead
+of silently inventing coordinates. Set `gradient_alignment: "pad_zero"` only
+for an explicit legacy-compatible replay; the result reports
+`gradient_padding_applied`, `gradient_padded_source_count`, and per-source
+`gradient_padded` audit fields. The `mean`, `last`, `max`, `min`, `median`, and
+`sum` reducers apply identically to scalar metrics and gradient coordinates in
+Rust, so Python elliptic telemetry and browser clients do not rebuild reduction
+semantics locally.
 
 Posterior decoding follows that same Rust-first boundary. Python's
 `ZSpacePosterior` and the browser's `zspacePosteriorDecodeObject` /
