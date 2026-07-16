@@ -64,6 +64,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
         zspace_stub = types.ModuleType("spiraltorch.zspace_inference")
         for name in [
             "ZMetrics",
+            "ZSpaceControlGradient",
             "ZSpaceDecoded",
             "ZSpaceInference",
             "ZSpacePosterior",
@@ -72,6 +73,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "ZSpaceInferenceRuntime",
             "ZSpaceInferencePipeline",
             "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
+            "ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS",
             "inference_to_mapping",
             "inference_to_zmetrics",
             "prepare_trainer_step_payload",

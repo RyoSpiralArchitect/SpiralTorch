@@ -697,9 +697,15 @@ def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
     )
     assert "origin=zspace:inference_distortion" in calls[0][0]
     assert "zspace.distortion.energy" in calls[0][0]
-    telemetry = trace.as_dict()["inference"]["telemetry"]["payload"]
-    assert len(trace.as_dict()["inference"]["applied"]["gradient"]) == 4
-    fusion = trace.as_dict()["inference"]["fusion"]
+    inference = trace.as_dict()["inference"]
+    telemetry = inference["telemetry"]["payload"]
+    assert "gradient" not in inference["applied"]
+    assert len(inference["gradient"]) == 4
+    assert inference["control_gradient"]["dimension"] == 4
+    assert inference["control_gradient"]["basis"] == (
+        st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    )
+    fusion = inference["fusion"]
     assert fusion["gradient_source"] == "canonical_metrics"
     assert fusion["gradient_replaced_source_count"] == 2
     assert telemetry["zspace.distortion.energy"] == pytest.approx(

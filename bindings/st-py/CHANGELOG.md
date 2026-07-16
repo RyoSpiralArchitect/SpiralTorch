@@ -2,6 +2,18 @@
 
 ## 0.4.13
 
+- Topos Z-space projection v2: the Rust payload now names its six-axis gradient
+  basis, exact resize rule, and ordered semantic channels. Python and WASM
+  transport that identity into posterior controls instead of attaching an
+  unlabelled positional vector.
+- Z-space posterior v2: replace raw one-sided FFT magnitudes with a
+  Parseval-normalized spectral contract, make fractional and drift ratios
+  scale-consistent down to nonzero tiny states, and make latent-gradient
+  normalization continuous and bounded. Rust now computes residual over only
+  observed metrics, applies telemetry as conservative confidence reliability,
+  and preserves every external gradient as a basis-tagged `control_gradient`
+  instead of resizing it into latent coordinates. Python and WASM expose the
+  same diagnostics, gradient identities, and fail-closed request rules.
 - Z-space partial fusion v3: add Rust-owned gradient basis identity, reject
   equal-length vectors with incompatible semantics, expose the canonical
   metric-cycle projector to Python and WASM, and route API response/distortion

@@ -11,10 +11,12 @@ pytest.importorskip("spiraltorch")
 import spiraltorch as st
 
 from spiraltorch import (
+    ZSpaceControlGradient,
     ZSpaceInferencePipeline,
     ZSpaceInferenceRuntime,
     ZSpacePosterior,
     ZSpacePartialBundle,
+    ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     coherence_partial_from_diagnostics,
@@ -29,6 +31,7 @@ from spiraltorch import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
+    inference_to_mapping,
     weights_partial_from_dlpack,
     weights_partial_from_compat,
     infer_weights_from_dlpack,
@@ -48,20 +51,30 @@ def test_decode_produces_expected_structure():
     assert set(decoded.metrics.keys()) == {"speed", "memory", "stability", "frac", "drs"}
     assert len(decoded.gradient) == len(vector)
     assert math.isclose(sum(decoded.barycentric), 1.0, rel_tol=1e-6)
+    assert decoded.spectral_bins == len(vector) // 2 + 1
 
 
 def test_posterior_decode_exposes_rust_owned_golden_contract():
     contract = zspace_posterior_decode([0.12, -0.03, 0.48, -0.2])
 
     assert contract["kind"] == "spiraltorch.zspace_posterior_decode"
-    assert contract["contract_version"] == "spiraltorch.zspace_posterior.v1"
+    assert contract["contract_version"] == "spiraltorch.zspace_posterior.v2"
     assert contract["semantic_owner"] == "st-core::inference::zspace_posterior"
     assert contract["semantic_backend"] == "rust"
     assert "DFT" in contract["fractional_formula"]
+    assert "Parseval" in contract["spectral_formula"]
     assert "zero exterior boundaries" in contract["gradient_formula"]
     assert "softplus" in contract["barycentric_formula"]
+    assert contract["gradient_basis"] == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
     assert contract["energy"] == pytest.approx(0.2857)
-    assert contract["frac_energy"] == pytest.approx(0.2621560649191949)
+    assert contract["spectral_energy"] == pytest.approx(contract["energy"])
+    assert contract["parseval_relative_error"] <= 1.0e-14
+    assert contract["frac_energy"] == pytest.approx(0.2210090973787923)
+    assert contract["fractional_energy_ratio"] == pytest.approx(
+        0.7735705193517406
+    )
+    assert contract["spectral_centroid"] == pytest.approx(0.7415120756037802)
+    assert contract["spectral_bins"] == 3
     assert contract["gradient"] == pytest.approx(
         [-0.015, 0.18, -0.085, -0.24]
     )
@@ -70,8 +83,8 @@ def test_posterior_decode_exposes_rust_owned_golden_contract():
             "speed": 0.4463024613684294,
             "memory": 0.10991043037290935,
             "stability": 0.672934550609384,
-            "drs": 0.6180432815695912,
-            "frac": 0.7247563119052868,
+            "drs": 0.6413201743341207,
+            "frac": 0.6490008507207798,
         }
     )
 
@@ -80,20 +93,31 @@ def test_posterior_projection_delegates_aliases_and_telemetry_to_rust():
     contract = zspace_posterior_project(
         [0.12, -0.03, 0.48, -0.2],
         {"speed": 0.3, "mem": -0.2, "gradient": [2.0, -1.0]},
+        gradient_basis="test.posterior.control.v1",
         telemetry={"psi": {"energy": 2.0, "focus": 0.4}},
     )
 
     assert contract["kind"] == "spiraltorch.zspace_posterior_projection"
-    assert "rms_5" in contract["projection_formula"]
+    assert "rms_observed" in contract["projection_formula"]
     assert "variance" in contract["telemetry_formula"]
     assert contract["applied"]["memory"] == pytest.approx(-0.2)
-    assert contract["gradient"] == pytest.approx(
-        [0.7615941559557649, -0.46211715726000974, 0.0, 0.0]
-    )
+    assert "gradient" not in contract["applied"]
+    assert contract["gradient"] == pytest.approx([-0.015, 0.18, -0.085, -0.24])
+    assert contract["gradient_basis"] == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    assert contract["gradient_source"] == "latent_state"
+    control = contract["control_gradient"]
+    assert control["source"] == "partial"
+    assert control["basis"] == "test.posterior.control.v1"
+    assert control["values"] == pytest.approx([2.0, -1.0])
+    assert control["dimension"] == 2
+    assert control["l2"] == pytest.approx(math.sqrt(5.0))
+    assert control["linf"] == pytest.approx(2.0)
     assert contract["telemetry"]["semantic_backend"] == "rust"
     assert contract["telemetry"]["summary"]["variance"] == pytest.approx(0.64)
-    assert contract["residual"] == pytest.approx(0.09345350599255713)
-    assert contract["confidence"] == pytest.approx(1.0)
+    assert contract["residual_metric_count"] == 2
+    assert contract["residual"] == pytest.approx(0.24233126609703365)
+    assert contract["telemetry_reliability"] == pytest.approx(1.0 / 1.64)
+    assert contract["confidence"] == pytest.approx(0.4785342427598339)
 
 
 def test_posterior_contract_rejects_ambiguous_or_invalid_requests():
@@ -101,6 +125,8 @@ def test_posterior_contract_rejects_ambiguous_or_invalid_requests():
         zspace_posterior_project([0.1], {"speed": 0.2, "velocity": 0.3})
     with pytest.raises(ValueError, match="smoothing"):
         zspace_posterior_project([0.1], smoothing=1.1)
+    with pytest.raises(ValueError, match="explicit gradient basis"):
+        zspace_posterior_project([0.1], {"gradient": [0.2]})
     with pytest.raises(ValueError, match="at least one"):
         zspace_posterior_decode([])
     with pytest.raises(ValueError, match="fractional order"):
@@ -122,7 +148,7 @@ def test_posterior_rejects_an_untrusted_native_contract(
     native = types.SimpleNamespace(
         _zspace_posterior_decode=lambda _request: {
             "kind": "spiraltorch.zspace_posterior_decode",
-            "contract_version": "spiraltorch.zspace_posterior.v1",
+            "contract_version": "spiraltorch.zspace_posterior.v2",
             "semantic_owner": "python",
             "semantic_backend": "rust",
         }
@@ -142,7 +168,8 @@ def test_posterior_rejects_an_untrusted_native_contract(
 )
 def test_infer_from_partial_overrides_requested_metrics(partial):
     vector = [0.2, -0.1, 0.45, -0.05]
-    result = infer_from_partial(vector, partial)
+    gradient_basis = "test.partial.control.v1" if "gradient" in partial else None
+    result = infer_from_partial(vector, partial, gradient_basis=gradient_basis)
     for key, value in partial.items():
         canonical = {
             "mem": "memory",
@@ -150,6 +177,10 @@ def test_infer_from_partial_overrides_requested_metrics(partial):
         }.get(key, key)
         if canonical == "gradient":
             assert len(result.gradient) == len(vector)
+            assert result.gradient_basis == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+            assert isinstance(result.control_gradient, ZSpaceControlGradient)
+            assert result.control_gradient.basis == gradient_basis
+            assert result.control_gradient.values == pytest.approx(value)
             continue
         assert math.isclose(result.metrics[canonical], float(value))
     assert 0.0 <= result.confidence <= 1.0
@@ -161,10 +192,15 @@ def test_infer_from_partial_accepts_mapping_proxy():
     gradient_mapping = types.MappingProxyType({0: 0.3, 1: -0.15, 2: 0.05, 3: -0.02})
     partial = types.MappingProxyType({"stab": 0.55, "gradient": gradient_mapping})
 
-    result = infer_from_partial(vector, partial)
+    result = infer_from_partial(
+        vector, partial, gradient_basis="test.mapping.control.v1"
+    )
 
     assert math.isclose(result.metrics["stability"], 0.55)
-    assert result.gradient == [0.3, -0.15, 0.05, -0.02]
+    assert result.gradient_basis == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    assert result.control_gradient is not None
+    assert result.control_gradient.values == pytest.approx([0.3, -0.15, 0.05, -0.02])
+    assert result.control_gradient.basis == "test.mapping.control.v1"
 
 
 def test_posterior_project_matches_helper():
@@ -210,6 +246,44 @@ def test_blend_partials_supports_weighted_mean_and_gradient():
     assert math.isclose(blended["speed"], (0.2 + 0.6 * 2.0) / 3.0, rel_tol=1e-6)
     assert math.isclose(blended["gradient"][0], (0.1 + 0.5 * 2.0) / 3.0, rel_tol=1e-6)
     assert len(blended["gradient"]) == 2
+
+
+def test_flattened_fusion_preserves_gradient_basis_for_composition():
+    basis = "test.compose.control.v1"
+    bundle = ZSpacePartialBundle(
+        {"speed": 0.4, "gradient": [0.25, -0.1]},
+        gradient_basis=basis,
+    )
+
+    resolved = bundle.resolved()
+    blended = blend_zspace_partials([bundle])
+
+    for payload in (resolved, blended):
+        assert payload["gradient_basis"] == basis
+        inference = infer_from_partial([0.3, -0.05, 0.22, -0.11], payload)
+        assert inference.control_gradient is not None
+        assert inference.control_gradient.basis == basis
+        assert inference.control_gradient.values == pytest.approx([0.25, -0.1])
+
+
+def test_runtime_keeps_fused_gradient_basis_out_of_metric_cache():
+    basis = "test.runtime.control.v1"
+    runtime = ZSpaceInferenceRuntime([0.3, -0.05, 0.22, -0.11])
+    partial = blend_zspace_partials(
+        [
+            ZSpacePartialBundle(
+                {"speed": 0.4, "gradient": [0.25, -0.1]},
+                gradient_basis=basis,
+            )
+        ]
+    )
+
+    inference = runtime.update(partial)
+
+    assert runtime.gradient_basis == basis
+    assert "gradient_basis" not in runtime.cached_observations
+    assert inference.control_gradient is not None
+    assert inference.control_gradient.basis == basis
 
 
 def test_telemetry_fusion_exposes_rust_owned_contract():
@@ -440,6 +514,31 @@ def test_elliptic_telemetry_delegates_scalar_and_gradient_reduction_to_rust():
 
     assert bundle.metrics["elliptic_curvature"] == 2.0
     assert bundle.metrics["gradient"] == [2.0, 6.0]
+    assert bundle.gradient_basis == "spiraltorch.elliptic.rotor_transport.v1"
+    inference = infer_from_partial(
+        [0.12, -0.03, 0.48, -0.2],
+        bundle.metrics,
+        gradient_basis=bundle.gradient_basis,
+    )
+    assert inference.control_gradient is not None
+    assert inference.control_gradient.basis == bundle.gradient_basis
+
+
+def test_elliptic_custom_gradient_sources_require_an_explicit_basis():
+    telemetry = [{"curvature_radius": 2.0, "custom_vector": [1.0, -1.0]}]
+
+    with pytest.raises(ValueError, match="gradient_basis is required"):
+        elliptic_partial_from_telemetry(
+            telemetry,
+            gradient_source="custom_vector",
+        )
+
+    bundle = elliptic_partial_from_telemetry(
+        telemetry,
+        gradient_source="custom_vector",
+        gradient_basis="example.custom_elliptic.v1",
+    )
+    assert bundle.gradient_basis == "example.custom_elliptic.v1"
 
 
 def test_partial_fusion_fails_closed_on_ambiguous_or_invalid_requests():
@@ -467,6 +566,11 @@ def test_zspace_posterior_functions_are_public():
     assert st.zspace_posterior_project is zspace_posterior_project
     assert "zspace_posterior_decode" in st.__all__
     assert "zspace_posterior_project" in st.__all__
+    assert st.ZSpaceControlGradient is ZSpaceControlGradient
+    assert (
+        st.ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+        == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    )
 
 
 def test_z_notation_delegates_partial_semantics_to_rust():
@@ -505,6 +609,10 @@ def test_infer_with_partials_preserves_post_fusion_projection_receipt():
     assert result.fusion is not None
     assert result.fusion["gradient_source"] == "canonical_metrics"
     assert result.fusion["gradient"] == pytest.approx([0.1, 0.2, 0.3, 0.4])
+    assert result.gradient_basis == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    assert result.control_gradient is not None
+    assert result.control_gradient.basis == st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    assert result.control_gradient.values == pytest.approx([0.1, 0.2, 0.3, 0.4])
 
 
 def test_infer_with_partials_merges_telemetry_payloads():
@@ -541,8 +649,16 @@ def test_pipeline_does_not_hide_invalid_fusion_overrides():
     pipeline = ZSpaceInferencePipeline(
         [0.22, -0.11, 0.31, -0.07], gradient_alignment="pad_zero"
     )
-    pipeline.add_partial({"speed": 0.2, "gradient": [0.1, -0.1]})
-    pipeline.add_partial({"speed": 0.6, "gradient": [0.5]})
+    pipeline.add_partial(
+        {"speed": 0.2, "gradient": [0.1, -0.1]},
+        gradient_basis="test.pipeline.control.v1",
+    )
+    pipeline.add_partial(
+        ZSpacePartialBundle(
+            {"speed": 0.6, "gradient": [0.5]},
+            gradient_basis="test.pipeline.control.v1",
+        )
+    )
 
     assert pipeline.gradient_alignment == "pad_zero"
     pipeline.infer(clear=False)
@@ -583,6 +699,9 @@ def test_pipeline_can_queue_geometry_probe_context():
     assert len(partials) == 1
     assert metadata["source_origins"] == ["geometry:field"]
     assert metadata["context_origins"] == ["geometry:consensus"]
+    assert metadata["consensus"]["gradient_preserved"] is True
+    assert inference.control_gradient is not None
+    assert inference.control_gradient.basis == partials[0].gradient_basis
     assert "speed" in inference.metrics
     assert inference.telemetry is not None
     assert inference.telemetry.payload["geometry.consensus.probe_count"] == pytest.approx(1.0)
@@ -612,6 +731,42 @@ def test_compile_inference_supports_decorator_usage():
     vector = [0.11, 0.02, -0.07, 0.19]
     output = produce(vector, 0.25, bias=0.1)
     assert math.isclose(output.metrics["speed"], 0.35)
+
+
+def test_compile_inference_preserves_an_explicit_control_basis():
+    @compile_inference(gradient_basis="test.compiled.control.v1")
+    def produce() -> Mapping[str, Any]:
+        return {"gradient": [0.2, -0.1]}
+
+    output = produce([0.11, 0.02, -0.07, 0.19])
+
+    assert output.control_gradient is not None
+    assert output.control_gradient.values == pytest.approx([0.2, -0.1])
+    assert output.control_gradient.basis == "test.compiled.control.v1"
+
+
+def test_inference_mapping_preserves_the_latent_gradient_basis():
+    inference = infer_from_partial([0.11, 0.02, -0.07, 0.19], {"speed": 0.3})
+
+    payload = inference_to_mapping(inference)
+
+    assert payload["gradient_basis"] == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    assert st.ZMetrics.from_mapping(payload).gradient_basis == (
+        ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+    )
+
+    remapped = inference_to_mapping(payload)
+    assert remapped["gradient_basis"] == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+
+
+def test_embedded_gradient_basis_round_trips_through_partial_projection():
+    inference = infer_from_partial([0.12, -0.03, 0.48, -0.2], {"speed": 0.2})
+    payload = inference_to_mapping(inference)
+
+    projected = infer_from_partial([0.12, -0.03, 0.48, -0.2], payload)
+
+    assert projected.control_gradient is not None
+    assert projected.control_gradient.basis == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
 
 
 def test_compile_inference_validates_return_type():

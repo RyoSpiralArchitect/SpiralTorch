@@ -123,6 +123,7 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     zspace_stub = types.ModuleType("spiraltorch.zspace_inference")
     _ZSPACE_CLASSES = [
         "ZMetrics",
+        "ZSpaceControlGradient",
         "ZSpaceDecoded",
         "ZSpaceInference",
         "ZSpacePosterior",
@@ -135,6 +136,9 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         setattr(zspace_stub, name, type(name, (), {}))
     zspace_stub.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS = (
         "spiraltorch.zspace.canonical_metric_cycle.v1"
+    )
+    zspace_stub.ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS = (
+        "spiraltorch.zspace.latent.central_difference.zero_boundary.v1"
     )
 
     _ZSPACE_FUNCTIONS = [

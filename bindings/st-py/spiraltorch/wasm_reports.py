@@ -25,6 +25,9 @@ __all__ = [
 ]
 
 _CONTEXT_ARTIFACT_SCHEMA = "spiraltorch.wasm_report_context.v1"
+_WASM_REPORT_SUMMARY_GRADIENT_BASIS = (
+    "spiraltorch.wasm.report.summary_features.v1"
+)
 
 
 def load_wasm_report(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -889,8 +892,10 @@ def _validated_partial_metrics(partial: ZSpacePartialBundle) -> dict[str, Any]:
 
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
     telemetry = partial.telemetry_payload()
+    metrics = _validated_partial_metrics(partial)
+    metrics.pop("gradient_basis", None)
     return {
-        "metrics": _validated_partial_metrics(partial),
+        "metrics": metrics,
         "weight": partial.weight,
         "origin": partial.origin,
         "gradient_basis": partial.gradient_basis,
@@ -1158,4 +1163,5 @@ def wasm_report_to_zspace_partial(
         weight=max(0.0, float(bundle_weight)),
         origin=origin or f"wasm:{family}",
         telemetry=telemetry,
+        gradient_basis=_WASM_REPORT_SUMMARY_GRADIENT_BASIS,
     )

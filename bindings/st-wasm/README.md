@@ -110,8 +110,9 @@ console.log(
 Optimizer snapshots bind a JavaScript-safe sequence, the complete Rust control bundle, and the
 v3 learning-rate plus gradient-state application prescribed by that bundle. The payload includes
 the same ten-axis bias basis, RMS-relative bias and clipping rules, and clipped-gradient momentum
-transition consumed by native Amega tapes; browser code does not rebuild those equations. The projection's first six gradient
-axes are semantic; wider client vectors are explicitly zero-filled by Rust. Results carry
+transition consumed by native Amega tapes; browser code does not rebuild those equations. Topos
+projection v2 names its six-axis basis, exact resize rule, and ordered channels; wider client
+vectors are explicitly zero-filled by Rust. Results carry
 `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and direct Rust
 runs can be audited against one semantic core.
 
@@ -119,7 +120,12 @@ Latent posterior decoding and partial projection use the same boundary. The
 browser passes state, partial observations, and telemetry to
 `st-core::inference::zspace_posterior`; Rust alone owns the DFT-derived
 fractional energy, gradient normalization, aliases, barycentric coordinates,
-residual/confidence update, and telemetry adjustment:
+residual/confidence update, and telemetry adjustment. Contract v2 uses a
+one-sided Parseval-normalized spectrum, reports its reconstruction error and
+centroid, computes residual RMS only over observed metrics, and applies
+telemetry as a confidence reliability no greater than one. Browser-supplied
+gradients require an explicit basis and remain separate controls; they never
+replace the Rust latent finite-difference gradient:
 
 ```ts
 import {
@@ -133,17 +139,22 @@ const prior = zspacePosteriorDecodeObject({
 });
 const projection = zspacePosteriorProjectObject({
     z_state: prior.z_state,
-    partial: { speed: 0.3, mem: -0.2 },
+    partial: { speed: 0.3, mem: -0.2, gradient: [0.2, -0.1] },
+    gradient_basis: "example.browser.control.v1",
     telemetry: [{ psi: { energy: 2.0, focus: 0.4 } }],
 });
 
-console.log(projection.residual, projection.semantic_owner);
+console.log(
+    projection.residual,
+    projection.gradient_basis,
+    projection.control_gradient?.basis,
+);
 ```
 
 The corresponding `zspacePosteriorDecodeJson` and
 `zspacePosteriorProjectJson` functions expose identical worker/persistence
 contracts. WASM adds only `execution_client: "wasm"`; it has no JavaScript
-posterior fallback.
+posterior fallback. An untagged external gradient fails closed in Rust.
 
 Coherence diagnostics use a peer contract as well. Browser code may carry
 diagnostics produced elsewhere, but the projection formula and summaries are

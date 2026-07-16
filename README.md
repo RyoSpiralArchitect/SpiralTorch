@@ -241,6 +241,11 @@ and replacement counts. The `mean`, `last`, `max`,
 `min`, `median`, and `sum` reducers apply identically to scalar metrics and
 compatible gradient coordinates in Rust.
 
+The Rust Topos projection follows the same rule: contract v2 includes the
+six-axis `spiraltorch.topos.control_signal.axes.v1` basis, its ordered channels,
+and the exact truncation/zero-padding formula. Python and WASM transport that
+identity rather than naming or reconstructing the control vector themselves.
+
 Posterior decoding follows that same Rust-first boundary. Python's
 `ZSpacePosterior` and the browser's `zspacePosteriorDecodeObject` /
 `zspacePosteriorProjectObject` are clients of
@@ -248,7 +253,18 @@ Posterior decoding follows that same Rust-first boundary. Python's
 energy, gradients, barycentric weights, residual confidence, or telemetry
 adjustments. For an auditable Python payload, call
 `st.zspace_posterior_decode(...)` or `st.zspace_posterior_project(...)` and
-check the returned `contract_version` and `semantic_owner`.
+check the returned `contract_version` and `semantic_owner`. Posterior v2 uses a
+one-sided Parseval-normalized spectrum, reports spectral energy/error/centroid,
+and keeps its latent finite-difference gradient in the versioned
+`st.ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS`. An external gradient is never
+resized or substituted for that latent gradient: attach an explicit
+`gradient_basis`, then read the preserved values from `control_gradient`.
+`ZSpaceTrainer.step_partial(...)` consumes the Rust latent gradient and does not
+silently apply that external control; a control-to-latent projection must be an
+explicit, basis-aware Rust contract.
+Residual RMS is computed only over observed canonical metrics, while telemetry
+can reduce confidence through an audited reliability factor but cannot erase
+geometric residual or increase confidence.
 
 Coherence diagnostics follow the same rule. `ZSpaceCoherenceSequencer` exposes
 the complete Rust diagnostics and linguistic contour, while

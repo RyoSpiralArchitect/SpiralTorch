@@ -23,6 +23,7 @@ from ._zspace_aliases import (
 
 __all__ = [
     "ZMetrics",
+    "ZSpaceControlGradient",
     "ZSpaceDecoded",
     "ZSpaceInference",
     "ZSpacePosterior",
@@ -31,6 +32,7 @@ __all__ = [
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
     "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
+    "ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS",
     "inference_to_mapping",
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",
@@ -80,6 +82,7 @@ class ZMetrics:
     gradient: Sequence[float] | None = None
     drs: float = 0.0
     telemetry: Mapping[str, float] | None = None
+    gradient_basis: str | None = None
 
 
 _PRIMARY_ALIAS_GROUPS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -155,7 +158,10 @@ _ZSPACE_METRIC_GRADIENT_PROJECTION_CONTRACT_VERSION = (
 ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS = (
     "spiraltorch.zspace.canonical_metric_cycle.v1"
 )
-_ZSPACE_POSTERIOR_CONTRACT_VERSION = "spiraltorch.zspace_posterior.v1"
+ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS = (
+    "spiraltorch.zspace.latent.central_difference.zero_boundary.v1"
+)
+_ZSPACE_POSTERIOR_CONTRACT_VERSION = "spiraltorch.zspace_posterior.v2"
 _ZSPACE_POSTERIOR_DECODE_KIND = "spiraltorch.zspace_posterior_decode"
 _ZSPACE_POSTERIOR_PROJECTION_KIND = "spiraltorch.zspace_posterior_projection"
 _ZSPACE_POSTERIOR_SEMANTIC_OWNER = "st-core::inference::zspace_posterior"
@@ -167,9 +173,20 @@ _ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER = (
     "st-core::inference::zspace_coherence"
 )
 _TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION = (
-    "spiraltorch.topos_zspace_projection.v1"
+    "spiraltorch.topos_zspace_projection.v2"
 )
 _TOPOS_ZSPACE_PROJECTION_KIND = "spiraltorch.topos_zspace_projection"
+_TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS = (
+    "spiraltorch.topos.control_signal.axes.v1"
+)
+_TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS = (
+    "openness",
+    "guard_strength",
+    "stability_hint",
+    "exploration_hint",
+    "depth_pressure",
+    "volume_pressure",
+)
 _TOPOS_CONTROL_SIGNAL_INPUT_KEYS = frozenset(
     {
         "curvature",
@@ -377,6 +394,26 @@ def _topos_zspace_projection_from_observation(
         or projection.get("semantic_backend") != "rust"
     ):
         raise RuntimeError("native Topos Z-space core returned an untrusted contract")
+    gradient_channels = projection.get("gradient_channels")
+    gradient = projection.get("gradient")
+    gradient_formula = projection.get("gradient_formula")
+    if (
+        projection.get("gradient_basis")
+        != _TOPOS_ZSPACE_PROJECTION_GRADIENT_BASIS
+        or not isinstance(gradient_channels, SequenceABC)
+        or isinstance(gradient_channels, (str, bytes, bytearray))
+        or tuple(gradient_channels) != _TOPOS_ZSPACE_PROJECTION_GRADIENT_CHANNELS
+        or not isinstance(gradient_formula, str)
+        or not gradient_formula
+    ):
+        raise RuntimeError("native Topos Z-space core returned an unknown gradient basis")
+    if (
+        not isinstance(gradient, SequenceABC)
+        or isinstance(gradient, (str, bytes, bytearray))
+        or projection.get("gradient_dim") != len(gradient)
+        or projection.get("base_gradient_dim") != len(gradient_channels)
+    ):
+        raise RuntimeError("native Topos Z-space core returned a malformed gradient")
     return projection
 
 
@@ -864,6 +901,7 @@ def topos_control_partial(
         weight=max(0.0, float(bundle_weight)),
         origin=origin,
         telemetry=telemetry,
+        gradient_basis=projection["gradient_basis"],
     )
 
 
@@ -992,6 +1030,15 @@ def inference_to_mapping(
 
     if include_gradient and gradient is not None:
         resolved["gradient"] = list(gradient)
+        gradient_basis = (
+            inference.get("gradient_basis")
+            if isinstance(inference, MappingABC)
+            else getattr(inference, "gradient_basis", None)
+        )
+        if gradient_basis is not None and not isinstance(gradient_basis, str):
+            raise TypeError("gradient_basis must be a string")
+        if gradient_basis is not None:
+            resolved["gradient_basis"] = gradient_basis
 
     return resolved
 
@@ -1012,11 +1059,19 @@ def inference_to_zmetrics(
 
     gradient_seq = gradient if gradient else None
 
+    if isinstance(inference, MappingABC):
+        gradient_basis = inference.get("gradient_basis")
+    else:
+        gradient_basis = getattr(inference, "gradient_basis", None)
+    if gradient_basis is not None and not isinstance(gradient_basis, str):
+        raise TypeError("gradient_basis must be a string")
+
     return ZMetrics(
         speed=_resolve_primary(metrics, "speed"),
         memory=_resolve_primary(metrics, "memory"),
         stability=_resolve_primary(metrics, "stability"),
         gradient=gradient_seq,
+        gradient_basis=gradient_basis,
         drs=_resolve_primary(metrics, "drs"),
         telemetry=telemetry_payload,
     )
@@ -1366,6 +1421,13 @@ _ELLIPTIC_VECTOR_CANDIDATES = (
     "flow_vector",
     "lie_log",
 )
+_ELLIPTIC_GRADIENT_BASES = MappingProxyType(
+    {
+        "rotor_transport": "spiraltorch.elliptic.rotor_transport.v1",
+        "flow_vector": "spiraltorch.elliptic.flow_vector.v1",
+        "lie_log": "spiraltorch.elliptic.lie_log.v1",
+    }
+)
 
 
 def _iter_elliptic_samples(candidate: Any) -> Iterable[Any]:
@@ -1698,9 +1760,12 @@ class ZSpacePartialBundle:
     gradient_basis: str | None = None
 
     def resolved(self) -> dict[str, Any]:
-        """Return the canonicalised metric mapping."""
+        """Return canonical metrics and any Rust-preserved gradient basis."""
 
-        return _canonicalise_inputs(self.metrics)
+        return _canonicalise_inputs(
+            self.metrics,
+            gradient_basis=self.gradient_basis,
+        )
 
     def telemetry_payload(self) -> Mapping[str, Any] | None:
         """Return a copy of any telemetry payload attached to the bundle."""
@@ -1712,12 +1777,40 @@ class ZSpacePartialBundle:
         return MappingProxyType(dict(self.telemetry))
 
 
-def _canonicalise_inputs(partial: Mapping[str, Any] | None) -> dict[str, Any]:
+def _canonicalise_inputs(
+    partial: Mapping[str, Any] | None,
+    *,
+    gradient_basis: str | None = None,
+) -> dict[str, Any]:
     if partial is None:
         return {}
     if not isinstance(partial, Mapping):
         raise TypeError("partial observations must be provided as a mapping")
-    return _metrics_from_fusion_contract(zspace_partial_fusion([partial]))
+    metrics, resolved_basis = _split_partial_gradient_basis(partial, gradient_basis)
+    source: Mapping[str, Any] | ZSpacePartialBundle = metrics
+    if resolved_basis is not None:
+        source = ZSpacePartialBundle(metrics, gradient_basis=resolved_basis)
+    return _metrics_from_fusion_contract(zspace_partial_fusion([source]))
+
+
+def _split_partial_gradient_basis(
+    partial: Mapping[str, Any],
+    explicit_basis: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    if explicit_basis is not None and not isinstance(explicit_basis, str):
+        raise TypeError("gradient_basis must be a string")
+    embedded_basis = partial.get("gradient_basis")
+    if embedded_basis is not None and not isinstance(embedded_basis, str):
+        raise TypeError("gradient_basis must be a string")
+    if (
+        explicit_basis is not None
+        and embedded_basis is not None
+        and explicit_basis != embedded_basis
+    ):
+        raise ValueError("embedded and explicit gradient_basis values disagree")
+    resolved_basis = explicit_basis if explicit_basis is not None else embedded_basis
+    metrics = {key: value for key, value in partial.items() if key != "gradient_basis"}
+    return metrics, resolved_basis
 
 
 def _metric_input(value: Any) -> float | list[float]:
@@ -1738,17 +1831,17 @@ def _partial_fusion_input(
     if partial is None:
         return None
     if isinstance(partial, ZSpacePartialBundle):
-        metrics = partial.metrics
+        metrics, gradient_basis = _split_partial_gradient_basis(
+            partial.metrics, partial.gradient_basis
+        )
         weight = float(partial.weight)
         origin = partial.origin
         telemetry = partial.telemetry_payload()
-        gradient_basis = partial.gradient_basis
     elif isinstance(partial, Mapping):
-        metrics = partial
+        metrics, gradient_basis = _split_partial_gradient_basis(partial, None)
         weight = 1.0
         origin = None
         telemetry = None
-        gradient_basis = None
     else:
         raise TypeError(
             "partial observations must be mappings or ZSpacePartialBundle instances"
@@ -1891,12 +1984,21 @@ def _metrics_from_fusion_contract(contract: Mapping[str, Any]) -> dict[str, Any]
         raise RuntimeError("native Z-space partial fusion returned malformed metrics")
     fused: dict[str, Any] = dict(metrics)
     gradient = contract.get("gradient")
+    gradient_basis = contract.get("gradient_basis")
     if gradient is not None:
         if not isinstance(gradient, Sequence) or isinstance(
             gradient, (str, bytes, bytearray, memoryview)
         ):
             raise RuntimeError("native Z-space partial fusion returned malformed gradient")
         fused["gradient"] = [float(value) for value in gradient]
+        if gradient_basis is not None:
+            if not isinstance(gradient_basis, str) or not gradient_basis:
+                raise RuntimeError(
+                    "native Z-space partial fusion returned malformed gradient basis"
+                )
+            fused["gradient_basis"] = gradient_basis
+    elif gradient_basis is not None:
+        raise RuntimeError("native Z-space partial fusion returned a basis without a gradient")
     return fused
 
 
@@ -1928,6 +2030,9 @@ def blend_zspace_partials(
     metric_gradient_dimension:
         When set, Rust replaces positional input gradients with one canonical
         projection of the fused named base metrics at this dimension.
+
+    The returned mapping preserves Rust's ``gradient_basis`` whenever the fused
+    payload contains a basis-tagged gradient.
     """
 
     return _metrics_from_fusion_contract(
@@ -1950,6 +2055,7 @@ def elliptic_partial_from_telemetry(
     aggregate: str = "mean",
     gradient_alignment: str = "strict",
     gradient_source: str = "rotor_transport",
+    gradient_basis: str | None = None,
     extra_telemetry: Mapping[str, Any] | None = None,
 ) -> ZSpacePartialBundle:
     """Convert elliptic telemetry through the Rust-owned partial fusion contract.
@@ -1970,7 +2076,7 @@ def elliptic_partial_from_telemetry(
 
     mode = aggregate.lower()
 
-    fusion_inputs: list[dict[str, Any]] = []
+    fusion_inputs: list[Mapping[str, Any] | ZSpacePartialBundle] = []
     summary_values: list[float] = []
     has_scalar_metrics = False
 
@@ -1988,29 +2094,45 @@ def elliptic_partial_from_telemetry(
             summary_values.append(numeric)
             has_scalar_metrics = True
 
-        vector_candidate: Any | None = (
-            payload.get(gradient_source) if gradient_source else None
-        )
+        vector_source: str | None = None
+        vector_candidate: Any | None = None
+        if gradient_source:
+            vector_candidate = payload.get(gradient_source)
+            if vector_candidate is not None:
+                vector_source = gradient_source
         if vector_candidate is None:
             for candidate in _ELLIPTIC_VECTOR_CANDIDATES:
                 vector_candidate = payload.get(candidate)
                 if vector_candidate is not None:
+                    vector_source = candidate
                     break
         gradient = _coerce_float_list(vector_candidate)
         if gradient:
             sample_partial["gradient"] = gradient
         if sample_partial:
-            fusion_inputs.append(sample_partial)
+            sample_basis = None
+            if gradient:
+                sample_basis = (
+                    gradient_basis
+                    if gradient_basis is not None
+                    else _ELLIPTIC_GRADIENT_BASES.get(vector_source or "")
+                )
+                if sample_basis is None:
+                    raise ValueError(
+                        "gradient_basis is required for custom elliptic gradient sources"
+                    )
+            fusion_inputs.append(
+                ZSpacePartialBundle(sample_partial, gradient_basis=sample_basis)
+            )
 
     if not has_scalar_metrics:
         raise ValueError("no elliptic metrics could be derived from telemetry")
-    partial = _metrics_from_fusion_contract(
-        zspace_partial_fusion(
-            fusion_inputs,
-            strategy=mode,
-            gradient_alignment=gradient_alignment,
-        )
+    fusion = zspace_partial_fusion(
+        fusion_inputs,
+        strategy=mode,
+        gradient_alignment=gradient_alignment,
     )
+    partial = _metrics_from_fusion_contract(fusion)
 
     telemetry_sources: list[Mapping[str, Any]] = list(samples)
     if extra_telemetry is not None:
@@ -2042,7 +2164,30 @@ def elliptic_partial_from_telemetry(
         weight=float(bundle_weight),
         origin=origin,
         telemetry=telemetry_map or None,
+        gradient_basis=fusion.get("gradient_basis"),
     )
+
+
+@dataclass(frozen=True)
+class ZSpaceControlGradient:
+    """Basis-tagged external control kept separate from latent posterior gradients."""
+
+    source: str
+    basis: str
+    values: tuple[float, ...]
+    dimension: int
+    l2: float
+    linf: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "basis": self.basis,
+            "values": list(self.values),
+            "dimension": self.dimension,
+            "l2": self.l2,
+            "linf": self.linf,
+        }
 
 
 @dataclass(frozen=True)
@@ -2052,18 +2197,30 @@ class ZSpaceDecoded:
     z_state: tuple[float, ...]
     metrics: Mapping[str, float]
     gradient: tuple[float, ...]
+    gradient_basis: str
     barycentric: tuple[float, float, float]
     energy: float
+    spectral_energy: float
+    parseval_relative_error: float
     frac_energy: float
+    fractional_energy_ratio: float
+    spectral_centroid: float
+    spectral_bins: int
 
     def as_dict(self) -> dict[str, Any]:
         data = {
             "z_state": list(self.z_state),
             "metrics": dict(self.metrics),
             "gradient": list(self.gradient),
+            "gradient_basis": self.gradient_basis,
             "barycentric": self.barycentric,
             "energy": self.energy,
+            "spectral_energy": self.spectral_energy,
+            "parseval_relative_error": self.parseval_relative_error,
             "frac_energy": self.frac_energy,
+            "fractional_energy_ratio": self.fractional_energy_ratio,
+            "spectral_centroid": self.spectral_centroid,
+            "spectral_bins": self.spectral_bins,
         }
         return data
 
@@ -2094,6 +2251,48 @@ def _posterior_scalar(payload: Mapping[str, Any], field: str) -> float:
     return value
 
 
+def _posterior_nonnegative_integer(payload: Mapping[str, Any], field: str) -> int:
+    value = payload.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"native Z-space posterior field '{field}' is malformed")
+    return value
+
+
+def _posterior_gradient_basis(payload: Mapping[str, Any]) -> str:
+    basis = payload.get("gradient_basis")
+    if basis != ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS:
+        raise RuntimeError("native Z-space posterior returned an unknown latent gradient basis")
+    return basis
+
+
+def _control_gradient_from_posterior_contract(
+    contract: Mapping[str, Any],
+) -> ZSpaceControlGradient | None:
+    payload = contract.get("control_gradient")
+    if payload is None:
+        return None
+    if not isinstance(payload, MappingABC):
+        raise RuntimeError("native Z-space posterior control gradient is malformed")
+    values = _posterior_sequence(payload, "values")
+    source = payload.get("source")
+    basis = payload.get("basis")
+    dimension = payload.get("dimension")
+    if source != "partial" or not isinstance(basis, str) or not basis:
+        raise RuntimeError("native Z-space posterior control gradient is untrusted")
+    if isinstance(dimension, bool) or not isinstance(dimension, int):
+        raise RuntimeError("native Z-space posterior control gradient dimension is malformed")
+    if dimension != len(values):
+        raise RuntimeError("native Z-space posterior control gradient dimension does not match")
+    return ZSpaceControlGradient(
+        source=source,
+        basis=basis,
+        values=values,
+        dimension=dimension,
+        l2=_posterior_scalar(payload, "l2"),
+        linf=_posterior_scalar(payload, "linf"),
+    )
+
+
 def _decoded_from_posterior_contract(
     contract: Mapping[str, Any],
 ) -> ZSpaceDecoded:
@@ -2105,16 +2304,28 @@ def _decoded_from_posterior_contract(
         raise RuntimeError("native Z-space posterior metrics are malformed")
     z_state = _posterior_sequence(contract, "z_state")
     gradient = _posterior_sequence(contract, "gradient", length=len(z_state))
+    gradient_basis = _posterior_gradient_basis(contract)
     barycentric = _posterior_sequence(contract, "barycentric", length=3)
+    spectral_bins = _posterior_nonnegative_integer(contract, "spectral_bins")
+    if spectral_bins != len(z_state) // 2 + 1:
+        raise RuntimeError("native Z-space posterior spectral bin count is malformed")
     return ZSpaceDecoded(
         z_state=z_state,
         metrics=MappingProxyType(
             {str(key): float(value) for key, value in metrics.items()}
         ),
         gradient=gradient,
+        gradient_basis=gradient_basis,
         barycentric=(barycentric[0], barycentric[1], barycentric[2]),
         energy=_posterior_scalar(contract, "energy"),
+        spectral_energy=_posterior_scalar(contract, "spectral_energy"),
+        parseval_relative_error=_posterior_scalar(contract, "parseval_relative_error"),
         frac_energy=_posterior_scalar(contract, "frac_energy"),
+        fractional_energy_ratio=_posterior_scalar(
+            contract, "fractional_energy_ratio"
+        ),
+        spectral_centroid=_posterior_scalar(contract, "spectral_centroid"),
+        spectral_bins=spectral_bins,
     )
 
 
@@ -2140,6 +2351,7 @@ def zspace_posterior_project(
     *,
     alpha: float = 0.35,
     smoothing: float = 0.35,
+    gradient_basis: str | None = None,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
 ) -> dict[str, Any]:
     """Project partial observations through the canonical Rust posterior contract."""
@@ -2147,6 +2359,9 @@ def zspace_posterior_project(
     if partial is None:
         partial_input: dict[str, Any] = {}
     elif isinstance(partial, Mapping):
+        partial, gradient_basis = _split_partial_gradient_basis(
+            partial, gradient_basis
+        )
         partial_input = {}
         for name, value in partial.items():
             if not isinstance(name, str):
@@ -2158,6 +2373,7 @@ def zspace_posterior_project(
         "z_state": [float(value) for value in z_state],
         "alpha": float(alpha),
         "partial": partial_input,
+        "gradient_basis": gradient_basis,
         "smoothing": float(smoothing),
         "telemetry": _telemetry_inputs([telemetry]),
     }
@@ -2174,9 +2390,13 @@ class ZSpaceInference:
 
     metrics: Mapping[str, float]
     gradient: Sequence[float]
+    gradient_basis: str
+    control_gradient: ZSpaceControlGradient | None
     barycentric: tuple[float, float, float]
     residual: float
+    residual_metric_count: int
     confidence: float
+    telemetry_reliability: float
     prior: ZSpaceDecoded
     applied: Mapping[str, Any]
     telemetry: ZSpaceTelemetryFrame | None = None
@@ -2186,9 +2406,15 @@ class ZSpaceInference:
         return {
             "metrics": dict(self.metrics),
             "gradient": list(self.gradient),
+            "gradient_basis": self.gradient_basis,
+            "control_gradient": (
+                None if self.control_gradient is None else self.control_gradient.as_dict()
+            ),
             "barycentric": self.barycentric,
             "residual": self.residual,
+            "residual_metric_count": self.residual_metric_count,
             "confidence": self.confidence,
+            "telemetry_reliability": self.telemetry_reliability,
             "applied": dict(self.applied),
             "prior": self.prior.as_dict(),
             "telemetry": None if self.telemetry is None else self.telemetry.as_dict(),
@@ -2221,6 +2447,7 @@ class ZSpacePosterior:
         partial: Mapping[str, Any] | None,
         *,
         smoothing: float = 0.35,
+        gradient_basis: str | None = None,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
         contract = zspace_posterior_project(
@@ -2228,6 +2455,7 @@ class ZSpacePosterior:
             partial,
             alpha=self._alpha,
             smoothing=smoothing,
+            gradient_basis=gradient_basis,
             telemetry=telemetry,
         )
         metrics = contract.get("metrics")
@@ -2240,6 +2468,8 @@ class ZSpacePosterior:
         gradient = _posterior_sequence(
             contract, "gradient", length=len(self._z_state)
         )
+        gradient_basis = _posterior_gradient_basis(contract)
+        control_gradient = _control_gradient_from_posterior_contract(contract)
         barycentric = _posterior_sequence(contract, "barycentric", length=3)
         telemetry_contract = contract.get("telemetry")
         telemetry_frame = None
@@ -2252,9 +2482,17 @@ class ZSpacePosterior:
                 {str(key): float(value) for key, value in metrics.items()}
             ),
             gradient=list(gradient),
+            gradient_basis=gradient_basis,
+            control_gradient=control_gradient,
             barycentric=(barycentric[0], barycentric[1], barycentric[2]),
             residual=_posterior_scalar(contract, "residual"),
+            residual_metric_count=_posterior_nonnegative_integer(
+                contract, "residual_metric_count"
+            ),
             confidence=_posterior_scalar(contract, "confidence"),
+            telemetry_reliability=_posterior_scalar(
+                contract, "telemetry_reliability"
+            ),
             prior=_decoded_from_posterior_contract(prior),
             applied=MappingProxyType(dict(applied)),
             telemetry=telemetry_frame,
@@ -2277,6 +2515,7 @@ class ZSpaceInferenceRuntime:
         self._smoothing = float(smoothing)
         self._accumulate = bool(accumulate)
         self._cached: dict[str, Any] = {}
+        self._gradient_basis: str | None = None
         self._telemetry: dict[str, float] = _merge_telemetry_payloads(telemetry)
 
     @property
@@ -2309,10 +2548,17 @@ class ZSpaceInferenceRuntime:
 
         return MappingProxyType(dict(self._cached))
 
+    @property
+    def gradient_basis(self) -> str | None:
+        """Return the basis attached to the cached external control gradient."""
+
+        return self._gradient_basis
+
     def clear(self) -> None:
         """Forget any cached observations."""
 
         self._cached.clear()
+        self._gradient_basis = None
 
     def set_telemetry(
         self, telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None
@@ -2321,20 +2567,32 @@ class ZSpaceInferenceRuntime:
 
         self._telemetry = _merge_telemetry_payloads(telemetry)
 
-    def _merge(self, partial: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    def _merge(
+        self,
+        partial: Mapping[str, Any] | None,
+        *,
+        gradient_basis: str | None,
+    ) -> Mapping[str, Any] | None:
         if partial is None:
             if not self._cached:
                 return None
             return self._cached
-        updates = _canonicalise_inputs(partial)
+        partial, gradient_basis = _split_partial_gradient_basis(
+            partial, gradient_basis
+        )
+        updates = _canonicalise_inputs(partial, gradient_basis=gradient_basis)
+        fused_gradient_basis = updates.pop("gradient_basis", None)
         if not self._accumulate:
             self._cached = {}
+            self._gradient_basis = None
         if "gradient" in updates:
             gradient = updates.pop("gradient")
             if gradient is not None:
                 self._cached["gradient"] = gradient
+                self._gradient_basis = fused_gradient_basis
             else:
                 self._cached.pop("gradient", None)
+                self._gradient_basis = None
         for key, value in updates.items():
             self._cached[key] = value
         return self._cached
@@ -2343,27 +2601,36 @@ class ZSpaceInferenceRuntime:
         self,
         partial: Mapping[str, Any] | None = None,
         *,
+        gradient_basis: str | None = None,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
         """Fuse *partial* with any cached observations and produce an inference."""
 
         if telemetry is not None:
             self._telemetry = _merge_telemetry_payloads(self._telemetry, telemetry)
-        merged = self._merge(partial)
+        merged = self._merge(partial, gradient_basis=gradient_basis)
         payload = self._telemetry if self._telemetry else None
         return self._posterior.project(
-            merged, smoothing=self._smoothing, telemetry=payload
+            merged,
+            smoothing=self._smoothing,
+            gradient_basis=self._gradient_basis,
+            telemetry=payload,
         )
 
     def infer(
         self,
         partial: Mapping[str, Any] | None = None,
         *,
+        gradient_basis: str | None = None,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
         """Alias for :meth:`update` to mirror the functional helpers."""
 
-        return self.update(partial, telemetry=telemetry)
+        return self.update(
+            partial,
+            gradient_basis=gradient_basis,
+            telemetry=telemetry,
+        )
 
 
 class ZSpaceInferencePipeline:
@@ -2429,6 +2696,7 @@ class ZSpaceInferencePipeline:
         weight: float | None = None,
         origin: str | None = None,
         telemetry: Mapping[str, Any] | None = None,
+        gradient_basis: str | None = None,
     ) -> ZSpacePartialBundle:
         """Register a new partial observation to be included in the next inference."""
 
@@ -2440,6 +2708,7 @@ class ZSpaceInferencePipeline:
                 weight=1.0 if weight is None else weight,
                 origin=origin,
                 telemetry=telemetry,
+                gradient_basis=gradient_basis,
             )
         self._partials.append(bundle)
         return bundle
@@ -2454,6 +2723,7 @@ class ZSpaceInferencePipeline:
         aggregate: str = "mean",
         gradient_alignment: str | None = None,
         gradient_source: str = "rotor_transport",
+        gradient_basis: str | None = None,
         extra_telemetry: Mapping[str, Any] | None = None,
     ) -> ZSpacePartialBundle:
         """Register elliptic telemetry samples as a partial observation."""
@@ -2470,6 +2740,7 @@ class ZSpaceInferencePipeline:
                 else gradient_alignment
             ),
             gradient_source=gradient_source,
+            gradient_basis=gradient_basis,
             extra_telemetry=extra_telemetry,
         )
         return self.add_partial(bundle)
@@ -2485,6 +2756,7 @@ class ZSpaceInferencePipeline:
         aggregate: str = "mean",
         gradient_alignment: str | None = None,
         gradient_source: str = "rotor_transport",
+        gradient_basis: str | None = None,
         extra_telemetry: Mapping[str, Any] | None = None,
         return_features: bool = False,
     ) -> ZSpacePartialBundle | tuple[Any, ZSpacePartialBundle]:
@@ -2505,6 +2777,7 @@ class ZSpaceInferencePipeline:
                 else gradient_alignment
             ),
             gradient_source=gradient_source,
+            gradient_basis=gradient_basis,
             extra_telemetry=extra_telemetry,
             return_features=return_features,
         )
@@ -2643,6 +2916,7 @@ class ZSpaceInferencePipeline:
         inference = replace(
             self._runtime.update(
                 blended,
+                gradient_basis=fusion.get("gradient_basis"),
                 telemetry=merged_telemetry if merged_telemetry else None,
             ),
             fusion=MappingProxyType(dict(fusion)),
@@ -2725,12 +2999,18 @@ def infer_from_partial(
     *,
     alpha: float = 0.35,
     smoothing: float = 0.35,
+    gradient_basis: str | None = None,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
 ) -> ZSpaceInference:
     """Fuse partial metric observations with a latent state to complete Z-space inference."""
 
     posterior = ZSpacePosterior(z_state, alpha=alpha)
-    return posterior.project(partial, smoothing=smoothing, telemetry=telemetry)
+    return posterior.project(
+        partial,
+        smoothing=smoothing,
+        gradient_basis=gradient_basis,
+        telemetry=telemetry,
+    )
 
 
 def infer_with_partials(
@@ -2762,6 +3042,7 @@ def infer_with_partials(
             blended,
             alpha=alpha,
             smoothing=smoothing,
+            gradient_basis=fusion.get("gradient_basis"),
             telemetry=merged_telemetry if merged_telemetry else None,
         ),
         fusion=MappingProxyType(dict(fusion)),
@@ -2917,6 +3198,7 @@ def compile_inference(
     *,
     alpha: float = 0.35,
     smoothing: float = 0.35,
+    gradient_basis: str | None = None,
 ):
     """Wrap a callable so it automatically feeds its output into Z-space inference.
 
@@ -2944,7 +3226,10 @@ def compile_inference(
 
     if fn is None:
         return lambda actual: compile_inference(
-            actual, alpha=alpha, smoothing=smoothing
+            actual,
+            alpha=alpha,
+            smoothing=smoothing,
+            gradient_basis=gradient_basis,
         )
 
     if not callable(fn):
@@ -2966,6 +3251,7 @@ def compile_inference(
             partial,
             alpha=alpha,
             smoothing=smoothing,
+            gradient_basis=gradient_basis,
             telemetry=telemetry,
         )
 

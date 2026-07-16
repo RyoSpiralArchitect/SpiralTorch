@@ -653,6 +653,7 @@ def build_manifest() -> dict[str, _Any]:
 
 from .zspace_inference import (
     ZMetrics,
+    ZSpaceControlGradient,
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
@@ -661,6 +662,7 @@ from .zspace_inference import (
     ZSpaceInferenceRuntime,
     ZSpaceInferencePipeline,
     ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS,
+    ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS,
     inference_to_mapping,
     inference_to_zmetrics,
     prepare_trainer_step_payload,
@@ -2509,6 +2511,7 @@ def z_metrics(
     stability: float | None = None,
     drs: float | None = None,
     gradient: _Any | None = None,
+    gradient_basis: str | None = None,
     telemetry: _Any | None = None,
     **aliases: _Any,
 ) -> ZMetrics:
@@ -2540,6 +2543,7 @@ def z_metrics(
         memory=float(values.get("memory", 0.0) or 0.0),
         stability=float(values.get("stability", 0.0) or 0.0),
         gradient=grad_list,
+        gradient_basis=gradient_basis,
         drs=float(values.get("drs", 0.0) or 0.0),
         telemetry=_normalise_telemetry_arg(telemetry) or None,
     )
@@ -2762,15 +2766,22 @@ class _ZSpaceNotation:
             source = args[0]
             if isinstance(source, ZSpacePartialBundle):
                 base_metrics = source.resolved()
+                embedded_basis = base_metrics.pop("gradient_basis", None)
                 base_weight = float(source.weight)
                 base_origin = source.origin
-                base_gradient_basis = source.gradient_basis
+                base_gradient_basis = source.gradient_basis or embedded_basis
                 telemetry_payload = dict(source.telemetry_payload() or {}) or None
             elif isinstance(source, ZMetrics):
                 base_metrics = _metrics_to_mapping(source)
+                base_gradient_basis = source.gradient_basis
                 telemetry_payload = dict(source.telemetry or {}) or None
             elif isinstance(source, _Mapping):
-                base_metrics = _canonicalise_partial_mapping(source)
+                source_mapping = dict(source)
+                embedded_basis = source_mapping.pop("gradient_basis", None)
+                if embedded_basis is not None and not isinstance(embedded_basis, str):
+                    raise TypeError("gradient_basis must be a string")
+                base_gradient_basis = embedded_basis
+                base_metrics = _canonicalise_partial_mapping(source_mapping)
             elif source is None:
                 base_metrics = {}
             else:
@@ -2788,6 +2799,12 @@ class _ZSpaceNotation:
 
         final_weight = float(weight) if weight is not None else base_weight
         final_origin = origin if origin is not None else base_origin
+        if (
+            gradient_basis is not None
+            and base_gradient_basis is not None
+            and gradient_basis != base_gradient_basis
+        ):
+            raise ValueError("embedded and explicit gradient_basis values disagree")
         final_gradient_basis = (
             gradient_basis if gradient_basis is not None else base_gradient_basis
         )
@@ -3253,6 +3270,7 @@ class ZMetrics:
     gradient: _Optional[_Sequence[float]] = None
     drs: float = 0.0
     telemetry: _Optional[_Mapping[str, float]] = None
+    gradient_basis: str | None = None
 
     @classmethod
     def from_mapping(
@@ -3260,6 +3278,7 @@ class ZMetrics:
         mapping: _Mapping[str, _Any],
         *,
         gradient: _Optional[_Sequence[float]] = None,
+        gradient_basis: str | None = None,
         telemetry: _Any | None = None,
     ) -> "ZMetrics":
         scalars, gradient_override = _extract_zmetrics_components(mapping)
@@ -3271,6 +3290,11 @@ class ZMetrics:
         gradient_payload = None
         if grad_source:
             gradient_payload = tuple(float(value) for value in grad_source)
+        embedded_gradient_basis = mapping.get("gradient_basis")
+        if embedded_gradient_basis is not None:
+            if not isinstance(embedded_gradient_basis, str):
+                raise TypeError("gradient_basis must be a string")
+            gradient_basis = embedded_gradient_basis
         telemetry_payload: dict[str, float] = {}
         embedded_telemetry = mapping.get("telemetry")
         if embedded_telemetry is not None:
@@ -3282,6 +3306,7 @@ class ZMetrics:
             memory=float(scalars.get("memory", 0.0)),
             stability=float(scalars.get("stability", 0.0)),
             gradient=gradient_payload,
+            gradient_basis=gradient_basis,
             drs=float(scalars.get("drs", 0.0)),
             telemetry=telemetry_payload or None,
         )
@@ -3308,6 +3333,7 @@ class ZMetrics:
                 memory=float(getattr(payload, "memory")),
                 stability=float(getattr(payload, "stability")),
                 gradient=_coerce_gradient_sequence(getattr(payload, "gradient", None)),
+                gradient_basis=getattr(payload, "gradient_basis", None),
                 drs=float(getattr(payload, "drs", 0.0)),
                 telemetry=(
                     _normalise_telemetry_arg(telemetry_payload)
@@ -3370,6 +3396,7 @@ def inference_to_zmetrics(
         gradient=gradient_payload,
         drs=float(scalars.get("drs", 0.0)),
         telemetry=telemetry_payload,
+        gradient_basis=inference.gradient_basis,
     )
 
 
@@ -4111,6 +4138,26 @@ class ZSpaceTrainer:
             else {}
         )
         gradient = _coerce_gradient_sequence(normalized.gradient) or []
+        if gradient and normalized.gradient_basis not in (
+            None,
+            ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS,
+        ):
+            raise ValueError(
+                "ZSpaceTrainer only accepts latent-coordinate gradients; "
+                f"received basis {normalized.gradient_basis!r}"
+            )
+        if not gradient and normalized.gradient_basis is not None:
+            raise ValueError("gradient_basis requires a non-empty gradient")
+        if (
+            gradient
+            and normalized.gradient_basis
+            == ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS
+            and len(gradient) != len(self._z)
+        ):
+            raise ValueError(
+                "latent-coordinate gradient dimension must match Z state: "
+                f"expected {len(self._z)}, received {len(gradient)}"
+            )
         report = zspace_meta_optimizer_step(
             config=self._optimizer_config,
             state=self._native_state(),
@@ -4139,6 +4186,7 @@ class ZSpaceTrainer:
         *,
         alpha: float | None = None,
         smoothing: float = 0.35,
+        gradient_basis: str | None = None,
         telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
     ) -> ZSpaceInference:
         with self._optimizer_lock:
@@ -4146,6 +4194,7 @@ class ZSpaceTrainer:
                 partial,
                 alpha=alpha,
                 smoothing=smoothing,
+                gradient_basis=gradient_basis,
                 telemetry=telemetry,
             )
 
@@ -4155,6 +4204,7 @@ class ZSpaceTrainer:
         *,
         alpha: float | None,
         smoothing: float,
+        gradient_basis: str | None,
         telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None,
     ) -> ZSpaceInference:
         if alpha is None:
@@ -4163,6 +4213,8 @@ class ZSpaceTrainer:
         partial_mapping = partial
         if isinstance(partial, ZSpacePartialBundle):
             partial_mapping = partial.metrics
+            if gradient_basis is None:
+                gradient_basis = partial.gradient_basis
             if telemetry is None:
                 telemetry = partial.telemetry_payload()
 
@@ -4171,6 +4223,7 @@ class ZSpaceTrainer:
             partial_mapping,
             alpha=float(alpha),
             smoothing=float(smoothing),
+            gradient_basis=gradient_basis,
             telemetry=telemetry,
         )
         self._last_inference = inference
@@ -4182,6 +4235,7 @@ class ZSpaceTrainer:
         *,
         alpha: float | None = None,
         smoothing: float = 0.35,
+        gradient_basis: str | None = None,
         telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
         prefer_applied: bool = True,
     ) -> float:
@@ -4191,6 +4245,7 @@ class ZSpaceTrainer:
                 partial,
                 alpha=alpha,
                 smoothing=smoothing,
+                gradient_basis=gradient_basis,
                 telemetry=telemetry,
             )
             try:
@@ -8140,6 +8195,7 @@ _EXTRAS.extend(
 )
 _EXTRAS.extend(
     [
+        "ZSpaceControlGradient",
         "ZSpaceDecoded",
         "ZSpaceInference",
         "ZSpacePosterior",
@@ -8148,6 +8204,7 @@ _EXTRAS.extend(
         "ZSpaceInferenceRuntime",
         "ZSpaceInferencePipeline",
         "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
+        "ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS",
         "zspace_posterior_decode",
         "zspace_posterior_project",
         "zspace_coherence_project",

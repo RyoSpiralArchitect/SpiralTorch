@@ -20,14 +20,21 @@ import spiraltorch as st
 
 def main() -> None:
     trainer = st.ZSpaceTrainer(z_dim=4, lr=0.05, lam_frac=0.05)
+    checkpoint = trainer.state_dict()
+    checkpoint["z"] = [0.12, -0.03, 0.48, -0.2]
+    trainer.load_state_dict(checkpoint)
     print("initial z:", trainer.state)
 
-    partial = {
-        "speed": 0.2,
-        "memory": 0.1,
-        "stability": 0.9,
-        "gradient": [0.15, -0.05, 0.02, 0.0],
-    }
+    partial = st.ZSpacePartialBundle(
+        {
+            "speed": 0.2,
+            "memory": 0.1,
+            "stability": 0.9,
+            "gradient": [0.15, -0.05, 0.02, 0.0],
+        },
+        origin="demo:observed-control",
+        gradient_basis="example.observed.control.v1",
+    )
 
     loss = trainer.step_partial(partial, smoothing=0.4)
     inference = trainer.last_inference
@@ -40,6 +47,12 @@ def main() -> None:
                 "residual": inference.residual,
                 "confidence": inference.confidence,
                 "barycentric": inference.barycentric,
+                "latent_gradient_basis": inference.gradient_basis,
+                "control_gradient": (
+                    None
+                    if inference.control_gradient is None
+                    else inference.control_gradient.as_dict()
+                ),
             },
         )
 
@@ -56,4 +69,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
