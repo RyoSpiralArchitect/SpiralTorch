@@ -3580,10 +3580,30 @@ component residuals, and `acceptance_probability = sigmoid(-F)` under an
 explicit two-state Gibbs comparison against a neutral `F=0` candidate. It is
 not labelled as calibrated confidence.
 
-`st-core::runtime::blackcat` consumes that report as its reward source and
-validates the ZMeta state, proposed fractional penalty, gradient norm, loss
-variance, fixed-width bandit context, and derived selection scores before
-atomically committing ES, temperature, bandit, statistics, and EMA state.
+`st-core::runtime::blackcat` consumes that report as its reward source. ZMeta is
+a versioned, temperature-scaled `(1+1)` ask/tell state machine rather than a
+penalty-only side calculation: a baseline or candidate latent is prepared
+before selection, cyclically projected so every latent coordinate contributes
+to the effective bandit context, and the reverse structural projection folds
+every context feature into the search direction without overflow-prone raw
+sums. A candidate is accepted only by the one reward credited to that
+selection. Retry, gradient-norm, and loss-variance telemetry changes the
+next candidate radius, making the temperature schedule causal without granting
+an observation-only report an acceptance decision. Such reports do not rotate
+or reward-train the ES, and
+abandonment releases both the bandit and ZMeta reward slots. The proposal and
+update witnesses retain the causal base/effective contexts, reward delta,
+accepted state, and before/evaluated/after penalties.
+
+BlackCat validates the ZMeta state, canonical fractional penalty, gradient
+norm, loss variance, fixed-width bandit context, and derived selection scores
+before atomically committing ES, temperature, bandit, statistics, and EMA
+state. Its penalty delegates to
+`st-core::runtime::zspace_optimizer::evaluate_zspace_fractional_regularizer`,
+so requested execution routing cannot alter the periodic Sobolev formula.
+The reward configuration is mutable only before the first committed report;
+changing objective epochs requires a new runtime so incumbent rewards, bandit
+posteriors, and aggregate statistics never compare unlike utilities.
 Monitoring and plugin publication occur only after that core commit.
 `ModuleTrainer` maps
 `reference_loss` to the unweighted step loss and `candidate_loss` to the same
