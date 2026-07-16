@@ -5155,7 +5155,7 @@ pub mod rewrite {
     use std::io::{self, Read};
     use std::path::{Path, PathBuf};
 
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
 
     use crate::heur::evidence::WilsonInterval;
@@ -5167,7 +5167,7 @@ pub mod rewrite {
     pub const HEUR_STORE_CONTRACT_VERSION: u32 = 1;
     pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT: &str =
         "spiraltorch.blackcat.heur_store.legacy_import";
-    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION: u32 = 1;
+    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION: u32 = 2;
     pub const HEUR_STORE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
     #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -5207,6 +5207,33 @@ pub mod rewrite {
         pub source_path: PathBuf,
         pub source_bytes: u64,
         pub source_sha256: String,
+        pub imported_from_byte: u64,
+        pub imported_bytes: u64,
+        pub source_ended_with_newline: bool,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct LegacyImportMarker {
+        contract: String,
+        contract_version: u32,
+        source_path: PathBuf,
+        source_bytes: u64,
+        source_sha256: String,
+        #[serde(default)]
+        source_ended_with_newline: Option<bool>,
+    }
+
+    struct LegacyImportCursor {
+        marker: LegacyImportMarker,
+        insertion_offset: usize,
+    }
+
+    struct LegacyDelta {
+        bytes: Vec<u8>,
+        source_bytes: u64,
+        source_sha256: String,
+        imported_from_byte: u64,
+        source_ended_with_newline: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -5478,6 +5505,15 @@ pub mod rewrite {
             if source_path == &self.path {
                 return Ok((current, None));
             }
+            let current_text = std::str::from_utf8(&current).map_err(|source| {
+                store_error(
+                    "decode",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let prior = latest_legacy_import_cursor(current_text, source_path, &self.path)?;
             let remaining = HEUR_STORE_MAX_BYTES
                 .checked_sub(current.len() as u64)
                 .ok_or_else(|| {
@@ -5488,11 +5524,15 @@ pub mod rewrite {
                         "canonical heuristic file exceeds the guarded byte limit",
                     )
                 })?;
-            let legacy = read_bounded_with_limit(source_path, remaining)?;
-            if legacy.is_empty() {
+            let Some(delta) = read_legacy_delta(
+                source_path,
+                prior.as_ref().map(|cursor| &cursor.marker),
+                remaining,
+            )?
+            else {
                 return Ok((current, None));
-            }
-            std::str::from_utf8(&legacy).map_err(|source| {
+            };
+            std::str::from_utf8(&delta.bytes).map_err(|source| {
                 store_error(
                     "decode_legacy",
                     source_path.clone(),
@@ -5500,28 +5540,23 @@ pub mod rewrite {
                     source.to_string(),
                 )
             })?;
-            let current_text = std::str::from_utf8(&current).map_err(|source| {
-                store_error(
-                    "decode",
-                    self.path.clone(),
-                    "invalid_data",
-                    source.to_string(),
-                )
-            })?;
-            let source_bytes = u64::try_from(legacy.len()).map_err(|_| {
+            let imported_bytes = u64::try_from(delta.bytes.len()).map_err(|_| {
                 store_error(
                     "migrate",
                     source_path.clone(),
                     "capacity",
-                    "legacy heuristic file length is not representable",
+                    "legacy heuristic suffix length is not representable",
                 )
             })?;
             let legacy_import = HeurStoreLegacyImport {
                 contract: HEUR_STORE_LEGACY_IMPORT_CONTRACT,
                 contract_version: HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION,
                 source_path: source_path.clone(),
-                source_bytes,
-                source_sha256: sha256_hex(&legacy),
+                source_bytes: delta.source_bytes,
+                source_sha256: delta.source_sha256,
+                imported_from_byte: delta.imported_from_byte,
+                imported_bytes,
+                source_ended_with_newline: delta.source_ended_with_newline,
             };
             let metadata = serde_json::to_string(&legacy_import).map_err(|source| {
                 store_error(
@@ -5532,11 +5567,7 @@ pub mod rewrite {
                 )
             })?;
             let marker = format!("# blackcat-migration {metadata}");
-            if current_text.lines().any(|line| line == marker) {
-                return Ok((current, None));
-            }
-
-            let separator_bytes = usize::from(!legacy.ends_with(b"\n"));
+            let separator_bytes = usize::from(!delta.source_ended_with_newline);
             let marker_bytes = marker.len().checked_add(1).ok_or_else(|| {
                 store_error(
                     "migrate",
@@ -5545,7 +5576,8 @@ pub mod rewrite {
                     "legacy migration marker length overflowed",
                 )
             })?;
-            let next_len = legacy
+            let next_len = delta
+                .bytes
                 .len()
                 .checked_add(separator_bytes)
                 .and_then(|length| length.checked_add(marker_bytes))
@@ -5568,16 +5600,214 @@ pub mod rewrite {
                     ),
                 ));
             }
+            let insertion_offset = prior.as_ref().map_or(0, |cursor| cursor.insertion_offset);
             let mut merged = Vec::with_capacity(next_len);
-            merged.extend_from_slice(&legacy);
-            if !legacy.ends_with(b"\n") {
+            merged.extend_from_slice(&current[..insertion_offset]);
+            merged.extend_from_slice(&delta.bytes);
+            if !delta.source_ended_with_newline {
                 merged.push(b'\n');
             }
             merged.extend_from_slice(marker.as_bytes());
             merged.push(b'\n');
-            merged.extend_from_slice(&current);
+            merged.extend_from_slice(&current[insertion_offset..]);
             Ok((merged, Some(legacy_import)))
         }
+    }
+
+    fn latest_legacy_import_cursor(
+        current: &str,
+        source_path: &Path,
+        canonical_path: &Path,
+    ) -> Result<Option<LegacyImportCursor>, HeurStoreError> {
+        let mut offset = 0usize;
+        let mut latest = None;
+        for segment in current.split_inclusive('\n') {
+            let insertion_offset = offset.checked_add(segment.len()).ok_or_else(|| {
+                store_error(
+                    "decode_migration",
+                    canonical_path.to_path_buf(),
+                    "capacity",
+                    "migration marker offset overflowed",
+                )
+            })?;
+            let line = segment.trim_end_matches(['\r', '\n']);
+            if let Some(metadata) = line.strip_prefix("# blackcat-migration ") {
+                let marker =
+                    serde_json::from_str::<LegacyImportMarker>(metadata).map_err(|source| {
+                        store_error(
+                            "decode_migration",
+                            canonical_path.to_path_buf(),
+                            "invalid_data",
+                            source.to_string(),
+                        )
+                    })?;
+                if marker.contract != HEUR_STORE_LEGACY_IMPORT_CONTRACT
+                    || !(1..=HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION)
+                        .contains(&marker.contract_version)
+                {
+                    return Err(store_error(
+                        "decode_migration",
+                        canonical_path.to_path_buf(),
+                        "invalid_data",
+                        "unsupported heuristic-store migration marker contract",
+                    ));
+                }
+                if marker.source_path == source_path {
+                    latest = Some(LegacyImportCursor {
+                        marker,
+                        insertion_offset,
+                    });
+                }
+            }
+            offset = insertion_offset;
+        }
+        Ok(latest)
+    }
+
+    fn read_legacy_delta(
+        path: &Path,
+        prior: Option<&LegacyImportMarker>,
+        delta_limit: u64,
+    ) -> Result<Option<LegacyDelta>, HeurStoreError> {
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(io_error("open_legacy", path, source)),
+        };
+        let metadata = file
+            .metadata()
+            .map_err(|source| io_error("metadata_legacy", path, source))?;
+        if metadata.len() > HEUR_STORE_MAX_BYTES {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!(
+                    "legacy heuristic file has {} bytes, maximum is {HEUR_STORE_MAX_BYTES}",
+                    metadata.len()
+                ),
+            ));
+        }
+        let imported_from_byte = prior.map_or(0, |marker| marker.source_bytes);
+        if metadata.len() < imported_from_byte {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "legacy heuristic history shrank after its last import",
+            ));
+        }
+        if prior.is_some_and(|marker| {
+            !marker.source_ended_with_newline.unwrap_or(true)
+                && metadata.len() > marker.source_bytes
+        }) {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "legacy history grew after a non-newline-terminated import",
+            ));
+        }
+
+        let mut hasher = Sha256::new();
+        let mut prefix_remaining = imported_from_byte;
+        let mut buffer = [0u8; 8192];
+        while prefix_remaining > 0 {
+            let count =
+                usize::try_from(prefix_remaining.min(buffer.len() as u64)).map_err(|_| {
+                    store_error(
+                        "migrate",
+                        path.to_path_buf(),
+                        "capacity",
+                        "legacy prefix chunk length is not representable",
+                    )
+                })?;
+            file.read_exact(&mut buffer[..count])
+                .map_err(|source| io_error("read_legacy_prefix", path, source))?;
+            hasher.update(&buffer[..count]);
+            prefix_remaining -= count as u64;
+        }
+        if let Some(marker) = prior {
+            let observed_prefix_sha256 = hex_digest(hasher.clone().finalize());
+            if observed_prefix_sha256 != marker.source_sha256 {
+                return Err(store_error(
+                    "migrate",
+                    path.to_path_buf(),
+                    "invalid_data",
+                    "legacy heuristic history changed before its append cursor",
+                ));
+            }
+        }
+
+        let metadata_delta = metadata.len() - imported_from_byte;
+        if metadata_delta > delta_limit {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!(
+                    "legacy heuristic suffix has {metadata_delta} bytes, remaining maximum is {delta_limit}"
+                ),
+            ));
+        }
+        let capacity = usize::try_from(metadata_delta).map_err(|_| {
+            store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                "legacy heuristic suffix length is not representable",
+            )
+        })?;
+        let mut delta = Vec::with_capacity(capacity);
+        file.take(delta_limit.saturating_add(1))
+            .read_to_end(&mut delta)
+            .map_err(|source| io_error("read_legacy_suffix", path, source))?;
+        if delta.len() as u64 > delta_limit {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!("legacy heuristic suffix grew beyond {delta_limit} bytes while reading"),
+            ));
+        }
+        if delta.is_empty() {
+            return Ok(None);
+        }
+        let source_ended_with_newline = delta.ends_with(b"\n");
+        if prior.is_some() && !source_ended_with_newline {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "append-only legacy updates must end with a complete newline-terminated record",
+            ));
+        }
+        hasher.update(&delta);
+        let source_bytes = imported_from_byte
+            .checked_add(delta.len() as u64)
+            .ok_or_else(|| {
+                store_error(
+                    "migrate",
+                    path.to_path_buf(),
+                    "capacity",
+                    "legacy heuristic source length overflowed",
+                )
+            })?;
+        if source_bytes > HEUR_STORE_MAX_BYTES {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                "legacy heuristic source grew beyond the guarded byte limit",
+            ));
+        }
+        Ok(Some(LegacyDelta {
+            bytes: delta,
+            source_bytes,
+            source_sha256: hex_digest(hasher.finalize()),
+            imported_from_byte,
+            source_ended_with_newline,
+        }))
     }
 
     struct HeurStoreLock {
@@ -5627,7 +5857,10 @@ pub mod rewrite {
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {
-        let digest = Sha256::digest(bytes);
+        hex_digest(Sha256::digest(bytes))
+    }
+
+    fn hex_digest(digest: impl IntoIterator<Item = u8>) -> String {
         let mut encoded = String::with_capacity(64);
         for byte in digest {
             use std::fmt::Write as _;
@@ -5776,6 +6009,9 @@ pub mod rewrite {
             assert_eq!(import.source_path, legacy_path);
             assert_eq!(import.source_bytes, legacy_bytes.len() as u64);
             assert_eq!(import.source_sha256, sha256_hex(legacy_bytes));
+            assert_eq!(import.imported_from_byte, 0);
+            assert_eq!(import.imported_bytes, legacy_bytes.len() as u64);
+            assert!(import.source_ended_with_newline);
 
             let migrated = fs::read(&path).expect("migrated canonical snapshot");
             let migrated_text = std::str::from_utf8(&migrated).expect("UTF-8 snapshot");
@@ -5805,22 +6041,34 @@ pub mod rewrite {
 
             let extended_legacy =
                 b"legacy-rule  # {\"wins\":4,\"trials\":4}\nlate-rule  # {\"wins\":8,\"trials\":8}\n";
+            let suffix_bytes = &extended_legacy[legacy_bytes.len()..];
             fs::write(&legacy_path, extended_legacy).expect("late legacy update");
             let late = store
                 .append_once("late-rule", &record("late-rule"))
                 .expect("a late legacy update is imported under the same lock");
             assert_eq!(late.disposition, HeurStoreDisposition::AlreadyPresent);
             assert!(late.durable_sync);
+            let late_import = late.legacy_import.as_ref().expect("late import witness");
+            assert_eq!(late_import.source_sha256, sha256_hex(extended_legacy));
+            assert_eq!(late_import.imported_from_byte, legacy_bytes.len() as u64);
+            assert_eq!(late_import.imported_bytes, suffix_bytes.len() as u64);
+            let late_canonical = fs::read_to_string(&path).expect("late canonical snapshot");
+            assert!(late_canonical.contains("late-rule"));
+            assert_eq!(late_canonical.matches("legacy-rule").count(), 1);
+            assert_eq!(late_canonical.matches("late-rule").count(), 1);
+
+            let before_rewrite = late_canonical.into_bytes();
+            let rewritten = b"changed-rule  # {\"wins\":4,\"trials\":4}\nlate-rule  # {\"wins\":8,\"trials\":8}\n";
+            fs::write(&legacy_path, rewritten).expect("non-append legacy rewrite");
+            let error = store
+                .append_once("changed-rule", &record("changed-rule"))
+                .expect_err("rewriting an imported prefix must fail closed");
+            assert_eq!(error.operation, "migrate");
+            assert_eq!(error.kind, "invalid_data");
             assert_eq!(
-                late.legacy_import
-                    .as_ref()
-                    .expect("late import witness")
-                    .source_sha256,
-                sha256_hex(extended_legacy)
+                fs::read(&path).expect("canonical snapshot remains atomic"),
+                before_rewrite
             );
-            assert!(fs::read_to_string(&path)
-                .expect("late canonical snapshot")
-                .contains("late-rule"));
         }
 
         #[test]

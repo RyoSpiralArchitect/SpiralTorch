@@ -2699,7 +2699,8 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
   durable append-once receipt rather than hiding persistence failures. Transcripts
   land in `roundtable.log` so you can replay how every choice surfaced. Opening
   the default store imports the legacy `~/.spiraltorch/heur/heur.kdsl` history
-  with a hashed migration witness and leaves the source file intact.
+  with a hashed byte cursor and leaves the source file intact. Later append-only
+  legacy updates import only their new suffix; a rewritten prefix fails closed.
   
 ---
 
