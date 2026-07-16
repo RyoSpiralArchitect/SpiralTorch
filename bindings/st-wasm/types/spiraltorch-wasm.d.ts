@@ -151,15 +151,19 @@ declare module "spiraltorch-wasm" {
         required_ready_backends?: string[];
     };
 
+    export type RuntimeDeviceReadiness = "ready" | "not_ready" | "unknown";
+
     export type RuntimeDeviceRouteRow = {
         requested_backend: string;
         effective_backend: string;
         report_available: boolean;
+        native_readiness: RuntimeDeviceReadiness;
         native_ready: boolean | null;
+        route_readiness: RuntimeDeviceReadiness;
         route_ready: boolean;
         fallback: boolean;
         route: "direct" | "surrogate" | "unavailable";
-        route_status: "ready" | "surrogate_ready" | "not_ready" | "error";
+        route_status: "ready" | "surrogate_ready" | "not_ready" | "unknown" | "error";
         runtime_status: string;
         requested_backend_runtime_status: string | null;
         effective_backend_runtime_status: string | null;
@@ -168,7 +172,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeDeviceRoute = {
         kind: "spiraltorch.runtime_device_route";
-        contract_version: "spiraltorch.runtime_device_route.v1";
+        contract_version: "spiraltorch.runtime_device_route.v2";
         semantic_owner: "st-core::backend::runtime_route";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -181,6 +185,8 @@ declare module "spiraltorch-wasm" {
         native_readiness_unknown_backends: string[];
         ready_backends: string[];
         not_ready_backends: string[];
+        route_not_ready_backends: string[];
+        route_readiness_unknown_backends: string[];
         fallback_backends: string[];
         error_backends: string[];
         missing_report_backends: string[];
@@ -192,6 +198,7 @@ declare module "spiraltorch-wasm" {
         required_available_backends_passed: boolean | null;
         required_ready_backends: string[];
         required_ready_backends_missing: string[];
+        required_ready_backends_unknown: string[];
         required_ready_backends_passed: boolean | null;
         failures: string[];
         passed: boolean;

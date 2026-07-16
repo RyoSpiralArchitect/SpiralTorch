@@ -356,7 +356,8 @@ console.log(runtime.routes[0].native_ready, runtime.routes[0].route_ready);
 
 This reports native MPS honestly as unavailable while preserving a ready WGPU surrogate.
 The browser binding adds only `execution_client: "wasm"`; it owns no readiness precedence
-or fallback heuristic.
+or fallback heuristic. Contract v2 also preserves absent evidence as `unknown` instead of
+silently rewriting it to `not_ready`; unknown routes remain fail-closed for execution.
 
 ## High-level Canvas utilities
 

@@ -50,7 +50,7 @@ __all__ = [
     "write_runtime_import_preflight_report",
 ]
 
-_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v1"
+_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v2"
 _RUNTIME_DEVICE_ROUTE_KIND = "spiraltorch.runtime_device_route"
 _RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER = "st-core::backend::runtime_route"
 
@@ -903,6 +903,7 @@ def runtime_device_report_fields(
                 csv_label(ready_required)
             ),
             f"{field_prefix}required_runtime_device_ready_backends_missing": "none",
+            f"{field_prefix}required_runtime_device_ready_backends_unknown": "none",
             f"{field_prefix}required_runtime_device_ready_backends_passed": (
                 None if not ready_required else False
             ),
@@ -987,6 +988,15 @@ def runtime_device_report_fields(
         f"{field_prefix}runtime_device_native_not_ready_backends": csv_label(
             contract.get("native_not_ready_backends")
         ),
+        f"{field_prefix}runtime_device_native_readiness_unknown_backends": csv_label(
+            contract.get("native_readiness_unknown_backends")
+        ),
+        f"{field_prefix}runtime_device_route_not_ready_backends": csv_label(
+            contract.get("route_not_ready_backends")
+        ),
+        f"{field_prefix}runtime_device_route_readiness_unknown_backends": csv_label(
+            contract.get("route_readiness_unknown_backends")
+        ),
         f"{field_prefix}runtime_device_route_failures": csv_label(failures),
         f"{field_prefix}required_runtime_device_backends": csv_label(required),
         f"{field_prefix}required_runtime_device_backends_missing": (
@@ -1000,6 +1010,11 @@ def runtime_device_report_fields(
         ),
         f"{field_prefix}required_runtime_device_ready_backends_missing": (
             csv_label(missing_ready_required) if ready_required else "none"
+        ),
+        f"{field_prefix}required_runtime_device_ready_backends_unknown": (
+            csv_label(contract.get("required_ready_backends_unknown"))
+            if ready_required
+            else "none"
         ),
         f"{field_prefix}required_runtime_device_ready_backends_passed": (
             contract.get("required_ready_backends_passed")

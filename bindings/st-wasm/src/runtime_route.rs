@@ -108,9 +108,38 @@ mod tests {
 
         assert_eq!(wasm, rust);
         assert_eq!(wasm["routes"][0]["route"], "surrogate");
+        assert_eq!(wasm["routes"][0]["native_readiness"], "not_ready");
         assert_eq!(wasm["routes"][0]["native_ready"], false);
+        assert_eq!(wasm["routes"][0]["route_readiness"], "ready");
         assert_eq!(wasm["routes"][0]["route_ready"], true);
         assert_eq!(wasm["passed"], true);
+    }
+
+    #[test]
+    fn wasm_transport_preserves_unknown_readiness() {
+        let request = request_from_json(
+            r#"{
+                "reports":[{"requested_backend":"cpu","runtime_status":"cpu"}],
+                "requested_backends":["cpu"],
+                "required_ready_backends":["cpu"]
+            }"#,
+        )
+        .expect("valid unknown-readiness request");
+        let payload = runtime_device_route_value(request).expect("valid WASM route transport");
+
+        assert_eq!(payload["routes"][0]["native_readiness"], "unknown");
+        assert_eq!(payload["routes"][0]["native_ready"], Value::Null);
+        assert_eq!(payload["routes"][0]["route_readiness"], "unknown");
+        assert_eq!(payload["routes"][0]["route_ready"], false);
+        assert_eq!(payload["routes"][0]["route_status"], "unknown");
+        assert_eq!(payload["route_not_ready_backends"], json!([]));
+        assert_eq!(payload["route_readiness_unknown_backends"], json!(["cpu"]));
+        assert_eq!(payload["required_ready_backends_unknown"], json!(["cpu"]));
+        assert_eq!(payload["required_ready_backends_passed"], false);
+        assert_eq!(
+            payload["failures"],
+            json!(["runtime_device_readiness_unknown:cpu"])
+        );
     }
 
     #[test]

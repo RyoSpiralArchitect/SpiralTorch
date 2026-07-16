@@ -95,7 +95,7 @@ def test_describe_runtime_devices_collects_backend_readiness(
     assert st.planner.describe_runtime_devices is st.describe_runtime_devices
     assert summary["backends"] == ["wgpu", "cpu", "mps"]
     assert summary["kind"] == "spiraltorch.runtime_device_route"
-    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v1"
+    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v2"
     assert summary["semantic_owner"] == "st-core::backend::runtime_route"
     assert summary["semantic_backend"] == "rust"
     assert summary["ready_backends"] == ["wgpu"]
@@ -148,8 +148,32 @@ def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> 
     assert contract["fallback_backends"] == ["mps"]
     assert contract["error_backends"] == []
     assert contract["routes"][0]["route"] == "surrogate"
+    assert contract["routes"][0]["native_readiness"] == "not_ready"
+    assert contract["routes"][0]["route_readiness"] == "ready"
     assert contract["routes"][0]["diagnostic"] == "native MPS kernels are not wired"
     assert contract["passed"] is True
+
+
+def test_runtime_device_route_preserves_unknown_readiness() -> None:
+    st = require_native()
+
+    contract = st.evaluate_runtime_device_route(
+        [{"requested_backend": "cpu", "runtime_status": "cpu"}],
+        requested_backends=["cpu"],
+        required_ready_backends=["cpu"],
+    )
+
+    route = contract["routes"][0]
+    assert route["native_readiness"] == "unknown"
+    assert route["native_ready"] is None
+    assert route["route_readiness"] == "unknown"
+    assert route["route_ready"] is False
+    assert route["route_status"] == "unknown"
+    assert contract["native_readiness_unknown_backends"] == ["cpu"]
+    assert contract["route_readiness_unknown_backends"] == ["cpu"]
+    assert contract["required_ready_backends_unknown"] == ["cpu"]
+    assert contract["required_ready_backends_passed"] is False
+    assert contract["failures"] == ["runtime_device_readiness_unknown:cpu"]
 
 
 def test_runtime_device_route_rejects_conflicting_readiness() -> None:

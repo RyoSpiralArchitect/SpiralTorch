@@ -76,7 +76,9 @@ PY
 readiness, surrogate readiness, fallback identity, and required-backend gates are owned by
 `st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly
 `native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
-`evaluate_runtime_device_route(...)` when another orchestrator already has device rows.
+`evaluate_runtime_device_route(...)` when another orchestrator already has device rows. The
+v2 contract keeps missing evidence as `native_readiness = "unknown"` or
+`route_readiness = "unknown"` while the boolean execution gate remains fail-closed.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:
