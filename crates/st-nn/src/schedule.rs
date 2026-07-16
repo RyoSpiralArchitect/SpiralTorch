@@ -8,10 +8,32 @@ use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::backend::unison_heuristics::Choice;
 use st_core::heur::free_energy::{BandEnergy as CoreBandEnergy, FreeEnergyError};
-use st_core::ops::rank_entry::RankPlan;
+use st_core::ops::rank_entry::{RankPlan, RankPlanError};
 use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError, SpectralFeatureSample};
 use st_tensor::TensorError;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use thiserror::Error;
+
+/// Failure to map an Autopilot control into an executable roundtable choice.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum KnobOverrideError {
+    #[error("roundtable override key {key:?} is empty")]
+    EmptyKey { key: String },
+    #[error("roundtable override '{key}' has an empty value")]
+    EmptyValue { key: String },
+    #[error("roundtable override '{key}' names an unsupported knob")]
+    UnsupportedKnob { key: String },
+    #[error("roundtable override '{key}' has invalid value {value:?}")]
+    InvalidValue { key: String, value: String },
+    #[error("roundtable override '{key}' assigns one band knob more than once")]
+    DuplicateAssignment { key: String },
+    #[error("roundtable override produced an invalid {band} rank plan: {source}")]
+    InvalidPlan {
+        band: &'static str,
+        #[source]
+        source: RankPlanError,
+    },
+}
 
 /// Configuration used to derive the A/B/C roundtable schedule.
 #[derive(Debug, Clone, Copy)]
@@ -156,20 +178,36 @@ impl RoundtableSchedule {
     ///
     /// Keys may optionally be scoped to a specific band using prefixes such as
     /// `"above."`, `"here."`, or `"beneath."`. Unscoped keys are applied to all
-    /// bands. Unknown keys are ignored so manual overrides can mix with future
-    /// knob additions without breaking older builds.
+    /// bands. Invalid override sets leave the schedule unchanged.
     pub fn apply_knob_overrides(&mut self, overrides: &HashMap<String, String>) {
-        if overrides.is_empty() {
-            return;
-        }
+        let _ = self.try_apply_knob_overrides(overrides);
+    }
 
-        for (raw_key, raw_value) in overrides {
+    /// Applies a complete override set transactionally. Every key and value
+    /// must map to an executable choice before any schedule field is changed.
+    pub fn try_apply_knob_overrides(
+        &mut self,
+        overrides: &HashMap<String, String>,
+    ) -> Result<usize, KnobOverrideError> {
+        let mut next = self.clone();
+        let mut assignments = BTreeSet::new();
+        let mut applied = 0usize;
+        let mut ordered = overrides.iter().collect::<Vec<_>>();
+        ordered.sort_by(|left, right| left.0.cmp(right.0));
+        for (raw_key, raw_value) in ordered {
             let value = raw_value.trim();
             if value.is_empty() {
-                continue;
+                return Err(KnobOverrideError::EmptyValue {
+                    key: raw_key.clone(),
+                });
             }
 
             let key_lower = raw_key.trim().to_ascii_lowercase();
+            if key_lower.is_empty() {
+                return Err(KnobOverrideError::EmptyKey {
+                    key: raw_key.clone(),
+                });
+            }
             let (targets, knob_key) = if let Some(rest) = key_lower.strip_prefix("above.") {
                 (OverrideTarget::specific(OverrideBand::Above), rest)
             } else if let Some(rest) = key_lower.strip_prefix("here.") {
@@ -182,23 +220,46 @@ impl RoundtableSchedule {
 
             let canonical = canonical_knob_key(knob_key);
             if canonical.is_empty() {
-                continue;
+                return Err(KnobOverrideError::EmptyKey {
+                    key: raw_key.clone(),
+                });
             }
+            let knob = normalized_knob_key(&canonical).ok_or_else(|| {
+                KnobOverrideError::UnsupportedKnob {
+                    key: raw_key.clone(),
+                }
+            })?;
 
             for band in targets.into_iter() {
+                if !assignments.insert((band, knob)) {
+                    return Err(KnobOverrideError::DuplicateAssignment {
+                        key: raw_key.clone(),
+                    });
+                }
                 match band {
                     OverrideBand::Above => {
-                        apply_choice_override(&mut self.above.choice, &canonical, value)
+                        apply_choice_override(&mut next.above.choice, knob, value, raw_key)?
                     }
                     OverrideBand::Here => {
-                        apply_choice_override(&mut self.here.choice, &canonical, value)
+                        apply_choice_override(&mut next.here.choice, knob, value, raw_key)?
                     }
                     OverrideBand::Beneath => {
-                        apply_choice_override(&mut self.beneath.choice, &canonical, value)
+                        apply_choice_override(&mut next.beneath.choice, knob, value, raw_key)?
                     }
                 }
+                applied = applied.saturating_add(1);
             }
         }
+        for (band, plan) in [
+            ("above", &next.above),
+            ("here", &next.here),
+            ("beneath", &next.beneath),
+        ] {
+            plan.validate()
+                .map_err(|source| KnobOverrideError::InvalidPlan { band, source })?;
+        }
+        *self = next;
+        Ok(applied)
     }
 
     /// Returns the TopK plan (Above band).
@@ -320,7 +381,7 @@ impl RoundtableSchedule {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum OverrideBand {
     Above,
     Here,
@@ -358,69 +419,83 @@ fn canonical_knob_key(key: &str) -> String {
         .collect::<String>()
 }
 
-fn apply_choice_override(choice: &mut Choice, key: &str, value: &str) {
+fn normalized_knob_key(key: &str) -> Option<&'static str> {
     match key {
-        "wg" | "workgroup" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.wg = parsed.max(1);
-            }
+        "wg" | "workgroup" => Some("wg"),
+        "kl" | "lanes" => Some("kl"),
+        "ch" | "channelstride" => Some("ch"),
+        "mk" | "mergekind" => Some("mk"),
+        "mkd" | "mergedetail" => Some("mkd"),
+        "tile" | "topktile" | "toptile" => Some("tile"),
+        "ctile" | "compactiontile" | "midtile" | "bottomtile" => Some("ctile"),
+        "subgroup" => Some("subgroup"),
+        "ffttile" | "ffttilecols" | "fftcolumns" => Some("ffttile"),
+        "fftradix" => Some("fftradix"),
+        "fftsegments" | "fftseg" => Some("fftsegments"),
+        _ => None,
+    }
+}
+
+fn apply_choice_override(
+    choice: &mut Choice,
+    key: &str,
+    value: &str,
+    raw_key: &str,
+) -> Result<(), KnobOverrideError> {
+    let invalid = || KnobOverrideError::InvalidValue {
+        key: raw_key.to_string(),
+        value: value.to_string(),
+    };
+    match key {
+        "wg" => {
+            choice.wg = parse_positive_u32(value).ok_or_else(invalid)?;
         }
-        "kl" | "lanes" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.kl = parsed.max(1);
-            }
+        "kl" => {
+            choice.kl = parse_positive_u32(value).ok_or_else(invalid)?;
         }
-        "ch" | "channelstride" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.ch = parsed;
-            }
+        "ch" => {
+            choice.ch = parse_u32(value).ok_or_else(invalid)?;
         }
-        "mk" | "mergekind" => {
-            if let Some(parsed) = parse_merge_kind(value) {
-                choice.mk = parsed;
-            }
+        "mk" => {
+            choice.mk = parse_merge_kind(value)
+                .filter(|parsed| *parsed <= 2)
+                .ok_or_else(invalid)?;
         }
-        "mkd" | "mergedetail" => {
-            if let Some(parsed) = parse_merge_detail(value) {
-                choice.mkd = parsed;
-            }
+        "mkd" => {
+            choice.mkd = parse_merge_detail(value)
+                .filter(|parsed| *parsed <= 5)
+                .ok_or_else(invalid)?;
         }
-        "tile" | "topktile" | "toptile" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.tile = parsed.max(1);
-            }
+        "tile" => {
+            choice.tile = parse_positive_u32(value).ok_or_else(invalid)?;
         }
-        "ctile" | "compactiontile" | "midtile" | "bottomtile" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.ctile = parsed.max(1);
-            }
+        "ctile" => {
+            choice.ctile = parse_positive_u32(value).ok_or_else(invalid)?;
         }
         "subgroup" => {
-            if let Some(parsed) = parse_bool(value) {
-                choice.subgroup = parsed;
-            }
+            choice.subgroup = parse_bool(value).ok_or_else(invalid)?;
         }
-        "ffttile" | "ffttilecols" | "fftcolumns" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.fft_tile = parsed.max(1);
-            }
+        "ffttile" => {
+            choice.fft_tile = parse_positive_u32(value).ok_or_else(invalid)?;
         }
-        "fftradix" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.fft_radix = parsed.clamp(2, 4);
-            }
+        "fftradix" => match parse_u32(value) {
+            Some(parsed @ (2 | 4)) => choice.fft_radix = parsed,
+            _ => return Err(invalid()),
+        },
+        "fftsegments" => {
+            choice.fft_segments = parse_positive_u32(value).ok_or_else(invalid)?;
         }
-        "fftsegments" | "fftseg" => {
-            if let Some(parsed) = parse_u32(value) {
-                choice.fft_segments = parsed.max(1);
-            }
-        }
-        _ => {}
+        _ => unreachable!("knob aliases are normalized before application"),
     }
+    Ok(())
 }
 
 fn parse_u32(value: &str) -> Option<u32> {
     value.trim().parse::<u32>().ok()
+}
+
+fn parse_positive_u32(value: &str) -> Option<u32> {
+    parse_u32(value).filter(|value| *value > 0)
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
@@ -642,6 +717,100 @@ impl BandEnergy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn demo_schedule() -> RoundtableSchedule {
+        let planner = RankPlanner::new(st_core::backend::device_caps::DeviceCaps::wgpu(
+            32, true, 256,
+        ));
+        RoundtableSchedule::new(&planner, 8, 16, RoundtableConfig::default())
+    }
+
+    fn choice_witness(schedule: &RoundtableSchedule) -> [(u32, u32, u32, bool); 3] {
+        [
+            (
+                schedule.above().choice.wg,
+                schedule.above().choice.tile,
+                schedule.above().choice.fft_radix,
+                schedule.above().choice.subgroup,
+            ),
+            (
+                schedule.here().choice.wg,
+                schedule.here().choice.tile,
+                schedule.here().choice.fft_radix,
+                schedule.here().choice.subgroup,
+            ),
+            (
+                schedule.beneath().choice.wg,
+                schedule.beneath().choice.tile,
+                schedule.beneath().choice.fft_radix,
+                schedule.beneath().choice.subgroup,
+            ),
+        ]
+    }
+
+    #[test]
+    fn guarded_knob_overrides_apply_every_declared_target() {
+        let mut schedule = demo_schedule();
+        let applied = schedule
+            .try_apply_knob_overrides(&HashMap::from([
+                ("wg".to_string(), "64".to_string()),
+                ("here.tile".to_string(), "42".to_string()),
+                ("beneath.fftradix".to_string(), "2".to_string()),
+            ]))
+            .expect("valid overrides");
+        assert_eq!(applied, 5);
+        assert_eq!(schedule.above().choice.wg, 64);
+        assert_eq!(schedule.here().choice.wg, 64);
+        assert_eq!(schedule.beneath().choice.wg, 64);
+        assert_eq!(schedule.here().choice.tile, 42);
+        assert_eq!(schedule.beneath().choice.fft_radix, 2);
+    }
+
+    #[test]
+    fn guarded_knob_overrides_are_transactional_on_invalid_values() {
+        let mut schedule = demo_schedule();
+        let before = choice_witness(&schedule);
+        let error = schedule
+            .try_apply_knob_overrides(&HashMap::from([
+                ("wg".to_string(), "64".to_string()),
+                ("here.tile".to_string(), "0".to_string()),
+            ]))
+            .expect_err("zero tile must fail");
+        assert!(matches!(error, KnobOverrideError::InvalidValue { .. }));
+        assert_eq!(choice_witness(&schedule), before);
+    }
+
+    #[test]
+    fn guarded_knob_overrides_reject_non_executable_rank_plans() {
+        let mut schedule = demo_schedule();
+        let before = choice_witness(&schedule);
+        let error = schedule
+            .try_apply_knob_overrides(&HashMap::from([("wg".to_string(), "48".to_string())]))
+            .expect_err("workgroups must remain lane aligned");
+        assert!(matches!(error, KnobOverrideError::InvalidPlan { .. }));
+        assert_eq!(choice_witness(&schedule), before);
+    }
+
+    #[test]
+    fn guarded_knob_overrides_reject_unknown_or_duplicate_assignments() {
+        let mut schedule = demo_schedule();
+        let before = choice_witness(&schedule);
+        let unknown = schedule
+            .try_apply_knob_overrides(&HashMap::from([("unknown".to_string(), "1".to_string())]))
+            .expect_err("unknown knob must fail");
+        assert!(matches!(unknown, KnobOverrideError::UnsupportedKnob { .. }));
+        let duplicate = schedule
+            .try_apply_knob_overrides(&HashMap::from([
+                ("wg".to_string(), "64".to_string()),
+                ("workgroup".to_string(), "128".to_string()),
+            ]))
+            .expect_err("aliases must not assign the same knob twice");
+        assert!(matches!(
+            duplicate,
+            KnobOverrideError::DuplicateAssignment { .. }
+        ));
+        assert_eq!(choice_witness(&schedule), before);
+    }
 
     #[test]
     fn schedule_splits_gradients() {
