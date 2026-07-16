@@ -336,6 +336,7 @@ def run_geometry_injection(
         for run_index in range(repeat):
             runtime = st.ApiLLMZSpaceRuntime(
                 list(z_state),
+                gradient_dim=gradient_dim,
                 provider="anthropic" if live_anthropic else "local-demo",
                 model=model,
                 create_session=False,

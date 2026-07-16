@@ -723,6 +723,7 @@ def main(argv: list[str] | None = None) -> int:
         psi_total=args.psi_total,
         coherence=args.coherence,
         distortion_strength=args.distortion_strength,
+        gradient_dim=4,
         base_temperature=args.base_temperature,
         base_top_p=args.base_top_p,
         include_penalties=args.include_penalties,

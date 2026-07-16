@@ -302,6 +302,7 @@ def main() -> None:
         prompts,
         invokes,
         z_state=args.z_state,
+        gradient_dim=args.wasm_gradient_dim,
         backend=args.backend,
         providers=providers,
         models=models,

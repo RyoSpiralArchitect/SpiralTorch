@@ -4008,11 +4008,14 @@ class ZSpaceInferencePipeline:
         alpha: float = ...,
         smoothing: float = ...,
         strategy: str = ...,
+        gradient_alignment: str = ...,
         telemetry: Mapping[str, Any] | None = ...,
     ) -> None: ...
 
     @property
     def strategy(self) -> str: ...
+    @property
+    def gradient_alignment(self) -> str: ...
     @property
     def posterior(self) -> ZSpacePosterior: ...
     @property
@@ -4034,6 +4037,7 @@ class ZSpaceInferencePipeline:
         origin: str | None = ...,
         telemetry_prefix: str = ...,
         aggregate: str = ...,
+        gradient_alignment: str | None = ...,
         gradient_source: str = ...,
         extra_telemetry: Mapping[str, Any] | None = ...,
     ) -> ZSpacePartialBundle: ...
@@ -4085,6 +4089,7 @@ class ZSpaceInferencePipeline:
         self,
         *,
         strategy: str | None = ...,
+        gradient_alignment: str | None = ...,
         weights: Sequence[float] | None = ...,
         clear: bool = ...,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
@@ -4156,6 +4161,7 @@ def blend_zspace_partials(
     *,
     weights: Sequence[float] | None = ...,
     strategy: str = ...,
+    gradient_alignment: str = ...,
 ) -> Dict[str, Any]: ...
 
 
@@ -4164,6 +4170,7 @@ def zspace_partial_fusion(
     *,
     weights: Sequence[float] | None = ...,
     strategy: str = ...,
+    gradient_alignment: str = ...,
     telemetry: Mapping[str, Any]
     | ZSpaceTelemetryFrame
     | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
@@ -4273,6 +4280,7 @@ def infer_with_partials(
     alpha: float = ...,
     smoothing: float = ...,
     strategy: str = ...,
+    gradient_alignment: str = ...,
     weights: Sequence[float] | None = ...,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
 ) -> ZSpaceInference: ...
@@ -4340,6 +4348,8 @@ class ApiLLMZSpaceRuntime:
     provider: Optional[str]
     model: Optional[str]
     requested_backend: Optional[str]
+    gradient_dim: int
+    gradient_alignment: str
     pipeline: ZSpaceInferencePipeline
     session_error: Optional[str]
     session: Any | None
@@ -4359,6 +4369,8 @@ class ApiLLMZSpaceRuntime:
         alpha: float = ...,
         smoothing: float = ...,
         strategy: str = ...,
+        gradient_dim: int | None = ...,
+        gradient_alignment: str = ...,
     ) -> None: ...
     def record_response(
         self,
@@ -4370,7 +4382,7 @@ class ApiLLMZSpaceRuntime:
         latency_ms: float | None = ...,
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
-        gradient_dim: int = ...,
+        gradient_dim: int | None = ...,
         context_partials: Any = ...,
         clear: bool = ...,
     ) -> ApiLLMTrace: ...
@@ -4739,6 +4751,8 @@ def run_api_llm_prompt_suite(
     alpha: float = ...,
     smoothing: float = ...,
     strategy: str = ...,
+    gradient_dim: int | None = ...,
+    gradient_alignment: str = ...,
     jsonl_out: str | PathLike[str] | None = ...,
     context_partials: Any = ...,
     runtime_adapter: Any = ...,
@@ -4763,6 +4777,8 @@ def run_api_llm_prompt_suite_matrix(
     alpha: float = ...,
     smoothing: float = ...,
     strategy: str = ...,
+    gradient_dim: int | None = ...,
+    gradient_alignment: str = ...,
     jsonl_dir: str | PathLike[str] | None = ...,
     context_partials: Any = ...,
     runtime_adapter: Any = ...,
@@ -4790,6 +4806,8 @@ def run_api_llm_topos_sweep(
     alpha: float = ...,
     smoothing: float = ...,
     strategy: str = ...,
+    gradient_dim: int | None = ...,
+    gradient_alignment: str = ...,
     jsonl_dir: str | PathLike[str] | None = ...,
     context_partials: Any = ...,
     context_prompt: bool = ...,

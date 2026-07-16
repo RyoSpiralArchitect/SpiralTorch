@@ -325,6 +325,7 @@ def test_wasm_report_context_artifact_roundtrips_into_api_llm_suite(tmp_path) ->
         ["Use selected WASM context."],
         fake_api,
         z_state=[0.12, -0.04, 0.33, -0.11],
+        gradient_dim=metadata["gradient_dim"],
         create_session=False,
         context_partials=context,
     )
@@ -332,3 +333,18 @@ def test_wasm_report_context_artifact_roundtrips_into_api_llm_suite(tmp_path) ->
     assert telemetry["wasm.family_canvas"] == pytest.approx(1.0)
     assert telemetry["wasm.loss"] == pytest.approx(0.01)
     assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
+
+
+def test_wasm_context_artifact_rejects_false_gradient_metadata(tmp_path) -> None:
+    artifact = tmp_path / "wasm-context.json"
+    st.write_wasm_report_context_artifact(
+        artifact,
+        [_canvas_report(last_loss=0.01)],
+        gradient_dim=4,
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["metadata"]["gradient_dim"] = 6
+    artifact.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata does not match"):
+        st.load_wasm_report_context_artifact(artifact)

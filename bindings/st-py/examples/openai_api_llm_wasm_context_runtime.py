@@ -191,6 +191,7 @@ def run_openai_wasm_context(
         telemetry_prefix=telemetry_prefix,
         write_wasm_context_artifact=write_wasm_context_artifact,
     )
+    runtime_gradient_dim = int(context_metadata.get("gradient_dim", gradient_dim))
     if invoke is None:
         invoke = st.make_openai_responses_invoke(
             model=selected_model,
@@ -204,6 +205,7 @@ def run_openai_wasm_context(
         list(prompts),
         invoke,
         z_state=list(z_state),
+        gradient_dim=runtime_gradient_dim,
         backend=backend,
         provider="openai",
         model=selected_model,
@@ -235,6 +237,7 @@ def run_openai_wasm_context(
             "reports": context_metadata.get("reports"),
             "comparison": context_metadata.get("comparison"),
             "artifact_schema": context_metadata.get("artifact_schema"),
+            "gradient_dim": runtime_gradient_dim,
         },
         "context_prompt_injected": bool(include_context_prompt),
         "wasm_context_seen": {

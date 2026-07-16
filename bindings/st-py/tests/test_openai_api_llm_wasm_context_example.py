@@ -150,6 +150,7 @@ def test_openai_wasm_context_example_loads_persisted_artifact(tmp_path) -> None:
     assert result["context_artifact"] == str(artifact)
     assert result["wasm_context"]["source"] == "artifact"
     assert result["wasm_context"]["artifact_schema"] == "spiraltorch.wasm_report_context.v1"
+    assert result["wasm_context"]["gradient_dim"] == 4
     assert result["wasm_context_seen"]["loss"] == pytest.approx(0.03)
 
 

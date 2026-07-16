@@ -207,6 +207,7 @@ def test_sweep_run_config_passes_wasm_context_into_trace(
         anthropic_max_tokens=128,
         near_best_tolerance=0.02,
         context_partials=context,
+        gradient_dim=6,
         wasm_context=wasm_context,
         resume_existing=False,
         force=False,
