@@ -9,6 +9,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+mod autograd;
 mod compat;
 mod dataset;
 mod elliptic;
@@ -263,6 +264,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     // 1) トップレベル（そのまま import できる）
     extras::register(py, m)?;
     tensor::register(py, m)?;
+    autograd::register(py, m)?;
     compat::register(py, m)?;
     pure::register(py, m)?;
     planner::register(py, m)?;
@@ -326,6 +328,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[allow(unused_mut)]
     let mut exports = vec![
         "Tensor",
+        "AutogradTensor",
+        "AUTOGRAD_CONTRACT_VERSION",
+        "AUTOGRAD_SEMANTIC_OWNER",
         "from_dlpack",
         "to_dlpack",
         "CpuSimdPackedRhs",

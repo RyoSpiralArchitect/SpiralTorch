@@ -1,5 +1,6 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
+mod autograd;
 mod cobol;
 mod concept_diffusion;
 mod cosmology;
@@ -33,6 +34,7 @@ mod tuner;
 #[cfg(target_arch = "wasm32")]
 mod utils;
 
+pub use autograd::*;
 #[cfg(target_arch = "wasm32")]
 pub use canvas::*;
 pub use cobol::*;

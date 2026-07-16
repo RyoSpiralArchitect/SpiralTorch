@@ -315,7 +315,7 @@ sequenceDiagram
   participant Session as Session manager
   participant Core as st-core orchestrator
   participant Planner as Graph planner + scheduler
-  participant Autodiff as Tape/autograd runtime
+  participant Autodiff as st-tensor AutogradTensor
   participant Reg as Op registry
   participant Caps as Capability DB
   participant Layout as Layout strategist
@@ -371,6 +371,13 @@ sequenceDiagram
   Session-->>Bridge: async completion signal
   Bridge-->>API: awaitable result / telemetry hook
 ```
+
+Reverse-mode meaning is owned once by `st-tensor::AutogradTensor`; Python and
+WASM expose handles to that graph, while WGPU/CPU backends execute its tensor
+operations without redefining derivatives. `AmegaHypergrad` and
+`AmegaRealgrad` remain Z-space optimizer/accumulator tapes rather than a second
+compute graph. See the [Rust-owned autograd contract](docs/autograd_contract.md)
+for the exact ownership boundaries and v1 invariants.
 
 **Licensing**
 

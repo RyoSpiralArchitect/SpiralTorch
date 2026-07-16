@@ -8186,7 +8186,8 @@ for _key, _hint in _FORWARDING_HINTS.items():
 
 
 _CORE_EXPORTS = [
-    "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
+    "Tensor","AutogradTensor","AUTOGRAD_CONTRACT_VERSION","AUTOGRAD_SEMANTIC_OWNER",
+    "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
     "GradientSummary","NonCollapseSnapshot","Hypergrad","Realgrad","TensorBiome",
     "Amegagrad","amegagrad",
     "LinearModel",

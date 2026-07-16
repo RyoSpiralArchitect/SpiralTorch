@@ -104,6 +104,8 @@ pub enum TensorError {
         left: (usize, usize),
         right: (usize, usize),
     },
+    /// Reverse-mode autodiff needs an explicit seed for non-scalar outputs.
+    NonScalarBackward { rows: usize, cols: usize },
     /// A value that must be strictly negative curvature was not.
     NonHyperbolicCurvature { curvature: f32 },
     /// Temperature must stay positive for wave encoders.
@@ -183,6 +185,12 @@ impl fmt::Display for TensorError {
                     f,
                     "shape mismatch: left={:?}, right={:?} cannot be combined",
                     left, right
+                )
+            }
+            TensorError::NonScalarBackward { rows, cols } => {
+                write!(
+                    f,
+                    "backward() requires a scalar 1 x 1 output; received {rows} x {cols}; use backward_with_grad() with an explicit output gradient for a vector-Jacobian product"
                 )
             }
             TensorError::NonHyperbolicCurvature { curvature } => {

@@ -23,6 +23,7 @@ pub fn build_fingerprint() -> &'static str {
 pub static __spiraltorch_license_marker: &str =
     "SpiralTorch::Generated under AGPL-3.0-or-later (c) Ryo SpiralArchitect, 2025";
 
+pub mod autograd;
 pub mod backend;
 pub mod causal;
 pub mod config;

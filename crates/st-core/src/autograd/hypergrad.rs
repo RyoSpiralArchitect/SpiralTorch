@@ -1,392 +1,1002 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
-// Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
-// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+// Copyright 2025 Ryo SpiralArchitect
 
-//! Ameba Autograd — Hypergradient utilities with Neumann and CG solvers.
+//! Unrolled and implicit hypergradients over the `st-tensor` reverse-mode core.
+
 use std::error::Error;
 use std::fmt;
 
-use crate::tensor::Tensor;
-use super::super::hypergrad::config::Solver;
+use st_tensor::{
+    AutogradTensor, Tensor, TensorError, AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
+};
 
-/// Output of the unrolled hypergradient computation.
-pub struct UnrolledOut {
-    pub w_final: Tensor,
-    pub dval_dhyper: Tensor,
+/// Contract version for higher-order differentiation owned by `st-core`.
+pub const HYPERGRAD_CONTRACT_VERSION: &str = "spiraltorch.hypergrad.v1";
+/// Module that owns higher-order solver equations and convergence diagnostics.
+pub const HYPERGRAD_SEMANTIC_OWNER: &str = "st-core::autograd::hypergrad";
+
+/// Linear solver used for the fixed-point sensitivity equation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Solver {
+    Neumann,
+    Cg,
 }
 
-/// How to approximate Jacobian-vector products with finite differences.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// How Jacobian-vector products are approximated numerically.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FiniteDiffMode {
+    #[default]
     Forward,
     Central,
 }
 
-impl Default for FiniteDiffMode {
-    fn default() -> Self { Self::Forward }
-}
-
-/// Diagnostics for implicit solvers (e.g. CG residuals).
-#[derive(Clone, Debug)]
+/// Diagnostics for one implicit hypergradient solve.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ImplicitDiagnostics {
-    pub solver: Solver,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub autograd_contract_version: &'static str,
+    pub autograd_semantic_owner: &'static str,
+    pub requested_solver: Solver,
+    pub effective_solver: Solver,
     pub iterations: usize,
     pub residual: f32,
     pub residual_history: Vec<f32>,
     pub finite_diff_mode: FiniteDiffMode,
+    pub finite_diff_step: f32,
+    pub converged: bool,
+    pub fallback_reason: Option<&'static str>,
 }
 
-/// Output of the implicit hypergradient computation.
+/// Result of differentiating through an explicitly unrolled optimization path.
+#[derive(Clone, Debug)]
+pub struct UnrolledOut {
+    pub w_final: AutogradTensor,
+    pub dval_dhyper: Tensor,
+}
+
+/// Result of an implicit fixed-point hypergradient solve.
+#[derive(Clone, Debug)]
 pub struct ImplicitOut {
     pub dval_dhyper: Tensor,
-    pub diagnostics: Option<ImplicitDiagnostics>,
+    pub diagnostics: ImplicitDiagnostics,
 }
 
-/// Controls the behaviour of the implicit hypergradient routines.
-#[derive(Clone, Debug)]
+/// Controls fixed-point sensitivity estimation.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ImplicitOptions {
     pub solver: Solver,
     pub max_iters: usize,
     pub tolerance: f32,
     pub finite_diff_eps: f32,
     pub finite_diff_mode: FiniteDiffMode,
-    pub zero_existing_grads: bool,
+    pub cg_fallback_to_neumann: bool,
+}
+
+#[derive(Clone, Copy)]
+struct SolverRoute {
+    requested: Solver,
+    fallback_reason: Option<&'static str>,
+}
+
+impl SolverRoute {
+    const fn direct(requested: Solver) -> Self {
+        Self {
+            requested,
+            fallback_reason: None,
+        }
+    }
+
+    const fn fallback(requested: Solver, reason: &'static str) -> Self {
+        Self {
+            requested,
+            fallback_reason: Some(reason),
+        }
+    }
 }
 
 impl Default for ImplicitOptions {
     fn default() -> Self {
         Self {
             solver: Solver::Neumann,
-            max_iters: 8,
+            max_iters: 32,
             tolerance: 1e-6,
             finite_diff_eps: 1e-3,
-            finite_diff_mode: FiniteDiffMode::Forward,
-            zero_existing_grads: true,
+            finite_diff_mode: FiniteDiffMode::Central,
+            cg_fallback_to_neumann: true,
         }
     }
 }
 
 impl ImplicitOptions {
-    pub fn with_solver(mut self, solver: Solver) -> Self { self.solver = solver; self }
-    pub fn with_max_iters(mut self, iters: usize) -> Self { self.max_iters = iters; self }
-    pub fn with_tolerance(mut self, tol: f32) -> Self { self.tolerance = tol; self }
-    pub fn with_finite_diff_eps(mut self, eps: f32) -> Self { self.finite_diff_eps = eps; self }
+    pub fn with_solver(mut self, solver: Solver) -> Self {
+        self.solver = solver;
+        self
+    }
+
+    pub fn with_max_iters(mut self, iterations: usize) -> Self {
+        self.max_iters = iterations;
+        self
+    }
+
+    pub fn with_tolerance(mut self, tolerance: f32) -> Self {
+        self.tolerance = tolerance;
+        self
+    }
+
+    pub fn with_finite_diff_eps(mut self, epsilon: f32) -> Self {
+        self.finite_diff_eps = epsilon;
+        self
+    }
+
     pub fn with_finite_diff_mode(mut self, mode: FiniteDiffMode) -> Self {
         self.finite_diff_mode = mode;
         self
     }
-    pub fn keep_existing_grads(mut self) -> Self { self.zero_existing_grads = false; self }
+
+    pub fn without_cg_fallback(mut self) -> Self {
+        self.cg_fallback_to_neumann = false;
+        self
+    }
+
+    fn validate(&self) -> HypergradResult<()> {
+        if self.max_iters == 0 {
+            return Err(HypergradError::InvalidIterations {
+                label: "implicit_max_iters",
+                iterations: self.max_iters,
+            });
+        }
+        if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
+            return Err(HypergradError::InvalidTolerance(self.tolerance));
+        }
+        if !self.finite_diff_eps.is_finite() || self.finite_diff_eps <= 0.0 {
+            return Err(HypergradError::InvalidFiniteDiffStep(self.finite_diff_eps));
+        }
+        Ok(())
+    }
 }
 
-/// Errors that can occur during implicit hypergradient computation.
-#[derive(Debug)]
+/// Failures from higher-order differentiation.
+#[derive(Clone, Debug, PartialEq)]
 pub enum HypergradError {
-    MissingBatch,
+    MissingBatch {
+        step: usize,
+    },
     MissingGrad(&'static str),
-    SolverBreakdown,
-    InvalidFiniteDiffStep,
+    NonTrainableInput(&'static str),
+    InvalidIterations {
+        label: &'static str,
+        iterations: usize,
+    },
+    InvalidTolerance(f32),
+    InvalidFiniteDiffStep(f32),
+    InvalidSolver(String),
+    StepShapeMismatch {
+        expected: (usize, usize),
+        got: (usize, usize),
+    },
+    SolverBreakdown {
+        iteration: usize,
+        denominator: f64,
+    },
+    Tensor(TensorError),
 }
 
 impl fmt::Display for HypergradError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HypergradError::MissingBatch => write!(f, "no batch available to estimate Jacobian"),
-            HypergradError::MissingGrad(name) => write!(f, "missing gradient for {name}"),
-            HypergradError::SolverBreakdown => write!(f, "implicit solver broke down"),
-            HypergradError::InvalidFiniteDiffStep => write!(f, "finite difference epsilon must be non-zero"),
+            Self::MissingBatch { step } => {
+                write!(f, "missing training batch for unrolled step {step}")
+            }
+            Self::MissingGrad(name) => write!(f, "missing gradient for {name}"),
+            Self::NonTrainableInput(name) => {
+                write!(f, "{name} must be an AutogradTensor trainable leaf")
+            }
+            Self::InvalidIterations { label, iterations } => {
+                write!(f, "{label} must be positive, received {iterations}")
+            }
+            Self::InvalidTolerance(tolerance) => {
+                write!(f, "implicit tolerance must be positive and finite, received {tolerance}")
+            }
+            Self::InvalidFiniteDiffStep(epsilon) => {
+                write!(f, "finite-difference step must be positive and finite, received {epsilon}")
+            }
+            Self::InvalidSolver(solver) => {
+                write!(f, "unknown implicit hypergradient solver '{solver}'")
+            }
+            Self::StepShapeMismatch { expected, got } => {
+                write!(f, "optimization step changed parameter shape from {expected:?} to {got:?}")
+            }
+            Self::SolverBreakdown {
+                iteration,
+                denominator,
+            } => write!(
+                f,
+                "implicit CG lost a positive direction at iteration {iteration} (p^T A p = {denominator})"
+            ),
+            Self::Tensor(error) => error.fmt(f),
         }
     }
 }
 
-impl Error for HypergradError {}
+impl Error for HypergradError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Tensor(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
+impl From<TensorError> for HypergradError {
+    fn from(error: TensorError) -> Self {
+        Self::Tensor(error)
+    }
+}
+
+pub type HypergradResult<T> = Result<T, HypergradError>;
+
+/// Differentiates validation loss through `steps` explicit optimization steps.
 pub fn unrolled<F, G, It>(
     mut step_fn: F,
-    mut w0: Tensor,
-    hyper: Tensor,
+    w0: AutogradTensor,
+    hyper: AutogradTensor,
     mut data_loader: It,
     steps: usize,
     val_loss_fn: G,
-) -> UnrolledOut
+) -> HypergradResult<UnrolledOut>
 where
-    F: FnMut(&Tensor, &Tensor, &Tensor) -> Tensor,
-    G: Fn(&Tensor) -> Tensor,
-    It: Iterator<Item=Tensor>,
+    F: FnMut(&AutogradTensor, &AutogradTensor, &AutogradTensor) -> HypergradResult<AutogradTensor>,
+    G: Fn(&AutogradTensor) -> HypergradResult<AutogradTensor>,
+    It: Iterator<Item = AutogradTensor>,
 {
-    hyper.zero_grad();
-    w0.zero_grad();
-    let mut w = w0.clone();
-    for _ in 0..steps {
-        if let Some(batch) = data_loader.next() { w = step_fn(&w, &hyper, &batch); }
+    if steps == 0 {
+        return Err(HypergradError::InvalidIterations {
+            label: "unrolled_steps",
+            iterations: steps,
+        });
     }
-    let val = val_loss_fn(&w);
-    val.backward();
-    let dh = hyper.grad().unwrap_or_else(|| Tensor::zeros_like(&hyper));
-    UnrolledOut{ w_final: w, dval_dhyper: dh }
+    ensure_trainable("hyper", &hyper)?;
+    let mut weights = w0;
+    for step in 0..steps {
+        let batch = data_loader
+            .next()
+            .ok_or(HypergradError::MissingBatch { step })?;
+        let next = step_fn(&weights, &hyper, &batch)?;
+        ensure_step_shape(weights.shape(), next.shape())?;
+        weights = next;
+    }
+
+    let validation_loss = val_loss_fn(&weights)?;
+    validation_loss.zero_grad_graph();
+    validation_loss.backward()?;
+    let dval_dhyper = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
+    Ok(UnrolledOut {
+        w_final: weights,
+        dval_dhyper,
+    })
 }
 
-/// Implicit hypergrad using either Neumann or CG. `iters` controls truncation/iterations.
+/// Convenience implicit solve using a named solver.
 pub fn implicit<F, G, It>(
-    step_fn: F, w0: Tensor, hyper: Tensor, mut data_loader: It, val_loss_fn: G,
-    solve: &str, iters: usize
-) -> Result<ImplicitOut, HypergradError>
+    step_fn: F,
+    w0: AutogradTensor,
+    hyper: AutogradTensor,
+    data_loader: It,
+    val_loss_fn: G,
+    solver: &str,
+    iterations: usize,
+) -> HypergradResult<ImplicitOut>
 where
-    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
-    G: Fn(&Tensor) -> Tensor,
-    It: Iterator<Item=Tensor>,
+    F: Fn(&AutogradTensor, &AutogradTensor, &AutogradTensor) -> HypergradResult<AutogradTensor>
+        + Copy,
+    G: Fn(&AutogradTensor) -> HypergradResult<AutogradTensor>,
+    It: Iterator<Item = AutogradTensor>,
 {
-    let solver = match solve {
-        s if s.eq_ignore_ascii_case("cg") => Solver::Cg,
-        _ => Solver::Neumann,
+    let solver = if solver.eq_ignore_ascii_case("cg") {
+        Solver::Cg
+    } else if solver.eq_ignore_ascii_case("neumann") {
+        Solver::Neumann
+    } else {
+        return Err(HypergradError::InvalidSolver(solver.to_string()));
     };
-
     implicit_with_options(
         step_fn,
         w0,
         hyper,
         data_loader,
         val_loss_fn,
-        ImplicitOptions::default().with_solver(solver).with_max_iters(iters),
+        ImplicitOptions::default()
+            .with_solver(solver)
+            .with_max_iters(iterations),
     )
 }
 
-/// Implicit hypergrad with a fully configurable set of options.
+/// Solves the fixed-point sensitivity equation with explicit diagnostics.
 pub fn implicit_with_options<F, G, It>(
     step_fn: F,
-    mut w0: Tensor,
-    mut hyper: Tensor,
+    w0: AutogradTensor,
+    hyper: AutogradTensor,
     mut data_loader: It,
     val_loss_fn: G,
-    mut opts: ImplicitOptions,
-) -> Result<ImplicitOut, HypergradError>
+    options: ImplicitOptions,
+) -> HypergradResult<ImplicitOut>
 where
-    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
-    G: Fn(&Tensor) -> Tensor,
-    It: Iterator<Item=Tensor>,
+    F: Fn(&AutogradTensor, &AutogradTensor, &AutogradTensor) -> HypergradResult<AutogradTensor>
+        + Copy,
+    G: Fn(&AutogradTensor) -> HypergradResult<AutogradTensor>,
+    It: Iterator<Item = AutogradTensor>,
 {
-    if opts.zero_existing_grads {
-        w0.zero_grad();
-        hyper.zero_grad();
-    }
+    options.validate()?;
+    ensure_trainable("w0", &w0)?;
+    ensure_trainable("hyper", &hyper)?;
+    let batch = data_loader
+        .next()
+        .ok_or(HypergradError::MissingBatch { step: 0 })?;
+    let base = step_fn(&w0, &hyper, &batch)?;
+    ensure_step_shape(w0.shape(), base.shape())?;
 
-    // one batch for Jacobian linearization
-    let batch = data_loader.next().ok_or(HypergradError::MissingBatch)?;
-    let w1 = step_fn(&w0, &hyper, &batch);
+    let validation_loss = val_loss_fn(&w0)?;
+    validation_loss.zero_grad_graph();
+    validation_loss.backward()?;
+    let validation_gradient = w0.grad().ok_or(HypergradError::MissingGrad("w0"))?;
+    let finite_diff_step = resolve_finite_diff_step(
+        options.finite_diff_eps,
+        options.finite_diff_mode,
+        w0.value(),
+        base.value(),
+    )?;
 
-    let resolved_eps = resolve_finite_diff_step(opts.finite_diff_eps, &w0, &w1)?;
-    opts.finite_diff_eps = resolved_eps;
-
-    // g = ∂ val_loss / ∂ w |_{w0}
-    let val = val_loss_fn(&w0);
-    val.backward();
-    let g = w0.grad().ok_or(HypergradError::MissingGrad("w0"))?;
-
-    match opts.solver {
-        Solver::Neumann => implicit_neumann(step_fn, w0, hyper, batch, w1, g, &opts),
-        Solver::Cg      => implicit_cg(step_fn, w0, hyper, batch, w1, g, &opts),
-    }
-}
-
-fn jvp_approx<F>(
-    step_fn: F,
-    w0: &Tensor,
-    hyper: &Tensor,
-    batch: &Tensor,
-    base: &Tensor,
-    x: &Tensor,
-    eps: f32,
-    mode: FiniteDiffMode,
-) -> Tensor
-where
-    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor,
-{
-    match mode {
-        FiniteDiffMode::Forward => {
-            let w_eps = w0.add(&x.mul_scalar(eps));
-            let s_eps = step_fn(&w_eps, hyper, batch);
-            s_eps.sub(base).mul_scalar(1.0 / eps)
-        }
-        FiniteDiffMode::Central => {
-            let offset = x.mul_scalar(eps);
-            let w_plus = w0.add(&offset);
-            let w_minus = w0.sub(&offset);
-            let s_plus = step_fn(&w_plus, hyper, batch);
-            let s_minus = step_fn(&w_minus, hyper, batch);
-            s_plus.sub(&s_minus).mul_scalar(0.5 / eps)
-        }
-    }
-}
-
-fn implicit_neumann<F>(
-    step_fn: F,
-    w0: Tensor,
-    mut hyper: Tensor,
-    batch: Tensor,
-    base: Tensor,
-    g: Tensor,
-    opts: &ImplicitOptions,
-) -> Result<ImplicitOut, HypergradError>
-where
-    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
-{
-    let mut v = g.clone();
-    let mut jt = g.clone();
-    let mut iterations = 0usize;
-    let mut residual = (jt.dot(&jt).item_f32() as f64).sqrt() as f32;
-    let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
-    residual_history.push(residual);
-
-    for _ in 0..opts.max_iters {
-        iterations += 1;
-        jt = jvp_approx(
+    match options.solver {
+        Solver::Neumann => solve_neumann(
+            &w0,
+            &hyper,
+            &base,
+            validation_gradient,
+            &options,
+            finite_diff_step,
+            SolverRoute::direct(Solver::Neumann),
+        ),
+        Solver::Cg => solve_cg(
             step_fn,
             &w0,
             &hyper,
             &batch,
             &base,
-            &jt,
-            opts.finite_diff_eps,
-            opts.finite_diff_mode,
-        );
-        residual = (jt.dot(&jt).item_f32() as f64).sqrt() as f32;
+            validation_gradient,
+            &options,
+            finite_diff_step,
+        ),
+    }
+}
+
+fn solve_neumann(
+    w0: &AutogradTensor,
+    hyper: &AutogradTensor,
+    base: &AutogradTensor,
+    gradient: Tensor,
+    options: &ImplicitOptions,
+    epsilon: f32,
+    route: SolverRoute,
+) -> HypergradResult<ImplicitOut> {
+    let equation_gradient = gradient.clone();
+    let mut sensitivity = gradient.clone();
+    let mut transpose_term = gradient;
+    let mut residual = stable_l2(&transpose_term);
+    let mut residual_history = vec![residual];
+    let mut iterations = 0usize;
+    let mut converged = residual <= options.tolerance;
+
+    while iterations < options.max_iters && !converged {
+        transpose_term = vjp(base, w0, &transpose_term, "w0")?;
+        sensitivity = sensitivity.add(&transpose_term)?;
+        residual = stable_l2(&transpose_term);
+        if !residual.is_finite() {
+            return Err(HypergradError::Tensor(TensorError::NonFiniteValue {
+                label: "implicit_neumann_residual",
+                value: residual,
+            }));
+        }
         residual_history.push(residual);
-        v = v.add(&jt);
-        if residual < opts.tolerance {
+        iterations += 1;
+        converged = residual <= options.tolerance;
+    }
+
+    let transpose_sensitivity = vjp(base, w0, &sensitivity, "w0")?;
+    let equation_residual = sensitivity
+        .sub(&transpose_sensitivity)?
+        .sub(&equation_gradient)?;
+    residual = stable_l2(&equation_residual);
+    if !residual.is_finite() {
+        return Err(HypergradError::Tensor(TensorError::NonFiniteValue {
+            label: "implicit_neumann_equation_residual",
+            value: residual,
+        }));
+    }
+    residual_history.push(residual);
+    converged = residual <= options.tolerance;
+    let dval_dhyper = vjp(base, hyper, &sensitivity, "hyper")?;
+    Ok(ImplicitOut {
+        dval_dhyper,
+        diagnostics: diagnostics(
+            route.requested,
+            Solver::Neumann,
+            iterations,
+            residual,
+            residual_history,
+            options.finite_diff_mode,
+            epsilon,
+            converged,
+            route.fallback_reason,
+        ),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_cg<F>(
+    step_fn: F,
+    w0: &AutogradTensor,
+    hyper: &AutogradTensor,
+    batch: &AutogradTensor,
+    base: &AutogradTensor,
+    gradient: Tensor,
+    options: &ImplicitOptions,
+    epsilon: f32,
+) -> HypergradResult<ImplicitOut>
+where
+    F: Fn(&AutogradTensor, &AutogradTensor, &AutogradTensor) -> HypergradResult<AutogradTensor>
+        + Copy,
+{
+    // Solve B B^T v = B g, where B = I - J. This is the normal equation for
+    // B^T v = g and keeps CG on a symmetric positive-semidefinite operator.
+    let jg = jvp(
+        step_fn,
+        w0,
+        hyper,
+        batch,
+        base.value(),
+        &gradient,
+        epsilon,
+        options.finite_diff_mode,
+    )?;
+    let rhs = gradient.sub(&jg)?;
+    let mut sensitivity = Tensor::zeros(rhs.shape().0, rhs.shape().1)?;
+    let mut residual_vector = rhs;
+    let mut direction = residual_vector.clone();
+    let mut residual_squared = tensor_dot(&residual_vector, &residual_vector)?;
+    let mut residual = residual_squared.sqrt() as f32;
+    let mut residual_history = vec![residual];
+    let mut iterations = 0usize;
+    let mut normal_converged = residual <= options.tolerance;
+
+    while iterations < options.max_iters && !normal_converged {
+        let j_direction = jvp(
+            step_fn,
+            w0,
+            hyper,
+            batch,
+            base.value(),
+            &direction,
+            epsilon,
+            options.finite_diff_mode,
+        )?;
+        let jt_direction = vjp(base, w0, &direction, "w0")?;
+        let j_jt_direction = jvp(
+            step_fn,
+            w0,
+            hyper,
+            batch,
+            base.value(),
+            &jt_direction,
+            epsilon,
+            options.finite_diff_mode,
+        )?;
+        let applied = direction
+            .sub(&j_direction)?
+            .sub(&jt_direction)?
+            .add(&j_jt_direction)?;
+        let denominator = tensor_dot(&direction, &applied)?;
+        if !denominator.is_finite() || denominator <= 1e-12 {
+            if options.cg_fallback_to_neumann {
+                return solve_neumann(
+                    w0,
+                    hyper,
+                    base,
+                    gradient,
+                    options,
+                    epsilon,
+                    SolverRoute::fallback(Solver::Cg, "cg_non_positive_direction"),
+                );
+            }
+            return Err(HypergradError::SolverBreakdown {
+                iteration: iterations,
+                denominator,
+            });
+        }
+
+        let alpha = residual_squared / denominator;
+        let alpha = finite_f32("implicit_cg_alpha", alpha)?;
+        sensitivity = sensitivity.add(&direction.scale(alpha)?)?;
+        residual_vector = residual_vector.sub(&applied.scale(alpha)?)?;
+        let next_residual_squared = tensor_dot(&residual_vector, &residual_vector)?;
+        residual = next_residual_squared.sqrt() as f32;
+        residual_history.push(residual);
+        iterations += 1;
+        normal_converged = residual <= options.tolerance;
+        if normal_converged {
             break;
         }
+        let beta = next_residual_squared / residual_squared;
+        let beta = finite_f32("implicit_cg_beta", beta)?;
+        direction = residual_vector.add(&direction.scale(beta)?)?;
+        residual_squared = next_residual_squared;
     }
-    // seed backward on base with v to pick up ∂ step / ∂ hyper contribution
-    base.zero_grad();
-    base
-        .backward_with_grad(&v)
-        .map_err(|_| HypergradError::SolverBreakdown)?;
-    let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
+
+    let transpose_sensitivity = vjp(base, w0, &sensitivity, "w0")?;
+    let equation_residual = sensitivity.sub(&transpose_sensitivity)?.sub(&gradient)?;
+    residual = stable_l2(&equation_residual);
+    if !residual.is_finite() {
+        return Err(HypergradError::Tensor(TensorError::NonFiniteValue {
+            label: "implicit_cg_equation_residual",
+            value: residual,
+        }));
+    }
+    residual_history.push(residual);
+    let converged = residual <= options.tolerance;
+    if !converged && options.cg_fallback_to_neumann {
+        return solve_neumann(
+            w0,
+            hyper,
+            base,
+            gradient,
+            options,
+            epsilon,
+            SolverRoute::fallback(Solver::Cg, "cg_equation_residual"),
+        );
+    }
+    let dval_dhyper = vjp(base, hyper, &sensitivity, "hyper")?;
     Ok(ImplicitOut {
-        dval_dhyper: dh,
-        diagnostics: Some(ImplicitDiagnostics {
-            solver: opts.solver,
+        dval_dhyper,
+        diagnostics: diagnostics(
+            Solver::Cg,
+            Solver::Cg,
             iterations,
             residual,
             residual_history,
-            finite_diff_mode: opts.finite_diff_mode,
-        }),
+            options.finite_diff_mode,
+            epsilon,
+            converged,
+            None,
+        ),
     })
 }
 
-fn implicit_cg<F>(
+#[allow(clippy::too_many_arguments)]
+fn jvp<F>(
     step_fn: F,
-    w0: Tensor,
-    mut hyper: Tensor,
-    batch: Tensor,
-    base: Tensor,
-    g: Tensor,
-    opts: &ImplicitOptions,
-) -> Result<ImplicitOut, HypergradError>
+    w0: &AutogradTensor,
+    hyper: &AutogradTensor,
+    batch: &AutogradTensor,
+    base: &Tensor,
+    vector: &Tensor,
+    epsilon: f32,
+    mode: FiniteDiffMode,
+) -> HypergradResult<Tensor>
 where
-    F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
+    F: Fn(&AutogradTensor, &AutogradTensor, &AutogradTensor) -> HypergradResult<AutogradTensor>
+        + Copy,
 {
-    // Solve (I - J)^T v = g  via CG on normal equations A = (I - J)(I - J)^T (symmetric PSD approx)
-    // We approximate Av with: A x ≈ x - J x - J^T x + J J^T x.
-    // Approximate J x with jvp; approximate J^T x by recomputing grad via backward seed trick.
-    let mut v = Tensor::zeros_like(&g);
-    let mut r = g.clone();           // r = b - A v ; start v=0 => r=b
-    let mut p = r.clone();
-    let mut rr_old = r.dot(&r).item_f32() as f64;
-    let mut residual = rr_old.sqrt() as f32;
-    let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
-    residual_history.push(residual);
-    let mut iterations = 0usize;
-
-    for _ in 0..opts.max_iters {
-        iterations += 1;
-        // A p ≈ p - J p - J^T p + J J^T p
-        let jp = jvp_approx(
-            step_fn,
-            &w0,
-            &hyper,
-            &batch,
-            &base,
-            &p,
-            opts.finite_diff_eps,
-            opts.finite_diff_mode,
-        );
-        // J^T p via backward seed: seed base with jp, read grad at base
-        base.zero_grad();
-        base
-            .backward_with_grad(&jp)
-            .map_err(|_| HypergradError::SolverBreakdown)?;
-        let jtp = base.grad().ok_or(HypergradError::MissingGrad("base"))?;
-        // J J^T p via J applied to (J^T p)
-        let j_jtp = jvp_approx(
-            step_fn,
-            &w0,
-            &hyper,
-            &batch,
-            &base,
-            &jtp,
-            opts.finite_diff_eps,
-            opts.finite_diff_mode,
-        );
-        let ap = p.sub(&jp).sub(&jtp).add(&j_jtp);
-
-        let denom = p.dot(&ap).item_f32() as f64;
-        if denom.abs() < 1e-12 {
-            let mut fallback_opts = opts.clone();
-            fallback_opts.solver = Solver::Neumann;
-            return implicit_neumann(step_fn, w0, hyper, batch, base, g, &fallback_opts);
-        }
-        let alpha = (rr_old / denom) as f32;
-        v = v.add(&p.mul_scalar(alpha));
-        r = r.sub(&ap.mul_scalar(alpha));
-        let rr_new = r.dot(&r).item_f32() as f64;
-        residual = rr_new.sqrt() as f32;
-        residual_history.push(residual);
-        if residual < opts.tolerance { break; }
-        let beta = (rr_new / rr_old) as f32;
-        p = r.add(&p.mul_scalar(beta));
-        rr_old = rr_new;
+    if vector.shape() != w0.shape() {
+        return Err(HypergradError::Tensor(TensorError::ShapeMismatch {
+            left: vector.shape(),
+            right: w0.shape(),
+        }));
     }
+    let hyper = hyper.detach()?;
+    let batch = batch.detach()?;
+    let offset = vector.scale(epsilon)?;
+    match mode {
+        FiniteDiffMode::Forward => {
+            let perturbed = AutogradTensor::constant(w0.value().add(&offset)?)?;
+            let stepped = step_fn(&perturbed, &hyper, &batch)?;
+            ensure_step_shape(w0.shape(), stepped.shape())?;
+            Ok(stepped.value().sub(base)?.scale(1.0 / epsilon)?)
+        }
+        FiniteDiffMode::Central => {
+            let plus = AutogradTensor::constant(w0.value().add(&offset)?)?;
+            let minus = AutogradTensor::constant(w0.value().sub(&offset)?)?;
+            let stepped_plus = step_fn(&plus, &hyper, &batch)?;
+            let stepped_minus = step_fn(&minus, &hyper, &batch)?;
+            ensure_step_shape(w0.shape(), stepped_plus.shape())?;
+            ensure_step_shape(w0.shape(), stepped_minus.shape())?;
+            Ok(stepped_plus
+                .value()
+                .sub(stepped_minus.value())?
+                .scale(0.5 / epsilon)?)
+        }
+    }
+}
 
-    // pick up ∂ step / ∂ hyper contribution via backward seed on base with v
-    base.zero_grad();
-    base
-        .backward_with_grad(&v)
-        .map_err(|_| HypergradError::SolverBreakdown)?;
-    let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
-    Ok(ImplicitOut {
-        dval_dhyper: dh,
-        diagnostics: Some(ImplicitDiagnostics {
-            solver: opts.solver,
-            iterations,
-            residual,
-            residual_history,
-            finite_diff_mode: opts.finite_diff_mode,
-        }),
-    })
+fn vjp(
+    output: &AutogradTensor,
+    input: &AutogradTensor,
+    vector: &Tensor,
+    label: &'static str,
+) -> HypergradResult<Tensor> {
+    output.zero_grad_graph();
+    output.backward_with_grad(vector)?;
+    input.grad().ok_or(HypergradError::MissingGrad(label))
+}
+
+fn ensure_trainable(label: &'static str, tensor: &AutogradTensor) -> HypergradResult<()> {
+    if tensor.requires_grad() {
+        Ok(())
+    } else {
+        Err(HypergradError::NonTrainableInput(label))
+    }
+}
+
+fn ensure_step_shape(expected: (usize, usize), got: (usize, usize)) -> HypergradResult<()> {
+    if expected == got {
+        Ok(())
+    } else {
+        Err(HypergradError::StepShapeMismatch { expected, got })
+    }
 }
 
 fn resolve_finite_diff_step(
-    initial_eps: f32,
+    initial: f32,
+    mode: FiniteDiffMode,
     w0: &Tensor,
     base: &Tensor,
-) -> Result<f32, HypergradError> {
-    if !initial_eps.is_finite() {
-        return Err(HypergradError::InvalidFiniteDiffStep);
+) -> HypergradResult<f32> {
+    if !initial.is_finite() || initial <= 0.0 {
+        return Err(HypergradError::InvalidFiniteDiffStep(initial));
+    }
+    let scale = stable_l2(w0).max(stable_l2(base)).max(1.0);
+    let roundoff_floor = match mode {
+        FiniteDiffMode::Forward => f32::EPSILON.sqrt(),
+        FiniteDiffMode::Central => f32::EPSILON.cbrt(),
+    };
+    let epsilon = initial.abs().max(scale * roundoff_floor);
+    if epsilon.is_finite() && epsilon > 0.0 {
+        Ok(epsilon)
+    } else {
+        Err(HypergradError::InvalidFiniteDiffStep(epsilon))
+    }
+}
+
+fn tensor_dot(lhs: &Tensor, rhs: &Tensor) -> HypergradResult<f64> {
+    if lhs.shape() != rhs.shape() {
+        return Err(HypergradError::Tensor(TensorError::ShapeMismatch {
+            left: lhs.shape(),
+            right: rhs.shape(),
+        }));
+    }
+    let mut dot = 0.0f64;
+    for (&lhs, &rhs) in lhs.data().iter().zip(rhs.data()) {
+        dot += lhs as f64 * rhs as f64;
+    }
+    if dot.is_finite() {
+        Ok(dot)
+    } else {
+        Err(HypergradError::Tensor(TensorError::NonFiniteValue {
+            label: "implicit_tensor_dot",
+            value: dot as f32,
+        }))
+    }
+}
+
+fn stable_l2(tensor: &Tensor) -> f32 {
+    tensor
+        .data()
+        .iter()
+        .map(|&value| {
+            let value = value as f64;
+            value * value
+        })
+        .sum::<f64>()
+        .sqrt()
+        .min(f32::MAX as f64) as f32
+}
+
+fn finite_f32(label: &'static str, value: f64) -> HypergradResult<f32> {
+    let narrowed = value as f32;
+    if narrowed.is_finite() {
+        Ok(narrowed)
+    } else {
+        Err(HypergradError::Tensor(TensorError::NonFiniteValue {
+            label,
+            value: narrowed,
+        }))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn diagnostics(
+    requested_solver: Solver,
+    effective_solver: Solver,
+    iterations: usize,
+    residual: f32,
+    residual_history: Vec<f32>,
+    finite_diff_mode: FiniteDiffMode,
+    finite_diff_step: f32,
+    converged: bool,
+    fallback_reason: Option<&'static str>,
+) -> ImplicitDiagnostics {
+    ImplicitDiagnostics {
+        contract_version: HYPERGRAD_CONTRACT_VERSION,
+        semantic_owner: HYPERGRAD_SEMANTIC_OWNER,
+        autograd_contract_version: AUTOGRAD_CONTRACT_VERSION,
+        autograd_semantic_owner: AUTOGRAD_SEMANTIC_OWNER,
+        requested_solver,
+        effective_solver,
+        iterations,
+        residual,
+        residual_history,
+        finite_diff_mode,
+        finite_diff_step,
+        converged,
+        fallback_reason,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scalar(value: f32, requires_grad: bool) -> AutogradTensor {
+        let value = Tensor::from_vec(1, 1, vec![value]).unwrap();
+        AutogradTensor::from_tensor(value, requires_grad).unwrap()
     }
 
-    let abs_eps = initial_eps.abs();
-    let mut scale = w0
-        .squared_l2_norm()
-        .sqrt()
-        .max(base.squared_l2_norm().sqrt());
-    if !scale.is_finite() || scale <= 0.0 {
-        scale = 1.0;
+    fn sgd_step(
+        weights: &AutogradTensor,
+        learning_rate: &AutogradTensor,
+        gradient: &AutogradTensor,
+    ) -> HypergradResult<AutogradTensor> {
+        Ok(weights.sub(&learning_rate.hadamard(gradient)?)?)
     }
-    let resolved = abs_eps.max(scale * 1e-6).max(1e-6);
-    if resolved.is_finite() {
-        Ok(resolved)
-    } else {
-        Err(HypergradError::InvalidFiniteDiffStep)
+
+    fn square_loss(weights: &AutogradTensor) -> HypergradResult<AutogradTensor> {
+        Ok(weights.hadamard(weights)?.mean()?)
+    }
+
+    fn fixed_point_step(
+        weights: &AutogradTensor,
+        hyper: &AutogradTensor,
+        contraction: &AutogradTensor,
+    ) -> HypergradResult<AutogradTensor> {
+        Ok(weights.hadamard(contraction)?.add(hyper)?)
+    }
+
+    fn coupled_fixed_point_step(
+        weights: &AutogradTensor,
+        hyper: &AutogradTensor,
+        coupling: &AutogradTensor,
+    ) -> HypergradResult<AutogradTensor> {
+        Ok(weights.matmul(coupling)?.add(hyper)?)
+    }
+
+    fn half_square_loss(weights: &AutogradTensor) -> HypergradResult<AutogradTensor> {
+        Ok(weights.hadamard(weights)?.scale(0.5)?.sum()?)
+    }
+
+    #[test]
+    fn unrolled_hypergradient_matches_closed_form() {
+        let weights = scalar(1.0, true);
+        let learning_rate = scalar(0.1, true);
+        let gradient = scalar(2.0, false);
+
+        let output = unrolled(
+            sgd_step,
+            weights,
+            learning_rate,
+            vec![gradient].into_iter(),
+            1,
+            square_loss,
+        )
+        .unwrap();
+
+        assert!((output.w_final.item_f32().unwrap() - 0.8).abs() < 1e-6);
+        assert!((output.dval_dhyper.data()[0] + 3.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn neumann_implicit_gradient_tracks_linear_fixed_point() {
+        let weights = scalar(2.0, true);
+        let hyper = scalar(0.5, true);
+        let contraction = scalar(0.2, false);
+        let options = ImplicitOptions::default()
+            .with_solver(Solver::Neumann)
+            .with_max_iters(64)
+            .with_tolerance(1e-6);
+
+        let output = implicit_with_options(
+            fixed_point_step,
+            weights,
+            hyper,
+            vec![contraction].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap();
+
+        assert!((output.dval_dhyper.data()[0] - 2.5).abs() < 2e-4);
+        assert!(
+            output.diagnostics.converged,
+            "diagnostics: {:?}",
+            output.diagnostics
+        );
+        assert_eq!(output.diagnostics.effective_solver, Solver::Neumann);
+    }
+
+    #[test]
+    fn cg_uses_correct_normal_equation_rhs() {
+        let weights = scalar(2.0, true);
+        let hyper = scalar(0.5, true);
+        let contraction = scalar(0.2, false);
+        let options = ImplicitOptions::default()
+            .with_solver(Solver::Cg)
+            .with_max_iters(16)
+            .with_tolerance(2e-6)
+            .without_cg_fallback();
+
+        let output = implicit_with_options(
+            fixed_point_step,
+            weights,
+            hyper,
+            vec![contraction].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap();
+
+        assert!((output.dval_dhyper.data()[0] - 2.5).abs() < 2e-3);
+        assert!(
+            output.diagnostics.converged,
+            "diagnostics: {:?}",
+            output.diagnostics
+        );
+        assert_eq!(output.diagnostics.requested_solver, Solver::Cg);
+        assert_eq!(output.diagnostics.effective_solver, Solver::Cg);
+        assert_eq!(output.diagnostics.fallback_reason, None);
+        assert_eq!(output.diagnostics.semantic_owner, HYPERGRAD_SEMANTIC_OWNER);
+        assert_eq!(
+            output.diagnostics.autograd_semantic_owner,
+            AUTOGRAD_SEMANTIC_OWNER
+        );
+    }
+
+    #[test]
+    fn cg_tracks_a_nonsymmetric_coupled_fixed_point() {
+        let weights = AutogradTensor::variable(
+            Tensor::from_vec(1, 2, vec![1.0, -0.5]).expect("valid weights"),
+        )
+        .unwrap();
+        let hyper = AutogradTensor::variable(
+            Tensor::from_vec(1, 2, vec![0.2, -0.1]).expect("valid hyper parameters"),
+        )
+        .unwrap();
+        let coupling = AutogradTensor::constant(
+            Tensor::from_vec(2, 2, vec![0.1, 0.3, 0.0, 0.2]).expect("valid coupling"),
+        )
+        .unwrap();
+        let options = ImplicitOptions::default()
+            .with_solver(Solver::Cg)
+            .with_max_iters(32)
+            .with_tolerance(2e-5)
+            .without_cg_fallback();
+
+        let output = implicit_with_options(
+            coupled_fixed_point_step,
+            weights,
+            hyper,
+            vec![coupling].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap();
+
+        // v (I - M^T) = [1, -0.5] for M = [[0.1, 0.3], [0, 0.2]].
+        let expected = [0.902_777_8, -0.625];
+        for (actual, expected) in output.dval_dhyper.data().iter().zip(expected) {
+            assert!((actual - expected).abs() < 2e-4, "{actual} != {expected}");
+        }
+        assert!(output.diagnostics.converged, "{output:?}");
+        assert_eq!(output.diagnostics.effective_solver, Solver::Cg);
+    }
+
+    #[test]
+    fn solver_does_not_claim_convergence_below_f32_residual_floor() {
+        let options = ImplicitOptions::default()
+            .with_solver(Solver::Neumann)
+            .with_max_iters(64)
+            .with_tolerance(1e-8);
+        let output = implicit_with_options(
+            fixed_point_step,
+            scalar(2.0, true),
+            scalar(0.5, true),
+            vec![scalar(0.2, false)].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap();
+
+        assert!(!output.diagnostics.converged);
+        assert!(output.diagnostics.residual > 1e-8);
+        assert!((output.dval_dhyper.data()[0] - 2.5).abs() < 2e-4);
+    }
+
+    #[test]
+    fn invalid_options_fail_before_mutating_gradients() {
+        let weights = scalar(2.0, true);
+        let hyper = scalar(0.5, true);
+        let contraction = scalar(0.2, false);
+        let options = ImplicitOptions::default().with_tolerance(f32::NAN);
+
+        let error = implicit_with_options(
+            fixed_point_step,
+            weights.clone(),
+            hyper.clone(),
+            vec![contraction].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, HypergradError::InvalidTolerance(value) if value.is_nan()));
+        assert!(weights.grad().is_none());
+        assert!(hyper.grad().is_none());
+    }
+
+    #[test]
+    fn negative_finite_difference_step_fails_before_graph_evaluation() {
+        let weights = scalar(2.0, true);
+        let hyper = scalar(0.5, true);
+        let options = ImplicitOptions::default().with_finite_diff_eps(-1e-3);
+
+        let error = implicit_with_options(
+            fixed_point_step,
+            weights.clone(),
+            hyper.clone(),
+            vec![scalar(0.2, false)].into_iter(),
+            half_square_loss,
+            options,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, HypergradError::InvalidFiniteDiffStep(-1e-3));
+        assert!(weights.grad().is_none());
+        assert!(hyper.grad().is_none());
+    }
+
+    #[test]
+    fn named_solver_rejects_unknown_values() {
+        let error = implicit(
+            fixed_point_step,
+            scalar(2.0, true),
+            scalar(0.5, true),
+            vec![scalar(0.2, false)].into_iter(),
+            half_square_loss,
+            "maybe-cg",
+            8,
+        )
+        .unwrap_err();
+        assert_eq!(error, HypergradError::InvalidSolver("maybe-cg".to_string()));
+    }
+
+    #[test]
+    fn unrolled_requires_every_declared_batch() {
+        let error = unrolled(
+            sgd_step,
+            scalar(1.0, true),
+            scalar(0.1, true),
+            vec![scalar(2.0, false)].into_iter(),
+            2,
+            square_loss,
+        )
+        .unwrap_err();
+        assert_eq!(error, HypergradError::MissingBatch { step: 1 });
     }
 }
