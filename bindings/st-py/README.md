@@ -2238,7 +2238,7 @@ contract = st.zspace_coherence_project(
 )
 partial = st.coherence_partial_from_diagnostics(diagnostics, contour=contour)
 
-assert contract["contract_version"] == "spiraltorch.zspace_coherence_projection.v1"
+assert contract["contract_version"] == "spiraltorch.zspace_coherence_projection.v2"
 assert contract["semantic_owner"] == "st-core::inference::zspace_coherence"
 assert contract["derived"]["distribution_source"] == "normalized_weights"
 assert contract["classification"]["label"] == diagnostics.observation.label
@@ -2249,9 +2249,11 @@ assert partial["speed"] == contract["partial"]["speed"]
 
 Rust recomputes normalized HHI concentration and `H / ln(N)` from the measured
 probability simplex, so `speed` and `stability` do not drift merely because a
-model uses more Maxwell channels. Missing diagnostics, invalid probability
-mass, inconsistent channel counts, and invalid gains fail at the contract
-boundary instead of being silently replaced or clamped by Python.
+model uses more Maxwell channels. Projection v2 also verifies that entropy,
+support counts, and dominant channel agree with that simplex, and that raw mean
+coherence agrees with the supplied response. Missing or contradictory evidence
+and invalid gains fail at the contract boundary instead of being silently
+replaced or clamped by Python.
 `ModuleTrainer.push_coherence_diagnostics(diagnostics)` feeds that same Rust
 control payload into learning; raw mean coherence and raw Shannon entropy remain
 audit metrics, while normalized radius, entropy, and pressure drive the policy.

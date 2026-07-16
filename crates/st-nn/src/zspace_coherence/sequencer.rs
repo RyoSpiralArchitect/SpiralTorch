@@ -3205,7 +3205,8 @@ mod tests {
     #[test]
     fn swap_invariance_detects_uniform_arrangements() {
         assert!(is_swap_invariant(&[0.5, 0.5, 0.5]));
-        assert!(is_swap_invariant(&[f32::NAN, f32::NAN]));
+        assert!(!is_swap_invariant(&[f32::NAN, f32::NAN]));
+        assert!(!is_swap_invariant(&[]));
         assert!(!is_swap_invariant(&[0.5, 0.2, 0.5]));
     }
 

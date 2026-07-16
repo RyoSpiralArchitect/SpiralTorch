@@ -143,6 +143,14 @@ mod tests {
         );
         assert_eq!(actual["classification"]["semantic_backend"], "rust");
         assert_eq!(
+            actual["contract_version"],
+            "spiraltorch.zspace_coherence_projection.v2"
+        );
+        assert!(actual["evidence_validation_formula"]
+            .as_str()
+            .expect("evidence validation formula")
+            .contains("coherence_entropy~=H(p)"));
+        assert_eq!(
             actual["control"]["kind"],
             "spiraltorch.zspace_coherence_control"
         );
@@ -199,5 +207,14 @@ mod tests {
         )
         .expect_err("null classification policy must fail")
         .contains("classification_policy' must be an object"));
+
+        let inconsistent = request_from_json(
+            r#"{"diagnostics":{"mean_coherence":0.3333333333333333,"coherence_entropy":0.5,"energy_ratio":0.7,"z_bias":0.1,"fractional_order":0.5,"normalized_weights":[0.5,0.3,0.2]},"coherence":[0.6,0.3,0.1]}"#,
+        )
+        .expect("structurally valid but contradictory evidence");
+        assert!(zspace_coherence_project_value(inconsistent)
+            .expect_err("Rust must reject contradictory entropy")
+            .to_string()
+            .contains("coherence_entropy"));
     }
 }

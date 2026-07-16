@@ -773,12 +773,13 @@ declare module "spiraltorch-wasm" {
 
     export type ZSpaceCoherenceProjection = {
         kind: "spiraltorch.zspace_coherence_projection";
-        contract_version: "spiraltorch.zspace_coherence_projection.v1";
+        contract_version: "spiraltorch.zspace_coherence_projection.v2";
         semantic_owner: "st-core::inference::zspace_coherence";
         semantic_backend: "rust";
         execution_client: "wasm";
         projection_formula: string;
         summary_formula: string;
+        evidence_validation_formula: string;
         diagnostics: ZSpaceCoherenceDiagnosticsInput;
         coherence: number[];
         contour?: ZSpaceCoherenceContourInput;

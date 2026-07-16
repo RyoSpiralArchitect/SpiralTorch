@@ -166,7 +166,7 @@ _ZSPACE_POSTERIOR_DECODE_KIND = "spiraltorch.zspace_posterior_decode"
 _ZSPACE_POSTERIOR_PROJECTION_KIND = "spiraltorch.zspace_posterior_projection"
 _ZSPACE_POSTERIOR_SEMANTIC_OWNER = "st-core::inference::zspace_posterior"
 _ZSPACE_COHERENCE_PROJECTION_CONTRACT_VERSION = (
-    "spiraltorch.zspace_coherence_projection.v1"
+    "spiraltorch.zspace_coherence_projection.v2"
 )
 _ZSPACE_COHERENCE_PROJECTION_KIND = "spiraltorch.zspace_coherence_projection"
 _ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER = (

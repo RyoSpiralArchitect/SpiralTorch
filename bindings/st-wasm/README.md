@@ -191,7 +191,10 @@ console.log(
 
 `zspaceCoherenceProjectJson` exposes the same worker/persistence boundary.
 Rust recomputes dimension-normalized entropy and normalized HHI concentration;
-its versioned control payload provides the same spectral radius, entropy, and
+projection v2 also rejects entropy, support counts, dominant channels, or raw
+means that contradict the supplied vectors. Browser code does not repair those
+cross-field inconsistencies.
+Its versioned control payload provides the same spectral radius, entropy, and
 pressure consumed by native training, while its classification policy emits the
 structural label, reason, formula, and thresholds. WASM adds only
 `execution_client: "wasm"` and has no JavaScript coherence heuristic,
