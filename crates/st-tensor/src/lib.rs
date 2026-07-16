@@ -7,6 +7,7 @@
 // crates/st-tensor/src/lib.rs
 pub mod fractional;
 
+pub mod autograd;
 pub mod backend;
 pub mod dlpack;
 pub mod execution;
@@ -17,6 +18,10 @@ pub mod observability;
 #[cfg(feature = "wgpu_frac")]
 mod util;
 
+pub use autograd::{
+    AutogradBackwardReport, AutogradGraphSummary, AutogradTensor, AUTOGRAD_CONTRACT_VERSION,
+    AUTOGRAD_SEMANTIC_OWNER,
+};
 pub use backend::faer_dense;
 
 #[cfg(feature = "wgpu_frac")]

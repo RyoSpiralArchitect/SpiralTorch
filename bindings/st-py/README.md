@@ -16,6 +16,9 @@ The published wheel is WGPU-first with CPU fallback. In plain Python terms,
 start with four handles:
 
 - `spiraltorch.Tensor` for dependency-light native tensors.
+- `spiraltorch.AutogradTensor` for a thin handle over the Rust-owned immutable
+  reverse-mode graph. Python never rebuilds its derivative or accumulation
+  rules.
 - `spiraltorch.nn` for modules, losses, trainers, LoRA adapters, and checked
   checkpoint handoff.
 - `spiraltorch.ecosystem` when a PyTorch/JAX/CuPy/TensorFlow tensor needs to
@@ -75,9 +78,31 @@ readiness, surrogate readiness, fallback identity, and required-backend gates ar
 `native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
 `evaluate_runtime_device_route(...)` when another orchestrator already has device rows.
 
+Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
+Rust and browser clients:
+
+```python
+import spiraltorch as st
+
+x = st.AutogradTensor.variable(st.Tensor((1, 3), data=[1.0, 2.0, -1.0]))
+loss = x.hadamard(x).add(x.scale(3.0)).sum()
+receipt = loss.backward()
+
+print(x.grad().tolist())
+print(receipt["contract_version"], receipt["semantic_owner"])
+```
+
+`backward()` accepts only scalar outputs; pass a shape-matched `Tensor` seed
+for an explicit vector-Jacobian product. Repeated calls accumulate, while
+`zero_grad_graph()` clears the complete reachable graph. These are Rust
+invariants, not Python-side conventions. Use
+`output.vector_jacobian_product(input, seed)` for a side-effect-free VJP; it
+does not read or mutate accumulated gradients and returns zero when `input` is
+disconnected.
+
 ## What's included
 
-- `Tensor`, `ComplexTensor`, and `OpenTopos` for dependency-free
+- `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free
   geometry experiments.
 - Native neural layers via `spiraltorch.nn`—`Linear`, `Embedding`,
   `Sequential`, losses, `ModuleTrainer`, `LoraLinear`, and `ZSpaceProjector`.

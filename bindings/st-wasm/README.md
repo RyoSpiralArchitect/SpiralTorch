@@ -30,6 +30,30 @@ builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_P
 - Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
 
+## Shared reverse-mode autograd
+
+`AutogradTensor` is a browser handle over the immutable graph implemented in
+`st-tensor`; JavaScript does not rebuild gradient formulas or accumulation rules.
+The v1 surface supports elementwise arithmetic, matrix multiplication, reductions,
+dot products, and mean-squared error, with explicit seeds required for non-scalar
+vector-Jacobian products:
+
+```ts
+import { AutogradTensor, autogradSemanticOwner } from "spiraltorch-wasm";
+
+const x = new AutogradTensor(1, 3, new Float32Array([1, 2, -1]), true);
+const loss = x.hadamard(x).add(x.scale(3)).sum();
+const receipt = loss.backward();
+
+console.log(x.gradientValues(), receipt.contract_version, autogradSemanticOwner());
+```
+
+Backward passes commit atomically, repeated passes accumulate explicitly, and
+`zeroGradGraph()` clears every reachable node. Python, WASM, and direct Rust all
+report `spiraltorch.autograd.v1` with semantic owner `st-tensor`. For probes that
+must not touch accumulated state, use `output.vectorJacobianProduct(input, seed)`;
+a disconnected input returns an all-zero gradient.
+
 ## Shared Topos control and runtime routing
 
 Browser clients can derive a topology control signal and project a runtime profile through

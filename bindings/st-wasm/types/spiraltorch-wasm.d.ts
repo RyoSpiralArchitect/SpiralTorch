@@ -9,6 +9,61 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Structural receipt from the Rust-owned immutable reverse-mode graph. */
+    export type AutogradGraphSummary = {
+        contract_version: "spiraltorch.autograd.v1";
+        semantic_owner: "st-tensor";
+        node_count: number;
+        operation_count: number;
+        leaf_count: number;
+        trainable_leaf_count: number;
+        max_depth: number;
+    };
+
+    /** Atomic backward-pass receipt emitted by the shared Rust contract. */
+    export type AutogradBackwardReport = AutogradGraphSummary & {
+        gradient_node_count: number;
+        leaf_gradient_count: number;
+        seed_l2: number;
+    };
+
+    /** Return the reverse-mode contract version compiled into this WASM client. */
+    export function autogradContractVersion(): "spiraltorch.autograd.v1";
+
+    /** Return the crate that owns graph and reverse-mode semantics. */
+    export function autogradSemanticOwner(): "st-tensor";
+
+    /** Thin browser handle over the Rust-owned reverse-mode graph. */
+    export class AutogradTensor {
+        constructor(rows: number, cols: number, values: Float32Array, requires_grad: boolean);
+        id(): string;
+        rows(): number;
+        cols(): number;
+        requiresGrad(): boolean;
+        operationName(): string;
+        values(): Float32Array;
+        hasGradient(): boolean;
+        gradientValues(): Float32Array;
+        detach(): AutogradTensor;
+        zeroGrad(): void;
+        zeroGradGraph(): void;
+        add(rhs: AutogradTensor): AutogradTensor;
+        sub(rhs: AutogradTensor): AutogradTensor;
+        hadamard(rhs: AutogradTensor): AutogradTensor;
+        matmul(rhs: AutogradTensor): AutogradTensor;
+        scale(factor: number): AutogradTensor;
+        transpose(): AutogradTensor;
+        sum(): AutogradTensor;
+        mean(): AutogradTensor;
+        dot(rhs: AutogradTensor): AutogradTensor;
+        meanSquaredError(target: AutogradTensor): AutogradTensor;
+        item(): number;
+        backward(): AutogradBackwardReport;
+        backwardWithGrad(values: Float32Array): AutogradBackwardReport;
+        vectorJacobianProduct(input: AutogradTensor, values: Float32Array): Float32Array;
+        graphSummary(): AutogradGraphSummary;
+    }
+
     /** Palette identifiers accepted by {@link FractalCanvas.set_palette}. */
     export type CanvasPaletteName =
         | "blue-magenta"
