@@ -524,7 +524,12 @@ Without cloning the repo, `pip install spiraltorch` gives you:
 - **Signal tools:** `st.MaxwellFingerprint` expectation curves (visualisation-ready).
 - **Z-space training utilities:** `st.ZSpaceTrainer`, `st.LanguageWaveEncoder`.
 - **Canvas + observability:** `st.canvas.CanvasProjector`, `st.telemetry.*`, HTML trace writers, `st.serve_zspace_trace`.
-- **SpiralK planning:** `st.plan_topk(...)`, `st.RankPlan`, `st.write_kdsl_trace_jsonl`, `st.write_kdsl_trace_html`.
+- **SpiralK planning:** `st.plan_topk(...)`, the Rust-owned
+  `st.RankPlan.contract()` audit payload, `st.write_kdsl_trace_jsonl`, and
+  `st.write_kdsl_trace_html`; invalid rank shapes and device-capability
+  overrides fail closed in the Rust planner. SpiralK contexts and hard rewrites
+  use that same planner contract, so Python never clamps or reinterprets rank
+  choices independently.
 - **API-model LLM bridge:** `st.ApiLLMZSpaceRuntime` converts hosted LLM
   responses/callables into Z-space runtime traces without requiring an API SDK
   at install time; when optional provider packages are available,
@@ -2597,7 +2602,7 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 ## What you get for training
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
-  Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
+  Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`. Hard SpiralK rewrites return a newly validated Rust `RankPlan`; malformed workgroups, FFT settings, or conflicting 1CE/2CE directives are rejected rather than repaired by a binding.
 - **Introspectable compute plans**
   Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)

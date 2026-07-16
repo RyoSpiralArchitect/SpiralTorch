@@ -359,6 +359,30 @@ The browser binding adds only `execution_client: "wasm"`; it owns no readiness p
 or fallback heuristic. Contract v2 also preserves absent evidence as `unknown` instead of
 silently rewriting it to `not_ready`; unknown routes remain fail-closed for execution.
 
+Rank planning uses the same boundary. `rankPlanObject` and `rankPlanJson` send shape and
+capability observations to `st-core::ops::rank_entry`; Rust validates `rows`, `cols`, `k`,
+device limits, runtime surrogate routing, and the complete unified heuristic choice:
+
+```ts
+import { rankPlanObject } from "spiraltorch-wasm";
+
+const plan = rankPlanObject({
+    kind: "midk",
+    rows: 4,
+    cols: 128,
+    k: 8,
+    backend: "wgpu",
+    lane_width: 32,
+    subgroup: true,
+});
+
+console.log(plan.choice.compaction_tile, plan.device_caps, plan.semantic_owner);
+```
+
+The browser owns no fallback table or capability clamp. The returned
+`spiraltorch.rank_plan.v1` payload is the same audit snapshot available from Python via
+`RankPlan.contract()`, with only client provenance added by each binding.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

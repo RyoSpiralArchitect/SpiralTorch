@@ -101,6 +101,11 @@ def test_plan_accepts_mps_backend_and_exposes_surrogate_route() -> None:
     assert int(plan.k) == 8
     assert int(plan.workgroup) >= 1
     assert int(plan.lanes) >= 1
+    contract = plan.contract()
+    assert contract["requested_backend"] == "mps"
+    assert contract["effective_backend"] == plan.effective_backend
+    assert contract["device_caps"]["backend"] == plan.effective_backend
+    assert contract["semantic_owner"] == "st-core::ops::rank_entry"
 
 
 def test_init_backend_and_session_expose_mps_preflight() -> None:

@@ -8,6 +8,7 @@ mod fractal_field;
 mod free_energy;
 mod generation_control;
 mod imaginary_time_schrodinger;
+mod rank_plan;
 mod reports;
 mod runtime_route;
 mod scale_stack;
@@ -50,6 +51,8 @@ pub use generation_control::*;
 pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
+#[cfg(target_arch = "wasm32")]
+pub use rank_plan::*;
 pub use reports::*;
 pub use runtime_route::*;
 pub use scale_stack::*;

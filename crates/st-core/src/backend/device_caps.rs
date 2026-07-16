@@ -4,6 +4,38 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use std::fmt;
+use std::str::FromStr;
+use thiserror::Error;
+
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum BackendKindParseError {
+    #[error("unknown backend '{value}', expected 'wgpu', 'mps', 'cuda', 'hip', or 'cpu'")]
+    Unknown { value: String },
+}
+
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum DeviceCapsError {
+    #[error("device capability 'lane_width' must be positive")]
+    ZeroLaneWidth,
+    #[error("device capability 'max_workgroup' must be positive")]
+    ZeroMaxWorkgroup,
+    #[error("device capability lane_width={lane_width} exceeds max_workgroup={max_workgroup}")]
+    LaneWidthExceedsMaxWorkgroup { lane_width: u32, max_workgroup: u32 },
+    #[error("device capability 'shared_mem_per_workgroup' must be positive when present")]
+    ZeroSharedMemory,
+}
+
+/// Optional client overrides applied to one backend's canonical defaults.
+///
+/// Validation lives here so language bindings never need to clamp or reinterpret
+/// capability values independently.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeviceCapsOverrides {
+    pub lane_width: Option<u32>,
+    pub subgroup: Option<bool>,
+    pub max_workgroup: Option<u32>,
+    pub shared_mem_per_workgroup: Option<u32>,
+}
 
 /// Enumerates the backends that participate in the unified heuristic chooser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +61,23 @@ impl BackendKind {
             BackendKind::Cuda => "cuda",
             BackendKind::Hip => "hip",
             BackendKind::Cpu => "cpu",
+        }
+    }
+}
+
+impl FromStr for BackendKind {
+    type Err = BackendKindParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "wgpu" | "webgpu" => Ok(Self::Wgpu),
+            "mps" => Ok(Self::Mps),
+            "cuda" => Ok(Self::Cuda),
+            "hip" | "rocm" => Ok(Self::Hip),
+            "cpu" => Ok(Self::Cpu),
+            _ => Err(BackendKindParseError::Unknown {
+                value: value.to_owned(),
+            }),
         }
     }
 }
@@ -80,9 +129,10 @@ impl DeviceCaps {
 
     /// WebGPU/WGPU capabilities.
     pub fn wgpu(lane_width: u32, subgroup: bool, max_workgroup: u32) -> Self {
+        let lane_width = lane_width.max(1);
         Self {
             subgroup,
-            max_workgroup: max_workgroup.max(1),
+            max_workgroup: max_workgroup.max(lane_width),
             ..Self::new(BackendKind::Wgpu, lane_width)
         }
     }
@@ -97,30 +147,33 @@ impl DeviceCaps {
         max_workgroup: u32,
         shared_mem_per_workgroup: Option<u32>,
     ) -> Self {
+        let lane_width = lane_width.max(1);
         Self {
             subgroup,
-            max_workgroup: max_workgroup.max(1),
-            shared_mem_per_workgroup,
+            max_workgroup: max_workgroup.max(lane_width),
+            shared_mem_per_workgroup: shared_mem_per_workgroup.filter(|value| *value > 0),
             ..Self::new(BackendKind::Mps, lane_width)
         }
     }
 
     /// CUDA capabilities.
     pub fn cuda(lane_width: u32, max_block: u32, shared_mem_per_block: Option<u32>) -> Self {
+        let lane_width = lane_width.max(1);
         Self {
             subgroup: true,
-            max_workgroup: max_block.max(1),
-            shared_mem_per_workgroup: shared_mem_per_block,
+            max_workgroup: max_block.max(lane_width),
+            shared_mem_per_workgroup: shared_mem_per_block.filter(|value| *value > 0),
             ..Self::new(BackendKind::Cuda, lane_width)
         }
     }
 
     /// HIP capabilities.
     pub fn hip(lane_width: u32, max_block: u32, shared_mem_per_block: Option<u32>) -> Self {
+        let lane_width = lane_width.max(1);
         Self {
             subgroup: true,
-            max_workgroup: max_block.max(1),
-            shared_mem_per_workgroup: shared_mem_per_block,
+            max_workgroup: max_block.max(lane_width),
+            shared_mem_per_workgroup: shared_mem_per_block.filter(|value| *value > 0),
             ..Self::new(BackendKind::Hip, lane_width)
         }
     }
@@ -131,6 +184,55 @@ impl DeviceCaps {
             max_workgroup: 128,
             ..Self::new(BackendKind::Cpu, 1)
         }
+    }
+
+    /// Rejects capability descriptors that cannot describe a launchable device.
+    pub fn validate(self) -> Result<Self, DeviceCapsError> {
+        if self.lane_width == 0 {
+            return Err(DeviceCapsError::ZeroLaneWidth);
+        }
+        if self.max_workgroup == 0 {
+            return Err(DeviceCapsError::ZeroMaxWorkgroup);
+        }
+        if self.lane_width > self.max_workgroup {
+            return Err(DeviceCapsError::LaneWidthExceedsMaxWorkgroup {
+                lane_width: self.lane_width,
+                max_workgroup: self.max_workgroup,
+            });
+        }
+        if self.shared_mem_per_workgroup == Some(0) {
+            return Err(DeviceCapsError::ZeroSharedMemory);
+        }
+        Ok(self)
+    }
+
+    /// Applies client overrides without silently repairing invalid values.
+    pub fn try_with_overrides(
+        mut self,
+        overrides: DeviceCapsOverrides,
+    ) -> Result<Self, DeviceCapsError> {
+        if let Some(lane_width) = overrides.lane_width {
+            if lane_width == 0 {
+                return Err(DeviceCapsError::ZeroLaneWidth);
+            }
+            self.lane_width = lane_width;
+        }
+        if let Some(subgroup) = overrides.subgroup {
+            self.subgroup = subgroup;
+        }
+        if let Some(max_workgroup) = overrides.max_workgroup {
+            if max_workgroup == 0 {
+                return Err(DeviceCapsError::ZeroMaxWorkgroup);
+            }
+            self.max_workgroup = max_workgroup;
+        }
+        if let Some(shared_mem_per_workgroup) = overrides.shared_mem_per_workgroup {
+            if shared_mem_per_workgroup == 0 {
+                return Err(DeviceCapsError::ZeroSharedMemory);
+            }
+            self.shared_mem_per_workgroup = Some(shared_mem_per_workgroup);
+        }
+        self.validate()
     }
 
     /// Clamp and align a requested workgroup size to something the backend can
@@ -257,19 +359,20 @@ impl DeviceCaps {
     /// number of rows that the kernel needs to process.
     pub fn recommended_workgroup(&self, rows: u32) -> u32 {
         let lanes = self.lane_width.max(1);
+        let max = self.max_workgroup.max(lanes);
         let mut target = if self.subgroup {
             lanes.saturating_mul(8)
         } else {
             lanes.saturating_mul(4)
         };
-        target = target.max(64).min(self.max_workgroup.max(64));
+        target = target.max(64.min(max)).min(max);
 
         if rows > 0 && rows < target {
             // Align the workgroup with the hardware lane width so we keep
             // coalesced accesses while avoiding oversubscribing the SM.
             let align = lanes;
             let aligned_rows = rows.div_ceil(align) * align;
-            aligned_rows.max(align).max(64).min(target)
+            aligned_rows.max(align).min(target)
         } else {
             target
         }
@@ -515,6 +618,62 @@ mod tests {
     }
 
     #[test]
+    fn backend_labels_parse_in_the_rust_core() {
+        assert_eq!("webgpu".parse::<BackendKind>(), Ok(BackendKind::Wgpu));
+        assert_eq!("ROCm".parse::<BackendKind>(), Ok(BackendKind::Hip));
+        assert!(matches!(
+            "commander".parse::<BackendKind>(),
+            Err(BackendKindParseError::Unknown { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_overrides_fail_closed_instead_of_clamping() {
+        let base = BackendKind::Wgpu.default_caps();
+        assert_eq!(
+            base.try_with_overrides(DeviceCapsOverrides {
+                lane_width: Some(0),
+                ..DeviceCapsOverrides::default()
+            }),
+            Err(DeviceCapsError::ZeroLaneWidth)
+        );
+        assert_eq!(
+            base.try_with_overrides(DeviceCapsOverrides {
+                lane_width: Some(512),
+                ..DeviceCapsOverrides::default()
+            }),
+            Err(DeviceCapsError::LaneWidthExceedsMaxWorkgroup {
+                lane_width: 512,
+                max_workgroup: 256,
+            })
+        );
+        assert_eq!(
+            base.try_with_overrides(DeviceCapsOverrides {
+                shared_mem_per_workgroup: Some(0),
+                ..DeviceCapsOverrides::default()
+            }),
+            Err(DeviceCapsError::ZeroSharedMemory)
+        );
+    }
+
+    #[test]
+    fn capability_overrides_are_applied_as_one_validated_contract() {
+        let caps = BackendKind::Wgpu
+            .default_caps()
+            .try_with_overrides(DeviceCapsOverrides {
+                lane_width: Some(64),
+                subgroup: Some(false),
+                max_workgroup: Some(512),
+                shared_mem_per_workgroup: Some(32 * 1024),
+            })
+            .expect("valid capability overrides");
+        assert_eq!(caps.lane_width, 64);
+        assert!(!caps.subgroup);
+        assert_eq!(caps.max_workgroup, 512);
+        assert_eq!(caps.shared_mem_per_workgroup, Some(32 * 1024));
+    }
+
+    #[test]
     fn workgroup_alignment_tracks_lane_width() {
         let caps = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
         assert_eq!(caps.align_workgroup(513), 544);
@@ -594,6 +753,13 @@ mod tests {
         let caps = DeviceCaps::cuda(32, 1024, Some(96 * 1024));
         assert_eq!(caps.recommended_workgroup(4096), 256);
         assert_eq!(caps.recommended_workgroup(96), 96);
+    }
+
+    #[test]
+    fn recommended_workgroup_never_exceeds_advertised_maximum() {
+        let caps = DeviceCaps::wgpu(32, true, 32);
+        assert_eq!(caps.recommended_workgroup(4096), 32);
+        assert_eq!(caps.recommended_workgroup(2), 32);
     }
 
     #[test]

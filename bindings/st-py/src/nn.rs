@@ -5734,7 +5734,8 @@ impl PyNnModuleTrainer {
             subgroup,
             max_workgroup,
             shared_mem_per_workgroup,
-        );
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
             inner: RustModuleTrainer::new(
                 caps,
