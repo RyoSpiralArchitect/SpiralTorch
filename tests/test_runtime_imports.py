@@ -432,7 +432,7 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertTrue(fields["runtime_device_report_requested"])
         self.assertEqual(
             fields["runtime_device_route_contract_version"],
-            "spiraltorch.runtime_device_route.v1",
+            "spiraltorch.runtime_device_route.v2",
         )
         self.assertEqual(
             fields["runtime_device_route_semantic_owner"],
@@ -498,6 +498,52 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertTrue(fields["required_runtime_device_backends_passed"])
         self.assertTrue(fields["required_runtime_device_ready_backends_passed"])
         self.assertEqual(module.runtime_device_requirement_failures(fields), [])
+
+    def test_runtime_device_report_preserves_unknown_readiness(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_describe(backends, *, continue_on_error=True):
+            self.assertTrue(continue_on_error)
+            return {
+                "reports": [
+                    {
+                        "backend": "cpu",
+                        "requested_backend": "cpu",
+                        "runtime_status": "cpu",
+                    }
+                ]
+            }
+
+        fields = module.runtime_device_report_fields(
+            {
+                "runtime_device_backends": ["cpu"],
+                "required_runtime_device_ready_backends": ["cpu"],
+            },
+            describe_runtime_devices=fake_describe,
+        )
+
+        contract = json.loads(fields["runtime_device_route_contract_json"])
+        self.assertEqual(fields["runtime_device_report_not_ready_backends"], "cpu")
+        self.assertEqual(
+            fields["runtime_device_native_readiness_unknown_backends"],
+            "cpu",
+        )
+        self.assertEqual(
+            fields["runtime_device_route_readiness_unknown_backends"],
+            "cpu",
+        )
+        self.assertEqual(fields["runtime_device_route_not_ready_backends"], "none")
+        self.assertEqual(
+            fields["required_runtime_device_ready_backends_unknown"],
+            "cpu",
+        )
+        self.assertEqual(contract["routes"][0]["native_readiness"], "unknown")
+        self.assertEqual(contract["routes"][0]["route_readiness"], "unknown")
+        self.assertFalse(fields["required_runtime_device_ready_backends_passed"])
+        self.assertEqual(
+            module.runtime_device_requirement_failures(fields),
+            ["runtime_device_readiness_unknown:cpu"],
+        )
 
     def test_preflight_report_includes_runtime_device_failures(self) -> None:
         module = load_runtime_imports()

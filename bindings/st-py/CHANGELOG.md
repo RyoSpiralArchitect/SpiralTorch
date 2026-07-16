@@ -2,6 +2,10 @@
 
 ## 0.4.13
 
+- Runtime-device route v2: preserve native and effective readiness as explicit
+  `ready` / `not_ready` / `unknown` evidence states in the Rust-owned contract,
+  keep execution gates fail-closed, and distinguish unknown-evidence failures
+  across the Python and WASM clients.
 - HF PEFT runtime: add lazy `spiraltorch.hf_peft` helpers plus
   `prepare_hf_finetune_model(...)` for model-family-aware LoRA target
   resolution, parameter-freeze audits, gradient checkpointing, and adapter
