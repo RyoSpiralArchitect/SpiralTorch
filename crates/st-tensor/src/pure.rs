@@ -28,10 +28,11 @@ pub use self::measure::{
     BarycenterIntermediate, TeslaTail, TeslaTailLine, ZSpaceBarycenter,
 };
 pub use self::topos::{
-    topos_optimizer_gradient_bias_basis, GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard,
-    ModalityProfile, MultiModalAtlas, MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos,
-    RewardBoundary, RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas,
-    ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
+    topos_optimizer_gradient_bias_amplitude, topos_optimizer_gradient_bias_basis,
+    topos_optimizer_gradient_clip_threshold, GraphGuardProfile, GraphGuardReport,
+    LawvereTierneyGuard, ModalityProfile, MultiModalAtlas, MultiModalBiome, MultiModalToposGuard,
+    OpenCartesianTopos, RewardBoundary, RewardBoundarySignal, RewriteMonad, TensorBiome,
+    ToposAtlas, ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
     ToposControlSignalPayload, ToposInferenceHints, ToposInferenceHintsInput,
     ToposInferenceHintsPayload, ToposInferencePlan, ToposInferencePlanOptions,
     ToposInferencePlanPayload, ToposOptimizerApplicationPayload, ToposOptimizerGradientStep,
@@ -44,6 +45,7 @@ pub use self::topos::{
     TOPOS_CONTROL_SIGNAL_KIND, TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND,
     TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER, TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
     TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+    TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
     TOPOS_OPTIMIZER_MOMENTUM_RULE, TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION,
     TOPOS_OPTIMIZER_SNAPSHOT_KIND, TOPOS_OPTIMIZER_SNAPSHOT_MAX_SEQUENCE,
     TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_BACKEND, TOPOS_OPTIMIZER_SNAPSHOT_SEMANTIC_OWNER,
@@ -7621,6 +7623,9 @@ struct PreparedHypergradUpdate {
     momentum_after: GradientSummary,
     raw_gradient_rms: f32,
     gradient_bias_amplitude: f32,
+    biased_gradient_rms: f64,
+    gradient_clip_threshold: Option<f64>,
+    gradient_clipped_values: usize,
 }
 
 /// Euclidean gradient accumulator that mirrors the hypergradient API while
@@ -9975,6 +9980,17 @@ impl AmegaHypergrad {
             .as_ref()
             .map(ToposOptimizerGradientStep::gradient_bias_amplitude)
             .unwrap_or(0.0);
+        let biased_gradient_rms = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::biased_gradient_rms)
+            .unwrap_or(raw_gradient_rms as f64);
+        let gradient_clip_threshold = gradient_step
+            .as_ref()
+            .and_then(ToposOptimizerGradientStep::gradient_clip_threshold);
+        let gradient_clipped_values = gradient_step
+            .as_ref()
+            .map(ToposOptimizerGradientStep::clipped_values)
+            .unwrap_or(0);
         let optimizer_gradient = GradientSummary::from_slice(applied_gradient);
         let projected =
             updated_weights.project_to_poincare_with_backend(self.curvature, backend)?;
@@ -9991,6 +10007,9 @@ impl AmegaHypergrad {
             momentum_after: next_momentum_summary,
             raw_gradient_rms,
             gradient_bias_amplitude,
+            biased_gradient_rms,
+            gradient_clip_threshold,
+            gradient_clipped_values,
         })
     }
 
@@ -10038,6 +10057,30 @@ impl AmegaHypergrad {
                 data.insert(
                     "topos_raw_gradient_rms".to_string(),
                     serde_json::json!(prepared.raw_gradient_rms),
+                );
+                data.insert(
+                    "topos_biased_gradient_rms".to_string(),
+                    serde_json::json!(prepared.biased_gradient_rms),
+                );
+                data.insert(
+                    "topos_gradient_clip_rule".to_string(),
+                    serde_json::json!(self.optimizer_state_control.gradient_clip_rule()),
+                );
+                data.insert(
+                    "topos_gradient_clip_normalization".to_string(),
+                    serde_json::json!(self.optimizer_state_control.gradient_clip_normalization()),
+                );
+                data.insert(
+                    "topos_gradient_clip_scale".to_string(),
+                    serde_json::json!(self.optimizer_state_control.gradient_clip_scale()),
+                );
+                data.insert(
+                    "topos_gradient_clip_threshold".to_string(),
+                    serde_json::json!(prepared.gradient_clip_threshold),
+                );
+                data.insert(
+                    "topos_gradient_clipped_values".to_string(),
+                    serde_json::json!(prepared.gradient_clipped_values),
                 );
                 data.insert(
                     "topos_momentum_rule".to_string(),
@@ -15001,7 +15044,7 @@ mod tests {
         let mut basis = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
         basis[0] = 1.0;
         basis[1] = -1.0;
-        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 0.5));
+        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 1.0, 0.5));
         let mut tape = unwrap_ok(AmegaRealgrad::new(0.1, 1, 2));
         tape.configure_optimizer_state(control);
         let wave = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, -1.0]));
@@ -15020,6 +15063,40 @@ mod tests {
         assert!((tape.optimizer_momentum()[1] + 0.9).abs() < 1e-6);
         assert!((weights.data()[0] + 0.15).abs() < 1e-6);
         assert!((weights.data()[1] - 0.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_realgrad_clips_outliers_before_optimizer_momentum() {
+        let control = unwrap_ok(ToposOptimizerStateControl::new(
+            0.0,
+            [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            0.5,
+            0.0,
+        ));
+        let mut tape = unwrap_ok(AmegaRealgrad::new(
+            0.1,
+            1,
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+        ));
+        tape.configure_optimizer_state(control);
+        let mut wave = vec![0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+        wave[0] = 10.0;
+        let wave = unwrap_ok(Tensor::from_vec(
+            1,
+            TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
+            wave,
+        ));
+        let mut weights = unwrap_ok(Tensor::zeros(1, TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM));
+
+        unwrap_ok(tape.accumulate_wave(&wave));
+        unwrap_ok(tape.apply(&mut weights));
+
+        let threshold = (10.0f32 / (TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM as f32).sqrt()) / 0.5;
+        assert!((tape.optimizer_momentum()[0] - threshold).abs() < 1e-6);
+        assert!((weights.data()[0] + 0.1 * threshold).abs() < 1e-6);
+        assert!(tape.optimizer_momentum()[1..]
+            .iter()
+            .all(|value| *value == 0.0));
     }
 
     #[test]
@@ -15075,6 +15152,7 @@ mod tests {
         let control = unwrap_ok(ToposOptimizerStateControl::new(
             0.2,
             [0.25; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            1.0,
             0.4,
         ));
         let mut hyper = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));

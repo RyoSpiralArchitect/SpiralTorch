@@ -228,7 +228,7 @@ mod tests {
 
         assert_eq!(
             control["contract_version"],
-            "spiraltorch.zspace_parameter_control.v1"
+            "spiraltorch.zspace_parameter_control.v2"
         );
         assert_eq!(control["semantic_backend"], "rust");
         assert_eq!(control["absolute_learning_rate_scale"], 0.5);

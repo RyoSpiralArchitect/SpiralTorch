@@ -487,9 +487,9 @@ def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     assert adapter["kind"] == "spiraltorch.topos_runtime_adapter"
     assert adapter["request"]["temperature"] == pytest.approx(0.68265)
     assert adapter["inference_plan"]["temperature"] == pytest.approx(0.68265)
-    assert adapter["runtime_profile"]["control_energy"] == pytest.approx(0.4041837060714286)
+    assert adapter["runtime_profile"]["control_energy"] == pytest.approx(0.3811704285714286)
     assert adapter["runtime_route"]["mode"] == "contextual"
-    assert adapter["runtime_route"]["score"] == pytest.approx(0.6956782798030483)
+    assert adapter["runtime_route"]["score"] == pytest.approx(0.6654185926761256)
     assert adapter["signal"]["sampling_focus"] == pytest.approx(0.668003125)
     assert adapter["signal"]["inference_hints"]["top_p_scale"] == pytest.approx(0.890274375)
     assert adapter["context_partial"]["origin"] == "topos:runtime"
@@ -504,16 +504,16 @@ def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     ] == pytest.approx(0.68265)
     assert adapter["context_partial"]["telemetry"][
         "topos.runtime_profile.control_energy"
-    ] == pytest.approx(0.4041837060714286)
+    ] == pytest.approx(0.3811704285714286)
     assert adapter["context_partial"]["telemetry"][
         "topos.runtime_route.mode_id"
     ] == pytest.approx(3.0)
     assert adapter["context_partial"]["telemetry"][
         "topos.runtime_route.context_score"
-    ] == pytest.approx(0.6956782798030483)
+    ] == pytest.approx(0.6654185926761256)
     assert adapter["context_partial"]["telemetry"][
         "topos.runtime_route.scores.context"
-    ] == pytest.approx(0.6956782798030483)
+    ] == pytest.approx(0.6654185926761256)
 
 
 def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
@@ -689,11 +689,11 @@ def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
     assert telemetry["topos.temperature_scale"] == pytest.approx(0.8533125)
     assert telemetry["topos.inference_plan.temperature"] == pytest.approx(0.68265)
     assert telemetry["topos.runtime_profile.control_energy"] == pytest.approx(
-        0.4041837060714286
+        0.3811704285714286
     )
-    assert telemetry["topos.runtime_route.score"] == pytest.approx(0.6956782798030483)
+    assert telemetry["topos.runtime_route.score"] == pytest.approx(0.6654185926761256)
     assert telemetry["topos.runtime_route.scores.context"] == pytest.approx(
-        0.6956782798030483
+        0.6654185926761256
     )
 
 
@@ -746,16 +746,16 @@ def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:
         0.68265
     )
     assert summary["topos_context"]["runtime_profile_control_energy"]["mean"] == pytest.approx(
-        0.4041837060714286
+        0.3811704285714286
     )
     assert summary["topos_context"]["runtime_profile_closure_risk"]["mean"] == pytest.approx(
         0.4451
     )
     assert summary["topos_context"]["runtime_route_score"]["mean"] == pytest.approx(
-        0.6956782798030483
+        0.6654185926761256
     )
     assert summary["topos_context"]["runtime_route_context_score"]["mean"] == pytest.approx(
-        0.6956782798030483
+        0.6654185926761256
     )
 
     comparison = st.compare_api_llm_trace_runs({"topos": path}, near_best_tolerance=1.0)
@@ -768,8 +768,8 @@ def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:
     assert row["topos_context_observed_rate"] == pytest.approx(1.0)
     assert row["topos_inference_context_weight_mean"] == pytest.approx(0.9225)
     assert row["topos_inference_plan_temperature_mean"] == pytest.approx(0.68265)
-    assert row["topos_runtime_control_energy_mean"] == pytest.approx(0.4041837060714286)
-    assert row["topos_runtime_route_score_mean"] == pytest.approx(0.6956782798030483)
+    assert row["topos_runtime_control_energy_mean"] == pytest.approx(0.3811704285714286)
+    assert row["topos_runtime_route_score_mean"] == pytest.approx(0.6654185926761256)
     assert comparison["topos_context"]["highest_runtime_control_energy"] == "topos"
     assert comparison["topos_context"]["highest_runtime_route_score"] == "topos"
     assert comparison["winners"]["highest_topos_runtime_control_energy"] == "topos"
@@ -946,9 +946,9 @@ def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context(tmp_path
     assert "topos.temperature_scale" in calls[0][0]
     telemetry = result["traces"][0]["inference"]["telemetry"]["payload"]
     assert telemetry["topos.learning_rate_scale"] == pytest.approx(0.8919875)
-    assert telemetry["topos.runtime_route.score"] == pytest.approx(0.7053927755182756)
+    assert telemetry["topos.runtime_route.score"] == pytest.approx(0.7176847612837576)
     assert telemetry["topos.runtime_route.scores.context"] == pytest.approx(
-        0.7053927755182756
+        0.7176847612837576
     )
 
     path = tmp_path / "topos-runtime-context.jsonl"
@@ -956,10 +956,10 @@ def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context(tmp_path
     summary = st.summarize_api_llm_trace_events(path)
 
     assert summary["topos_context"]["runtime_route_score"]["mean"] == pytest.approx(
-        0.7053927755182756
+        0.7176847612837576
     )
     assert summary["topos_context"]["runtime_route_context_score"]["mean"] == pytest.approx(
-        0.7053927755182756
+        0.7176847612837576
     )
 
 

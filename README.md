@@ -1094,7 +1094,9 @@ The reported objective is an observed resource cost, not a claim that resource
 telemetry was differentiated through Z. State updates combine the supplied
 Z-gradient with the normalised analytic fractional gradient and optional Topos
 bias. Topos `learning_rate_scale` changes the actual Adam learning rate, while
-`regularization_scale` changes the actual fractional weight.
+`regularization_scale` changes the actual fractional weight. `clip_scale` is not
+another learning-rate multiplier: Rust derives a scale-invariant threshold from
+the biased-gradient RMS, with `clip_scale=1` as an exact no-op.
 
 Native parameter training consumes that same report without rebuilding its
 semantics in Python:

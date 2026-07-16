@@ -113,7 +113,7 @@ def test_module_trainer_applies_rust_meta_report_idempotently() -> None:
     assert receipt["changed"] is True
     assert (
         receipt["control_contract_version"]
-        == "spiraltorch.zspace_parameter_control.v1"
+        == "spiraltorch.zspace_parameter_control.v2"
     )
     assert receipt["semantic_backend"] == "rust"
     assert receipt["absolute_learning_rate_scale"] == pytest.approx(0.5)
@@ -592,28 +592,28 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
                         "topos.temperature_scale": 0.8533125,
                         "topos.training_hints.gradient_bias_scale": 0.0786561,
                         "topos.training_hints.clip_scale": 0.871,
-                        "topos.training_plan.rate_scale": 0.7769211125,
+                        "topos.training_plan.rate_scale": 0.8919875,
                         "topos.training_plan.effective_gradient_bias_scale": 0.0786561,
                         "topos.training_plan.effective_momentum_damping": 0.2535,
-                        "topos.optimizer_effect.rate_scale": 0.776965,
-                        "topos.optimizer_effect.raw_rate_scale": 0.7769211125,
+                        "topos.optimizer_effect.rate_scale": 0.8919875,
+                        "topos.optimizer_effect.raw_rate_scale": 0.8919875,
                         "topos.optimizer_effect.effective_gradient_bias_scale": 0.0786561,
                         "topos.optimizer_effect.effective_momentum_damping": 0.2535,
-                        "topos.optimizer_effect.hyper_learning_rate": 0.0310786,
-                        "topos.optimizer_effect.real_learning_rate": 0.0155393,
+                        "topos.optimizer_effect.hyper_learning_rate": 0.0356795,
+                        "topos.optimizer_effect.real_learning_rate": 0.01783975,
                         "topos.inference_plan.temperature": 0.8533125,
                         "topos.inference_plan.top_p": 0.890274375,
                         "topos.inference_plan.context_weight": 0.9225,
                         "topos.inference_hints.top_p_scale": 0.890274375,
                         "topos.inference_hints.context_weight": 0.9225,
-                        "topos.runtime_profile.control_energy": 0.4041837060714286,
+                        "topos.runtime_profile.control_energy": 0.3811704285714286,
                         "topos.runtime_profile.closure_risk": 0.4451,
                         "topos.runtime_profile.exploration_budget": 0.4555,
-                        "topos.runtime_profile.training_rate_scale": 0.7769211125,
+                        "topos.runtime_profile.training_rate_scale": 0.8919875,
                         "topos.runtime_profile.training_gradient_bias_scale": 0.0786561,
                         "topos.runtime_profile.inference_temperature": 0.8533125,
                         "topos.runtime_profile.inference_context_weight": 0.9225,
-                        "topos.runtime_profile.learning_inference_balance": 0.9104766571,
+                        "topos.runtime_profile.learning_inference_balance": 1.0453233722,
                     }
                 },
             },
@@ -689,10 +689,10 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
     )
     assert context["training_plan_effective_momentum_damping"]["last"] == pytest.approx(0.3)
     assert context["optimizer_rate_scale"]["min"] == pytest.approx(0.42)
-    assert context["optimizer_raw_rate_scale"]["mean"] == pytest.approx(0.63846055625)
+    assert context["optimizer_raw_rate_scale"]["mean"] == pytest.approx(0.69599375)
     assert context["optimizer_effective_gradient_bias_scale"]["max"] == pytest.approx(0.0786561)
     assert context["optimizer_effective_momentum_damping"]["last"] == pytest.approx(0.3)
-    assert context["optimizer_hyper_learning_rate"]["mean"] == pytest.approx(0.0239393)
+    assert context["optimizer_hyper_learning_rate"]["mean"] == pytest.approx(0.02623975)
     assert context["optimizer_real_learning_rate"]["last"] == pytest.approx(0.0084)
     assert context["inference_plan_temperature"]["min"] == pytest.approx(0.7)
     assert context["inference_plan_top_p"]["mean"] == pytest.approx(0.8201371875)
@@ -700,7 +700,7 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
     assert context["inference_top_p_scale"]["mean"] == pytest.approx(0.8051371875)
     assert context["inference_context_weight"]["last"] == pytest.approx(1.1)
     assert context["runtime_profile_control_energy"]["mean"] == pytest.approx(
-        0.3770918530357143
+        0.3655852142857143
     )
     assert context["runtime_profile_closure_risk"]["max"] == pytest.approx(0.7)
     assert context["runtime_profile_exploration_budget"]["last"] == pytest.approx(0.2)

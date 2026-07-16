@@ -84,9 +84,9 @@ console.log(
 `toposControlSignalJson`, `toposOptimizerSnapshotJson`, `toposRuntimeRouteJson`, and
 `toposZSpaceProjectionJson` expose the same contracts for storage and worker-message flows.
 Optimizer snapshots bind a JavaScript-safe sequence, the complete Rust control bundle, and the
-v2 learning-rate plus gradient-state application prescribed by that bundle. The payload includes
-the same ten-axis bias basis, RMS-relative bias rule, and momentum transition consumed by native
-Amega tapes; browser code does not rebuild those equations. The projection's first six gradient
+v3 learning-rate plus gradient-state application prescribed by that bundle. The payload includes
+the same ten-axis bias basis, RMS-relative bias and clipping rules, and clipped-gradient momentum
+transition consumed by native Amega tapes; browser code does not rebuild those equations. The projection's first six gradient
 axes are semantic; wider client vectors are explicitly zero-filled by Rust. Results carry
 `contract_version`, `semantic_owner`, and `semantic_backend` so Python, browser, and direct Rust
 runs can be audited against one semantic core.

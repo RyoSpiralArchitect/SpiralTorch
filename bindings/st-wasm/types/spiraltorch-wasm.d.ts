@@ -286,6 +286,7 @@ declare module "spiraltorch-wasm" {
         raw_rate_scale: number;
         rate_scale: number;
         effective_gradient_bias_scale: number;
+        effective_gradient_clip_scale: number;
         effective_momentum_damping: number;
     };
 
@@ -314,7 +315,7 @@ declare module "spiraltorch-wasm" {
 
     export type ToposControlSignal = Required<ToposControlSignalInput> & {
         kind: "spiraltorch.topos_control_signal";
-        contract_version: "spiraltorch.topos_control_signal.v1";
+        contract_version: "spiraltorch.topos_control_signal.v2";
         semantic_owner: "st-tensor::pure::topos";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -381,13 +382,16 @@ declare module "spiraltorch-wasm" {
         effective_gradient_bias_scale: number;
         gradient_bias_basis_dim: 10;
         gradient_bias_basis: number[];
-        momentum_rule: "m_t=damping*m_(t-1)+(1-damping)*g_biased";
+        gradient_clip_rule: "g_clipped[i]=clamp(g_biased[i],-rms(g_biased)/(1-clip_scale),rms(g_biased)/(1-clip_scale))";
+        gradient_clip_normalization: "biased_gradient_rms";
+        effective_gradient_clip_scale: number;
+        momentum_rule: "m_t=damping*m_(t-1)+(1-damping)*g_clipped";
         effective_momentum_damping: number;
     };
 
     export type ToposOptimizerSnapshot = {
         kind: "spiraltorch.topos_optimizer_snapshot";
-        contract_version: "spiraltorch.topos_optimizer_snapshot.v2";
+        contract_version: "spiraltorch.topos_optimizer_snapshot.v3";
         semantic_owner: "st-tensor::pure::topos";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -817,7 +821,7 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceMetaOptimizerCheckpoint = {
-        contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        contract_version: "spiraltorch.zspace_meta_optimizer.v2";
         kind: "spiraltorch.zspace_meta_optimizer";
         semantic_owner: "st-core::runtime::zspace_optimizer";
         semantic_backend: "rust";
@@ -827,7 +831,7 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceMetaOptimizerStepReport = {
-        contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        contract_version: "spiraltorch.zspace_meta_optimizer.v2";
         kind: "spiraltorch.zspace_meta_optimizer";
         semantic_owner: "st-core::runtime::zspace_optimizer";
         semantic_backend: "rust";
@@ -877,11 +881,19 @@ declare module "spiraltorch-wasm" {
             effective_learning_rate: number;
             clip_hint: number;
             clip_scale: number;
+            gradient_clip_rule: string;
+            gradient_clip_normalization: "biased_gradient_rms";
+            biased_gradient_rms: number;
             gradient_clip_threshold: number | null;
             regularization_hint: number;
             regularization_scale: number;
             effective_fractional_weight: number;
+            gradient_bias_rule: string;
+            gradient_bias_normalization: "raw_gradient_rms";
             gradient_bias_scale: number;
+            gradient_bias_basis: number[];
+            raw_gradient_rms: number;
+            gradient_bias_amplitude: number;
             gradient_bias: number[];
         };
         gradient: {
@@ -908,11 +920,11 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceParameterControl = {
-        contract_version: "spiraltorch.zspace_parameter_control.v1";
+        contract_version: "spiraltorch.zspace_parameter_control.v2";
         kind: "spiraltorch.zspace_parameter_control";
         semantic_owner: "st-core::runtime::zspace_optimizer";
         semantic_backend: "rust";
-        source_contract_version: "spiraltorch.zspace_meta_optimizer.v1";
+        source_contract_version: "spiraltorch.zspace_meta_optimizer.v2";
         source_semantic_owner: "st-core::runtime::zspace_optimizer";
         source_step: number;
         absolute_learning_rate_scale: number;

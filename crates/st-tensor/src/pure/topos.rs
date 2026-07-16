@@ -41,7 +41,7 @@ pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_OWNER: &str = "st-tensor::pure::topos";
 pub const TOPOS_RUNTIME_ROUTE_SEMANTIC_BACKEND: &str = "rust";
 
 /// Stable contract identifier shared by Rust, Python, and WASM control-signal clients.
-pub const TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION: &str = "spiraltorch.topos_control_signal.v1";
+pub const TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION: &str = "spiraltorch.topos_control_signal.v2";
 
 /// Stable payload kind shared by Rust, Python, and WASM control-signal clients.
 pub const TOPOS_CONTROL_SIGNAL_KIND: &str = "spiraltorch.topos_control_signal";
@@ -54,7 +54,7 @@ pub const TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND: &str = "rust";
 
 /// Stable contract identifier for one control-to-optimizer application snapshot.
 pub const TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION: &str =
-    "spiraltorch.topos_optimizer_snapshot.v2";
+    "spiraltorch.topos_optimizer_snapshot.v3";
 
 /// Stable payload kind shared by native, Python, and WASM optimizer clients.
 pub const TOPOS_OPTIMIZER_SNAPSHOT_KIND: &str = "spiraltorch.topos_optimizer_snapshot";
@@ -75,11 +75,18 @@ pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM: usize = 10;
 pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE: &str =
     "g_biased[i]=g[i]+rms(g)*bias_scale*basis[i%10]";
 
+/// Canonical scale-invariant outlier guard shared by every optimizer client.
+pub const TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE: &str =
+    "g_clipped[i]=clamp(g_biased[i],-rms(g_biased)/(1-clip_scale),rms(g_biased)/(1-clip_scale))";
+
 /// Canonical state transition used to damp abrupt gradient changes.
-pub const TOPOS_OPTIMIZER_MOMENTUM_RULE: &str = "m_t=damping*m_(t-1)+(1-damping)*g_biased";
+pub const TOPOS_OPTIMIZER_MOMENTUM_RULE: &str = "m_t=damping*m_(t-1)+(1-damping)*g_clipped";
 
 /// Canonical normalization used by the Topos gradient-bias rule.
 pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION: &str = "raw_gradient_rms";
+
+/// Canonical normalization used by the Topos gradient-clipping rule.
+pub const TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION: &str = "biased_gradient_rms";
 
 /// Stable contract identifier shared by Rust, Python, and WASM Z-space clients.
 pub const TOPOS_ZSPACE_PROJECTION_CONTRACT_VERSION: &str = "spiraltorch.topos_zspace_projection.v1";
@@ -367,6 +374,7 @@ pub struct ToposTrainingPlan {
     raw_rate_scale: f32,
     rate_scale: f32,
     effective_gradient_bias_scale: f32,
+    effective_gradient_clip_scale: f32,
     effective_momentum_damping: f32,
 }
 
@@ -474,9 +482,10 @@ impl ToposTrainingHints {
     /// Applies a runtime gain and returns concrete optimizer controls.
     pub fn plan(&self, gain: f32) -> ToposTrainingPlan {
         let gain = finite_non_negative(gain);
-        let raw_rate_scale = (self.learning_rate_scale * self.clip_scale).clamp(0.01, 2.0);
+        let raw_rate_scale = self.learning_rate_scale.clamp(0.01, 2.0);
         let rate_scale = (1.0 + gain * (raw_rate_scale - 1.0)).clamp(0.01, 2.0);
         let effective_gradient_bias_scale = (self.gradient_bias_scale * gain).clamp(0.0, 0.35);
+        let effective_gradient_clip_scale = (1.0 + gain * (self.clip_scale - 1.0)).clamp(0.25, 1.0);
         let effective_momentum_damping = (self.momentum_damping * gain).clamp(0.0, 0.85);
         ToposTrainingPlan {
             gain,
@@ -489,6 +498,7 @@ impl ToposTrainingHints {
             raw_rate_scale,
             rate_scale,
             effective_gradient_bias_scale,
+            effective_gradient_clip_scale,
             effective_momentum_damping,
         }
     }
@@ -535,6 +545,10 @@ impl ToposTrainingPlan {
         self.effective_gradient_bias_scale
     }
 
+    pub fn effective_gradient_clip_scale(&self) -> f32 {
+        self.effective_gradient_clip_scale
+    }
+
     pub fn effective_momentum_damping(&self) -> f32 {
         self.effective_momentum_damping
     }
@@ -545,7 +559,7 @@ impl ToposTrainingPlan {
             self.regularization_scale,
             self.step_damping,
             self.effective_gradient_bias_scale,
-            self.clip_scale,
+            self.effective_gradient_clip_scale,
             self.effective_momentum_damping,
         ]
     }
@@ -563,6 +577,7 @@ impl ToposTrainingPlan {
             raw_rate_scale: self.raw_rate_scale,
             rate_scale: self.rate_scale,
             effective_gradient_bias_scale: self.effective_gradient_bias_scale,
+            effective_gradient_clip_scale: self.effective_gradient_clip_scale,
             effective_momentum_damping: self.effective_momentum_damping,
             vector: self.vector(),
         }
@@ -600,6 +615,25 @@ pub fn topos_optimizer_gradient_bias_basis(
     ]
 }
 
+/// Computes the scale-relative bias amplitude used by every Topos optimizer path.
+pub fn topos_optimizer_gradient_bias_amplitude(
+    raw_gradient_rms: f64,
+    gradient_bias_scale: f64,
+) -> f64 {
+    raw_gradient_rms * gradient_bias_scale
+}
+
+/// Resolves the RMS-relative clipping threshold after gradient bias is applied.
+///
+/// A scale of `1` is an exact no-op. Lower values progressively guard the
+/// distribution tail without introducing an absolute, unit-dependent bound.
+pub fn topos_optimizer_gradient_clip_threshold(
+    biased_gradient_rms: f64,
+    gradient_clip_scale: f64,
+) -> Option<f64> {
+    (gradient_clip_scale < 1.0).then(|| biased_gradient_rms / (1.0 - gradient_clip_scale))
+}
+
 /// Rust-owned gradient-state controls configured on Amega optimizer tapes.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct ToposOptimizerStateControl {
@@ -608,6 +642,9 @@ pub struct ToposOptimizerStateControl {
     effective_gradient_bias_scale: f32,
     gradient_bias_basis_dim: usize,
     gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+    gradient_clip_rule: &'static str,
+    gradient_clip_normalization: &'static str,
+    effective_gradient_clip_scale: f32,
     momentum_rule: &'static str,
     effective_momentum_damping: f32,
 }
@@ -627,6 +664,9 @@ impl ToposOptimizerStateControl {
             effective_gradient_bias_scale: 0.0,
             gradient_bias_basis_dim: TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
             gradient_bias_basis: [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            gradient_clip_rule: TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
+            gradient_clip_normalization: TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION,
+            effective_gradient_clip_scale: 1.0,
             momentum_rule: TOPOS_OPTIMIZER_MOMENTUM_RULE,
             effective_momentum_damping: 0.0,
         }
@@ -636,6 +676,7 @@ impl ToposOptimizerStateControl {
     pub fn new(
         effective_gradient_bias_scale: f32,
         gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+        effective_gradient_clip_scale: f32,
         effective_momentum_damping: f32,
     ) -> PureResult<Self> {
         if !effective_gradient_bias_scale.is_finite() {
@@ -647,6 +688,17 @@ impl ToposOptimizerStateControl {
         if !(0.0..=0.35).contains(&effective_gradient_bias_scale) {
             return Err(TensorError::InvalidValue {
                 label: "topos_optimizer_gradient_bias_scale",
+            });
+        }
+        if !effective_gradient_clip_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "topos_optimizer_gradient_clip_scale",
+                value: effective_gradient_clip_scale,
+            });
+        }
+        if !(0.25..=1.0).contains(&effective_gradient_clip_scale) {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_gradient_clip_scale",
             });
         }
         if !effective_momentum_damping.is_finite() {
@@ -679,6 +731,9 @@ impl ToposOptimizerStateControl {
             effective_gradient_bias_scale,
             gradient_bias_basis_dim: TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
             gradient_bias_basis,
+            gradient_clip_rule: TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
+            gradient_clip_normalization: TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION,
+            effective_gradient_clip_scale,
             momentum_rule: TOPOS_OPTIMIZER_MOMENTUM_RULE,
             effective_momentum_damping,
         })
@@ -704,6 +759,18 @@ impl ToposOptimizerStateControl {
         &self.gradient_bias_basis
     }
 
+    pub fn gradient_clip_scale(&self) -> f32 {
+        self.effective_gradient_clip_scale
+    }
+
+    pub fn gradient_clip_rule(&self) -> &'static str {
+        self.gradient_clip_rule
+    }
+
+    pub fn gradient_clip_normalization(&self) -> &'static str {
+        self.gradient_clip_normalization
+    }
+
     pub fn momentum_damping(&self) -> f32 {
         self.effective_momentum_damping
     }
@@ -713,10 +780,12 @@ impl ToposOptimizerStateControl {
     }
 
     pub fn is_neutral(&self) -> bool {
-        self.effective_gradient_bias_scale == 0.0 && self.effective_momentum_damping == 0.0
+        self.effective_gradient_bias_scale == 0.0
+            && self.effective_gradient_clip_scale == 1.0
+            && self.effective_momentum_damping == 0.0
     }
 
-    /// Applies the canonical RMS-relative bias and momentum transition.
+    /// Applies the canonical RMS-relative bias, clipping, and momentum transition.
     pub fn gradient_step(
         &self,
         raw_gradient: &[f32],
@@ -758,7 +827,10 @@ impl ToposOptimizerStateControl {
                 value: raw_gradient_rms,
             });
         }
-        let gradient_bias_amplitude = raw_gradient_rms * self.effective_gradient_bias_scale;
+        let gradient_bias_amplitude = topos_optimizer_gradient_bias_amplitude(
+            raw_gradient_rms as f64,
+            self.effective_gradient_bias_scale as f64,
+        ) as f32;
         if !gradient_bias_amplitude.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "topos_optimizer_gradient_bias_amplitude",
@@ -766,14 +838,9 @@ impl ToposOptimizerStateControl {
             });
         }
 
-        let damping = self.effective_momentum_damping;
-        let incoming = 1.0 - damping;
-        let mut next_momentum = Vec::with_capacity(raw_gradient.len());
-        for (index, (&raw, &previous)) in raw_gradient
-            .iter()
-            .zip(previous_momentum.iter())
-            .enumerate()
-        {
+        let mut biased_gradient = Vec::with_capacity(raw_gradient.len());
+        let mut biased_sum_squares = 0.0f64;
+        for (index, &raw) in raw_gradient.iter().enumerate() {
             let bias = gradient_bias_amplitude
                 * self.gradient_bias_basis[index % TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
             let biased = raw + bias;
@@ -783,7 +850,45 @@ impl ToposOptimizerStateControl {
                     value: biased,
                 });
             }
-            let momentum = damping * previous + incoming * biased;
+            biased_sum_squares += (biased as f64) * (biased as f64);
+            biased_gradient.push(biased);
+        }
+        let biased_gradient_rms = if biased_gradient.is_empty() {
+            0.0
+        } else {
+            (biased_sum_squares / biased_gradient.len() as f64).sqrt()
+        };
+        if !biased_gradient_rms.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_biased_gradient_rms",
+            });
+        }
+        let gradient_clip_threshold = topos_optimizer_gradient_clip_threshold(
+            biased_gradient_rms,
+            self.effective_gradient_clip_scale as f64,
+        );
+        if gradient_clip_threshold.is_some_and(|threshold| !threshold.is_finite()) {
+            return Err(TensorError::InvalidValue {
+                label: "topos_optimizer_gradient_clip_threshold",
+            });
+        }
+        let mut clipped_values = 0;
+        let mut clipped_gradient = Vec::with_capacity(biased_gradient.len());
+        for biased in biased_gradient {
+            let clipped = gradient_clip_threshold.map_or(biased, |threshold| {
+                (biased as f64).clamp(-threshold, threshold) as f32
+            });
+            if clipped != biased {
+                clipped_values += 1;
+            }
+            clipped_gradient.push(clipped);
+        }
+
+        let damping = self.effective_momentum_damping;
+        let incoming = 1.0 - damping;
+        let mut next_momentum = Vec::with_capacity(raw_gradient.len());
+        for (&clipped, &previous) in clipped_gradient.iter().zip(previous_momentum.iter()) {
+            let momentum = damping * previous + incoming * clipped;
             if !momentum.is_finite() {
                 return Err(TensorError::NonFiniteValue {
                     label: "topos_optimizer_next_momentum",
@@ -795,6 +900,9 @@ impl ToposOptimizerStateControl {
         Ok(ToposOptimizerGradientStep {
             raw_gradient_rms,
             gradient_bias_amplitude,
+            biased_gradient_rms,
+            gradient_clip_threshold,
+            clipped_values,
             next_momentum,
         })
     }
@@ -805,6 +913,9 @@ impl ToposOptimizerStateControl {
 pub struct ToposOptimizerGradientStep {
     raw_gradient_rms: f32,
     gradient_bias_amplitude: f32,
+    biased_gradient_rms: f64,
+    gradient_clip_threshold: Option<f64>,
+    clipped_values: usize,
     next_momentum: Vec<f32>,
 }
 
@@ -815,6 +926,18 @@ impl ToposOptimizerGradientStep {
 
     pub fn gradient_bias_amplitude(&self) -> f32 {
         self.gradient_bias_amplitude
+    }
+
+    pub fn biased_gradient_rms(&self) -> f64 {
+        self.biased_gradient_rms
+    }
+
+    pub fn gradient_clip_threshold(&self) -> Option<f64> {
+        self.gradient_clip_threshold
+    }
+
+    pub fn clipped_values(&self) -> usize {
+        self.clipped_values
     }
 
     pub fn applied_gradient(&self) -> &[f32] {
@@ -1090,6 +1213,7 @@ pub struct ToposTrainingPlanPayload {
     pub raw_rate_scale: f32,
     pub rate_scale: f32,
     pub effective_gradient_bias_scale: f32,
+    pub effective_gradient_clip_scale: f32,
     pub effective_momentum_damping: f32,
     pub vector: [f32; 6],
 }
@@ -2217,6 +2341,7 @@ impl ToposControlSignal {
         let optimizer_state = ToposOptimizerStateControl::new(
             control.training_plan.effective_gradient_bias_scale,
             gradient_bias_basis,
+            control.training_plan.effective_gradient_clip_scale,
             control.training_plan.effective_momentum_damping,
         )?;
 
@@ -5721,9 +5846,10 @@ mod tests {
         assert!((training.momentum_damping() - 0.2535).abs() < 1e-6);
         assert_eq!(training.vector().len(), 6);
         let training_plan = signal.training_plan(0.5);
-        assert!((training_plan.raw_rate_scale() - 0.7769211).abs() < 1e-6);
-        assert!((training_plan.rate_scale() - 0.8884606).abs() < 1e-6);
+        assert!((training_plan.raw_rate_scale() - 0.8919875).abs() < 1e-6);
+        assert!((training_plan.rate_scale() - 0.9459937).abs() < 1e-6);
         assert!((training_plan.effective_gradient_bias_scale() - 0.03932805).abs() < 1e-6);
+        assert!((training_plan.effective_gradient_clip_scale() - 0.9355).abs() < 1e-6);
         assert!((training_plan.effective_momentum_damping() - 0.12675).abs() < 1e-6);
         assert_eq!(training_plan.vector().len(), 6);
         let inference = signal.inference_hints();
@@ -5742,10 +5868,10 @@ mod tests {
         let profile = signal.runtime_profile(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
         assert!((profile.closure_risk() - 0.4451).abs() < 1e-6);
         assert!((profile.exploration_budget() - 0.4555).abs() < 1e-6);
-        assert!((profile.training_rate_scale() - 0.8884606).abs() < 1e-6);
+        assert!((profile.training_rate_scale() - 0.9459937).abs() < 1e-6);
         assert!((profile.inference_temperature() - 0.741325).abs() < 1e-6);
-        assert!((profile.control_energy() - 0.35998437).abs() < 1e-6);
-        assert!((profile.learning_inference_balance() - 1.1984764).abs() < 1e-6);
+        assert!((profile.control_energy() - 0.34847772).abs() < 1e-6);
+        assert!((profile.learning_inference_balance() - 1.276085).abs() < 1e-6);
         assert_eq!(profile.vector().len(), 6);
         let route = profile.route();
         assert_eq!(route.mode(), ToposRuntimeMode::Contextual);
@@ -5753,7 +5879,7 @@ mod tests {
         assert_eq!(route.mode_id(), 3);
         assert_eq!(route.score_key(), "context");
         assert_eq!(route.inference_action(), "raise_context_weight");
-        assert!((route.score() - 0.70263207).abs() < 1e-6);
+        assert!((route.score() - 0.68883634).abs() < 1e-6);
         assert!((route.scores().context_score() - route.score()).abs() < 1e-6);
         assert!(route.scores().training_score() > route.scores().guard_score());
         let signal_route = signal.runtime_route(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
@@ -5921,8 +6047,9 @@ mod tests {
         assert_eq!(payload.training_hints.gradient_bias_scale, 0.0);
         assert_eq!(payload.training_hints.clip_scale, 0.25);
         assert_eq!(payload.training_plan.gain, 0.5);
-        assert!((payload.training_plan.raw_rate_scale - 0.3125).abs() < 1e-6);
-        assert!((payload.training_plan.rate_scale - 0.65625).abs() < 1e-6);
+        assert!((payload.training_plan.raw_rate_scale - 1.25).abs() < 1e-6);
+        assert!((payload.training_plan.rate_scale - 1.125).abs() < 1e-6);
+        assert!((payload.training_plan.effective_gradient_clip_scale - 0.625).abs() < 1e-6);
         assert_eq!(payload.inference_hints.temperature_scale, 1.5);
         assert_eq!(payload.inference_hints.top_p_scale, 0.05);
         assert_eq!(payload.inference_hints.context_weight, 0.25);
@@ -6021,6 +6148,18 @@ mod tests {
             serialized["control"]["training_plan"]["effective_gradient_bias_scale"]
         );
         assert_eq!(
+            serialized["optimizer_application"]["effective_gradient_clip_scale"],
+            serialized["control"]["training_plan"]["effective_gradient_clip_scale"]
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_clip_rule"],
+            TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE
+        );
+        assert_eq!(
+            serialized["optimizer_application"]["gradient_clip_normalization"],
+            TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION
+        );
+        assert_eq!(
             serialized["optimizer_application"]["effective_momentum_damping"],
             serialized["control"]["training_plan"]["effective_momentum_damping"]
         );
@@ -6048,12 +6187,16 @@ mod tests {
         let controlled = unwrap_ok(ToposOptimizerStateControl::new(
             0.35,
             [1.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+            0.25,
             0.5,
         ));
         let zeros = [0.0, 0.0];
         let zero_step = unwrap_ok(controlled.gradient_step(&zeros, &zeros));
         assert_eq!(zero_step.raw_gradient_rms(), 0.0);
         assert_eq!(zero_step.gradient_bias_amplitude(), 0.0);
+        assert_eq!(zero_step.biased_gradient_rms(), 0.0);
+        assert_eq!(zero_step.gradient_clip_threshold(), Some(0.0));
+        assert_eq!(zero_step.clipped_values(), 0);
         assert_eq!(zero_step.applied_gradient(), zeros.as_slice());
     }
 
@@ -6062,7 +6205,7 @@ mod tests {
         let mut basis = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
         basis[0] = 1.0;
         basis[1] = -1.0;
-        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 0.25));
+        let control = unwrap_ok(ToposOptimizerStateControl::new(0.2, basis, 1.0, 0.25));
         let step = unwrap_ok(control.gradient_step(&[3.0, 4.0], &[1.0, -1.0]));
         let rms = (12.5f32).sqrt();
         let amplitude = rms * 0.2;
@@ -6071,6 +6214,39 @@ mod tests {
         assert!((step.applied_gradient()[0] - (0.25 + 0.75 * (3.0 + amplitude))).abs() < 1e-6);
         assert!((step.applied_gradient()[1] - (-0.25 + 0.75 * (4.0 - amplitude))).abs() < 1e-6);
         assert_eq!(step.applied_gradient(), step.next_momentum());
+    }
+
+    #[test]
+    fn optimizer_state_control_clips_outliers_relative_to_biased_rms() {
+        let zeros = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+        let clipped = unwrap_ok(ToposOptimizerStateControl::new(0.0, zeros, 0.5, 0.0));
+        let unguarded = unwrap_ok(ToposOptimizerStateControl::new(0.0, zeros, 1.0, 0.0));
+        let mut raw = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+        raw[0] = 10.0;
+        let previous = [0.0; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM];
+
+        let step = unwrap_ok(clipped.gradient_step(&raw, &previous));
+        let unguarded_step = unwrap_ok(unguarded.gradient_step(&raw, &previous));
+        let expected_rms = 10.0f64 / (TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM as f64).sqrt();
+        assert!((step.biased_gradient_rms() - expected_rms).abs() < 1e-6);
+        assert!(
+            (step.gradient_clip_threshold().expect("active clip") - expected_rms / 0.5).abs()
+                < 1e-12
+        );
+        assert_eq!(step.clipped_values(), 1);
+        assert!(step.applied_gradient()[0] < raw[0]);
+        assert_eq!(unguarded_step.applied_gradient(), raw.as_slice());
+        assert_eq!(unguarded_step.gradient_clip_threshold(), None);
+
+        let scaled_raw = raw.map(|value| value * 10.0);
+        let scaled_step = unwrap_ok(clipped.gradient_step(&scaled_raw, &previous));
+        for (scaled, base) in scaled_step
+            .applied_gradient()
+            .iter()
+            .zip(step.applied_gradient())
+        {
+            assert!((*scaled - 10.0 * base).abs() < 1e-5);
+        }
     }
 
     #[test]

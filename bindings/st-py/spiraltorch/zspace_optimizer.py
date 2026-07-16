@@ -7,7 +7,7 @@ import sys
 from collections.abc import Mapping
 from typing import Any
 
-ZSPACE_META_OPTIMIZER_CONTRACT_VERSION = "spiraltorch.zspace_meta_optimizer.v1"
+ZSPACE_META_OPTIMIZER_CONTRACT_VERSION = "spiraltorch.zspace_meta_optimizer.v2"
 ZSPACE_META_OPTIMIZER_KIND = "spiraltorch.zspace_meta_optimizer"
 ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
 ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND = "rust"
