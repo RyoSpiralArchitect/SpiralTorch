@@ -3,10 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use bandit::{SoftBandit, SoftBanditMode};
+use bandit::{BanditDecisionWitness, SoftBandit, SoftBanditMode};
 use rewrite::HeurStore;
 use spiral_config::determinism;
 use st_frac::FracBackend;
@@ -21,6 +21,21 @@ use crate::heur::free_energy::{
 };
 use crate::plugin::{global_registry, PluginEvent};
 use crate::telemetry::{monitoring::MonitoringHub, trace_init};
+
+/// Stable semantic contract emitted with every contextual bandit decision.
+pub const BLACKCAT_BANDIT_CONTRACT: &str = "spiraltorch.blackcat.contextual-bandit";
+/// Schema version for [`BlackCatSelectionWitness`].
+pub const BLACKCAT_BANDIT_CONTRACT_VERSION: u32 = 1;
+/// Maximum accepted contextual feature width for guarded construction.
+pub const BLACKCAT_MAX_FEATURE_DIM: usize = 256;
+/// Maximum accepted named choice groups for guarded construction.
+pub const BLACKCAT_MAX_CHOICE_GROUPS: usize = 128;
+/// Maximum accepted choices in one group for guarded construction.
+pub const BLACKCAT_MAX_CHOICES_PER_GROUP: usize = 256;
+/// Aggregate precision-matrix cells permitted across all arms.
+pub const BLACKCAT_MAX_POSTERIOR_CELLS: usize = 4_194_304;
+/// Maximum accepted ZMeta search dimension for guarded construction.
+pub const BLACKCAT_MAX_ZMETA_DIM: usize = 4096;
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum BlackCatError {
@@ -38,6 +53,24 @@ pub enum BlackCatError {
     UnknownChoiceHint { id: String },
     #[error("BlackCat choice group '{id}' does not admit hinted value '{choice}'")]
     InvalidChoiceHint { id: String, choice: String },
+    #[error("BlackCat selection {selection_id} is still awaiting reward or explicit abandonment")]
+    PendingSelection { selection_id: u64 },
+    #[error("BlackCat cannot choose because no non-empty choice groups are configured")]
+    NoChoiceGroups,
+    #[error("invalid BlackCat configuration at '{field}': {detail}")]
+    InvalidConfig { field: &'static str, detail: String },
+}
+
+/// Complete, replay-oriented witness for one contextual bandit selection.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct BlackCatSelectionWitness {
+    pub contract: &'static str,
+    pub contract_version: u32,
+    pub selection_id: u64,
+    pub context: Vec<f64>,
+    pub hints: BTreeMap<String, String>,
+    pub picks: BTreeMap<String, String>,
+    pub decisions: BTreeMap<String, BanditDecisionWitness>,
 }
 
 /// Metrics reported by a training loop back into the runtime.
@@ -164,44 +197,160 @@ pub struct ChoiceGroups {
 /// Multi-armed contextual bandit that operates over named groups.
 #[derive(Clone)]
 pub struct MultiBandit {
-    arms: HashMap<String, SoftBandit>,
+    arms: BTreeMap<String, SoftBandit>,
 }
 
+/// Decision evidence and executable picks for one multi-group choice.
+pub type MultiBanditSelection = (
+    HashMap<String, String>,
+    BTreeMap<String, BanditDecisionWitness>,
+);
+
 impl MultiBandit {
+    /// Compatibility constructor. Invalid aggregate domains produce an empty,
+    /// fail-closed sentinel; prefer [`Self::try_new_seeded`] for direct use.
     pub fn new(groups: &ChoiceGroups, feat_dim: usize, mode: SoftBanditMode) -> Self {
-        let mut arms = HashMap::new();
-        let feat_dim = feat_dim.max(1);
+        Self::new_seeded(
+            groups,
+            feat_dim,
+            mode,
+            determinism::config().seed_for("st-core/blackcat/bandits"),
+        )
+    }
+
+    /// Builds bandits whose per-group random streams are derived from one
+    /// explicit seed. Invalid aggregate domains produce an empty fail-closed
+    /// sentinel; group insertion order cannot change valid streams.
+    pub fn new_seeded(
+        groups: &ChoiceGroups,
+        feat_dim: usize,
+        mode: SoftBanditMode,
+        seed: u64,
+    ) -> Self {
+        Self::try_new_seeded(groups, feat_dim, mode, seed).unwrap_or_else(|_| Self {
+            arms: BTreeMap::new(),
+        })
+    }
+
+    /// Guarded constructor that bounds the aggregate posterior allocation,
+    /// validates every finite choice domain, and derives stable group streams.
+    pub fn try_new_seeded(
+        groups: &ChoiceGroups,
+        feat_dim: usize,
+        mode: SoftBanditMode,
+        seed: u64,
+    ) -> Result<Self, BlackCatError> {
+        validate_choice_groups(groups, feat_dim)?;
+        let mut arms = BTreeMap::new();
         for (name, opts) in &groups.groups {
-            if !opts.is_empty() {
-                arms.insert(name.clone(), SoftBandit::new(opts.clone(), feat_dim, mode));
-            }
+            let bandit = SoftBandit::try_new_seeded(
+                opts.clone(),
+                feat_dim,
+                mode,
+                bandit::derive_group_seed(seed, name),
+            )
+            .map_err(|field| BlackCatError::InvalidConfig {
+                field,
+                detail: format!("choice group {name:?} could not initialize its posterior"),
+            })?;
+            arms.insert(name.clone(), bandit);
         }
-        Self { arms }
+        Ok(Self { arms })
     }
 
     pub fn select_all(&mut self, context: &[f64]) -> HashMap<String, String> {
-        self.select_all_with_hints(context, &BTreeMap::new())
+        match self.try_select_all(context) {
+            Ok((picks, _)) => picks,
+            Err(_) => HashMap::new(),
+        }
     }
 
-    /// Selects every group while using validated hints as deterministic
-    /// tie-breaking priors. Learned score differences still take precedence.
-    fn select_all_with_hints(
+    /// Guarded selection for every group without an external hint prior.
+    pub fn try_select_all(
+        &mut self,
+        context: &[f64],
+    ) -> Result<MultiBanditSelection, BlackCatError> {
+        self.try_select_all_with_hints(context, &BTreeMap::new())
+    }
+
+    /// Selects every group. A validated hint resolves only an equivalent
+    /// posterior projection; otherwise the sampled TS or deterministic UCB
+    /// score remains authoritative. Selection is atomic across all groups.
+    pub fn try_select_all_with_hints(
         &mut self,
         context: &[f64],
         hints: &BTreeMap<String, String>,
-    ) -> HashMap<String, String> {
-        let mut picks = HashMap::new();
-        for (name, bandit) in self.arms.iter_mut() {
-            let choice = bandit.select_with_hint(context, hints.get(name).map(String::as_str));
-            picks.insert(name.clone(), choice);
+    ) -> Result<MultiBanditSelection, BlackCatError> {
+        if self.is_empty() {
+            return Err(BlackCatError::NoChoiceGroups);
         }
-        picks
+        self.validate_hints(hints)?;
+        let mut next = self.clone();
+        next.validate_state(context.len())
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        next.validate_selection_scores(context)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let selection = next
+            .select_all_with_hints_in_place(context, hints)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        next.validate_state(context.len())
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        *self = next;
+        Ok(selection)
     }
 
-    pub fn update_all(&mut self, context: &[f64], reward: f64) {
-        for bandit in self.arms.values_mut() {
-            bandit.update_last(context, reward);
+    fn select_all_with_hints_in_place(
+        &mut self,
+        context: &[f64],
+        hints: &BTreeMap<String, String>,
+    ) -> Result<MultiBanditSelection, &'static str> {
+        let mut picks = HashMap::new();
+        let mut decisions = BTreeMap::new();
+        for (name, bandit) in self.arms.iter_mut() {
+            let decision =
+                bandit.try_select_with_hint(context, hints.get(name).map(String::as_str))?;
+            picks.insert(name.clone(), decision.chosen.clone());
+            decisions.insert(name.clone(), decision);
         }
+        Ok((picks, decisions))
+    }
+
+    pub fn try_update_all(&mut self, context: &[f64], reward: f64) -> Result<(), &'static str> {
+        let mut next = self.clone();
+        for bandit in next.arms.values_mut() {
+            bandit.try_update_last(context, reward)?;
+        }
+        *self = next;
+        Ok(())
+    }
+
+    /// Releases all pending group decisions without posterior credit.
+    pub fn try_abandon_all(&mut self) -> Result<(), &'static str> {
+        let mut next = self.clone();
+        for bandit in next.arms.values_mut() {
+            bandit.try_abandon_last_selection()?;
+        }
+        *self = next;
+        Ok(())
+    }
+
+    /// Reports the common pending state and rejects impossible cross-group
+    /// disagreement.
+    pub fn selection_pending(&self) -> Result<bool, &'static str> {
+        let mut states = self.arms.values().map(SoftBandit::selection_pending);
+        let Some(expected) = states.next() else {
+            return Ok(false);
+        };
+        if states.any(|pending| pending != expected) {
+            return Err("bandit.pending_state");
+        }
+        Ok(expected)
+    }
+
+    /// Compatibility update path. Guarded runtime code uses
+    /// [`Self::try_update_all`] and commits a cloned state atomically.
+    pub fn update_all(&mut self, context: &[f64], reward: f64) {
+        let _ = self.try_update_all(context, reward);
     }
 
     /// Stable snapshot of every named choice domain owned by the bandits.
@@ -213,15 +362,30 @@ impl MultiBandit {
     }
 
     fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
-        self.arms
-            .values()
-            .try_for_each(|bandit| bandit.validate_state(context_dim))
+        self.arms.iter().try_for_each(|(name, bandit)| {
+            if name.trim().is_empty() {
+                return Err("bandit.group_id");
+            }
+            bandit.validate_state(context_dim)
+        })
     }
 
     fn validate_selection_scores(&self, context: &[f64]) -> Result<(), &'static str> {
         self.arms
             .values()
             .try_for_each(|bandit| bandit.validate_selection_scores(context))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.arms.is_empty()
+    }
+
+    /// Stable observation counts for every choice in every group.
+    pub fn observation_counts(&self) -> BTreeMap<String, BTreeMap<String, u64>> {
+        self.arms
+            .iter()
+            .map(|(name, bandit)| (name.clone(), bandit.observation_counts()))
+            .collect()
     }
 
     fn validate_hints(&self, hints: &BTreeMap<String, String>) -> Result<(), BlackCatError> {
@@ -242,13 +406,18 @@ impl MultiBandit {
 
 /// BlackCat orchestrator that joins ES search with contextual bandits.
 pub struct BlackCatRuntime {
-    pub z: ZMetaES,
-    pub bandits: MultiBandit,
-    pub heur: HeurStore,
-    pub reward: RewardCfg,
+    z: ZMetaES,
+    bandits: MultiBandit,
+    heur: HeurStore,
+    reward: RewardCfg,
+    configuration_error: Option<BlackCatError>,
     context_dim: usize,
     last_context: Vec<f64>,
     last_picks: HashMap<String, String>,
+    last_selection_witness: Option<BlackCatSelectionWitness>,
+    selection_pending: bool,
+    selection_counter: u64,
+    last_credited_selection_id: Option<u64>,
     last_step_start: Option<Instant>,
     stats_alpha: f64,
     stats_steps: u64,
@@ -263,6 +432,9 @@ pub struct BlackCatRuntime {
 }
 
 impl BlackCatRuntime {
+    /// Compatibility constructor. Invalid configuration is retained as a
+    /// fail-closed sentinel without allocating attacker-sized posterior state;
+    /// prefer [`Self::try_new`] for an explicit construction error.
     #[allow(clippy::too_many_arguments)]
     #[instrument(skip(groups, heur_path), fields(feat_dim = feat_dim, bandit_mode = ?mode))]
     pub fn new(
@@ -273,11 +445,33 @@ impl BlackCatRuntime {
         heur_path: Option<String>,
     ) -> Self {
         trace_init::init_tracing();
-        let mut params = z_params;
+        let mut configuration_error =
+            validate_blackcat_configuration(&z_params, &groups, feat_dim).err();
+        let valid_configuration = configuration_error.is_none();
+        let effective_feat_dim = if valid_configuration { feat_dim } else { 1 };
+        let mut params = if valid_configuration {
+            z_params
+        } else {
+            ZMetaParams::default()
+        };
         if determinism::config().enabled {
             params.seed = determinism::config().seed_for("st-core/blackcat/zmeta");
         }
-        let bandits = MultiBandit::new(&groups, feat_dim, mode);
+        let bandits = if valid_configuration {
+            match MultiBandit::try_new_seeded(&groups, effective_feat_dim, mode, params.seed) {
+                Ok(bandits) => bandits,
+                Err(error) => {
+                    configuration_error = Some(error);
+                    MultiBandit {
+                        arms: BTreeMap::new(),
+                    }
+                }
+            }
+        } else {
+            MultiBandit {
+                arms: BTreeMap::new(),
+            }
+        };
         let heur = HeurStore::new(heur_path);
         let stats_alpha = 0.2;
         let runtime = Self {
@@ -285,9 +479,14 @@ impl BlackCatRuntime {
             bandits,
             heur,
             reward: RewardCfg::default(),
-            context_dim: feat_dim.max(1),
-            last_context: vec![0.0; feat_dim.max(1)],
+            configuration_error,
+            context_dim: effective_feat_dim,
+            last_context: vec![0.0; effective_feat_dim],
             last_picks: HashMap::new(),
+            last_selection_witness: None,
+            selection_pending: false,
+            selection_counter: 0,
+            last_credited_selection_id: None,
             last_step_start: None,
             stats_alpha,
             stats_steps: 0,
@@ -304,13 +503,31 @@ impl BlackCatRuntime {
         runtime
     }
 
+    /// Guarded constructor for a directly usable Rust runtime.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        z_params: ZMetaParams,
+        groups: ChoiceGroups,
+        feat_dim: usize,
+        mode: SoftBanditMode,
+        heur_path: Option<String>,
+    ) -> Result<Self, BlackCatError> {
+        validate_blackcat_configuration(&z_params, &groups, feat_dim)?;
+        let runtime = Self::new(z_params, groups, feat_dim, mode, heur_path);
+        match runtime.configuration_error.clone() {
+            Some(error) => Err(error),
+            None => Ok(runtime),
+        }
+    }
+
     /// Call at the beginning of a training step.
     #[instrument(skip(self))]
     pub fn begin_step(&mut self) {
         self.last_step_start = Some(Instant::now());
     }
 
-    /// Build a contextual feature vector from runtime metrics.
+    /// Compatibility context builder. Invalid dimensions or observations
+    /// produce an empty context that guarded selection rejects.
     #[allow(
         clippy::too_many_arguments,
         reason = "Context vector requires these inputs for bandit feature parity"
@@ -325,12 +542,54 @@ impl BlackCatRuntime {
         extras: &[(String, f64)],
         feat_dim: usize,
     ) -> Vec<f64> {
+        self.try_make_context(batches, tiles, depth, device_code, load, extras, feat_dim)
+            .unwrap_or_default()
+    }
+
+    /// Builds a bounded contextual feature vector owned by this runtime's
+    /// declared feature contract. `feat_dim == 0` selects that declared width;
+    /// any other value must match it exactly.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Context vector requires these inputs for bandit feature parity"
+    )]
+    pub fn try_make_context(
+        &self,
+        batches: u32,
+        tiles: u32,
+        depth: u32,
+        device_code: u32,
+        load: f64,
+        extras: &[(String, f64)],
+        feat_dim: usize,
+    ) -> Result<Vec<f64>, BlackCatError> {
+        self.validate_configuration()?;
         let target_dim = if feat_dim == 0 {
             self.context_dim
         } else {
             feat_dim
         };
-        let mut ctx = vec![
+        if target_dim != self.context_dim {
+            return Err(BlackCatError::ContextDimension {
+                expected: self.context_dim,
+                actual: target_dim,
+            });
+        }
+        let available_extra_features = target_dim.saturating_sub(6);
+        if extras.len() > available_extra_features {
+            return Err(BlackCatError::InvalidConfig {
+                field: "context.extras",
+                detail: format!(
+                    "at most {available_extra_features} extra values fit feature dimension {target_dim}, got {}",
+                    extras.len()
+                ),
+            });
+        }
+        validate_blackcat_finite("context.load", load)?;
+        for (_, value) in extras {
+            validate_blackcat_finite("context.extra", *value)?;
+        }
+        let base = [
             1.0,
             batches as f64,
             tiles as f64,
@@ -338,11 +597,11 @@ impl BlackCatRuntime {
             (device_code % 1024) as f64 / 1024.0,
             load,
         ];
-        for (_, value) in extras.iter() {
-            ctx.push(*value);
-        }
+        let mut ctx = Vec::with_capacity(target_dim);
+        ctx.extend(base.into_iter().take(target_dim));
+        ctx.extend(extras.iter().map(|(_, value)| *value));
         ctx.resize(target_dim, 0.0);
-        ctx
+        Ok(ctx)
     }
 
     /// Choose all groups at once, storing the picks and context internally.
@@ -373,14 +632,25 @@ impl BlackCatRuntime {
         self.try_choose_with_hints(context, &BTreeMap::new())
     }
 
-    /// Guarded choice path with deterministic tie-breaking priors. Hints must
-    /// name existing groups and values; they never bypass learned scores.
+    /// Guarded choice path with deterministic equivalent-posterior priors.
+    /// Hints must name existing groups and values. Once projected posterior
+    /// mean or uncertainty differs, the sampled TS or UCB score decides.
     pub fn try_choose_with_hints(
         &mut self,
         context: Vec<f64>,
         hints: &BTreeMap<String, String>,
     ) -> Result<HashMap<String, String>, BlackCatError> {
+        self.validate_configuration()?;
+        if self.selection_pending {
+            return Err(BlackCatError::PendingSelection {
+                selection_id: self.selection_counter,
+            });
+        }
+        if self.bandits.is_empty() {
+            return Err(BlackCatError::NoChoiceGroups);
+        }
         self.validate_context(&context)?;
+        self.validate_selection_state()?;
         self.bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
@@ -389,22 +659,43 @@ impl BlackCatRuntime {
         next_bandits
             .validate_selection_scores(&context)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
-        let picks = next_bandits.select_all_with_hints(&context, hints);
+        let (picks, decisions) = next_bandits
+            .select_all_with_hints_in_place(&context, hints)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
         next_bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let selection_id =
+            self.selection_counter
+                .checked_add(1)
+                .ok_or(BlackCatError::InvalidAdaptationState {
+                    field: "bandit.selection_count",
+                })?;
+        let witness = BlackCatSelectionWitness {
+            contract: BLACKCAT_BANDIT_CONTRACT,
+            contract_version: BLACKCAT_BANDIT_CONTRACT_VERSION,
+            selection_id,
+            context: context.clone(),
+            hints: hints.clone(),
+            picks: picks
+                .iter()
+                .map(|(id, choice)| (id.clone(), choice.clone()))
+                .collect(),
+            decisions,
+        };
         self.bandits = next_bandits;
         self.last_context = context;
         self.last_picks = picks.clone();
+        self.last_selection_witness = Some(witness);
+        self.selection_pending = true;
+        self.selection_counter = selection_id;
         debug!(picks = ?self.last_picks, "blackcat bandit picks");
         let bus = global_registry().event_bus();
         if bus.has_listeners("BlackCatChoose") {
             bus.publish(&PluginEvent::custom(
                 "BlackCatChoose",
                 serde_json::json!({
-                    "context": &self.last_context,
-                    "hints": hints,
-                    "picks": &self.last_picks,
+                    "selection": &self.last_selection_witness,
                 }),
             ));
         }
@@ -441,13 +732,16 @@ impl BlackCatRuntime {
             .map(|report| report.utility)
     }
 
-    /// Update both the ES search and contextual bandits from one canonical
-    /// free-energy report, committing state only after validation succeeds.
+    /// Updates ES, statistics, and telemetry from one canonical free-energy
+    /// report. A contextual posterior is updated only when a pending selection
+    /// exists, and that selection is credited at most once. All state commits
+    /// only after validation succeeds.
     #[instrument(skip(self, metrics), fields(step_time = metrics.step_time_ms, retry_rate = metrics.retry_rate))]
     pub fn try_post_step_report(
         &mut self,
         metrics: &StepMetrics,
     ) -> Result<FreeEnergyReport, BlackCatError> {
+        self.validate_configuration()?;
         let curr_penalty = self.z.frac_penalty();
         let report = self.reward.report(metrics, curr_penalty)?;
         let reward_current = report.utility;
@@ -460,7 +754,11 @@ impl BlackCatRuntime {
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
         self.validate_statistics_state()?;
-        self.validate_context(&self.last_context)?;
+        self.validate_selection_state()?;
+        let credited_selection_id = self.selection_pending.then_some(self.selection_counter);
+        if credited_selection_id.is_some() {
+            self.validate_context(&self.last_context)?;
+        }
         let grad_norm = metrics.extra.get("grad_norm").copied().unwrap_or(0.0);
         validate_blackcat_non_negative("grad_norm", grad_norm)?;
         let loss_var = metrics
@@ -474,7 +772,11 @@ impl BlackCatRuntime {
         validate_blackcat_finite("zmeta.proposed_reward", proposed_reward)?;
 
         let mut next_z = self.z.clone();
-        next_z.update(reward_current, proposed_reward, Some(&self.last_context));
+        next_z.update(
+            reward_current,
+            proposed_reward,
+            credited_selection_id.map(|_| self.last_context.as_slice()),
+        );
         next_z.temp_schedule(metrics.retry_rate, grad_norm, loss_var);
         next_z
             .validate_adaptation_state()
@@ -486,7 +788,11 @@ impl BlackCatRuntime {
         )?;
 
         let mut next_bandits = self.bandits.clone();
-        next_bandits.update_all(&self.last_context, reward_current);
+        if credited_selection_id.is_some() {
+            next_bandits
+                .try_update_all(&self.last_context, reward_current)
+                .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        }
         next_bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
@@ -515,6 +821,10 @@ impl BlackCatRuntime {
         self.extra_ema = next_extra_ema;
         self.last_reward = reward_current;
         self.last_free_energy_report = Some(report.clone());
+        if let Some(selection_id) = credited_selection_id {
+            self.selection_pending = false;
+            self.last_credited_selection_id = Some(selection_id);
+        }
         debug!(
             reward = reward_current,
             frac_penalty = curr_penalty,
@@ -529,6 +839,10 @@ impl BlackCatRuntime {
                     "reward": reward_current,
                     "frac_penalty": curr_penalty,
                     "free_energy": &report,
+                    "bandit_contract": BLACKCAT_BANDIT_CONTRACT,
+                    "bandit_contract_version": BLACKCAT_BANDIT_CONTRACT_VERSION,
+                    "credited_selection_id": credited_selection_id,
+                    "bandit_observations": self.bandits.observation_counts(),
                     "picks": &self.last_picks,
                     "metrics": {
                         "step_time_ms": metrics.step_time_ms,
@@ -540,6 +854,53 @@ impl BlackCatRuntime {
             ));
         }
         Ok(report)
+    }
+
+    fn validate_selection_state(&self) -> Result<(), BlackCatError> {
+        let bandits_pending = self
+            .bandits
+            .selection_pending()
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        if bandits_pending != self.selection_pending {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "bandit.pending_state",
+            });
+        }
+        if self.selection_pending {
+            let witness = self.last_selection_witness.as_ref().ok_or(
+                BlackCatError::InvalidAdaptationState {
+                    field: "bandit.pending_witness",
+                },
+            )?;
+            if witness.selection_id != self.selection_counter
+                || witness.context != self.last_context
+                || witness.picks.len() != self.last_picks.len()
+                || witness
+                    .picks
+                    .iter()
+                    .any(|(id, choice)| self.last_picks.get(id) != Some(choice))
+            {
+                return Err(BlackCatError::InvalidAdaptationState {
+                    field: "bandit.pending_witness",
+                });
+            }
+        }
+        if self
+            .last_credited_selection_id
+            .is_some_and(|selection_id| selection_id > self.selection_counter)
+        {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "bandit.credited_selection",
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_configuration(&self) -> Result<(), BlackCatError> {
+        match &self.configuration_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 
     fn validate_statistics_state(&self) -> Result<(), BlackCatError> {
@@ -640,6 +1001,12 @@ impl BlackCatRuntime {
         self.context_dim
     }
 
+    /// Returns the retained construction error for compatibility-created
+    /// fail-closed runtimes.
+    pub fn configuration_error(&self) -> Option<&BlackCatError> {
+        self.configuration_error.as_ref()
+    }
+
     /// Returns a deterministic snapshot of all contextual control domains.
     pub fn choice_domains(&self) -> BTreeMap<String, Vec<String>> {
         self.bandits.choice_domains()
@@ -650,6 +1017,12 @@ impl BlackCatRuntime {
         self.z.frac_penalty()
     }
 
+    /// Returns the current latent ZMeta coordinates without granting mutation
+    /// access to the adaptation state.
+    pub fn z_state(&self) -> &[f64] {
+        self.z.z()
+    }
+
     /// Overrides the fractional regulariser backend.
     pub fn set_frac_backend(&mut self, backend: FracBackend) {
         self.z.set_frac_backend(backend);
@@ -658,6 +1031,25 @@ impl BlackCatRuntime {
     /// Returns the current exploration temperature tracked by the runtime.
     pub fn temperature(&self) -> f64 {
         self.z.temperature()
+    }
+
+    /// Returns the canonical reward configuration used by guarded reports.
+    pub fn reward_config(&self) -> &RewardCfg {
+        &self.reward
+    }
+
+    /// Replaces reward shaping only after it can build a valid canonical
+    /// free-energy configuration.
+    pub fn try_set_reward_config(&mut self, reward: RewardCfg) -> Result<(), BlackCatError> {
+        reward.free_energy_config()?;
+        self.reward = reward;
+        Ok(())
+    }
+
+    /// Returns the append-only heuristic store path without exposing writes
+    /// that bypass the Wilson adoption guard.
+    pub fn heuristics_path(&self) -> &std::path::Path {
+        self.heur.path()
     }
 
     /// Try to adopt a new soft heuristic guarded by the Wilson lower bound.
@@ -695,6 +1087,58 @@ impl BlackCatRuntime {
         &self.last_picks
     }
 
+    /// Returns the complete witness for the most recent bandit selection.
+    pub fn last_selection_witness(&self) -> Option<&BlackCatSelectionWitness> {
+        self.last_selection_witness.as_ref()
+    }
+
+    /// Returns the selection currently eligible for exactly one bandit reward.
+    pub fn pending_selection_id(&self) -> Option<u64> {
+        self.selection_pending.then_some(self.selection_counter)
+    }
+
+    /// Returns the most recent selection that actually updated the posterior.
+    pub fn last_credited_selection_id(&self) -> Option<u64> {
+        self.last_credited_selection_id
+    }
+
+    /// Explicitly abandons an unexecuted selection without updating any arm.
+    pub fn abandon_pending_selection(&mut self) -> Option<u64> {
+        self.try_abandon_pending_selection().unwrap_or(None)
+    }
+
+    /// Guarded abandonment path that validates the pending witness before
+    /// releasing its one-shot reward credit.
+    pub fn try_abandon_pending_selection(&mut self) -> Result<Option<u64>, BlackCatError> {
+        self.validate_selection_state()?;
+        let Some(selection_id) = self.pending_selection_id() else {
+            return Ok(None);
+        };
+        let mut next_bandits = self.bandits.clone();
+        next_bandits
+            .try_abandon_all()
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.bandits = next_bandits;
+        self.selection_pending = false;
+        let bus = global_registry().event_bus();
+        if bus.has_listeners("BlackCatSelectionAbandoned") {
+            bus.publish(&PluginEvent::custom(
+                "BlackCatSelectionAbandoned",
+                serde_json::json!({
+                    "selection": &self.last_selection_witness,
+                    "bandit_contract": BLACKCAT_BANDIT_CONTRACT,
+                    "bandit_contract_version": BLACKCAT_BANDIT_CONTRACT_VERSION,
+                }),
+            ));
+        }
+        Ok(Some(selection_id))
+    }
+
+    /// Stable posterior observation counts for audit and replay assertions.
+    pub fn bandit_observation_counts(&self) -> BTreeMap<String, BTreeMap<String, u64>> {
+        self.bandits.observation_counts()
+    }
+
     /// Returns aggregated runtime statistics derived from recent updates.
     pub fn stats(&self) -> BlackcatRuntimeStats {
         let reward_std = if self.stats_steps > 1 {
@@ -724,6 +1168,125 @@ impl BlackCatRuntime {
             extras,
         }
     }
+}
+
+fn validate_blackcat_configuration(
+    z_params: &ZMetaParams,
+    groups: &ChoiceGroups,
+    feat_dim: usize,
+) -> Result<(), BlackCatError> {
+    let invalid =
+        |field: &'static str, detail: String| BlackCatError::InvalidConfig { field, detail };
+    if feat_dim == 0 || feat_dim > BLACKCAT_MAX_FEATURE_DIM {
+        return Err(invalid(
+            "feat_dim",
+            format!("expected 1..={BLACKCAT_MAX_FEATURE_DIM}, got {feat_dim}"),
+        ));
+    }
+    if z_params.dim == 0 || z_params.dim > BLACKCAT_MAX_ZMETA_DIM {
+        return Err(invalid(
+            "zmeta.dim",
+            format!(
+                "expected 1..={BLACKCAT_MAX_ZMETA_DIM}, got {}",
+                z_params.dim
+            ),
+        ));
+    }
+    for (field, value, strictly_positive) in [
+        ("zmeta.sigma", z_params.sigma, false),
+        ("zmeta.lr", z_params.lr, false),
+        ("zmeta.alpha_frac", z_params.alpha_frac, false),
+        ("zmeta.lam_frac", z_params.lam_frac, false),
+        ("zmeta.orientation_eta", z_params.orientation_eta, false),
+        ("zmeta.orientation_eps", z_params.orientation_eps, true),
+    ] {
+        if !value.is_finite() || value < 0.0 || (strictly_positive && value == 0.0) {
+            return Err(invalid(
+                field,
+                format!(
+                    "expected a finite {} value, got {value}",
+                    if strictly_positive {
+                        "positive"
+                    } else {
+                        "non-negative"
+                    }
+                ),
+            ));
+        }
+    }
+    validate_choice_groups(groups, feat_dim)
+}
+
+fn validate_choice_groups(groups: &ChoiceGroups, feat_dim: usize) -> Result<(), BlackCatError> {
+    let invalid =
+        |field: &'static str, detail: String| BlackCatError::InvalidConfig { field, detail };
+    if feat_dim == 0 || feat_dim > BLACKCAT_MAX_FEATURE_DIM {
+        return Err(invalid(
+            "feat_dim",
+            format!("expected 1..={BLACKCAT_MAX_FEATURE_DIM}, got {feat_dim}"),
+        ));
+    }
+    if groups.groups.len() > BLACKCAT_MAX_CHOICE_GROUPS {
+        return Err(invalid(
+            "choice_groups",
+            format!(
+                "at most {BLACKCAT_MAX_CHOICE_GROUPS} groups are allowed, got {}",
+                groups.groups.len()
+            ),
+        ));
+    }
+    let mut group_ids = groups.groups.keys().collect::<Vec<_>>();
+    group_ids.sort();
+    let mut total_choices = 0usize;
+    for id in group_ids {
+        if id.is_empty() || id.trim() != id {
+            return Err(invalid(
+                "choice_group.id",
+                format!("group identifier {id:?} must be non-empty and trimmed"),
+            ));
+        }
+        let choices = &groups.groups[id];
+        if choices.is_empty() || choices.len() > BLACKCAT_MAX_CHOICES_PER_GROUP {
+            return Err(invalid(
+                "choice_group.domain",
+                format!(
+                    "group {id:?} requires 1..={BLACKCAT_MAX_CHOICES_PER_GROUP} choices, got {}",
+                    choices.len()
+                ),
+            ));
+        }
+        let mut unique = HashSet::with_capacity(choices.len());
+        for choice in choices {
+            if choice.is_empty() || choice.trim() != choice {
+                return Err(invalid(
+                    "choice_group.choice",
+                    format!("choice {choice:?} in group {id:?} must be non-empty and trimmed"),
+                ));
+            }
+            if !unique.insert(choice.as_str()) {
+                return Err(invalid(
+                    "choice_group.choice",
+                    format!("choice {choice:?} is duplicated in group {id:?}"),
+                ));
+            }
+        }
+        total_choices = total_choices
+            .checked_add(choices.len())
+            .ok_or_else(|| invalid("choice_groups", "choice count overflowed".to_string()))?;
+    }
+    let posterior_cells = feat_dim
+        .checked_mul(feat_dim)
+        .and_then(|cells| cells.checked_mul(total_choices))
+        .ok_or_else(|| invalid("posterior_cells", "posterior size overflowed".to_string()))?;
+    if posterior_cells > BLACKCAT_MAX_POSTERIOR_CELLS {
+        return Err(invalid(
+            "posterior_cells",
+            format!(
+                "at most {BLACKCAT_MAX_POSTERIOR_CELLS} cells are allowed, got {posterior_cells}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_blackcat_finite(field: &'static str, value: f64) -> Result<f64, BlackCatError> {
@@ -927,6 +1490,30 @@ mod tests {
     }
 
     #[test]
+    fn reward_configuration_replacement_is_guarded_and_transactional() {
+        let mut runtime = sample_runtime();
+        let original_speed_scale = runtime.reward_config().scale_speed;
+        let invalid = RewardCfg {
+            scale_speed: 0.0,
+            ..RewardCfg::default()
+        };
+        assert!(matches!(
+            runtime.try_set_reward_config(invalid),
+            Err(BlackCatError::FreeEnergy(_))
+        ));
+        assert_eq!(runtime.reward_config().scale_speed, original_speed_scale);
+
+        let valid = RewardCfg {
+            scale_speed: 5.0,
+            ..RewardCfg::default()
+        };
+        runtime
+            .try_set_reward_config(valid)
+            .expect("valid reward configuration");
+        assert_eq!(runtime.reward_config().scale_speed, 5.0);
+    }
+
+    #[test]
     fn rejected_reward_does_not_mutate_runtime() {
         let mut runtime = sample_runtime();
         let metrics = StepMetrics {
@@ -1013,8 +1600,21 @@ mod tests {
                 .map(String::as_str),
             Some("b")
         );
+        let first_witness = runtime.last_selection_witness().expect("selection witness");
+        assert_eq!(first_witness.contract, BLACKCAT_BANDIT_CONTRACT);
+        assert!(!first_witness.decisions["tile"].sampling_applied);
+        assert!(matches!(
+            runtime.try_choose_with_hints(context.clone(), &hinted_b),
+            Err(BlackCatError::PendingSelection { selection_id: 1 })
+        ));
 
-        runtime.bandits.update_all(&context, 10.0);
+        let mut metrics = StepMetrics::default();
+        metrics.extra.insert("reference_loss".to_string(), 100.0);
+        metrics.extra.insert("candidate_loss".to_string(), 0.0);
+        runtime
+            .try_post_step_report(&metrics)
+            .expect("hinted selection receives one guarded reward");
+        assert_eq!(runtime.last_credited_selection_id(), Some(1));
         let hinted_a = BTreeMap::from([("tile".to_string(), "a".to_string())]);
         assert_eq!(
             runtime
@@ -1024,6 +1624,7 @@ mod tests {
                 .map(String::as_str),
             Some("b")
         );
+        assert!(runtime.last_selection_witness().unwrap().decisions["tile"].sampling_applied);
     }
 
     #[test]
@@ -1044,27 +1645,280 @@ mod tests {
     }
 
     #[test]
-    fn bandit_overflow_rejects_the_whole_runtime_update() {
+    fn thompson_selection_rejects_non_finite_predictive_variance_atomically() {
         let mut runtime = sample_runtime();
-        runtime
-            .try_choose(vec![f64::MAX, 0.0, 0.0, 0.0])
-            .expect("finite context can be selected before posterior update");
-        let z_before = runtime.z.z().to_vec();
-        let temperature_before = runtime.temperature();
-
+        let initial_context = runtime.last_context().to_vec();
+        let initial_counts = runtime.bandit_observation_counts();
         let error = runtime
-            .try_post_step_report(&StepMetrics::default())
-            .expect_err("overflowing posterior update must fail closed");
+            .try_choose(vec![f64::MAX, 0.0, 0.0, 0.0])
+            .expect_err("non-finite predictive variance must fail closed");
         assert_eq!(
             error,
             BlackCatError::InvalidAdaptationState {
-                field: "bandit.posterior_state",
+                field: "bandit.selection_score",
             }
         );
-        assert_eq!(runtime.z.z(), z_before);
-        assert_eq!(runtime.temperature(), temperature_before);
-        assert_eq!(runtime.stats().steps, 0);
-        assert!(runtime.last_free_energy_report().is_none());
+        assert_eq!(runtime.last_context(), initial_context);
+        assert_eq!(runtime.bandit_observation_counts(), initial_counts);
+        assert_eq!(runtime.pending_selection_id(), None);
+        assert!(runtime.last_selection_witness().is_none());
+    }
+
+    #[test]
+    fn each_selection_receives_at_most_one_bandit_reward() {
+        let mut runtime = sample_runtime();
+        let context = vec![1.0, 0.0, 0.0, 0.0];
+        let initial_counts = runtime.bandit_observation_counts();
+
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("observation-only report remains supported");
+        assert_eq!(runtime.bandit_observation_counts(), initial_counts);
+        assert_eq!(runtime.last_credited_selection_id(), None);
+
+        runtime.try_choose(context).expect("bandit selection");
+        assert_eq!(runtime.pending_selection_id(), Some(1));
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("first reward credits the selection");
+        let credited_counts = runtime.bandit_observation_counts();
+        assert_eq!(runtime.pending_selection_id(), None);
+        assert_eq!(runtime.last_credited_selection_id(), Some(1));
+        assert_eq!(credited_counts["tile"].values().copied().sum::<u64>(), 1);
+
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("later observation has no pending bandit credit");
+        assert_eq!(runtime.bandit_observation_counts(), credited_counts);
+    }
+
+    #[test]
+    fn group_insertion_order_cannot_change_seeded_decisions() {
+        let mut left_groups = HashMap::new();
+        left_groups.insert(
+            "tile".to_string(),
+            vec!["small".to_string(), "large".to_string()],
+        );
+        left_groups.insert("wg".to_string(), vec!["128".to_string(), "256".to_string()]);
+        let mut right_groups = HashMap::new();
+        right_groups.insert("wg".to_string(), vec!["128".to_string(), "256".to_string()]);
+        right_groups.insert(
+            "tile".to_string(),
+            vec!["small".to_string(), "large".to_string()],
+        );
+        let mut left = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups {
+                groups: left_groups,
+            },
+            2,
+            SoftBanditMode::TS,
+            None,
+        );
+        let mut right = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups {
+                groups: right_groups,
+            },
+            2,
+            SoftBanditMode::TS,
+            None,
+        );
+
+        assert_eq!(
+            left.try_choose(vec![1.0, 0.25]).expect("left picks"),
+            right.try_choose(vec![1.0, 0.25]).expect("right picks")
+        );
+        assert_eq!(
+            left.last_selection_witness().unwrap().decisions,
+            right.last_selection_witness().unwrap().decisions
+        );
+    }
+
+    #[test]
+    fn duplicate_choice_domains_fail_before_rng_or_runtime_mutation() {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([(
+                "tile".to_string(),
+                vec!["same".to_string(), "same".to_string()],
+            )]),
+        };
+        let mut runtime =
+            BlackCatRuntime::new(ZMetaParams::default(), groups, 2, SoftBanditMode::TS, None);
+        let error = runtime
+            .try_choose(vec![1.0, 0.0])
+            .expect_err("duplicate domain must fail closed");
+        assert!(matches!(
+            error,
+            BlackCatError::InvalidConfig {
+                field: "choice_group.choice",
+                ..
+            }
+        ));
+        assert_eq!(runtime.pending_selection_id(), None);
+        assert!(runtime.last_selection_witness().is_none());
+    }
+
+    #[test]
+    fn empty_named_choice_group_is_not_silently_discarded() {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([("tile".to_string(), Vec::new())]),
+        };
+        let mut runtime =
+            BlackCatRuntime::new(ZMetaParams::default(), groups, 2, SoftBanditMode::TS, None);
+        let error = runtime
+            .try_choose(vec![1.0, 0.0])
+            .expect_err("empty named group must remain visible and invalid");
+        assert!(matches!(
+            error,
+            BlackCatError::InvalidConfig {
+                field: "choice_group.domain",
+                ..
+            }
+        ));
+        assert!(runtime.choice_domains().is_empty());
+    }
+
+    #[test]
+    fn guarded_constructor_bounds_posterior_allocation() {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([("tile".to_string(), vec!["a".to_string()])]),
+        };
+        let result = BlackCatRuntime::try_new(
+            ZMetaParams::default(),
+            groups.clone(),
+            BLACKCAT_MAX_FEATURE_DIM + 1,
+            SoftBanditMode::TS,
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(BlackCatError::InvalidConfig {
+                field: "feat_dim",
+                ..
+            })
+        ));
+
+        let mut compatibility = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            groups,
+            usize::MAX,
+            SoftBanditMode::TS,
+            None,
+        );
+        assert!(matches!(
+            compatibility.configuration_error(),
+            Some(BlackCatError::InvalidConfig {
+                field: "feat_dim",
+                ..
+            })
+        ));
+        assert!(matches!(
+            compatibility.try_choose(vec![0.0]),
+            Err(BlackCatError::InvalidConfig {
+                field: "feat_dim",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guarded_multi_bandit_bounds_aggregate_posterior_allocation() {
+        let choices = |prefix: &str| {
+            (0..33)
+                .map(|index| format!("{prefix}-{index}"))
+                .collect::<Vec<_>>()
+        };
+        let groups = ChoiceGroups {
+            groups: HashMap::from([
+                ("left".to_string(), choices("left")),
+                ("right".to_string(), choices("right")),
+            ]),
+        };
+        assert!(matches!(
+            MultiBandit::try_new_seeded(&groups, BLACKCAT_MAX_FEATURE_DIM, SoftBanditMode::TS, 7,),
+            Err(BlackCatError::InvalidConfig {
+                field: "posterior_cells",
+                ..
+            })
+        ));
+        assert!(
+            MultiBandit::new_seeded(&groups, BLACKCAT_MAX_FEATURE_DIM, SoftBanditMode::TS, 7,)
+                .choice_domains()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn guarded_multi_bandit_selection_has_an_explicit_reward_slot() {
+        let groups = ChoiceGroups {
+            groups: HashMap::from([
+                ("tile".to_string(), vec!["a".to_string(), "b".to_string()]),
+                ("radix".to_string(), vec!["2".to_string(), "4".to_string()]),
+            ]),
+        };
+        let mut bandits = MultiBandit::try_new_seeded(&groups, 2, SoftBanditMode::TS, 11)
+            .expect("valid aggregate bandit");
+        let (picks, decisions) = bandits
+            .try_select_all(&[1.0, 0.25])
+            .expect("guarded decision");
+        assert_eq!(picks.len(), 2);
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(bandits.selection_pending(), Ok(true));
+        assert!(matches!(
+            bandits.try_select_all(&[1.0, 0.25]),
+            Err(BlackCatError::InvalidAdaptationState {
+                field: "bandit.pending_selection",
+            })
+        ));
+        bandits
+            .try_abandon_all()
+            .expect("explicit aggregate abandonment");
+        assert_eq!(bandits.selection_pending(), Ok(false));
+
+        bandits
+            .try_select_all(&[1.0, 0.25])
+            .expect("fresh decision after abandonment");
+        bandits
+            .try_update_all(&[1.0, 0.25], 0.75)
+            .expect("one aggregate reward");
+        assert_eq!(bandits.selection_pending(), Ok(false));
+        assert_eq!(
+            bandits
+                .observation_counts()
+                .values()
+                .flat_map(|group| group.values())
+                .sum::<u64>(),
+            2
+        );
+    }
+
+    #[test]
+    fn context_builder_cannot_escape_the_runtime_feature_contract() {
+        let runtime = sample_runtime();
+        assert_eq!(
+            runtime
+                .try_make_context(2, 4, 8, 16, 0.5, &[], 0)
+                .expect("declared context"),
+            vec![1.0, 2.0, 4.0, 8.0]
+        );
+        assert!(matches!(
+            runtime.try_make_context(2, 4, 8, 16, 0.5, &[], usize::MAX),
+            Err(BlackCatError::ContextDimension {
+                expected: 4,
+                actual: usize::MAX,
+            })
+        ));
+        assert!(matches!(
+            runtime.try_make_context(2, 4, 8, 16, f64::NAN, &[], 0),
+            Err(BlackCatError::NonFinite {
+                field: "context.load",
+                ..
+            })
+        ));
+        assert!(runtime
+            .make_context(2, 4, 8, 16, 0.5, &[], usize::MAX)
+            .is_empty());
     }
 
     #[test]
@@ -1726,11 +2580,65 @@ pub mod zmeta {
 
 // =================== bandit.rs ===================
 pub mod bandit {
+    use std::collections::{BTreeMap, HashSet};
 
-    #[derive(Clone, Copy, Debug)]
+    use nalgebra::{DMatrix, DVector};
+    use rand::Rng;
+
+    const POSTERIOR_REGULARIZATION: f64 = 1.0;
+    const EXPLORATION_SCALE: f64 = 1.0;
+    /// Full-covariance posterior estimator used by TS and UCB decisions.
+    pub const POSTERIOR_ESTIMATOR: &str = "bayesian-linear-cholesky-v1";
+    /// Stable pseudo-random stream and Gaussian transform used by TS.
+    pub const THOMPSON_RNG_ALGORITHM: &str = "splitmix64-box-muller-v1";
+
+    /// Contextual decision policy used by [`SoftBandit`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+    #[serde(rename_all = "snake_case")]
     pub enum SoftBanditMode {
         TS,
         UCB,
+    }
+
+    impl SoftBanditMode {
+        pub const fn as_str(self) -> &'static str {
+            match self {
+                Self::TS => "thompson_sampling",
+                Self::UCB => "upper_confidence_bound",
+            }
+        }
+    }
+
+    /// Posterior projection used to explain one candidate decision.
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+    pub struct BanditArmWitness {
+        pub choice: String,
+        pub posterior_mean: f64,
+        pub predictive_stddev: f64,
+        pub decision_score: f64,
+        pub observations: u64,
+        pub hinted: bool,
+    }
+
+    /// Complete decision witness for one named choice group.
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+    pub struct BanditDecisionWitness {
+        pub mode: SoftBanditMode,
+        pub chosen: String,
+        pub decision_index: u64,
+        pub posterior_estimator: &'static str,
+        pub posterior_regularization: f64,
+        pub exploration_scale: f64,
+        pub sampling_applied: bool,
+        pub rng_algorithm: Option<&'static str>,
+        pub rng_stream_seed: Option<u64>,
+        pub arms: Vec<BanditArmWitness>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct PosteriorProjection {
+        mean: f64,
+        stddev: f64,
     }
 
     #[derive(Clone, Debug)]
@@ -1738,42 +2646,149 @@ pub mod bandit {
         dim: usize,
         a: Vec<f64>,
         b: Vec<f64>,
+        observations: u64,
     }
 
     impl LinTSArm {
+        /// Compatibility constructor. Invalid configuration creates an
+        /// unusable sentinel that every guarded operation rejects; prefer
+        /// [`Self::try_new`] when configuration is not compile-time fixed.
         pub fn new(dim: usize, lambda: f64) -> Self {
-            Self {
+            Self::try_new(dim, lambda).unwrap_or_else(|_| Self {
+                dim: 0,
+                a: Vec::new(),
+                b: Vec::new(),
+                observations: 0,
+            })
+        }
+
+        /// Guarded constructor for a regularized Bayesian linear arm.
+        pub fn try_new(dim: usize, lambda: f64) -> Result<Self, &'static str> {
+            if dim == 0 || dim > super::BLACKCAT_MAX_FEATURE_DIM {
+                return Err("bandit.posterior_shape");
+            }
+            if !lambda.is_finite() || lambda <= 0.0 {
+                return Err("bandit.posterior_regularization");
+            }
+            dim.checked_mul(dim).ok_or("bandit.posterior_shape")?;
+            Ok(Self {
                 dim,
                 a: eye_flat(dim, lambda),
                 b: vec![0.0; dim],
-            }
+                observations: 0,
+            })
         }
 
+        /// Compatibility sampler backed by thread entropy. Runtime decisions
+        /// use the owned, replayable stream in [`SoftBandit`] instead.
         pub fn sample_score(&self, x: &[f64]) -> f64 {
-            let mean = solve_spd_diag(&self.a, &self.b, self.dim);
-            dot(&mean, x)
+            let mut rng = rand::thread_rng();
+            match self.project(x) {
+                Ok(projection) => {
+                    let score = projection.mean
+                        + EXPLORATION_SCALE
+                            * projection.stddev
+                            * standard_normal_from_rand(&mut rng);
+                    if score.is_finite() {
+                        score
+                    } else {
+                        f64::NAN
+                    }
+                }
+                Err(_) => f64::NAN,
+            }
         }
 
         pub fn ucb_score(&self, x: &[f64], c: f64) -> f64 {
-            let ainv = inv_spd_diag(&self.a, self.dim);
-            let mean = matvec_flat(&ainv, &self.b, self.dim);
-            let variance = quad_form(&ainv, x);
-            dot(&mean, x) + c * variance.max(0.0).sqrt()
+            self.try_ucb_score(x, c).unwrap_or(f64::NAN)
+        }
+
+        /// Guarded UCB projection for direct Rust consumers.
+        pub fn try_ucb_score(&self, x: &[f64], c: f64) -> Result<f64, &'static str> {
+            if !c.is_finite() || c < 0.0 {
+                return Err("bandit.exploration_scale");
+            }
+            let projection = self.project(x)?;
+            let score = projection.mean + c * projection.stddev;
+            score
+                .is_finite()
+                .then_some(score)
+                .ok_or("bandit.selection_score")
         }
 
         pub fn update(&mut self, x: &[f64], reward: f64) {
-            rank1_add(&mut self.a, x, self.dim);
-            for (bi, xi) in self.b.iter_mut().zip(x) {
-                *bi += reward * xi;
-            }
+            let _ = self.try_update(x, reward);
         }
 
-        fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
+        /// Guarded full-covariance posterior update.
+        pub fn try_update(&mut self, x: &[f64], reward: f64) -> Result<(), &'static str> {
+            validate_context(x, self.dim)?;
+            if !reward.is_finite() {
+                return Err("bandit.reward");
+            }
+            let mut next = self.clone();
+            rank1_add(&mut next.a, x, self.dim);
+            for (bi, xi) in next.b.iter_mut().zip(x) {
+                *bi += reward * xi;
+            }
+            next.observations = next
+                .observations
+                .checked_add(1)
+                .ok_or("bandit.observation_count")?;
+            next.validate_state(self.dim)?;
+            *self = next;
+            Ok(())
+        }
+
+        /// Returns `(posterior_mean, predictive_stddev)` for one context.
+        pub fn try_posterior_projection(&self, x: &[f64]) -> Result<(f64, f64), &'static str> {
+            let projection = self.project(x)?;
+            Ok((projection.mean, projection.stddev))
+        }
+
+        /// Number of rewards committed to this arm.
+        pub fn observations(&self) -> u64 {
+            self.observations
+        }
+
+        fn project(&self, x: &[f64]) -> Result<PosteriorProjection, &'static str> {
+            validate_context(x, self.dim)?;
+            let matrix = self.precision_matrix()?;
+            let cholesky = matrix.cholesky().ok_or("bandit.posterior_spd")?;
+            let b = DVector::from_column_slice(&self.b);
+            let context = DVector::from_column_slice(x);
+            let mean_parameters = cholesky.solve(&b);
+            let covariance_context = cholesky.solve(&context);
+            if mean_parameters.iter().any(|value| !value.is_finite())
+                || covariance_context.iter().any(|value| !value.is_finite())
+            {
+                return Err("bandit.posterior_solution");
+            }
+            let mean = context.dot(&mean_parameters);
+            let variance = context.dot(&covariance_context);
+            if !mean.is_finite() || !variance.is_finite() {
+                return Err("bandit.selection_score");
+            }
+            let variance_tolerance = 64.0
+                * f64::EPSILON
+                * context.norm_squared().max(1.0)
+                * covariance_context.norm().max(1.0);
+            if variance < -variance_tolerance {
+                return Err("bandit.posterior_variance");
+            }
+            let stddev = variance.max(0.0).sqrt();
+            if !stddev.is_finite() {
+                return Err("bandit.selection_score");
+            }
+            Ok(PosteriorProjection { mean, stddev })
+        }
+
+        fn precision_matrix(&self) -> Result<DMatrix<f64>, &'static str> {
             let matrix_len = self
                 .dim
                 .checked_mul(self.dim)
                 .ok_or("bandit.posterior_shape")?;
-            if self.dim != context_dim || self.a.len() != matrix_len || self.b.len() != self.dim {
+            if self.dim == 0 || self.a.len() != matrix_len || self.b.len() != self.dim {
                 return Err("bandit.posterior_shape");
             }
             if self
@@ -1784,11 +2799,30 @@ pub mod bandit {
             {
                 return Err("bandit.posterior_state");
             }
-            for index in 0..self.dim {
-                if self.a[index * self.dim + index] <= 0.0 {
-                    return Err("bandit.posterior_diagonal");
+            let scale = self
+                .a
+                .iter()
+                .fold(1.0f64, |acc, value| acc.max(value.abs()));
+            let symmetry_tolerance = 64.0 * f64::EPSILON * scale;
+            for row in 0..self.dim {
+                for col in 0..row {
+                    if (self.a[row * self.dim + col] - self.a[col * self.dim + row]).abs()
+                        > symmetry_tolerance
+                    {
+                        return Err("bandit.posterior_symmetry");
+                    }
                 }
             }
+            Ok(DMatrix::from_row_slice(self.dim, self.dim, &self.a))
+        }
+
+        fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
+            if self.dim != context_dim {
+                return Err("bandit.posterior_shape");
+            }
+            self.precision_matrix()?
+                .cholesky()
+                .ok_or("bandit.posterior_spd")?;
             Ok(())
         }
     }
@@ -1799,58 +2833,217 @@ pub mod bandit {
         arms: Vec<LinTSArm>,
         last_index: usize,
         mode: SoftBanditMode,
+        rng: BanditRng,
+        rng_seed: u64,
+        decisions: u64,
+        selection_pending: bool,
     }
 
     impl SoftBandit {
         pub fn new(choices: Vec<String>, feat_dim: usize, mode: SoftBanditMode) -> Self {
+            Self::new_seeded(choices, feat_dim, mode, 0x424c_4143_4b43_4154)
+        }
+
+        pub fn new_seeded(
+            choices: Vec<String>,
+            feat_dim: usize,
+            mode: SoftBanditMode,
+            seed: u64,
+        ) -> Self {
+            Self::try_new_seeded(choices, feat_dim, mode, seed).unwrap_or_else(|_| Self {
+                choices: Vec::new(),
+                arms: Vec::new(),
+                last_index: 0,
+                mode,
+                rng: BanditRng::new(seed),
+                rng_seed: seed,
+                decisions: 0,
+                selection_pending: false,
+            })
+        }
+
+        /// Guarded constructor for one finite choice domain and posterior
+        /// stream.
+        pub fn try_new_seeded(
+            choices: Vec<String>,
+            feat_dim: usize,
+            mode: SoftBanditMode,
+            seed: u64,
+        ) -> Result<Self, &'static str> {
+            if feat_dim == 0 || feat_dim > super::BLACKCAT_MAX_FEATURE_DIM {
+                return Err("bandit.posterior_shape");
+            }
+            if choices.is_empty() || choices.len() > super::BLACKCAT_MAX_CHOICES_PER_GROUP {
+                return Err("bandit.choice_state");
+            }
+            let mut unique = HashSet::with_capacity(choices.len());
+            if choices.iter().any(|choice| {
+                choice.is_empty() || choice.trim() != choice || !unique.insert(choice)
+            }) {
+                return Err("bandit.choice_domain");
+            }
+            feat_dim
+                .checked_mul(feat_dim)
+                .and_then(|cells| cells.checked_mul(choices.len()))
+                .filter(|cells| *cells <= super::BLACKCAT_MAX_POSTERIOR_CELLS)
+                .ok_or("bandit.posterior_size")?;
             let arms = (0..choices.len())
-                .map(|_| LinTSArm::new(feat_dim, 1.0))
+                .map(|_| LinTSArm::new(feat_dim, POSTERIOR_REGULARIZATION))
                 .collect();
-            Self {
+            Ok(Self {
                 choices,
                 arms,
                 last_index: 0,
                 mode,
-            }
+                rng: BanditRng::new(seed),
+                rng_seed: seed,
+                decisions: 0,
+                selection_pending: false,
+            })
         }
 
         pub fn select(&mut self, x: &[f64]) -> String {
-            self.select_with_hint(x, None)
+            self.try_select(x)
+                .map(|decision| decision.chosen)
+                .unwrap_or_default()
         }
 
-        pub(super) fn select_with_hint(&mut self, x: &[f64], hint: Option<&str>) -> String {
-            let mut idx = hint
-                .and_then(|hint| self.choices.iter().position(|choice| choice == hint))
-                .unwrap_or(0);
-            let mut best = self.score(idx, x);
-            for (i, arm) in self.arms.iter().enumerate() {
+        /// Guarded selection without an external prior.
+        pub fn try_select(&mut self, x: &[f64]) -> Result<BanditDecisionWitness, &'static str> {
+            self.try_select_with_hint(x, None)
+        }
+
+        /// Guarded selection with an optional equivalent-posterior tie prior.
+        pub fn try_select_with_hint(
+            &mut self,
+            x: &[f64],
+            hint: Option<&str>,
+        ) -> Result<BanditDecisionWitness, &'static str> {
+            if hint.is_some_and(|value| !self.choices.iter().any(|choice| choice == value)) {
+                return Err("bandit.choice_hint");
+            }
+            let mut next = self.clone();
+            let decision = next.select_with_hint_in_place(x, hint)?;
+            *self = next;
+            Ok(decision)
+        }
+
+        fn select_with_hint_in_place(
+            &mut self,
+            x: &[f64],
+            hint: Option<&str>,
+        ) -> Result<BanditDecisionWitness, &'static str> {
+            self.validate_state(x.len())?;
+            if self.selection_pending {
+                return Err("bandit.pending_selection");
+            }
+            validate_context(x, self.arms[0].dim)?;
+            let hint_index =
+                hint.and_then(|value| self.choices.iter().position(|choice| choice == value));
+            let projections = self
+                .arms
+                .iter()
+                .map(|arm| arm.project(x))
+                .collect::<Result<Vec<_>, _>>()?;
+            let equivalent_hint_prior = hint_index.is_some()
+                && projections
+                    .windows(2)
+                    .all(|pair| projections_equivalent(pair[0], pair[1]));
+            let sampling_applied = self.mode == SoftBanditMode::TS && !equivalent_hint_prior;
+            let mut scores = Vec::with_capacity(self.arms.len());
+            for projection in &projections {
                 let score = match self.mode {
-                    SoftBanditMode::TS => arm.sample_score(x),
-                    SoftBanditMode::UCB => arm.ucb_score(x, 1.0),
+                    SoftBanditMode::TS if sampling_applied => {
+                        projection.mean
+                            + EXPLORATION_SCALE * projection.stddev * self.rng.standard_normal()
+                    }
+                    SoftBanditMode::TS => projection.mean,
+                    SoftBanditMode::UCB => projection.mean + EXPLORATION_SCALE * projection.stddev,
                 };
+                if !score.is_finite() {
+                    return Err("bandit.selection_score");
+                }
+                scores.push(score);
+            }
+            let mut idx = hint_index.unwrap_or(0);
+            let mut best = scores[idx];
+            for (index, score) in scores.iter().copied().enumerate() {
                 if score > best {
                     best = score;
-                    idx = i;
+                    idx = index;
                 }
             }
+            let decision_index = self
+                .decisions
+                .checked_add(1)
+                .ok_or("bandit.decision_count")?;
             self.last_index = idx;
-            self.choices[idx].clone()
-        }
-
-        fn score(&self, index: usize, x: &[f64]) -> f64 {
-            match self.mode {
-                SoftBanditMode::TS => self.arms[index].sample_score(x),
-                SoftBanditMode::UCB => self.arms[index].ucb_score(x, 1.0),
-            }
+            self.decisions = decision_index;
+            self.selection_pending = true;
+            Ok(BanditDecisionWitness {
+                mode: self.mode,
+                chosen: self.choices[idx].clone(),
+                decision_index,
+                posterior_estimator: POSTERIOR_ESTIMATOR,
+                posterior_regularization: POSTERIOR_REGULARIZATION,
+                exploration_scale: EXPLORATION_SCALE,
+                sampling_applied,
+                rng_algorithm: (self.mode == SoftBanditMode::TS).then_some(THOMPSON_RNG_ALGORITHM),
+                rng_stream_seed: (self.mode == SoftBanditMode::TS).then_some(self.rng_seed),
+                arms: self
+                    .choices
+                    .iter()
+                    .zip(self.arms.iter())
+                    .zip(projections)
+                    .zip(scores)
+                    .map(
+                        |(((choice, arm), projection), decision_score)| BanditArmWitness {
+                            choice: choice.clone(),
+                            posterior_mean: projection.mean,
+                            predictive_stddev: projection.stddev,
+                            decision_score,
+                            observations: arm.observations,
+                            hinted: hint == Some(choice.as_str()),
+                        },
+                    )
+                    .collect(),
+            })
         }
 
         pub fn update_last(&mut self, x: &[f64], reward: f64) {
-            if let Some(arm) = self.arms.get_mut(self.last_index) {
-                arm.update(x, reward);
-            }
+            let _ = self.try_update_last(x, reward);
         }
 
-        pub(super) fn choices(&self) -> &[String] {
+        /// Credits the pending decision exactly once.
+        pub fn try_update_last(&mut self, x: &[f64], reward: f64) -> Result<(), &'static str> {
+            if !self.selection_pending {
+                return Err("bandit.missing_selection");
+            }
+            let arm = self
+                .arms
+                .get_mut(self.last_index)
+                .ok_or("bandit.choice_state")?;
+            arm.try_update(x, reward)?;
+            self.selection_pending = false;
+            Ok(())
+        }
+
+        /// Releases a pending decision without posterior credit.
+        pub fn try_abandon_last_selection(&mut self) -> Result<(), &'static str> {
+            if !self.selection_pending {
+                return Err("bandit.missing_selection");
+            }
+            self.selection_pending = false;
+            Ok(())
+        }
+
+        /// Returns whether this bandit is awaiting reward or abandonment.
+        pub fn selection_pending(&self) -> bool {
+            self.selection_pending
+        }
+
+        /// Declared finite choice domain in stable decision order.
+        pub fn choices(&self) -> &[String] {
             &self.choices
         }
 
@@ -1860,6 +3053,18 @@ pub mod bandit {
                 || self.last_index >= self.choices.len()
             {
                 return Err("bandit.choice_state");
+            }
+            let mut unique = HashSet::with_capacity(self.choices.len());
+            if self
+                .choices
+                .iter()
+                .any(|choice| choice.trim().is_empty() || !unique.insert(choice.as_str()))
+            {
+                return Err("bandit.choice_domain");
+            }
+            self.rng.validate_state()?;
+            if self.selection_pending && self.decisions == 0 {
+                return Err("bandit.pending_state");
             }
             self.arms
                 .iter()
@@ -1871,15 +3076,25 @@ pub mod bandit {
             context: &[f64],
         ) -> Result<(), &'static str> {
             for arm in &self.arms {
-                let score = match self.mode {
-                    SoftBanditMode::TS => arm.sample_score(context),
-                    SoftBanditMode::UCB => arm.ucb_score(context, 1.0),
-                };
-                if !score.is_finite() {
+                let projection = arm.project(context)?;
+                let score = projection.mean + EXPLORATION_SCALE * projection.stddev;
+                if !score.is_finite()
+                    || !projection.mean.is_finite()
+                    || !projection.stddev.is_finite()
+                {
                     return Err("bandit.selection_score");
                 }
             }
             Ok(())
+        }
+
+        /// Stable observation count for every declared choice.
+        pub fn observation_counts(&self) -> BTreeMap<String, u64> {
+            self.choices
+                .iter()
+                .zip(self.arms.iter())
+                .map(|(choice, arm)| (choice.clone(), arm.observations))
+                .collect()
         }
     }
 
@@ -1891,22 +3106,6 @@ pub mod bandit {
         matrix
     }
 
-    fn matvec_flat(a: &[f64], x: &[f64], dim: usize) -> Vec<f64> {
-        let mut y = vec![0.0; dim];
-        for i in 0..dim {
-            let mut sum = 0.0;
-            for j in 0..dim {
-                sum += a[i * dim + j] * x[j];
-            }
-            y[i] = sum;
-        }
-        y
-    }
-
-    fn dot(a: &[f64], b: &[f64]) -> f64 {
-        a.iter().zip(b).map(|(x, y)| x * y).sum()
-    }
-
     fn rank1_add(a: &mut [f64], x: &[f64], dim: usize) {
         for i in 0..dim {
             for j in 0..dim {
@@ -1915,40 +3114,237 @@ pub mod bandit {
         }
     }
 
-    fn inv_spd_diag(a: &[f64], dim: usize) -> Vec<f64> {
-        let mut inv = vec![0.0; dim * dim];
-        for i in 0..dim {
-            let value = a[i * dim + i];
-            inv[i * dim + i] = if value.abs() > 1e-12 {
-                1.0 / value
-            } else {
-                1.0
-            };
+    fn validate_context(context: &[f64], expected: usize) -> Result<(), &'static str> {
+        if context.len() != expected {
+            return Err("bandit.context_shape");
         }
-        inv
+        if context.iter().any(|value| !value.is_finite()) {
+            return Err("bandit.context_state");
+        }
+        Ok(())
     }
 
-    fn solve_spd_diag(a: &[f64], b: &[f64], dim: usize) -> Vec<f64> {
-        let mut x = vec![0.0; dim];
-        for i in 0..dim {
-            let value = a[i * dim + i];
-            x[i] = if value.abs() > 1e-12 {
-                b[i] / value
-            } else {
-                b[i]
-            };
-        }
-        x
+    fn projections_equivalent(left: PosteriorProjection, right: PosteriorProjection) -> bool {
+        close_projection(left.mean, right.mean) && close_projection(left.stddev, right.stddev)
     }
 
-    fn quad_form(a: &[f64], x: &[f64]) -> f64 {
-        let mut sum = 0.0;
-        for i in 0..x.len() {
-            for j in 0..x.len() {
-                sum += x[i] * a[i * x.len() + j] * x[j];
+    fn close_projection(left: f64, right: f64) -> bool {
+        (left - right).abs() <= 32.0 * f64::EPSILON * left.abs().max(right.abs()).max(1.0)
+    }
+
+    fn standard_normal_from_rand(rng: &mut impl Rng) -> f64 {
+        let u1 = rng.gen::<f64>().max(f64::MIN_POSITIVE);
+        let u2 = rng.gen::<f64>();
+        (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+    }
+
+    #[derive(Clone)]
+    struct BanditRng {
+        state: u64,
+        spare_normal: Option<f64>,
+    }
+
+    impl BanditRng {
+        fn new(seed: u64) -> Self {
+            Self {
+                state: seed,
+                spare_normal: None,
             }
         }
-        sum
+
+        fn next_u64(&mut self) -> u64 {
+            self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut value = self.state;
+            value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            value ^ (value >> 31)
+        }
+
+        fn uniform_open01(&mut self) -> f64 {
+            const DENOMINATOR: f64 = (1_u64 << 53) as f64;
+            ((self.next_u64() >> 11) as f64 + 0.5) / DENOMINATOR
+        }
+
+        fn standard_normal(&mut self) -> f64 {
+            if let Some(value) = self.spare_normal.take() {
+                return value;
+            }
+            let u1 = self.uniform_open01();
+            let u2 = self.uniform_open01();
+            let radius = (-2.0 * u1.ln()).sqrt();
+            let angle = 2.0 * std::f64::consts::PI * u2;
+            self.spare_normal = Some(radius * angle.sin());
+            radius * angle.cos()
+        }
+
+        fn validate_state(&self) -> Result<(), &'static str> {
+            if self.spare_normal.is_some_and(|value| !value.is_finite()) {
+                return Err("bandit.rng_state");
+            }
+            Ok(())
+        }
+    }
+
+    pub(super) fn derive_group_seed(base_seed: u64, group: &str) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ base_seed.rotate_left(17);
+        for byte in group.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn posterior_projection_uses_full_covariance() {
+            let mut arm = LinTSArm::new(2, 1.0);
+            arm.try_update(&[1.0, 1.0], 2.0).expect("valid update");
+            let projection = arm.project(&[1.0, 0.0]).expect("valid posterior");
+
+            assert!((projection.mean - 2.0 / 3.0).abs() < 1.0e-12);
+            assert!((projection.stddev - (2.0_f64 / 3.0).sqrt()).abs() < 1.0e-12);
+        }
+
+        #[test]
+        fn seeded_thompson_sampling_is_replayable_and_explores() {
+            let choices = vec!["a".to_string(), "b".to_string()];
+            let mut left = SoftBandit::new_seeded(choices.clone(), 2, SoftBanditMode::TS, 17);
+            let mut right = SoftBandit::new_seeded(choices, 2, SoftBanditMode::TS, 17);
+            let mut sequence = Vec::new();
+            for _ in 0..32 {
+                let left_pick = left
+                    .try_select_with_hint(&[1.0, 0.5], None)
+                    .expect("left decision")
+                    .chosen;
+                let right_pick = right
+                    .try_select_with_hint(&[1.0, 0.5], None)
+                    .expect("right decision")
+                    .chosen;
+                assert_eq!(left_pick, right_pick);
+                sequence.push(left_pick);
+                left.try_abandon_last_selection()
+                    .expect("release left delayed reward slot");
+                right
+                    .try_abandon_last_selection()
+                    .expect("release right delayed reward slot");
+            }
+            assert!(sequence.iter().any(|choice| choice == "a"));
+            assert!(sequence.iter().any(|choice| choice == "b"));
+        }
+
+        #[test]
+        fn hint_resolves_only_an_equivalent_thompson_prior() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string()],
+                2,
+                SoftBanditMode::TS,
+                23,
+            );
+            let first = bandit
+                .try_select_with_hint(&[1.0, 0.0], Some("b"))
+                .expect("equivalent prior");
+            assert_eq!(first.chosen, "b");
+            assert!(!first.sampling_applied);
+            bandit
+                .try_update_last(&[1.0, 0.0], 100.0)
+                .expect("posterior update");
+
+            let second = bandit
+                .try_select_with_hint(&[1.0, 0.0], Some("a"))
+                .expect("learned posterior");
+            assert!(second.sampling_applied);
+            assert_eq!(second.chosen, "b");
+        }
+
+        #[test]
+        fn delayed_reward_slot_cannot_be_overwritten_or_credited_twice() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string()],
+                2,
+                SoftBanditMode::TS,
+                29,
+            );
+            assert_eq!(
+                bandit.try_update_last(&[1.0, 0.0], 1.0),
+                Err("bandit.missing_selection")
+            );
+            assert!(matches!(
+                bandit.try_select_with_hint(&[1.0, 0.0], Some("missing")),
+                Err("bandit.choice_hint")
+            ));
+            bandit
+                .try_select_with_hint(&[1.0, 0.0], None)
+                .expect("first selection");
+            assert!(matches!(
+                bandit.try_select_with_hint(&[1.0, 0.0], None),
+                Err("bandit.pending_selection")
+            ));
+            bandit
+                .try_update_last(&[1.0, 0.0], 1.0)
+                .expect("one reward");
+            assert_eq!(
+                bandit.try_update_last(&[1.0, 0.0], 1.0),
+                Err("bandit.missing_selection")
+            );
+        }
+
+        #[test]
+        fn decision_witness_identifies_the_maximum_sampled_score() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                2,
+                SoftBanditMode::TS,
+                31,
+            );
+            let decision = bandit
+                .try_select_with_hint(&[1.0, -0.25], None)
+                .expect("decision");
+            let winner = decision
+                .arms
+                .iter()
+                .max_by(|left, right| left.decision_score.total_cmp(&right.decision_score))
+                .expect("candidate");
+            assert_eq!(decision.chosen, winner.choice);
+            assert!(decision.sampling_applied);
+            assert_eq!(decision.posterior_estimator, POSTERIOR_ESTIMATOR);
+            assert_eq!(decision.rng_algorithm, Some(THOMPSON_RNG_ALGORITHM));
+            assert_eq!(decision.rng_stream_seed, Some(31));
+        }
+
+        #[test]
+        fn asymmetric_precision_state_is_rejected() {
+            let mut arm = LinTSArm::new(2, 1.0);
+            arm.a[1] = 0.25;
+            assert_eq!(arm.validate_state(2), Err("bandit.posterior_symmetry"));
+        }
+
+        #[test]
+        fn guarded_arm_constructor_rejects_invalid_configuration_without_panicking() {
+            assert!(matches!(
+                LinTSArm::try_new(0, 1.0),
+                Err("bandit.posterior_shape")
+            ));
+            assert!(matches!(
+                LinTSArm::try_new(2, f64::NAN),
+                Err("bandit.posterior_regularization")
+            ));
+            assert!(LinTSArm::new(0, -1.0).validate_state(1).is_err());
+            assert!(matches!(
+                SoftBandit::try_new_seeded(
+                    vec!["a".to_string()],
+                    super::super::BLACKCAT_MAX_FEATURE_DIM + 1,
+                    SoftBanditMode::TS,
+                    1,
+                ),
+                Err("bandit.posterior_shape")
+            ));
+            let mut compatibility =
+                SoftBandit::new_seeded(vec!["a".to_string()], usize::MAX, SoftBanditMode::TS, 1);
+            assert!(compatibility.select(&[0.0]).is_empty());
+        }
     }
 }
 
@@ -1982,13 +3378,13 @@ pub mod rewrite {
     impl HeurStore {
         pub fn new(custom: Option<String>) -> Self {
             let path = custom.map(PathBuf::from).unwrap_or(default_path());
-            if let Some(dir) = path.parent() {
-                let _ = fs::create_dir_all(dir);
-            }
             Self { path }
         }
 
         pub fn append(&self, rule_text: &str, info: &HashMap<String, f64>) {
+            if let Some(dir) = self.path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
             if let Ok(mut file) = OpenOptions::new()
                 .create(true)
                 .append(true)

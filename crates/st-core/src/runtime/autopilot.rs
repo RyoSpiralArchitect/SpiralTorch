@@ -60,7 +60,8 @@ const BASE_CONTEXT_DIM: usize = AUTOPILOT_BASE_CONTEXT_FEATURES.len();
 pub enum AutoMode {
     /// Fully automatic (default). ENV/CLI are considered hints only.
     Auto,
-    /// Respect persisted choices as priors; still allow the runtime to adjust.
+    /// Prefer persisted choices only across equivalent posterior projections;
+    /// otherwise the runtime's TS or UCB decision remains authoritative.
     Hint,
     /// Disabled. No dynamic tuning.
     Off,
@@ -157,6 +158,8 @@ pub enum AutopilotError {
     InvalidKnobChoice { id: String, choice: String },
     #[error("Autopilot report requires one successful suggestion")]
     MissingSuggestion,
+    #[error("Autopilot already has a suggestion awaiting reward or abandonment")]
+    PendingSuggestion,
     #[error("could not read or write Autopilot profile '{}': {source}", path.display())]
     ProfileIo {
         path: PathBuf,
@@ -372,6 +375,12 @@ impl Autopilot {
                 field: "device_caps",
                 detail: error.to_string(),
             })?;
+        if let Some(error) = runtime.configuration_error() {
+            return Err(AutopilotError::InvalidConfig {
+                field: "blackcat",
+                detail: error.to_string(),
+            });
+        }
         if cfg.feat_dim == 0 {
             return Err(AutopilotError::InvalidConfig {
                 field: "feat_dim",
@@ -558,10 +567,15 @@ impl Autopilot {
         &mut self,
         context: Vec<f64>,
     ) -> Result<&HashMap<String, String>, AutopilotError> {
-        self.suggestion_ready = false;
-        self.picks.clear();
         if self.mode == AutoMode::Off {
+            self.suggestion_ready = false;
+            self.picks.clear();
             return Ok(&self.picks);
+        }
+        if self.suggestion_ready {
+            let error = AutopilotError::PendingSuggestion;
+            publish_rejection("suggest", &error);
+            return Err(error);
         }
         let context_snapshot = global_registry()
             .event_bus()
@@ -582,14 +596,20 @@ impl Autopilot {
         } else {
             BTreeMap::new()
         };
-        let picks = self
+        let runtime_picks = self
             .runtime
             .try_choose_with_hints(context, &hints)
             .map_err(AutopilotError::from)
             .inspect_err(|error| publish_rejection("suggest", error))?;
-        self.picks = self
-            .resolve_picks(picks)
-            .inspect_err(|error| publish_rejection("suggest", error))?;
+        let picks = match self.resolve_picks(runtime_picks) {
+            Ok(picks) => picks,
+            Err(error) => {
+                let _ = self.runtime.abandon_pending_selection();
+                publish_rejection("suggest", &error);
+                return Err(error);
+            }
+        };
+        self.picks = picks;
         self.suggestion_ready = true;
         debug!(picks = ?self.picks, "autopilot suggestions updated");
         let bus = global_registry().event_bus();
@@ -606,6 +626,7 @@ impl Autopilot {
                     "context_features": self.context_features(),
                     "hints": hints,
                     "picks": ordered_map(&self.picks),
+                    "bandit_selection": self.runtime.last_selection_witness(),
                     "profile_contract": AUTOPILOT_PROFILE_CONTRACT,
                     "profile_schema_version": AUTOPILOT_PROFILE_SCHEMA_VERSION,
                 }),
@@ -620,10 +641,23 @@ impl Autopilot {
     pub fn suggest(&mut self, context: Vec<f64>) -> &HashMap<String, String> {
         if let Err(error) = self.try_suggest(context) {
             warn!(error = %error, "autopilot suggestion rejected");
-            self.picks.clear();
-            self.suggestion_ready = false;
+            if !self.suggestion_ready {
+                self.picks.clear();
+            }
         }
         &self.picks
+    }
+
+    /// Abandons a suggestion that was not executed, preserving posterior
+    /// integrity while allowing the next step to request another decision.
+    pub fn abandon_suggestion(&mut self) -> Option<u64> {
+        if !self.suggestion_ready {
+            return None;
+        }
+        let selection_id = self.runtime.abandon_pending_selection()?;
+        self.suggestion_ready = false;
+        self.picks.clear();
+        Some(selection_id)
     }
 
     /// Guarded report path. One successful suggestion receives at most one
@@ -1665,6 +1699,43 @@ mod tests {
     }
 
     #[test]
+    fn pending_suggestion_requires_report_or_explicit_abandonment() {
+        let temp = tempdir().expect("temporary profile directory");
+        let mut autopilot = configured_autopilot(temp.path());
+        let context = autopilot
+            .try_build_context(8, 128, 64, 0.5, &[])
+            .expect("valid context");
+        let first_picks = autopilot
+            .try_suggest(context.clone())
+            .expect("first suggestion")
+            .clone();
+        let first_selection = autopilot
+            .runtime()
+            .pending_selection_id()
+            .expect("pending BlackCat selection");
+
+        assert!(matches!(
+            autopilot.try_suggest(context.clone()),
+            Err(AutopilotError::PendingSuggestion)
+        ));
+        assert_eq!(&autopilot.picks, &first_picks);
+        assert_eq!(
+            autopilot.runtime().pending_selection_id(),
+            Some(first_selection)
+        );
+
+        assert_eq!(autopilot.abandon_suggestion(), Some(first_selection));
+        assert!(autopilot.picks.is_empty());
+        autopilot
+            .try_suggest(context)
+            .expect("new suggestion after explicit abandonment");
+        assert_eq!(
+            autopilot.runtime().pending_selection_id(),
+            Some(first_selection + 1)
+        );
+    }
+
+    #[test]
     fn context_is_named_stable_and_strict() {
         let temp = tempdir().expect("temporary profile directory");
         let autopilot = Autopilot::try_new_with_profile_dir(
@@ -1836,6 +1907,32 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, AutopilotError::InvalidConfig { .. }));
+    }
+
+    #[test]
+    fn constructor_rejects_a_fail_closed_blackcat_runtime() {
+        let temp = tempdir().expect("temporary profile directory");
+        let runtime = demo_runtime(
+            BASE_CONTEXT_DIM,
+            HashMap::from([("wg".to_string(), vec!["128".to_string(), "128".to_string()])]),
+        );
+        let result = Autopilot::try_new_with_profile_dir(
+            DeviceCaps::wgpu(32, true, 256),
+            AutoConfig::default(),
+            runtime,
+            temp.path(),
+        );
+        let error = match result {
+            Ok(_) => panic!("invalid BlackCat configuration must not be hidden"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            AutopilotError::InvalidConfig {
+                field: "blackcat",
+                ..
+            }
+        ));
     }
 
     #[test]

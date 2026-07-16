@@ -5768,6 +5768,42 @@ impl ModuleTrainer {
         I: IntoIterator,
         I::Item: IntoBatch,
     {
+        let result = self.train_epoch_inner(module, loss, batches, schedule);
+        if let Err(error) = &result {
+            let abandoned_selection_id = self
+                .autopilot
+                .as_mut()
+                .and_then(Autopilot::abandon_suggestion);
+            if let Some(selection_id) = abandoned_selection_id {
+                let bus = global_registry().event_bus();
+                if bus.has_listeners("TrainerAutopilotRejected") {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerAutopilotRejected",
+                        serde_json::json!({
+                            "stage": "epoch_error",
+                            "error": error.to_string(),
+                            "abandoned_selection_id": selection_id,
+                        }),
+                    ));
+                }
+            }
+        }
+        result
+    }
+
+    fn train_epoch_inner<M, L, I>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        batches: I,
+        schedule: &RoundtableSchedule,
+    ) -> PureResult<EpochStats>
+    where
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
+        I: IntoIterator,
+        I::Item: IntoBatch,
+    {
         self.epoch = self.epoch.saturating_add(1);
         let epoch = self.epoch;
         global_registry()
@@ -5828,6 +5864,7 @@ impl ModuleTrainer {
             }
             let mut step_schedule = (*schedule).clone();
             let mut autopilot_picks = None;
+            let mut autopilot_selection_witness = None;
             let (input, target) = batch.into_batch()?;
             validate_trainer_tensor("trainer_batch_input", &input)?;
             validate_trainer_tensor("trainer_batch_target", &target)?;
@@ -5858,6 +5895,7 @@ impl ModuleTrainer {
                     })?
                     .clone();
                 if let Err(error) = step_schedule.try_apply_knob_overrides(&picks) {
+                    let abandoned_selection_id = ap.abandon_suggestion();
                     let bus = global_registry().event_bus();
                     if bus.has_listeners("TrainerAutopilotRejected") {
                         bus.publish(&PluginEvent::custom(
@@ -5866,6 +5904,7 @@ impl ModuleTrainer {
                                 "stage": "schedule_override",
                                 "error": error.to_string(),
                                 "picks": picks,
+                                "abandoned_selection_id": abandoned_selection_id,
                             }),
                         ));
                     }
@@ -5873,6 +5912,7 @@ impl ModuleTrainer {
                         label: "autopilot schedule override",
                     });
                 }
+                autopilot_selection_witness = ap.runtime().last_selection_witness().cloned();
                 autopilot_picks = Some(picks);
             }
             let _backend_policy_guard = push_backend_policy(backend_policy);
@@ -6908,6 +6948,7 @@ impl ModuleTrainer {
                     "free_energy": free_energy_report.as_ref(),
                     "autopilot": autopilot_picks.as_ref().map(|picks| serde_json::json!({
                         "picks": picks,
+                        "selection": autopilot_selection_witness.as_ref(),
                         "executed_choices": {
                             "above": {
                                 "wg": step_schedule.above().choice.wg,
@@ -8082,6 +8123,34 @@ mod tests {
         }
     }
 
+    struct FailingForwardModule;
+
+    impl Module for FailingForwardModule {
+        fn forward(&self, _input: &Tensor) -> PureResult<Tensor> {
+            Err(TensorError::InvalidValue {
+                label: "intentional forward failure",
+            })
+        }
+
+        fn backward(&mut self, _input: &Tensor, _grad_output: &Tensor) -> PureResult<Tensor> {
+            unreachable!("forward failure prevents backward execution")
+        }
+
+        fn visit_parameters(
+            &self,
+            _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+    }
+
     struct TrainingFlagModule {
         training: bool,
     }
@@ -9217,12 +9286,110 @@ mod tests {
         });
         let execution = execution.expect("Autopilot TrainerStep execution witness");
         assert_eq!(
+            execution["autopilot"]["selection"]["contract"],
+            "spiraltorch.blackcat.contextual-bandit"
+        );
+        assert_eq!(
+            execution["autopilot"]["selection"]["decisions"]["here.tile"]["chosen"],
+            "42"
+        );
+        assert_eq!(
             execution["autopilot"]["executed_choices"]["here"]["tile"],
             42
         );
         assert_eq!(
             execution["autopilot"]["executed_choices"]["beneath"]["fft_radix"],
             2
+        );
+    }
+
+    #[test]
+    fn train_epoch_abandons_autopilot_selection_when_the_step_fails() {
+        let profile_dir = tempfile::tempdir().expect("temporary Autopilot profile directory");
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let groups = ChoiceGroups {
+            groups: HashMap::from([
+                ("wg".to_string(), vec!["64".to_string()]),
+                ("here.tile".to_string(), vec!["42".to_string()]),
+                ("beneath.fftradix".to_string(), vec!["2".to_string()]),
+            ]),
+        };
+        let runtime =
+            BlackCatRuntime::try_new(ZMetaParams::default(), groups, 8, SoftBanditMode::TS, None)
+                .expect("valid BlackCat contract");
+        let autopilot = Autopilot::try_new_with_profile_dir(
+            caps,
+            AutoConfig {
+                feat_dim: 8,
+                mode: AutoMode::Auto,
+                knobs: vec![
+                    KnobSpec {
+                        id: "wg".to_string(),
+                        domain: vec!["64".to_string()],
+                        default_idx: 0,
+                    },
+                    KnobSpec {
+                        id: "here.tile".to_string(),
+                        domain: vec!["42".to_string()],
+                        default_idx: 0,
+                    },
+                    KnobSpec {
+                        id: "beneath.fftradix".to_string(),
+                        domain: vec!["2".to_string()],
+                        default_idx: 0,
+                    },
+                ],
+                extra_features: Vec::new(),
+            },
+            runtime,
+            profile_dir.path(),
+        )
+        .expect("valid Autopilot contract");
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_autopilot(autopilot);
+        let schedule = trainer.roundtable(8, 16, RoundtableConfig::default());
+        let input = Tensor::from_vec(8, 16, vec![0.25; 8 * 16]).unwrap();
+        let target = Tensor::from_vec(8, 16, vec![0.0; 8 * 16]).unwrap();
+
+        let mut failing_module = FailingForwardModule;
+        let mut loss = MeanSquaredError::new();
+        assert!(trainer
+            .train_epoch(
+                &mut failing_module,
+                &mut loss,
+                vec![(input.clone(), target.clone())],
+                &schedule,
+            )
+            .is_err());
+
+        let autopilot = trainer.autopilot.as_ref().expect("Autopilot retained");
+        let abandoned_selection = autopilot
+            .runtime()
+            .last_selection_witness()
+            .expect("failed step selection witness")
+            .selection_id;
+        assert_eq!(autopilot.runtime().pending_selection_id(), None);
+        assert_eq!(autopilot.runtime().last_credited_selection_id(), None);
+        assert!(autopilot
+            .runtime()
+            .bandit_observation_counts()
+            .values()
+            .flat_map(|group| group.values())
+            .all(|observations| *observations == 0));
+
+        let mut module = Linear::new("autopilot_retry_after_failure", 16, 16).unwrap();
+        trainer.prepare(&mut module).unwrap();
+        trainer
+            .train_epoch(&mut module, &mut loss, vec![(input, target)], &schedule)
+            .expect("next epoch can acquire and credit a fresh selection");
+        let runtime = trainer
+            .autopilot
+            .as_ref()
+            .expect("Autopilot retained")
+            .runtime();
+        assert_eq!(runtime.pending_selection_id(), None);
+        assert_eq!(
+            runtime.last_credited_selection_id(),
+            Some(abandoned_selection + 1)
         );
     }
 
