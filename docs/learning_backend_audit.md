@@ -3612,6 +3612,32 @@ before/after improvement. The separate `roundtable_loss_quality` remains a
 bounded local consensus signal and is trace-labelled as such, not presented as
 a second BlackCat reward.
 
+Soft heuristic adoption is now another Rust-owned contract rather than a
+positive-only trainer shortcut. `st-core::heur::evidence` is the canonical
+guarded Wilson evaluator. `ModuleTrainer` contributes one Bernoulli observation
+per executed step for the exact canonical Above-plan script: positive
+free-energy utility is a success and every other valid utility is a failure.
+BlackCat accumulates evidence per stable SHA-256 rule identity, enforces a
+configurable minimum trial count, and emits a versioned
+`SoftHeuristicAdoptionReport` with the complete interval and threshold decision.
+Evidence continues accumulating after a rule is adopted, while persistence stays
+append-once; a later confidence drop is visible but does not silently invent a
+retraction policy.
+The heuristic store honours `SPIRAL_HEUR_FILE` or
+`~/.spiraltorch/heur.kdsl`, detects an existing rule across process restarts,
+serializes concurrent read-modify-write transactions across processes, and
+replaces the complete bounded snapshot atomically with file and directory sync.
+A default-path store imports the former
+`~/.spiraltorch/heur/heur.kdsl` snapshot ahead of current canonical entries,
+records its source, cumulative byte cursor, and prefix SHA-256 in a replay-safe
+migration marker, and retains the source file. A later append-only update inserts
+only the verified new suffix after the previous marker; source shrinkage or a
+rewritten prefix fails closed rather than duplicating history.
+A typed persistence failure remains visible and retryable; it never marks the
+rule as adopted. `TrainerStep` carries the same report plus numeric evidence
+spotlights, while `ModuleTrainer::blackcat_heuristic_adoption_report()` exposes
+the retained Rust witness directly.
+
 Python's `zspace_free_energy(...)` and WASM's `zspaceFreeEnergy*` functions are
 thin clients: request parsing, validation, normalisation, heuristics, and
 reduction remain in Rust. This is control-plane scalar work, so forcing it onto

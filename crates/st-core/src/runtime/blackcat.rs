@@ -7,14 +7,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use bandit::{BanditDecisionWitness, SoftBandit, SoftBanditMode};
-use rewrite::HeurStore;
+use rewrite::{HeurStore, HeurStoreDisposition, HeurStoreReceipt};
 use spiral_config::determinism;
 use st_frac::FracBackend;
 use thiserror::Error;
 use tracing::{debug, instrument, warn};
-use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams, ZMetaProposalWitness, ZMetaUpdateWitness};
 
+use crate::heur::evidence::{try_wilson_interval, WilsonInterval};
 use crate::heur::free_energy::{
     evaluate_free_energy, BandEnergy, FreeEnergyConfig, FreeEnergyError, FreeEnergyObservation,
     FreeEnergyReport, FreeEnergyRequest,
@@ -36,6 +36,39 @@ pub const BLACKCAT_MAX_CHOICES_PER_GROUP: usize = 256;
 pub const BLACKCAT_MAX_POSTERIOR_CELLS: usize = 4_194_304;
 /// Maximum accepted ZMeta search dimension for guarded construction.
 pub const BLACKCAT_MAX_ZMETA_DIM: usize = 4096;
+/// Stable contract for evidence-backed heuristic adoption.
+pub const BLACKCAT_HEURISTIC_ADOPTION_CONTRACT: &str =
+    "spiraltorch.blackcat.soft_heuristic_adoption";
+pub const BLACKCAT_HEURISTIC_ADOPTION_CONTRACT_VERSION: u32 = 1;
+pub const BLACKCAT_MAX_TRACKED_HEURISTICS: usize = 1024;
+pub const BLACKCAT_MAX_HEURISTIC_RULE_BYTES: usize = 16 * 1024;
+
+fn canonical_heuristic_rule_text(rule_text: &str) -> Result<&str, &'static str> {
+    let canonical = rule_text.trim();
+    if canonical.is_empty() {
+        return Err("heuristic rule must not be empty");
+    }
+    if canonical.len() > BLACKCAT_MAX_HEURISTIC_RULE_BYTES {
+        return Err("heuristic rule exceeds the guarded byte limit");
+    }
+    if canonical
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r' | '\0'))
+    {
+        return Err("heuristic rule must be one line and contain no NUL byte");
+    }
+    Ok(canonical)
+}
+
+fn canonical_heuristic_rule(rule_text: &str) -> Result<(String, String), BlackCatError> {
+    let canonical = canonical_heuristic_rule_text(rule_text).map_err(|detail| {
+        BlackCatError::InvalidConfig {
+            field: "heuristic_adoption.rule",
+            detail: detail.to_string(),
+        }
+    })?;
+    Ok((canonical.to_string(), rewrite::rule_id(canonical)))
+}
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum BlackCatError {
@@ -61,6 +94,10 @@ pub enum BlackCatError {
     InvalidConfig { field: &'static str, detail: String },
     #[error(transparent)]
     ZMeta(#[from] zmeta::ZMetaError),
+    #[error(transparent)]
+    Wilson(#[from] crate::heur::evidence::WilsonError),
+    #[error(transparent)]
+    HeuristicStore(#[from] rewrite::HeurStoreError),
 }
 
 /// Complete, replay-oriented witness for one contextual bandit selection.
@@ -74,6 +111,111 @@ pub struct BlackCatSelectionWitness {
     pub hints: BTreeMap<String, String>,
     pub picks: BTreeMap<String, String>,
     pub decisions: BTreeMap<String, BanditDecisionWitness>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct SoftHeuristicAdoptionConfig {
+    pub minimum_trials: u64,
+    pub baseline_probability: f64,
+    pub confidence_z: f64,
+}
+
+impl Default for SoftHeuristicAdoptionConfig {
+    fn default() -> Self {
+        Self {
+            minimum_trials: 8,
+            baseline_probability: 0.5,
+            confidence_z: 1.96,
+        }
+    }
+}
+
+impl SoftHeuristicAdoptionConfig {
+    pub fn validate(&self) -> Result<(), BlackCatError> {
+        if self.minimum_trials == 0
+            || self.minimum_trials > crate::heur::evidence::WILSON_MAX_EXACT_TRIALS
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.minimum_trials",
+                detail: format!(
+                    "expected 1..={}, got {}",
+                    crate::heur::evidence::WILSON_MAX_EXACT_TRIALS,
+                    self.minimum_trials
+                ),
+            });
+        }
+        if !self.baseline_probability.is_finite()
+            || !(0.0..1.0).contains(&self.baseline_probability)
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.baseline_probability",
+                detail: format!(
+                    "expected a finite probability in [0, 1), got {}",
+                    self.baseline_probability
+                ),
+            });
+        }
+        if !self.confidence_z.is_finite() || self.confidence_z <= 0.0 {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.confidence_z",
+                detail: format!(
+                    "expected a finite positive confidence z, got {}",
+                    self.confidence_z
+                ),
+            });
+        }
+        let _ = try_wilson_interval(0, 1, self.confidence_z)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SoftHeuristicAdoptionDecision {
+    Collecting,
+    BelowThreshold,
+    Adopted,
+    AlreadyPersisted,
+    AlreadyAdopted,
+    PersistenceFailed,
+}
+
+impl SoftHeuristicAdoptionDecision {
+    pub fn is_persisted(self) -> bool {
+        matches!(
+            self,
+            Self::Adopted | Self::AlreadyPersisted | Self::AlreadyAdopted
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct SoftHeuristicAdoptionReport {
+    pub contract: &'static str,
+    pub contract_version: u32,
+    pub rule_id: String,
+    pub rule: String,
+    pub interval: WilsonInterval,
+    pub minimum_trials: u64,
+    pub baseline_probability: f64,
+    pub eligible: bool,
+    pub decision: SoftHeuristicAdoptionDecision,
+    pub persistence: Option<HeurStoreReceipt>,
+    pub persistence_error: Option<rewrite::HeurStoreError>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SoftHeuristicEvidenceMode {
+    StreamingStep,
+    CumulativeSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SoftHeuristicEvidenceState {
+    successes: u64,
+    trials: u64,
+    config: SoftHeuristicAdoptionConfig,
+    mode: SoftHeuristicEvidenceMode,
 }
 
 /// Metrics reported by a training loop back into the runtime.
@@ -413,6 +555,10 @@ pub struct BlackCatRuntime {
     bandits: MultiBandit,
     heur: HeurStore,
     reward: RewardCfg,
+    heuristic_adoption: SoftHeuristicAdoptionConfig,
+    heuristic_evidence: BTreeMap<String, SoftHeuristicEvidenceState>,
+    adopted_heuristics: HashSet<String>,
+    last_heuristic_adoption: Option<SoftHeuristicAdoptionReport>,
     configuration_error: Option<BlackCatError>,
     context_dim: usize,
     last_base_context: Vec<f64>,
@@ -477,13 +623,23 @@ impl BlackCatRuntime {
                 arms: BTreeMap::new(),
             }
         };
-        let heur = HeurStore::new(heur_path);
+        let heur = match HeurStore::try_new(heur_path) {
+            Ok(store) => store,
+            Err(error) => {
+                configuration_error.get_or_insert_with(|| error.into());
+                HeurStore::new(None)
+            }
+        };
         let stats_alpha = 0.2;
         let runtime = Self {
             z: ZMetaES::new(params),
             bandits,
             heur,
             reward: RewardCfg::default(),
+            heuristic_adoption: SoftHeuristicAdoptionConfig::default(),
+            heuristic_evidence: BTreeMap::new(),
+            adopted_heuristics: HashSet::new(),
+            last_heuristic_adoption: None,
             configuration_error,
             context_dim: effective_feat_dim,
             last_base_context: vec![0.0; effective_feat_dim],
@@ -1123,7 +1279,265 @@ impl BlackCatRuntime {
         self.heur.path()
     }
 
-    /// Try to adopt a new soft heuristic guarded by the Wilson lower bound.
+    /// Returns the startup witness when the former default store was imported.
+    pub fn heuristic_store_startup_legacy_import(&self) -> Option<&rewrite::HeurStoreLegacyImport> {
+        self.heur.startup_legacy_import()
+    }
+
+    pub fn heuristic_adoption_config(&self) -> SoftHeuristicAdoptionConfig {
+        self.heuristic_adoption
+    }
+
+    /// Reconfigure evidence thresholds before the first heuristic observation.
+    pub fn try_set_heuristic_adoption_config(
+        &mut self,
+        config: SoftHeuristicAdoptionConfig,
+    ) -> Result<(), BlackCatError> {
+        config.validate()?;
+        if config == self.heuristic_adoption {
+            return Ok(());
+        }
+        if !self.heuristic_evidence.is_empty() || !self.adopted_heuristics.is_empty() {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption",
+                detail: "evidence thresholds are locked after the first observation; construct a new BlackCatRuntime for a new evidence epoch"
+                    .to_string(),
+            });
+        }
+        self.heuristic_adoption = config;
+        Ok(())
+    }
+
+    pub fn last_heuristic_adoption_report(&self) -> Option<&SoftHeuristicAdoptionReport> {
+        self.last_heuristic_adoption.as_ref()
+    }
+
+    pub fn tracked_heuristic_count(&self) -> usize {
+        self.heuristic_evidence.len()
+    }
+
+    /// Add one Bernoulli observation to a rule's evidence and persist it once
+    /// its Wilson lower bound clears the configured baseline.
+    pub fn try_observe_soft(
+        &mut self,
+        rule_text: &str,
+        success: bool,
+    ) -> Result<SoftHeuristicAdoptionReport, BlackCatError> {
+        self.validate_configuration()?;
+        self.heuristic_adoption.validate()?;
+        let (rule, rule_id) = canonical_heuristic_rule(rule_text)?;
+        let already_adopted = self.adopted_heuristics.contains(&rule_id);
+        let mut next_evidence = self.heuristic_evidence.clone();
+        if !next_evidence.contains_key(&rule_id)
+            && next_evidence.len() >= BLACKCAT_MAX_TRACKED_HEURISTICS
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.rules",
+                detail: format!(
+                    "at most {BLACKCAT_MAX_TRACKED_HEURISTICS} distinct rules may be tracked"
+                ),
+            });
+        }
+        let evidence = next_evidence
+            .entry(rule_id.clone())
+            .or_insert(SoftHeuristicEvidenceState {
+                successes: 0,
+                trials: 0,
+                config: self.heuristic_adoption,
+                mode: SoftHeuristicEvidenceMode::StreamingStep,
+            });
+        if evidence.mode != SoftHeuristicEvidenceMode::StreamingStep
+            || evidence.config != self.heuristic_adoption
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.evidence_policy",
+                detail: "a rule cannot mix streaming observations with cumulative snapshots or change thresholds within one evidence epoch"
+                    .to_string(),
+            });
+        }
+        evidence.trials =
+            evidence
+                .trials
+                .checked_add(1)
+                .ok_or(BlackCatError::InvalidAdaptationState {
+                    field: "heuristic_adoption.trials",
+                })?;
+        if success {
+            evidence.successes =
+                evidence
+                    .successes
+                    .checked_add(1)
+                    .ok_or(BlackCatError::InvalidAdaptationState {
+                        field: "heuristic_adoption.successes",
+                    })?;
+        }
+        let interval = try_wilson_interval(
+            evidence.successes,
+            evidence.trials,
+            self.heuristic_adoption.confidence_z,
+        )?;
+        let enough_trials = interval.trials >= self.heuristic_adoption.minimum_trials;
+        let eligible =
+            enough_trials && interval.lower > self.heuristic_adoption.baseline_probability;
+        let mut next_adopted = self.adopted_heuristics.clone();
+        let (decision, persistence, persistence_error) = if already_adopted {
+            (SoftHeuristicAdoptionDecision::AlreadyAdopted, None, None)
+        } else if !enough_trials {
+            (SoftHeuristicAdoptionDecision::Collecting, None, None)
+        } else if !eligible {
+            (SoftHeuristicAdoptionDecision::BelowThreshold, None, None)
+        } else {
+            match self.persist_soft_heuristic(&rule, &rule_id, interval, self.heuristic_adoption) {
+                Ok(receipt) => {
+                    next_adopted.insert(rule_id.clone());
+                    let decision = match receipt.disposition {
+                        HeurStoreDisposition::Appended => SoftHeuristicAdoptionDecision::Adopted,
+                        HeurStoreDisposition::AlreadyPresent => {
+                            SoftHeuristicAdoptionDecision::AlreadyPersisted
+                        }
+                    };
+                    (decision, Some(receipt), None)
+                }
+                Err(error) => (
+                    SoftHeuristicAdoptionDecision::PersistenceFailed,
+                    None,
+                    Some(error),
+                ),
+            }
+        };
+        let report = self.soft_adoption_report(
+            rule,
+            rule_id,
+            interval,
+            self.heuristic_adoption,
+            eligible,
+            decision,
+            persistence,
+            persistence_error,
+        );
+        self.heuristic_evidence = next_evidence;
+        self.adopted_heuristics = next_adopted;
+        self.commit_soft_adoption_report(report.clone());
+        Ok(report)
+    }
+
+    /// Evaluate externally accumulated evidence and return a complete adoption
+    /// report. Counts must move monotonically if the same rule was seen before.
+    pub fn try_adopt_soft_report(
+        &mut self,
+        rule_text: &str,
+        wins: u32,
+        trials: u32,
+        baseline_probability: f64,
+    ) -> Result<SoftHeuristicAdoptionReport, BlackCatError> {
+        self.validate_configuration()?;
+        let config = SoftHeuristicAdoptionConfig {
+            minimum_trials: 1,
+            baseline_probability,
+            confidence_z: 1.96,
+        };
+        config.validate()?;
+        let (rule, rule_id) = canonical_heuristic_rule(rule_text)?;
+        let interval =
+            try_wilson_interval(u64::from(wins), u64::from(trials), config.confidence_z)?;
+        let mut next_evidence = self.heuristic_evidence.clone();
+        if !next_evidence.contains_key(&rule_id)
+            && next_evidence.len() >= BLACKCAT_MAX_TRACKED_HEURISTICS
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.rules",
+                detail: format!(
+                    "at most {BLACKCAT_MAX_TRACKED_HEURISTICS} distinct rules may be tracked"
+                ),
+            });
+        }
+        if let Some(previous) = next_evidence.get(&rule_id) {
+            if previous.mode != SoftHeuristicEvidenceMode::CumulativeSnapshot
+                || previous.config != config
+            {
+                return Err(BlackCatError::InvalidConfig {
+                    field: "heuristic_adoption.evidence_policy",
+                    detail: "a rule cannot mix streaming observations with cumulative snapshots or change thresholds within one evidence epoch"
+                        .to_string(),
+                });
+            }
+            let Some(successes_delta) = interval.successes.checked_sub(previous.successes) else {
+                return Err(BlackCatError::InvalidConfig {
+                    field: "heuristic_adoption.evidence",
+                    detail: "cumulative wins/trials must advance monotonically for a tracked rule"
+                        .to_string(),
+                });
+            };
+            let Some(trials_delta) = interval.trials.checked_sub(previous.trials) else {
+                return Err(BlackCatError::InvalidConfig {
+                    field: "heuristic_adoption.evidence",
+                    detail: "cumulative wins/trials must advance monotonically for a tracked rule"
+                        .to_string(),
+                });
+            };
+            if successes_delta > trials_delta {
+                return Err(BlackCatError::InvalidConfig {
+                    field: "heuristic_adoption.evidence",
+                    detail: "cumulative wins/trials must advance monotonically for a tracked rule"
+                        .to_string(),
+                });
+            }
+        }
+        next_evidence.insert(
+            rule_id.clone(),
+            SoftHeuristicEvidenceState {
+                successes: interval.successes,
+                trials: interval.trials,
+                config,
+                mode: SoftHeuristicEvidenceMode::CumulativeSnapshot,
+            },
+        );
+        let eligible = interval.lower > config.baseline_probability;
+        let mut next_adopted = self.adopted_heuristics.clone();
+        let (decision, persistence, persistence_error) = if self
+            .adopted_heuristics
+            .contains(&rule_id)
+        {
+            (SoftHeuristicAdoptionDecision::AlreadyAdopted, None, None)
+        } else if !eligible {
+            (SoftHeuristicAdoptionDecision::BelowThreshold, None, None)
+        } else {
+            match self.persist_soft_heuristic(&rule, &rule_id, interval, config) {
+                Ok(receipt) => {
+                    next_adopted.insert(rule_id.clone());
+                    let decision = match receipt.disposition {
+                        HeurStoreDisposition::Appended => SoftHeuristicAdoptionDecision::Adopted,
+                        HeurStoreDisposition::AlreadyPresent => {
+                            SoftHeuristicAdoptionDecision::AlreadyPersisted
+                        }
+                    };
+                    (decision, Some(receipt), None)
+                }
+                Err(error) => (
+                    SoftHeuristicAdoptionDecision::PersistenceFailed,
+                    None,
+                    Some(error),
+                ),
+            }
+        };
+        let report = self.soft_adoption_report(
+            rule,
+            rule_id,
+            interval,
+            config,
+            eligible,
+            decision,
+            persistence,
+            persistence_error,
+        );
+        self.heuristic_evidence = next_evidence;
+        self.adopted_heuristics = next_adopted;
+        self.commit_soft_adoption_report(report.clone());
+        Ok(report)
+    }
+
+    /// Compatibility boolean. It is `false` for invalid evidence, persistence
+    /// failures, and candidates that have not crossed the guarded threshold.
     pub fn try_adopt_soft(
         &mut self,
         rule_text: &str,
@@ -1131,16 +1545,67 @@ impl BlackCatRuntime {
         trials: u32,
         baseline_p: f64,
     ) -> bool {
-        let lb = wilson_lower(wins as i32, trials as i32, 1.96);
-        if lb > baseline_p {
-            let mut info = HashMap::new();
-            info.insert("wins".to_string(), wins as f64);
-            info.insert("trials".to_string(), trials as f64);
-            self.heur
-                .append(&format!("{}  # blackcat", rule_text.trim()), &info);
-            return true;
+        self.try_adopt_soft_report(rule_text, wins, trials, baseline_p)
+            .map(|report| report.decision.is_persisted())
+            .unwrap_or(false)
+    }
+
+    fn persist_soft_heuristic(
+        &self,
+        rule: &str,
+        rule_id: &str,
+        interval: WilsonInterval,
+        config: SoftHeuristicAdoptionConfig,
+    ) -> Result<HeurStoreReceipt, rewrite::HeurStoreError> {
+        self.heur.append_once(
+            rule,
+            &rewrite::HeurStoreRecord {
+                contract: BLACKCAT_HEURISTIC_ADOPTION_CONTRACT,
+                contract_version: BLACKCAT_HEURISTIC_ADOPTION_CONTRACT_VERSION,
+                rule_id: rule_id.to_string(),
+                interval,
+                minimum_trials: config.minimum_trials,
+                baseline_probability: config.baseline_probability,
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn soft_adoption_report(
+        &self,
+        rule: String,
+        rule_id: String,
+        interval: WilsonInterval,
+        config: SoftHeuristicAdoptionConfig,
+        eligible: bool,
+        decision: SoftHeuristicAdoptionDecision,
+        persistence: Option<HeurStoreReceipt>,
+        persistence_error: Option<rewrite::HeurStoreError>,
+    ) -> SoftHeuristicAdoptionReport {
+        SoftHeuristicAdoptionReport {
+            contract: BLACKCAT_HEURISTIC_ADOPTION_CONTRACT,
+            contract_version: BLACKCAT_HEURISTIC_ADOPTION_CONTRACT_VERSION,
+            rule_id,
+            rule,
+            interval,
+            minimum_trials: config.minimum_trials,
+            baseline_probability: config.baseline_probability,
+            eligible,
+            decision,
+            persistence,
+            persistence_error,
         }
-        false
+    }
+
+    fn commit_soft_adoption_report(&mut self, report: SoftHeuristicAdoptionReport) {
+        self.last_heuristic_adoption = Some(report.clone());
+        let bus = global_registry().event_bus();
+        if bus.has_listeners("BlackCatHeuristicEvidence") {
+            bus.publish(&PluginEvent::custom(
+                "BlackCatHeuristicEvidence",
+                serde_json::json!({"adoption": report}),
+            ));
+        }
     }
 
     /// Returns the duration since the last [`Self::begin_step`] call.
@@ -1510,12 +1975,35 @@ impl RollingEma {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
 
     fn sample_runtime() -> BlackCatRuntime {
         let mut groups = HashMap::new();
         groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
         let groups = ChoiceGroups { groups };
         BlackCatRuntime::new(ZMetaParams::default(), groups, 4, SoftBanditMode::TS, None)
+    }
+
+    fn sample_runtime_with_heur_path(path: &Path) -> BlackCatRuntime {
+        let mut groups = HashMap::new();
+        groups.insert("tile".to_string(), vec!["a".to_string(), "b".to_string()]);
+        BlackCatRuntime::try_new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            Some(path.to_string_lossy().into_owned()),
+        )
+        .expect("runtime with a guarded heuristic path")
+    }
+
+    fn four_trial_adoption() -> SoftHeuristicAdoptionConfig {
+        SoftHeuristicAdoptionConfig {
+            minimum_trials: 4,
+            baseline_probability: 0.5,
+            confidence_z: 1.96,
+        }
     }
 
     #[test]
@@ -2270,6 +2758,206 @@ mod tests {
         assert_eq!(runtime.z.z(), z_before);
         assert_eq!(runtime.temperature(), temperature_before);
         assert_eq!(runtime.last_free_energy_report(), Some(&committed));
+    }
+
+    #[test]
+    fn soft_heuristic_adoption_requires_cumulative_evidence_and_appends_once() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let path = temp.path().join("heur.kdsl");
+        let mut runtime = sample_runtime_with_heur_path(&path);
+        runtime
+            .try_set_heuristic_adoption_config(four_trial_adoption())
+            .expect("adoption configuration");
+        let rule = "  when grad_norm > 1.0 => clip  ";
+
+        for expected_trials in 1..4 {
+            let report = runtime
+                .try_observe_soft(rule, true)
+                .expect("collecting evidence");
+            assert_eq!(report.decision, SoftHeuristicAdoptionDecision::Collecting);
+            assert_eq!(report.interval.trials, expected_trials);
+            assert!(!path.exists());
+        }
+
+        let adopted = runtime
+            .try_observe_soft(rule, true)
+            .expect("four successes clear the guarded threshold");
+        assert_eq!(adopted.decision, SoftHeuristicAdoptionDecision::Adopted);
+        assert!(adopted.eligible);
+        assert_eq!(adopted.rule, "when grad_norm > 1.0 => clip");
+        assert_eq!(adopted.interval.successes, 4);
+        assert_eq!(adopted.interval.trials, 4);
+        assert!(adopted.interval.lower > 0.5);
+        let receipt = adopted.persistence.as_ref().expect("durable receipt");
+        assert_eq!(receipt.disposition, HeurStoreDisposition::Appended);
+        assert!(receipt.durable_sync);
+        let persisted = fs::read(&path).expect("persisted rule");
+        assert!(String::from_utf8_lossy(&persisted).contains(&adopted.rule_id));
+
+        let repeated = runtime
+            .try_observe_soft(rule, false)
+            .expect("an adopted rule keeps accumulating evidence");
+        assert_eq!(
+            repeated.decision,
+            SoftHeuristicAdoptionDecision::AlreadyAdopted
+        );
+        assert_eq!(repeated.interval.successes, 4);
+        assert_eq!(repeated.interval.trials, 5);
+        assert!(!repeated.eligible);
+        assert_eq!(fs::read(&path).expect("unchanged rule file"), persisted);
+        assert_eq!(runtime.tracked_heuristic_count(), 1);
+        assert_eq!(runtime.last_heuristic_adoption_report(), Some(&repeated));
+    }
+
+    #[test]
+    fn heuristic_store_identity_prevents_duplicate_writes_across_runtimes() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let path = temp.path().join("heur.kdsl");
+        let rule = "when entropy > 2.0 => cool";
+
+        let mut first = sample_runtime_with_heur_path(&path);
+        first
+            .try_set_heuristic_adoption_config(four_trial_adoption())
+            .expect("first configuration");
+        for _ in 0..4 {
+            first
+                .try_observe_soft(rule, true)
+                .expect("first evidence epoch");
+        }
+        let persisted = fs::read(&path).expect("first persisted snapshot");
+
+        let mut second = sample_runtime_with_heur_path(&path);
+        second
+            .try_set_heuristic_adoption_config(four_trial_adoption())
+            .expect("second configuration");
+        let mut report = None;
+        for _ in 0..4 {
+            report = Some(
+                second
+                    .try_observe_soft(rule, true)
+                    .expect("replayed evidence epoch"),
+            );
+        }
+        let report = report.expect("fourth report");
+        assert_eq!(
+            report.decision,
+            SoftHeuristicAdoptionDecision::AlreadyPersisted
+        );
+        assert_eq!(
+            report
+                .persistence
+                .as_ref()
+                .map(|receipt| receipt.disposition),
+            Some(HeurStoreDisposition::AlreadyPresent)
+        );
+        assert_eq!(fs::read(&path).expect("deduplicated snapshot"), persisted);
+    }
+
+    #[test]
+    fn persistence_failure_is_reported_and_retryable_without_fake_adoption() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let blocker = temp.path().join("blocked");
+        fs::write(&blocker, b"not a directory").expect("blocker file");
+        let path = blocker.join("heur.kdsl");
+        let mut runtime = sample_runtime_with_heur_path(&path);
+        runtime
+            .try_set_heuristic_adoption_config(four_trial_adoption())
+            .expect("adoption configuration");
+
+        let mut report = None;
+        for _ in 0..4 {
+            report = Some(
+                runtime
+                    .try_observe_soft("when loss falls => retain", true)
+                    .expect("evidence remains observable despite store failure"),
+            );
+        }
+        let failed = report.expect("failure report");
+        assert_eq!(
+            failed.decision,
+            SoftHeuristicAdoptionDecision::PersistenceFailed
+        );
+        assert!(failed.eligible);
+        assert!(failed.persistence.is_none());
+        assert_eq!(
+            failed
+                .persistence_error
+                .as_ref()
+                .map(|error| error.operation),
+            Some("create_parent")
+        );
+        assert!(!failed.decision.is_persisted());
+
+        fs::remove_file(&blocker).expect("remove blocker");
+        let recovered = runtime
+            .try_observe_soft("when loss falls => retain", true)
+            .expect("next observation retries persistence");
+        assert_eq!(recovered.decision, SoftHeuristicAdoptionDecision::Adopted);
+        assert_eq!(recovered.interval.trials, 5);
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn external_evidence_is_guarded_monotonic_and_configuration_locks() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let path = temp.path().join("heur.kdsl");
+        let mut runtime = sample_runtime_with_heur_path(&path);
+        let first = runtime
+            .try_adopt_soft_report("when stable => retain", 1, 2, 0.5)
+            .expect("valid initial snapshot");
+        assert_eq!(
+            first.decision,
+            SoftHeuristicAdoptionDecision::BelowThreshold
+        );
+        assert!(!path.exists());
+
+        assert!(matches!(
+            runtime.try_adopt_soft_report("when stable => retain", 2, 3, 0.4),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.evidence_policy",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.try_observe_soft("when stable => retain", true),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.evidence_policy",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.try_adopt_soft_report("when stable => retain", 0, 2, 0.5),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.evidence",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.try_adopt_soft_report("when stable => retain", 3, 3, 0.5),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.evidence",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.try_adopt_soft_report("when impossible => reject", 2, 1, 0.5),
+            Err(BlackCatError::Wilson(_))
+        ));
+        assert!(matches!(
+            runtime.try_adopt_soft_report("line one\nline two", 1, 1, 0.5),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption.rule",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.try_set_heuristic_adoption_config(four_trial_adoption()),
+            Err(BlackCatError::InvalidConfig {
+                field: "heuristic_adoption",
+                ..
+            })
+        ));
+        assert_eq!(runtime.tracked_heuristic_count(), 1);
     }
 }
 
@@ -4441,76 +5129,1047 @@ pub mod bandit {
 
 // =================== wilson.rs ===================
 pub mod wilson {
+    pub use crate::heur::evidence::{
+        try_wilson_interval, try_wilson_lower, WilsonError, WilsonInterval,
+        WILSON_INTERVAL_CONTRACT, WILSON_INTERVAL_CONTRACT_VERSION, WILSON_INTERVAL_FORMULA,
+        WILSON_MAX_EXACT_TRIALS,
+    };
+
+    /// Compatibility scalar for legacy callers. Guarded code should retain the
+    /// typed interval or error returned by [`try_wilson_interval`].
     pub fn wilson_lower(successes: i32, trials: i32, z: f64) -> f64 {
-        if trials <= 0 {
+        let Ok(successes) = u64::try_from(successes) else {
             return 0.0;
-        }
-        let n = trials as f64;
-        let s = successes as f64;
-        let p = (s / n).clamp(0.0, 1.0);
-        let denom = 1.0 + z * z / n;
-        let center = (p + z * z / (2.0 * n)) / denom;
-        let radius = z * ((p * (1.0 - p) + z * z / (4.0 * n)) / n).max(0.0).sqrt() / denom;
-        (center - radius).max(0.0)
+        };
+        let Ok(trials) = u64::try_from(trials) else {
+            return 0.0;
+        };
+        try_wilson_lower(successes, trials, z).unwrap_or(0.0)
     }
 }
 
 // =================== rewrite.rs ===================
 pub mod rewrite {
-    use std::collections::HashMap;
-    use std::fs::{self, OpenOptions};
-    use std::io::Write;
-    use std::path::PathBuf;
+    use std::fmt;
+    use std::fs::{self, File, OpenOptions};
+    use std::io::{self, Read};
+    use std::path::{Path, PathBuf};
 
+    use serde::{Deserialize, Serialize};
+    use sha2::{Digest, Sha256};
+
+    use crate::heur::evidence::WilsonInterval;
+    use crate::runtime::persistence::atomic_write;
+
+    use super::canonical_heuristic_rule_text;
+
+    pub const HEUR_STORE_CONTRACT: &str = "spiraltorch.blackcat.heur_store";
+    pub const HEUR_STORE_CONTRACT_VERSION: u32 = 1;
+    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT: &str =
+        "spiraltorch.blackcat.heur_store.legacy_import";
+    pub const HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION: u32 = 2;
+    pub const HEUR_STORE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+    #[derive(Clone, Debug, PartialEq, Serialize)]
+    pub struct HeurStoreError {
+        pub operation: &'static str,
+        pub path: PathBuf,
+        pub kind: String,
+        pub detail: String,
+    }
+
+    impl fmt::Display for HeurStoreError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "heuristic store {} failed for '{}': {} ({})",
+                self.operation,
+                self.path.display(),
+                self.detail,
+                self.kind
+            )
+        }
+    }
+
+    impl std::error::Error for HeurStoreError {}
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum HeurStoreDisposition {
+        Appended,
+        AlreadyPresent,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize)]
+    pub struct HeurStoreLegacyImport {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub source_path: PathBuf,
+        pub source_bytes: u64,
+        pub source_sha256: String,
+        pub imported_from_byte: u64,
+        pub imported_bytes: u64,
+        pub source_ended_with_newline: bool,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct LegacyImportMarker {
+        contract: String,
+        contract_version: u32,
+        source_path: PathBuf,
+        source_bytes: u64,
+        source_sha256: String,
+        #[serde(default)]
+        source_ended_with_newline: Option<bool>,
+    }
+
+    struct LegacyImportCursor {
+        marker: LegacyImportMarker,
+        insertion_offset: usize,
+    }
+
+    struct LegacyDelta {
+        bytes: Vec<u8>,
+        source_bytes: u64,
+        source_sha256: String,
+        imported_from_byte: u64,
+        source_ended_with_newline: bool,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize)]
+    pub struct HeurStoreReceipt {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub path: PathBuf,
+        pub rule_id: String,
+        pub disposition: HeurStoreDisposition,
+        pub bytes_before: u64,
+        pub bytes_after: u64,
+        pub durable_sync: bool,
+        pub legacy_import: Option<HeurStoreLegacyImport>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize)]
+    pub struct HeurStoreRecord {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub rule_id: String,
+        pub interval: WilsonInterval,
+        pub minimum_trials: u64,
+        pub baseline_probability: f64,
+    }
+
+    #[derive(Clone, Debug)]
     pub struct HeurStore {
         path: PathBuf,
+        legacy_path: Option<PathBuf>,
+        startup_legacy_import: Option<HeurStoreLegacyImport>,
     }
 
     impl HeurStore {
         pub fn new(custom: Option<String>) -> Self {
-            let path = custom.map(PathBuf::from).unwrap_or(default_path());
-            Self { path }
+            Self::try_new(custom).unwrap_or_else(|_| {
+                let (path, legacy_path) = default_paths();
+                Self {
+                    path,
+                    legacy_path,
+                    startup_legacy_import: None,
+                }
+            })
         }
 
-        pub fn append(&self, rule_text: &str, info: &HashMap<String, f64>) {
+        pub fn try_new(custom: Option<String>) -> Result<Self, HeurStoreError> {
+            let (path, legacy_path) = match custom {
+                Some(path) if path.trim().is_empty() => {
+                    return Err(store_error(
+                        "configure",
+                        PathBuf::from(path),
+                        "invalid_input",
+                        "custom heuristic path must not be empty",
+                    ));
+                }
+                Some(path) => (PathBuf::from(path), None),
+                None => default_paths(),
+            };
+            Self::try_new_paths(path, legacy_path)
+        }
+
+        fn try_new_paths(
+            path: PathBuf,
+            legacy_path: Option<PathBuf>,
+        ) -> Result<Self, HeurStoreError> {
+            if path.as_os_str().is_empty() {
+                return Err(store_error(
+                    "configure",
+                    path,
+                    "invalid_input",
+                    "heuristic path must not be empty",
+                ));
+            }
+            let mut store = Self {
+                path,
+                legacy_path,
+                startup_legacy_import: None,
+            };
+            store.startup_legacy_import = store.migrate_legacy_snapshot()?;
+            Ok(store)
+        }
+
+        pub fn append_once(
+            &self,
+            rule_text: &str,
+            record: &HeurStoreRecord,
+        ) -> Result<HeurStoreReceipt, HeurStoreError> {
+            let canonical = canonical_heuristic_rule_text(rule_text).map_err(|detail| {
+                store_error("validate", self.path.clone(), "invalid_input", detail)
+            })?;
+            let expected_id = rule_id(canonical);
+            if record.rule_id != expected_id {
+                return Err(store_error(
+                    "validate",
+                    self.path.clone(),
+                    "invalid_input",
+                    "record rule_id does not match the canonical rule text",
+                ));
+            }
             if let Some(dir) = self.path.parent() {
-                let _ = fs::create_dir_all(dir);
+                fs::create_dir_all(dir)
+                    .map_err(|source| io_error("create_parent", &self.path, source))?;
             }
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&self.path)
-            {
-                let meta = serde_like_json(info);
-                let line = format!("{}  # {}\n", rule_text.trim(), meta);
-                let _ = file.write_all(line.as_bytes());
+            let _store_lock = HeurStoreLock::acquire(&self.path)?;
+            let bytes = read_bounded(&self.path)?;
+            let bytes_before = u64::try_from(bytes.len()).map_err(|_| {
+                store_error(
+                    "read",
+                    self.path.clone(),
+                    "capacity",
+                    "existing heuristic file length is not representable",
+                )
+            })?;
+            let (mut bytes, legacy_import) = self.import_legacy(bytes)?;
+            let existing = std::str::from_utf8(&bytes).map_err(|source| {
+                store_error(
+                    "decode",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let already_present = existing.lines().any(|line| {
+                let line = line.trim();
+                if line == canonical {
+                    return true;
+                }
+                if line
+                    .split_once("  # ")
+                    .is_some_and(|(legacy_rule, _)| legacy_rule.trim() == canonical)
+                {
+                    return true;
+                }
+                line.strip_prefix("# blackcat ")
+                    .and_then(|metadata| serde_json::from_str::<serde_json::Value>(metadata).ok())
+                    .and_then(|metadata| {
+                        metadata
+                            .get("rule_id")
+                            .and_then(serde_json::Value::as_str)
+                            .map(|rule_id| rule_id == record.rule_id)
+                    })
+                    .unwrap_or(false)
+            });
+            if already_present {
+                let durable_sync = legacy_import.is_some();
+                if durable_sync {
+                    atomic_write(&self.path, &bytes)
+                        .map_err(|source| io_error("atomic_write", &self.path, source))?;
+                }
+                let bytes_after = u64::try_from(bytes.len()).map_err(|_| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "migrated heuristic file length is not representable",
+                    )
+                })?;
+                return Ok(HeurStoreReceipt {
+                    contract: HEUR_STORE_CONTRACT,
+                    contract_version: HEUR_STORE_CONTRACT_VERSION,
+                    path: self.path.clone(),
+                    rule_id: record.rule_id.clone(),
+                    disposition: HeurStoreDisposition::AlreadyPresent,
+                    bytes_before,
+                    bytes_after,
+                    durable_sync,
+                    legacy_import,
+                });
             }
+
+            let metadata = serde_json::to_string(record).map_err(|source| {
+                store_error(
+                    "encode",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+                bytes.push(b'\n');
+            }
+            let entry = format!("# blackcat {metadata}\n{canonical}\n");
+            let next_len = bytes.len().checked_add(entry.len()).ok_or_else(|| {
+                store_error(
+                    "append",
+                    self.path.clone(),
+                    "capacity",
+                    "heuristic file length overflowed",
+                )
+            })?;
+            let bytes_after = u64::try_from(next_len).map_err(|_| {
+                store_error(
+                    "append",
+                    self.path.clone(),
+                    "capacity",
+                    "heuristic file length is not representable",
+                )
+            })?;
+            if bytes_after > HEUR_STORE_MAX_BYTES {
+                return Err(store_error(
+                    "append",
+                    self.path.clone(),
+                    "capacity",
+                    format!(
+                        "heuristic file would have {bytes_after} bytes, maximum is {HEUR_STORE_MAX_BYTES}"
+                    ),
+                ));
+            }
+            bytes.extend_from_slice(entry.as_bytes());
+            atomic_write(&self.path, &bytes)
+                .map_err(|source| io_error("atomic_write", &self.path, source))?;
+            Ok(HeurStoreReceipt {
+                contract: HEUR_STORE_CONTRACT,
+                contract_version: HEUR_STORE_CONTRACT_VERSION,
+                path: self.path.clone(),
+                rule_id: record.rule_id.clone(),
+                disposition: HeurStoreDisposition::Appended,
+                bytes_before,
+                bytes_after,
+                durable_sync: true,
+                legacy_import,
+            })
         }
 
-        pub fn path(&self) -> &PathBuf {
+        pub fn path(&self) -> &Path {
             &self.path
         }
-    }
 
-    fn default_path() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| String::from("."));
-        let mut path = PathBuf::from(home);
-        path.push(".spiraltorch/heur/heur.kdsl");
-        path
-    }
-
-    fn serde_like_json(info: &HashMap<String, f64>) -> String {
-        let mut out = String::from("{");
-        let mut first = true;
-        for (key, value) in info.iter() {
-            if !first {
-                out.push_str(", ");
-            }
-            first = false;
-            out.push_str(&format!("\"{}\":{:.6}", key, value));
+        pub fn startup_legacy_import(&self) -> Option<&HeurStoreLegacyImport> {
+            self.startup_legacy_import.as_ref()
         }
-        out.push('}');
-        out
+
+        #[cfg(target_arch = "wasm32")]
+        fn migrate_legacy_snapshot(&self) -> Result<Option<HeurStoreLegacyImport>, HeurStoreError> {
+            Ok(None)
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        fn migrate_legacy_snapshot(&self) -> Result<Option<HeurStoreLegacyImport>, HeurStoreError> {
+            let Some(source_path) = self.legacy_path.as_ref() else {
+                return Ok(None);
+            };
+            match fs::metadata(source_path) {
+                Ok(metadata) if metadata.len() == 0 => return Ok(None),
+                Ok(_) => {}
+                Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(source) => return Err(io_error("metadata_legacy", source_path, source)),
+            }
+            if let Some(dir) = self.path.parent() {
+                fs::create_dir_all(dir)
+                    .map_err(|source| io_error("create_parent", &self.path, source))?;
+            }
+            let _store_lock = HeurStoreLock::acquire(&self.path)?;
+            let current = read_bounded(&self.path)?;
+            let (merged, legacy_import) = self.import_legacy(current)?;
+            if legacy_import.is_some() {
+                atomic_write(&self.path, &merged)
+                    .map_err(|source| io_error("atomic_write", &self.path, source))?;
+            }
+            Ok(legacy_import)
+        }
+
+        fn import_legacy(
+            &self,
+            current: Vec<u8>,
+        ) -> Result<(Vec<u8>, Option<HeurStoreLegacyImport>), HeurStoreError> {
+            let Some(source_path) = self.legacy_path.as_ref() else {
+                return Ok((current, None));
+            };
+            if source_path == &self.path {
+                return Ok((current, None));
+            }
+            let current_text = std::str::from_utf8(&current).map_err(|source| {
+                store_error(
+                    "decode",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let prior = latest_legacy_import_cursor(current_text, source_path, &self.path)?;
+            let remaining = HEUR_STORE_MAX_BYTES
+                .checked_sub(current.len() as u64)
+                .ok_or_else(|| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "canonical heuristic file exceeds the guarded byte limit",
+                    )
+                })?;
+            let Some(delta) = read_legacy_delta(
+                source_path,
+                prior.as_ref().map(|cursor| &cursor.marker),
+                remaining,
+            )?
+            else {
+                return Ok((current, None));
+            };
+            std::str::from_utf8(&delta.bytes).map_err(|source| {
+                store_error(
+                    "decode_legacy",
+                    source_path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let imported_bytes = u64::try_from(delta.bytes.len()).map_err(|_| {
+                store_error(
+                    "migrate",
+                    source_path.clone(),
+                    "capacity",
+                    "legacy heuristic suffix length is not representable",
+                )
+            })?;
+            let legacy_import = HeurStoreLegacyImport {
+                contract: HEUR_STORE_LEGACY_IMPORT_CONTRACT,
+                contract_version: HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION,
+                source_path: source_path.clone(),
+                source_bytes: delta.source_bytes,
+                source_sha256: delta.source_sha256,
+                imported_from_byte: delta.imported_from_byte,
+                imported_bytes,
+                source_ended_with_newline: delta.source_ended_with_newline,
+            };
+            let metadata = serde_json::to_string(&legacy_import).map_err(|source| {
+                store_error(
+                    "encode_migration",
+                    self.path.clone(),
+                    "invalid_data",
+                    source.to_string(),
+                )
+            })?;
+            let marker = format!("# blackcat-migration {metadata}");
+            let separator_bytes = usize::from(!delta.source_ended_with_newline);
+            let marker_bytes = marker.len().checked_add(1).ok_or_else(|| {
+                store_error(
+                    "migrate",
+                    self.path.clone(),
+                    "capacity",
+                    "legacy migration marker length overflowed",
+                )
+            })?;
+            let next_len = delta
+                .bytes
+                .len()
+                .checked_add(separator_bytes)
+                .and_then(|length| length.checked_add(marker_bytes))
+                .and_then(|length| length.checked_add(current.len()))
+                .ok_or_else(|| {
+                    store_error(
+                        "migrate",
+                        self.path.clone(),
+                        "capacity",
+                        "merged heuristic file length overflowed",
+                    )
+                })?;
+            if next_len as u64 > HEUR_STORE_MAX_BYTES {
+                return Err(store_error(
+                    "migrate",
+                    self.path.clone(),
+                    "capacity",
+                    format!(
+                        "merged heuristic file would have {next_len} bytes, maximum is {HEUR_STORE_MAX_BYTES}"
+                    ),
+                ));
+            }
+            let insertion_offset = prior.as_ref().map_or(0, |cursor| cursor.insertion_offset);
+            let mut merged = Vec::with_capacity(next_len);
+            merged.extend_from_slice(&current[..insertion_offset]);
+            merged.extend_from_slice(&delta.bytes);
+            if !delta.source_ended_with_newline {
+                merged.push(b'\n');
+            }
+            merged.extend_from_slice(marker.as_bytes());
+            merged.push(b'\n');
+            merged.extend_from_slice(&current[insertion_offset..]);
+            Ok((merged, Some(legacy_import)))
+        }
+    }
+
+    fn latest_legacy_import_cursor(
+        current: &str,
+        source_path: &Path,
+        canonical_path: &Path,
+    ) -> Result<Option<LegacyImportCursor>, HeurStoreError> {
+        let mut offset = 0usize;
+        let mut latest = None;
+        for segment in current.split_inclusive('\n') {
+            let insertion_offset = offset.checked_add(segment.len()).ok_or_else(|| {
+                store_error(
+                    "decode_migration",
+                    canonical_path.to_path_buf(),
+                    "capacity",
+                    "migration marker offset overflowed",
+                )
+            })?;
+            let line = segment.trim_end_matches(['\r', '\n']);
+            if let Some(metadata) = line.strip_prefix("# blackcat-migration ") {
+                let marker =
+                    serde_json::from_str::<LegacyImportMarker>(metadata).map_err(|source| {
+                        store_error(
+                            "decode_migration",
+                            canonical_path.to_path_buf(),
+                            "invalid_data",
+                            source.to_string(),
+                        )
+                    })?;
+                if marker.contract != HEUR_STORE_LEGACY_IMPORT_CONTRACT
+                    || !(1..=HEUR_STORE_LEGACY_IMPORT_CONTRACT_VERSION)
+                        .contains(&marker.contract_version)
+                {
+                    return Err(store_error(
+                        "decode_migration",
+                        canonical_path.to_path_buf(),
+                        "invalid_data",
+                        "unsupported heuristic-store migration marker contract",
+                    ));
+                }
+                if marker.source_path == source_path {
+                    latest = Some(LegacyImportCursor {
+                        marker,
+                        insertion_offset,
+                    });
+                }
+            }
+            offset = insertion_offset;
+        }
+        Ok(latest)
+    }
+
+    fn read_legacy_delta(
+        path: &Path,
+        prior: Option<&LegacyImportMarker>,
+        delta_limit: u64,
+    ) -> Result<Option<LegacyDelta>, HeurStoreError> {
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(io_error("open_legacy", path, source)),
+        };
+        let metadata = file
+            .metadata()
+            .map_err(|source| io_error("metadata_legacy", path, source))?;
+        if metadata.len() > HEUR_STORE_MAX_BYTES {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!(
+                    "legacy heuristic file has {} bytes, maximum is {HEUR_STORE_MAX_BYTES}",
+                    metadata.len()
+                ),
+            ));
+        }
+        let imported_from_byte = prior.map_or(0, |marker| marker.source_bytes);
+        if metadata.len() < imported_from_byte {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "legacy heuristic history shrank after its last import",
+            ));
+        }
+        if prior.is_some_and(|marker| {
+            !marker.source_ended_with_newline.unwrap_or(true)
+                && metadata.len() > marker.source_bytes
+        }) {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "legacy history grew after a non-newline-terminated import",
+            ));
+        }
+
+        let mut hasher = Sha256::new();
+        let mut prefix_remaining = imported_from_byte;
+        let mut buffer = [0u8; 8192];
+        while prefix_remaining > 0 {
+            let count =
+                usize::try_from(prefix_remaining.min(buffer.len() as u64)).map_err(|_| {
+                    store_error(
+                        "migrate",
+                        path.to_path_buf(),
+                        "capacity",
+                        "legacy prefix chunk length is not representable",
+                    )
+                })?;
+            file.read_exact(&mut buffer[..count])
+                .map_err(|source| io_error("read_legacy_prefix", path, source))?;
+            hasher.update(&buffer[..count]);
+            prefix_remaining -= count as u64;
+        }
+        if let Some(marker) = prior {
+            let observed_prefix_sha256 = hex_digest(hasher.clone().finalize());
+            if observed_prefix_sha256 != marker.source_sha256 {
+                return Err(store_error(
+                    "migrate",
+                    path.to_path_buf(),
+                    "invalid_data",
+                    "legacy heuristic history changed before its append cursor",
+                ));
+            }
+        }
+
+        let metadata_delta = metadata.len() - imported_from_byte;
+        if metadata_delta > delta_limit {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!(
+                    "legacy heuristic suffix has {metadata_delta} bytes, remaining maximum is {delta_limit}"
+                ),
+            ));
+        }
+        let capacity = usize::try_from(metadata_delta).map_err(|_| {
+            store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                "legacy heuristic suffix length is not representable",
+            )
+        })?;
+        let mut delta = Vec::with_capacity(capacity);
+        file.take(delta_limit.saturating_add(1))
+            .read_to_end(&mut delta)
+            .map_err(|source| io_error("read_legacy_suffix", path, source))?;
+        if delta.len() as u64 > delta_limit {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                format!("legacy heuristic suffix grew beyond {delta_limit} bytes while reading"),
+            ));
+        }
+        if delta.is_empty() {
+            return Ok(None);
+        }
+        let source_ended_with_newline = delta.ends_with(b"\n");
+        if prior.is_some() && !source_ended_with_newline {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "invalid_data",
+                "append-only legacy updates must end with a complete newline-terminated record",
+            ));
+        }
+        hasher.update(&delta);
+        let source_bytes = imported_from_byte
+            .checked_add(delta.len() as u64)
+            .ok_or_else(|| {
+                store_error(
+                    "migrate",
+                    path.to_path_buf(),
+                    "capacity",
+                    "legacy heuristic source length overflowed",
+                )
+            })?;
+        if source_bytes > HEUR_STORE_MAX_BYTES {
+            return Err(store_error(
+                "migrate",
+                path.to_path_buf(),
+                "capacity",
+                "legacy heuristic source grew beyond the guarded byte limit",
+            ));
+        }
+        Ok(Some(LegacyDelta {
+            bytes: delta,
+            source_bytes,
+            source_sha256: hex_digest(hasher.finalize()),
+            imported_from_byte,
+            source_ended_with_newline,
+        }))
+    }
+
+    struct HeurStoreLock {
+        file: File,
+    }
+
+    impl HeurStoreLock {
+        fn acquire(path: &Path) -> Result<Self, HeurStoreError> {
+            let file_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_else(|| "heur.kdsl".into());
+            let lock_path = path.with_file_name(format!(".{file_name}.lock"));
+            let file = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(&lock_path)
+                .map_err(|source| io_error("open_lock", &lock_path, source))?;
+            file.lock()
+                .map_err(|source| io_error("lock", &lock_path, source))?;
+            Ok(Self { file })
+        }
+    }
+
+    impl Drop for HeurStoreLock {
+        fn drop(&mut self) {
+            let _ = self.file.unlock();
+        }
+    }
+
+    fn default_paths() -> (PathBuf, Option<PathBuf>) {
+        if let Ok(path) = std::env::var("SPIRAL_HEUR_FILE") {
+            if !path.trim().is_empty() {
+                return (PathBuf::from(path), None);
+            }
+        }
+        let root = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".spiraltorch");
+        (root.join("heur.kdsl"), Some(root.join("heur/heur.kdsl")))
+    }
+
+    pub fn rule_id(rule_text: &str) -> String {
+        sha256_hex(rule_text.as_bytes())
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        hex_digest(Sha256::digest(bytes))
+    }
+
+    fn hex_digest(digest: impl IntoIterator<Item = u8>) -> String {
+        let mut encoded = String::with_capacity(64);
+        for byte in digest {
+            use std::fmt::Write as _;
+            let _ = write!(&mut encoded, "{byte:02x}");
+        }
+        encoded
+    }
+
+    fn read_bounded(path: &Path) -> Result<Vec<u8>, HeurStoreError> {
+        read_bounded_with_limit(path, HEUR_STORE_MAX_BYTES)
+    }
+
+    fn read_bounded_with_limit(path: &Path, limit: u64) -> Result<Vec<u8>, HeurStoreError> {
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(io_error("open", path, source)),
+        };
+        let metadata = file
+            .metadata()
+            .map_err(|source| io_error("metadata", path, source))?;
+        if metadata.len() > limit {
+            return Err(store_error(
+                "read",
+                path.to_path_buf(),
+                "capacity",
+                format!(
+                    "existing heuristic file has {} bytes, remaining maximum is {limit}",
+                    metadata.len()
+                ),
+            ));
+        }
+        let capacity = usize::try_from(metadata.len()).map_err(|_| {
+            store_error(
+                "read",
+                path.to_path_buf(),
+                "capacity",
+                "existing heuristic file length is not representable",
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(capacity);
+        file.take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|source| io_error("read", path, source))?;
+        if bytes.len() as u64 > limit {
+            return Err(store_error(
+                "read",
+                path.to_path_buf(),
+                "capacity",
+                format!("heuristic file grew beyond {limit} bytes while reading"),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    fn io_error(operation: &'static str, path: &Path, source: io::Error) -> HeurStoreError {
+        store_error(
+            operation,
+            path.to_path_buf(),
+            format!("{:?}", source.kind()).to_lowercase(),
+            source.to_string(),
+        )
+    }
+
+    fn store_error(
+        operation: &'static str,
+        path: PathBuf,
+        kind: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> HeurStoreError {
+        HeurStoreError {
+            operation,
+            path,
+            kind: kind.into(),
+            detail: detail.into(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::sync::{Arc, Barrier};
+
+        fn record(rule: &str) -> HeurStoreRecord {
+            HeurStoreRecord {
+                contract: "test.contract",
+                contract_version: 1,
+                rule_id: rule_id(rule),
+                interval: crate::heur::evidence::try_wilson_interval(4, 4, 1.96)
+                    .expect("test interval"),
+                minimum_trials: 4,
+                baseline_probability: 0.5,
+            }
+        }
+
+        #[test]
+        fn append_once_writes_a_deterministic_durable_record() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join("nested/heur.kdsl");
+            let store = HeurStore::try_new(Some(path.to_string_lossy().into_owned()))
+                .expect("guarded store");
+            let record = record("abc");
+            assert_eq!(
+                record.rule_id,
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            );
+
+            let first = store
+                .append_once("  abc  ", &record)
+                .expect("first durable append");
+            assert_eq!(first.disposition, HeurStoreDisposition::Appended);
+            assert_eq!(first.bytes_before, 0);
+            assert!(first.bytes_after > 0);
+            assert!(first.durable_sync);
+            let metadata = serde_json::to_string(&record).expect("deterministic metadata");
+            let expected = format!("# blackcat {metadata}\nabc\n").into_bytes();
+            assert_eq!(fs::read(&path).expect("stored bytes"), expected);
+
+            let second = store
+                .append_once("abc", &record)
+                .expect("duplicate receipt");
+            assert_eq!(second.disposition, HeurStoreDisposition::AlreadyPresent);
+            assert_eq!(second.bytes_before, first.bytes_after);
+            assert_eq!(second.bytes_after, first.bytes_after);
+            assert!(!second.durable_sync);
+            assert_eq!(fs::read(&path).expect("unchanged bytes"), expected);
+        }
+
+        #[test]
+        fn default_store_imports_legacy_history_once_without_deleting_it() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join(".spiraltorch/heur.kdsl");
+            let legacy_path = temp.path().join(".spiraltorch/heur/heur.kdsl");
+            fs::create_dir_all(legacy_path.parent().expect("legacy parent"))
+                .expect("legacy directory");
+            let legacy_bytes = b"legacy-rule  # {\"wins\":4,\"trials\":4}\n";
+            let canonical_bytes = b"canonical-rule\n";
+            fs::write(&legacy_path, legacy_bytes).expect("legacy snapshot");
+            fs::write(&path, canonical_bytes).expect("canonical snapshot");
+            let store = HeurStore::try_new_paths(path.clone(), Some(legacy_path.clone()))
+                .expect("default-path store imports legacy history at startup");
+            let import = store
+                .startup_legacy_import()
+                .expect("typed startup legacy import witness");
+            assert_eq!(import.contract, HEUR_STORE_LEGACY_IMPORT_CONTRACT);
+            assert_eq!(import.source_path, legacy_path);
+            assert_eq!(import.source_bytes, legacy_bytes.len() as u64);
+            assert_eq!(import.source_sha256, sha256_hex(legacy_bytes));
+            assert_eq!(import.imported_from_byte, 0);
+            assert_eq!(import.imported_bytes, legacy_bytes.len() as u64);
+            assert!(import.source_ended_with_newline);
+
+            let migrated = fs::read(&path).expect("migrated canonical snapshot");
+            let migrated_text = std::str::from_utf8(&migrated).expect("UTF-8 snapshot");
+            let legacy_position = migrated_text.find("legacy-rule").expect("legacy rule");
+            let marker_position = migrated_text
+                .find("# blackcat-migration ")
+                .expect("migration marker");
+            let canonical_position = migrated_text
+                .find("canonical-rule")
+                .expect("canonical rule");
+            assert!(legacy_position < marker_position);
+            assert!(marker_position < canonical_position);
+            assert_eq!(
+                fs::read(&legacy_path).expect("legacy retained"),
+                legacy_bytes
+            );
+
+            let receipt = store
+                .append_once("legacy-rule", &record("legacy-rule"))
+                .expect("legacy inline rule is recognized after migration");
+            assert_eq!(receipt.disposition, HeurStoreDisposition::AlreadyPresent);
+            assert_eq!(receipt.bytes_before, migrated.len() as u64);
+            assert_eq!(receipt.bytes_after, migrated.len() as u64);
+            assert!(!receipt.durable_sync);
+            assert!(receipt.legacy_import.is_none());
+            assert_eq!(fs::read(&path).expect("stable canonical bytes"), migrated);
+
+            let extended_legacy =
+                b"legacy-rule  # {\"wins\":4,\"trials\":4}\nlate-rule  # {\"wins\":8,\"trials\":8}\n";
+            let suffix_bytes = &extended_legacy[legacy_bytes.len()..];
+            fs::write(&legacy_path, extended_legacy).expect("late legacy update");
+            let late = store
+                .append_once("late-rule", &record("late-rule"))
+                .expect("a late legacy update is imported under the same lock");
+            assert_eq!(late.disposition, HeurStoreDisposition::AlreadyPresent);
+            assert!(late.durable_sync);
+            let late_import = late.legacy_import.as_ref().expect("late import witness");
+            assert_eq!(late_import.source_sha256, sha256_hex(extended_legacy));
+            assert_eq!(late_import.imported_from_byte, legacy_bytes.len() as u64);
+            assert_eq!(late_import.imported_bytes, suffix_bytes.len() as u64);
+            let late_canonical = fs::read_to_string(&path).expect("late canonical snapshot");
+            assert!(late_canonical.contains("late-rule"));
+            assert_eq!(late_canonical.matches("legacy-rule").count(), 1);
+            assert_eq!(late_canonical.matches("late-rule").count(), 1);
+
+            let before_rewrite = late_canonical.into_bytes();
+            let rewritten = b"changed-rule  # {\"wins\":4,\"trials\":4}\nlate-rule  # {\"wins\":8,\"trials\":8}\n";
+            fs::write(&legacy_path, rewritten).expect("non-append legacy rewrite");
+            let error = store
+                .append_once("changed-rule", &record("changed-rule"))
+                .expect_err("rewriting an imported prefix must fail closed");
+            assert_eq!(error.operation, "migrate");
+            assert_eq!(error.kind, "invalid_data");
+            assert_eq!(
+                fs::read(&path).expect("canonical snapshot remains atomic"),
+                before_rewrite
+            );
+        }
+
+        #[test]
+        fn store_rejects_ambiguous_rules_and_mismatched_identity_before_writing() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join("heur.kdsl");
+            let store = HeurStore::try_new(Some(path.to_string_lossy().into_owned()))
+                .expect("guarded store");
+
+            let mismatch = record("different");
+            assert_eq!(
+                store
+                    .append_once("abc", &mismatch)
+                    .expect_err("identity mismatch")
+                    .operation,
+                "validate"
+            );
+            let newline = record("line one\nline two");
+            assert_eq!(
+                store
+                    .append_once("line one\nline two", &newline)
+                    .expect_err("multiline rule")
+                    .operation,
+                "validate"
+            );
+            let oversized = "a".repeat(super::super::BLACKCAT_MAX_HEURISTIC_RULE_BYTES + 1);
+            let oversized_record = record(&oversized);
+            assert_eq!(
+                store
+                    .append_once(&oversized, &oversized_record)
+                    .expect_err("oversized rule")
+                    .kind,
+                "invalid_input"
+            );
+            assert!(!path.exists());
+            assert!(HeurStore::try_new(Some("  ".to_string())).is_err());
+        }
+
+        #[test]
+        fn store_rejects_an_oversized_existing_snapshot_before_reading_it() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join("heur.kdsl");
+            File::create(&path)
+                .expect("sparse snapshot")
+                .set_len(HEUR_STORE_MAX_BYTES + 1)
+                .expect("oversized logical length");
+            let store = HeurStore::try_new(Some(path.to_string_lossy().into_owned()))
+                .expect("guarded store");
+            let error = store
+                .append_once("abc", &record("abc"))
+                .expect_err("oversized input is rejected before allocation");
+            assert_eq!(error.operation, "read");
+            assert_eq!(error.kind, "capacity");
+            assert_eq!(
+                fs::metadata(&path).expect("snapshot metadata").len(),
+                HEUR_STORE_MAX_BYTES + 1
+            );
+        }
+
+        #[test]
+        fn store_serializes_concurrent_read_modify_write_transactions() {
+            let temp = tempfile::tempdir().expect("temporary directory");
+            let path = temp.path().join("heur.kdsl");
+            let store = Arc::new(
+                HeurStore::try_new(Some(path.to_string_lossy().into_owned()))
+                    .expect("guarded store"),
+            );
+            let barrier = Arc::new(Barrier::new(2));
+            let left_record = record("left-rule");
+            let right_record = record("right-rule");
+
+            let (left, right) = std::thread::scope(|scope| {
+                let left_store = Arc::clone(&store);
+                let left_barrier = Arc::clone(&barrier);
+                let left = scope.spawn(move || {
+                    left_barrier.wait();
+                    left_store.append_once("left-rule", &left_record)
+                });
+                let right_store = Arc::clone(&store);
+                let right_barrier = Arc::clone(&barrier);
+                let right = scope.spawn(move || {
+                    right_barrier.wait();
+                    right_store.append_once("right-rule", &right_record)
+                });
+                (
+                    left.join().expect("left writer"),
+                    right.join().expect("right writer"),
+                )
+            });
+            assert_eq!(
+                left.expect("left append").disposition,
+                HeurStoreDisposition::Appended
+            );
+            assert_eq!(
+                right.expect("right append").disposition,
+                HeurStoreDisposition::Appended
+            );
+            let contents = fs::read_to_string(&path).expect("serialized snapshot");
+            assert!(contents.lines().any(|line| line == "left-rule"));
+            assert!(contents.lines().any(|line| line == "right-rule"));
+        }
     }
 }
 

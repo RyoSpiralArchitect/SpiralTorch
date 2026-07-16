@@ -82,7 +82,9 @@ use st_core::inference::zspace_coherence::{
 use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
 use st_core::runtime::autopilot::Autopilot;
-use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
+use st_core::runtime::blackcat::{
+    BlackCatRuntime, BlackcatRuntimeStats, SoftHeuristicAdoptionReport, StepMetrics,
+};
 use st_core::runtime::zspace_optimizer::{
     zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
 };
@@ -5181,6 +5183,13 @@ impl ModuleTrainer {
             .and_then(BlackCatRuntime::last_free_energy_report)
     }
 
+    /// Returns the latest cumulative, evidence-backed heuristic adoption report.
+    pub fn blackcat_heuristic_adoption_report(&self) -> Option<&SoftHeuristicAdoptionReport> {
+        self.blackcat
+            .as_ref()
+            .and_then(BlackCatRuntime::last_heuristic_adoption_report)
+    }
+
     /// Replays moderator minutes so the embedded Blackcat runtime can stay aligned.
     pub fn sync_blackcat_minutes(&mut self, minutes: &[ModeratorMinutes]) {
         if let Some(moderator) = self.blackcat_moderator.as_mut() {
@@ -6899,6 +6908,7 @@ impl ModuleTrainer {
                     })?;
             }
             let mut free_energy_report = None;
+            let mut heuristic_adoption_report = None;
             if let Some(rt) = self.blackcat.as_mut() {
                 let report =
                     rt.try_post_step_report(&metrics)
@@ -6924,14 +6934,49 @@ impl ModuleTrainer {
                     "free_energy_band_potential".to_string(),
                     report.components.band_potential,
                 );
-                if reward > 0.0 {
-                    let plan = step_schedule.above();
-                    let script = plan
-                        .choice
-                        .to_unison_script(RankKind::TopK)
-                        .replace('\n', "; ");
-                    let _ = rt.try_adopt_soft(&script, 1, 1, 0.5);
-                }
+                let plan = step_schedule.above();
+                let script = plan
+                    .choice
+                    .to_unison_script(RankKind::TopK)
+                    .replace('\n', "; ");
+                let adoption = rt.try_observe_soft(&script, reward > 0.0).map_err(|_| {
+                    TensorError::InvalidValue {
+                        label: "blackcat heuristic evidence",
+                    }
+                })?;
+                metrics.extra.insert(
+                    "blackcat_heuristic_successes".to_string(),
+                    adoption.interval.successes as f64,
+                );
+                metrics.extra.insert(
+                    "blackcat_heuristic_trials".to_string(),
+                    adoption.interval.trials as f64,
+                );
+                metrics.extra.insert(
+                    "blackcat_heuristic_wilson_lower".to_string(),
+                    adoption.interval.lower,
+                );
+                metrics.extra.insert(
+                    "blackcat_heuristic_eligible".to_string(),
+                    if adoption.eligible { 1.0 } else { 0.0 },
+                );
+                metrics.extra.insert(
+                    "blackcat_heuristic_persisted".to_string(),
+                    if adoption.decision.is_persisted() {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                );
+                metrics.extra.insert(
+                    "blackcat_heuristic_persistence_failed".to_string(),
+                    if adoption.persistence_error.is_some() {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                );
+                heuristic_adoption_report = Some(adoption);
                 free_energy_report = Some(report);
             }
             bus.publish(&PluginEvent::custom(
@@ -6946,6 +6991,7 @@ impl ModuleTrainer {
                         "extra": &metrics.extra,
                     },
                     "free_energy": free_energy_report.as_ref(),
+                    "heuristic_adoption": heuristic_adoption_report.as_ref(),
                     "autopilot": autopilot_picks.as_ref().map(|picks| serde_json::json!({
                         "picks": picks,
                         "selection": autopilot_selection_witness.as_ref(),
@@ -7946,7 +7992,9 @@ mod tests {
     use st_core::inference::zspace_coherence::summarize_zspace_coherence_distribution;
     use st_core::plugin::{PluginEventRecorder, PluginEventRecorderConfig, PluginEventSnapshot};
     use st_core::runtime::autopilot::{AutoConfig, AutoMode, KnobSpec};
-    use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_core::runtime::blackcat::{
+        bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups, SoftHeuristicAdoptionConfig,
+    };
     use st_core::runtime::zspace_optimizer::{
         transition_zspace_meta_optimizer, ZSpaceMetaObservation, ZSpaceMetaOptimizerConfig,
         ZSpaceMetaOptimizerState, ZSpaceMetaOptimizerStepRequest,
@@ -10041,6 +10089,7 @@ mod tests {
                     .and_then(|report| report.get("semantic_owner"))
                     .and_then(|owner| owner.as_str())
                     == Some(st_core::heur::free_energy::FREE_ENERGY_SEMANTIC_OWNER)
+                    && event["free_energy"]["utility"].as_f64() == Some(retained_utility)
             })
             .expect("TrainerStep carries canonical free-energy report");
         let report = event.get("free_energy").expect("free-energy payload");
@@ -10062,6 +10111,113 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some(st_core::heur::free_energy::FREE_ENERGY_CONTRACT_VERSION)
         );
+    }
+
+    #[test]
+    fn train_epoch_accumulates_blackcat_heuristic_evidence_for_every_step() {
+        let bus = global_registry().event_bus().clone();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let captured = Arc::clone(&events);
+        let subscription_id = bus.subscribe(
+            "TrainerStep",
+            Arc::new(move |event: &PluginEvent| {
+                if let Some(payload) = event.downcast_data::<serde_json::Value>() {
+                    captured
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(payload.clone());
+                }
+            }),
+        );
+        let temp = tempfile::tempdir().expect("temporary heuristic directory");
+        let heuristic_path = temp.path().join("heur.kdsl");
+        let groups = ChoiceGroups {
+            groups: HashMap::from([("tile".to_string(), vec!["a".to_string(), "b".to_string()])]),
+        };
+        let mut runtime = BlackCatRuntime::try_new(
+            ZMetaParams::default(),
+            groups,
+            4,
+            SoftBanditMode::TS,
+            Some(heuristic_path.to_string_lossy().into_owned()),
+        )
+        .expect("guarded BlackCat runtime");
+        runtime
+            .try_set_heuristic_adoption_config(SoftHeuristicAdoptionConfig {
+                minimum_trials: 9,
+                baseline_probability: 0.4321,
+                confidence_z: 1.96,
+            })
+            .expect("test-specific evidence policy");
+        let mut trainer =
+            ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_blackcat(runtime);
+        let mut model = Linear::new("heuristic_evidence_linear", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+        let batches = (0..4)
+            .map(|index| {
+                let offset = index as f32 * 0.05;
+                (
+                    Tensor::from_vec(2, 2, vec![0.5 + offset, -1.0, 1.5, 0.25]).unwrap(),
+                    Tensor::from_vec(2, 1, vec![0.1, -0.2 + offset]).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut loss = MeanSquaredError::new();
+        let result = trainer.train_epoch(&mut model, &mut loss, batches, &schedule);
+        let _ = bus.unsubscribe("TrainerStep", subscription_id);
+        result.expect("four-step training epoch");
+
+        let events = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let observed_rules = events
+            .iter()
+            .filter(|data| {
+                data["heuristic_adoption"]["baseline_probability"].as_f64() == Some(0.4321)
+            })
+            .filter_map(|data| {
+                data["heuristic_adoption"]["rule"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        let retained = trainer
+            .blackcat_heuristic_adoption_report()
+            .expect("trainer exposes the Rust adoption report");
+        assert_eq!(
+            retained.interval.trials, 4,
+            "all four steps must share one semantic rule: {observed_rules:?}"
+        );
+        assert!(retained.interval.successes <= retained.interval.trials);
+        assert_eq!(
+            retained.contract,
+            st_core::runtime::blackcat::BLACKCAT_HEURISTIC_ADOPTION_CONTRACT
+        );
+        assert!(!heuristic_path.exists());
+
+        let adoption_steps = events
+            .iter()
+            .filter(|data| {
+                data["heuristic_adoption"]["baseline_probability"].as_f64() == Some(0.4321)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(adoption_steps.len(), 4);
+        for (index, event) in adoption_steps.iter().enumerate() {
+            let expected_trials = (index + 1) as u64;
+            assert_eq!(
+                event["heuristic_adoption"]["interval"]["trials"].as_u64(),
+                Some(expected_trials)
+            );
+            assert_eq!(
+                event["metrics"]["extra"]["blackcat_heuristic_trials"].as_f64(),
+                Some(expected_trials as f64)
+            );
+            assert_eq!(
+                event["metrics"]["extra"]["blackcat_heuristic_persistence_failed"].as_f64(),
+                Some(0.0)
+            );
+        }
     }
 
     #[test]

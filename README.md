@@ -2693,9 +2693,14 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**
-  A/B/C conversations (Wilson CI) append `soft(...)` into
-  `~/.spiraltorch/heur.kdsl` once the roundtable agrees a configuration is ahead, while transcripts land in
-  `roundtable.log` so you can replay how every choice surfaced.
+  A/B/C conversations and BlackCat training evidence use the canonical Rust
+  Wilson interval before appending `soft(...)` rules. The shared store honours
+  `SPIRAL_HEUR_FILE`, otherwise writes `~/.spiraltorch/heur.kdsl`, and returns a
+  durable append-once receipt rather than hiding persistence failures. Transcripts
+  land in `roundtable.log` so you can replay how every choice surfaced. Opening
+  the default store imports the legacy `~/.spiraltorch/heur/heur.kdsl` history
+  with a hashed byte cursor and leaves the source file intact. Later append-only
+  legacy updates import only their new suffix; a rewritten prefix fails closed.
   
 ---
 
@@ -2985,8 +2990,17 @@ reward comparison, acceptance decision, and fractional penalty.
 
 Attach the runtime once and it will ingest per-step metrics, evaluate the
 canonical Rust variational free-energy report, log Above/Here/Beneath energy,
-estimate the BlackCat drift band, and opportunistically promote winning
-`soft(...)` snippets behind a Wilson lower bound. ZMeta's fractional penalty
+estimate the BlackCat drift band, and accumulate both successful and unsuccessful
+step rewards for each canonical `RankPlan.choice` script. The default adoption
+epoch requires at least eight observations and promotes a rule only when the
+95% Wilson lower bound clears the configured baseline. The interval, threshold,
+decision, and typed persistence result are retained in
+`SoftHeuristicAdoptionReport`; a store error is reported without pretending that
+the rule was adopted, and a later observation retries the write. Observations
+continue to update the Wilson witness after adoption without rewriting the rule;
+automatic retraction is a separate policy. Persisted rules use a stable SHA-256
+identity and an atomically synced append-once snapshot.
+ZMeta's fractional penalty
 reuses the same periodic Sobolev evaluator as `runtime::zspace_optimizer`, so a
 CPU/WGPU route request cannot change the mathematical objective. Invalid reward,
 adaptation, or context inputs are rejected before ES, bandit, statistics, or
@@ -3033,6 +3047,17 @@ let report = trainer
     .blackcat_free_energy_report()
     .expect("BlackCat committed a guarded free-energy report");
 println!("F={} p_accept={}", report.free_energy, report.acceptance_probability);
+let evidence = trainer
+    .blackcat_heuristic_adoption_report()
+    .expect("BlackCat retained the cumulative heuristic evidence");
+println!(
+    "rule={} wins={}/{} lower={} decision={:?}",
+    evidence.rule_id,
+    evidence.interval.successes,
+    evidence.interval.trials,
+    evidence.interval.lower,
+    evidence.decision,
+);
 ```
 
 **Rust (Z-space gating + projector)**
