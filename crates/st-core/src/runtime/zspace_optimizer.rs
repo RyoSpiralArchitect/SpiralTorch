@@ -629,7 +629,8 @@ pub fn transition_zspace_meta_optimizer(
     request.observation.validate()?;
 
     let state_before = request.state.clone();
-    let fractional = fractional_regularizer(&state_before.z, request.config.fractional_order)?;
+    let fractional =
+        evaluate_zspace_fractional_regularizer(&state_before.z, request.config.fractional_order)?;
     let mut topos = resolve_topos_control(
         &request.config,
         &request.observation.telemetry,
@@ -851,6 +852,31 @@ pub fn transition_zspace_meta_optimizer(
         state_before,
         state_after,
     })
+}
+
+/// Evaluate the canonical periodic fractional Sobolev regularizer without
+/// taking an optimizer step.
+///
+/// Runtime components that need the same Z-space geometry should call this
+/// primitive rather than reconstructing a finite-difference surrogate. The
+/// returned energy and analytic gradient therefore keep one semantic owner
+/// across stateful optimizers, contextual runtimes, and client bindings.
+pub fn evaluate_zspace_fractional_regularizer(
+    signal: &[f64],
+    fractional_order: f64,
+) -> Result<FractionalRegularizerReport, ZSpaceMetaOptimizerError> {
+    if signal.is_empty() {
+        return Err(ZSpaceMetaOptimizerError::InvalidDimension { dimension: 0 });
+    }
+    if signal.len() > ZSPACE_META_OPTIMIZER_MAX_DIMENSION {
+        return Err(ZSpaceMetaOptimizerError::DimensionLimit {
+            dimension: signal.len(),
+            maximum: ZSPACE_META_OPTIMIZER_MAX_DIMENSION,
+        });
+    }
+    require_positive("fractional_order", fractional_order)?;
+    require_finite_vector("fractional_signal", signal)?;
+    fractional_regularizer(signal, fractional_order)
 }
 
 /// Extracts the model-parameter control that is semantically safe to share
@@ -1688,6 +1714,36 @@ mod tests {
                 maximum: ZSPACE_META_OPTIMIZER_MAX_DIMENSION,
             })
         );
+    }
+
+    #[test]
+    fn public_fractional_regularizer_is_guarded_and_matches_the_canonical_primitive() {
+        let signal = [0.4, -0.7, 0.2, 1.1, -0.3, 0.8];
+        let public = evaluate_zspace_fractional_regularizer(&signal, 0.65)
+            .expect("public evaluator accepts a finite bounded signal");
+        let canonical = fractional_regularizer(&signal, 0.65).expect("canonical regularizer");
+        assert_eq!(public, canonical);
+
+        assert_eq!(
+            evaluate_zspace_fractional_regularizer(&[], 0.65),
+            Err(ZSpaceMetaOptimizerError::InvalidDimension { dimension: 0 })
+        );
+        let oversized = vec![0.0; ZSPACE_META_OPTIMIZER_MAX_DIMENSION + 1];
+        assert_eq!(
+            evaluate_zspace_fractional_regularizer(&oversized, 0.65),
+            Err(ZSpaceMetaOptimizerError::DimensionLimit {
+                dimension: ZSPACE_META_OPTIMIZER_MAX_DIMENSION + 1,
+                maximum: ZSPACE_META_OPTIMIZER_MAX_DIMENSION,
+            })
+        );
+        assert!(matches!(
+            evaluate_zspace_fractional_regularizer(&[0.0, f64::NAN], 0.65),
+            Err(ZSpaceMetaOptimizerError::NonFinite { .. })
+        ));
+        assert!(matches!(
+            evaluate_zspace_fractional_regularizer(&signal, 0.0),
+            Err(ZSpaceMetaOptimizerError::NonPositive { .. })
+        ));
     }
 
     #[test]

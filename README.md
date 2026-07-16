@@ -2973,12 +2973,26 @@ println!("roundtable avg loss: {:.6}", stats.average_loss);
 **BlackCat runtime tap-in**
 
 The derivative-free ZMeta ES and contextual bandits can ride alongside the
-roundtable loop. Attach the runtime once and it will ingest per-step metrics,
-evaluate the canonical Rust variational free-energy report, log
-Above/Here/Beneath energy, estimate the BlackCat drift band, and
-opportunistically promote winning `soft(...)` snippets behind a Wilson lower
-bound. Invalid reward, adaptation, or context inputs are rejected before ES,
-bandit, statistics, or telemetry state changes. When you call
+roundtable loop. ZMeta now runs a guarded ask/tell `(1+1)` contract: the first
+credited selection establishes a baseline, each later candidate applies a
+temperature-scaled, bounded latent deformation to the actual bandit context,
+and only that selection's observed free-energy utility may accept the candidate.
+Retry, gradient-norm, and loss-variance telemetry controls the next proposal
+radius rather than a disconnected diagnostic. Observation-only reports and
+explicitly abandoned selections do not reward-train the ES. The
+selection and update traces retain the base/effective contexts, evaluated Z,
+reward comparison, acceptance decision, and fractional penalty.
+
+Attach the runtime once and it will ingest per-step metrics, evaluate the
+canonical Rust variational free-energy report, log Above/Here/Beneath energy,
+estimate the BlackCat drift band, and opportunistically promote winning
+`soft(...)` snippets behind a Wilson lower bound. ZMeta's fractional penalty
+reuses the same periodic Sobolev evaluator as `runtime::zspace_optimizer`, so a
+CPU/WGPU route request cannot change the mathematical objective. Invalid reward,
+adaptation, or context inputs are rejected before ES, bandit, statistics, or
+telemetry state changes. Reward shaping is configurable before learning starts
+and then locked, preventing one runtime from mixing ZMeta incumbents, bandit
+posteriors, or statistics learned under different utility functions. When you call
 `install_blackcat_moderator` a dedicated runtime is spun up for the moderator
 so the training loop and the distributed consensus stay decoupled.
 

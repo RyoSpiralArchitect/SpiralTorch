@@ -13,7 +13,7 @@ use st_frac::FracBackend;
 use thiserror::Error;
 use tracing::{debug, instrument, warn};
 use wilson::wilson_lower;
-use zmeta::{ZMetaES, ZMetaParams};
+use zmeta::{ZMetaES, ZMetaParams, ZMetaProposalWitness, ZMetaUpdateWitness};
 
 use crate::heur::free_energy::{
     evaluate_free_energy, BandEnergy, FreeEnergyConfig, FreeEnergyError, FreeEnergyObservation,
@@ -25,7 +25,7 @@ use crate::telemetry::{monitoring::MonitoringHub, trace_init};
 /// Stable semantic contract emitted with every contextual bandit decision.
 pub const BLACKCAT_BANDIT_CONTRACT: &str = "spiraltorch.blackcat.contextual-bandit";
 /// Schema version for [`BlackCatSelectionWitness`].
-pub const BLACKCAT_BANDIT_CONTRACT_VERSION: u32 = 1;
+pub const BLACKCAT_BANDIT_CONTRACT_VERSION: u32 = 2;
 /// Maximum accepted contextual feature width for guarded construction.
 pub const BLACKCAT_MAX_FEATURE_DIM: usize = 256;
 /// Maximum accepted named choice groups for guarded construction.
@@ -59,6 +59,8 @@ pub enum BlackCatError {
     NoChoiceGroups,
     #[error("invalid BlackCat configuration at '{field}': {detail}")]
     InvalidConfig { field: &'static str, detail: String },
+    #[error(transparent)]
+    ZMeta(#[from] zmeta::ZMetaError),
 }
 
 /// Complete, replay-oriented witness for one contextual bandit selection.
@@ -67,6 +69,7 @@ pub struct BlackCatSelectionWitness {
     pub contract: &'static str,
     pub contract_version: u32,
     pub selection_id: u64,
+    pub zmeta: ZMetaProposalWitness,
     pub context: Vec<f64>,
     pub hints: BTreeMap<String, String>,
     pub picks: BTreeMap<String, String>,
@@ -412,12 +415,14 @@ pub struct BlackCatRuntime {
     reward: RewardCfg,
     configuration_error: Option<BlackCatError>,
     context_dim: usize,
+    last_base_context: Vec<f64>,
     last_context: Vec<f64>,
     last_picks: HashMap<String, String>,
     last_selection_witness: Option<BlackCatSelectionWitness>,
     selection_pending: bool,
     selection_counter: u64,
     last_credited_selection_id: Option<u64>,
+    last_zmeta_update: Option<ZMetaUpdateWitness>,
     last_step_start: Option<Instant>,
     stats_alpha: f64,
     stats_steps: u64,
@@ -481,12 +486,14 @@ impl BlackCatRuntime {
             reward: RewardCfg::default(),
             configuration_error,
             context_dim: effective_feat_dim,
+            last_base_context: vec![0.0; effective_feat_dim],
             last_context: vec![0.0; effective_feat_dim],
             last_picks: HashMap::new(),
             last_selection_witness: None,
             selection_pending: false,
             selection_counter: 0,
             last_credited_selection_id: None,
+            last_zmeta_update: None,
             last_step_start: None,
             stats_alpha,
             stats_steps: 0,
@@ -651,31 +658,37 @@ impl BlackCatRuntime {
         }
         self.validate_context(&context)?;
         self.validate_selection_state()?;
+        self.z.validate_adaptation_state()?;
         self.bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
         self.bandits.validate_hints(hints)?;
-        let mut next_bandits = self.bandits.clone();
-        next_bandits
-            .validate_selection_scores(&context)
-            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
-        let (picks, decisions) = next_bandits
-            .select_all_with_hints_in_place(&context, hints)
-            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
-        next_bandits
-            .validate_state(self.context_dim)
-            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
         let selection_id =
             self.selection_counter
                 .checked_add(1)
                 .ok_or(BlackCatError::InvalidAdaptationState {
                     field: "bandit.selection_count",
                 })?;
+        let mut next_z = self.z.clone();
+        let zmeta = next_z.try_prepare_context(selection_id, &context)?;
+        let effective_context = zmeta.effective_context.clone();
+        self.validate_context(&effective_context)?;
+        let mut next_bandits = self.bandits.clone();
+        next_bandits
+            .validate_selection_scores(&effective_context)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let (picks, decisions) = next_bandits
+            .select_all_with_hints_in_place(&effective_context, hints)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        next_bandits
+            .validate_state(self.context_dim)
+            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
         let witness = BlackCatSelectionWitness {
             contract: BLACKCAT_BANDIT_CONTRACT,
             contract_version: BLACKCAT_BANDIT_CONTRACT_VERSION,
             selection_id,
-            context: context.clone(),
+            zmeta,
+            context: effective_context.clone(),
             hints: hints.clone(),
             picks: picks
                 .iter()
@@ -683,8 +696,10 @@ impl BlackCatRuntime {
                 .collect(),
             decisions,
         };
+        self.z = next_z;
         self.bandits = next_bandits;
-        self.last_context = context;
+        self.last_base_context = context;
+        self.last_context = effective_context;
         self.last_picks = picks.clone();
         self.last_selection_witness = Some(witness);
         self.selection_pending = true;
@@ -742,14 +757,11 @@ impl BlackCatRuntime {
         metrics: &StepMetrics,
     ) -> Result<FreeEnergyReport, BlackCatError> {
         self.validate_configuration()?;
-        let curr_penalty = self.z.frac_penalty();
-        let report = self.reward.report(metrics, curr_penalty)?;
+        let evaluated_penalty = self.z.try_active_frac_penalty()?;
+        validate_blackcat_non_negative("zmeta.evaluated_frac_penalty", evaluated_penalty)?;
+        let report = self.reward.report(metrics, evaluated_penalty)?;
         let reward_current = report.utility;
-        let proposed_penalty = self.z.frac_penalty_proposed();
-        validate_blackcat_non_negative("zmeta.proposed_frac_penalty", proposed_penalty)?;
-        self.z
-            .validate_adaptation_state()
-            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.z.validate_adaptation_state()?;
         self.bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
@@ -768,24 +780,14 @@ impl BlackCatRuntime {
             .copied()
             .unwrap_or(1.0);
         validate_blackcat_non_negative("loss_variance", loss_var)?;
-        let proposed_reward = reward_current - (proposed_penalty - curr_penalty);
-        validate_blackcat_finite("zmeta.proposed_reward", proposed_reward)?;
 
         let mut next_z = self.z.clone();
-        next_z.update(
-            reward_current,
-            proposed_reward,
-            credited_selection_id.map(|_| self.last_context.as_slice()),
-        );
-        next_z.temp_schedule(metrics.retry_rate, grad_norm, loss_var);
-        next_z
-            .validate_adaptation_state()
-            .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        let zmeta_update = credited_selection_id
+            .map(|selection_id| next_z.try_tell(selection_id, reward_current))
+            .transpose()?;
+        next_z.try_temp_schedule(metrics.retry_rate, grad_norm, loss_var)?;
+        next_z.validate_adaptation_state()?;
         validate_blackcat_non_negative("zmeta.next_frac_penalty", next_z.frac_penalty())?;
-        validate_blackcat_non_negative(
-            "zmeta.next_proposed_frac_penalty",
-            next_z.frac_penalty_proposed(),
-        )?;
 
         let mut next_bandits = self.bandits.clone();
         if credited_selection_id.is_some() {
@@ -802,7 +804,7 @@ impl BlackCatRuntime {
         let mut next_metrics_ema = self.metrics_ema.clone();
         next_metrics_ema.try_update(metrics)?;
         let mut next_frac_penalty_ema = self.frac_penalty_ema.clone();
-        next_frac_penalty_ema.try_update("statistics.frac_penalty_ema", curr_penalty)?;
+        next_frac_penalty_ema.try_update("statistics.frac_penalty_ema", evaluated_penalty)?;
         let mut next_extra_ema = self.extra_ema.clone();
         for (key, value) in &metrics.extra {
             next_extra_ema
@@ -821,13 +823,16 @@ impl BlackCatRuntime {
         self.extra_ema = next_extra_ema;
         self.last_reward = reward_current;
         self.last_free_energy_report = Some(report.clone());
+        if let Some(update) = &zmeta_update {
+            self.last_zmeta_update = Some(update.clone());
+        }
         if let Some(selection_id) = credited_selection_id {
             self.selection_pending = false;
             self.last_credited_selection_id = Some(selection_id);
         }
         debug!(
             reward = reward_current,
-            frac_penalty = curr_penalty,
+            frac_penalty = evaluated_penalty,
             "blackcat step complete"
         );
         let _ = self.monitoring.observe(metrics, reward_current);
@@ -837,8 +842,9 @@ impl BlackCatRuntime {
                 "BlackCatPostStep",
                 serde_json::json!({
                     "reward": reward_current,
-                    "frac_penalty": curr_penalty,
+                    "frac_penalty": evaluated_penalty,
                     "free_energy": &report,
+                    "zmeta_update": &zmeta_update,
                     "bandit_contract": BLACKCAT_BANDIT_CONTRACT,
                     "bandit_contract_version": BLACKCAT_BANDIT_CONTRACT_VERSION,
                     "credited_selection_id": credited_selection_id,
@@ -857,6 +863,7 @@ impl BlackCatRuntime {
     }
 
     fn validate_selection_state(&self) -> Result<(), BlackCatError> {
+        self.z.validate_adaptation_state()?;
         let bandits_pending = self
             .bandits
             .selection_pending()
@@ -864,6 +871,12 @@ impl BlackCatRuntime {
         if bandits_pending != self.selection_pending {
             return Err(BlackCatError::InvalidAdaptationState {
                 field: "bandit.pending_state",
+            });
+        }
+        let zmeta_pending = self.z.pending_evaluation_id();
+        if zmeta_pending != self.pending_selection_id() {
+            return Err(BlackCatError::InvalidAdaptationState {
+                field: "zmeta.pending_state",
             });
         }
         if self.selection_pending {
@@ -874,6 +887,10 @@ impl BlackCatRuntime {
             )?;
             if witness.selection_id != self.selection_counter
                 || witness.context != self.last_context
+                || witness.zmeta.evaluation_id != witness.selection_id
+                || witness.zmeta.base_context != self.last_base_context
+                || witness.zmeta.effective_context != self.last_context
+                || self.z.last_proposal() != Some(&witness.zmeta)
                 || witness.picks.len() != self.last_picks.len()
                 || witness
                     .picks
@@ -965,7 +982,7 @@ impl BlackCatRuntime {
         &self,
         metrics: &StepMetrics,
     ) -> Result<FreeEnergyReport, FreeEnergyError> {
-        self.reward.report(metrics, self.z.frac_penalty())
+        self.reward.report(metrics, self.z.active_frac_penalty())
     }
 
     /// Most recent report that was committed to the runtime.
@@ -1017,15 +1034,29 @@ impl BlackCatRuntime {
         self.z.frac_penalty()
     }
 
+    /// Returns the penalty of the latent currently affecting an in-flight
+    /// selection, or the incumbent penalty when no selection is pending.
+    pub fn active_frac_penalty(&self) -> f64 {
+        self.z.active_frac_penalty()
+    }
+
     /// Returns the current latent ZMeta coordinates without granting mutation
     /// access to the adaptation state.
     pub fn z_state(&self) -> &[f64] {
         self.z.z()
     }
 
-    /// Overrides the fractional regulariser backend.
+    /// Records the preferred fractional execution route. The proposal witness
+    /// separately names this request and the canonical Rust semantic backend.
     pub fn set_frac_backend(&mut self, backend: FracBackend) {
-        self.z.set_frac_backend(backend);
+        let _ = self.try_set_frac_backend(backend);
+    }
+
+    /// Guarded backend request. Routing choices never change the canonical
+    /// fractional objective.
+    pub fn try_set_frac_backend(&mut self, backend: FracBackend) -> Result<(), BlackCatError> {
+        self.z.try_set_frac_backend(backend)?;
+        Ok(())
     }
 
     /// Returns the current exploration temperature tracked by the runtime.
@@ -1033,15 +1064,55 @@ impl BlackCatRuntime {
         self.z.temperature()
     }
 
+    /// Number of rewarded ZMeta evaluations committed by the runtime.
+    pub fn zmeta_generation(&self) -> u64 {
+        self.z.generation()
+    }
+
+    /// Reward attached to the current accepted ZMeta incumbent.
+    pub fn zmeta_incumbent_reward(&self) -> Option<f64> {
+        self.z.incumbent_reward()
+    }
+
     /// Returns the canonical reward configuration used by guarded reports.
     pub fn reward_config(&self) -> &RewardCfg {
         &self.reward
     }
 
-    /// Replaces reward shaping only after it can build a valid canonical
-    /// free-energy configuration.
+    /// Replaces reward shaping only before the runtime has committed learning
+    /// under another objective. Semantically identical configurations are
+    /// harmless no-ops; callers that need a new objective epoch must construct
+    /// a fresh runtime so ZMeta, bandit posteriors, and reward statistics cannot
+    /// mix evidence from different utilities.
     pub fn try_set_reward_config(&mut self, reward: RewardCfg) -> Result<(), BlackCatError> {
-        reward.free_energy_config()?;
+        self.validate_configuration()?;
+        let next_config = reward.free_energy_config()?;
+        let current_config = self.reward.free_energy_config()?;
+        self.validate_selection_state()?;
+        self.validate_statistics_state()?;
+        if next_config == current_config {
+            return Ok(());
+        }
+        if let Some(selection_id) = self.pending_selection_id() {
+            return Err(BlackCatError::PendingSelection { selection_id });
+        }
+        let posterior_has_observations = self
+            .bandits
+            .observation_counts()
+            .values()
+            .flat_map(BTreeMap::values)
+            .any(|observations| *observations > 0);
+        if self.stats_steps > 0
+            || self.z.generation() > 0
+            || self.last_credited_selection_id.is_some()
+            || posterior_has_observations
+        {
+            return Err(BlackCatError::InvalidConfig {
+                field: "reward_config",
+                detail: "the reward objective is locked after learning begins; construct a new BlackCatRuntime for a new objective epoch"
+                    .to_string(),
+            });
+        }
         self.reward = reward;
         Ok(())
     }
@@ -1077,7 +1148,12 @@ impl BlackCatRuntime {
         self.last_step_start.map(|start| start.elapsed())
     }
 
-    /// Returns the last contextual feature vector used for bandit updates.
+    /// Returns the undeformed contextual feature vector supplied by the caller.
+    pub fn last_base_context(&self) -> &[f64] {
+        &self.last_base_context
+    }
+
+    /// Returns the ZMeta-deformed contextual feature vector used for bandit updates.
     pub fn last_context(&self) -> &[f64] {
         &self.last_context
     }
@@ -1090,6 +1166,11 @@ impl BlackCatRuntime {
     /// Returns the complete witness for the most recent bandit selection.
     pub fn last_selection_witness(&self) -> Option<&BlackCatSelectionWitness> {
         self.last_selection_witness.as_ref()
+    }
+
+    /// Returns the most recent committed ZMeta reward transition.
+    pub fn last_zmeta_update(&self) -> Option<&ZMetaUpdateWitness> {
+        self.last_zmeta_update.as_ref()
     }
 
     /// Returns the selection currently eligible for exactly one bandit reward.
@@ -1114,10 +1195,14 @@ impl BlackCatRuntime {
         let Some(selection_id) = self.pending_selection_id() else {
             return Ok(None);
         };
+        let mut next_z = self.z.clone();
+        let zmeta = next_z.try_abandon(selection_id)?;
         let mut next_bandits = self.bandits.clone();
         next_bandits
             .try_abandon_all()
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        next_z.validate_adaptation_state()?;
+        self.z = next_z;
         self.bandits = next_bandits;
         self.selection_pending = false;
         let bus = global_registry().event_bus();
@@ -1126,6 +1211,7 @@ impl BlackCatRuntime {
                 "BlackCatSelectionAbandoned",
                 serde_json::json!({
                     "selection": &self.last_selection_witness,
+                    "zmeta": &zmeta,
                     "bandit_contract": BLACKCAT_BANDIT_CONTRACT,
                     "bandit_contract_version": BLACKCAT_BANDIT_CONTRACT_VERSION,
                 }),
@@ -1193,9 +1279,9 @@ fn validate_blackcat_configuration(
         ));
     }
     for (field, value, strictly_positive) in [
-        ("zmeta.sigma", z_params.sigma, false),
-        ("zmeta.lr", z_params.lr, false),
-        ("zmeta.alpha_frac", z_params.alpha_frac, false),
+        ("zmeta.sigma", z_params.sigma, true),
+        ("zmeta.lr", z_params.lr, true),
+        ("zmeta.alpha_frac", z_params.alpha_frac, true),
         ("zmeta.lam_frac", z_params.lam_frac, false),
         ("zmeta.orientation_eta", z_params.orientation_eta, false),
         ("zmeta.orientation_eps", z_params.orientation_eps, true),
@@ -1213,6 +1299,13 @@ fn validate_blackcat_configuration(
                 ),
             ));
         }
+    }
+    let step_radius = z_params.lr * z_params.sigma;
+    if !step_radius.is_finite() || step_radius <= 0.0 {
+        return Err(invalid(
+            "zmeta.step_radius",
+            format!("learning_rate*sigma must be finite and positive, got {step_radius}"),
+        ));
     }
     validate_choice_groups(groups, feat_dim)
 }
@@ -1511,6 +1604,37 @@ mod tests {
             .try_set_reward_config(valid)
             .expect("valid reward configuration");
         assert_eq!(runtime.reward_config().scale_speed, 5.0);
+
+        runtime
+            .try_choose(vec![1.0, 0.0, 0.0, 0.0])
+            .expect("baseline selection");
+        let pending_change = RewardCfg {
+            scale_speed: 6.0,
+            ..RewardCfg::default()
+        };
+        assert!(matches!(
+            runtime.try_set_reward_config(pending_change),
+            Err(BlackCatError::PendingSelection { selection_id: 1 })
+        ));
+        assert_eq!(runtime.reward_config().scale_speed, 5.0);
+        assert_eq!(runtime.pending_selection_id(), Some(1));
+
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("baseline reward remains creditable after rejection");
+        let locked_change = RewardCfg {
+            scale_speed: 7.0,
+            ..RewardCfg::default()
+        };
+        assert!(matches!(
+            runtime.try_set_reward_config(locked_change),
+            Err(BlackCatError::InvalidConfig {
+                field: "reward_config",
+                ..
+            })
+        ));
+        assert_eq!(runtime.reward_config().scale_speed, 5.0);
+        assert_eq!(runtime.zmeta_generation(), 1);
     }
 
     #[test]
@@ -1690,6 +1814,170 @@ mod tests {
             .try_post_step_report(&StepMetrics::default())
             .expect("later observation has no pending bandit credit");
         assert_eq!(runtime.bandit_observation_counts(), credited_counts);
+    }
+
+    #[test]
+    fn zmeta_candidate_is_executed_in_context_before_reward_acceptance() {
+        let mut runtime = sample_runtime();
+        let context = vec![1.0, 0.25, -0.5, 0.75];
+
+        runtime
+            .try_choose(context.clone())
+            .expect("baseline selection");
+        let baseline = runtime
+            .last_selection_witness()
+            .expect("baseline witness")
+            .zmeta
+            .clone();
+        assert_eq!(baseline.kind, zmeta::ZMetaEvaluationKind::Baseline);
+        assert_eq!(baseline.base_context, baseline.effective_context);
+        let baseline_report = runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("baseline reward");
+        assert_eq!(runtime.zmeta_generation(), 1);
+        assert_eq!(runtime.z_state(), &[0.0; 6]);
+
+        runtime
+            .try_choose(context.clone())
+            .expect("candidate selection");
+        let candidate = runtime
+            .last_selection_witness()
+            .expect("candidate witness")
+            .zmeta
+            .clone();
+        assert_eq!(candidate.kind, zmeta::ZMetaEvaluationKind::Candidate);
+        assert_ne!(candidate.effective_context, candidate.base_context);
+        assert_eq!(runtime.last_base_context(), context);
+        assert_eq!(runtime.last_context(), candidate.effective_context);
+
+        let mut improved = StepMetrics::default();
+        improved.extra.insert("reference_loss".into(), 10.0);
+        improved.extra.insert("candidate_loss".into(), 0.0);
+        let candidate_report = runtime
+            .try_post_step_report(&improved)
+            .expect("candidate reward");
+        assert!(candidate_report.utility > baseline_report.utility);
+        let accepted = runtime.last_zmeta_update().expect("ZMeta update");
+        assert!(accepted.accepted);
+        assert_eq!(accepted.evaluated_z, candidate.evaluated_z);
+        assert_eq!(runtime.z_state(), candidate.evaluated_z);
+
+        let incumbent = runtime.z_state().to_vec();
+        runtime.try_choose(context).expect("worse candidate");
+        let mut degraded = StepMetrics::default();
+        degraded.extra.insert("reference_loss".into(), 0.0);
+        degraded.extra.insert("candidate_loss".into(), 10.0);
+        runtime
+            .try_post_step_report(&degraded)
+            .expect("degraded reward remains valid");
+        assert!(!runtime.last_zmeta_update().unwrap().accepted);
+        assert_eq!(runtime.z_state(), incumbent);
+    }
+
+    #[test]
+    fn observation_only_reports_and_abandonment_do_not_train_zmeta() {
+        let mut runtime = sample_runtime();
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("observation-only report");
+        assert_eq!(runtime.zmeta_generation(), 0);
+        assert_eq!(runtime.zmeta_incumbent_reward(), None);
+        assert!(runtime.last_zmeta_update().is_none());
+
+        let context = vec![1.0, 0.25, -0.5, 0.75];
+        runtime
+            .try_choose(context.clone())
+            .expect("pending baseline");
+        assert_eq!(runtime.abandon_pending_selection(), Some(1));
+        assert_eq!(runtime.zmeta_generation(), 0);
+        assert_eq!(runtime.zmeta_incumbent_reward(), None);
+        assert_eq!(runtime.pending_selection_id(), None);
+
+        runtime.try_choose(context).expect("replacement baseline");
+        assert_eq!(
+            runtime.last_selection_witness().unwrap().zmeta.kind,
+            zmeta::ZMetaEvaluationKind::Baseline
+        );
+        assert_eq!(runtime.pending_selection_id(), Some(2));
+    }
+
+    #[test]
+    fn zmeta_and_bandit_replay_multiple_seeded_generations() {
+        let mut left = sample_runtime();
+        let mut right = sample_runtime();
+        let context = vec![1.0, 0.25, -0.5, 0.75];
+        let rewards = [(0.0, 0.0), (8.0, 0.0), (0.0, 4.0), (12.0, 0.0)];
+
+        for (reference_loss, candidate_loss) in rewards {
+            assert_eq!(
+                left.try_choose(context.clone()).expect("left choice"),
+                right.try_choose(context.clone()).expect("right choice")
+            );
+            assert_eq!(
+                left.last_selection_witness(),
+                right.last_selection_witness()
+            );
+            let mut metrics = StepMetrics::default();
+            metrics
+                .extra
+                .insert("reference_loss".into(), reference_loss);
+            metrics
+                .extra
+                .insert("candidate_loss".into(), candidate_loss);
+            assert_eq!(
+                left.try_post_step_report(&metrics).expect("left reward"),
+                right.try_post_step_report(&metrics).expect("right reward")
+            );
+            assert_eq!(left.z_state(), right.z_state());
+            assert_eq!(left.last_zmeta_update(), right.last_zmeta_update());
+            assert_eq!(
+                left.bandit_observation_counts(),
+                right.bandit_observation_counts()
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_pending_reward_preserves_a_retryable_joint_transaction() {
+        let mut runtime = sample_runtime();
+        runtime
+            .try_choose(vec![1.0, 0.25, -0.5, 0.75])
+            .expect("pending baseline");
+        let proposal = runtime
+            .last_selection_witness()
+            .expect("selection witness")
+            .clone();
+        let counts = runtime.bandit_observation_counts();
+        let temperature = runtime.temperature();
+
+        let mut invalid = StepMetrics::default();
+        invalid.extra.insert("grad_norm".into(), f64::NAN);
+        assert!(matches!(
+            runtime.try_post_step_report(&invalid),
+            Err(BlackCatError::NonFinite {
+                field: "grad_norm",
+                ..
+            })
+        ));
+        assert_eq!(runtime.pending_selection_id(), Some(1));
+        assert_eq!(runtime.zmeta_generation(), 0);
+        assert_eq!(runtime.last_selection_witness(), Some(&proposal));
+        assert_eq!(runtime.bandit_observation_counts(), counts);
+        assert_eq!(runtime.temperature(), temperature);
+
+        runtime
+            .try_post_step_report(&StepMetrics::default())
+            .expect("same pending evaluation remains creditable");
+        assert_eq!(runtime.pending_selection_id(), None);
+        assert_eq!(runtime.zmeta_generation(), 1);
+        assert_eq!(
+            runtime
+                .bandit_observation_counts()
+                .values()
+                .flat_map(|group| group.values())
+                .sum::<u64>(),
+            1
+        );
     }
 
     #[test]
@@ -1987,10 +2275,101 @@ mod tests {
 
 // =================== zmeta.rs ===================
 pub mod zmeta {
-    use super::FracBackend;
+    use super::{FracBackend, BLACKCAT_MAX_ZMETA_DIM};
+    use crate::runtime::zspace_optimizer::{
+        evaluate_zspace_fractional_regularizer, ZSpaceMetaOptimizerError,
+        ZSPACE_FRACTIONAL_REGULARIZER_FORMULA, ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND,
+        ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER,
+    };
     use randless::{Rng, StdRng};
+    use thiserror::Error;
 
-    #[derive(Clone, Debug)]
+    /// Stable ask/tell contract for BlackCat's latent context search.
+    pub const ZMETA_ES_CONTRACT: &str = "spiraltorch.blackcat.zmeta-es";
+    /// Schema version for [`ZMetaProposalWitness`] and [`ZMetaUpdateWitness`].
+    pub const ZMETA_ES_CONTRACT_VERSION: u32 = 1;
+    /// Bounded deformation applied to a contextual feature.
+    pub const ZMETA_CONTEXT_DEFORMATION: &str =
+        "x_effective[i]=x[i]+mean_j(tanh(z_eval[j])) where j mod context_dim=i; tile if empty";
+    /// Candidate rule for the temperature-scaled `(1+1)` evolution strategy.
+    pub const ZMETA_PROPOSAL_RULE: &str =
+        "z_eval=z_incumbent+learning_rate*sigma*temperature*direction";
+
+    #[derive(Clone, Debug, Error, PartialEq)]
+    pub enum ZMetaError {
+        #[error("invalid ZMeta configuration at '{field}': {detail}")]
+        InvalidConfig { field: &'static str, detail: String },
+        #[error("invalid ZMeta state at '{field}'")]
+        InvalidState { field: &'static str },
+        #[error("ZMeta evaluation {evaluation_id} is still awaiting reward or abandonment")]
+        PendingEvaluation { evaluation_id: u64 },
+        #[error("ZMeta has no evaluation awaiting reward")]
+        MissingEvaluation,
+        #[error("ZMeta expected evaluation {expected}, received {actual}")]
+        EvaluationMismatch { expected: u64, actual: u64 },
+        #[error("ZMeta field '{field}' must be finite, got {value}")]
+        NonFinite { field: &'static str, value: f64 },
+        #[error(transparent)]
+        Fractional(#[from] ZSpaceMetaOptimizerError),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ZMetaEvaluationKind {
+        Baseline,
+        Candidate,
+    }
+
+    /// Replay-oriented witness emitted before a latent state is evaluated.
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+    pub struct ZMetaProposalWitness {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub evaluation_id: u64,
+        pub kind: ZMetaEvaluationKind,
+        pub proposal_rule: &'static str,
+        pub context_deformation: &'static str,
+        pub fractional_formula: &'static str,
+        pub fractional_semantic_owner: &'static str,
+        pub fractional_semantic_backend: &'static str,
+        pub requested_fractional_backend: String,
+        pub incumbent_z: Vec<f64>,
+        pub evaluated_z: Vec<f64>,
+        pub direction: Vec<f64>,
+        pub base_step_radius: f64,
+        pub temperature: f64,
+        pub step_radius: f64,
+        pub incumbent_reward: Option<f64>,
+        pub base_context: Vec<f64>,
+        pub effective_context: Vec<f64>,
+        pub structural_projection: Vec<f64>,
+        pub fractional_energy: f64,
+        pub fractional_penalty: f64,
+    }
+
+    /// Atomic state transition produced when an evaluated latent receives a reward.
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+    pub struct ZMetaUpdateWitness {
+        pub contract: &'static str,
+        pub contract_version: u32,
+        pub evaluation_id: u64,
+        pub kind: ZMetaEvaluationKind,
+        pub reward: f64,
+        pub incumbent_reward_before: Option<f64>,
+        pub incumbent_reward_after: f64,
+        pub reward_delta: Option<f64>,
+        pub accepted: bool,
+        pub generation: u64,
+        pub z_before: Vec<f64>,
+        pub evaluated_z: Vec<f64>,
+        pub z_after: Vec<f64>,
+        pub direction_after: Vec<f64>,
+        pub fractional_penalty_before: f64,
+        pub fractional_penalty_evaluated: f64,
+        pub fractional_penalty_after: f64,
+    }
+
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
     pub struct ZMetaParams {
         pub dim: usize,
         pub sigma: f64,
@@ -2017,6 +2396,56 @@ pub mod zmeta {
         }
     }
 
+    impl ZMetaParams {
+        pub fn validate(&self) -> Result<(), ZMetaError> {
+            if self.dim == 0 || self.dim > BLACKCAT_MAX_ZMETA_DIM {
+                return Err(ZMetaError::InvalidConfig {
+                    field: "dim",
+                    detail: format!("expected 1..={BLACKCAT_MAX_ZMETA_DIM}, got {}", self.dim),
+                });
+            }
+            for (field, value, strictly_positive) in [
+                ("sigma", self.sigma, true),
+                ("lr", self.lr, true),
+                ("alpha_frac", self.alpha_frac, true),
+                ("lam_frac", self.lam_frac, false),
+                ("orientation_eta", self.orientation_eta, false),
+                ("orientation_eps", self.orientation_eps, true),
+            ] {
+                if !value.is_finite() || value < 0.0 || (strictly_positive && value == 0.0) {
+                    return Err(ZMetaError::InvalidConfig {
+                        field,
+                        detail: format!(
+                            "expected a finite {} value, got {value}",
+                            if strictly_positive {
+                                "positive"
+                            } else {
+                                "non-negative"
+                            }
+                        ),
+                    });
+                }
+            }
+            let step_radius = self.lr * self.sigma;
+            if !step_radius.is_finite() || step_radius <= 0.0 {
+                return Err(ZMetaError::InvalidConfig {
+                    field: "step_radius",
+                    detail: format!(
+                        "learning_rate*sigma must be finite and positive, got {step_radius}"
+                    ),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct PendingEvaluation {
+        witness: ZMetaProposalWitness,
+        structural_before: Vec<f64>,
+        structural_delta: Option<Vec<f64>>,
+    }
+
     #[derive(Clone)]
     pub struct ZMetaES {
         z: Vec<f64>,
@@ -2028,16 +2457,42 @@ pub mod zmeta {
         temp_min: f64,
         temp_max: f64,
         structural: Vec<f64>,
+        configuration_error: Option<ZMetaError>,
+        pending: Option<PendingEvaluation>,
+        evaluation_counter: u64,
+        generation: u64,
+        incumbent_reward: Option<f64>,
+        last_proposal: Option<ZMetaProposalWitness>,
+        last_update: Option<ZMetaUpdateWitness>,
     }
 
     impl ZMetaES {
+        /// Compatibility constructor. Invalid parameters produce a bounded,
+        /// fail-closed sentinel; direct Rust callers should prefer
+        /// [`Self::try_new`].
         pub fn new(params: ZMetaParams) -> Self {
+            match Self::try_new(params) {
+                Ok(value) => value,
+                Err(error) => Self::build(ZMetaParams::default(), Some(error)),
+            }
+        }
+
+        /// Construct a directly usable ask/tell evolution strategy.
+        pub fn try_new(params: ZMetaParams) -> Result<Self, ZMetaError> {
+            params.validate()?;
+            Ok(Self::build(params, None))
+        }
+
+        fn build(params: ZMetaParams, configuration_error: Option<ZMetaError>) -> Self {
             let rng = StdRng::seed_from_u64(params.seed);
             let mut dir = vec![0.0; params.dim];
             for value in dir.iter_mut() {
                 *value = rng.gauss(0.0, 1.0);
             }
-            normalize(&mut dir);
+            if !normalize_above(&mut dir, 0.0) {
+                dir.fill(0.0);
+                dir[0] = 1.0;
+            }
             let dim = params.dim;
             Self {
                 z: vec![0.0; dim],
@@ -2049,6 +2504,13 @@ pub mod zmeta {
                 temp_min: 0.1,
                 temp_max: 4.0,
                 structural: vec![0.0; dim],
+                configuration_error,
+                pending: None,
+                evaluation_counter: 0,
+                generation: 0,
+                incumbent_reward: None,
+                last_proposal: None,
+                last_update: None,
             }
         }
 
@@ -2056,103 +2518,204 @@ pub mod zmeta {
             &self.z
         }
 
+        /// Returns the validated search and regularization parameters.
+        pub fn params(&self) -> &ZMetaParams {
+            &self.params
+        }
+
+        /// Returns the unit search direction used by the next candidate.
+        pub fn direction(&self) -> &[f64] {
+            &self.dir
+        }
+
+        /// Returns the retained error of a compatibility-created sentinel.
+        pub fn configuration_error(&self) -> Option<&ZMetaError> {
+            self.configuration_error.as_ref()
+        }
+
+        /// Returns the latent that is currently affecting an in-flight choice.
+        pub fn active_z(&self) -> &[f64] {
+            self.pending
+                .as_ref()
+                .map(|pending| pending.witness.evaluated_z.as_slice())
+                .unwrap_or(&self.z)
+        }
+
+        pub fn pending_evaluation_id(&self) -> Option<u64> {
+            self.pending
+                .as_ref()
+                .map(|pending| pending.witness.evaluation_id)
+        }
+
+        pub fn generation(&self) -> u64 {
+            self.generation
+        }
+
+        pub fn incumbent_reward(&self) -> Option<f64> {
+            self.incumbent_reward
+        }
+
+        pub fn last_proposal(&self) -> Option<&ZMetaProposalWitness> {
+            self.last_proposal.as_ref()
+        }
+
+        pub fn last_update(&self) -> Option<&ZMetaUpdateWitness> {
+            self.last_update.as_ref()
+        }
+
         /// Returns the current exploration temperature.
         pub fn temperature(&self) -> f64 {
             self.temp
         }
 
-        /// Overrides the exploration temperature bounds.
+        /// Compatibility temperature-bound setter. Invalid bounds leave the
+        /// state unchanged.
         pub fn set_temp_bounds(&mut self, t_min: f64, t_max: f64) {
-            let mut lower = t_min.max(0.0);
-            let mut upper = t_max.max(lower + f64::EPSILON);
-            if lower > upper {
-                std::mem::swap(&mut lower, &mut upper);
+            let _ = self.try_set_temp_bounds(t_min, t_max);
+        }
+
+        pub fn try_set_temp_bounds(&mut self, t_min: f64, t_max: f64) -> Result<(), ZMetaError> {
+            self.validate_adaptation_state()?;
+            if let Some(pending) = &self.pending {
+                return Err(ZMetaError::PendingEvaluation {
+                    evaluation_id: pending.witness.evaluation_id,
+                });
             }
-            self.temp_min = lower;
-            self.temp_max = upper;
-            self.temp = self.temp.clamp(self.temp_min, self.temp_max);
+            require_finite("temperature_min", t_min)?;
+            require_finite("temperature_max", t_max)?;
+            if t_min <= 0.0 || t_max <= t_min {
+                return Err(ZMetaError::InvalidConfig {
+                    field: "temperature_bounds",
+                    detail: format!("expected 0 < min < max, got [{t_min}, {t_max}]"),
+                });
+            }
+            self.temp_min = t_min;
+            self.temp_max = t_max;
+            self.temp = self.temp.clamp(t_min, t_max);
+            Ok(())
         }
 
         /// Adjusts the exploration temperature using retry/gradient signals.
         pub fn temp_schedule(&mut self, retry: f64, grad_norm: f64, loss_var: f64) {
+            let _ = self.try_temp_schedule(retry, grad_norm, loss_var);
+        }
+
+        pub fn try_temp_schedule(
+            &mut self,
+            retry: f64,
+            grad_norm: f64,
+            loss_var: f64,
+        ) -> Result<f64, ZMetaError> {
+            self.validate_adaptation_state()?;
+            if let Some(pending) = &self.pending {
+                return Err(ZMetaError::PendingEvaluation {
+                    evaluation_id: pending.witness.evaluation_id,
+                });
+            }
+            for (field, value) in [
+                ("temperature.retry", retry),
+                ("temperature.grad_norm", grad_norm),
+                ("temperature.loss_variance", loss_var),
+            ] {
+                require_finite(field, value)?;
+                if value < 0.0 {
+                    return Err(ZMetaError::InvalidConfig {
+                        field,
+                        detail: format!("expected a non-negative value, got {value}"),
+                    });
+                }
+            }
             let stagnation = (1.0 - (loss_var / (1.0 + loss_var))).clamp(0.0, 1.0);
             let grad_term = (grad_norm / (1.0 + grad_norm)).clamp(0.0, 1.0);
             let instability = retry + 0.5 * grad_term;
             let delta = 0.2 * stagnation - 0.3 * instability;
-            self.temp = (self.temp + delta).clamp(self.temp_min, self.temp_max);
+            let next = self.temp + delta;
+            require_finite("temperature.next", next)?;
+            self.temp = next.clamp(self.temp_min, self.temp_max);
+            Ok(self.temp)
         }
 
-        /// Sets the backend used for fractional regularisation.
+        /// Records the preferred fractional execution route without changing
+        /// the canonical Rust regularizer semantics.
         pub fn set_frac_backend(&mut self, backend: FracBackend) {
+            let _ = self.try_set_frac_backend(backend);
+        }
+
+        pub fn try_set_frac_backend(&mut self, backend: FracBackend) -> Result<(), ZMetaError> {
+            self.validate_adaptation_state()?;
+            if let Some(pending) = &self.pending {
+                return Err(ZMetaError::PendingEvaluation {
+                    evaluation_id: pending.witness.evaluation_id,
+                });
+            }
+            validate_fractional_backend(&backend)?;
             self.frac_backend = backend;
+            Ok(())
         }
 
         pub fn frac_penalty(&self) -> f64 {
-            frac_penalty_backend(
-                &self.z,
-                self.params.alpha_frac,
-                self.params.lam_frac,
-                &self.frac_backend,
-            )
+            self.try_frac_penalty().unwrap_or(f64::NAN)
+        }
+
+        pub fn try_frac_penalty(&self) -> Result<f64, ZMetaError> {
+            fractional_penalty(&self.z, &self.params, &self.frac_backend)
+                .map(|(_, penalty)| penalty)
+        }
+
+        pub fn active_frac_penalty(&self) -> f64 {
+            self.try_active_frac_penalty().unwrap_or(f64::NAN)
+        }
+
+        pub fn try_active_frac_penalty(&self) -> Result<f64, ZMetaError> {
+            if let Some(pending) = &self.pending {
+                Ok(pending.witness.fractional_penalty)
+            } else {
+                self.try_frac_penalty()
+            }
         }
 
         pub fn frac_penalty_proposed(&self) -> f64 {
-            let proposed: Vec<f64> = self
+            let radius = self.params.lr * self.params.sigma * self.temp;
+            let proposed = self
                 .z
                 .iter()
-                .zip(self.dir.iter())
-                .map(|(z, d)| z + self.params.sigma * d)
-                .collect();
-            frac_penalty_backend(
-                &proposed,
-                self.params.alpha_frac,
-                self.params.lam_frac,
-                &self.frac_backend,
-            )
+                .zip(&self.dir)
+                .map(|(value, direction)| value + radius * direction)
+                .collect::<Vec<_>>();
+            fractional_penalty(&proposed, &self.params, &self.frac_backend)
+                .map(|(_, penalty)| penalty)
+                .unwrap_or(f64::NAN)
         }
 
-        pub(super) fn validate_adaptation_state(&self) -> Result<(), &'static str> {
+        pub fn validate_adaptation_state(&self) -> Result<(), ZMetaError> {
+            if let Some(error) = &self.configuration_error {
+                return Err(error.clone());
+            }
+            self.params.validate()?;
+            validate_fractional_backend(&self.frac_backend)?;
             if self.z.len() != self.params.dim
                 || self.dir.len() != self.params.dim
                 || self.structural.len() != self.params.dim
             {
-                return Err("zmeta.vector_shape");
+                return Err(ZMetaError::InvalidState {
+                    field: "vector_shape",
+                });
             }
             for (field, value) in [
-                ("zmeta.params.sigma", self.params.sigma),
-                ("zmeta.params.lr", self.params.lr),
-                ("zmeta.params.alpha_frac", self.params.alpha_frac),
-                ("zmeta.params.lam_frac", self.params.lam_frac),
-                ("zmeta.params.orientation_eta", self.params.orientation_eta),
-                ("zmeta.params.orientation_eps", self.params.orientation_eps),
-                ("zmeta.temperature", self.temp),
-                ("zmeta.temperature_min", self.temp_min),
-                ("zmeta.temperature_max", self.temp_max),
+                ("temperature", self.temp),
+                ("temperature_min", self.temp_min),
+                ("temperature_max", self.temp_max),
             ] {
-                if !value.is_finite() {
-                    return Err(field);
-                }
+                require_finite(field, value)?;
             }
-            for (field, value) in [
-                ("zmeta.params.sigma", self.params.sigma),
-                ("zmeta.params.lr", self.params.lr),
-                ("zmeta.params.alpha_frac", self.params.alpha_frac),
-                ("zmeta.params.lam_frac", self.params.lam_frac),
-                ("zmeta.params.orientation_eta", self.params.orientation_eta),
-            ] {
-                if value < 0.0 {
-                    return Err(field);
-                }
-            }
-            if self.params.orientation_eps <= 0.0 {
-                return Err("zmeta.params.orientation_eps");
-            }
-            if self.temp_min < 0.0
-                || self.temp_max < self.temp_min
+            if self.temp_min <= 0.0
+                || self.temp_max <= self.temp_min
                 || self.temp < self.temp_min
                 || self.temp > self.temp_max
             {
-                return Err("zmeta.temperature_bounds");
+                return Err(ZMetaError::InvalidState {
+                    field: "temperature_bounds",
+                });
             }
             if self
                 .z
@@ -2161,115 +2724,395 @@ pub mod zmeta {
                 .chain(self.structural.iter())
                 .any(|value| !value.is_finite())
             {
-                return Err("zmeta.vector_state");
+                return Err(ZMetaError::InvalidState {
+                    field: "vector_state",
+                });
             }
             let direction_norm = stable_norm(&self.dir);
             if !direction_norm.is_finite()
                 || (!self.dir.is_empty() && (direction_norm - 1.0).abs() > 1.0e-6)
             {
-                return Err("zmeta.direction_norm");
+                return Err(ZMetaError::InvalidState {
+                    field: "direction_norm",
+                });
             }
             let structural_norm = stable_norm(&self.structural);
             if !structural_norm.is_finite() || structural_norm > 1.0 + 1.0e-6 {
-                return Err("zmeta.structural_norm");
+                return Err(ZMetaError::InvalidState {
+                    field: "structural_norm",
+                });
+            }
+            if self
+                .incumbent_reward
+                .is_some_and(|reward| !reward.is_finite())
+            {
+                return Err(ZMetaError::InvalidState {
+                    field: "incumbent_reward",
+                });
+            }
+            if self.generation > self.evaluation_counter {
+                return Err(ZMetaError::InvalidState {
+                    field: "generation",
+                });
+            }
+            if let Some(pending) = &self.pending {
+                let witness = &pending.witness;
+                let base_step_radius = self.params.lr * self.params.sigma;
+                let candidate_step_radius = base_step_radius * self.temp;
+                let step_radius = match witness.kind {
+                    ZMetaEvaluationKind::Baseline => 0.0,
+                    ZMetaEvaluationKind::Candidate => candidate_step_radius,
+                };
+                if witness.evaluation_id != self.evaluation_counter
+                    || self.last_proposal.as_ref() != Some(witness)
+                    || witness.contract != ZMETA_ES_CONTRACT
+                    || witness.contract_version != ZMETA_ES_CONTRACT_VERSION
+                    || witness.proposal_rule != ZMETA_PROPOSAL_RULE
+                    || witness.context_deformation != ZMETA_CONTEXT_DEFORMATION
+                    || witness.fractional_formula != ZSPACE_FRACTIONAL_REGULARIZER_FORMULA
+                    || witness.fractional_semantic_owner != ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER
+                    || witness.fractional_semantic_backend != ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND
+                    || witness.requested_fractional_backend != backend_label(&self.frac_backend)
+                    || witness.incumbent_z != self.z
+                    || witness.incumbent_reward != self.incumbent_reward
+                    || witness.direction != self.dir
+                    || !approximately_equal(witness.base_step_radius, base_step_radius)
+                    || !approximately_equal(witness.temperature, self.temp)
+                    || !approximately_equal(witness.step_radius, step_radius)
+                    || witness.evaluated_z.len() != self.params.dim
+                    || witness.structural_projection != self.structural
+                    || pending.structural_before.len() != self.params.dim
+                    || pending
+                        .structural_before
+                        .iter()
+                        .any(|value| !value.is_finite())
+                    || pending.structural_delta.as_ref().is_some_and(|delta| {
+                        delta.len() != self.params.dim
+                            || delta.iter().any(|value| !value.is_finite())
+                    })
+                    || witness.base_context.is_empty()
+                    || witness.effective_context.len() != witness.base_context.len()
+                    || witness
+                        .base_context
+                        .iter()
+                        .chain(witness.direction.iter())
+                        .chain(witness.effective_context.iter())
+                        .chain(witness.evaluated_z.iter())
+                        .any(|value| !value.is_finite())
+                {
+                    return Err(ZMetaError::InvalidState {
+                        field: "pending_witness",
+                    });
+                }
+                let expected_z = match witness.kind {
+                    ZMetaEvaluationKind::Baseline => self.z.clone(),
+                    ZMetaEvaluationKind::Candidate => self
+                        .z
+                        .iter()
+                        .zip(&self.dir)
+                        .map(|(value, direction)| value + candidate_step_radius * direction)
+                        .collect(),
+                };
+                let effective_context = deform_context(&witness.base_context, &expected_z)?;
+                let (energy, penalty) =
+                    fractional_penalty(&witness.evaluated_z, &self.params, &self.frac_backend)?;
+                if expected_z != witness.evaluated_z
+                    || effective_context != witness.effective_context
+                    || !approximately_equal(energy, witness.fractional_energy)
+                    || !approximately_equal(penalty, witness.fractional_penalty)
+                {
+                    return Err(ZMetaError::InvalidState {
+                        field: "pending_derivation",
+                    });
+                }
+            }
+            self.try_frac_penalty()?;
+            Ok(())
+        }
+
+        /// Prepare one baseline or candidate latent and apply it to a context.
+        /// The state is committed only after every derived value validates.
+        pub fn try_ask(&mut self, context: &[f64]) -> Result<ZMetaProposalWitness, ZMetaError> {
+            let evaluation_id =
+                self.evaluation_counter
+                    .checked_add(1)
+                    .ok_or(ZMetaError::InvalidState {
+                        field: "evaluation_counter",
+                    })?;
+            self.try_prepare_context(evaluation_id, context)
+        }
+
+        /// Prepare an evaluation with an externally coordinated identifier.
+        pub fn try_prepare_context(
+            &mut self,
+            evaluation_id: u64,
+            context: &[f64],
+        ) -> Result<ZMetaProposalWitness, ZMetaError> {
+            self.validate_adaptation_state()?;
+            if let Some(pending) = &self.pending {
+                return Err(ZMetaError::PendingEvaluation {
+                    evaluation_id: pending.witness.evaluation_id,
+                });
+            }
+            let expected =
+                self.evaluation_counter
+                    .checked_add(1)
+                    .ok_or(ZMetaError::InvalidState {
+                        field: "evaluation_counter",
+                    })?;
+            if evaluation_id != expected {
+                return Err(ZMetaError::EvaluationMismatch {
+                    expected,
+                    actual: evaluation_id,
+                });
+            }
+            if context.is_empty() || context.iter().any(|value| !value.is_finite()) {
+                return Err(ZMetaError::InvalidConfig {
+                    field: "context",
+                    detail: "expected one or more finite contextual features".to_string(),
+                });
+            }
+
+            let mut next = self.clone();
+            let structural_before = next.structural.clone();
+            let structural_delta = next.ingest_structural(Some(context));
+            let kind = if next.incumbent_reward.is_some() {
+                ZMetaEvaluationKind::Candidate
+            } else {
+                ZMetaEvaluationKind::Baseline
+            };
+            let base_step_radius = next.params.lr * next.params.sigma;
+            let candidate_step_radius = base_step_radius * next.temp;
+            if !candidate_step_radius.is_finite() || candidate_step_radius <= 0.0 {
+                return Err(ZMetaError::InvalidState {
+                    field: "proposal_step_radius",
+                });
+            }
+            let step_radius = match kind {
+                ZMetaEvaluationKind::Baseline => 0.0,
+                ZMetaEvaluationKind::Candidate => candidate_step_radius,
+            };
+            let evaluated_z = match kind {
+                ZMetaEvaluationKind::Baseline => next.z.clone(),
+                ZMetaEvaluationKind::Candidate => next
+                    .z
+                    .iter()
+                    .zip(&next.dir)
+                    .map(|(value, direction)| value + candidate_step_radius * direction)
+                    .collect(),
+            };
+            if evaluated_z.iter().any(|value| !value.is_finite()) {
+                return Err(ZMetaError::InvalidState { field: "proposal" });
+            }
+            let effective_context = deform_context(context, &evaluated_z)?;
+            let (fractional_energy, fractional_penalty) =
+                fractional_penalty(&evaluated_z, &next.params, &next.frac_backend)?;
+            let witness = ZMetaProposalWitness {
+                contract: ZMETA_ES_CONTRACT,
+                contract_version: ZMETA_ES_CONTRACT_VERSION,
+                evaluation_id,
+                kind,
+                proposal_rule: ZMETA_PROPOSAL_RULE,
+                context_deformation: ZMETA_CONTEXT_DEFORMATION,
+                fractional_formula: ZSPACE_FRACTIONAL_REGULARIZER_FORMULA,
+                fractional_semantic_owner: ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER,
+                fractional_semantic_backend: ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND,
+                requested_fractional_backend: backend_label(&next.frac_backend),
+                incumbent_z: next.z.clone(),
+                evaluated_z,
+                direction: next.dir.clone(),
+                base_step_radius,
+                temperature: next.temp,
+                step_radius,
+                incumbent_reward: next.incumbent_reward,
+                base_context: context.to_vec(),
+                effective_context,
+                structural_projection: next.structural.clone(),
+                fractional_energy,
+                fractional_penalty,
+            };
+            next.pending = Some(PendingEvaluation {
+                witness: witness.clone(),
+                structural_before,
+                structural_delta,
+            });
+            next.evaluation_counter = evaluation_id;
+            next.last_proposal = Some(witness.clone());
+            next.validate_adaptation_state()?;
+            *self = next;
+            Ok(witness)
+        }
+
+        /// Commit exactly one observed reward to the pending latent evaluation.
+        pub fn try_tell_pending(&mut self, reward: f64) -> Result<ZMetaUpdateWitness, ZMetaError> {
+            let evaluation_id = self
+                .pending_evaluation_id()
+                .ok_or(ZMetaError::MissingEvaluation)?;
+            self.try_tell(evaluation_id, reward)
+        }
+
+        /// Commit a reward with an externally coordinated identifier.
+        pub fn try_tell(
+            &mut self,
+            evaluation_id: u64,
+            reward: f64,
+        ) -> Result<ZMetaUpdateWitness, ZMetaError> {
+            self.validate_adaptation_state()?;
+            require_finite("reward", reward)?;
+            let mut next = self.clone();
+            let pending = next.pending.take().ok_or(ZMetaError::MissingEvaluation)?;
+            if pending.witness.evaluation_id != evaluation_id {
+                return Err(ZMetaError::EvaluationMismatch {
+                    expected: pending.witness.evaluation_id,
+                    actual: evaluation_id,
+                });
+            }
+            let z_before = next.z.clone();
+            let incumbent_reward_before = next.incumbent_reward;
+            let reward_delta = incumbent_reward_before.map(|baseline| reward - baseline);
+            if reward_delta.is_some_and(|delta| !delta.is_finite()) {
+                return Err(ZMetaError::InvalidState {
+                    field: "reward_delta",
+                });
+            }
+            let accepted = match pending.witness.kind {
+                ZMetaEvaluationKind::Baseline => true,
+                ZMetaEvaluationKind::Candidate => reward_delta.is_some_and(|delta| delta > 0.0),
+            };
+            if pending.witness.kind == ZMetaEvaluationKind::Candidate && accepted {
+                next.z = pending.witness.evaluated_z.clone();
+            }
+            if accepted {
+                next.incumbent_reward = Some(reward);
+            }
+            if let Some(delta) = reward_delta {
+                next.adapt_direction(accepted)?;
+                if let Some(structural_delta) = pending.structural_delta {
+                    next.apply_structural_drive(structural_delta, delta);
+                    if !normalize_above(&mut next.dir, 0.0) {
+                        return Err(ZMetaError::InvalidState {
+                            field: "direction_update",
+                        });
+                    }
+                }
+            }
+            next.generation = next
+                .generation
+                .checked_add(1)
+                .ok_or(ZMetaError::InvalidState {
+                    field: "generation",
+                })?;
+            let incumbent_reward_after = next.incumbent_reward.ok_or(ZMetaError::InvalidState {
+                field: "incumbent_reward",
+            })?;
+            let penalty_before = fractional_penalty(&z_before, &next.params, &next.frac_backend)?.1;
+            let penalty_after = next.try_frac_penalty()?;
+            let update = ZMetaUpdateWitness {
+                contract: ZMETA_ES_CONTRACT,
+                contract_version: ZMETA_ES_CONTRACT_VERSION,
+                evaluation_id,
+                kind: pending.witness.kind,
+                reward,
+                incumbent_reward_before,
+                incumbent_reward_after,
+                reward_delta,
+                accepted,
+                generation: next.generation,
+                z_before,
+                evaluated_z: pending.witness.evaluated_z,
+                z_after: next.z.clone(),
+                direction_after: next.dir.clone(),
+                fractional_penalty_before: penalty_before,
+                fractional_penalty_evaluated: pending.witness.fractional_penalty,
+                fractional_penalty_after: penalty_after,
+            };
+            next.last_update = Some(update.clone());
+            next.validate_adaptation_state()?;
+            *self = next;
+            Ok(update)
+        }
+
+        /// Release an unevaluated candidate without changing the incumbent or
+        /// consuming a direction update.
+        pub fn try_abandon_pending(&mut self) -> Result<ZMetaProposalWitness, ZMetaError> {
+            let evaluation_id = self
+                .pending_evaluation_id()
+                .ok_or(ZMetaError::MissingEvaluation)?;
+            self.try_abandon(evaluation_id)
+        }
+
+        /// Release an evaluation with an externally coordinated identifier.
+        pub fn try_abandon(
+            &mut self,
+            evaluation_id: u64,
+        ) -> Result<ZMetaProposalWitness, ZMetaError> {
+            self.validate_adaptation_state()?;
+            let mut next = self.clone();
+            let pending = next.pending.take().ok_or(ZMetaError::MissingEvaluation)?;
+            if pending.witness.evaluation_id != evaluation_id {
+                return Err(ZMetaError::EvaluationMismatch {
+                    expected: pending.witness.evaluation_id,
+                    actual: evaluation_id,
+                });
+            }
+            next.structural = pending.structural_before;
+            next.validate_adaptation_state()?;
+            let witness = pending.witness;
+            *self = next;
+            Ok(witness)
+        }
+
+        fn adapt_direction(&mut self, accepted: bool) -> Result<(), ZMetaError> {
+            if accepted {
+                for direction in &mut self.dir {
+                    *direction = 0.7 * *direction + 0.3 * self.rng.gauss(0.0, 1.0);
+                }
+            } else {
+                let mut kick = (0..self.params.dim)
+                    .map(|_| self.rng.gauss(0.0, 0.5))
+                    .collect::<Vec<_>>();
+                let projection = dot(&kick, &self.dir);
+                for (value, direction) in kick.iter_mut().zip(&self.dir) {
+                    *value -= projection * direction;
+                }
+                for (direction, value) in self.dir.iter_mut().zip(kick) {
+                    *direction = 0.9 * *direction + 0.1 * value;
+                }
+            }
+            if !normalize_above(&mut self.dir, 0.0) {
+                return Err(ZMetaError::InvalidState {
+                    field: "direction_update",
+                });
             }
             Ok(())
         }
 
-        pub fn update(
-            &mut self,
-            reward_current: f64,
-            reward_proposed: f64,
-            structural: Option<&[f64]>,
-        ) {
-            let delta_reward = reward_proposed - reward_current;
-            let structural_delta = self.ingest_structural(structural);
-            let improved = delta_reward > 0.0;
-
-            if improved {
-                for (z, d) in self.z.iter_mut().zip(self.dir.iter()) {
-                    *z += self.params.lr * (self.params.sigma * d);
-                }
-                for dir in self.dir.iter_mut() {
-                    *dir = 0.7 * (*dir) + 0.3 * self.rng.gauss(0.0, 1.0);
-                }
-            } else {
-                let mut kick: Vec<f64> = (0..self.params.dim)
-                    .map(|_| self.rng.gauss(0.0, 0.5))
-                    .collect();
-                let projection = dot(&kick, &self.dir);
-                for (k, d) in kick.iter_mut().zip(self.dir.iter()) {
-                    *k -= projection * d;
-                }
-                for (dir, kick) in self.dir.iter_mut().zip(kick.iter()) {
-                    *dir = 0.9 * (*dir) + 0.1 * (*kick);
-                }
-            }
-
-            normalize(&mut self.dir);
-
-            if let Some(delta) = structural_delta {
-                self.apply_structural_drive(delta, delta_reward);
-            }
-        }
-
-        #[allow(dead_code)]
-        fn ingest_structural_legacy(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let raw = structural?;
-            if self.params.dim == 0 {
-                return None;
-            }
-
-            let mut new_vec = vec![0.0f64; self.params.dim];
-            let mut any = false;
-            for (idx, slot) in new_vec.iter_mut().enumerate() {
-                if let Some(value) = raw.get(idx).copied() {
-                    if value.is_finite() {
-                        *slot = value;
-                        any |= value.abs() > 1e-12;
-                    }
-                }
-            }
-            if !any {
-                return None;
-            }
-
-            if !normalize_above(&mut new_vec, 1.0e-9) {
-                return None;
-            }
-
-            let prev = self.structural.clone();
-            self.structural = new_vec;
-            Some(
-                self.structural
-                    .iter()
-                    .zip(prev.iter())
-                    .map(|(new, old)| new - old)
-                    .collect(),
-            )
-        }
-
         fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
             let raw = structural?;
-            if self.params.dim == 0 {
+            if self.params.dim == 0 || raw.is_empty() {
                 return None;
             }
 
+            let raw_scale = raw.iter().map(|value| value.abs()).fold(0.0f64, f64::max);
+            if !raw_scale.is_finite() || raw_scale == 0.0 {
+                return None;
+            }
             let mut new_vec = vec![0.0f64; self.params.dim];
-            let mut any = false;
-            for (idx, slot) in new_vec.iter_mut().enumerate() {
-                if let Some(value) = raw.get(idx).copied() {
-                    if value.is_finite() {
-                        *slot = value;
-                        any |= value.abs() > 1e-12;
-                    }
-                }
+            let mut counts = vec![0usize; self.params.dim];
+            for (index, value) in raw.iter().copied().enumerate() {
+                let coordinate = index % self.params.dim;
+                new_vec[coordinate] += value / raw_scale;
+                counts[coordinate] += 1;
             }
-            if !any {
-                return None;
+            for (index, value) in new_vec.iter_mut().enumerate() {
+                *value = if counts[index] == 0 {
+                    raw[index % raw.len()] / raw_scale
+                } else {
+                    *value / counts[index] as f64
+                };
             }
 
-            if !normalize_above(&mut new_vec, 1.0e-9) {
+            if !normalize_above(&mut new_vec, 0.0) {
                 return None;
             }
 
@@ -2282,28 +3125,6 @@ pub mod zmeta {
                     .map(|(new, old)| new - old)
                     .collect(),
             )
-        }
-
-        #[allow(dead_code)]
-        fn apply_structural_drive_legacy(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
-            if delta_reward.abs() <= 1e-9 {
-                return;
-            }
-            let gain = delta_reward.tanh();
-            if !gain.is_finite() || gain.abs() <= 1e-6 {
-                return;
-            }
-
-            let delta_norm = stable_norm(&delta);
-            if delta_norm <= 1e-9 {
-                return;
-            }
-
-            for value in delta.iter_mut() {
-                *value *= gain;
-            }
-
-            self.logistic_project_step(&delta);
         }
 
         fn apply_structural_drive(&mut self, mut delta: Vec<f64>, delta_reward: f64) {
@@ -2325,52 +3146,6 @@ pub mod zmeta {
             }
 
             self.logistic_project_step(&delta);
-        }
-
-        #[allow(dead_code)]
-        fn logistic_project_step_legacy(&mut self, drive: &[f64]) {
-            if self.dir.is_empty() {
-                return;
-            }
-
-            let structural_norm_sq = self.structural.iter().map(|v| v * v).sum::<f64>();
-            if structural_norm_sq <= 1e-12 {
-                return;
-            }
-
-            let mut projected = Vec::with_capacity(self.dir.len());
-            let dot_nd = dot(&self.dir, drive);
-            for (n, d) in self.dir.iter().zip(drive.iter()) {
-                projected.push(d - dot_nd * n);
-            }
-
-            let proj_norm_sq = projected.iter().map(|v| v * v).sum::<f64>();
-            if proj_norm_sq <= 1e-12 {
-                return;
-            }
-
-            // unused 警告を抑制（意味は変えない）
-            let _proj_norm = proj_norm_sq.sqrt();
-
-            let dot_nr = self
-                .dir
-                .iter()
-                .zip(self.structural.iter())
-                .map(|(n, r)| n * r)
-                .sum::<f64>()
-                .clamp(-1.0, 1.0);
-            let p_t = 0.5 * (1.0 + dot_nr);
-            let eps = self.params.orientation_eps.max(1e-6);
-            let denom = 2.0 * p_t * (1.0 - p_t) + eps;
-            let eta = self.params.orientation_eta.max(0.0);
-            if eta <= 0.0 {
-                return;
-            }
-
-            for (n, proj) in self.dir.iter_mut().zip(projected.iter()) {
-                *n += eta * (*proj) / denom;
-            }
-            normalize(&mut self.dir);
         }
 
         fn logistic_project_step(&mut self, drive: &[f64]) {
@@ -2451,26 +3226,96 @@ pub mod zmeta {
         a.iter().zip(b).map(|(x, y)| x * y).sum()
     }
 
-    fn frac_penalty(z: &[f64], alpha: f64, lam: f64) -> f64 {
-        if z.len() < 3 {
-            return 0.0;
+    fn require_finite(field: &'static str, value: f64) -> Result<f64, ZMetaError> {
+        if value.is_finite() {
+            Ok(value)
+        } else {
+            Err(ZMetaError::NonFinite { field, value })
         }
-        let mut acc = 0.0;
-        for idx in 1..(z.len() - 1) {
-            let d2 = z[idx - 1] - 2.0 * z[idx] + z[idx + 1];
-            acc += d2.abs().powf(1.0 + alpha);
-        }
-        lam * acc
     }
 
-    fn frac_penalty_backend(z: &[f64], alpha: f64, lam: f64, backend: &FracBackend) -> f64 {
-        let base = frac_penalty(z, alpha, lam);
+    fn validate_fractional_backend(backend: &FracBackend) -> Result<(), ZMetaError> {
         match backend {
-            FracBackend::CpuRadix2 => base,
-            FracBackend::Wgpu { radix } => {
-                let radix_factor = (*radix as f64).max(2.0) / 2.0;
-                base * (1.0 + 0.15 * (radix_factor - 1.0))
-            }
+            FracBackend::CpuRadix2 => Ok(()),
+            FracBackend::Wgpu { radix } if *radix >= 2 && radix.is_power_of_two() => Ok(()),
+            FracBackend::Wgpu { radix } => Err(ZMetaError::InvalidConfig {
+                field: "fractional_backend.radix",
+                detail: format!("expected a power of two in 2..=128, got {radix}"),
+            }),
+        }
+    }
+
+    fn backend_label(backend: &FracBackend) -> String {
+        match backend {
+            FracBackend::CpuRadix2 => "cpu_radix2".to_string(),
+            FracBackend::Wgpu { radix } => format!("wgpu_radix{radix}"),
+        }
+    }
+
+    fn fractional_penalty(
+        z: &[f64],
+        params: &ZMetaParams,
+        backend: &FracBackend,
+    ) -> Result<(f64, f64), ZMetaError> {
+        validate_fractional_backend(backend)?;
+        let report = evaluate_zspace_fractional_regularizer(z, params.alpha_frac)?;
+        let penalty = report.energy * params.lam_frac;
+        require_finite("fractional_penalty", penalty)?;
+        Ok((report.energy, penalty))
+    }
+
+    fn deform_context(context: &[f64], z: &[f64]) -> Result<Vec<f64>, ZMetaError> {
+        if context.is_empty() || z.is_empty() {
+            return Err(ZMetaError::InvalidState {
+                field: "context_deformation_dimension",
+            });
+        }
+        let mut deformation = vec![0.0; context.len()];
+        let mut counts = vec![0usize; context.len()];
+        for (index, value) in z.iter().copied().enumerate() {
+            let feature = index % context.len();
+            deformation[feature] += value.tanh();
+            counts[feature] += 1;
+        }
+        for (index, value) in deformation.iter_mut().enumerate() {
+            *value = if counts[index] == 0 {
+                z[index % z.len()].tanh()
+            } else {
+                *value / counts[index] as f64
+            };
+        }
+        context
+            .iter()
+            .zip(deformation)
+            .map(|(value, offset)| {
+                let deformed = *value + offset;
+                if deformed.is_finite() {
+                    Ok(deformed)
+                } else {
+                    Err(ZMetaError::InvalidState {
+                        field: "effective_context",
+                    })
+                }
+            })
+            .collect()
+    }
+
+    fn approximately_equal(left: f64, right: f64) -> bool {
+        if left == right {
+            return true;
+        }
+        let scale = left.abs().max(right.abs()).max(1.0);
+        (left - right).abs() <= 128.0 * f64::EPSILON * scale
+    }
+
+    #[cfg(test)]
+    fn assert_backend_invariant(z: &[f64], params: &ZMetaParams) {
+        let cpu =
+            fractional_penalty(z, params, &FracBackend::CpuRadix2).expect("CPU semantic penalty");
+        for radix in [2, 4, 8, 16] {
+            let routed = fractional_penalty(z, params, &FracBackend::Wgpu { radix })
+                .expect("WGPU route shares semantics");
+            assert_eq!(cpu, routed);
         }
     }
 
@@ -2530,6 +3375,219 @@ pub mod zmeta {
             es.apply_structural_drive(delta, 0.25);
             es.validate_adaptation_state()
                 .expect("stable normalisation preserves valid state");
+        }
+
+        #[test]
+        fn structural_projection_uses_context_features_beyond_the_latent_width() {
+            let mut es = ZMetaES::try_new(ZMetaParams {
+                dim: 2,
+                seed: 13,
+                ..Default::default()
+            })
+            .expect("valid ES");
+
+            let proposal = es
+                .try_ask(&[0.0, 0.0, 0.0, 1.0])
+                .expect("tail feature remains visible");
+            assert_eq!(proposal.structural_projection[0], 0.0);
+            assert!(proposal.structural_projection[1] > 0.0);
+            assert!(approximately_equal(
+                stable_norm(&proposal.structural_projection),
+                1.0
+            ));
+        }
+
+        #[test]
+        fn ask_tell_establishes_baseline_then_accepts_and_rejects_candidates() {
+            let mut es = ZMetaES::try_new(ZMetaParams {
+                dim: 3,
+                seed: 19,
+                ..Default::default()
+            })
+            .expect("valid ES");
+            let context = [1.0, 0.25, -0.5, 0.75];
+
+            let baseline = es.try_ask(&context).expect("baseline proposal");
+            assert_eq!(baseline.kind, ZMetaEvaluationKind::Baseline);
+            assert_eq!(baseline.incumbent_z, baseline.evaluated_z);
+            assert_eq!(baseline.base_context, baseline.effective_context);
+            let baseline_update = es.try_tell_pending(0.25).expect("baseline reward");
+            assert!(baseline_update.accepted);
+            assert_eq!(es.generation(), 1);
+            assert_eq!(es.z(), &[0.0, 0.0, 0.0]);
+
+            let candidate = es
+                .try_prepare_context(2, &context)
+                .expect("candidate proposal");
+            assert_eq!(candidate.kind, ZMetaEvaluationKind::Candidate);
+            assert_ne!(candidate.evaluated_z, candidate.incumbent_z);
+            assert_ne!(candidate.effective_context, candidate.base_context);
+            assert!(candidate
+                .effective_context
+                .iter()
+                .zip(&candidate.base_context)
+                .all(|(effective, base)| (effective - base).abs() <= 1.0));
+            let accepted_z = candidate.evaluated_z.clone();
+            let accepted = es.try_tell(2, 0.75).expect("improved candidate");
+            assert!(accepted.accepted);
+            assert_eq!(es.z(), accepted_z);
+
+            let incumbent = es.z().to_vec();
+            es.try_prepare_context(3, &context).expect("next candidate");
+            let rejected = es.try_tell(3, -0.5).expect("worse candidate");
+            assert!(!rejected.accepted);
+            assert_eq!(es.z(), incumbent);
+            assert_eq!(es.incumbent_reward(), Some(0.75));
+            assert_eq!(es.generation(), 3);
+        }
+
+        #[test]
+        fn telemetry_temperature_controls_the_next_candidate_radius() {
+            let mut es = ZMetaES::try_new(ZMetaParams {
+                dim: 3,
+                seed: 21,
+                ..Default::default()
+            })
+            .expect("valid ES");
+            let context = [1.0, 0.25, -0.5];
+            es.try_ask(&context).expect("baseline proposal");
+            es.try_tell_pending(0.25).expect("baseline reward");
+
+            let temperature = es
+                .try_temp_schedule(0.0, 0.0, 0.0)
+                .expect("stable telemetry raises exploration temperature");
+            let candidate = es.try_ask(&context).expect("candidate proposal");
+            assert!(temperature > 1.0);
+            assert_eq!(candidate.temperature, temperature);
+            assert!(approximately_equal(
+                candidate.base_step_radius,
+                es.params().lr * es.params().sigma
+            ));
+            assert!(approximately_equal(
+                candidate.step_radius,
+                candidate.base_step_radius * candidate.temperature
+            ));
+            let actual_radius = candidate
+                .evaluated_z
+                .iter()
+                .zip(&candidate.incumbent_z)
+                .fold(0.0f64, |norm, (candidate, incumbent)| {
+                    norm.hypot(candidate - incumbent)
+                });
+            assert!(approximately_equal(actual_radius, candidate.step_radius));
+
+            let before = es.clone();
+            assert!(matches!(
+                es.try_temp_schedule(0.0, 0.0, 0.0),
+                Err(ZMetaError::PendingEvaluation { evaluation_id: 2 })
+            ));
+            assert!(matches!(
+                es.try_set_temp_bounds(0.5, 2.0),
+                Err(ZMetaError::PendingEvaluation { evaluation_id: 2 })
+            ));
+            assert_eq!(es.temperature(), before.temperature());
+            assert_eq!(es.pending_evaluation_id(), before.pending_evaluation_id());
+            assert_eq!(es.last_proposal(), before.last_proposal());
+
+            es.try_abandon_pending().expect("release candidate");
+            assert!(matches!(
+                es.try_set_temp_bounds(0.0, 2.0),
+                Err(ZMetaError::InvalidConfig {
+                    field: "temperature_bounds",
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn failed_tell_and_abandonment_are_atomic() {
+            let mut es = ZMetaES::try_new(ZMetaParams {
+                dim: 3,
+                seed: 23,
+                ..Default::default()
+            })
+            .expect("valid ES");
+            let context = [1.0, 0.5, -0.25];
+            let structural_before = es.structural.clone();
+            let proposal = es
+                .try_prepare_context(1, &context)
+                .expect("pending baseline");
+
+            assert!(matches!(
+                es.try_tell(2, 0.0),
+                Err(ZMetaError::EvaluationMismatch {
+                    expected: 1,
+                    actual: 2
+                })
+            ));
+            assert_eq!(es.pending_evaluation_id(), Some(1));
+            assert!(matches!(
+                es.try_tell(1, f64::NAN),
+                Err(ZMetaError::NonFinite {
+                    field: "reward",
+                    ..
+                })
+            ));
+            assert_eq!(es.pending_evaluation_id(), Some(1));
+
+            let abandoned = es.try_abandon(1).expect("abandon proposal");
+            assert_eq!(abandoned, proposal);
+            assert_eq!(es.pending_evaluation_id(), None);
+            assert_eq!(es.structural, structural_before);
+            assert_eq!(es.generation(), 0);
+            assert_eq!(es.incumbent_reward(), None);
+        }
+
+        #[test]
+        fn fractional_semantics_are_backend_invariant() {
+            let params = ZMetaParams {
+                dim: 4,
+                alpha_frac: 0.45,
+                lam_frac: 0.3,
+                ..Default::default()
+            };
+            assert_backend_invariant(&[0.25, -0.75, 0.5, 0.125], &params);
+            assert!(matches!(
+                validate_fractional_backend(&FracBackend::Wgpu { radix: 3 }),
+                Err(ZMetaError::InvalidConfig {
+                    field: "fractional_backend.radix",
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn context_projection_keeps_every_latent_coordinate_causal() {
+            let context = [1.0, 0.0, 0.0, 0.0];
+            let mut z = vec![0.0; 6];
+            z[4] = 1.0;
+            let effective = deform_context(&context, &z).expect("folded deformation");
+            assert!(effective[0] > context[0]);
+            assert_eq!(effective[1], context[1]);
+
+            let tiled = deform_context(&[0.0; 8], &[0.5, -0.5])
+                .expect("short latents tile across features");
+            assert!(tiled
+                .iter()
+                .enumerate()
+                .all(|(index, value)| value.signum() == if index % 2 == 0 { 1.0 } else { -1.0 }));
+        }
+
+        #[test]
+        fn guarded_constructor_rejects_degenerate_search_parameters() {
+            assert!(matches!(
+                ZMetaES::try_new(ZMetaParams {
+                    sigma: 0.0,
+                    ..Default::default()
+                }),
+                Err(ZMetaError::InvalidConfig { field: "sigma", .. })
+            ));
+            let compatibility = ZMetaES::new(ZMetaParams {
+                dim: usize::MAX,
+                ..Default::default()
+            });
+            assert!(compatibility.validate_adaptation_state().is_err());
+            assert_eq!(compatibility.z().len(), ZMetaParams::default().dim);
         }
     }
 
