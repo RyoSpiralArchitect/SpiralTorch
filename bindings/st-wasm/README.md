@@ -255,6 +255,29 @@ adds only `execution_client: "wasm"`; it does not carry a browser Adam, FFT
 fallback, or model-parameter optimizer. The shared Rust contract bounds step
 counters at JavaScript's largest exactly representable integer.
 
+Partial-gradient construction is a peer contract too. Browser code supplies
+named canonical metrics; Rust assigns their periodic optimizer coordinates and
+returns the basis identity consumed by partial fusion:
+
+```ts
+import { zspaceMetricGradientProjectionObject } from "spiraltorch-wasm";
+
+const projected = zspaceMetricGradientProjectionObject({
+    metrics: { speed: 0.2, memory: 0.1, stability: 0.7, frac: 0.3, drs: -0.1 },
+    dimension: 6,
+});
+
+console.log(projected.gradient, projected.basis);
+```
+
+Partial fusion v3 rejects tagged gradients from different bases, including
+equal-length vectors. WASM therefore cannot silently fuse browser-local feature
+orders with a Rust or Python gradient signal. Set
+`metric_gradient_dimension` on a partial-fusion request when heterogeneous
+clients should contribute named metrics instead: Rust fuses those scalars,
+projects one canonical gradient, and reports which positional gradients were
+replaced.
+
 Concept diffusion is also a peer contract rather than a browser-side
 approximation. Rust validates the labelled simplex and symmetric graph, applies
 observation/Z-bias controls, selects CFL-safe heat-flow substeps, and audits

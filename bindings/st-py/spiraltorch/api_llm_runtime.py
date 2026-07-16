@@ -28,6 +28,7 @@ from .zspace_inference import (
     topos_inference_plan,
     topos_runtime_profile,
     topos_runtime_route,
+    zspace_metric_gradient_projection,
 )
 
 __all__ = [
@@ -593,17 +594,12 @@ def api_llm_zspace_inference_distortion_adapter(
         "stability": stability,
         "frac": psi,
         "drs": pressure - psi,
-        "gradient": [
-            pressure,
-            psi,
-            stability,
-            coherence_value,
-            distortion_energy,
-            strength,
-        ][: max(1, int(gradient_dim))],
     }
-    while len(metrics["gradient"]) < max(1, int(gradient_dim)):
-        metrics["gradient"].append(0.0)
+    gradient_projection = zspace_metric_gradient_projection(
+        metrics,
+        gradient_dim=gradient_dim,
+    )
+    metrics["gradient"] = list(gradient_projection["gradient"])
     telemetry = _prefixed(
         {
             "desire.pressure": pressure,
@@ -639,6 +635,7 @@ def api_llm_zspace_inference_distortion_adapter(
             "origin": origin,
             "weight": bundle_weight_value,
             "metrics": metrics,
+            "gradient_basis": gradient_projection["basis"],
             "telemetry": telemetry,
         },
     }
@@ -1120,17 +1117,6 @@ def _runtime_metrics(
     stability = max(0.0, min(1.0, 0.65 * stop_stability + 0.35 * probability))
     frac = max(0.0, min(1.0, stats["entropy_norm"]))
     drs = math.tanh((completion_tokens - prompt_tokens) / max(1.0, total_tokens))
-    gradient_source = [
-        speed,
-        memory,
-        stability,
-        frac,
-        drs,
-        math.tanh(stats["chars"] / 4096.0),
-        math.tanh(stats["words"] / 512.0),
-        probability,
-    ]
-
     telemetry = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -1150,7 +1136,6 @@ def _runtime_metrics(
         "stability": stability,
         "frac": frac,
         "drs": drs,
-        "gradient": gradient_source,
     }
     return metrics, telemetry
 
@@ -1531,11 +1516,11 @@ def api_llm_partial_from_response(
         finish_reason=finish_reason,
         top_probability=top_probability,
     )
-    gradient = list(metrics["gradient"])
-    dim = max(1, int(gradient_dim))
-    if len(gradient) < dim:
-        gradient.extend(0.0 for _ in range(dim - len(gradient)))
-    metrics["gradient"] = gradient[:dim]
+    gradient_projection = zspace_metric_gradient_projection(
+        metrics,
+        gradient_dim=gradient_dim,
+    )
+    metrics["gradient"] = list(gradient_projection["gradient"])
 
     numeric_telemetry: dict[str, Any] = dict(telemetry)
     if provider:
@@ -1553,6 +1538,7 @@ def api_llm_partial_from_response(
         weight=max(0.0, float(bundle_weight)),
         origin=origin,
         telemetry=_prefixed(numeric_telemetry, telemetry_prefix),
+        gradient_basis=gradient_projection["basis"],
     )
 
 
@@ -1663,6 +1649,14 @@ def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
     return dict(trace)
 
 
+def _context_gradient_basis(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError("context partial gradient_basis must be a string")
+    return value
+
+
 def _context_bundle_from_mapping(mapping: Mapping[str, Any]) -> ZSpacePartialBundle:
     context = mapping.get("context_partial")
     if isinstance(context, Mapping):
@@ -1678,6 +1672,7 @@ def _context_bundle_from_mapping(mapping: Mapping[str, Any]) -> ZSpacePartialBun
                 if isinstance(mapping.get("telemetry"), Mapping)
                 else None
             ),
+            gradient_basis=_context_gradient_basis(mapping.get("gradient_basis")),
         )
     return ZSpacePartialBundle(mapping)
 
@@ -3943,6 +3938,7 @@ class ApiLLMZSpaceRuntime:
             smoothing=smoothing,
             strategy=strategy,
             gradient_alignment=gradient_alignment,
+            metric_gradient_dimension=self.gradient_dim,
         )
         self.session_error: str | None = None
         self.session = session
@@ -4110,6 +4106,7 @@ class ApiLLMZSpaceRuntime:
             "requested_backend": self.requested_backend,
             "gradient_dim": self.gradient_dim,
             "gradient_alignment": self.gradient_alignment,
+            "metric_gradient_dimension": self.pipeline.metric_gradient_dimension,
             "device_preflight": self.device_preflight,
             "summary": self.summary(),
             "traces": [trace.as_dict() for trace in traces],
@@ -4354,6 +4351,7 @@ class ApiLLMZSpaceRuntime:
             "requested_backend": self.requested_backend,
             "gradient_dim": self.gradient_dim,
             "gradient_alignment": self.gradient_alignment,
+            "metric_gradient_dimension": self.pipeline.metric_gradient_dimension,
             "session_error": self.session_error,
             "device_preflight": self.device_preflight,
             "summary": self.summary(),
@@ -4510,6 +4508,7 @@ def run_api_llm_prompt_suite_matrix(
         "prompt_count": len(prompt_list),
         "gradient_dim": resolved_gradient_dim,
         "gradient_alignment": gradient_alignment,
+        "metric_gradient_dimension": resolved_gradient_dim,
         "labels": list(suites.keys()),
         "jsonl_dir": str(out_dir) if out_dir is not None else None,
         "trace_paths": trace_paths,
@@ -5935,6 +5934,7 @@ def run_api_llm_topos_sweep(
         "prompt_count": len(prompt_list),
         "gradient_dim": resolved_gradient_dim,
         "gradient_alignment": gradient_alignment,
+        "metric_gradient_dimension": resolved_gradient_dim,
         "labels": list(suites.keys()),
         "jsonl_dir": str(out_dir) if out_dir is not None else None,
         "trace_paths": trace_paths,

@@ -390,11 +390,13 @@ fn canonical_partial(
             metrics: partial,
             weight: 1.0,
             origin: Some("zspace_posterior_projection".to_owned()),
+            gradient_basis: None,
             telemetry: None,
         })],
         weights: None,
         strategy: ZSpaceFusionStrategy::Last,
         gradient_alignment: Default::default(),
+        metric_gradient_dimension: None,
         telemetry: Vec::new(),
     })?;
     Ok(CanonicalPosteriorPartial {

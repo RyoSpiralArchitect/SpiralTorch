@@ -36,6 +36,7 @@ from spiraltorch import (
     zspace_coherence_project,
     zspace_posterior_decode,
     zspace_posterior_project,
+    zspace_metric_gradient_projection,
     zspace_partial_fusion,
     zspace_telemetry_fusion,
 )
@@ -251,7 +252,7 @@ def test_partial_fusion_overrides_bundle_weights_and_suppresses_telemetry():
         telemetry={"external": 7.0},
     )
 
-    assert contract["contract_version"] == "spiraltorch.zspace_partial_fusion.v2"
+    assert contract["contract_version"] == "spiraltorch.zspace_partial_fusion.v3"
     assert contract["metrics"] == {"speed": 5.0}
     assert contract["gradient"] == [5.0]
     assert contract["suppressed_count"] == 1
@@ -261,6 +262,113 @@ def test_partial_fusion_overrides_bundle_weights_and_suppresses_telemetry():
     assert contract["gradient_padding_applied"] is False
     assert contract["telemetry"]["payload"] == {"external": 7.0, "source": 2.0}
     assert contract["sources"][0]["status"] == "suppressed"
+
+
+def test_metric_gradient_projection_exposes_rust_owned_basis():
+    contract = zspace_metric_gradient_projection(
+        {
+            "speed": 0.1,
+            "memory": 0.2,
+            "stability": 0.3,
+            "frac": 0.4,
+            "drs": -0.5,
+        },
+        gradient_dim=7,
+    )
+
+    assert contract["contract_version"] == (
+        "spiraltorch.zspace_metric_gradient_projection.v1"
+    )
+    assert contract["semantic_owner"] == "st-core::telemetry::zspace_fusion"
+    assert contract["semantic_backend"] == "rust"
+    assert contract["basis"] == st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    assert contract["coordinate_channels"] == [
+        "speed",
+        "memory",
+        "stability",
+        "frac",
+        "drs",
+        "speed",
+        "memory",
+    ]
+    assert contract["gradient"] == pytest.approx(
+        [0.1, 0.2, 0.3, 0.4, -0.5, 0.1, 0.2]
+    )
+
+    with pytest.raises(ValueError, match="dimension must be in"):
+        zspace_metric_gradient_projection(
+            {
+                "speed": 0.1,
+                "memory": 0.2,
+                "stability": 0.3,
+                "frac": 0.4,
+                "drs": -0.5,
+            },
+            gradient_dim=0,
+        )
+    with pytest.raises(TypeError, match="dimension must be an integer"):
+        zspace_metric_gradient_projection(
+            {
+                "speed": 0.1,
+                "memory": 0.2,
+                "stability": 0.3,
+                "frac": 0.4,
+                "drs": -0.5,
+            },
+            gradient_dim=1.5,
+        )
+
+
+def test_partial_fusion_rejects_equal_length_gradients_from_different_bases():
+    with pytest.raises(ValueError, match="does not match basis"):
+        zspace_partial_fusion(
+            [
+                ZSpacePartialBundle(
+                    {"speed": 0.2, "gradient": [0.1, 0.2]},
+                    gradient_basis="basis.a.v1",
+                ),
+                ZSpacePartialBundle(
+                    {"speed": 0.4, "gradient": [0.3, 0.4]},
+                    gradient_basis="basis.b.v1",
+                ),
+            ]
+        )
+
+
+def test_partial_fusion_can_replace_heterogeneous_gradients_from_named_metrics():
+    contract = zspace_partial_fusion(
+        [
+            ZSpacePartialBundle(
+                {
+                    "speed": 1.0,
+                    "memory": 2.0,
+                    "stability": 3.0,
+                    "frac": 4.0,
+                    "drs": 5.0,
+                    "gradient": [99.0, 98.0],
+                },
+                gradient_basis="feature.a.v1",
+            ),
+            ZSpacePartialBundle(
+                {
+                    "speed": 3.0,
+                    "memory": 4.0,
+                    "stability": 5.0,
+                    "frac": 6.0,
+                    "drs": 7.0,
+                    "gradient": [-9.0, -8.0, -7.0],
+                },
+                gradient_basis="feature.b.v1",
+            ),
+        ],
+        metric_gradient_dimension=4,
+    )
+
+    assert contract["gradient_source"] == "canonical_metrics"
+    assert contract["gradient_basis"] == st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    assert contract["gradient"] == pytest.approx([2.0, 3.0, 4.0, 5.0])
+    assert contract["gradient_replaced_source_count"] == 2
+    assert contract["metric_gradient_projection_applied"] is True
 
 
 def test_partial_fusion_requires_explicit_legacy_gradient_padding():
@@ -380,6 +488,25 @@ def test_infer_with_partials_honours_last_strategy():
     assert math.isclose(result.metrics["speed"], 0.9)
 
 
+def test_infer_with_partials_preserves_post_fusion_projection_receipt():
+    result = infer_with_partials(
+        [0.3, -0.05, 0.21, 0.08],
+        {
+            "speed": 0.1,
+            "memory": 0.2,
+            "stability": 0.3,
+            "frac": 0.4,
+            "drs": -0.5,
+            "gradient": [9.0],
+        },
+        metric_gradient_dimension=4,
+    )
+
+    assert result.fusion is not None
+    assert result.fusion["gradient_source"] == "canonical_metrics"
+    assert result.fusion["gradient"] == pytest.approx([0.1, 0.2, 0.3, 0.4])
+
+
 def test_infer_with_partials_merges_telemetry_payloads():
     vector = [0.3, -0.05, 0.21, 0.08]
     bundle = ZSpacePartialBundle({"speed": 0.4}, telemetry={"psi.mean": 0.5})
@@ -389,6 +516,8 @@ def test_infer_with_partials_merges_telemetry_payloads():
         telemetry={"psi.offset": 0.2},
     )
     assert result.telemetry is not None
+    assert result.fusion is not None
+    assert result.fusion["semantic_owner"] == "st-core::telemetry::zspace_fusion"
     payload = result.telemetry.payload
     assert "psi.mean" in payload and "psi.offset" in payload
 
@@ -401,6 +530,8 @@ def test_pipeline_blends_and_clears_partials():
     first = pipeline.infer(clear=False)
     assert math.isclose(first.metrics["speed"], 0.5, rel_tol=1e-6)
     assert math.isclose(first.metrics["memory"], -0.1, rel_tol=1e-6)
+    assert first.fusion is not None
+    assert first.fusion["gradient_source"] == "none"
     second = pipeline.infer()
     assert "speed" in second.metrics
     assert pipeline.posterior is not None
