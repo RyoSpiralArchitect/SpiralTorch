@@ -320,6 +320,8 @@ error instead of repairing or reinterpreting contradictory evidence.
 Portable clients can explicitly build and validate the same evidence boundary:
 
 ```python
+import spiraltorch as st
+
 witness = st.zspace_coherence_distribution_witness([0.5, 0.3, 0.2])
 summary = st.validate_zspace_coherence_distribution_witness(witness)
 assert witness["semantic_backend"] == "rust"
