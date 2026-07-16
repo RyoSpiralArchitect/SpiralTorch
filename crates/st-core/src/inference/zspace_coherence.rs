@@ -703,8 +703,19 @@ fn stable_mean(values: &[f64]) -> f64 {
     if scale == 0.0 {
         return 0.0;
     }
-    let normalized_mean =
-        values.iter().map(|value| value / scale).sum::<f64>() / values.len() as f64;
+    let mut normalized_sum = 0.0;
+    let mut compensation = 0.0;
+    for value in values.iter().map(|value| value / scale) {
+        let next = normalized_sum + value;
+        // Neumaier compensation retains small residuals when large terms cancel.
+        compensation += if normalized_sum.abs() >= value.abs() {
+            (normalized_sum - next) + value
+        } else {
+            (value - next) + normalized_sum
+        };
+        normalized_sum = next;
+    }
+    let normalized_mean = (normalized_sum + compensation) / values.len() as f64;
     scale * normalized_mean.clamp(-1.0, 1.0)
 }
 
@@ -1680,11 +1691,16 @@ mod tests {
         );
 
         let mut high_dynamic_range = request();
-        high_dynamic_range.diagnostics.mean_coherence = 0.0;
-        high_dynamic_range.coherence = vec![f64::MAX, -f64::MAX, f64::MAX, -f64::MAX];
+        high_dynamic_range.coherence = vec![1.0e300, 1.0, -1.0e300, 0.0];
         let projected = project_zspace_coherence(high_dynamic_range)
-            .expect("finite high-dynamic-range response must not overflow its mean");
-        assert_eq!(projected.derived.response_mean, 0.0);
-        assert_eq!(projected.derived.response_peak, f64::MAX);
+            .expect("finite high-dynamic-range residual must survive cancellation");
+        assert_relative_eq!(projected.derived.response_mean, 0.25, epsilon = 1.0e-15);
+        assert_eq!(projected.derived.response_peak, 1.0e300);
+
+        let mut permuted = request();
+        permuted.coherence = vec![1.0e300, -1.0e300, 1.0, 0.0];
+        let permuted = project_zspace_coherence(permuted)
+            .expect("response mean must not depend on cancellation order");
+        assert_relative_eq!(permuted.derived.response_mean, 0.25, epsilon = 1.0e-15);
     }
 }
