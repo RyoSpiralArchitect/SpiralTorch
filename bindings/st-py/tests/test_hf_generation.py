@@ -1808,20 +1808,36 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         calls = []
 
-        def fake_describe(backends, *, continue_on_error=True, **kwargs):
-            calls.append((list(backends), continue_on_error, dict(kwargs)))
-            return {
-                "backends": list(backends),
-                "ready_backends": ["wgpu"],
-                "not_ready_backends": ["cpu", "mps"],
-                "status_by_backend": {
-                    "wgpu": "kernel_wired",
-                    "cpu": "cpu",
-                    "mps": "placeholder",
-                },
-                "all_ready": False,
-                "has_errors": False,
-            }
+        def fake_describe(
+            backends,
+            *,
+            continue_on_error=True,
+            required_ready_backends=None,
+            **kwargs,
+        ):
+            calls.append(
+                (
+                    list(backends),
+                    continue_on_error,
+                    list(required_ready_backends or []),
+                    dict(kwargs),
+                )
+            )
+            reports = [
+                {
+                    "requested_backend": backend,
+                    "runtime_ready": backend == "wgpu",
+                    "runtime_status": (
+                        "kernel_wired" if backend == "wgpu" else "placeholder"
+                    ),
+                }
+                for backend in backends
+            ]
+            return st.evaluate_runtime_device_route(
+                reports,
+                requested_backends=backends,
+                required_ready_backends=required_ready_backends,
+            )
 
         preflight = zspace_inference_distortion_runtime_preflight(
             runtime,
@@ -1836,12 +1852,41 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(preflight["backends"], ["wgpu", "cpu", "mps"])
         self.assertEqual(preflight["ready_backends"], ["wgpu"])
         self.assertEqual(preflight["missing_ready_backends"], ["mps"])
+        self.assertEqual(preflight["unknown_ready_backends"], [])
+        self.assertEqual(preflight["runtime_readiness"], "not_ready")
         self.assertFalse(preflight["runtime_ready"])
+        self.assertEqual(
+            preflight["runtime_ready_basis"],
+            "required_ready_backends",
+        )
         self.assertEqual(
             preflight["status_by_backend"]["mps"],
             "placeholder",
         )
-        self.assertEqual(calls, [(["wgpu", "cpu", "mps"], True, {"workgroup": 128})])
+        self.assertEqual(
+            calls,
+            [
+                (
+                    ["wgpu", "cpu", "mps"],
+                    True,
+                    ["wgpu", "mps"],
+                    {"workgroup": 128},
+                )
+            ],
+        )
+
+    def test_inference_distortion_runtime_preflight_rejects_python_semantics(self) -> None:
+        preflight = zspace_inference_distortion_runtime_preflight(
+            {"api_provider": "fake"},
+            describe_runtime_devices=lambda *_args, **_kwargs: {
+                "ready_backends": ["wgpu"],
+                "runtime_ready": True,
+            },
+        )
+
+        self.assertEqual(preflight["status"], "error")
+        self.assertFalse(preflight["runtime_ready"])
+        self.assertIn("untrusted route contract", preflight["error"])
 
     def test_inference_distortion_runtime_preflight_handles_missing_reporter(self) -> None:
         preflight = zspace_inference_distortion_runtime_preflight(

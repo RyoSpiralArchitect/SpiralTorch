@@ -172,7 +172,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeDeviceRoute = {
         kind: "spiraltorch.runtime_device_route";
-        contract_version: "spiraltorch.runtime_device_route.v2";
+        contract_version: "spiraltorch.runtime_device_route.v3";
         semantic_owner: "st-core::backend::runtime_route";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -193,6 +193,11 @@ declare module "spiraltorch-wasm" {
         status_by_backend: Record<string, string>;
         all_ready: boolean;
         has_errors: boolean;
+        runtime_readiness: RuntimeDeviceReadiness;
+        runtime_ready: boolean;
+        runtime_ready_basis: "required_ready_backends" | "any_ready_backend";
+        runtime_missing_ready_backends: string[];
+        runtime_unknown_ready_backends: string[];
         required_available_backends: string[];
         required_available_backends_missing: string[];
         required_available_backends_passed: boolean | null;

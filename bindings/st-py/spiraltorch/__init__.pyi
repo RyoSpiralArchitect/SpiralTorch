@@ -5432,6 +5432,8 @@ def describe_runtime_devices(
     backends: str | Iterable[str] = ...,
     *,
     continue_on_error: bool = ...,
+    required_available_backends: object = ...,
+    required_ready_backends: object = ...,
     lane_width: Optional[int] = ...,
     subgroup: Optional[bool] = ...,
     max_workgroup: Optional[int] = ...,

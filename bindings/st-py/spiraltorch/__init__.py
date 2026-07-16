@@ -8473,9 +8473,11 @@ def describe_runtime_devices(
     backends: _Any = _RUNTIME_DEVICE_REPORT_BACKENDS,
     *,
     continue_on_error: bool = True,
+    required_available_backends: _Any = None,
+    required_ready_backends: _Any = None,
     **kwargs: _Any,
 ) -> _Dict[str, _Any]:
-    """Collect ``describe_device`` readiness reports for several backends."""
+    """Collect device evidence and evaluate it through the Rust route contract."""
 
     describe = globals().get("describe_device")
     if not callable(describe):
@@ -8504,6 +8506,8 @@ def describe_runtime_devices(
     contract = evaluate_runtime_device_route(
         reports,
         requested_backends=backend_labels,
+        required_available_backends=required_available_backends,
+        required_ready_backends=required_ready_backends,
     )
     contract["reports"] = reports
     return contract

@@ -50,9 +50,10 @@ __all__ = [
     "write_runtime_import_preflight_report",
 ]
 
-_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v2"
+_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v3"
 _RUNTIME_DEVICE_ROUTE_KIND = "spiraltorch.runtime_device_route"
 _RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER = "st-core::backend::runtime_route"
+_RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND = "rust"
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
     "transformers": ["transformers"],
@@ -722,7 +723,14 @@ def _default_describe_runtime_devices():
 
         return _missing
 
-    def _describe(backends, *, continue_on_error=True, **kwargs):
+    def _describe(
+        backends,
+        *,
+        continue_on_error=True,
+        required_available_backends=None,
+        required_ready_backends=None,
+        **kwargs,
+    ):
         rows = []
         backend_labels = unique_stripped_values(backends)
         for backend in backend_labels:
@@ -742,6 +750,8 @@ def _default_describe_runtime_devices():
         contract = evaluate_runtime_device_route(
             rows,
             requested_backends=backend_labels,
+            required_available_backends=required_available_backends,
+            required_ready_backends=required_ready_backends,
         )
         contract["reports"] = rows
         return contract
@@ -800,19 +810,25 @@ def _native_runtime_device_route_contract(
             "rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate"
         )
     payload = evaluate(dict(request))
+    return _require_trusted_runtime_device_route_contract(payload)
+
+
+def _require_trusted_runtime_device_route_contract(
+    payload: object,
+) -> dict[str, object]:
+    """Validate transport identity without rebuilding Rust route semantics."""
+
     if not isinstance(payload, Mapping):
-        raise RuntimeError(
-            "native runtime-device route core returned a non-mapping payload"
-        )
+        raise RuntimeError("runtime-device route source returned a non-mapping payload")
     contract = dict(payload)
     if (
         contract.get("kind") != _RUNTIME_DEVICE_ROUTE_KIND
         or contract.get("contract_version") != _RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION
         or contract.get("semantic_owner") != _RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER
-        or contract.get("semantic_backend") != "rust"
+        or contract.get("semantic_backend") != _RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND
     ):
         raise RuntimeError(
-            "native runtime-device route core returned an untrusted contract"
+            "runtime-device route source returned an untrusted route contract"
         )
     return contract
 

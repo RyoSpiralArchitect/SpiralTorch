@@ -77,8 +77,10 @@ readiness, surrogate readiness, fallback identity, and required-backend gates ar
 `st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly
 `native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
 `evaluate_runtime_device_route(...)` when another orchestrator already has device rows. The
-v2 contract keeps missing evidence as `native_readiness = "unknown"` or
-`route_readiness = "unknown"` while the boolean execution gate remains fail-closed.
+v3 contract also owns the payload-level `runtime_readiness` projection: explicit required
+backends use an all-required gate, while an ungated request accepts any ready route. Missing
+evidence remains `native_readiness = "unknown"` or `route_readiness = "unknown"`, and the
+boolean `runtime_ready` projection remains fail-closed.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:
