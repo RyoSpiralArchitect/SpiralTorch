@@ -8,11 +8,12 @@ use super::device_caps::DeviceCaps;
 use super::kdsl_bridge;
 #[cfg(feature = "logic-learn")]
 use super::lock_recover;
+use super::rank_directives::{RankDirectives, RankKind};
 #[cfg(feature = "logic-learn")]
 use super::soft_logic::learn;
 #[cfg(feature = "logic")]
 use super::soft_logic::SoftRule;
-use super::spiralk_fft::SpiralKFftPlan;
+use super::spiralk_fft::{canonical_fft_tile_hint, SpiralKFftPlan};
 use crate::backend::wgpu_heuristics_generated as gen;
 use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
@@ -154,7 +155,7 @@ fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         ctile,
         mode_midk: 0,
         mode_bottomk: 0,
-        tile_cols: cols.max(1).div_ceil(1024) * 1024,
+        tile_cols: canonical_fft_tile_hint(cols),
         radix: if k.is_power_of_two() { 4 } else { 2 },
         segments: if cols > 131_072 {
             4
@@ -178,6 +179,7 @@ pub fn choose_bottomk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
 
 #[derive(Default, Clone, Copy)]
 pub struct DslOverrides {
+    pub use_2ce: Option<bool>,
     pub algo_topk: u8,
     pub ctile: u32,
     pub mode_midk: u8,
@@ -187,6 +189,9 @@ pub struct DslOverrides {
     pub segments: u32,
 }
 fn overlay(c: &mut Choice, o: &DslOverrides) {
+    if let Some(use_2ce) = o.use_2ce {
+        c.use_2ce = use_2ce;
+    }
     if o.algo_topk != 0 {
         c.algo_topk = o.algo_topk;
     }
@@ -247,6 +252,7 @@ fn emit_wgpu_heuristic_choice_meta(
     overrides: &DslOverrides,
 ) {
     let override_count = [
+        overrides.use_2ce.is_some(),
         overrides.algo_topk != 0,
         overrides.ctile != 0,
         overrides.mode_midk != 0,
@@ -291,6 +297,8 @@ fn emit_wgpu_heuristic_choice_meta(
             "fft_radix": choice.radix,
             "fft_segments": choice.segments,
             "override_count": override_count,
+            "has_override_use_2ce": overrides.use_2ce.is_some(),
+            "override_use_2ce": overrides.use_2ce.unwrap_or(false),
             "override_algo_topk": overrides.algo_topk,
             "override_mode_midk": overrides.mode_midk,
             "override_mode_bottomk": overrides.mode_bottomk,
@@ -318,6 +326,21 @@ fn finalize_choice(
     overrides: &DslOverrides,
 ) -> Option<Choice> {
     overlay(&mut choice, overrides);
+    let rank_kind = match kind {
+        "topk" => RankKind::TopK,
+        "midk" => RankKind::MidK,
+        "bottomk" => RankKind::BottomK,
+        _ => return None,
+    };
+    let resolved =
+        RankDirectives::try_from_codes(choice.algo_topk, choice.mode_midk, choice.mode_bottomk)
+            .ok()?
+            .resolve(rank_kind, overrides.use_2ce)
+            .ok()?;
+    if let Some(use_two_stage) = resolved.use_two_stage {
+        choice.use_2ce = use_two_stage;
+    }
+    SpiralKFftPlan::from_choice(&choice, subgroup).ok()?;
     let algo_hint = match kind {
         "topk" => Some(format!("algo={}", describe_topk_algo(choice.algo_topk))),
         "midk" => Some(format!(
@@ -490,13 +513,13 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     influence += apply_numeric_vote_u32(&mut choice.wg, &wg_vote, 1, u32::MAX);
     influence += apply_numeric_vote_u32(&mut choice.kl, &kl_vote, 1, u32::MAX);
     influence += apply_numeric_vote_u32(&mut choice.ch, &ch_vote, 1, u32::MAX);
-    influence += apply_numeric_vote_u8(&mut choice.algo_topk, &algo_vote, 0, u8::MAX);
+    influence += apply_numeric_vote_u8(&mut choice.algo_topk, &algo_vote, 0, 3);
     influence += apply_numeric_vote_u32(&mut choice.ctile, &ctile_vote, 1, u32::MAX);
-    influence += apply_numeric_vote_u8(&mut choice.mode_midk, &midk_vote, 0, u8::MAX);
-    influence += apply_numeric_vote_u8(&mut choice.mode_bottomk, &bottomk_vote, 0, u8::MAX);
+    influence += apply_numeric_vote_u8(&mut choice.mode_midk, &midk_vote, 0, 2);
+    influence += apply_numeric_vote_u8(&mut choice.mode_bottomk, &bottomk_vote, 0, 2);
     influence += apply_numeric_vote_u32(&mut choice.tile_cols, &tile_cols_vote, 1, u32::MAX);
     influence += apply_numeric_vote_u32(&mut choice.radix, &radix_vote, 1, u32::MAX);
-    influence += apply_numeric_vote_u32(&mut choice.segments, &segments_vote, 1, u32::MAX);
+    influence += apply_numeric_vote_u32(&mut choice.segments, &segments_vote, 1, 4);
 
     if influence <= 0.0 {
         return None;
@@ -738,9 +761,9 @@ pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<
 
 /// Internal helper that assembles the [`SpiralKFftPlan`] from the heuristic
 /// `Choice`.
-fn auto_fft_plan(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<SpiralKFftPlan> {
+pub fn auto_fft_plan(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<SpiralKFftPlan> {
     let choice = choose_topk(rows, cols, k, subgroup)?;
-    Some(SpiralKFftPlan::from_choice(&choice, subgroup))
+    SpiralKFftPlan::from_choice(&choice, subgroup).ok()
 }
 
 include!("wgpu_heuristics_generated.rs");

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use st_core::backend::device_caps::DeviceCaps;
+use st_core::backend::spiralk_fft::canonical_fft_tile_hint;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
@@ -187,12 +188,23 @@ impl WasmTuner {
 
     /// Produce a tuned FFT plan for the provided workload if an override exists.
     #[wasm_bindgen(js_name = planFft)]
-    pub fn plan_fft(&self, rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<WasmFftPlan> {
+    pub fn plan_fft(
+        &self,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        subgroup: bool,
+    ) -> Result<Option<WasmFftPlan>, JsValue> {
         let base = base_choice(rows as usize, cols as usize, k as usize, subgroup);
-        let choice = self
-            .table
-            .choose(base, rows as usize, cols as usize, k as usize, subgroup)?;
-        Some(WasmFftPlan::from_choice(choice, subgroup))
+        let Some(choice) =
+            self.table
+                .choose(base, rows as usize, cols as usize, k as usize, subgroup)
+        else {
+            return Ok(None);
+        };
+        WasmFftPlan::from_choice(choice, subgroup)
+            .map(Some)
+            .map_err(js_error)
     }
 
     /// Produce a tuned FFT plan encoded as JSON when an override exists.
@@ -204,7 +216,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<Option<String>, JsValue> {
-        match self.plan_fft(rows, cols, k, subgroup) {
+        match self.plan_fft(rows, cols, k, subgroup)? {
             Some(plan) => Ok(Some(plan.to_json()?)),
             None => Ok(None),
         }
@@ -219,7 +231,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
-        match self.plan_fft(rows, cols, k, subgroup) {
+        match self.plan_fft(rows, cols, k, subgroup)? {
             Some(plan) => plan.to_object(),
             None => Ok(JsValue::UNDEFINED),
         }
@@ -234,9 +246,9 @@ impl WasmTuner {
         cols: u32,
         k: u32,
         subgroup: bool,
-    ) -> WasmFftPlan {
+    ) -> Result<WasmFftPlan, JsValue> {
         let (choice, _, _) = self.resolve_fft_choice(rows, cols, k, subgroup);
-        WasmFftPlan::from_choice(choice, subgroup)
+        WasmFftPlan::from_choice(choice, subgroup).map_err(js_error)
     }
 
     /// Resolve a tuned FFT plan and encode it as JSON.
@@ -248,7 +260,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<String, JsValue> {
-        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup);
+        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup)?;
         plan.to_json()
     }
 
@@ -261,7 +273,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
-        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup);
+        let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup)?;
         plan.to_object()
     }
 
@@ -274,10 +286,10 @@ impl WasmTuner {
         cols: u32,
         k: u32,
         subgroup: bool,
-    ) -> ResolvedWasmFftPlan {
+    ) -> Result<ResolvedWasmFftPlan, JsValue> {
         let (choice, source, heuristic_used) = self.resolve_fft_choice(rows, cols, k, subgroup);
-        let plan = WasmFftPlan::from_choice(choice, subgroup);
-        ResolvedWasmFftPlan::new(plan, source, heuristic_used)
+        let plan = WasmFftPlan::from_choice(choice, subgroup).map_err(js_error)?;
+        Ok(ResolvedWasmFftPlan::new(plan, source, heuristic_used))
     }
 
     /// Resolve a tuned FFT plan and encode the metadata report as JSON.
@@ -289,7 +301,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<String, JsValue> {
-        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
+        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup)?;
         resolved.to_json()
     }
 
@@ -302,7 +314,7 @@ impl WasmTuner {
         k: u32,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
-        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup);
+        let resolved = self.plan_fft_resolution(rows, cols, k, subgroup)?;
         resolved.to_object()
     }
 
@@ -351,7 +363,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
         ctile,
         mode_midk: 0,
         mode_bottomk: 0,
-        tile_cols: ((cols.max(1) + 1023) / 1024) * 1024,
+        tile_cols: canonical_fft_tile_hint(cols),
         radix: if k.is_power_of_two() { 4 } else { 2 },
         segments: if cols > 131_072 {
             4
@@ -509,13 +521,16 @@ impl ResolvedWasmFftPlan {
         }
     }
 
-    fn from_serde(serde: ResolvedPlanSerde) -> Self {
-        Self {
+    fn from_serde(
+        serde: ResolvedPlanSerde,
+    ) -> Result<Self, st_core::backend::spiralk_fft::SpiralKFftPlanError> {
+        WasmFftPlan::try_from(serde.plan.clone())?;
+        Ok(Self {
             plan: serde.plan,
             override_applied: serde.override_applied,
             heuristic_used: serde.heuristic_used,
             source: PlanSource::from(serde.source),
-        }
+        })
     }
 
     fn to_serde(&self) -> ResolvedPlanSerde {
@@ -532,7 +547,8 @@ impl ResolvedWasmFftPlan {
 impl ResolvedWasmFftPlan {
     #[wasm_bindgen(getter)]
     pub fn plan(&self) -> WasmFftPlan {
-        WasmFftPlan::from(self.plan.clone())
+        WasmFftPlan::try_from(self.plan.clone())
+            .expect("resolved FFT plans are validated when constructed")
     }
 
     #[wasm_bindgen(getter, js_name = overrideApplied)]
@@ -563,13 +579,13 @@ impl ResolvedWasmFftPlan {
     #[wasm_bindgen(js_name = fromJson)]
     pub fn from_json(json: &str) -> Result<ResolvedWasmFftPlan, JsValue> {
         let parsed = serde_json::from_str::<ResolvedPlanSerde>(json).map_err(js_error)?;
-        Ok(Self::from_serde(parsed))
+        Self::from_serde(parsed).map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = fromObject)]
     pub fn from_object(value: &JsValue) -> Result<ResolvedWasmFftPlan, JsValue> {
         let parsed = swb::from_value::<ResolvedPlanSerde>(value.clone()).map_err(js_error)?;
-        Ok(Self::from_serde(parsed))
+        Self::from_serde(parsed).map_err(js_error)
     }
 }
 
@@ -656,10 +672,14 @@ mod tests {
     fn fallback_plan_prefers_override() {
         let mut tuner = empty_tuner();
         tuner.table.push_sorted(override_record());
-        let plan = tuner.plan_fft_with_fallback(512, 4096, 128, true);
+        let plan = tuner
+            .plan_fft_with_fallback(512, 4096, 128, true)
+            .expect("valid fallback plan");
         assert_eq!(plan.tile_cols(), 2048);
         assert_eq!(plan.radix(), 4);
-        let resolved = tuner.plan_fft_resolution(512, 4096, 128, true);
+        let resolved = tuner
+            .plan_fft_resolution(512, 4096, 128, true)
+            .expect("valid resolution");
         assert!(resolved.override_applied());
         assert_eq!(resolved.plan().tile_cols(), 2048);
         assert_eq!(resolved.plan().radix(), 4);
@@ -672,7 +692,9 @@ mod tests {
     #[test]
     fn fallback_plan_handles_missing_override() {
         let tuner = empty_tuner();
-        let resolved = tuner.plan_fft_resolution(512, 4096, 128, true);
+        let resolved = tuner
+            .plan_fft_resolution(512, 4096, 128, true)
+            .expect("valid resolution");
         assert!(!resolved.override_applied());
         assert!(matches!(
             resolved.source(),

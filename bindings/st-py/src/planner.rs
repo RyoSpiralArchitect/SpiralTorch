@@ -206,12 +206,24 @@ impl PyRankPlan {
         self.inner.choice.to_unison_script(self.inner.kind)
     }
 
-    fn fft_wgsl(&self) -> String {
-        self.inner.fft_wgsl()
+    fn fft_wgsl(&self) -> PyResult<String> {
+        self.inner
+            .fft_wgsl()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    fn fft_spiralk_hint(&self) -> String {
-        self.inner.fft_spiralk_hint()
+    fn fft_spiralk_hint(&self) -> PyResult<String> {
+        self.inner
+            .fft_spiralk_hint()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    fn fft_dispatch_manifest_json(&self) -> PyResult<String> {
+        self.inner
+            .fft_plan()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?
+            .dispatch_manifest_json()
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
     /// Returns the shared Rust-owned planning contract with client provenance.

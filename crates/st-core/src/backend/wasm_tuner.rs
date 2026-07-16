@@ -6,7 +6,7 @@
 use crate::backend::wgpu_heuristics::Choice;
 use serde::{Deserialize, Serialize};
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
-use std::cmp::{max, min, Ordering};
+use std::cmp::Ordering;
 use std::fmt;
 
 /// Error emitted when a WASM tuner table cannot be parsed.
@@ -143,10 +143,10 @@ impl WasmTunerRecord {
             choice.tile_cols = value;
         }
         if let Some(value) = self.radix {
-            choice.radix = max(2, value);
+            choice.radix = value;
         }
         if let Some(value) = self.segments {
-            choice.segments = min(8, value);
+            choice.segments = value;
         }
     }
 }
@@ -449,6 +449,23 @@ mod tests {
         let table = WasmTunerTable::from_json_str(json).unwrap();
         let out = table.to_json().unwrap();
         assert!(out.contains("\"cols_min\": 0"));
+    }
+
+    #[test]
+    fn tuner_records_transport_fft_values_without_reinterpreting_them() {
+        let mut override_record = record(None, None, 0, usize::MAX, None);
+        override_record.tile_cols = Some(1536);
+        override_record.radix = Some(1);
+        override_record.segments = Some(8);
+        let table = WasmTunerTable::from_records(vec![override_record]);
+        let choice = table
+            .choose(base_choice(), 1, 1, 1, false)
+            .expect("matching transport record");
+
+        assert_eq!(choice.tile_cols, 1536);
+        assert_eq!(choice.radix, 1);
+        assert_eq!(choice.segments, 8);
+        assert!(crate::backend::spiralk_fft::SpiralKFftPlan::from_choice(&choice, false).is_err());
     }
 
     fn record(

@@ -1,7 +1,7 @@
 use js_sys::Float32Array;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
-use st_core::backend::spiralk_fft::SpiralKFftPlan;
+use st_core::backend::spiralk_fft::{SpiralKFftPlan, SpiralKFftPlanError};
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use st_frac::fft::{self, Complex32};
 use wasm_bindgen::prelude::*;
@@ -14,10 +14,8 @@ pub struct WasmFftPlan {
 }
 
 impl WasmFftPlan {
-    pub(crate) fn from_choice(choice: Choice, subgroup: bool) -> Self {
-        Self {
-            plan: SpiralKFftPlan::from_choice(&choice, subgroup),
-        }
+    pub(crate) fn from_choice(choice: Choice, subgroup: bool) -> Result<Self, SpiralKFftPlanError> {
+        SpiralKFftPlan::from_choice(&choice, subgroup).map(Self::from_plan)
     }
 
     pub(crate) fn from_plan(plan: SpiralKFftPlan) -> Self {
@@ -32,34 +30,35 @@ impl WasmFftPlan {
 #[wasm_bindgen]
 impl WasmFftPlan {
     #[wasm_bindgen(constructor)]
-    pub fn new(radix: u32, tile_cols: u32, segments: u32, subgroup: bool) -> WasmFftPlan {
-        let plan = SpiralKFftPlan {
-            radix: radix.max(2).min(4),
-            tile_cols: tile_cols.max(1),
-            segments: segments.max(1),
-            subgroup,
-        };
-        Self::from_plan(plan)
+    pub fn new(
+        radix: u32,
+        tile_cols: u32,
+        segments: u32,
+        subgroup: bool,
+    ) -> Result<WasmFftPlan, JsValue> {
+        let plan =
+            SpiralKFftPlan::try_new(radix, tile_cols, segments, subgroup).map_err(js_error)?;
+        Ok(Self::from_plan(plan))
     }
 
     #[wasm_bindgen(getter)]
     pub fn radix(&self) -> u32 {
-        self.plan.radix
+        self.plan.radix()
     }
 
     #[wasm_bindgen(getter, js_name = tileCols)]
     pub fn tile_cols(&self) -> u32 {
-        self.plan.tile_cols
+        self.plan.tile_cols()
     }
 
     #[wasm_bindgen(getter)]
     pub fn segments(&self) -> u32 {
-        self.plan.segments
+        self.plan.segments()
     }
 
     #[wasm_bindgen(getter)]
     pub fn subgroup(&self) -> bool {
-        self.plan.subgroup
+        self.plan.subgroup()
     }
 
     #[wasm_bindgen(js_name = workgroupSize)]
@@ -74,6 +73,16 @@ impl WasmFftPlan {
     #[wasm_bindgen(js_name = spiralkHint)]
     pub fn spiralk_hint(&self) -> String {
         self.plan.emit_spiralk_hint()
+    }
+
+    #[wasm_bindgen(js_name = dispatchManifestJson)]
+    pub fn dispatch_manifest_json(&self) -> Result<String, JsValue> {
+        self.plan.dispatch_manifest_json().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = dispatchManifestObject)]
+    pub fn dispatch_manifest_object(&self) -> Result<JsValue, JsValue> {
+        swb::to_value(&self.plan.snapshot()).map_err(js_error)
     }
 
     /// Serialise the plan into a JSON string so it can be persisted or sent over the network.
@@ -110,7 +119,7 @@ pub(crate) fn auto_plan_internal(
     subgroup: bool,
 ) -> Option<WasmFftPlan> {
     let choice = wgpu_heuristics::choose_topk(rows, cols, k, subgroup)?;
-    Some(WasmFftPlan::from_choice(choice, subgroup))
+    WasmFftPlan::from_choice(choice, subgroup).ok()
 }
 
 #[wasm_bindgen(js_name = "auto_plan_fft")]
@@ -222,10 +231,10 @@ pub(crate) struct WasmFftPlanSerde {
 impl From<&SpiralKFftPlan> for WasmFftPlanSerde {
     fn from(plan: &SpiralKFftPlan) -> Self {
         Self {
-            radix: plan.radix,
-            tile_cols: plan.tile_cols,
-            segments: plan.segments,
-            subgroup: plan.subgroup,
+            radix: plan.radix(),
+            tile_cols: plan.tile_cols(),
+            segments: plan.segments(),
+            subgroup: plan.subgroup(),
         }
     }
 }
@@ -242,20 +251,19 @@ impl From<WasmFftPlan> for WasmFftPlanSerde {
     }
 }
 
-impl From<WasmFftPlanSerde> for SpiralKFftPlan {
-    fn from(value: WasmFftPlanSerde) -> Self {
-        SpiralKFftPlan {
-            radix: value.radix.max(2).min(4),
-            tile_cols: value.tile_cols.max(1),
-            segments: value.segments.max(1),
-            subgroup: value.subgroup,
-        }
+impl TryFrom<WasmFftPlanSerde> for SpiralKFftPlan {
+    type Error = SpiralKFftPlanError;
+
+    fn try_from(value: WasmFftPlanSerde) -> Result<Self, Self::Error> {
+        SpiralKFftPlan::try_new(value.radix, value.tile_cols, value.segments, value.subgroup)
     }
 }
 
-impl From<WasmFftPlanSerde> for WasmFftPlan {
-    fn from(value: WasmFftPlanSerde) -> Self {
-        WasmFftPlan::from_plan(value.into())
+impl TryFrom<WasmFftPlanSerde> for WasmFftPlan {
+    type Error = SpiralKFftPlanError;
+
+    fn try_from(value: WasmFftPlanSerde) -> Result<Self, Self::Error> {
+        SpiralKFftPlan::try_from(value).map(WasmFftPlan::from_plan)
     }
 }
 
@@ -286,13 +294,22 @@ mod tests {
 
     #[test]
     fn wasm_fft_plan_json_roundtrip() {
-        let plan = WasmFftPlan::new(4, 2048, 3, true);
+        let plan = WasmFftPlan::new(4, 2048, 3, true).expect("valid plan");
         let json = plan.to_json().expect("json serialisation");
         let parsed = WasmFftPlan::from_json(&json).expect("json parse");
         assert_eq!(parsed.radix(), 4);
         assert_eq!(parsed.tile_cols(), 2048);
         assert_eq!(parsed.segments(), 3);
         assert!(parsed.subgroup());
+    }
+
+    #[test]
+    fn wasm_fft_plan_rejects_invalid_values_instead_of_clamping() {
+        assert!(WasmFftPlan::new(3, 2048, 1, false).is_err());
+        assert!(WasmFftPlan::from_json(
+            r#"{"radix":4,"tile_cols":1536,"segments":1,"subgroup":false}"#
+        )
+        .is_err());
     }
 
     #[test]

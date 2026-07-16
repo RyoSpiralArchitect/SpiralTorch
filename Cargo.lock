@@ -3425,6 +3425,7 @@ dependencies = [
  "dirs 5.0.1",
  "getrandom 0.2.17",
  "julia-ffi-poc",
+ "naga",
  "nalgebra 0.32.6",
  "ndarray",
  "num-complex",

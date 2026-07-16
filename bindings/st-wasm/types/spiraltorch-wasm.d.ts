@@ -1541,6 +1541,31 @@ declare module "spiraltorch-wasm" {
         subgroup: boolean;
     };
 
+    export type WasmFftDispatch = {
+        stage_index: number;
+        kind: "bit_reverse" | "butterfly";
+        entry_point: "fft_bit_reverse" | "fft_stage";
+        radix: number;
+        span: number;
+        workgroups: [number, number, number];
+        source: "primary" | "scratch";
+        destination: "primary" | "scratch";
+    };
+
+    export type WasmFftDispatchManifest = {
+        kind: "spiraltorch.fft_plan";
+        contract_version: "spiraltorch.fft_plan.v1";
+        semantic_owner: "st-core::backend::spiralk_fft";
+        semantic_backend: "rust";
+        radix: number;
+        tile_cols: number;
+        segments: number;
+        subgroup: boolean;
+        workgroup_size: number;
+        dispatches: WasmFftDispatch[];
+        output_buffer: "primary" | "scratch";
+    };
+
     export class WasmFftPlan {
         constructor(radix: number, tileCols: number, segments: number, subgroup: boolean);
         readonly radix: number;
@@ -1550,6 +1575,8 @@ declare module "spiraltorch-wasm" {
         workgroupSize(): number;
         wgsl(): string;
         spiralkHint(): string;
+        dispatchManifestJson(): string;
+        dispatchManifestObject(): WasmFftDispatchManifest;
         toJson(): string;
         toObject(): WasmFftPlanObject;
         static fromJson(json: string): WasmFftPlan;
