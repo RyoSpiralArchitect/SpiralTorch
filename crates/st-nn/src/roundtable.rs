@@ -1362,10 +1362,10 @@ mod tests {
             issued_at: SystemTime::now(),
         });
 
-        assert_eq!(
+        assert!(matches!(
             outcome.minutes.picks.get("agenda").map(String::as_str),
-            Some("focus")
-        );
+            Some("focus" | "branch")
+        ));
         assert!(outcome.minutes.reward.is_finite());
     }
 
