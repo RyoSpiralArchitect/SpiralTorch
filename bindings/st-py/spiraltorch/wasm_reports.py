@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .zspace_inference import ZSpacePartialBundle
+from .zspace_inference import ZSpacePartialBundle, blend_zspace_partials
 
 __all__ = [
     "audit_wasm_report",
@@ -881,12 +881,19 @@ def build_wasm_report_context(
     return context_partials, metadata
 
 
+def _validated_partial_metrics(partial: ZSpacePartialBundle) -> dict[str, Any]:
+    blend_zspace_partials([partial])
+    # Preserve the observation independently from its current contribution weight.
+    return blend_zspace_partials([partial], weights=[1.0])
+
+
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
     telemetry = partial.telemetry_payload()
     return {
-        "metrics": partial.resolved(),
+        "metrics": _validated_partial_metrics(partial),
         "weight": partial.weight,
         "origin": partial.origin,
+        "gradient_basis": partial.gradient_basis,
         "telemetry": None if telemetry is None else dict(telemetry),
     }
 
@@ -900,12 +907,18 @@ def _partial_from_payload(payload: Any) -> ZSpacePartialBundle:
     telemetry = payload.get("telemetry")
     if telemetry is not None and not isinstance(telemetry, Mapping):
         raise ValueError("WASM context partial telemetry must be an object")
-    return ZSpacePartialBundle(
+    gradient_basis = payload.get("gradient_basis")
+    if gradient_basis is not None and not isinstance(gradient_basis, str):
+        raise ValueError("WASM context partial gradient_basis must be a string")
+    partial = ZSpacePartialBundle(
         dict(metrics),
         weight=float(payload.get("weight", 1.0)),
         origin=None if payload.get("origin") is None else str(payload.get("origin")),
         telemetry=None if telemetry is None else dict(telemetry),
+        gradient_basis=gradient_basis,
     )
+    _validated_partial_metrics(partial)
+    return partial
 
 
 def build_wasm_report_context_artifact(

@@ -201,9 +201,17 @@ aliases, weighting, suppression, reduction, flattening, and audit semantics stay
 in `st-core::telemetry::zspace_fusion`:
 
 ```ts
+const projected = zspaceMetricGradientProjectionObject({
+  metrics: { speed: 0.4, memory: 0.2, stability: 0.8, frac: 0.3, drs: -0.1 },
+  dimension: 2,
+});
 const fused = zspacePartialFusionObject({
   partials: [
-    { metrics: { velocity: 0.4, gradient: [0.1, -0.2] }, origin: "canvas" },
+    {
+      metrics: { velocity: 0.4, gradient: projected.gradient },
+      gradient_basis: projected.basis,
+      origin: "canvas",
+    },
     { metrics: { speed: 0.8 }, weight: 2.0, origin: "webgpu" },
   ],
   strategy: "mean",
@@ -212,14 +220,26 @@ const fused = zspacePartialFusionObject({
 });
 ```
 
-Partial fusion contract v2 rejects ragged active gradients by default instead
-of silently inventing coordinates. Set `gradient_alignment: "pad_zero"` only
-for an explicit legacy-compatible replay; the result reports
+Partial fusion contract v3 rejects gradients whose declared bases differ even
+when their vector lengths match. Tagged and untagged gradients cannot be mixed,
+so positional coincidence is not treated as semantic compatibility. It also
+rejects ragged active gradients by default instead of silently inventing
+coordinates. Set `gradient_alignment: "pad_zero"` only for an explicit
+legacy-compatible replay within one basis; the result reports
 `gradient_padding_applied`, `gradient_padded_source_count`, and per-source
-`gradient_padded` audit fields. The `mean`, `last`, `max`, `min`, `median`, and
-`sum` reducers apply identically to scalar metrics and gradient coordinates in
-Rust, so Python elliptic telemetry and browser clients do not rebuild reduction
-semantics locally.
+`gradient_padded` audit fields. `zspaceMetricGradientProjectionObject` and
+`st.zspace_metric_gradient_projection(...)` expose the same Rust-owned periodic
+projection from `[speed, memory, stability, frac, drs]`; API response and
+distortion adapters use that basis rather than constructing unrelated feature
+vectors in Python. `ApiLLMZSpaceRuntime` additionally requests
+`metric_gradient_dimension` during partial fusion, so Rust first fuses the
+named scalar metrics and then projects one canonical runtime-width gradient;
+heterogeneous positional gradients from context clients are replaced and
+reported instead of being silently relabelled. Python preserves that native
+receipt as `ZSpaceInference.fusion`, so API traces expose the exact projection
+and replacement counts. The `mean`, `last`, `max`,
+`min`, `median`, and `sum` reducers apply identically to scalar metrics and
+compatible gradient coordinates in Rust.
 
 Posterior decoding follows that same Rust-first boundary. Python's
 `ZSpacePosterior` and the browser's `zspacePosteriorDecodeObject` /

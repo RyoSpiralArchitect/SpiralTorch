@@ -601,7 +601,28 @@ declare module "spiraltorch-wasm" {
         metrics: Record<string, number | number[]>;
         weight?: number;
         origin?: string | null;
+        gradient_basis?: string | null;
         telemetry?: Record<string, unknown> | null;
+    };
+
+    export type ZSpaceMetricGradientProjectionRequest = {
+        metrics: Record<string, number>;
+        dimension: number;
+    };
+
+    export type ZSpaceMetricGradientProjection = {
+        kind: "spiraltorch.zspace_metric_gradient_projection";
+        contract_version: "spiraltorch.zspace_metric_gradient_projection.v1";
+        semantic_owner: "st-core::telemetry::zspace_fusion";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        basis: "spiraltorch.zspace.canonical_metric_cycle.v1";
+        formula: "g_i=m_(i mod 5),m=[speed,memory,stability,frac,drs]";
+        dimension: number;
+        base_dimension: 5;
+        source_metrics: Record<string, number>;
+        coordinate_channels: Array<"speed" | "memory" | "stability" | "frac" | "drs">;
+        gradient: number[];
     };
 
     export type ZSpacePartialFusionRequest = {
@@ -609,6 +630,7 @@ declare module "spiraltorch-wasm" {
         weights?: number[] | null;
         strategy?: ZSpaceFusionStrategy;
         gradient_alignment?: ZSpaceGradientAlignment;
+        metric_gradient_dimension?: number | null;
         telemetry?: Array<Record<string, unknown>>;
     };
 
@@ -620,20 +642,25 @@ declare module "spiraltorch-wasm" {
         metric_count: number;
         gradient_present: boolean;
         gradient_dim: number;
+        gradient_basis?: string;
+        gradient_replaced_by_metric_projection: boolean;
         gradient_padded: boolean;
         telemetry_entry_count: number;
     };
 
     export type ZSpacePartialFusion = {
         kind: "spiraltorch.zspace_partial_fusion";
-        contract_version: "spiraltorch.zspace_partial_fusion.v2";
+        contract_version: "spiraltorch.zspace_partial_fusion.v3";
         semantic_owner: "st-core::telemetry::zspace_fusion";
         semantic_backend: "rust";
         execution_client: "wasm";
         strategy: ZSpaceFusionStrategy;
         gradient_alignment: ZSpaceGradientAlignment;
+        gradient_source: "none" | "explicit" | "canonical_metrics";
+        gradient_formula?: string;
         metrics: Record<string, number>;
         gradient?: number[];
+        gradient_basis?: string;
         telemetry: ZSpaceTelemetryFusion;
         input_count: number;
         active_count: number;
@@ -641,6 +668,8 @@ declare module "spiraltorch-wasm" {
         null_count: number;
         gradient_input_count: number;
         gradient_dim: number;
+        metric_gradient_projection_applied: boolean;
+        gradient_replaced_source_count: number;
         gradient_padding_applied: boolean;
         gradient_padded_source_count: number;
         sources: ZSpacePartialSourceAudit[];
@@ -1460,6 +1489,10 @@ declare module "spiraltorch-wasm" {
     export function zspacePartialFusionObject(
         request: ZSpacePartialFusionRequest,
     ): ZSpacePartialFusion;
+    export function zspaceMetricGradientProjectionJson(requestJson: string): string;
+    export function zspaceMetricGradientProjectionObject(
+        request: ZSpaceMetricGradientProjectionRequest,
+    ): ZSpaceMetricGradientProjection;
     export function zspaceCoherenceProjectJson(requestJson: string): string;
     export function zspaceCoherenceProjectObject(
         request: ZSpaceCoherenceProjectionRequest,

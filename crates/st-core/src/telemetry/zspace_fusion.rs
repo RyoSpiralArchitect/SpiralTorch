@@ -14,9 +14,24 @@ pub const ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_t
 /// Stable payload kind for canonical Z-space telemetry fusion.
 pub const ZSPACE_TELEMETRY_FUSION_KIND: &str = "spiraltorch.zspace_telemetry_fusion";
 /// Stable contract identifier shared by Rust, Python, and WASM partial clients.
-pub const ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_partial_fusion.v2";
+pub const ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_partial_fusion.v3";
 /// Stable payload kind for canonical Z-space partial fusion.
 pub const ZSPACE_PARTIAL_FUSION_KIND: &str = "spiraltorch.zspace_partial_fusion";
+/// Stable contract identifier for canonical metric-to-gradient projection.
+pub const ZSPACE_METRIC_GRADIENT_PROJECTION_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_metric_gradient_projection.v1";
+/// Stable payload kind for canonical metric-to-gradient projection.
+pub const ZSPACE_METRIC_GRADIENT_PROJECTION_KIND: &str =
+    "spiraltorch.zspace_metric_gradient_projection";
+/// Basis identity for a gradient signal projected from the five base metrics.
+pub const ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS: &str =
+    "spiraltorch.zspace.canonical_metric_cycle.v1";
+/// Exact projection rule shared by every client.
+pub const ZSPACE_CANONICAL_METRIC_GRADIENT_FORMULA: &str =
+    "g_i=m_(i mod 5),m=[speed,memory,stability,frac,drs]";
+/// Ordered channels tiled by the canonical metric-gradient projection.
+pub const ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS: [&str; 5] =
+    ["speed", "memory", "stability", "frac", "drs"];
 /// Crate/module that owns Z-space fusion semantics.
 pub const ZSPACE_FUSION_SEMANTIC_OWNER: &str = "st-core::telemetry::zspace_fusion";
 /// Backend label attached to payloads produced by the canonical implementation.
@@ -28,6 +43,7 @@ pub const ZSPACE_FUSION_MAX_GRADIENT_DIM: usize = 4_096;
 pub const ZSPACE_FUSION_MAX_TELEMETRY_ENTRIES: usize = 16_384;
 pub const ZSPACE_FUSION_MAX_TELEMETRY_DEPTH: usize = 64;
 pub const ZSPACE_FUSION_MAX_METRIC_LABEL_BYTES: usize = 256;
+pub const ZSPACE_FUSION_MAX_GRADIENT_BASIS_BYTES: usize = 256;
 pub const ZSPACE_FUSION_MAX_ORIGIN_BYTES: usize = 4_096;
 pub const ZSPACE_FUSION_MAX_TELEMETRY_PATH_BYTES: usize = 4_096;
 
@@ -93,6 +109,43 @@ pub enum ZSpaceFusionError {
     },
     #[error("gradient entry {entry} at partial {index} must be finite")]
     NonFiniteGradient { index: usize, entry: usize },
+    #[error("gradient at partial {index} must contain at least one entry")]
+    EmptyGradient { index: usize },
+    #[error("gradient basis at partial {index} requires a gradient vector")]
+    GradientBasisWithoutGradient { index: usize },
+    #[error("gradient basis at partial {index} must be a non-empty trimmed label")]
+    InvalidGradientBasis { index: usize },
+    #[error("gradient basis at partial {index} has {actual} bytes, exceeding limit {max}")]
+    GradientBasisTooLong {
+        index: usize,
+        actual: usize,
+        max: usize,
+    },
+    #[error(
+        "gradient basis '{actual}' at partial {index} does not match basis '{expected}' at partial {expected_index}"
+    )]
+    GradientBasisMismatch {
+        index: usize,
+        actual: String,
+        expected_index: usize,
+        expected: String,
+    },
+    #[error("metric-gradient projection dimension must be in 1..={max}, received {actual}")]
+    InvalidMetricGradientDimension { actual: usize, max: usize },
+    #[error("metric-gradient projection is missing canonical metric '{metric}'")]
+    MissingMetricGradientMetric { metric: &'static str },
+    #[error("metric-gradient projection metric '{metric}' must be finite")]
+    InvalidMetricGradientMetric { metric: String },
+    #[error("metric-gradient projection does not support metric '{metric}'")]
+    UnsupportedMetricGradientMetric { metric: String },
+    #[error(
+        "metric-gradient projection metrics '{first}' and '{second}' both resolve to '{canonical}'"
+    )]
+    MetricGradientAliasCollision {
+        first: String,
+        second: String,
+        canonical: String,
+    },
     #[error("telemetry payload {index} must be an object")]
     TelemetryNotObject { index: usize },
     #[error("telemetry payload {index} exceeds nesting limit {max_depth}")]
@@ -176,7 +229,33 @@ pub struct ZSpacePartialInput {
     #[serde(default)]
     pub origin: Option<String>,
     #[serde(default)]
+    pub gradient_basis: Option<String>,
+    #[serde(default)]
     pub telemetry: Option<Value>,
+}
+
+/// Request for projecting canonical Z-space metrics into an optimizer gradient basis.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceMetricGradientProjectionRequest {
+    pub metrics: BTreeMap<String, f64>,
+    pub dimension: usize,
+}
+
+/// Rust-owned metric-to-gradient projection shared by native, Python, and WASM clients.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZSpaceMetricGradientProjectionPayload {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub basis: &'static str,
+    pub formula: &'static str,
+    pub dimension: usize,
+    pub base_dimension: usize,
+    pub source_metrics: BTreeMap<String, f64>,
+    pub coordinate_channels: Vec<&'static str>,
+    pub gradient: Vec<f64>,
 }
 
 const fn default_weight() -> f64 {
@@ -193,6 +272,9 @@ pub struct ZSpacePartialFusionRequest {
     pub strategy: ZSpaceFusionStrategy,
     #[serde(default)]
     pub gradient_alignment: ZSpaceGradientAlignment,
+    /// Replace positional input gradients with one projection of the fused base metrics.
+    #[serde(default)]
+    pub metric_gradient_dimension: Option<usize>,
     #[serde(default)]
     pub telemetry: Vec<Value>,
 }
@@ -324,6 +406,9 @@ pub struct ZSpacePartialSourceAudit {
     pub metric_count: usize,
     pub gradient_present: bool,
     pub gradient_dim: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_basis: Option<String>,
+    pub gradient_replaced_by_metric_projection: bool,
     pub gradient_padded: bool,
     pub telemetry_entry_count: usize,
 }
@@ -336,9 +421,14 @@ pub struct ZSpacePartialFusionPayload {
     pub semantic_backend: &'static str,
     pub strategy: &'static str,
     pub gradient_alignment: &'static str,
+    pub gradient_source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_formula: Option<&'static str>,
     pub metrics: BTreeMap<String, f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gradient: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_basis: Option<String>,
     pub telemetry: ZSpaceTelemetryFusionPayload,
     pub input_count: usize,
     pub active_count: usize,
@@ -346,6 +436,8 @@ pub struct ZSpacePartialFusionPayload {
     pub null_count: usize,
     pub gradient_input_count: usize,
     pub gradient_dim: usize,
+    pub metric_gradient_projection_applied: bool,
+    pub gradient_replaced_source_count: usize,
     pub gradient_padding_applied: bool,
     pub gradient_padded_source_count: usize,
     pub sources: Vec<ZSpacePartialSourceAudit>,
@@ -500,6 +592,74 @@ pub fn fuse_zspace_telemetry(
     })
 }
 
+/// Project the five canonical observation metrics into a dimensioned gradient signal.
+///
+/// This intentionally centralizes the periodic projection already consumed by
+/// the Z-space optimizer. Clients provide named observations and never assign
+/// positional meanings to gradient coordinates themselves.
+pub fn project_zspace_metric_gradient(
+    request: ZSpaceMetricGradientProjectionRequest,
+) -> Result<ZSpaceMetricGradientProjectionPayload, ZSpaceFusionError> {
+    if !(1..=ZSPACE_FUSION_MAX_GRADIENT_DIM).contains(&request.dimension) {
+        return Err(ZSpaceFusionError::InvalidMetricGradientDimension {
+            actual: request.dimension,
+            max: ZSPACE_FUSION_MAX_GRADIENT_DIM,
+        });
+    }
+
+    let mut canonical = BTreeMap::new();
+    let mut original_names = BTreeMap::new();
+    for (name, value) in request.metrics {
+        let Some(canonical_name) = canonical_metric_name(&name) else {
+            return Err(ZSpaceFusionError::UnsupportedMetricGradientMetric { metric: name });
+        };
+        if !ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS.contains(&canonical_name) {
+            return Err(ZSpaceFusionError::UnsupportedMetricGradientMetric { metric: name });
+        }
+        if !value.is_finite() {
+            return Err(ZSpaceFusionError::InvalidMetricGradientMetric { metric: name });
+        }
+        if let Some(first) = original_names.insert(canonical_name, name.clone()) {
+            return Err(ZSpaceFusionError::MetricGradientAliasCollision {
+                first,
+                second: name,
+                canonical: canonical_name.to_owned(),
+            });
+        }
+        canonical.insert(canonical_name.to_owned(), value);
+    }
+
+    let base = ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS
+        .map(|metric| {
+            canonical
+                .get(metric)
+                .copied()
+                .ok_or(ZSpaceFusionError::MissingMetricGradientMetric { metric })
+        })
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    let coordinate_channels = (0..request.dimension)
+        .map(|index| ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS[index % base.len()])
+        .collect::<Vec<_>>();
+    let gradient = (0..request.dimension)
+        .map(|index| base[index % base.len()])
+        .collect();
+
+    Ok(ZSpaceMetricGradientProjectionPayload {
+        kind: ZSPACE_METRIC_GRADIENT_PROJECTION_KIND,
+        contract_version: ZSPACE_METRIC_GRADIENT_PROJECTION_CONTRACT_VERSION,
+        semantic_owner: ZSPACE_FUSION_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_FUSION_SEMANTIC_BACKEND,
+        basis: ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS,
+        formula: ZSPACE_CANONICAL_METRIC_GRADIENT_FORMULA,
+        dimension: request.dimension,
+        base_dimension: ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS.len(),
+        source_metrics: canonical,
+        coordinate_channels,
+        gradient,
+    })
+}
+
 fn stable_weighted_mean<'a>(values: impl Iterator<Item = (&'a f64, &'a f64)>) -> f64 {
     let values: Vec<(&f64, &f64)> = values.collect();
     let max_weight = values
@@ -596,24 +756,41 @@ fn reduce_scalars(values: &[(f64, f64)], strategy: ZSpaceFusionStrategy) -> f64 
 #[derive(Default)]
 struct GradientReduction {
     gradient: Option<Vec<f64>>,
+    basis: Option<String>,
     input_count: usize,
     dimension: usize,
     padded_source_indices: Vec<usize>,
 }
 
+fn gradient_basis_label(basis: Option<&str>) -> String {
+    basis.unwrap_or("<unspecified>").to_owned()
+}
+
 fn reduce_gradients(
-    gradients: &[(usize, Vec<f64>, f64)],
+    gradients: &[(usize, Vec<f64>, f64, Option<String>)],
     strategy: ZSpaceFusionStrategy,
     alignment: ZSpaceGradientAlignment,
 ) -> Result<GradientReduction, ZSpaceFusionError> {
-    let Some((expected_index, expected_gradient, _)) = gradients.first() else {
+    let Some((expected_index, expected_gradient, _, expected_basis)) = gradients.first() else {
         return Ok(GradientReduction::default());
     };
+    if let Some((index, _, _, actual_basis)) = gradients
+        .iter()
+        .skip(1)
+        .find(|(_, _, _, basis)| basis != expected_basis)
+    {
+        return Err(ZSpaceFusionError::GradientBasisMismatch {
+            index: *index,
+            actual: gradient_basis_label(actual_basis.as_deref()),
+            expected_index: *expected_index,
+            expected: gradient_basis_label(expected_basis.as_deref()),
+        });
+    }
     if alignment == ZSpaceGradientAlignment::Strict {
-        if let Some((index, gradient, _)) = gradients
+        if let Some((index, gradient, _, _)) = gradients
             .iter()
             .skip(1)
-            .find(|(_, gradient, _)| gradient.len() != expected_gradient.len())
+            .find(|(_, gradient, _, _)| gradient.len() != expected_gradient.len())
         {
             return Err(ZSpaceFusionError::GradientDimensionMismatch {
                 index: *index,
@@ -628,20 +805,21 @@ fn reduce_gradients(
         ZSpaceGradientAlignment::Strict => expected_gradient.len(),
         ZSpaceGradientAlignment::PadZero => gradients
             .iter()
-            .map(|(_, gradient, _)| gradient.len())
+            .map(|(_, gradient, _, _)| gradient.len())
             .max()
             .unwrap_or(0),
     };
     let padded_source_indices = if alignment == ZSpaceGradientAlignment::PadZero {
         gradients
             .iter()
-            .filter_map(|(index, gradient, _)| (gradient.len() < length).then_some(*index))
+            .filter_map(|(index, gradient, _, _)| (gradient.len() < length).then_some(*index))
             .collect()
     } else {
         Vec::new()
     };
     let mut reduction = GradientReduction {
         gradient: None,
+        basis: expected_basis.clone(),
         input_count: gradients.len(),
         dimension: length,
         padded_source_indices,
@@ -655,10 +833,10 @@ fn reduce_gradients(
         ZSpaceFusionStrategy::Mean => {
             let max_weight = gradients
                 .iter()
-                .map(|(_, _, weight)| *weight)
+                .map(|(_, _, weight, _)| *weight)
                 .fold(0.0, f64::max);
             let mut total_weight = 0.0;
-            for (_, gradient, weight) in gradients {
+            for (_, gradient, weight, _) in gradients {
                 let scaled_weight = weight / max_weight;
                 if scaled_weight == 0.0 {
                     continue;
@@ -673,14 +851,14 @@ fn reduce_gradients(
             }
         }
         ZSpaceFusionStrategy::Last => {
-            let (_, gradient, _) = gradients.last().expect("non-empty gradients");
+            let (_, gradient, _, _) = gradients.last().expect("non-empty gradients");
             result[..gradient.len()].copy_from_slice(gradient);
         }
         ZSpaceFusionStrategy::Max | ZSpaceFusionStrategy::Min => {
             for (index, output) in result.iter_mut().enumerate() {
                 *output = gradients
                     .iter()
-                    .map(|(_, gradient, _)| gradient.get(index).copied().unwrap_or(0.0))
+                    .map(|(_, gradient, _, _)| gradient.get(index).copied().unwrap_or(0.0))
                     .fold(
                         if strategy == ZSpaceFusionStrategy::Max {
                             f64::NEG_INFINITY
@@ -700,7 +878,7 @@ fn reduce_gradients(
                 *output = weighted_median(
                     gradients
                         .iter()
-                        .map(|(_, gradient, weight)| {
+                        .map(|(_, gradient, weight, _)| {
                             (gradient.get(index).copied().unwrap_or(0.0), *weight)
                         })
                         .collect(),
@@ -710,11 +888,11 @@ fn reduce_gradients(
         ZSpaceFusionStrategy::Sum => {
             let max_weight = gradients
                 .iter()
-                .map(|(_, _, weight)| *weight)
+                .map(|(_, _, weight, _)| *weight)
                 .fold(0.0, f64::max);
             for (index, output) in result.iter_mut().enumerate() {
                 *output = stable_weighted_sum(
-                    gradients.iter().map(|(_, gradient, weight)| {
+                    gradients.iter().map(|(_, gradient, weight, _)| {
                         (gradient.get(index).copied().unwrap_or(0.0), *weight)
                     }),
                     max_weight,
@@ -731,6 +909,7 @@ pub fn fuse_zspace_partials(
     request: ZSpacePartialFusionRequest,
 ) -> Result<ZSpacePartialFusionPayload, ZSpaceFusionError> {
     let input_count = request.partials.len();
+    let metric_gradient_dimension = request.metric_gradient_dimension;
     if input_count > ZSPACE_FUSION_MAX_PARTIALS {
         return Err(ZSpaceFusionError::TooManyPartials {
             actual: input_count,
@@ -750,6 +929,14 @@ pub fn fuse_zspace_partials(
             .find(|(_, weight)| !weight.is_finite())
         {
             return Err(ZSpaceFusionError::NonFiniteWeight { index });
+        }
+    }
+    if let Some(dimension) = metric_gradient_dimension {
+        if !(1..=ZSPACE_FUSION_MAX_GRADIENT_DIM).contains(&dimension) {
+            return Err(ZSpaceFusionError::InvalidMetricGradientDimension {
+                actual: dimension,
+                max: ZSPACE_FUSION_MAX_GRADIENT_DIM,
+            });
         }
     }
 
@@ -772,6 +959,8 @@ pub fn fuse_zspace_partials(
                 metric_count: 0,
                 gradient_present: false,
                 gradient_dim: 0,
+                gradient_basis: None,
+                gradient_replaced_by_metric_projection: false,
                 gradient_padded: false,
                 telemetry_entry_count: 0,
             });
@@ -822,10 +1011,26 @@ pub fn fuse_zspace_partials(
                 metric_count: 0,
                 gradient_present: false,
                 gradient_dim: 0,
+                gradient_basis: None,
+                gradient_replaced_by_metric_projection: false,
                 gradient_padded: false,
                 telemetry_entry_count: 0,
             });
             continue;
+        }
+
+        let gradient_basis = partial.gradient_basis;
+        if let Some(basis) = gradient_basis.as_deref() {
+            if basis.is_empty() || basis.trim() != basis {
+                return Err(ZSpaceFusionError::InvalidGradientBasis { index });
+            }
+            if basis.len() > ZSPACE_FUSION_MAX_GRADIENT_BASIS_BYTES {
+                return Err(ZSpaceFusionError::GradientBasisTooLong {
+                    index,
+                    actual: basis.len(),
+                    max: ZSPACE_FUSION_MAX_GRADIENT_BASIS_BYTES,
+                });
+            }
         }
 
         let mut canonical_metrics: BTreeMap<&'static str, (String, ZSpaceMetricInput)> =
@@ -856,6 +1061,9 @@ pub fn fuse_zspace_partials(
                         metric: canonical.to_owned(),
                     });
                 };
+                if gradient.is_empty() {
+                    return Err(ZSpaceFusionError::EmptyGradient { index });
+                }
                 if gradient.len() > ZSPACE_FUSION_MAX_GRADIENT_DIM {
                     return Err(ZSpaceFusionError::GradientTooLong {
                         index,
@@ -872,7 +1080,7 @@ pub fn fuse_zspace_partials(
                 }
                 gradient_present = true;
                 gradient_dim = gradient.len();
-                gradients.push((index, gradient, weight));
+                gradients.push((index, gradient, weight, gradient_basis.clone()));
                 continue;
             }
             let ZSpaceMetricInput::Scalar(value) = value else {
@@ -892,6 +1100,9 @@ pub fn fuse_zspace_partials(
                 .entry(canonical.to_owned())
                 .or_default()
                 .push((value, weight));
+        }
+        if gradient_basis.is_some() && !gradient_present {
+            return Err(ZSpaceFusionError::GradientBasisWithoutGradient { index });
         }
 
         let telemetry_entry_count = if let Some(payload) = partial.telemetry {
@@ -913,6 +1124,9 @@ pub fn fuse_zspace_partials(
             metric_count,
             gradient_present,
             gradient_dim,
+            gradient_basis,
+            gradient_replaced_by_metric_projection: metric_gradient_dimension.is_some()
+                && gradient_present,
             gradient_padded: false,
             telemetry_entry_count,
         });
@@ -928,8 +1142,29 @@ pub fn fuse_zspace_partials(
         }
         metrics.insert(key, value);
     }
-    let gradient_reduction =
-        reduce_gradients(&gradients, request.strategy, request.gradient_alignment)?;
+    let gradient_reduction = if let Some(dimension) = metric_gradient_dimension {
+        let projection_metrics = ZSPACE_CANONICAL_METRIC_GRADIENT_CHANNELS
+            .iter()
+            .filter_map(|metric| {
+                metrics
+                    .get(*metric)
+                    .map(|value| ((*metric).to_owned(), *value))
+            })
+            .collect();
+        let projection = project_zspace_metric_gradient(ZSpaceMetricGradientProjectionRequest {
+            metrics: projection_metrics,
+            dimension,
+        })?;
+        GradientReduction {
+            gradient: Some(projection.gradient),
+            basis: Some(projection.basis.to_owned()),
+            input_count: gradients.len(),
+            dimension: projection.dimension,
+            padded_source_indices: Vec::new(),
+        }
+    } else {
+        reduce_gradients(&gradients, request.strategy, request.gradient_alignment)?
+    };
     for source in &mut sources {
         source.gradient_padded = gradient_reduction
             .padded_source_indices
@@ -939,7 +1174,19 @@ pub fn fuse_zspace_partials(
     let gradient_input_count = gradient_reduction.input_count;
     let gradient_dim = gradient_reduction.dimension;
     let gradient_padded_source_count = gradient_reduction.padded_source_indices.len();
+    let gradient_replaced_source_count = sources
+        .iter()
+        .filter(|source| source.gradient_replaced_by_metric_projection)
+        .count();
+    let gradient_basis = gradient_reduction.basis;
     let gradient = gradient_reduction.gradient;
+    let gradient_source = if metric_gradient_dimension.is_some() {
+        "canonical_metrics"
+    } else if gradient.is_some() {
+        "explicit"
+    } else {
+        "none"
+    };
     if let Some((entry, _)) = gradient
         .iter()
         .flatten()
@@ -956,8 +1203,12 @@ pub fn fuse_zspace_partials(
         semantic_backend: ZSPACE_FUSION_SEMANTIC_BACKEND,
         strategy: request.strategy.as_str(),
         gradient_alignment: request.gradient_alignment.as_str(),
+        gradient_source,
+        gradient_formula: metric_gradient_dimension
+            .map(|_| ZSPACE_CANONICAL_METRIC_GRADIENT_FORMULA),
         metrics,
         gradient,
+        gradient_basis,
         telemetry,
         input_count,
         active_count,
@@ -965,6 +1216,8 @@ pub fn fuse_zspace_partials(
         null_count,
         gradient_input_count,
         gradient_dim,
+        metric_gradient_projection_applied: metric_gradient_dimension.is_some(),
+        gradient_replaced_source_count,
         gradient_padding_applied: gradient_padded_source_count > 0,
         gradient_padded_source_count,
         sources,
@@ -1051,6 +1304,7 @@ mod tests {
             metrics: serde_json::from_value(metrics).expect("valid metrics"),
             weight,
             origin: Some(origin.to_owned()),
+            gradient_basis: None,
             telemetry,
         }
     }
@@ -1073,6 +1327,176 @@ mod tests {
     }
 
     #[test]
+    fn metric_gradient_projection_owns_dimension_and_coordinate_basis() {
+        let projection = project_zspace_metric_gradient(ZSpaceMetricGradientProjectionRequest {
+            metrics: BTreeMap::from([
+                ("velocity".to_owned(), 1.0),
+                ("mem".to_owned(), 2.0),
+                ("stab".to_owned(), 3.0),
+                ("frac_reg".to_owned(), 4.0),
+                ("drift".to_owned(), 5.0),
+            ]),
+            dimension: 7,
+        })
+        .expect("canonical metric projection");
+
+        assert_eq!(
+            projection.contract_version,
+            ZSPACE_METRIC_GRADIENT_PROJECTION_CONTRACT_VERSION
+        );
+        assert_eq!(projection.basis, ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS);
+        assert_eq!(projection.base_dimension, 5);
+        assert_eq!(
+            projection.coordinate_channels,
+            [
+                "speed",
+                "memory",
+                "stability",
+                "frac",
+                "drs",
+                "speed",
+                "memory"
+            ]
+        );
+        assert_eq!(projection.gradient, [1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0]);
+        assert_eq!(projection.source_metrics["speed"], 1.0);
+    }
+
+    #[test]
+    fn metric_gradient_projection_fails_closed_on_incomplete_or_ambiguous_inputs() {
+        let missing = project_zspace_metric_gradient(ZSpaceMetricGradientProjectionRequest {
+            metrics: BTreeMap::from([("speed".to_owned(), 1.0)]),
+            dimension: 4,
+        });
+        assert_eq!(
+            missing,
+            Err(ZSpaceFusionError::MissingMetricGradientMetric { metric: "memory" })
+        );
+
+        let collision = project_zspace_metric_gradient(ZSpaceMetricGradientProjectionRequest {
+            metrics: BTreeMap::from([
+                ("speed".to_owned(), 1.0),
+                ("velocity".to_owned(), 2.0),
+                ("memory".to_owned(), 3.0),
+                ("stability".to_owned(), 4.0),
+                ("frac".to_owned(), 5.0),
+                ("drs".to_owned(), 6.0),
+            ]),
+            dimension: 4,
+        });
+        assert!(matches!(
+            collision,
+            Err(ZSpaceFusionError::MetricGradientAliasCollision { .. })
+        ));
+    }
+
+    #[test]
+    fn gradient_basis_identity_is_enforced_before_positional_reduction() {
+        let tagged = |basis: Option<&str>, gradient: Vec<f64>| {
+            let mut input = partial(
+                json!({"speed": 1.0, "gradient": gradient}),
+                1.0,
+                "basis-test",
+                None,
+            );
+            input.gradient_basis = basis.map(str::to_owned);
+            Some(input)
+        };
+
+        let mismatch = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                tagged(Some("basis.a.v1"), vec![1.0, 2.0]),
+                tagged(Some("basis.b.v1"), vec![3.0, 4.0]),
+            ],
+            ..ZSpacePartialFusionRequest::default()
+        });
+        assert!(matches!(
+            mismatch,
+            Err(ZSpaceFusionError::GradientBasisMismatch { index: 1, .. })
+        ));
+
+        let mixed = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                tagged(Some("basis.a.v1"), vec![1.0]),
+                tagged(None, vec![2.0]),
+            ],
+            ..ZSpacePartialFusionRequest::default()
+        });
+        assert!(matches!(
+            mixed,
+            Err(ZSpaceFusionError::GradientBasisMismatch { index: 1, .. })
+        ));
+
+        let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                tagged(Some("basis.a.v1"), vec![1.0, 2.0]),
+                tagged(Some("basis.a.v1"), vec![3.0, 4.0]),
+            ],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("matching bases fuse");
+        assert_eq!(fused.gradient, Some(vec![2.0, 3.0]));
+        assert_eq!(fused.gradient_basis.as_deref(), Some("basis.a.v1"));
+        assert_eq!(
+            fused.sources[0].gradient_basis.as_deref(),
+            Some("basis.a.v1")
+        );
+    }
+
+    #[test]
+    fn metric_projection_replaces_heterogeneous_input_gradients_after_scalar_fusion() {
+        let mut first = partial(
+            json!({
+                "speed": 1.0,
+                "memory": 2.0,
+                "stability": 3.0,
+                "frac": 4.0,
+                "drs": 5.0,
+                "gradient": [99.0, 98.0]
+            }),
+            1.0,
+            "first",
+            None,
+        );
+        first.gradient_basis = Some("feature.first.v1".to_owned());
+        let mut second = partial(
+            json!({
+                "speed": 3.0,
+                "memory": 4.0,
+                "stability": 5.0,
+                "frac": 6.0,
+                "drs": 7.0,
+                "gradient": [-9.0, -8.0, -7.0]
+            }),
+            1.0,
+            "second",
+            None,
+        );
+        second.gradient_basis = Some("feature.second.v1".to_owned());
+
+        let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(first), Some(second)],
+            metric_gradient_dimension: Some(4),
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("named metrics replace heterogeneous positional gradients");
+
+        assert_eq!(fused.gradient_source, "canonical_metrics");
+        assert_eq!(
+            fused.gradient_basis.as_deref(),
+            Some(ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS)
+        );
+        assert_eq!(fused.gradient, Some(vec![2.0, 3.0, 4.0, 5.0]));
+        assert_eq!(fused.gradient_input_count, 2);
+        assert_eq!(fused.gradient_replaced_source_count, 2);
+        assert!(fused.metric_gradient_projection_applied);
+        assert!(fused
+            .sources
+            .iter()
+            .all(|source| source.gradient_replaced_by_metric_projection));
+    }
+
+    #[test]
     fn weighted_mean_uses_explicit_weights_and_suppresses_telemetry() {
         let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
             partials: vec![
@@ -1092,6 +1516,7 @@ mod tests {
             weights: Some(vec![0.0, 3.0]),
             strategy: ZSpaceFusionStrategy::Mean,
             gradient_alignment: ZSpaceGradientAlignment::Strict,
+            metric_gradient_dimension: None,
             telemetry: vec![json!({"external": 7.0})],
         })
         .expect("valid fusion");
@@ -1147,6 +1572,7 @@ mod tests {
                 metrics,
                 weight: 1.0,
                 origin: Some("coherence".to_owned()),
+                gradient_basis: None,
                 telemetry: None,
             })],
             ..ZSpacePartialFusionRequest::default()
@@ -1154,6 +1580,8 @@ mod tests {
         .expect("all Rust-owned coherence metrics must be registered");
 
         assert_eq!(fused.active_count, 1);
+        assert_eq!(fused.gradient_source, "none");
+        assert_eq!(fused.gradient, None);
         assert_eq!(
             fused.metrics["coherence_concentration"],
             expected_concentration
@@ -1418,6 +1846,7 @@ mod tests {
                 )]),
                 weight: 1.0,
                 origin: None,
+                gradient_basis: None,
                 telemetry: None,
             })],
             ..ZSpacePartialFusionRequest::default()
@@ -1435,6 +1864,7 @@ mod tests {
                 )]),
                 weight: 1.0,
                 origin: None,
+                gradient_basis: None,
                 telemetry: None,
             })],
             ..ZSpacePartialFusionRequest::default()
@@ -1443,6 +1873,17 @@ mod tests {
             too_long,
             Err(ZSpaceFusionError::GradientTooLong { .. })
         ));
+
+        let empty = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![Some(partial(
+                json!({"gradient": []}),
+                1.0,
+                "empty-gradient",
+                None,
+            ))],
+            ..ZSpacePartialFusionRequest::default()
+        });
+        assert_eq!(empty, Err(ZSpaceFusionError::EmptyGradient { index: 0 }));
 
         let null_with_non_finite_weight = fuse_zspace_partials(ZSpacePartialFusionRequest {
             partials: vec![None],
@@ -1519,6 +1960,7 @@ mod tests {
                 metrics: BTreeMap::from([(metric_label, ZSpaceMetricInput::Scalar(1.0))]),
                 weight: 1.0,
                 origin: None,
+                gradient_basis: None,
                 telemetry: None,
             })],
             ..ZSpacePartialFusionRequest::default()
@@ -1537,6 +1979,7 @@ mod tests {
                 )]),
                 weight: 1.0,
                 origin: None,
+                gradient_basis: None,
                 telemetry: None,
             })],
             weights: Some(vec![0.0]),

@@ -3907,6 +3907,7 @@ class ZSpacePartialBundle:
     weight: float
     origin: Optional[str]
     telemetry: Optional[Mapping[str, Any]]
+    gradient_basis: Optional[str]
 
     def __init__(
         self,
@@ -3914,6 +3915,7 @@ class ZSpacePartialBundle:
         weight: float = ...,
         origin: str | None = ...,
         telemetry: Mapping[str, Any] | None = ...,
+        gradient_basis: str | None = ...,
     ) -> None: ...
     def resolved(self) -> Dict[str, Any]: ...
     def telemetry_payload(self) -> Mapping[str, Any] | None: ...
@@ -4010,6 +4012,7 @@ class ZSpaceInferencePipeline:
         smoothing: float = ...,
         strategy: str = ...,
         gradient_alignment: str = ...,
+        metric_gradient_dimension: int | None = ...,
         telemetry: Mapping[str, Any] | None = ...,
     ) -> None: ...
 
@@ -4017,6 +4020,8 @@ class ZSpaceInferencePipeline:
     def strategy(self) -> str: ...
     @property
     def gradient_alignment(self) -> str: ...
+    @property
+    def metric_gradient_dimension(self) -> int | None: ...
     @property
     def posterior(self) -> ZSpacePosterior: ...
     @property
@@ -4163,6 +4168,19 @@ def blend_zspace_partials(
     weights: Sequence[float] | None = ...,
     strategy: str = ...,
     gradient_alignment: str = ...,
+    metric_gradient_dimension: int | None = ...,
+) -> Dict[str, Any]: ...
+
+
+ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS: Literal[
+    "spiraltorch.zspace.canonical_metric_cycle.v1"
+]
+
+
+def zspace_metric_gradient_projection(
+    metrics: Mapping[str, Any],
+    *,
+    gradient_dim: int,
 ) -> Dict[str, Any]: ...
 
 
@@ -4172,6 +4190,7 @@ def zspace_partial_fusion(
     weights: Sequence[float] | None = ...,
     strategy: str = ...,
     gradient_alignment: str = ...,
+    metric_gradient_dimension: int | None = ...,
     telemetry: Mapping[str, Any]
     | ZSpaceTelemetryFrame
     | Sequence[Mapping[str, Any] | ZSpaceTelemetryFrame | None]
@@ -4282,6 +4301,7 @@ def infer_with_partials(
     smoothing: float = ...,
     strategy: str = ...,
     gradient_alignment: str = ...,
+    metric_gradient_dimension: int | None = ...,
     weights: Sequence[float] | None = ...,
     telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
 ) -> ZSpaceInference: ...
@@ -11168,6 +11188,7 @@ __all__ = [
     "ZSpaceTelemetryFrame",
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
+    "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
     "zspace_posterior_decode",
     "zspace_posterior_project",
     "zspace_coherence_project",
@@ -11177,6 +11198,7 @@ __all__ = [
     "compile_inference",
     "blend_zspace_partials",
     "zspace_partial_fusion",
+    "zspace_metric_gradient_projection",
     "zspace_telemetry_fusion",
     "training_telemetry_projection",
     "zspace_concept_diffusion",

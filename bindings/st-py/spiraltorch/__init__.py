@@ -660,6 +660,7 @@ from .zspace_inference import (
     ZSpaceTelemetryFrame,
     ZSpaceInferenceRuntime,
     ZSpaceInferencePipeline,
+    ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS,
     inference_to_mapping,
     inference_to_zmetrics,
     prepare_trainer_step_payload,
@@ -683,6 +684,7 @@ from .zspace_inference import (
     decode_zspace_embedding,
     blend_zspace_partials,
     zspace_partial_fusion,
+    zspace_metric_gradient_projection,
     zspace_telemetry_fusion,
     compile_inference,
     infer_canvas_snapshot,
@@ -2744,11 +2746,13 @@ class _ZSpaceNotation:
         weight: float | None = None,
         origin: str | None = None,
         telemetry: _Any | None = None,
+        gradient_basis: str | None = None,
         **metrics: _Any,
     ) -> ZSpacePartialBundle:
         base_metrics: dict[str, _Any] = {}
         base_weight: float = 1.0
         base_origin: str | None = None
+        base_gradient_basis: str | None = None
         telemetry_payload: dict[str, float] | None = None
 
         if len(args) > 1:
@@ -2760,6 +2764,7 @@ class _ZSpaceNotation:
                 base_metrics = source.resolved()
                 base_weight = float(source.weight)
                 base_origin = source.origin
+                base_gradient_basis = source.gradient_basis
                 telemetry_payload = dict(source.telemetry_payload() or {}) or None
             elif isinstance(source, ZMetrics):
                 base_metrics = _metrics_to_mapping(source)
@@ -2783,6 +2788,9 @@ class _ZSpaceNotation:
 
         final_weight = float(weight) if weight is not None else base_weight
         final_origin = origin if origin is not None else base_origin
+        final_gradient_basis = (
+            gradient_basis if gradient_basis is not None else base_gradient_basis
+        )
 
         if telemetry is not None:
             telemetry_payload = dict(telemetry_payload or {})
@@ -2795,6 +2803,7 @@ class _ZSpaceNotation:
             weight=final_weight,
             origin=final_origin,
             telemetry=telemetry_payload,
+            gradient_basis=final_gradient_basis,
         )
 
     def bundle(
@@ -8138,6 +8147,7 @@ _EXTRAS.extend(
         "ZSpaceTelemetryFrame",
         "ZSpaceInferenceRuntime",
         "ZSpaceInferencePipeline",
+        "ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS",
         "zspace_posterior_decode",
         "zspace_posterior_project",
         "zspace_coherence_project",
@@ -8147,6 +8157,7 @@ _EXTRAS.extend(
         "compile_inference",
         "blend_zspace_partials",
         "zspace_partial_fusion",
+        "zspace_metric_gradient_projection",
         "zspace_telemetry_fusion",
         "training_telemetry_projection",
         "zspace_concept_diffusion",

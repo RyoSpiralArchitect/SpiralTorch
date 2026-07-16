@@ -133,12 +133,16 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     for name in _ZSPACE_CLASSES:
         setattr(zspace_stub, name, type(name, (), {}))
+    zspace_stub.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS = (
+        "spiraltorch.zspace.canonical_metric_cycle.v1"
+    )
 
     _ZSPACE_FUNCTIONS = [
         "inference_to_mapping",
         "inference_to_zmetrics",
         "prepare_trainer_step_payload",
         "topos_control_signal",
+        "topos_optimizer_snapshot",
         "topos_training_hints",
         "topos_training_plan",
         "topos_inference_hints",
@@ -157,6 +161,7 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "decode_zspace_embedding",
         "blend_zspace_partials",
         "zspace_partial_fusion",
+        "zspace_metric_gradient_projection",
         "zspace_telemetry_fusion",
         "compile_inference",
         "infer_canvas_snapshot",

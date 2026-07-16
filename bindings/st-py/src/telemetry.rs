@@ -17,7 +17,8 @@ use st_core::telemetry::training_projection::{
     project_training_telemetry, TrainingTelemetryProjectionRequest,
 };
 use st_core::telemetry::zspace_fusion::{
-    fuse_zspace_partials, fuse_zspace_telemetry, ZSpacePartialFusionRequest,
+    fuse_zspace_partials, fuse_zspace_telemetry, project_zspace_metric_gradient,
+    ZSpaceMetricGradientProjectionRequest, ZSpacePartialFusionRequest,
 };
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
@@ -45,6 +46,21 @@ fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResul
         .map_err(|error| json_error("Z-space partial fusion failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space partial contract encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_metric_gradient_projection(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = crate::json::py_to_json(request)?;
+    let request: ZSpaceMetricGradientProjectionRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space metric-gradient request", error))?;
+    let payload = project_zspace_metric_gradient(request)
+        .map_err(|error| json_error("Z-space metric-gradient projection failed", error))?;
+    let payload = serde_json::to_value(payload)
+        .map_err(|error| json_error("Z-space metric-gradient contract encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
@@ -730,6 +746,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(current, &module)?)?;
     module.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, &module)?)?;
     module.add_function(wrap_pyfunction!(_zspace_partial_fusion, &module)?)?;
+    module.add_function(wrap_pyfunction!(
+        _zspace_metric_gradient_projection,
+        &module
+    )?)?;
     module.add_function(wrap_pyfunction!(_zspace_free_energy, &module)?)?;
     module.add_function(wrap_pyfunction!(_training_telemetry_projection, &module)?)?;
     module.add(
@@ -755,6 +775,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add("DashboardRing", module.getattr("DashboardRing")?)?;
     parent.add_function(wrap_pyfunction!(_zspace_telemetry_fusion, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_partial_fusion, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_metric_gradient_projection,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(_zspace_free_energy, parent)?)?;
     parent.add_function(wrap_pyfunction!(_training_telemetry_projection, parent)?)?;
     if let Ok(zspace) = parent.getattr("zspace") {

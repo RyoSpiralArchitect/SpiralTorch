@@ -2,6 +2,13 @@
 
 ## 0.4.13
 
+- Z-space partial fusion v3: add Rust-owned gradient basis identity, reject
+  equal-length vectors with incompatible semantics, expose the canonical
+  metric-cycle projector to Python and WASM, and route API response/distortion
+  gradients through that projector. API runtime fusion now combines named
+  metrics first and performs one Rust-owned runtime-width projection, replacing
+  heterogeneous positional context gradients with explicit audit fields that
+  remain attached to `ZSpaceInference.fusion` and API traces.
 - Runtime-device route v3: move payload-level execution readiness into the
   Rust-owned contract, preserve `ready` / `not_ready` / `unknown` evidence,
   expose the all-required versus any-ready basis to Python and WASM, and make

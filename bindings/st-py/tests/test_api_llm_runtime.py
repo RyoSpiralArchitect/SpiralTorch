@@ -334,6 +334,17 @@ def test_api_llm_partial_derives_zspace_bundle() -> None:
     assert 0.0 <= metrics["memory"] <= 1.0
     assert metrics["stability"] > 0.7
     assert len(metrics["gradient"]) == 6
+    assert bundle.gradient_basis == st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    assert metrics["gradient"] == pytest.approx(
+        [
+            metrics["speed"],
+            metrics["memory"],
+            metrics["stability"],
+            metrics["frac"],
+            metrics["drs"],
+            metrics["speed"],
+        ]
+    )
     telemetry = bundle.telemetry_payload()
     assert telemetry is not None
     assert telemetry["api_llm.total_tokens"] == 11
@@ -375,6 +386,11 @@ def test_api_llm_runtime_owns_one_gradient_dimension_contract() -> None:
     assert runtime.gradient_alignment == "strict"
     assert len(trace.metrics["gradient"]) == 6
     assert runtime.as_dict()["gradient_dim"] == 6
+    assert runtime.as_dict()["metric_gradient_dimension"] == 6
+    assert trace.inference is not None
+    assert trace.inference.fusion is not None
+    assert trace.inference.fusion["gradient_source"] == "canonical_metrics"
+    assert trace.inference.fusion["gradient_replaced_source_count"] == 1
     with pytest.raises(ValueError, match="must match the runtime contract"):
         runtime.record_response(_chat_response(), gradient_dim=4)
 
@@ -403,6 +419,22 @@ def test_api_llm_runtime_blends_wasm_context_partials_for_each_prompt() -> None:
         assert telemetry["wasm.family_canvas"] == pytest.approx(1.0)
         assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
         assert inference["confidence"] > 0.0
+
+
+def test_api_llm_runtime_rejects_non_string_context_gradient_basis() -> None:
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        create_session=False,
+    )
+
+    with pytest.raises(TypeError, match="gradient_basis must be a string"):
+        runtime.record_response(
+            _chat_response(),
+            context_partials={
+                "metrics": {"speed": 0.4, "gradient": [0.4]},
+                "gradient_basis": 7,
+            },
+        )
 
 
 def test_format_api_llm_context_prompt_includes_bounded_wasm_telemetry() -> None:
@@ -624,7 +656,7 @@ def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
         psi_total=0.7,
         coherence=0.35,
         distortion_strength=1.25,
-        gradient_dim=4,
+        gradient_dim=6,
         base_temperature=0.7,
         include_penalties=True,
     )
@@ -652,6 +684,10 @@ def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
     )
 
     assert adapter["kind"] == "spiraltorch.zspace_inference_distortion_adapter"
+    assert len(adapter["context_partial"]["metrics"]["gradient"]) == 6
+    assert adapter["context_partial"]["gradient_basis"] == (
+        st.ZSPACE_CANONICAL_METRIC_GRADIENT_BASIS
+    )
     assert adapter["request"]["temperature"] > 0.7
     assert adapter["request"]["top_p"] <= 1.0
     assert adapter["logits_processor_kwargs"]["repression_strength"] > 0.75
@@ -662,6 +698,10 @@ def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
     assert "origin=zspace:inference_distortion" in calls[0][0]
     assert "zspace.distortion.energy" in calls[0][0]
     telemetry = trace.as_dict()["inference"]["telemetry"]["payload"]
+    assert len(trace.as_dict()["inference"]["applied"]["gradient"]) == 4
+    fusion = trace.as_dict()["inference"]["fusion"]
+    assert fusion["gradient_source"] == "canonical_metrics"
+    assert fusion["gradient_replaced_source_count"] == 2
     assert telemetry["zspace.distortion.energy"] == pytest.approx(
         adapter["distortion_energy"]
     )
