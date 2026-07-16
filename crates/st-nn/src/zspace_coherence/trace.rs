@@ -475,14 +475,9 @@ impl ZSpaceTraceRecord {
 }
 
 impl ZSpaceTraceEvent {
-    /// Decode either an in-process enum payload or the stable record used on plugin buses.
+    /// Decode the stable record used on plugin buses; raw enum payloads are not replayable.
     pub fn from_plugin_payload(payload: Value) -> Result<Self, ZSpaceTraceDecodeError> {
-        let is_stable_record = payload.get("schema").is_some()
-            || (payload.get("kind").is_some() && payload.get("payload").is_some());
-        if is_stable_record {
-            return serde_json::from_value::<ZSpaceTraceRecord>(payload)?.into_event();
-        }
-        serde_json::from_value(payload).map_err(ZSpaceTraceDecodeError::from)
+        serde_json::from_value::<ZSpaceTraceRecord>(payload)?.into_event()
     }
 
     pub fn kind(&self) -> &'static str {
@@ -1153,6 +1148,12 @@ mod tests {
         assert!(matches!(
             decoded_plugin,
             ZSpaceTraceEvent::Aggregated { .. }
+        ));
+        let raw_plugin_payload =
+            serde_json::to_value(&decoded).expect("in-process trace event remains serializable");
+        assert!(matches!(
+            ZSpaceTraceEvent::from_plugin_payload(raw_plugin_payload),
+            Err(ZSpaceTraceDecodeError::InvalidPayload(_))
         ));
 
         let mut wrong_version = aggregated.clone();

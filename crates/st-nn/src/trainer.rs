@@ -9000,6 +9000,11 @@ mod tests {
             .event_bus()
             .publish(&PluginEvent::custom("ZSpaceTrace", stable_payload));
         assert!(live_bridge.drain().is_some());
+        let raw_payload = serde_json::to_value(&event).unwrap();
+        global_registry()
+            .event_bus()
+            .publish(&PluginEvent::custom("ZSpaceTrace", raw_payload));
+        assert!(live_bridge.drain().is_none());
 
         let mut legacy = event.clone();
         let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut legacy else {
