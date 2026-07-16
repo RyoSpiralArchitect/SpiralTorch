@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
 use bandit::{SoftBandit, SoftBanditMode};
@@ -34,6 +34,10 @@ pub enum BlackCatError {
     ContextDimension { expected: usize, actual: usize },
     #[error("BlackCat adaptation state is invalid at '{field}'")]
     InvalidAdaptationState { field: &'static str },
+    #[error("BlackCat received a hint for unknown choice group '{id}'")]
+    UnknownChoiceHint { id: String },
+    #[error("BlackCat choice group '{id}' does not admit hinted value '{choice}'")]
+    InvalidChoiceHint { id: String, choice: String },
 }
 
 /// Metrics reported by a training loop back into the runtime.
@@ -176,9 +180,19 @@ impl MultiBandit {
     }
 
     pub fn select_all(&mut self, context: &[f64]) -> HashMap<String, String> {
+        self.select_all_with_hints(context, &BTreeMap::new())
+    }
+
+    /// Selects every group while using validated hints as deterministic
+    /// tie-breaking priors. Learned score differences still take precedence.
+    fn select_all_with_hints(
+        &mut self,
+        context: &[f64],
+        hints: &BTreeMap<String, String>,
+    ) -> HashMap<String, String> {
         let mut picks = HashMap::new();
         for (name, bandit) in self.arms.iter_mut() {
-            let choice = bandit.select(context);
+            let choice = bandit.select_with_hint(context, hints.get(name).map(String::as_str));
             picks.insert(name.clone(), choice);
         }
         picks
@@ -188,6 +202,14 @@ impl MultiBandit {
         for bandit in self.arms.values_mut() {
             bandit.update_last(context, reward);
         }
+    }
+
+    /// Stable snapshot of every named choice domain owned by the bandits.
+    pub fn choice_domains(&self) -> BTreeMap<String, Vec<String>> {
+        self.arms
+            .iter()
+            .map(|(name, bandit)| (name.clone(), bandit.choices().to_vec()))
+            .collect()
     }
 
     fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
@@ -200,6 +222,21 @@ impl MultiBandit {
         self.arms
             .values()
             .try_for_each(|bandit| bandit.validate_selection_scores(context))
+    }
+
+    fn validate_hints(&self, hints: &BTreeMap<String, String>) -> Result<(), BlackCatError> {
+        for (id, choice) in hints {
+            let Some(bandit) = self.arms.get(id) else {
+                return Err(BlackCatError::UnknownChoiceHint { id: id.clone() });
+            };
+            if !bandit.choices().contains(choice) {
+                return Err(BlackCatError::InvalidChoiceHint {
+                    id: id.clone(),
+                    choice: choice.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -333,15 +370,26 @@ impl BlackCatRuntime {
         &mut self,
         context: Vec<f64>,
     ) -> Result<HashMap<String, String>, BlackCatError> {
+        self.try_choose_with_hints(context, &BTreeMap::new())
+    }
+
+    /// Guarded choice path with deterministic tie-breaking priors. Hints must
+    /// name existing groups and values; they never bypass learned scores.
+    pub fn try_choose_with_hints(
+        &mut self,
+        context: Vec<f64>,
+        hints: &BTreeMap<String, String>,
+    ) -> Result<HashMap<String, String>, BlackCatError> {
         self.validate_context(&context)?;
         self.bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
+        self.bandits.validate_hints(hints)?;
         let mut next_bandits = self.bandits.clone();
         next_bandits
             .validate_selection_scores(&context)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
-        let picks = next_bandits.select_all(&context);
+        let picks = next_bandits.select_all_with_hints(&context, hints);
         next_bandits
             .validate_state(self.context_dim)
             .map_err(|field| BlackCatError::InvalidAdaptationState { field })?;
@@ -355,6 +403,7 @@ impl BlackCatRuntime {
                 "BlackCatChoose",
                 serde_json::json!({
                     "context": &self.last_context,
+                    "hints": hints,
                     "picks": &self.last_picks,
                 }),
             ));
@@ -589,6 +638,11 @@ impl BlackCatRuntime {
     /// Returns the dimensionality expected by the contextual bandits.
     pub fn context_dim(&self) -> usize {
         self.context_dim
+    }
+
+    /// Returns a deterministic snapshot of all contextual control domains.
+    pub fn choice_domains(&self) -> BTreeMap<String, Vec<String>> {
+        self.bandits.choice_domains()
     }
 
     /// Returns the current fractional regularisation penalty tracked by ZMeta.
@@ -943,6 +997,49 @@ mod tests {
             }
         ));
         assert_eq!(runtime.last_context(), initial_context);
+        assert!(runtime.last_picks().is_empty());
+    }
+
+    #[test]
+    fn choice_hints_break_ties_without_overriding_learned_scores() {
+        let mut runtime = sample_runtime();
+        let context = vec![1.0, 0.0, 0.0, 0.0];
+        let hinted_b = BTreeMap::from([("tile".to_string(), "b".to_string())]);
+        assert_eq!(
+            runtime
+                .try_choose_with_hints(context.clone(), &hinted_b)
+                .expect("valid tie-breaking hint")
+                .get("tile")
+                .map(String::as_str),
+            Some("b")
+        );
+
+        runtime.bandits.update_all(&context, 10.0);
+        let hinted_a = BTreeMap::from([("tile".to_string(), "a".to_string())]);
+        assert_eq!(
+            runtime
+                .try_choose_with_hints(context, &hinted_a)
+                .expect("learned score remains authoritative")
+                .get("tile")
+                .map(String::as_str),
+            Some("b")
+        );
+    }
+
+    #[test]
+    fn choice_hints_reject_unknown_groups_and_values() {
+        let mut runtime = sample_runtime();
+        let context = vec![1.0, 0.0, 0.0, 0.0];
+        let unknown = BTreeMap::from([("missing".to_string(), "a".to_string())]);
+        assert!(matches!(
+            runtime.try_choose_with_hints(context.clone(), &unknown),
+            Err(BlackCatError::UnknownChoiceHint { .. })
+        ));
+        let invalid = BTreeMap::from([("tile".to_string(), "missing".to_string())]);
+        assert!(matches!(
+            runtime.try_choose_with_hints(context, &invalid),
+            Err(BlackCatError::InvalidChoiceHint { .. })
+        ));
         assert!(runtime.last_picks().is_empty());
     }
 
@@ -1718,8 +1815,14 @@ pub mod bandit {
         }
 
         pub fn select(&mut self, x: &[f64]) -> String {
-            let mut best = f64::MIN;
-            let mut idx = 0usize;
+            self.select_with_hint(x, None)
+        }
+
+        pub(super) fn select_with_hint(&mut self, x: &[f64], hint: Option<&str>) -> String {
+            let mut idx = hint
+                .and_then(|hint| self.choices.iter().position(|choice| choice == hint))
+                .unwrap_or(0);
+            let mut best = self.score(idx, x);
             for (i, arm) in self.arms.iter().enumerate() {
                 let score = match self.mode {
                     SoftBanditMode::TS => arm.sample_score(x),
@@ -1734,10 +1837,21 @@ pub mod bandit {
             self.choices[idx].clone()
         }
 
+        fn score(&self, index: usize, x: &[f64]) -> f64 {
+            match self.mode {
+                SoftBanditMode::TS => self.arms[index].sample_score(x),
+                SoftBanditMode::UCB => self.arms[index].ucb_score(x, 1.0),
+            }
+        }
+
         pub fn update_last(&mut self, x: &[f64], reward: f64) {
             if let Some(arm) = self.arms.get_mut(self.last_index) {
                 arm.update(x, reward);
             }
+        }
+
+        pub(super) fn choices(&self) -> &[String] {
+            &self.choices
         }
 
         pub(super) fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {

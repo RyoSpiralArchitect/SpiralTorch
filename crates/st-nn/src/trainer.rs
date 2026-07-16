@@ -5261,31 +5261,19 @@ impl ModuleTrainer {
         &self.planner
     }
 
-    /// Produces a roundtable schedule for the provided output dimensions.
+    /// Produces the static baseline schedule for the provided output dimensions.
     ///
-    /// When an Autopilot runtime is attached the planner suggestions are
-    /// overridden with the latest contextual picks before the schedule is
-    /// emitted.
+    /// An attached Autopilot is deliberately not consulted here. Adaptive
+    /// selection, execution, and reward credit are kept inside one
+    /// [`Self::train_epoch`] step so a suggested arm cannot be credited for a
+    /// different schedule.
     pub fn roundtable(
         &mut self,
         rows: u32,
         cols: u32,
         config: RoundtableConfig,
     ) -> RoundtableSchedule {
-        let mut schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
-        let mut autopilot_picks: Option<std::collections::HashMap<String, String>> = None;
-        if self.autopilot.is_some() {
-            let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
-            let device_load = self.estimate_device_load();
-            if let Some(ap) = self.autopilot.as_mut() {
-                let context = ap.build_context(rows, cols, depth, device_load, &[]);
-                let picks = ap.suggest(context).clone();
-                if !picks.is_empty() {
-                    schedule.apply_knob_overrides(&picks);
-                }
-                autopilot_picks = Some(picks);
-            }
-        }
+        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
         let bus = global_registry().event_bus();
         if bus.has_listeners("RoundtablePlanned") {
             let encode_plan = |plan: &RankPlan| {
@@ -5320,7 +5308,12 @@ impl ModuleTrainer {
                         "here_tolerance": config.here_tolerance,
                     },
                     "autopilot_enabled": self.autopilot.is_some(),
-                    "autopilot_picks": autopilot_picks,
+                    "autopilot_scope": if self.autopilot.is_some() {
+                        "train_step"
+                    } else {
+                        "disabled"
+                    },
+                    "autopilot_picks": serde_json::Value::Null,
                     "bands": {
                         "above": encode_plan(schedule.above()),
                         "here": encode_plan(schedule.here()),
@@ -5833,6 +5826,8 @@ impl ModuleTrainer {
             if let Some(trace) = tensor_trace.as_ref() {
                 trace.clear();
             }
+            let mut step_schedule = (*schedule).clone();
+            let mut autopilot_picks = None;
             let (input, target) = batch.into_batch()?;
             validate_trainer_tensor("trainer_batch_input", &input)?;
             validate_trainer_tensor("trainer_batch_target", &target)?;
@@ -5849,9 +5844,36 @@ impl ModuleTrainer {
             let device_load = self.estimate_device_load();
             if let Some(ap) = self.autopilot.as_mut() {
                 let (rows, cols) = input.shape();
-                let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
-                let context = ap.build_context(rows as u32, cols as u32, depth, device_load, &[]);
-                let _ = ap.suggest(context);
+                let depth =
+                    step_schedule.above().k + step_schedule.here().k + step_schedule.beneath().k;
+                let context = ap
+                    .try_build_context(rows as u32, cols as u32, depth, device_load, &[])
+                    .map_err(|_| TensorError::InvalidValue {
+                        label: "autopilot context",
+                    })?;
+                let picks = ap
+                    .try_suggest(context)
+                    .map_err(|_| TensorError::InvalidValue {
+                        label: "autopilot suggestion",
+                    })?
+                    .clone();
+                if let Err(error) = step_schedule.try_apply_knob_overrides(&picks) {
+                    let bus = global_registry().event_bus();
+                    if bus.has_listeners("TrainerAutopilotRejected") {
+                        bus.publish(&PluginEvent::custom(
+                            "TrainerAutopilotRejected",
+                            serde_json::json!({
+                                "stage": "schedule_override",
+                                "error": error.to_string(),
+                                "picks": picks,
+                            }),
+                        ));
+                    }
+                    return Err(TensorError::InvalidValue {
+                        label: "autopilot schedule override",
+                    });
+                }
+                autopilot_picks = Some(picks);
             }
             let _backend_policy_guard = push_backend_policy(backend_policy);
             let prediction = module.forward(&input)?;
@@ -5864,7 +5886,7 @@ impl ModuleTrainer {
             let grad_output = loss.backward(&prediction, &target)?;
             validate_trainer_tensor("trainer_grad_output", &grad_output)?;
             let grad_output_shape = grad_output.shape();
-            let mut band_energy = schedule.band_energy(&grad_output)?;
+            let mut band_energy = step_schedule.band_energy(&grad_output)?;
             validate_band_energy_for_trainer(&band_energy)?;
             let baseline_band_energy = band_energy;
             let mut desire_impulse = None;
@@ -5886,12 +5908,13 @@ impl ModuleTrainer {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
             validate_band_energy_for_trainer(&band_energy)?;
-            let mut roundtable_signal = RoundtableBandSignal::from_schedule(schedule, band_energy);
+            let mut roundtable_signal =
+                RoundtableBandSignal::from_schedule(&step_schedule, band_energy);
             if let Some(bridge) = self.gnn_roundtable_bridge.as_ref() {
                 roundtable_signal = bridge.publish(roundtable_signal.clone())?;
             }
             self.gnn_last_roundtable_signal = Some(roundtable_signal.clone());
-            let mut bands: GradientBands = schedule.split(&grad_output)?;
+            let mut bands: GradientBands = step_schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
             if let Some(ref impulse) = desire_impulse {
                 weights.0 *= impulse.multipliers.0;
@@ -6414,9 +6437,9 @@ impl ModuleTrainer {
                     band_energy.beneath,
                 );
                 let plan = match outcome {
-                    OutcomeBand::Above => schedule.above(),
-                    OutcomeBand::Here => schedule.here(),
-                    OutcomeBand::Beneath => schedule.beneath(),
+                    OutcomeBand::Above => step_schedule.above(),
+                    OutcomeBand::Here => step_schedule.here(),
+                    OutcomeBand::Beneath => step_schedule.beneath(),
                 };
                 let signature = plan_signature(plan, outcome);
                 let script_hint = plan.choice.to_unison_script(plan.kind).replace('\n', "; ");
@@ -6829,7 +6852,11 @@ impl ModuleTrainer {
                 extra,
             };
             if let Some(ap) = self.autopilot.as_mut() {
-                ap.report(&metrics);
+                let _ = ap
+                    .try_report(&metrics)
+                    .map_err(|_| TensorError::InvalidValue {
+                        label: "autopilot report",
+                    })?;
             }
             let mut free_energy_report = None;
             if let Some(rt) = self.blackcat.as_mut() {
@@ -6858,7 +6885,7 @@ impl ModuleTrainer {
                     report.components.band_potential,
                 );
                 if reward > 0.0 {
-                    let plan = schedule.above();
+                    let plan = step_schedule.above();
                     let script = plan
                         .choice
                         .to_unison_script(RankKind::TopK)
@@ -6879,6 +6906,50 @@ impl ModuleTrainer {
                         "extra": &metrics.extra,
                     },
                     "free_energy": free_energy_report.as_ref(),
+                    "autopilot": autopilot_picks.as_ref().map(|picks| serde_json::json!({
+                        "picks": picks,
+                        "executed_choices": {
+                            "above": {
+                                "wg": step_schedule.above().choice.wg,
+                                "kl": step_schedule.above().choice.kl,
+                                "ch": step_schedule.above().choice.ch,
+                                "mk": step_schedule.above().choice.mk,
+                                "mkd": step_schedule.above().choice.mkd,
+                                "tile": step_schedule.above().choice.tile,
+                                "ctile": step_schedule.above().choice.ctile,
+                                "subgroup": step_schedule.above().choice.subgroup,
+                                "fft_tile": step_schedule.above().choice.fft_tile,
+                                "fft_radix": step_schedule.above().choice.fft_radix,
+                                "fft_segments": step_schedule.above().choice.fft_segments,
+                            },
+                            "here": {
+                                "wg": step_schedule.here().choice.wg,
+                                "kl": step_schedule.here().choice.kl,
+                                "ch": step_schedule.here().choice.ch,
+                                "mk": step_schedule.here().choice.mk,
+                                "mkd": step_schedule.here().choice.mkd,
+                                "tile": step_schedule.here().choice.tile,
+                                "ctile": step_schedule.here().choice.ctile,
+                                "subgroup": step_schedule.here().choice.subgroup,
+                                "fft_tile": step_schedule.here().choice.fft_tile,
+                                "fft_radix": step_schedule.here().choice.fft_radix,
+                                "fft_segments": step_schedule.here().choice.fft_segments,
+                            },
+                            "beneath": {
+                                "wg": step_schedule.beneath().choice.wg,
+                                "kl": step_schedule.beneath().choice.kl,
+                                "ch": step_schedule.beneath().choice.ch,
+                                "mk": step_schedule.beneath().choice.mk,
+                                "mkd": step_schedule.beneath().choice.mkd,
+                                "tile": step_schedule.beneath().choice.tile,
+                                "ctile": step_schedule.beneath().choice.ctile,
+                                "subgroup": step_schedule.beneath().choice.subgroup,
+                                "fft_tile": step_schedule.beneath().choice.fft_tile,
+                                "fft_radix": step_schedule.beneath().choice.fft_radix,
+                                "fft_segments": step_schedule.beneath().choice.fft_segments,
+                            },
+                        },
+                    })),
                 }),
             ));
         }
@@ -7832,7 +7903,8 @@ mod tests {
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::inference::zspace_coherence::summarize_zspace_coherence_distribution;
-    use st_core::runtime::autopilot::{AutoConfig, AutoMode};
+    use st_core::plugin::{PluginEventRecorder, PluginEventRecorderConfig, PluginEventSnapshot};
+    use st_core::runtime::autopilot::{AutoConfig, AutoMode, KnobSpec};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::runtime::zspace_optimizer::{
         transition_zspace_meta_optimizer, ZSpaceMetaObservation, ZSpaceMetaOptimizerConfig,
@@ -9075,33 +9147,83 @@ mod tests {
     }
 
     #[test]
-    fn roundtable_applies_autopilot_overrides() {
+    fn train_epoch_applies_autopilot_overrides_to_the_credited_step() {
+        let profile_dir = tempfile::tempdir().expect("temporary Autopilot profile directory");
+        let recorder = PluginEventRecorder::subscribe(
+            global_registry().event_bus().clone(),
+            PluginEventRecorderConfig { capacity: 256 },
+        );
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut groups = HashMap::new();
         groups.insert("wg".to_string(), vec!["64".to_string()]);
         groups.insert("here.tile".to_string(), vec!["42".to_string()]);
-        groups.insert("beneath.subgroup".to_string(), vec!["false".to_string()]);
+        groups.insert("beneath.fftradix".to_string(), vec!["2".to_string()]);
         let runtime = BlackCatRuntime::new(
             ZMetaParams::default(),
             ChoiceGroups { groups },
-            4,
+            8,
             SoftBanditMode::TS,
             None,
         );
-        let autopilot = Autopilot::new(
+        let autopilot = Autopilot::try_new_with_profile_dir(
             caps,
             AutoConfig {
-                feat_dim: 4,
+                feat_dim: 8,
                 mode: AutoMode::Auto,
-                ..AutoConfig::default()
+                knobs: vec![
+                    KnobSpec {
+                        id: "wg".to_string(),
+                        domain: vec!["64".to_string()],
+                        default_idx: 0,
+                    },
+                    KnobSpec {
+                        id: "here.tile".to_string(),
+                        domain: vec!["42".to_string()],
+                        default_idx: 0,
+                    },
+                    KnobSpec {
+                        id: "beneath.fftradix".to_string(),
+                        domain: vec!["2".to_string()],
+                        default_idx: 0,
+                    },
+                ],
+                extra_features: Vec::new(),
             },
             runtime,
-        );
+            profile_dir.path(),
+        )
+        .expect("valid Autopilot contract");
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_autopilot(autopilot);
         let schedule = trainer.roundtable(8, 16, RoundtableConfig::default());
-        assert_eq!(schedule.above().choice.wg, 64);
-        assert_eq!(schedule.here().choice.tile, 42);
-        assert!(!schedule.beneath().choice.subgroup);
+
+        let mut module = Linear::new("autopilot_causal_step", 16, 16).unwrap();
+        let mut loss = MeanSquaredError::new();
+        trainer.prepare(&mut module).unwrap();
+        let input = Tensor::from_vec(8, 16, vec![0.25; 8 * 16]).unwrap();
+        let target = Tensor::from_vec(8, 16, vec![0.0; 8 * 16]).unwrap();
+        trainer
+            .train_epoch(&mut module, &mut loss, vec![(input, target)], &schedule)
+            .unwrap();
+
+        let trace = recorder.snapshot();
+        let execution = trace.events.iter().find_map(|record| match &record.event {
+            PluginEventSnapshot::Custom {
+                event_type,
+                data: Some(data),
+            } if event_type == "TrainerStep" && data["autopilot"]["picks"]["here.tile"] == "42" => {
+                Some(data)
+            }
+            _ => None,
+        });
+        let execution = execution.expect("Autopilot TrainerStep execution witness");
+        assert_eq!(
+            execution["autopilot"]["executed_choices"]["here"]["tile"],
+            42
+        );
+        assert_eq!(
+            execution["autopilot"]["executed_choices"]["beneath"]["fft_radix"],
+            2
+        );
     }
 
     #[test]
