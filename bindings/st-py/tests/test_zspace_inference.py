@@ -36,6 +36,8 @@ from spiraltorch import (
     weights_partial_from_compat,
     infer_weights_from_dlpack,
     infer_weights_from_compat,
+    validate_zspace_coherence_distribution_witness,
+    zspace_coherence_distribution_witness,
     zspace_coherence_project,
     zspace_posterior_decode,
     zspace_posterior_project,
@@ -958,6 +960,41 @@ def test_coherence_diagnostics_projection_infers_metrics():
         contour=_DummyContour(),
     )
     assert "coherence_strength" in inference.metrics
+
+
+def test_coherence_distribution_witness_is_built_and_validated_in_rust():
+    witness = zspace_coherence_distribution_witness([0.6, 0.3, 0.1])
+    assert witness == {
+        "kind": "spiraltorch.zspace_coherence_distribution_witness",
+        "contract_version": "spiraltorch.zspace_coherence_distribution_witness.v1",
+        "semantic_owner": "st-core::inference::zspace_coherence",
+        "semantic_backend": "rust",
+        "witness_formula": witness["witness_formula"],
+        "normalized_weights": pytest.approx([0.6, 0.3, 0.1]),
+    }
+    assert "complete simplex witness" in witness["witness_formula"]
+
+    summary = validate_zspace_coherence_distribution_witness(witness)
+    assert summary["channels"] == 3
+    assert summary["weight_mass"] == pytest.approx(1.0)
+    assert summary["effective_channels"] == pytest.approx(
+        math.exp(summary["weight_entropy"])
+    )
+
+    wrong_version = dict(witness)
+    wrong_version["contract_version"] = (
+        "spiraltorch.zspace_coherence_distribution_witness.v0"
+    )
+    with pytest.raises(ValueError, match="contract_version"):
+        validate_zspace_coherence_distribution_witness(wrong_version)
+
+    invalid_simplex = dict(witness)
+    invalid_simplex["normalized_weights"] = [0.7, 0.3, 0.1]
+    with pytest.raises(ValueError, match="sum to one"):
+        validate_zspace_coherence_distribution_witness(invalid_simplex)
+
+    with pytest.raises(TypeError, match="must be a mapping"):
+        validate_zspace_coherence_distribution_witness([0.6, 0.3, 0.1])
 
 
 def test_coherence_projection_accepts_trace_entropy_alias_and_rejects_bad_gain():

@@ -2,6 +2,11 @@
 
 ## 0.4.13
 
+- Z-space trace schema v2: record the complete Rust-owned coherence simplex as
+  a versioned distribution witness, decode stable plugin records before trainer
+  replay, and reject missing, contradictory, or non-Rust evidence. Python and
+  WASM expose the same witness build/validate APIs without host-language
+  entropy or concentration formulas.
 - Z-space coherence projection v2: validate entropy, support counts, dominant
   channel, and raw response mean against their supplied Rust-side evidence;
   reject non-finite symmetry probes; and expose the same validation formula and

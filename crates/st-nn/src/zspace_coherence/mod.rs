@@ -34,14 +34,14 @@ pub use sequencer::{
 };
 pub use st_core::inference::zspace_coherence::{
     ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceControlPayload,
-    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionConfig,
-    ZSpaceCoherenceProjectionDerived, ZSpaceCoherenceProjectionError,
-    ZSpaceCoherenceProjectionPayload,
+    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceDistributionWitness,
+    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionDerived,
+    ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
 };
 pub use text_vae::ZSpaceTextVae;
 pub use trace::{
-    coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord,
-    ZSpaceTraceRecorder,
+    coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceDecodeError,
+    ZSpaceTraceEvent, ZSpaceTraceRecord, ZSpaceTraceRecorder,
 };
 pub use vae::{
     MellinBasis, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind, ZSpaceVaeState,

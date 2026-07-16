@@ -2258,6 +2258,24 @@ replaced or clamped by Python.
 control payload into learning; raw mean coherence and raw Shannon entropy remain
 audit metrics, while normalized radius, entropy, and pressure drive the policy.
 Trace replay is guarded and rejects missing, legacy, or tampered control fields.
+Current trace schema v2 includes a complete Rust-owned simplex witness rather
+than asking replay code to trust independently stored entropy and concentration
+scalars. Build and validate the same portable evidence directly from Python:
+
+```python
+witness = st.zspace_coherence_distribution_witness([0.5, 0.3, 0.2])
+summary = st.validate_zspace_coherence_distribution_witness(witness)
+
+assert witness["contract_version"] == (
+    "spiraltorch.zspace_coherence_distribution_witness.v1"
+)
+assert witness["semantic_backend"] == "rust"
+assert summary["weight_mass"] == 1.0
+```
+
+Both calls require the compiled Rust core. Python performs input shaping and
+orchestration only; it does not recompute entropy, concentration, or effective
+channel count.
 `diagnostics.observation.signature` exposes the same Rust-owned normalized
 entropy, concentration, effective channel count, label, reason, formula,
 contract version, and policy thresholds. Python never reclassifies the trace.

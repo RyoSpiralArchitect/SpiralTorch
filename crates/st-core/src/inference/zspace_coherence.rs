@@ -15,6 +15,12 @@ pub const ZSPACE_COHERENCE_PROJECTION_FORMULA: &str =
     "speed=tanh(speed_gain*C);C=C_HHI(normalized_weights)|1-H_norm(diagnostic_entropy);memory=tanh(z_bias);stability=tanh(stability_gain*(1-2*H_norm));frac=tanh(frac_gain*fractional_order);drs=tanh(drs_gain*(energy_ratio-0.5))";
 pub const ZSPACE_COHERENCE_SUMMARY_FORMULA: &str =
     "p=w/sum(w);H=-sum(p*ln(p));H_norm=H/ln(N);C_HHI=(sum(p^2)-1/N)/(1-1/N);N_eff=exp(H);response_mean=mean(coherence);peak=max(values)";
+pub const ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_KIND: &str =
+    "spiraltorch.zspace_coherence_distribution_witness";
+pub const ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_coherence_distribution_witness.v1";
+pub const ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_FORMULA: &str =
+    "normalized_weights are the complete simplex witness;all distribution summaries and controls must be re-derived by st-core";
 pub const ZSPACE_COHERENCE_EVIDENCE_VALIDATION_FORMULA: &str =
     "normalized_weights=>coherence_entropy~=H(p),preserved_channels=count(p>0),discarded_channels=count(p=0),dominant_channel in argmax(p);coherence=>mean_coherence~=mean(coherence);comparisons use channel-scaled f32 tolerance";
 pub const ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION: &str =
@@ -187,6 +193,7 @@ pub struct ZSpaceCoherenceClassificationPayload {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct ZSpaceCoherenceDistributionSummary {
     pub channels: usize,
     pub weight_mass: f64,
@@ -194,6 +201,18 @@ pub struct ZSpaceCoherenceDistributionSummary {
     pub normalized_entropy: f64,
     pub concentration: f64,
     pub effective_channels: f64,
+}
+
+/// Complete, portable evidence for reconstructing coherence distribution semantics.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceCoherenceDistributionWitness {
+    pub kind: String,
+    pub contract_version: String,
+    pub semantic_owner: String,
+    pub semantic_backend: String,
+    pub witness_formula: String,
+    pub normalized_weights: Vec<f64>,
 }
 
 /// Dimensionless coherence controls derived by the canonical Rust contract.
@@ -335,6 +354,14 @@ pub enum ZSpaceCoherenceProjectionError {
         value: f64,
         peak: f64,
     },
+    #[error(
+        "Z-space coherence distribution witness field '{field}' must be '{expected}', received '{actual}'"
+    )]
+    InvalidDistributionWitnessContract {
+        field: &'static str,
+        actual: String,
+        expected: &'static str,
+    },
 }
 
 fn validate_scalar(field: &'static str, value: f64) -> Result<(), ZSpaceCoherenceProjectionError> {
@@ -470,6 +497,75 @@ where
         concentration,
         effective_channels: weight_entropy.exp().min(channels as f64),
     })
+}
+
+/// Build a portable simplex witness after validating the canonical Rust distribution contract.
+pub fn build_zspace_coherence_distribution_witness<T>(
+    weights: &[T],
+) -> Result<ZSpaceCoherenceDistributionWitness, ZSpaceCoherenceProjectionError>
+where
+    T: Copy,
+    f64: From<T>,
+{
+    summarize_zspace_coherence_distribution(weights)?;
+    Ok(ZSpaceCoherenceDistributionWitness {
+        kind: ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_KIND.to_owned(),
+        contract_version: ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_CONTRACT_VERSION.to_owned(),
+        semantic_owner: ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER.to_owned(),
+        semantic_backend: ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND.to_owned(),
+        witness_formula: ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_FORMULA.to_owned(),
+        normalized_weights: weights.iter().copied().map(f64::from).collect(),
+    })
+}
+
+fn validate_distribution_witness_contract_field(
+    field: &'static str,
+    actual: &str,
+    expected: &'static str,
+) -> Result<(), ZSpaceCoherenceProjectionError> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(
+            ZSpaceCoherenceProjectionError::InvalidDistributionWitnessContract {
+                field,
+                actual: actual.to_owned(),
+                expected,
+            },
+        )
+    }
+}
+
+/// Validate witness identity and reconstruct all distribution metrics from its simplex.
+pub fn validate_zspace_coherence_distribution_witness(
+    witness: &ZSpaceCoherenceDistributionWitness,
+) -> Result<ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionError> {
+    validate_distribution_witness_contract_field(
+        "kind",
+        &witness.kind,
+        ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_KIND,
+    )?;
+    validate_distribution_witness_contract_field(
+        "contract_version",
+        &witness.contract_version,
+        ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_CONTRACT_VERSION,
+    )?;
+    validate_distribution_witness_contract_field(
+        "semantic_owner",
+        &witness.semantic_owner,
+        ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
+    )?;
+    validate_distribution_witness_contract_field(
+        "semantic_backend",
+        &witness.semantic_backend,
+        ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
+    )?;
+    validate_distribution_witness_contract_field(
+        "witness_formula",
+        &witness.witness_formula,
+        ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_FORMULA,
+    )?;
+    summarize_zspace_coherence_distribution(&witness.normalized_weights)
 }
 
 /// Derive dimensionless trainer/runtime controls from a canonical distribution summary.
@@ -1493,6 +1589,46 @@ mod tests {
         assert!(!is_zspace_coherence_swap_invariant(&[] as &[f64]));
         assert!(!is_zspace_coherence_swap_invariant(&[f64::NAN, f64::NAN]));
         assert!(!is_zspace_coherence_swap_invariant(&[0.5, f64::INFINITY]));
+    }
+
+    #[test]
+    fn distribution_witness_round_trips_only_through_the_rust_contract() {
+        let witness = build_zspace_coherence_distribution_witness(&[0.6_f32, 0.3, 0.1]).unwrap();
+        assert_eq!(
+            witness.contract_version,
+            ZSPACE_COHERENCE_DISTRIBUTION_WITNESS_CONTRACT_VERSION
+        );
+        assert_eq!(witness.semantic_backend, "rust");
+
+        let summary = validate_zspace_coherence_distribution_witness(&witness).unwrap();
+        assert_relative_eq!(summary.weight_mass, 1.0, epsilon = 1.0e-6);
+        assert_relative_eq!(
+            summary.concentration,
+            summarize_zspace_coherence_distribution(&[0.6_f32, 0.3, 0.1])
+                .unwrap()
+                .concentration,
+            epsilon = 1.0e-12
+        );
+
+        let mut wrong_version = witness.clone();
+        wrong_version.contract_version =
+            "spiraltorch.zspace_coherence_distribution_witness.v0".to_owned();
+        assert!(matches!(
+            validate_zspace_coherence_distribution_witness(&wrong_version),
+            Err(
+                ZSpaceCoherenceProjectionError::InvalidDistributionWitnessContract {
+                    field: "contract_version",
+                    ..
+                }
+            )
+        ));
+
+        let mut invalid_simplex = witness;
+        invalid_simplex.normalized_weights[0] = 0.7;
+        assert!(matches!(
+            validate_zspace_coherence_distribution_witness(&invalid_simplex),
+            Err(ZSpaceCoherenceProjectionError::InvalidWeightMass { .. })
+        ));
     }
 
     #[test]

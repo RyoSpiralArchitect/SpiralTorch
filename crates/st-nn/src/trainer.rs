@@ -70,14 +70,14 @@ use st_core::ecosystem::{
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::heur::free_energy::FreeEnergyReport;
 use st_core::inference::zspace_coherence::{
-    classify_zspace_coherence, derive_zspace_coherence_control,
+    project_zspace_coherence, validate_zspace_coherence_distribution_witness,
     ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationPolicy,
-    ZSpaceCoherenceClassificationRequest, ZSpaceCoherenceControlPayload,
-    ZSpaceCoherenceDistributionSummary, ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION,
-    ZSPACE_COHERENCE_CLASSIFICATION_FORMULA, ZSPACE_COHERENCE_CLASSIFICATION_KIND,
-    ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION, ZSPACE_COHERENCE_CONTROL_FORMULA,
-    ZSPACE_COHERENCE_CONTROL_KIND, ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
-    ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
+    ZSpaceCoherenceControlPayload, ZSpaceCoherenceDiagnosticsInput,
+    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionRequest,
+    ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION, ZSPACE_COHERENCE_CLASSIFICATION_FORMULA,
+    ZSPACE_COHERENCE_CLASSIFICATION_KIND, ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION,
+    ZSPACE_COHERENCE_CONTROL_FORMULA, ZSPACE_COHERENCE_CONTROL_KIND,
+    ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND, ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
 };
 use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
@@ -692,49 +692,64 @@ impl CoherenceSignal {
         })
     }
 
-    fn structure_is_valid(
-        dominant_channel: Option<usize>,
-        preserved_channels: usize,
-        discarded_channels: usize,
-        distribution_channels: usize,
-        z_bias: f32,
-    ) -> bool {
-        z_bias.is_finite()
-            && dominant_channel
-                .map(|index| index < distribution_channels)
-                .unwrap_or(true)
-            && preserved_channels
-                .checked_add(discarded_channels)
-                .is_some_and(|channels| channels == distribution_channels)
-    }
-
     fn from_zspace_trace_event(event: &ZSpaceTraceEvent) -> Option<Self> {
-        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = event else {
+        let ZSpaceTraceEvent::Aggregated {
+            coherence,
+            diagnostics,
+            ..
+        } = event
+        else {
             return None;
         };
-        let distribution = ZSpaceCoherenceDistributionSummary {
-            channels: diagnostics.distribution_channels?,
-            weight_mass: f64::from(diagnostics.distribution_weight_mass?),
-            weight_entropy: f64::from(diagnostics.entropy),
-            normalized_entropy: f64::from(diagnostics.normalized_entropy?),
-            concentration: f64::from(diagnostics.concentration?),
-            effective_channels: f64::from(diagnostics.effective_channels?),
-        };
-        let control = derive_zspace_coherence_control(
-            distribution,
-            f64::from(diagnostics.energy_ratio),
-            f64::from(diagnostics.mean_coherence),
-        )
-        .ok()?;
-        if !Self::structure_is_valid(
-            diagnostics.dominant_channel,
-            diagnostics.preserved_channels,
-            diagnostics.discarded_channels,
-            control.channels,
-            diagnostics.z_bias,
-        ) {
+        let witness = diagnostics.distribution_witness.as_ref()?;
+        let distribution = validate_zspace_coherence_distribution_witness(witness).ok()?;
+        if diagnostics.distribution_channels != Some(distribution.channels)
+            || !Self::trace_value_matches(
+                diagnostics.distribution_weight_mass,
+                distribution.weight_mass,
+            )
+            || !Self::trace_value_matches(Some(diagnostics.entropy), distribution.weight_entropy)
+            || !Self::trace_value_matches(
+                diagnostics.normalized_entropy,
+                distribution.normalized_entropy,
+            )
+            || !Self::trace_value_matches(diagnostics.concentration, distribution.concentration)
+            || !Self::trace_value_matches(
+                diagnostics.effective_channels,
+                distribution.effective_channels,
+            )
+        {
             return None;
         }
+
+        let policy = ZSpaceCoherenceClassificationPolicy {
+            background_energy_ratio_max: diagnostics.background_energy_ratio_max?,
+            cascade_energy_ratio_min: diagnostics.cascade_energy_ratio_min?,
+        };
+        let complete_coherence = if coherence.len() == distribution.channels {
+            coherence.iter().map(|value| f64::from(*value)).collect()
+        } else {
+            Vec::new()
+        };
+        let projection = project_zspace_coherence(ZSpaceCoherenceProjectionRequest {
+            diagnostics: ZSpaceCoherenceDiagnosticsInput {
+                mean_coherence: f64::from(diagnostics.mean_coherence),
+                coherence_entropy: f64::from(diagnostics.entropy),
+                energy_ratio: f64::from(diagnostics.energy_ratio),
+                z_bias: f64::from(diagnostics.z_bias),
+                fractional_order: f64::from(diagnostics.fractional_order),
+                normalized_weights: witness.normalized_weights.clone(),
+                preserved_channels: Some(diagnostics.preserved_channels),
+                discarded_channels: Some(diagnostics.discarded_channels),
+                dominant_channel: diagnostics.dominant_channel,
+            },
+            coherence: complete_coherence,
+            contour: None,
+            config: ZSpaceCoherenceProjectionConfig::default(),
+            classification_policy: policy,
+        })
+        .ok()?;
+        let control = projection.control?;
         if diagnostics.control_kind.as_deref() != Some(ZSPACE_COHERENCE_CONTROL_KIND)
             || diagnostics.control_contract_version.as_deref()
                 != Some(ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION)
@@ -749,16 +764,9 @@ impl CoherenceSignal {
         {
             return None;
         }
-        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
-            energy_ratio: f64::from(diagnostics.energy_ratio),
-            swap_invariant: diagnostics.swap_invariant?,
-            policy: ZSpaceCoherenceClassificationPolicy {
-                background_energy_ratio_max: diagnostics.background_energy_ratio_max?,
-                cascade_energy_ratio_min: diagnostics.cascade_energy_ratio_min?,
-            },
-        })
-        .ok()?;
+        let classification = projection.classification?;
         if diagnostics.label != classification.label.as_str()
+            || diagnostics.swap_invariant != Some(classification.swap_invariant)
             || diagnostics.classification_kind.as_deref()
                 != Some(ZSPACE_COHERENCE_CLASSIFICATION_KIND)
             || diagnostics.classification_contract_version.as_deref()
@@ -787,17 +795,11 @@ impl CoherenceSignal {
     }
 
     fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Option<Self> {
-        let control = diagnostics.control_summary().ok()?;
-        let classification = diagnostics.classify(Default::default()).ok()?;
-        if !Self::structure_is_valid(
-            diagnostics.dominant_channel(),
-            diagnostics.preserved_channels(),
-            diagnostics.discarded_channels(),
-            control.channels,
-            diagnostics.z_bias(),
-        ) {
-            return None;
-        }
+        let projection = diagnostics
+            .project_to_zspace_partial(ZSpaceCoherenceProjectionConfig::default(), None)
+            .ok()?;
+        let control = projection.control?;
+        let classification = projection.classification?;
         Some(Self {
             dominant_channel: diagnostics.dominant_channel(),
             preserved_channels: diagnostics.preserved_channels(),
@@ -862,10 +864,10 @@ impl ZSpaceTraceCoherenceBridge {
                 let Some(payload) = event.downcast_data::<serde_json::Value>() else {
                     return;
                 };
-                let is_aggregated =
-                    payload.get("kind").and_then(Value::as_str) == Some("Aggregated");
-                let Ok(trace_event) = serde_json::from_value::<ZSpaceTraceEvent>(payload.clone())
-                else {
+                let is_aggregated = payload.get("kind").and_then(Value::as_str)
+                    == Some("Aggregated")
+                    || payload.get("Aggregated").is_some();
+                let Ok(trace_event) = ZSpaceTraceEvent::from_plugin_payload(payload.clone()) else {
                     if is_aggregated {
                         Self::replace_latest(&latest_clone, None);
                     }
@@ -7829,9 +7831,7 @@ mod tests {
     };
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
-    use st_core::inference::zspace_coherence::{
-        is_zspace_coherence_swap_invariant, summarize_zspace_coherence_distribution,
-    };
+    use st_core::inference::zspace_coherence::summarize_zspace_coherence_distribution;
     use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::runtime::zspace_optimizer::{
@@ -7879,28 +7879,40 @@ mod tests {
         let channels = weights.len();
         let raw_mean_coherence = weights.iter().sum::<f32>() / channels as f32;
         let distribution = summarize_zspace_coherence_distribution(&weights).unwrap();
-        let control = derive_zspace_coherence_control(
-            distribution,
-            f64::from(energy_ratio),
-            f64::from(raw_mean_coherence),
-        )
-        .unwrap();
-        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
-            energy_ratio: f64::from(energy_ratio),
-            swap_invariant: is_zspace_coherence_swap_invariant(&weights),
-            policy: ZSpaceCoherenceClassificationPolicy::default(),
+        let dominant_channel = weights
+            .iter()
+            .enumerate()
+            .max_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
+            .map(|(index, _)| index);
+        let preserved_channels = weights.iter().filter(|weight| **weight > 0.0).count();
+        let normalized_weights = weights
+            .iter()
+            .map(|weight| f64::from(*weight))
+            .collect::<Vec<_>>();
+        let projection = project_zspace_coherence(ZSpaceCoherenceProjectionRequest {
+            diagnostics: ZSpaceCoherenceDiagnosticsInput {
+                mean_coherence: f64::from(raw_mean_coherence),
+                coherence_entropy: distribution.weight_entropy,
+                energy_ratio: f64::from(energy_ratio),
+                z_bias: f64::from(z_bias),
+                fractional_order: 0.0,
+                normalized_weights: normalized_weights.clone(),
+                preserved_channels: Some(preserved_channels),
+                discarded_channels: Some(channels - preserved_channels),
+                dominant_channel,
+            },
+            coherence: normalized_weights,
+            contour: None,
+            config: ZSpaceCoherenceProjectionConfig::default(),
+            classification_policy: ZSpaceCoherenceClassificationPolicy::default(),
         })
         .unwrap();
         CoherenceSignal {
-            dominant_channel: weights
-                .iter()
-                .enumerate()
-                .max_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
-                .map(|(index, _)| index),
-            preserved_channels: weights.iter().filter(|weight| **weight > 0.0).count(),
+            dominant_channel,
+            preserved_channels,
             z_bias,
-            control,
-            classification,
+            control: projection.control.unwrap(),
+            classification: projection.classification.unwrap(),
             repaired_non_finite_weights: 0,
             repaired_negative_weights: 0,
             pre_discard_repaired_non_finite: 0,
@@ -8982,6 +8994,13 @@ mod tests {
         ZSpaceTraceCoherenceBridge::replace_latest_from_trace_event(&latest, &event);
         assert!(latest.lock().unwrap().is_some());
 
+        let live_bridge = ZSpaceTraceCoherenceBridge::subscribe();
+        let stable_payload = serde_json::to_value(event.stable_record()).unwrap();
+        global_registry()
+            .event_bus()
+            .publish(&PluginEvent::custom("ZSpaceTrace", stable_payload));
+        assert!(live_bridge.drain().is_some());
+
         let mut legacy = event.clone();
         let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut legacy else {
             unreachable!()
@@ -8995,6 +9014,43 @@ mod tests {
         };
         diagnostics.distribution_weight_mass = None;
         assert!(CoherenceSignal::from_zspace_trace_event(&missing_mass).is_none());
+
+        let mut missing_witness = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut missing_witness else {
+            unreachable!()
+        };
+        diagnostics.distribution_witness = None;
+        assert!(CoherenceSignal::from_zspace_trace_event(&missing_witness).is_none());
+
+        let mut tampered_concentration = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut tampered_concentration else {
+            unreachable!()
+        };
+        diagnostics.concentration = diagnostics.concentration.map(|value| value + 0.1);
+        assert!(CoherenceSignal::from_zspace_trace_event(&tampered_concentration).is_none());
+
+        let mut tampered_witness_contract = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut tampered_witness_contract
+        else {
+            unreachable!()
+        };
+        diagnostics
+            .distribution_witness
+            .as_mut()
+            .expect("current trace witness")
+            .semantic_backend = "python".to_owned();
+        assert!(CoherenceSignal::from_zspace_trace_event(&tampered_witness_contract).is_none());
+
+        let mut tampered_witness_simplex = event.clone();
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut tampered_witness_simplex else {
+            unreachable!()
+        };
+        diagnostics
+            .distribution_witness
+            .as_mut()
+            .expect("current trace witness")
+            .normalized_weights[0] += 0.1;
+        assert!(CoherenceSignal::from_zspace_trace_event(&tampered_witness_simplex).is_none());
 
         let mut invalid_structure = event.clone();
         let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = &mut invalid_structure else {

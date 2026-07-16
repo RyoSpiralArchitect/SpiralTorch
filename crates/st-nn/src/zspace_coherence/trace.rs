@@ -18,6 +18,7 @@ use crate::language::{ConceptHint, NarrativeHint};
 use crate::{PureResult, Tensor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use st_core::inference::zspace_coherence::ZSpaceCoherenceDistributionWitness;
 use st_core::maxwell::MaxwellZPulse;
 use st_core::telemetry::noncollapse::NonCollapseSnapshot;
 use st_tensor::TensorError;
@@ -27,6 +28,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MaxwellZPulseSummary {
@@ -108,6 +110,8 @@ pub struct CoherenceDiagnosticsSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distribution_weight_mass: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distribution_witness: Option<Box<ZSpaceCoherenceDistributionWitness>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub swap_invariant: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification_kind: Option<String>,
@@ -163,6 +167,7 @@ pub struct CoherenceDiagnosticsSummary {
 impl CoherenceDiagnosticsSummary {
     fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Self {
         let distribution = diagnostics.distribution_summary().ok();
+        let distribution_witness = diagnostics.distribution_witness().ok().map(Box::new);
         let classification = diagnostics.classify(Default::default()).ok();
         let control = diagnostics.control_summary().ok();
         let label = classification
@@ -178,6 +183,7 @@ impl CoherenceDiagnosticsSummary {
             effective_channels: distribution.map(|summary| summary.effective_channels as f32),
             distribution_channels: distribution.map(|summary| summary.channels),
             distribution_weight_mass: distribution.map(|summary| summary.weight_mass as f32),
+            distribution_witness,
             swap_invariant: classification.map(|payload| payload.swap_invariant),
             classification_kind: classification.map(|payload| payload.kind.to_owned()),
             classification_reason: classification.map(|payload| payload.reason.to_owned()),
@@ -323,7 +329,7 @@ impl ConceptHintSnapshot {
 }
 
 pub const ZSPACE_TRACE_SCHEMA: &str = "spiraltorch.zspace_trace";
-pub const ZSPACE_TRACE_SCHEMA_VERSION: u32 = 1;
+pub const ZSPACE_TRACE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ZSpaceTraceEvent {
@@ -340,7 +346,7 @@ pub enum ZSpaceTraceEvent {
         step: u64,
         aggregated_shape: (usize, usize),
         coherence: Vec<f32>,
-        diagnostics: CoherenceDiagnosticsSummary,
+        diagnostics: Box<CoherenceDiagnosticsSummary>,
     },
     PreDiscardApplied {
         step: u64,
@@ -424,7 +430,61 @@ pub struct ZSpaceTraceRecord {
     pub payload: Map<String, Value>,
 }
 
+#[derive(Debug, Error)]
+pub enum ZSpaceTraceDecodeError {
+    #[error("unsupported Z-space trace schema '{actual}', expected '{expected}'")]
+    UnsupportedSchema {
+        actual: String,
+        expected: &'static str,
+    },
+    #[error("unsupported Z-space trace schema version {actual}, expected {expected}")]
+    UnsupportedSchemaVersion { actual: u32, expected: u32 },
+    #[error("Z-space trace record step {record_step} disagrees with payload step {event_step}")]
+    StepMismatch { record_step: u64, event_step: u64 },
+    #[error("invalid Z-space trace payload: {0}")]
+    InvalidPayload(#[from] serde_json::Error),
+}
+
+impl ZSpaceTraceRecord {
+    /// Decode a stable record only when its schema identity and duplicated step agree.
+    pub fn into_event(self) -> Result<ZSpaceTraceEvent, ZSpaceTraceDecodeError> {
+        if self.schema != ZSPACE_TRACE_SCHEMA {
+            return Err(ZSpaceTraceDecodeError::UnsupportedSchema {
+                actual: self.schema,
+                expected: ZSPACE_TRACE_SCHEMA,
+            });
+        }
+        if self.schema_version != ZSPACE_TRACE_SCHEMA_VERSION {
+            return Err(ZSpaceTraceDecodeError::UnsupportedSchemaVersion {
+                actual: self.schema_version,
+                expected: ZSPACE_TRACE_SCHEMA_VERSION,
+            });
+        }
+
+        let mut tagged = Map::new();
+        tagged.insert(self.kind, Value::Object(self.payload));
+        let event: ZSpaceTraceEvent = serde_json::from_value(Value::Object(tagged))?;
+        if event.step() != self.step {
+            return Err(ZSpaceTraceDecodeError::StepMismatch {
+                record_step: self.step,
+                event_step: event.step(),
+            });
+        }
+        Ok(event)
+    }
+}
+
 impl ZSpaceTraceEvent {
+    /// Decode either an in-process enum payload or the stable record used on plugin buses.
+    pub fn from_plugin_payload(payload: Value) -> Result<Self, ZSpaceTraceDecodeError> {
+        let is_stable_record = payload.get("schema").is_some()
+            || (payload.get("kind").is_some() && payload.get("payload").is_some());
+        if is_stable_record {
+            return serde_json::from_value::<ZSpaceTraceRecord>(payload)?.into_event();
+        }
+        serde_json::from_value(payload).map_err(ZSpaceTraceDecodeError::from)
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             ZSpaceTraceEvent::Projected { .. } => "Projected",
@@ -571,6 +631,14 @@ impl ZSpaceTraceEvent {
                     "coherence_effective_channels": diagnostics.effective_channels,
                     "coherence_distribution_channels": diagnostics.distribution_channels,
                     "coherence_distribution_weight_mass": diagnostics.distribution_weight_mass,
+                    "coherence_distribution_witness_contract_version": diagnostics
+                        .distribution_witness
+                        .as_ref()
+                        .map(|witness| witness.contract_version.as_str()),
+                    "coherence_distribution_witness_semantic_backend": diagnostics
+                        .distribution_witness
+                        .as_ref()
+                        .map(|witness| witness.semantic_backend.as_str()),
                     "coherence_swap_invariant": diagnostics.swap_invariant,
                     "coherence_classification_kind": diagnostics.classification_kind,
                     "coherence_classification_reason": diagnostics.classification_reason,
@@ -770,7 +838,7 @@ impl ZSpaceTraceRecorder {
                 step,
                 aggregated_shape: aggregated.shape(),
                 coherence: coherence.iter().copied().take(limit).collect(),
-                diagnostics: CoherenceDiagnosticsSummary::from_diagnostics(diagnostics),
+                diagnostics: Box::new(CoherenceDiagnosticsSummary::from_diagnostics(diagnostics)),
             },
             ZSpaceSequencerStage::PreDiscardApplied {
                 original,
@@ -1020,6 +1088,23 @@ mod tests {
         assert!(diagnostics["effective_channels"].is_number());
         assert!(diagnostics["distribution_channels"].is_number());
         assert!(diagnostics["distribution_weight_mass"].is_number());
+        let witness = diagnostics["distribution_witness"]
+            .as_object()
+            .expect("distribution witness object");
+        assert_eq!(
+            witness["contract_version"],
+            "spiraltorch.zspace_coherence_distribution_witness.v1"
+        );
+        assert_eq!(witness["semantic_backend"], "rust");
+        assert_eq!(
+            witness["normalized_weights"]
+                .as_array()
+                .expect("complete normalized weights")
+                .len(),
+            diagnostics["distribution_channels"]
+                .as_u64()
+                .expect("distribution channels") as usize
+        );
         assert!(diagnostics["swap_invariant"].is_boolean());
         assert_eq!(
             diagnostics["classification_kind"],
@@ -1055,6 +1140,33 @@ mod tests {
         assert!(diagnostics["spectral_radius"].is_number());
         assert!(diagnostics["spectral_entropy"].is_number());
         assert!(diagnostics["spectral_pressure"].is_number());
+
+        let decoded = aggregated
+            .clone()
+            .into_event()
+            .expect("stable record must decode to its event");
+        assert!(matches!(decoded, ZSpaceTraceEvent::Aggregated { .. }));
+        let decoded_plugin = ZSpaceTraceEvent::from_plugin_payload(
+            serde_json::to_value(aggregated).expect("serializable stable record"),
+        )
+        .expect("plugin payload must decode through the stable schema");
+        assert!(matches!(
+            decoded_plugin,
+            ZSpaceTraceEvent::Aggregated { .. }
+        ));
+
+        let mut wrong_version = aggregated.clone();
+        wrong_version.schema_version -= 1;
+        assert!(matches!(
+            wrong_version.into_event(),
+            Err(ZSpaceTraceDecodeError::UnsupportedSchemaVersion { .. })
+        ));
+        let mut wrong_step = aggregated.clone();
+        wrong_step.step = wrong_step.step.wrapping_add(1);
+        assert!(matches!(
+            wrong_step.into_event(),
+            Err(ZSpaceTraceDecodeError::StepMismatch { .. })
+        ));
     }
 
     #[test]
@@ -1078,6 +1190,7 @@ mod tests {
         assert!(summary.concentration.is_none());
         assert!(summary.effective_channels.is_none());
         assert!(summary.distribution_weight_mass.is_none());
+        assert!(summary.distribution_witness.is_none());
         assert!(summary.classification_kind.is_none());
         assert!(summary.classification_contract_version.is_none());
         assert!(summary.background_energy_ratio_max.is_none());

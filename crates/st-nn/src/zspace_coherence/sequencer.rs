@@ -20,13 +20,14 @@ use crate::{
     Module, PureResult, Tensor,
 };
 use st_core::inference::zspace_coherence::{
-    classify_zspace_coherence, derive_zspace_coherence_control, is_zspace_coherence_swap_invariant,
-    project_zspace_coherence, summarize_zspace_coherence_distribution,
-    ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationRequest,
-    ZSpaceCoherenceContourInput, ZSpaceCoherenceControlPayload, ZSpaceCoherenceDiagnosticsInput,
-    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionConfig,
-    ZSpaceCoherenceProjectionError, ZSpaceCoherenceProjectionPayload,
-    ZSpaceCoherenceProjectionRequest,
+    build_zspace_coherence_distribution_witness, classify_zspace_coherence,
+    derive_zspace_coherence_control, is_zspace_coherence_swap_invariant, project_zspace_coherence,
+    summarize_zspace_coherence_distribution, ZSpaceCoherenceClassificationPayload,
+    ZSpaceCoherenceClassificationRequest, ZSpaceCoherenceContourInput,
+    ZSpaceCoherenceControlPayload, ZSpaceCoherenceDiagnosticsInput,
+    ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceDistributionWitness,
+    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionError,
+    ZSpaceCoherenceProjectionPayload, ZSpaceCoherenceProjectionRequest,
 };
 pub use st_core::inference::zspace_coherence::{
     ZSpaceCoherenceClassificationPolicy, ZSpaceCoherenceLabel as CoherenceLabel,
@@ -575,6 +576,13 @@ impl CoherenceDiagnostics {
         &self,
     ) -> Result<ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionError> {
         summarize_zspace_coherence_distribution(&self.normalized_weights)
+    }
+
+    /// Captures the complete simplex needed to replay distribution semantics in Rust.
+    pub fn distribution_witness(
+        &self,
+    ) -> Result<ZSpaceCoherenceDistributionWitness, ZSpaceCoherenceProjectionError> {
+        build_zspace_coherence_distribution_witness(&self.normalized_weights)
     }
 
     /// Derives dimensionless trainer/runtime controls through the canonical Rust contract.
