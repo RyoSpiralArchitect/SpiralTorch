@@ -15,7 +15,7 @@ hip-real = ["hip", "st-backend-hip/hip-real"]
 default = []
 cpu      = ["st-tensor/cpu"]
 hip      = ["dep:st-backend-hip", "st-tensor/hip"]
-wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell", "st-frac/wgpu", "st-tensor/wgpu"]
+wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell", "dep:st-backend-wgpu", "st-frac/wgpu", "st-tensor/wgpu"]
 wgpu-rt  = ["wgpu"]
 mps      = ["st-tensor/mps"]
 cuda     = ["dep:cudarc", "st-tensor/cuda"]
@@ -59,6 +59,7 @@ parking_lot = { version = "0.12", optional = true }
 plotters    = { version = "0.3", optional = true, default-features = false, features = ["bitmap_backend", "bitmap_encoder"] }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
+st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 st-softlogic   = { path = "../st-softlogic",   optional = true }
 st-kdsl        = { path = "../st-kdsl",        optional = true }
 st-kv          = { path = "../st-kv",          optional = true }

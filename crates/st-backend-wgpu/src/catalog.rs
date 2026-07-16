@@ -24,6 +24,16 @@ const COMPACTION_BINDINGS: &[&str] = &[
     "out_values:write_storage",
     "prefix:scratch_storage",
 ];
+const EXACT_RANK_2CE_BINDINGS: &[&str] = &[
+    "values:read_storage",
+    "scratch_values:storage",
+    "scratch_indices:storage",
+    "tile_counts:storage",
+    "tile_cursors:storage",
+    "out_values:write_storage",
+    "out_indices:write_storage",
+    "params:uniform",
+];
 const ATTENTION_BINDINGS: &[&str] = &[
     "queries:read_storage",
     "keys:read_storage",
@@ -44,6 +54,7 @@ const REDUCE_BINDINGS: &[&str] = &["input:read_storage", "output:write_storage"]
 const STAGE_SOFTMAX: &[&str] = &["reduce_and_normalize"];
 const STAGE_TOPK: &[&str] = &["keepk"];
 const STAGE_MIDK: &[&str] = &["scan_tiles", "row_prefix", "apply", "middlemax_optional"];
+const STAGE_RANK_EXACT_2CE: &[&str] = &["tile_sort", "row_merge"];
 const STAGE_COMPACTION_1CE: &[&str] = &["compact"];
 const STAGE_COMPACTION_2CE: &[&str] = &["scan", "apply"];
 const STAGE_ATTENTION: &[&str] = &["qk", "bias", "online_softmax", "value_mix"];
@@ -117,6 +128,7 @@ pub struct RankKernelRequest {
     pub fft_tile: u32,
     pub fft_radix: u32,
     pub fft_segments: u32,
+    pub rank_tile: u32,
     pub compaction_tile: u32,
 }
 
@@ -280,12 +292,40 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         notes: "large-row single-pass subgroup TopK keep-k kernel",
     },
     KernelDescriptor {
+        name: "rankk_exact_2ce_tile_sort",
+        family: "rank",
+        operation: "rankk_exact",
+        shader: "rankk_exact_2ce.wgsl",
+        entry_point: "rankk_exact_2ce_tile_sort",
+        pipeline_label: "st.rankk.exact_2ce.tile_sort",
+        variant: "2ce_tile_sort",
+        subgroup: false,
+        portable: true,
+        stages: STAGE_RANK_EXACT_2CE,
+        bindings: EXACT_RANK_2CE_BINDINGS,
+        notes: "first command: finite-aware planner-tiled total-order sort",
+    },
+    KernelDescriptor {
+        name: "rankk_exact_2ce_row_merge",
+        family: "rank",
+        operation: "rankk_exact",
+        shader: "rankk_exact_2ce.wgsl",
+        entry_point: "rankk_exact_2ce_row_merge",
+        pipeline_label: "st.rankk.exact_2ce.row_merge",
+        variant: "2ce_row_merge",
+        subgroup: false,
+        portable: true,
+        stages: STAGE_RANK_EXACT_2CE,
+        bindings: EXACT_RANK_2CE_BINDINGS,
+        notes: "second command: exact TopK/MidK/BottomK ordered-run merge",
+    },
+    KernelDescriptor {
         name: "midk_bottomk_scan_tiles",
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "scan_tiles",
-        pipeline_label: "st.midk_bottomk.scan_tiles",
+        entry_point: "midk_compact_scan_tiles",
+        pipeline_label: "midk_compact_scan_tiles",
         variant: "scan",
         subgroup: false,
         portable: true,
@@ -298,8 +338,8 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "row_prefix",
-        pipeline_label: "st.midk_bottomk.row_prefix",
+        entry_point: "midk_compact_row_prefix",
+        pipeline_label: "midk_compact_row_prefix",
         variant: "row_prefix",
         subgroup: false,
         portable: true,
@@ -312,8 +352,8 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "apply_fallback",
-        pipeline_label: "st.midk_bottomk.apply_fallback",
+        entry_point: "midk_compact_apply",
+        pipeline_label: "midk_compact_apply",
         variant: "fallback",
         subgroup: false,
         portable: true,
@@ -326,8 +366,8 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "apply_subgroup",
-        pipeline_label: "st.midk_bottomk.apply_subgroup",
+        entry_point: "midk_compact_apply_sg",
+        pipeline_label: "midk_compact_apply_sg",
         variant: "subgroup",
         subgroup: true,
         portable: false,
@@ -340,8 +380,8 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "apply_subgroup_v2",
-        pipeline_label: "st.midk_bottomk.apply_subgroup_v2",
+        entry_point: "midk_compact_apply_sg2",
+        pipeline_label: "midk_compact_apply_sg2",
         variant: "subgroup_v2",
         subgroup: true,
         portable: false,
@@ -354,8 +394,8 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "midk_bottomk",
         shader: "midk_bottomk_compaction.wgsl",
-        entry_point: "middlemax",
-        pipeline_label: "st.midk_bottomk.middlemax",
+        entry_point: "midk_middlemax",
+        pipeline_label: "midk_middlemax",
         variant: "middlemax",
         subgroup: false,
         portable: true,
@@ -558,6 +598,14 @@ fn tiles_for_cols(cols: u32) -> u32 {
     cols.saturating_add(255) / 256
 }
 
+fn tiles_for_cols_and_tile(cols: u32, tile_cols: u32) -> u32 {
+    if cols == 0 {
+        0
+    } else {
+        cols.div_ceil(tile_cols.max(1))
+    }
+}
+
 fn default_dispatch(rows: u32, cols: u32) -> DispatchGeometry {
     DispatchGeometry {
         workgroups: if rows == 0 || cols == 0 {
@@ -574,45 +622,70 @@ fn default_dispatch(rows: u32, cols: u32) -> DispatchGeometry {
 /// Describe WGPU rank-k kernel selection for a planner-like request.
 #[must_use]
 pub fn rank_kernel_report(request: RankKernelRequest) -> RankKernelReport {
-    let fallback = match request.kind {
+    let portable_fallback = match request.kind {
         RankKernelKind::TopK => Some(descriptor("topk_keepk_workgroup")),
         RankKernelKind::MidK | RankKernelKind::BottomK => {
             Some(descriptor("midk_bottomk_apply_fallback"))
         }
     };
-    let primary = match request.kind {
+    let single_command_primary = match request.kind {
         RankKernelKind::TopK if request.subgroup && request.k > 1024 => {
             descriptor("topk_keepk_subgroup_1ce_large")
         }
-        RankKernelKind::TopK if request.subgroup && request.use_two_stage => {
-            descriptor("topk_keepk_subgroup")
-        }
         RankKernelKind::TopK if request.subgroup => descriptor("topk_keepk_subgroup_1ce"),
         RankKernelKind::TopK => descriptor("topk_keepk_workgroup"),
-        RankKernelKind::MidK | RankKernelKind::BottomK
-            if request.subgroup && request.use_two_stage =>
-        {
-            descriptor("midk_bottomk_apply_subgroup_v2")
-        }
         RankKernelKind::MidK | RankKernelKind::BottomK if request.subgroup => {
             descriptor("midk_bottomk_apply_subgroup")
         }
         RankKernelKind::MidK | RankKernelKind::BottomK => descriptor("midk_bottomk_apply_fallback"),
     };
+    let primary = if request.use_two_stage {
+        descriptor("rankk_exact_2ce_row_merge")
+    } else {
+        single_command_primary
+    };
+    let fallback = if request.use_two_stage {
+        Some(single_command_primary)
+    } else {
+        portable_fallback
+    };
 
-    let tiles_x = tiles_for_cols(request.cols);
-    let dispatch = match request.kind {
-        RankKernelKind::TopK => default_dispatch(request.rows, request.cols),
-        RankKernelKind::MidK | RankKernelKind::BottomK => DispatchGeometry {
+    let requested_tile = match request.kind {
+        RankKernelKind::TopK => request.rank_tile,
+        RankKernelKind::MidK | RankKernelKind::BottomK => request.compaction_tile,
+    };
+    let exact_tile = if requested_tile == 0 {
+        256
+    } else {
+        requested_tile
+    }
+    .min(request.cols.max(1));
+    let exact_tiles_x = tiles_for_cols_and_tile(request.cols, exact_tile);
+    let dispatch = if request.use_two_stage {
+        DispatchGeometry {
             workgroups: if request.rows == 0 || request.cols == 0 {
                 (0, 0, 0)
             } else {
-                (tiles_x, request.rows, 1)
+                (exact_tiles_x, request.rows, 1)
             },
-            tiles_x,
+            tiles_x: exact_tiles_x,
             row_stride: request.cols,
             empty: request.rows == 0 || request.cols == 0,
-        },
+        }
+    } else {
+        match request.kind {
+            RankKernelKind::TopK => default_dispatch(request.rows, request.cols),
+            RankKernelKind::MidK | RankKernelKind::BottomK => DispatchGeometry {
+                workgroups: if request.rows == 0 || request.cols == 0 {
+                    (0, 0, 0)
+                } else {
+                    (tiles_for_cols(request.cols), request.rows, 1)
+                },
+                tiles_x: tiles_for_cols(request.cols),
+                row_stride: request.cols,
+                empty: request.rows == 0 || request.cols == 0,
+            },
+        }
     };
 
     RankKernelReport {
@@ -625,9 +698,13 @@ pub fn rank_kernel_report(request: RankKernelRequest) -> RankKernelReport {
             radix: request.fft_radix.max(1),
             segments: request.fft_segments.max(1),
         },
-        stages: match request.kind {
-            RankKernelKind::TopK => STAGE_TOPK,
-            RankKernelKind::MidK | RankKernelKind::BottomK => STAGE_MIDK,
+        stages: if request.use_two_stage {
+            STAGE_RANK_EXACT_2CE
+        } else {
+            match request.kind {
+                RankKernelKind::TopK => STAGE_TOPK,
+                RankKernelKind::MidK | RankKernelKind::BottomK => STAGE_MIDK,
+            }
         },
     }
 }
@@ -682,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn rank_report_prefers_subgroup_v2_for_two_stage_bottomk() {
+    fn rank_report_selects_exact_two_command_bottomk_geometry() {
         let report = rank_kernel_report(RankKernelRequest {
             kind: RankKernelKind::BottomK,
             rows: 8,
@@ -693,11 +770,46 @@ mod tests {
             fft_tile: 2048,
             fft_radix: 4,
             fft_segments: 2,
+            rank_tile: 1024,
             compaction_tile: 512,
         });
-        assert_eq!(report.primary.name, "midk_bottomk_apply_subgroup_v2");
-        assert_eq!(report.dispatch.workgroups, (4, 8, 1));
+        assert_eq!(report.primary.name, "rankk_exact_2ce_row_merge");
+        assert_eq!(report.fallback.unwrap().name, "midk_bottomk_apply_subgroup");
+        assert_eq!(report.dispatch.workgroups, (2, 8, 1));
+        assert_eq!(report.stages, STAGE_RANK_EXACT_2CE);
         assert_eq!(report.fft.tile_cols, 2048);
+    }
+
+    #[test]
+    fn rank_catalog_entry_points_exist_in_owned_wgsl() {
+        for (shader, source) in [
+            (
+                "midk_bottomk_compaction.wgsl",
+                include_str!("shaders/midk_bottomk_compaction.wgsl"),
+            ),
+            (
+                "rankk_exact_2ce.wgsl",
+                include_str!("shaders/rankk_exact_2ce.wgsl"),
+            ),
+        ] {
+            let module = naga::front::wgsl::parse_str(source)
+                .unwrap_or_else(|error| panic!("{shader} did not parse: {error}"));
+            let entry_points = module
+                .entry_points
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>();
+            for descriptor in kernel_catalog()
+                .iter()
+                .filter(|descriptor| descriptor.shader == shader)
+            {
+                assert!(
+                    entry_points.contains(&descriptor.entry_point),
+                    "catalog entry point {} is missing from {shader}",
+                    descriptor.entry_point
+                );
+            }
+        }
     }
 
     #[test]

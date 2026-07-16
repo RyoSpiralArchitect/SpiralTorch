@@ -2603,6 +2603,7 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`. Hard SpiralK rewrites return a newly validated Rust `RankPlan`; malformed workgroups, FFT settings, or conflicting 1CE/2CE directives are rejected rather than repaired by a binding.
+  On WGPU, `choice.use_2ce` now executes the Rust-owned exact two-command path: planner-sized tiles are finite-filtered and total-ordered first, then merged into TopK, MidK, or BottomK with the same lower-index tie-break and `(NaN, -1)` padding as the CPU reference. Python only projects this plan and kernel report; it does not reconstruct rank semantics.
 - **Introspectable compute plans**
   Unified `RankPlan`s expose a validated FFT execution contract directly. Call `plan.fft_plan()?` to inspect the radix/segment shape and ordered ping-pong dispatches, `plan.fft_wgsl()?` to emit their shared WGSL module, or `plan.fft_spiralk_hint()?` to log the same choice back into SpiralK. Invalid radix, non-power-of-two tiles, and out-of-range segment counts fail closed in Rust.
 - **SpiralK DSL** (K×Lisp-inspired)

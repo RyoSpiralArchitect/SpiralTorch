@@ -17,6 +17,17 @@ pub struct WgpuExecutor;
 const WGPU_RANK_EXACT_SMALL_COLS_LIMIT: u32 = 256;
 
 pub fn wgpu_rank_exact_support(plan: &RankPlan) -> Result<(), String> {
+    if plan.choice.use_2ce {
+        return st_backend_wgpu::ExactRank2CePlan::try_new(
+            exact_2ce_kind(plan.kind),
+            plan.rows,
+            plan.cols,
+            plan.k,
+            exact_2ce_tile_cols(plan),
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    }
     wgpu_rank_exact_support_for(plan.kind, plan.rows, plan.cols, plan.k)
 }
 
@@ -101,16 +112,20 @@ fn run_wgpu_topk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
     validate_plan_buffers(plan, &buffers)?;
 
     if crate::backend::wgpu_rt::installed_ctx().is_some() {
-        let k_lane = plan.choice.kl.max(plan.k).max(1);
-        let real_result = wgpu_rank_exact_support_for(RankKind::TopK, plan.rows, plan.cols, plan.k)
+        let real_result = wgpu_rank_exact_support(plan)
             .and_then(|()| {
-                crate::backend::wgpu_rt::dispatch_topk_host(
-                    plan.rows,
-                    plan.cols,
-                    plan.k,
-                    k_lane,
-                    buffers.input,
-                )
+                if plan.choice.use_2ce {
+                    dispatch_exact_2ce(plan, buffers.input)
+                } else {
+                    let k_lane = plan.choice.kl.max(plan.k).max(1);
+                    crate::backend::wgpu_rt::dispatch_topk_host(
+                        plan.rows,
+                        plan.cols,
+                        plan.k,
+                        k_lane,
+                        buffers.input,
+                    )
+                }
             })
             .and_then(|(values, indices)| copy_rankk_outputs(&mut buffers, &values, &indices));
 
@@ -139,14 +154,18 @@ fn run_wgpu_midk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<(), S
     validate_plan_buffers(plan, &buffers)?;
 
     if crate::backend::wgpu_rt::installed_ctx().is_some() {
-        let real_result = wgpu_rank_exact_support_for(RankKind::MidK, plan.rows, plan.cols, plan.k)
+        let real_result = wgpu_rank_exact_support(plan)
             .and_then(|()| {
-                crate::backend::wgpu_rt::dispatch_midk_host(
-                    plan.rows,
-                    plan.cols,
-                    plan.k,
-                    buffers.input,
-                )
+                if plan.choice.use_2ce {
+                    dispatch_exact_2ce(plan, buffers.input)
+                } else {
+                    crate::backend::wgpu_rt::dispatch_midk_host(
+                        plan.rows,
+                        plan.cols,
+                        plan.k,
+                        buffers.input,
+                    )
+                }
             })
             .and_then(|(values, indices)| copy_rankk_outputs(&mut buffers, &values, &indices));
 
@@ -175,10 +194,12 @@ fn run_wgpu_bottomk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<()
     validate_plan_buffers(plan, &buffers)?;
 
     if crate::backend::wgpu_rt::installed_ctx().is_some() {
-        let k_lane = plan.choice.kl.max(plan.k).max(1);
-        let real_result =
-            wgpu_rank_exact_support_for(RankKind::BottomK, plan.rows, plan.cols, plan.k)
-                .and_then(|()| {
+        let real_result = wgpu_rank_exact_support(plan)
+            .and_then(|()| {
+                if plan.choice.use_2ce {
+                    dispatch_exact_2ce(plan, buffers.input)
+                } else {
+                    let k_lane = plan.choice.kl.max(plan.k).max(1);
                     crate::backend::wgpu_rt::dispatch_bottomk_host(
                         plan.rows,
                         plan.cols,
@@ -186,8 +207,9 @@ fn run_wgpu_bottomk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<()
                         k_lane,
                         buffers.input,
                     )
-                })
-                .and_then(|(values, indices)| copy_rankk_outputs(&mut buffers, &values, &indices));
+                }
+            })
+            .and_then(|(values, indices)| copy_rankk_outputs(&mut buffers, &values, &indices));
 
         match real_result {
             Ok(()) => return Ok(()),
@@ -208,6 +230,32 @@ fn run_wgpu_bottomk(plan: &RankPlan, mut buffers: LaunchSlices<'_>) -> Result<()
         return Err("wgpu bottomk runtime context is not installed; fallback disabled".to_string());
     }
     run_selection(Selection::Bottom, plan, buffers)
+}
+
+fn dispatch_exact_2ce(plan: &RankPlan, input: &[f32]) -> Result<(Vec<f32>, Vec<i32>), String> {
+    crate::backend::wgpu_rt::dispatch_exact_rank_2ce_host(
+        exact_2ce_kind(plan.kind),
+        plan.rows,
+        plan.cols,
+        plan.k,
+        exact_2ce_tile_cols(plan),
+        input,
+    )
+}
+
+fn exact_2ce_kind(kind: RankKind) -> st_backend_wgpu::ExactRank2CeKind {
+    match kind {
+        RankKind::TopK => st_backend_wgpu::ExactRank2CeKind::TopK,
+        RankKind::MidK => st_backend_wgpu::ExactRank2CeKind::MidK,
+        RankKind::BottomK => st_backend_wgpu::ExactRank2CeKind::BottomK,
+    }
+}
+
+fn exact_2ce_tile_cols(plan: &RankPlan) -> u32 {
+    match plan.kind {
+        RankKind::TopK => plan.choice.tile,
+        RankKind::MidK | RankKind::BottomK => plan.choice.ctile,
+    }
 }
 
 fn copy_rankk_outputs(
@@ -367,7 +415,7 @@ mod tests {
         with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
             || {
-                WgpuExecutor::default().launch_topk(&plan).unwrap();
+                WgpuExecutor.launch_topk(&plan).unwrap();
             },
         );
 
@@ -388,7 +436,7 @@ mod tests {
 
         let err = with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-            || WgpuExecutor::default().launch_midk(&plan),
+            || WgpuExecutor.launch_midk(&plan),
         )
         .expect_err("strict mode should reject software fallback");
 
@@ -408,7 +456,7 @@ mod tests {
 
         let err = with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-            || WgpuExecutor::default().launch_topk(&plan),
+            || WgpuExecutor.launch_topk(&plan),
         )
         .expect_err("strict mode should require an installed WGPU runtime context");
 
@@ -458,6 +506,18 @@ mod tests {
 
         let too_large_k = wgpu_rank_exact_support_for(RankKind::TopK, 1, 4, 5).unwrap_err();
         assert!(too_large_k.contains("k <= cols"));
+
+        for kind in [RankKind::TopK, RankKind::MidK, RankKind::BottomK] {
+            let mut wide = plan_for(kind, 2, 513, 7);
+            wide.choice.use_2ce = true;
+            wide.choice.tile = 128;
+            wide.choice.ctile = 128;
+            assert!(
+                wgpu_rank_exact_support(&wide).is_ok(),
+                "{} should support wide exact 2CE execution",
+                kind.as_str()
+            );
+        }
     }
 
     #[test]
@@ -477,7 +537,7 @@ mod tests {
 
         with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-            || WgpuExecutor::default().launch_topk(&plan),
+            || WgpuExecutor.launch_topk(&plan),
         )
         .expect("strict WGPU TopK should use the installed runtime context");
 
@@ -502,7 +562,7 @@ mod tests {
 
         with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-            || WgpuExecutor::default().launch_bottomk(&plan),
+            || WgpuExecutor.launch_bottomk(&plan),
         )
         .expect("strict WGPU BottomK should use the installed runtime context");
 
@@ -527,7 +587,7 @@ mod tests {
 
         with_launch_buffers_wgpu(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
-            || WgpuExecutor::default().launch_midk(&plan),
+            || WgpuExecutor.launch_midk(&plan),
         )
         .expect("strict WGPU MidK should use the installed runtime context");
 
@@ -574,7 +634,7 @@ mod tests {
 
             with_launch_buffers_wgpu(
                 launch_buffers_for(&input, rows, cols, &mut out_vals, &mut out_idx, k),
-                || launch(&WgpuExecutor::default(), &plan),
+                || launch(&WgpuExecutor, &plan),
             )
             .expect("strict WGPU rank-k should use the installed runtime context");
 
@@ -584,8 +644,91 @@ mod tests {
     }
 
     #[test]
+    fn wgpu_rank_2ce_runtime_matches_wide_reference_when_enabled() {
+        if !wgpu_runtime_tests_enabled() {
+            return;
+        }
+        if let Err(err) = ensure_wgpu_runtime_ctx_for_test() {
+            eprintln!("skipping WGPU 2CE runtime parity test: {err}");
+            return;
+        }
+
+        let rows = 2;
+        let cols = 513;
+        let k = 7;
+        let mut input = (0..rows * cols)
+            .map(|index| ((index * 37 % 101) as f32 - 50.0) / 7.0)
+            .collect::<Vec<_>>();
+        input[0] = f32::NAN;
+        input[1] = f32::INFINITY;
+        input[2] = -0.0;
+        input[3] = 0.0;
+        input[129] = 9.25;
+        input[385] = 9.25;
+        for value in &mut input[cols as usize..] {
+            *value = f32::NAN;
+        }
+        input[cols as usize + 2] = -0.0;
+        input[cols as usize + 257] = 0.0;
+        input[cols as usize + 512] = -4.0;
+
+        for (selection, kind, launch) in [
+            (
+                Selection::Top,
+                RankKind::TopK,
+                WgpuExecutor::launch_topk as fn(&WgpuExecutor, &RankPlan) -> Result<(), String>,
+            ),
+            (Selection::Mid, RankKind::MidK, WgpuExecutor::launch_midk),
+            (
+                Selection::Bottom,
+                RankKind::BottomK,
+                WgpuExecutor::launch_bottomk,
+            ),
+        ] {
+            let mut plan = strict_plan(kind, rows, cols, k);
+            plan.choice.use_2ce = true;
+            plan.choice.tile = 128;
+            plan.choice.ctile = 128;
+            let (expected_values, expected_indices) =
+                software_reference(selection, kind, &input, rows, cols, k);
+            let mut actual_values = vec![0.0; (rows * k) as usize];
+            let mut actual_indices = vec![0; (rows * k) as usize];
+
+            with_launch_buffers_wgpu(
+                launch_buffers_for(
+                    &input,
+                    rows,
+                    cols,
+                    &mut actual_values,
+                    &mut actual_indices,
+                    k,
+                ),
+                || launch(&WgpuExecutor, &plan),
+            )
+            .unwrap_or_else(|error| panic!("{} exact 2CE failed: {error}", kind.as_str()));
+
+            assert_eq!(
+                actual_indices,
+                expected_indices,
+                "{} indices",
+                kind.as_str()
+            );
+            for (slot, (actual, expected)) in
+                actual_values.iter().zip(expected_values.iter()).enumerate()
+            {
+                assert!(
+                    (actual.is_nan() && expected.is_nan())
+                        || actual.to_bits() == expected.to_bits(),
+                    "{} value slot {slot}: actual={actual:?} expected={expected:?}",
+                    kind.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wgpu_rank_executor_errors_without_registered_buffers() {
-        let err = WgpuExecutor::default()
+        let err = WgpuExecutor
             .launch_topk(&plan(RankKind::TopK, 2))
             .unwrap_err();
         assert!(err.contains("no launch buffers"));

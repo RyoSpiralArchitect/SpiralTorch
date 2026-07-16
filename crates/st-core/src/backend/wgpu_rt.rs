@@ -92,6 +92,7 @@ pub struct WgpuCtx {
     topk_bit_pl: OnceCell<wgpu::ComputePipeline>,
     topk_wg_pl: OnceCell<wgpu::ComputePipeline>,
     midk_wg_pl: OnceCell<wgpu::ComputePipeline>,
+    rankk_exact_2ce_pl: OnceCell<st_backend_wgpu::ExactRank2CePipelines>,
     layout_topk: OnceCell<wgpu::BindGroupLayout>,
     // Linear primitives
     lin_axpy_pl: OnceCell<wgpu::ComputePipeline>,
@@ -116,6 +117,7 @@ impl WgpuCtx {
             topk_bit_pl: OnceCell::new(),
             topk_wg_pl: OnceCell::new(),
             midk_wg_pl: OnceCell::new(),
+            rankk_exact_2ce_pl: OnceCell::new(),
             layout_topk: OnceCell::new(),
             lin_axpy_pl: OnceCell::new(),
             lin_scale_pl: OnceCell::new(),
@@ -225,7 +227,7 @@ fn module(ctx: &WgpuCtx, label: &str, src: &'static str) -> Result<wgpu::ShaderM
                 source: wgpu::ShaderSource::Wgsl(src.into()),
             })
     }))
-    .map_err(|payload| panic_payload_to_string(payload))
+    .map_err(panic_payload_to_string)
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
@@ -326,7 +328,7 @@ fn pl(
                 compilation_options: Default::default(),
             })
     }))
-    .map_err(|payload| panic_payload_to_string(payload))
+    .map_err(panic_payload_to_string)
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
@@ -353,7 +355,7 @@ fn lin_pl(
                 compilation_options: Default::default(),
             })
     }))
-    .map_err(|payload| panic_payload_to_string(payload))
+    .map_err(panic_payload_to_string)
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
@@ -380,7 +382,7 @@ fn lin_subgroup_pl(
                 compilation_options: Default::default(),
             })
     }))
-    .map_err(|payload| panic_payload_to_string(payload))
+    .map_err(panic_payload_to_string)
 }
 
 fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
@@ -426,6 +428,15 @@ fn ensure_topk_wg_pl(ctx: &WgpuCtx) -> Result<&wgpu::ComputePipeline, String> {
 fn ensure_midk_wg_pl(ctx: &WgpuCtx) -> Result<&wgpu::ComputePipeline, String> {
     ctx.midk_wg_pl
         .get_or_try_init(|| pl(ctx, "midk_workgroup_exact_1ce", ensure_layout_topk(ctx)))
+}
+
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+fn ensure_rankk_exact_2ce_pl(
+    ctx: &WgpuCtx,
+) -> Result<&st_backend_wgpu::ExactRank2CePipelines, String> {
+    ctx.rankk_exact_2ce_pl
+        .get_or_try_init(|| st_backend_wgpu::ExactRank2CePipelines::new(&ctx.device))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
@@ -477,6 +488,7 @@ fn ensure_lin_dot_finalize_subgroup_pl(ctx: &WgpuCtx) -> Result<&wgpu::ComputePi
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch_topk_1ce(
     rows: u32,
     cols: u32,
@@ -685,6 +697,30 @@ pub fn dispatch_midk_1ce(
         std::time::Duration::from_secs(30),
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+pub fn dispatch_exact_rank_2ce_host(
+    kind: st_backend_wgpu::ExactRank2CeKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    tile_cols: u32,
+    input: &[f32],
+) -> Result<(Vec<f32>, Vec<i32>), String> {
+    let ctx = ctx()?;
+    let plan = st_backend_wgpu::ExactRank2CePlan::try_new(kind, rows, cols, k, tile_cols)
+        .map_err(|error| error.to_string())?;
+    let pipelines = ensure_rankk_exact_2ce_pl(&ctx)?;
+    let output = st_backend_wgpu::dispatch_exact_rank_2ce_host(
+        &ctx.device,
+        &ctx.queue,
+        pipelines,
+        plan,
+        input,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((output.values, output.indices))
 }
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
@@ -1028,7 +1064,7 @@ fn div_ceil_u32(x: u32, d: u32) -> u32 {
     if x == 0 {
         0
     } else {
-        (x + d - 1) / d
+        x.div_ceil(d)
     }
 }
 
