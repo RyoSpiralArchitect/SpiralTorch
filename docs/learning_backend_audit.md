@@ -3619,7 +3619,11 @@ Z. The update combines the caller-supplied Z-gradient with the normalized
 analytic fractional gradient and Topos bias. Topos `learning_rate_scale` now scales the
 actual Adam learning rate rather than multiplying the gradient, where Adam's
 normalisation would largely cancel it. `regularization_scale` now scales the
-actual fractional weight rather than appearing only in a bias basis.
+actual fractional weight rather than appearing only in a bias basis. Bias and
+clipping share the canonical `st-tensor::pure::topos` equations: bias amplitude
+is normalized by raw-gradient RMS, then the clipping threshold is normalized by
+biased-gradient RMS. `clip_scale=1` is an exact no-op; lower values guard only
+the distribution tail rather than imposing a unit-dependent absolute bound.
 
 Python's `ZSpaceTrainer` retains payload fusion, inference caching, and legacy
 checkpoint field names, but init, restore, and step all call the Rust contract

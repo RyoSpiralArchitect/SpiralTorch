@@ -2468,13 +2468,15 @@ print("snapshot hyper rate:", snapshot["optimizer_application"]["hyper_learning_
 print("runtime temperature:", adapter["request"]["temperature"])
 ```
 
-`topos_optimizer_snapshot()` is the step boundary for optimizer integration. Its v2 contract is
+`topos_optimizer_snapshot()` is the step boundary for optimizer integration. Its v3 contract is
 owned by Rust and binds one sequence-checked control bundle to learning rates plus the gradient
 state configured on both Amega tapes. Bias is scale-relative,
 `g_biased[i] = g[i] + rms(g) * bias_scale * basis[i % 10]`, so its bias term is exactly zero for a
-zero raw gradient; only pre-existing momentum can carry an update. Momentum follows
-`m_t = damping * m_(t-1) + (1 - damping) * g_biased`; `damping=0` exactly preserves the historical
-stateless update. Python transports and audits these fields but never reconstructs either rule.
+zero raw gradient. Clipping is also scale-relative: `clip_scale=1` is an exact no-op; otherwise
+Rust clamps `g_biased` at `rms(g_biased) / (1 - clip_scale)`. Momentum then follows
+`m_t = damping * m_(t-1) + (1 - damping) * g_clipped`, so hidden state cannot retain an unclipped
+outlier. `damping=0` exactly preserves the stateless guarded update. Python transports and audits
+these fields but never reconstructs any rule.
 
 `Amegagrad.tune()` enters one native configuration boundary that commits rates and both tape
 controls only after Rust validation and momentum allocation succeed.

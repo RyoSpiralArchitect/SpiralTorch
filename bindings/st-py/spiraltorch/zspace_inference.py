@@ -132,10 +132,10 @@ def _unit_interval(value: Any, *, default: float = 0.0) -> float:
     return max(0.0, min(1.0, numeric))
 
 
-_TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v1"
+_TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION = "spiraltorch.topos_control_signal.v2"
 _TOPOS_CONTROL_SIGNAL_SEMANTIC_OWNER = "st-tensor::pure::topos"
 _TOPOS_OPTIMIZER_SNAPSHOT_KIND = "spiraltorch.topos_optimizer_snapshot"
-_TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION = "spiraltorch.topos_optimizer_snapshot.v2"
+_TOPOS_OPTIMIZER_SNAPSHOT_CONTRACT_VERSION = "spiraltorch.topos_optimizer_snapshot.v3"
 _ZSPACE_FUSION_SEMANTIC_OWNER = "st-core::telemetry::zspace_fusion"
 _ZSPACE_TELEMETRY_FUSION_KIND = "spiraltorch.zspace_telemetry_fusion"
 _ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION = (

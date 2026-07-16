@@ -120,7 +120,7 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     )
 
     hints = opt.topos_training_hints()
-    expected_scale = hints["learning_rate_scale"] * hints["clip_scale"]
+    expected_scale = hints["learning_rate_scale"]
 
     control = _UnitRateControl()
     returned = opt.tune(control=control, use_topos=True)
@@ -141,8 +141,12 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     assert diagnostics["runtime_profile"]["control_energy"] > 0.0
     assert diagnostics["effect"]["rate_scale"] == pytest.approx(expected_scale)
     assert diagnostics["training_plan"]["raw_rate_scale"] == pytest.approx(
-        hints["learning_rate_scale"] * hints["clip_scale"]
+        hints["learning_rate_scale"]
     )
+    assert diagnostics["effect"]["effective_gradient_clip_scale"] == pytest.approx(
+        diagnostics["training_plan"]["effective_gradient_clip_scale"]
+    )
+    assert diagnostics["effect"]["gradient_clip_normalization"] == "biased_gradient_rms"
     assert diagnostics["training_plan"]["effective_gradient_bias_scale"] > 0.0
     assert diagnostics["effect"]["effective_gradient_bias_scale"] == pytest.approx(
         diagnostics["training_plan"]["effective_gradient_bias_scale"]
@@ -339,9 +343,14 @@ def test_gradient_tapes_reject_rewritten_topos_optimizer_rules() -> None:
         visited_volume=1,
     )
     application = dict(snapshot["optimizer_application"])
-    application["momentum_rule"] = "python_reconstruction"
     tape = st.hypergrad((1, 1))
 
+    application["gradient_clip_rule"] = "python_reconstruction"
+    with pytest.raises(ValueError, match="gradient_clip_rule"):
+        tape.configure_optimizer_state(application)
+
+    application = dict(snapshot["optimizer_application"])
+    application["momentum_rule"] = "python_reconstruction"
     with pytest.raises(ValueError, match="momentum_rule"):
         tape.configure_optimizer_state(application)
 

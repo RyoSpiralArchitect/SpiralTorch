@@ -462,12 +462,20 @@ mod tests {
             actual["control"]["training_plan"]["effective_gradient_bias_scale"]
         );
         assert_eq!(
+            actual["optimizer_application"]["effective_gradient_clip_scale"],
+            actual["control"]["training_plan"]["effective_gradient_clip_scale"]
+        );
+        assert_eq!(
             actual["optimizer_application"]["effective_momentum_damping"],
             actual["control"]["training_plan"]["effective_momentum_damping"]
         );
         assert_eq!(
             actual["optimizer_application"]["gradient_bias_normalization"],
             "raw_gradient_rms"
+        );
+        assert_eq!(
+            actual["optimizer_application"]["gradient_clip_normalization"],
+            "biased_gradient_rms"
         );
         assert_eq!(
             actual["optimizer_application"]["gradient_bias_basis"]

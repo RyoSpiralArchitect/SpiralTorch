@@ -9,16 +9,21 @@
 
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::{Deserialize, Serialize};
-use st_tensor::topos_optimizer_gradient_bias_basis;
+use st_tensor::{
+    topos_optimizer_gradient_bias_amplitude, topos_optimizer_gradient_bias_basis,
+    topos_optimizer_gradient_clip_threshold, TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION,
+    TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE, TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION,
+    TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
+};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-pub const ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: &str = "spiraltorch.zspace_meta_optimizer.v1";
+pub const ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: &str = "spiraltorch.zspace_meta_optimizer.v2";
 pub const ZSPACE_META_OPTIMIZER_KIND: &str = "spiraltorch.zspace_meta_optimizer";
 pub const ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
 pub const ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND: &str = "rust";
 pub const ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_parameter_control.v1";
+    "spiraltorch.zspace_parameter_control.v2";
 pub const ZSPACE_PARAMETER_CONTROL_KIND: &str = "spiraltorch.zspace_parameter_control";
 pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
 pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND: &str = "rust";
@@ -34,7 +39,7 @@ pub const ZSPACE_FRACTIONAL_REGULARIZER_FORMULA: &str =
     "R_alpha(z)=mean_k((k/k_max)^(2*alpha)*|DFT(z)_k|^2),k=0..floor(n/2)";
 pub const ZSPACE_ADAM_UPDATE_RULE: &str = "z_next=z-lr_eff*m_hat/(sqrt(v_hat)+epsilon)";
 pub const ZSPACE_GRADIENT_RULE: &str =
-    "g=clip(project(tanh(g_observed))+lambda_frac_eff*normalized(dR_alpha/dz)+g_topos)";
+    "g=clip_rms(bias_rms(project(tanh(g_observed))+lambda_frac_eff*normalized(dR_alpha/dz)))";
 
 const DERIVED_TOLERANCE: f64 = 128.0 * f64::EPSILON;
 
@@ -292,11 +297,19 @@ pub struct ToposOptimizerControlReport {
     pub effective_learning_rate: f64,
     pub clip_hint: f64,
     pub clip_scale: f64,
+    pub gradient_clip_rule: &'static str,
+    pub gradient_clip_normalization: &'static str,
+    pub biased_gradient_rms: f64,
     pub gradient_clip_threshold: Option<f64>,
     pub regularization_hint: f64,
     pub regularization_scale: f64,
     pub effective_fractional_weight: f64,
+    pub gradient_bias_rule: &'static str,
+    pub gradient_bias_normalization: &'static str,
     pub gradient_bias_scale: f64,
+    pub gradient_bias_basis: Vec<f64>,
+    pub raw_gradient_rms: f64,
+    pub gradient_bias_amplitude: f64,
     pub gradient_bias: Vec<f64>,
 }
 
@@ -617,7 +630,7 @@ pub fn transition_zspace_meta_optimizer(
 
     let state_before = request.state.clone();
     let fractional = fractional_regularizer(&state_before.z, request.config.fractional_order)?;
-    let topos = resolve_topos_control(
+    let mut topos = resolve_topos_control(
         &request.config,
         &request.observation.telemetry,
         request.config.weights.fractional,
@@ -628,7 +641,7 @@ pub fn transition_zspace_meta_optimizer(
         request.config.gradient_projection,
     )?;
 
-    let mut before_clip = Vec::with_capacity(request.config.dimension);
+    let mut regularized_gradient = Vec::with_capacity(request.config.dimension);
     for (index, projected_gradient) in projected.iter().copied().enumerate() {
         let regularized = checked_add(
             &format!("gradient.regularized[{index}]"),
@@ -639,16 +652,54 @@ pub fn transition_zspace_meta_optimizer(
                 fractional.normalized_gradient[index],
             )?,
         )?;
+        regularized_gradient.push(regularized);
+    }
+    let raw_gradient_rms = gradient_rms("gradient.raw_rms", &regularized_gradient)?;
+    let gradient_bias_amplitude =
+        topos_optimizer_gradient_bias_amplitude(raw_gradient_rms, topos.gradient_bias_scale);
+    require_derived_finite("gradient.topos_bias_amplitude", gradient_bias_amplitude)?;
+    let gradient_bias = topos
+        .gradient_bias_basis
+        .iter()
+        .cycle()
+        .take(request.config.dimension)
+        .enumerate()
+        .map(|(index, basis)| {
+            checked_mul(
+                &format!("gradient.topos_bias[{index}]"),
+                gradient_bias_amplitude,
+                *basis,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut before_clip = Vec::with_capacity(request.config.dimension);
+    for (index, (regularized, bias)) in regularized_gradient
+        .iter()
+        .copied()
+        .zip(gradient_bias.iter().copied())
+        .enumerate()
+    {
         before_clip.push(checked_add(
             &format!("gradient.topos_biased[{index}]"),
             regularized,
-            topos.gradient_bias[index],
+            bias,
         )?);
     }
+    let biased_gradient_rms = gradient_rms("gradient.biased_rms", &before_clip)?;
+    let gradient_clip_threshold =
+        topos_optimizer_gradient_clip_threshold(biased_gradient_rms, topos.clip_scale);
+    if let Some(threshold) = gradient_clip_threshold {
+        require_derived_finite("gradient.clip_threshold", threshold)?;
+    }
+    topos.raw_gradient_rms = raw_gradient_rms;
+    topos.gradient_bias_amplitude = gradient_bias_amplitude;
+    topos.gradient_bias = gradient_bias;
+    topos.biased_gradient_rms = biased_gradient_rms;
+    topos.gradient_clip_threshold = gradient_clip_threshold;
 
     let mut applied = before_clip.clone();
     let mut clipped_values = 0;
-    if let Some(threshold) = topos.gradient_clip_threshold {
+    if let Some(threshold) = gradient_clip_threshold {
         for value in &mut applied {
             let clipped = value.clamp(-threshold, threshold);
             if clipped != *value {
@@ -1206,7 +1257,6 @@ fn resolve_topos_control(
     } else {
         1.0
     };
-    let gradient_clip_threshold = (clip_scale < 1.0).then_some(clip_scale);
     let regularization_hint = raw_regularization_hint.clamp(0.25, 4.0);
     let regularization_scale = if active {
         blend_topos_scale(
@@ -1245,15 +1295,6 @@ fn resolve_topos_control(
         openness,
         exploration,
     );
-    let gradient_bias = (0..config.dimension)
-        .map(|index| {
-            checked_mul(
-                &format!("topos.gradient_bias[{index}]"),
-                gradient_bias_scale,
-                basis[index % basis.len()],
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(ToposOptimizerControlReport {
         present,
@@ -1272,12 +1313,20 @@ fn resolve_topos_control(
         effective_learning_rate,
         clip_hint,
         clip_scale,
-        gradient_clip_threshold,
+        gradient_clip_rule: TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
+        gradient_clip_normalization: TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION,
+        biased_gradient_rms: 0.0,
+        gradient_clip_threshold: None,
         regularization_hint,
         regularization_scale,
         effective_fractional_weight,
+        gradient_bias_rule: TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+        gradient_bias_normalization: TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION,
         gradient_bias_scale,
-        gradient_bias,
+        gradient_bias_basis: basis.to_vec(),
+        raw_gradient_rms: 0.0,
+        gradient_bias_amplitude: 0.0,
+        gradient_bias: vec![0.0; config.dimension],
     })
 }
 
@@ -1316,6 +1365,28 @@ fn project_observed_gradient(
     Ok((0..dimension)
         .map(|index| gradient[index % gradient.len()].tanh())
         .collect())
+}
+
+fn gradient_rms(field: &str, gradient: &[f64]) -> Result<f64, ZSpaceMetaOptimizerError> {
+    if gradient.is_empty() {
+        return Ok(0.0);
+    }
+    let sum_squares =
+        gradient
+            .iter()
+            .copied()
+            .enumerate()
+            .try_fold(0.0, |sum, (index, value)| {
+                checked_add(
+                    field,
+                    sum,
+                    checked_mul(&format!("{field}.square[{index}]"), value, value)?,
+                )
+            })?;
+    let mean_square = checked_div(field, sum_squares, gradient.len() as f64)?;
+    let rms = mean_square.sqrt();
+    require_derived_finite(field, rms)?;
+    Ok(rms)
 }
 
 fn objective_report(
@@ -1810,6 +1881,45 @@ mod tests {
         assert_eq!(report.topos_control.gradient_clip_threshold, None);
         assert_eq!(report.gradient.clipped_values, 0);
         assert!(report.gradient.applied.iter().any(|value| *value > 1.0));
+    }
+
+    #[test]
+    fn topos_clip_uses_biased_gradient_rms_instead_of_an_absolute_threshold() {
+        let mut request = default_request();
+        request.config.dimension = 16;
+        request.config.weights.fractional = 0.0;
+        request.config.topos_control_gain = 1.0;
+        request.state = ZSpaceMetaOptimizerState::zeros(request.config.dimension);
+        request.observation.gradient = vec![0.0; request.config.dimension];
+        request.observation.gradient[0] = 100.0;
+        request.observation.telemetry = BTreeMap::from([
+            ("topos.training_hints.clip_scale".to_owned(), 0.25),
+            ("topos.training_hints.gradient_bias_scale".to_owned(), 0.0),
+        ]);
+
+        let report = transition_zspace_meta_optimizer(request).expect("RMS-clipped transition");
+        let expected_rms = 1.0 / 4.0;
+        let expected_threshold = expected_rms / 0.75;
+        assert_eq!(
+            report.topos_control.gradient_clip_rule,
+            TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE
+        );
+        assert_eq!(
+            report.topos_control.gradient_clip_normalization,
+            TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION
+        );
+        assert_relative_eq!(report.topos_control.biased_gradient_rms, expected_rms);
+        assert_relative_eq!(
+            report
+                .topos_control
+                .gradient_clip_threshold
+                .expect("active clip"),
+            expected_threshold
+        );
+        assert_eq!(report.gradient.clipped_values, 1);
+        assert_relative_eq!(report.gradient.before_clip[0], 1.0);
+        assert_relative_eq!(report.gradient.applied[0], expected_threshold);
+        assert!(expected_threshold > report.topos_control.clip_scale);
     }
 
     #[test]

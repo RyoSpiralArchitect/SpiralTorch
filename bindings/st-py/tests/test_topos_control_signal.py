@@ -21,7 +21,7 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     )
 
     assert signal["kind"] == "spiraltorch.topos_control_signal"
-    assert signal["contract_version"] == "spiraltorch.topos_control_signal.v1"
+    assert signal["contract_version"] == "spiraltorch.topos_control_signal.v2"
     assert signal["semantic_owner"] == "st-tensor::pure::topos"
     assert signal["semantic_backend"] == "rust"
     assert signal["observed_depth"] == 4
@@ -41,7 +41,10 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["training_hints"]["gradient_bias_scale"] == pytest.approx(0.0786561)
     assert signal["training_hints"]["clip_scale"] == pytest.approx(0.871)
     assert signal["training_hints"]["momentum_damping"] == pytest.approx(0.2535)
-    assert signal["training_plan"]["rate_scale"] == pytest.approx(0.7769211125)
+    assert signal["training_plan"]["rate_scale"] == pytest.approx(0.8919875)
+    assert signal["training_plan"]["effective_gradient_clip_scale"] == pytest.approx(
+        0.871
+    )
     assert signal["training_plan"]["effective_gradient_bias_scale"] == pytest.approx(
         0.0786561
     )
@@ -58,14 +61,14 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["runtime_profile"]["closure_risk"] == pytest.approx(0.4451)
     assert signal["runtime_profile"]["exploration_budget"] == pytest.approx(0.4555)
     assert signal["runtime_profile"]["control_energy"] == pytest.approx(
-        0.4041837060714286
+        0.3811704285714286
     )
     assert signal["runtime_profile"]["learning_inference_balance"] == pytest.approx(
-        0.9104766571449497
+        1.0453233721526405
     )
     assert signal["runtime_route"]["mode"] == "contextual"
     assert signal["runtime_route"]["mode_id"] == 3
-    assert signal["runtime_route"]["score"] == pytest.approx(0.7053927755182756)
+    assert signal["runtime_route"]["score"] == pytest.approx(0.7176847612837576)
     assert signal["runtime_route"]["scores"]["context"] == pytest.approx(
         signal["runtime_route"]["score"]
     )
@@ -117,7 +120,7 @@ def test_topos_optimizer_snapshot_binds_control_and_optimizer_state_application(
     )
 
     assert snapshot["kind"] == "spiraltorch.topos_optimizer_snapshot"
-    assert snapshot["contract_version"] == "spiraltorch.topos_optimizer_snapshot.v2"
+    assert snapshot["contract_version"] == "spiraltorch.topos_optimizer_snapshot.v3"
     assert snapshot["semantic_owner"] == "st-tensor::pure::topos"
     assert snapshot["semantic_backend"] == "rust"
     assert snapshot["sequence"] == 7
@@ -145,8 +148,16 @@ def test_topos_optimizer_snapshot_binds_control_and_optimizer_state_application(
     assert application["gradient_bias_rule"] == (
         "g_biased[i]=g[i]+rms(g)*bias_scale*basis[i%10]"
     )
+    assert application["effective_gradient_clip_scale"] == pytest.approx(
+        snapshot["control"]["training_plan"]["effective_gradient_clip_scale"]
+    )
+    assert application["gradient_clip_normalization"] == "biased_gradient_rms"
+    assert application["gradient_clip_rule"] == (
+        "g_clipped[i]=clamp(g_biased[i],-rms(g_biased)/(1-clip_scale),"
+        "rms(g_biased)/(1-clip_scale))"
+    )
     assert application["momentum_rule"] == (
-        "m_t=damping*m_(t-1)+(1-damping)*g_biased"
+        "m_t=damping*m_(t-1)+(1-damping)*g_clipped"
     )
     assert application["gradient_bias_basis_dim"] == 10
     assert len(application["gradient_bias_basis"]) == 10
@@ -180,7 +191,7 @@ def test_topos_optimizer_snapshot_rejects_non_rust_contracts(monkeypatch) -> Non
         "_native_topos_optimizer_snapshot_from_observation",
         lambda *_args, **_kwargs: {
             "kind": "spiraltorch.topos_optimizer_snapshot",
-            "contract_version": "spiraltorch.topos_optimizer_snapshot.v2",
+            "contract_version": "spiraltorch.topos_optimizer_snapshot.v3",
             "semantic_owner": "python",
             "semantic_backend": "python",
         },
@@ -324,7 +335,10 @@ def test_partial_external_hints_are_normalized_by_rust() -> None:
     assert signal["semantic_backend"] == "rust"
     assert signal["training_hints"]["learning_rate_scale"] == pytest.approx(1.25)
     assert signal["training_hints"]["clip_scale"] == pytest.approx(0.25)
-    assert signal["training_plan"]["raw_rate_scale"] == pytest.approx(0.3125)
+    assert signal["training_plan"]["raw_rate_scale"] == pytest.approx(1.25)
+    assert signal["training_plan"]["effective_gradient_clip_scale"] == pytest.approx(
+        0.25
+    )
     assert signal["inference_hints"]["top_p_scale"] == pytest.approx(0.05)
     assert signal["inference_hints"]["context_weight"] == pytest.approx(1.25)
     assert signal["runtime_profile"]["inference_context_weight"] == pytest.approx(1.25)
@@ -423,9 +437,10 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
     assert training["learning_rate_scale"] == pytest.approx(0.8919875)
     assert training["gradient_bias_scale"] == pytest.approx(0.0786561)
     assert len(training["vector"]) == 6
-    assert training_plan["raw_rate_scale"] == pytest.approx(0.7769211125)
-    assert training_plan["rate_scale"] == pytest.approx(0.88846055625)
+    assert training_plan["raw_rate_scale"] == pytest.approx(0.8919875)
+    assert training_plan["rate_scale"] == pytest.approx(0.94599375)
     assert training_plan["effective_gradient_bias_scale"] == pytest.approx(0.03932805)
+    assert training_plan["effective_gradient_clip_scale"] == pytest.approx(0.9355)
     assert inference["temperature_scale"] == pytest.approx(0.8533125)
     assert inference["top_p_scale"] == pytest.approx(0.890274375)
     assert len(inference["vector"]) == 6
@@ -433,10 +448,10 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
     assert inference_plan["top_p"] == pytest.approx(0.85062346875)
     assert inference_plan["frequency_penalty"] == pytest.approx(0.242700546875)
     assert inference_plan["presence_penalty"] == pytest.approx(0.1809496875)
-    assert runtime_profile["training_rate_scale"] == pytest.approx(0.88846055625)
+    assert runtime_profile["training_rate_scale"] == pytest.approx(0.94599375)
     assert runtime_profile["inference_temperature"] == pytest.approx(0.741325)
     assert runtime_profile["inference_context_weight"] == pytest.approx(0.96125)
-    assert runtime_profile["control_energy"] == pytest.approx(0.3599843530357143)
+    assert runtime_profile["control_energy"] == pytest.approx(0.3484777142857143)
     assert len(runtime_profile["vector"]) == 6
 
 
@@ -458,7 +473,7 @@ def test_topos_runtime_route_names_profile_for_learning_and_inference() -> None:
     assert route["semantic_owner"] == "st-tensor::pure::topos"
     assert route["mode"] == "contextual"
     assert route["mode_id"] == 3
-    assert route["score"] == pytest.approx(0.6956782798030483)
+    assert route["score"] == pytest.approx(0.6654185926761256)
     assert route["score_key"] == "context"
     assert route["inference_action"] == "raise_context_weight"
     assert route["scores"]["context"] == pytest.approx(route["score"])
@@ -726,7 +741,7 @@ def test_prepared_zmetrics_payload_keeps_topos_telemetry_for_trainer() -> None:
     assert trainer.last_topos_control["volume_pressure"] == pytest.approx(0.75)
 
 
-def test_topos_control_gain_can_drive_trainer_without_metric_gradient() -> None:
+def test_topos_control_gain_cannot_invent_a_gradient_from_zero() -> None:
     metrics = st.z_metrics(
         speed=0.0,
         memory=0.0,
@@ -753,8 +768,10 @@ def test_topos_control_gain_can_drive_trainer_without_metric_gradient() -> None:
     active_loss = active.step(metrics)
 
     assert passive.state == [0.0, 0.0, 0.0, 0.0]
-    assert active.state != passive.state
+    assert active.state == passive.state
     assert active_loss > passive_loss
+    assert active.last_optimizer_report["topos_control"]["raw_gradient_rms"] == 0.0
+    assert active.last_optimizer_report["topos_control"]["gradient_bias_amplitude"] == 0.0
     assert active.last_topos_control["guard_strength"] == pytest.approx(0.8)
     assert active.last_topos_control["learning_rate_scale"] == pytest.approx(0.55)
 

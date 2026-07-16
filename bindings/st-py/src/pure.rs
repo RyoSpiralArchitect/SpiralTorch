@@ -20,6 +20,7 @@ use st_tensor::{
     ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingPlan, ToposZSpaceProjectionOptions,
     ZBox, ZBoxSite, TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM,
     TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_BIAS_RULE,
+    TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION, TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
     TOPOS_OPTIMIZER_MOMENTUM_RULE,
 };
 
@@ -55,6 +56,9 @@ struct ToposOptimizerStateControlInput {
     effective_gradient_bias_scale: f32,
     gradient_bias_basis_dim: usize,
     gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+    gradient_clip_rule: String,
+    gradient_clip_normalization: String,
+    effective_gradient_clip_scale: f32,
     momentum_rule: String,
     effective_momentum_damping: f32,
 }
@@ -84,6 +88,16 @@ fn topos_optimizer_state_control_from_py(
             "Topos optimizer-state gradient_bias_basis_dim does not match the Rust contract",
         ));
     }
+    if input.gradient_clip_rule != TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state gradient_clip_rule does not match the Rust contract",
+        ));
+    }
+    if input.gradient_clip_normalization != TOPOS_OPTIMIZER_GRADIENT_CLIP_NORMALIZATION {
+        return Err(PyValueError::new_err(
+            "Topos optimizer-state gradient_clip_normalization does not match the Rust contract",
+        ));
+    }
     if input.momentum_rule != TOPOS_OPTIMIZER_MOMENTUM_RULE {
         return Err(PyValueError::new_err(
             "Topos optimizer-state momentum_rule does not match the Rust contract",
@@ -92,6 +106,7 @@ fn topos_optimizer_state_control_from_py(
     ToposOptimizerStateControl::new(
         input.effective_gradient_bias_scale,
         input.gradient_bias_basis,
+        input.effective_gradient_clip_scale,
         input.effective_momentum_damping,
     )
     .map_err(tensor_err_to_py)
