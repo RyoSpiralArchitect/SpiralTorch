@@ -397,6 +397,58 @@ def test_zspace_trace_atlas_delegates_coherence_projection_to_rust_contract(
     assert "zspace.trace.control_formula=canonical Rust control formula" in frame.notes()
 
 
+def test_zspace_trace_atlas_validates_and_forwards_rust_distribution_witness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    witness = {
+        "kind": "spiraltorch.zspace_coherence_distribution_witness",
+        "contract_version": "spiraltorch.zspace_coherence_distribution_witness.v1",
+        "semantic_owner": "st-core::inference::zspace_coherence",
+        "semantic_backend": "rust",
+        "witness_formula": "complete simplex witness",
+        "normalized_weights": [0.75, 0.25],
+    }
+    validated: list[dict] = []
+    projected: list[dict] = []
+
+    def validate(payload):
+        validated.append(dict(payload))
+        return {"channels": 2, "weight_mass": 1.0}
+
+    def project(diagnostics, *, coherence):
+        projected.append(dict(diagnostics))
+        return {"partial": {"coherence_mean": 0.5}}
+
+    monkeypatch.setattr(st, "validate_zspace_coherence_distribution_witness", validate)
+    monkeypatch.setattr(st, "zspace_coherence_project", project)
+    frame = zspace_trace_event_to_atlas_frame(
+        {
+            "kind": "Aggregated",
+            "coherence": [0.75, 0.25],
+            "diagnostics": {
+                "mean_coherence": 0.5,
+                "entropy": 0.5623351446,
+                "energy_ratio": 0.75,
+                "fractional_order": 0.4,
+                "z_bias": 0.1,
+                "preserved_channels": 2,
+                "discarded_channels": 0,
+                "dominant_channel": 0,
+                "distribution_witness": witness,
+            },
+        }
+    )
+
+    assert frame is not None
+    assert validated == [witness]
+    assert projected[0]["normalized_weights"] == [0.75, 0.25]
+    assert (
+        "zspace.trace.distribution_witness="
+        "spiraltorch.zspace_coherence_distribution_witness.v1"
+        in frame.notes()
+    )
+
+
 def test_zspace_trace_atlas_omits_malformed_optional_count_without_aborting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

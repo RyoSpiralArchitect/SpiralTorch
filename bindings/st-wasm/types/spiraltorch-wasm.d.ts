@@ -697,6 +697,24 @@ declare module "spiraltorch-wasm" {
         dominant_channel?: number | null;
     };
 
+    export type ZSpaceCoherenceDistributionWitness = {
+        kind: "spiraltorch.zspace_coherence_distribution_witness";
+        contract_version: "spiraltorch.zspace_coherence_distribution_witness.v1";
+        semantic_owner: "st-core::inference::zspace_coherence";
+        semantic_backend: "rust";
+        witness_formula: string;
+        normalized_weights: number[];
+    };
+
+    export type ZSpaceCoherenceDistributionSummary = {
+        channels: number;
+        weight_mass: number;
+        weight_entropy: number;
+        normalized_entropy: number;
+        concentration: number;
+        effective_channels: number;
+    };
+
     export type ZSpaceCoherenceContourInput = {
         coherence_strength: number;
         prosody_index: number;
@@ -1529,6 +1547,18 @@ declare module "spiraltorch-wasm" {
     export function zspaceCoherenceProjectObject(
         request: ZSpaceCoherenceProjectionRequest,
     ): ZSpaceCoherenceProjection;
+    export function zspaceCoherenceDistributionWitnessJson(
+        normalizedWeightsJson: string,
+    ): string;
+    export function zspaceCoherenceDistributionWitnessObject(
+        normalizedWeights: number[],
+    ): ZSpaceCoherenceDistributionWitness;
+    export function zspaceCoherenceDistributionValidateJson(
+        witnessJson: string,
+    ): string;
+    export function zspaceCoherenceDistributionValidateObject(
+        witness: ZSpaceCoherenceDistributionWitness,
+    ): ZSpaceCoherenceDistributionSummary;
     export function zspacePosteriorDecodeJson(requestJson: string): string;
     export function zspacePosteriorDecodeObject(
         request: ZSpacePosteriorDecodeRequest,

@@ -121,6 +121,13 @@ Sobolev term with a normalized FFT-derived analytic gradient, resolves Topos lea
 regularisation, clipping, and bias controls, and atomically commits Adam state.
 Python owns orchestration and inference caches, not a second optimizer formula.
 
+Coherence trace schema v2 follows the same boundary. Every aggregated event
+carries a complete `zspace_coherence_distribution_witness.v1` simplex produced
+by `st-core`; trainer replay decodes the stable plugin record, validates the
+witness, and re-runs the canonical projection before accepting controls. Older
+scalar-only traces remain suitable for visualization, but cannot be replayed as
+training authority.
+
 The inference helpers accept structured telemetry. Pass dicts, `ZSpaceTelemetryFrame`
 instances, or the telemetry captured inside a `ZSpacePartialBundle`; everything
 is flattened and merged automatically before the posterior update so PSI health

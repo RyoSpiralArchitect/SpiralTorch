@@ -16,7 +16,9 @@ use st_core::inference::temperature_control::{
     apply_temperature_control, TemperatureControlRequest,
 };
 use st_core::inference::zspace_coherence::{
-    project_zspace_coherence, ZSpaceCoherenceProjectionRequest,
+    build_zspace_coherence_distribution_witness, project_zspace_coherence,
+    validate_zspace_coherence_distribution_witness, ZSpaceCoherenceDistributionWitness,
+    ZSpaceCoherenceProjectionRequest,
 };
 use st_core::inference::zspace_posterior::{
     decode_zspace_posterior, project_zspace_posterior, ZSpacePosteriorDecodeRequest,
@@ -306,6 +308,40 @@ fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
     crate::json::json_to_py(py, &payload)
 }
 
+#[pyfunction]
+fn _zspace_coherence_distribution_witness(
+    py: Python<'_>,
+    normalized_weights: Vec<f64>,
+) -> PyResult<PyObject> {
+    let witness = py
+        .allow_threads(|| build_zspace_coherence_distribution_witness(&normalized_weights))
+        .map_err(|error| json_error("Z-space coherence witness construction failed", error))?;
+    let payload = serde_json::to_value(witness)
+        .map_err(|error| json_error("Z-space coherence witness encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
+#[pyfunction]
+fn _zspace_coherence_distribution_validate(
+    py: Python<'_>,
+    witness: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let witness = crate::json::py_to_json(witness)?;
+    if !witness.is_object() {
+        return Err(PyValueError::new_err(
+            "Z-space coherence distribution witness must be a mapping",
+        ));
+    }
+    let witness: ZSpaceCoherenceDistributionWitness = serde_json::from_value(witness)
+        .map_err(|error| json_error("invalid Z-space coherence distribution witness", error))?;
+    let summary = py
+        .allow_threads(|| validate_zspace_coherence_distribution_witness(&witness))
+        .map_err(|error| json_error("Z-space coherence witness validation failed", error))?;
+    let payload = serde_json::to_value(summary)
+        .map_err(|error| json_error("Z-space coherence summary encoding failed", error))?;
+    crate::json::json_to_py(py, &payload)
+}
+
 #[pyclass(module = "spiraltorch.inference", name = "SafetyViolation")]
 #[derive(Clone)]
 struct SafetyViolationPy {
@@ -534,6 +570,11 @@ pub fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_zspace_posterior_decode, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_posterior_project, m)?)?;
     m.add_function(wrap_pyfunction!(_zspace_coherence_project, m)?)?;
+    m.add_function(wrap_pyfunction!(_zspace_coherence_distribution_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        _zspace_coherence_distribution_validate,
+        m
+    )?)?;
     m.add_class::<InferenceRuntime>()?;
     m.add_class::<InferenceResultPy>()?;
     m.add_class::<AuditLogPy>()?;

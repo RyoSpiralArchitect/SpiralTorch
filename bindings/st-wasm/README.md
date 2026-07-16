@@ -194,6 +194,20 @@ Rust recomputes dimension-normalized entropy and normalized HHI concentration;
 projection v2 also rejects entropy, support counts, dominant channels, or raw
 means that contradict the supplied vectors. Browser code does not repair those
 cross-field inconsistencies.
+It can also persist and later revalidate the exact simplex witness without
+implementing any distribution mathematics in JavaScript:
+
+```ts
+import {
+    zspaceCoherenceDistributionValidateObject,
+    zspaceCoherenceDistributionWitnessObject,
+} from "spiraltorch-wasm";
+
+const witness = zspaceCoherenceDistributionWitnessObject([0.5, 0.3, 0.2]);
+const summary = zspaceCoherenceDistributionValidateObject(witness);
+console.log(witness.contract_version, summary.concentration);
+```
+
 Its versioned control payload provides the same spectral radius, entropy, and
 pressure consumed by native training, while its classification policy emits the
 structural label, reason, formula, and thresholds. WASM adds only

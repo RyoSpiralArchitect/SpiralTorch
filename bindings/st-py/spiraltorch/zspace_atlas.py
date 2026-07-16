@@ -319,6 +319,32 @@ def zspace_trace_event_to_atlas_frame(
                     else:
                         projection_diagnostics[field] = int(value)
             normalized_weights = diagnostics.get("normalized_weights")
+            distribution_witness = diagnostics.get("distribution_witness")
+            if distribution_witness is not None:
+                if isinstance(distribution_witness, Mapping):
+                    try:
+                        st.validate_zspace_coherence_distribution_witness(
+                            distribution_witness
+                        )
+                    except (TypeError, ValueError, RuntimeError) as exc:
+                        fragment.push_note(
+                            "zspace.trace.distribution_witness.skipped="
+                            f"{type(exc).__name__}"
+                        )
+                        normalized_weights = None
+                    else:
+                        normalized_weights = distribution_witness.get(
+                            "normalized_weights"
+                        )
+                        fragment.push_note(
+                            "zspace.trace.distribution_witness="
+                            f"{distribution_witness.get('contract_version', 'unknown')}"
+                        )
+                else:
+                    fragment.push_note(
+                        "zspace.trace.distribution_witness.skipped=TypeError"
+                    )
+                    normalized_weights = None
             if normalized_weights is not None:
                 if isinstance(normalized_weights, Sequence) and not isinstance(
                     normalized_weights, (str, bytes, bytearray)

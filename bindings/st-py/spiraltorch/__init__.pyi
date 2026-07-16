@@ -4166,6 +4166,16 @@ def zspace_posterior_project(
 ) -> Dict[str, Any]: ...
 
 
+def zspace_coherence_distribution_witness(
+    normalized_weights: Any,
+) -> Dict[str, Any]: ...
+
+
+def validate_zspace_coherence_distribution_witness(
+    witness: Mapping[str, Any],
+) -> Dict[str, Any]: ...
+
+
 def elliptic_partial_from_telemetry(
     telemetry: Any,
     *,
@@ -11277,6 +11287,8 @@ __all__ = [
     "ZSPACE_POSTERIOR_LATENT_GRADIENT_BASIS",
     "zspace_posterior_decode",
     "zspace_posterior_project",
+    "zspace_coherence_distribution_witness",
+    "validate_zspace_coherence_distribution_witness",
     "zspace_coherence_project",
     "decode_zspace_embedding",
     "infer_from_partial",

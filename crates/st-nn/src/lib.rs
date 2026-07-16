@@ -156,8 +156,9 @@ pub use zspace_coherence::{
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
     ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationPolicy,
-    ZSpaceCoherenceControlPayload, ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceSequencer,
-    ZSpaceTextVae, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord,
+    ZSpaceCoherenceControlPayload, ZSpaceCoherenceDistributionSummary,
+    ZSpaceCoherenceDistributionWitness, ZSpaceCoherenceSequencer, ZSpaceTextVae, ZSpaceTrace,
+    ZSpaceTraceConfig, ZSpaceTraceDecodeError, ZSpaceTraceEvent, ZSpaceTraceRecord,
     ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind, ZSpaceVaeState,
     ZSpaceVaeStats,
 };

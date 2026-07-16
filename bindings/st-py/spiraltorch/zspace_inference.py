@@ -47,6 +47,8 @@ __all__ = [
     "topos_control_partial",
     "zspace_posterior_decode",
     "zspace_posterior_project",
+    "zspace_coherence_distribution_witness",
+    "validate_zspace_coherence_distribution_witness",
     "zspace_coherence_project",
     "decode_zspace_embedding",
     "infer_from_partial",
@@ -1286,6 +1288,26 @@ def _native_zspace_coherence_projection(
             "native Z-space coherence projection returned malformed partial metrics"
         )
     return contract
+
+
+def _native_zspace_coherence_distribution(
+    function_name: str,
+    payload: Any,
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, function_name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space coherence distribution evidence requires the compiled Rust "
+            f"semantic core; rebuild or reinstall SpiralTorch with {function_name}"
+        )
+    contract = operation(payload)
+    if not isinstance(contract, MappingABC):
+        raise RuntimeError(
+            "native Z-space coherence distribution operation returned a non-mapping payload"
+        )
+    return dict(contract)
 
 
 def _validate_zspace_posterior_contract(
@@ -3538,6 +3560,34 @@ def _coherence_count(value: Any, *, field: str) -> int:
     if not math.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
         raise ValueError(f"coherence field '{field}' must be a non-negative integer")
     return int(numeric)
+
+
+def zspace_coherence_distribution_witness(
+    normalized_weights: Any,
+) -> dict[str, Any]:
+    """Build a complete simplex witness in the canonical Rust semantic core."""
+
+    weights = _coherence_sequence(
+        normalized_weights,
+        field="normalized_weights",
+    )
+    return _native_zspace_coherence_distribution(
+        "_zspace_coherence_distribution_witness",
+        weights,
+    )
+
+
+def validate_zspace_coherence_distribution_witness(
+    witness: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a simplex witness and re-derive its summary in Rust."""
+
+    if not isinstance(witness, MappingABC):
+        raise TypeError("Z-space coherence distribution witness must be a mapping")
+    return _native_zspace_coherence_distribution(
+        "_zspace_coherence_distribution_validate",
+        dict(witness),
+    )
 
 
 def zspace_coherence_project(

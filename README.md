@@ -299,8 +299,11 @@ raw Shannon entropy for audit, but derives trainer-facing spectral radius,
 entropy, and pressure from normalized HHI concentration and `H / ln(N)` so
 channel count alone cannot change the control signal. Pass diagnostics directly
 with `trainer.push_coherence_diagnostics(diagnostics)`; replayed trace events are
-accepted only when their Rust contract provenance, probability mass, summaries,
-classification, and control values still agree.
+accepted only when their Rust contract provenance, complete probability-simplex
+witness, summaries, classification, and control values still agree. Trace schema
+v2 carries that witness, and the Rust bridge decodes the stable plugin record
+before rebuilding the projection; legacy scalar-only traces remain readable for
+inspection but cannot command trainer controls.
 The same versioned Rust policy emits `background`, `symmetric_pulse`,
 `cascade_imbalance`, or `diffuse_drift` with an explicit reason and thresholds;
 trace, Python, and WASM only transport that decision. Call
@@ -313,6 +316,17 @@ observation: entropy, support counts, and the dominant channel must agree with
 `normalized_weights`, while `mean_coherence` must agree with the raw
 `coherence` response when present. Python and WASM surface the resulting Rust
 error instead of repairing or reinterpreting contradictory evidence.
+
+Portable clients can explicitly build and validate the same evidence boundary:
+
+```python
+import spiraltorch as st
+
+witness = st.zspace_coherence_distribution_witness([0.5, 0.3, 0.2])
+summary = st.validate_zspace_coherence_distribution_witness(witness)
+assert witness["semantic_backend"] == "rust"
+assert summary["channels"] == 3
+```
 
 Runtime plan scoring follows the same ownership rule. Variational free energy
 is evaluated only by `st-core::heur::free_energy`; Python and WASM transport the
