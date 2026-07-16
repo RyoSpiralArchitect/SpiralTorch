@@ -74,6 +74,7 @@ _TOPOS_ROUTE_POLICY_KIND = "spiraltorch.topos_route_policy"
 _TOPOS_ROUTE_REWARDS_KIND = "spiraltorch.topos_route_rewards"
 _TOPOS_ROUTE_POLICY_RESOLUTION_KIND = "spiraltorch.topos_route_policy_resolution"
 _TOPOS_ROUTE_POLICY_SEMANTIC_OWNER = "st-core::runtime::topos_route_policy"
+_API_LLM_MAX_GRADIENT_DIM = 4_096
 _TOPOS_SWEEP_SIGNAL_KEYS = frozenset(
     {
         "curvature",
@@ -730,6 +731,7 @@ def _topos_adapter_from_sweep_spec(
     request_options: Mapping[str, Any] | None,
     signal_options: Mapping[str, Any] | None,
     adapter_options: Mapping[str, Any] | None,
+    gradient_dim: int | None = None,
 ) -> dict[str, Any]:
     if _is_topos_runtime_adapter(spec):
         return dict(spec)
@@ -786,6 +788,8 @@ def _topos_adapter_from_sweep_spec(
         label="adapter_options.request_options",
     )
     profile_adapter.setdefault("origin", f"topos:sweep:{label}")
+    if gradient_dim is not None:
+        profile_adapter.setdefault("gradient_dim", gradient_dim)
     profile_adapter["request_options"] = adapter_request
     return topos_runtime_adapter(topos, **profile_adapter, **profile_signal)
 
@@ -3891,6 +3895,24 @@ def _session_from_spiraltorch(
         return None, None, f"{exc.__class__.__name__}: {exc}"
 
 
+def _validated_api_llm_gradient_dim(gradient_dim: int) -> int:
+    resolved = int(gradient_dim)
+    if not 1 <= resolved <= _API_LLM_MAX_GRADIENT_DIM:
+        raise ValueError(
+            f"gradient_dim must be in 1..={_API_LLM_MAX_GRADIENT_DIM}, got {resolved}"
+        )
+    return resolved
+
+
+def _api_llm_gradient_dim(
+    z_state: Sequence[float],
+    gradient_dim: int | None,
+) -> int:
+    return _validated_api_llm_gradient_dim(
+        len(z_state) if gradient_dim is None else gradient_dim
+    )
+
+
 class ApiLLMZSpaceRuntime:
     """Runtime bridge for hosted LLM inference plus Z-space observations."""
 
@@ -3907,15 +3929,20 @@ class ApiLLMZSpaceRuntime:
         alpha: float = 0.35,
         smoothing: float = 0.35,
         strategy: str = "mean",
+        gradient_dim: int | None = None,
+        gradient_alignment: str = "strict",
     ) -> None:
         self.provider = provider
         self.model = model
         self.requested_backend = backend
+        self.gradient_dim = _api_llm_gradient_dim(z_state, gradient_dim)
+        self.gradient_alignment = gradient_alignment
         self.pipeline = ZSpaceInferencePipeline(
             z_state,
             alpha=alpha,
             smoothing=smoothing,
             strategy=strategy,
+            gradient_alignment=gradient_alignment,
         )
         self.session_error: str | None = None
         self.session = session
@@ -3940,12 +3967,22 @@ class ApiLLMZSpaceRuntime:
         latency_ms: float | None = None,
         bundle_weight: float = 1.0,
         telemetry_prefix: str = "api_llm",
-        gradient_dim: int = 4,
+        gradient_dim: int | None = None,
         context_partials: Any = None,
         clear: bool = True,
     ) -> ApiLLMTrace:
         """Record an API response, fuse it into Z-space, and return a trace."""
 
+        resolved_gradient_dim = (
+            self.gradient_dim
+            if gradient_dim is None
+            else _validated_api_llm_gradient_dim(gradient_dim)
+        )
+        if resolved_gradient_dim != self.gradient_dim:
+            raise ValueError(
+                "record_response gradient_dim must match the runtime contract "
+                f"({self.gradient_dim}), got {resolved_gradient_dim}"
+            )
         provider_value = provider or self.provider
         model_value = model or self.model or _response_model(response)
         bundle = api_llm_partial_from_response(
@@ -3956,7 +3993,7 @@ class ApiLLMZSpaceRuntime:
             latency_ms=latency_ms,
             bundle_weight=bundle_weight,
             telemetry_prefix=telemetry_prefix,
-            gradient_dim=gradient_dim,
+            gradient_dim=resolved_gradient_dim,
         )
         for context in _normalise_context_partials(context_partials):
             self.pipeline.add_partial(context)
@@ -3972,7 +4009,7 @@ class ApiLLMZSpaceRuntime:
             device_preflight=self.device_preflight,
             bundle_weight=bundle_weight,
             telemetry_prefix=telemetry_prefix,
-            gradient_dim=gradient_dim,
+            gradient_dim=resolved_gradient_dim,
         )
         self.traces.append(trace)
         return trace
@@ -4071,6 +4108,8 @@ class ApiLLMZSpaceRuntime:
             "provider": provider or self.provider,
             "model": model or self.model,
             "requested_backend": self.requested_backend,
+            "gradient_dim": self.gradient_dim,
+            "gradient_alignment": self.gradient_alignment,
             "device_preflight": self.device_preflight,
             "summary": self.summary(),
             "traces": [trace.as_dict() for trace in traces],
@@ -4313,6 +4352,8 @@ class ApiLLMZSpaceRuntime:
             "provider": self.provider,
             "model": self.model,
             "requested_backend": self.requested_backend,
+            "gradient_dim": self.gradient_dim,
+            "gradient_alignment": self.gradient_alignment,
             "session_error": self.session_error,
             "device_preflight": self.device_preflight,
             "summary": self.summary(),
@@ -4334,6 +4375,8 @@ def run_api_llm_prompt_suite(
     alpha: float = 0.35,
     smoothing: float = 0.35,
     strategy: str = "mean",
+    gradient_dim: int | None = None,
+    gradient_alignment: str = "strict",
     jsonl_out: str | Path | None = None,
     context_partials: Any = None,
     runtime_adapter: Any = None,
@@ -4355,6 +4398,8 @@ def run_api_llm_prompt_suite(
         alpha=alpha,
         smoothing=smoothing,
         strategy=strategy,
+        gradient_dim=gradient_dim,
+        gradient_alignment=gradient_alignment,
     )
     return runtime.run_prompts(
         prompts,
@@ -4386,6 +4431,8 @@ def run_api_llm_prompt_suite_matrix(
     alpha: float = 0.35,
     smoothing: float = 0.35,
     strategy: str = "mean",
+    gradient_dim: int | None = None,
+    gradient_alignment: str = "strict",
     jsonl_dir: str | Path | None = None,
     context_partials: Any = None,
     runtime_adapter: Any = None,
@@ -4404,6 +4451,7 @@ def run_api_llm_prompt_suite_matrix(
     """
 
     prompt_list = list(prompts)
+    resolved_gradient_dim = _api_llm_gradient_dim(z_state, gradient_dim)
     provider_map = dict(providers or {})
     model_map = dict(models or {})
     request_kwargs_map = dict(request_kwargs or {})
@@ -4436,6 +4484,8 @@ def run_api_llm_prompt_suite_matrix(
             alpha=alpha,
             smoothing=smoothing,
             strategy=strategy,
+            gradient_dim=resolved_gradient_dim,
+            gradient_alignment=gradient_alignment,
             jsonl_out=jsonl_out,
             context_partials=context_partials,
             runtime_adapter=runtime_adapter,
@@ -4458,6 +4508,8 @@ def run_api_llm_prompt_suite_matrix(
         "kind": "spiraltorch.api_llm_prompt_suite_matrix",
         "count": len(suites),
         "prompt_count": len(prompt_list),
+        "gradient_dim": resolved_gradient_dim,
+        "gradient_alignment": gradient_alignment,
         "labels": list(suites.keys()),
         "jsonl_dir": str(out_dir) if out_dir is not None else None,
         "trace_paths": trace_paths,
@@ -5786,6 +5838,8 @@ def run_api_llm_topos_sweep(
     alpha: float = 0.35,
     smoothing: float = 0.35,
     strategy: str = "mean",
+    gradient_dim: int | None = None,
+    gradient_alignment: str = "strict",
     jsonl_dir: str | Path | None = None,
     context_partials: Any = None,
     context_prompt: bool = False,
@@ -5811,6 +5865,7 @@ def run_api_llm_topos_sweep(
     """
 
     prompt_list = list(prompts)
+    resolved_gradient_dim = _api_llm_gradient_dim(z_state, gradient_dim)
     entries = _topos_sweep_entries(topos_profiles, labels=labels)
     request_kwargs_map = dict(request_kwargs or {})
     out_dir = Path(jsonl_dir) if jsonl_dir is not None else None
@@ -5829,6 +5884,7 @@ def run_api_llm_topos_sweep(
             request_options=request_options,
             signal_options=signal_options,
             adapter_options=adapter_options,
+            gradient_dim=resolved_gradient_dim,
         )
         adapters[label_value] = adapter
 
@@ -5853,6 +5909,8 @@ def run_api_llm_topos_sweep(
             alpha=alpha,
             smoothing=smoothing,
             strategy=strategy,
+            gradient_dim=resolved_gradient_dim,
+            gradient_alignment=gradient_alignment,
             jsonl_out=jsonl_out,
             context_partials=context_partials,
             runtime_adapter=adapter,
@@ -5875,6 +5933,8 @@ def run_api_llm_topos_sweep(
         "kind": "spiraltorch.api_llm_topos_sweep",
         "count": len(suites),
         "prompt_count": len(prompt_list),
+        "gradient_dim": resolved_gradient_dim,
+        "gradient_alignment": gradient_alignment,
         "labels": list(suites.keys()),
         "jsonl_dir": str(out_dir) if out_dir is not None else None,
         "trace_paths": trace_paths,

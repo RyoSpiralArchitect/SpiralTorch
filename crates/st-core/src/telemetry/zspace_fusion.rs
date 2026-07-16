@@ -14,7 +14,7 @@ pub const ZSPACE_TELEMETRY_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_t
 /// Stable payload kind for canonical Z-space telemetry fusion.
 pub const ZSPACE_TELEMETRY_FUSION_KIND: &str = "spiraltorch.zspace_telemetry_fusion";
 /// Stable contract identifier shared by Rust, Python, and WASM partial clients.
-pub const ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_partial_fusion.v1";
+pub const ZSPACE_PARTIAL_FUSION_CONTRACT_VERSION: &str = "spiraltorch.zspace_partial_fusion.v2";
 /// Stable payload kind for canonical Z-space partial fusion.
 pub const ZSPACE_PARTIAL_FUSION_KIND: &str = "spiraltorch.zspace_partial_fusion";
 /// Crate/module that owns Z-space fusion semantics.
@@ -82,6 +82,15 @@ pub enum ZSpaceFusionError {
         actual: usize,
         max: usize,
     },
+    #[error(
+        "gradient dimension {actual} at partial {index} does not match dimension {expected} at partial {expected_index}; set gradient_alignment to 'pad_zero' to opt into zero padding"
+    )]
+    GradientDimensionMismatch {
+        index: usize,
+        actual: usize,
+        expected_index: usize,
+        expected: usize,
+    },
     #[error("gradient entry {entry} at partial {index} must be finite")]
     NonFiniteGradient { index: usize, entry: usize },
     #[error("telemetry payload {index} must be an object")]
@@ -103,11 +112,19 @@ pub enum ZSpaceFusionError {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ZSpaceFusionStrategy {
+    /// Numerically stable mean weighted by each active partial.
     #[default]
     Mean,
+    /// Value from the last active partial that defines the metric.
     Last,
+    /// Largest value across active partials; weights only gate participation.
     Max,
+    /// Smallest value across active partials; weights only gate participation.
     Min,
+    /// Weighted median, interpolating a balanced boundary between neighbours.
+    Median,
+    /// Compensated weighted sum across active partials.
+    Sum,
 }
 
 impl ZSpaceFusionStrategy {
@@ -117,6 +134,28 @@ impl ZSpaceFusionStrategy {
             Self::Last => "last",
             Self::Max => "max",
             Self::Min => "min",
+            Self::Median => "median",
+            Self::Sum => "sum",
+        }
+    }
+}
+
+/// Policy for reconciling gradient dimensions across active partials.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZSpaceGradientAlignment {
+    /// Reject mismatched dimensions rather than inventing missing coordinates.
+    #[default]
+    Strict,
+    /// Preserve the legacy behavior by padding shorter gradients with zeroes.
+    PadZero,
+}
+
+impl ZSpaceGradientAlignment {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::PadZero => "pad_zero",
         }
     }
 }
@@ -152,6 +191,8 @@ pub struct ZSpacePartialFusionRequest {
     pub weights: Option<Vec<f64>>,
     #[serde(default)]
     pub strategy: ZSpaceFusionStrategy,
+    #[serde(default)]
+    pub gradient_alignment: ZSpaceGradientAlignment,
     #[serde(default)]
     pub telemetry: Vec<Value>,
 }
@@ -281,7 +322,9 @@ pub struct ZSpacePartialSourceAudit {
     pub weight: Option<f64>,
     pub status: &'static str,
     pub metric_count: usize,
+    pub gradient_present: bool,
     pub gradient_dim: usize,
+    pub gradient_padded: bool,
     pub telemetry_entry_count: usize,
 }
 
@@ -292,6 +335,7 @@ pub struct ZSpacePartialFusionPayload {
     pub semantic_owner: &'static str,
     pub semantic_backend: &'static str,
     pub strategy: &'static str,
+    pub gradient_alignment: &'static str,
     pub metrics: BTreeMap<String, f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gradient: Option<Vec<f64>>,
@@ -300,6 +344,10 @@ pub struct ZSpacePartialFusionPayload {
     pub active_count: usize,
     pub suppressed_count: usize,
     pub null_count: usize,
+    pub gradient_input_count: usize,
+    pub gradient_dim: usize,
+    pub gradient_padding_applied: bool,
+    pub gradient_padded_source_count: usize,
     pub sources: Vec<ZSpacePartialSourceAudit>,
 }
 
@@ -472,6 +520,57 @@ fn stable_weighted_mean<'a>(values: impl Iterator<Item = (&'a f64, &'a f64)>) ->
     mean
 }
 
+fn compensated_sum(values: impl Iterator<Item = f64>) -> f64 {
+    let mut sum = 0.0_f64;
+    let mut compensation = 0.0_f64;
+    for value in values {
+        let next = sum + value;
+        compensation += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + compensation
+}
+
+fn stable_midpoint(lower: f64, upper: f64) -> f64 {
+    if (lower < 0.0) == (upper < 0.0) {
+        lower + (upper - lower) * 0.5
+    } else {
+        lower * 0.5 + upper * 0.5
+    }
+}
+
+fn stable_weighted_sum(values: impl Iterator<Item = (f64, f64)>, max_weight: f64) -> f64 {
+    debug_assert!(max_weight.is_finite() && max_weight > 0.0);
+    let scaled_sum = compensated_sum(values.map(|(value, weight)| value * (weight / max_weight)));
+    scaled_sum * max_weight
+}
+
+fn weighted_median(mut values: Vec<(f64, f64)>) -> f64 {
+    debug_assert!(!values.is_empty());
+    values.sort_by(|(left, _), (right, _)| left.total_cmp(right));
+    let max_weight = values.iter().map(|(_, weight)| *weight).fold(0.0, f64::max);
+    let midpoint_weight =
+        compensated_sum(values.iter().map(|(_, weight)| weight / max_weight)) * 0.5;
+    let mut cumulative_weight = 0.0;
+    for (index, (value, weight)) in values.iter().enumerate() {
+        cumulative_weight += weight / max_weight;
+        if cumulative_weight < midpoint_weight {
+            continue;
+        }
+        if cumulative_weight == midpoint_weight {
+            if let Some((upper, _)) = values.get(index + 1) {
+                return stable_midpoint(*value, *upper);
+            }
+        }
+        return *value;
+    }
+    values.last().map(|(value, _)| *value).unwrap_or(0.0)
+}
+
 fn reduce_scalars(values: &[(f64, f64)], strategy: ZSpaceFusionStrategy) -> f64 {
     match strategy {
         ZSpaceFusionStrategy::Mean => {
@@ -486,20 +585,69 @@ fn reduce_scalars(values: &[(f64, f64)], strategy: ZSpaceFusionStrategy) -> f64 
             .iter()
             .map(|(value, _)| *value)
             .fold(f64::INFINITY, f64::min),
+        ZSpaceFusionStrategy::Median => weighted_median(values.to_vec()),
+        ZSpaceFusionStrategy::Sum => {
+            let max_weight = values.iter().map(|(_, weight)| *weight).fold(0.0, f64::max);
+            stable_weighted_sum(values.iter().copied(), max_weight)
+        }
     }
 }
 
+#[derive(Default)]
+struct GradientReduction {
+    gradient: Option<Vec<f64>>,
+    input_count: usize,
+    dimension: usize,
+    padded_source_indices: Vec<usize>,
+}
+
 fn reduce_gradients(
-    gradients: &[(Vec<f64>, f64)],
+    gradients: &[(usize, Vec<f64>, f64)],
     strategy: ZSpaceFusionStrategy,
-) -> Option<Vec<f64>> {
-    let length = gradients
-        .iter()
-        .map(|(gradient, _)| gradient.len())
-        .max()
-        .unwrap_or(0);
+    alignment: ZSpaceGradientAlignment,
+) -> Result<GradientReduction, ZSpaceFusionError> {
+    let Some((expected_index, expected_gradient, _)) = gradients.first() else {
+        return Ok(GradientReduction::default());
+    };
+    if alignment == ZSpaceGradientAlignment::Strict {
+        if let Some((index, gradient, _)) = gradients
+            .iter()
+            .skip(1)
+            .find(|(_, gradient, _)| gradient.len() != expected_gradient.len())
+        {
+            return Err(ZSpaceFusionError::GradientDimensionMismatch {
+                index: *index,
+                actual: gradient.len(),
+                expected_index: *expected_index,
+                expected: expected_gradient.len(),
+            });
+        }
+    }
+
+    let length = match alignment {
+        ZSpaceGradientAlignment::Strict => expected_gradient.len(),
+        ZSpaceGradientAlignment::PadZero => gradients
+            .iter()
+            .map(|(_, gradient, _)| gradient.len())
+            .max()
+            .unwrap_or(0),
+    };
+    let padded_source_indices = if alignment == ZSpaceGradientAlignment::PadZero {
+        gradients
+            .iter()
+            .filter_map(|(index, gradient, _)| (gradient.len() < length).then_some(*index))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut reduction = GradientReduction {
+        gradient: None,
+        input_count: gradients.len(),
+        dimension: length,
+        padded_source_indices,
+    };
     if length == 0 {
-        return None;
+        return Ok(reduction);
     }
 
     let mut result = vec![0.0; length];
@@ -507,10 +655,10 @@ fn reduce_gradients(
         ZSpaceFusionStrategy::Mean => {
             let max_weight = gradients
                 .iter()
-                .map(|(_, weight)| *weight)
+                .map(|(_, _, weight)| *weight)
                 .fold(0.0, f64::max);
             let mut total_weight = 0.0;
-            for (gradient, weight) in gradients {
+            for (_, gradient, weight) in gradients {
                 let scaled_weight = weight / max_weight;
                 if scaled_weight == 0.0 {
                     continue;
@@ -525,14 +673,14 @@ fn reduce_gradients(
             }
         }
         ZSpaceFusionStrategy::Last => {
-            let (gradient, _) = gradients.last().expect("non-empty gradients");
+            let (_, gradient, _) = gradients.last().expect("non-empty gradients");
             result[..gradient.len()].copy_from_slice(gradient);
         }
         ZSpaceFusionStrategy::Max | ZSpaceFusionStrategy::Min => {
             for (index, output) in result.iter_mut().enumerate() {
                 *output = gradients
                     .iter()
-                    .map(|(gradient, _)| gradient.get(index).copied().unwrap_or(0.0))
+                    .map(|(_, gradient, _)| gradient.get(index).copied().unwrap_or(0.0))
                     .fold(
                         if strategy == ZSpaceFusionStrategy::Max {
                             f64::NEG_INFINITY
@@ -547,8 +695,35 @@ fn reduce_gradients(
                     );
             }
         }
+        ZSpaceFusionStrategy::Median => {
+            for (index, output) in result.iter_mut().enumerate() {
+                *output = weighted_median(
+                    gradients
+                        .iter()
+                        .map(|(_, gradient, weight)| {
+                            (gradient.get(index).copied().unwrap_or(0.0), *weight)
+                        })
+                        .collect(),
+                );
+            }
+        }
+        ZSpaceFusionStrategy::Sum => {
+            let max_weight = gradients
+                .iter()
+                .map(|(_, _, weight)| *weight)
+                .fold(0.0, f64::max);
+            for (index, output) in result.iter_mut().enumerate() {
+                *output = stable_weighted_sum(
+                    gradients.iter().map(|(_, gradient, weight)| {
+                        (gradient.get(index).copied().unwrap_or(0.0), *weight)
+                    }),
+                    max_weight,
+                );
+            }
+        }
     }
-    Some(result)
+    reduction.gradient = Some(result);
+    Ok(reduction)
 }
 
 /// Fuse Z-space metric partials and attached telemetry under one Rust-owned contract.
@@ -595,7 +770,9 @@ pub fn fuse_zspace_partials(
                 weight: None,
                 status: "null",
                 metric_count: 0,
+                gradient_present: false,
                 gradient_dim: 0,
+                gradient_padded: false,
                 telemetry_entry_count: 0,
             });
             continue;
@@ -643,7 +820,9 @@ pub fn fuse_zspace_partials(
                 weight: Some(weight),
                 status: "suppressed",
                 metric_count: 0,
+                gradient_present: false,
                 gradient_dim: 0,
+                gradient_padded: false,
                 telemetry_entry_count: 0,
             });
             continue;
@@ -667,6 +846,7 @@ pub fn fuse_zspace_partials(
         }
 
         let mut metric_count = 0;
+        let mut gradient_present = false;
         let mut gradient_dim = 0;
         for (canonical, (_, value)) in canonical_metrics {
             if canonical == "gradient" {
@@ -690,8 +870,9 @@ pub fn fuse_zspace_partials(
                 {
                     return Err(ZSpaceFusionError::NonFiniteGradient { index, entry });
                 }
+                gradient_present = true;
                 gradient_dim = gradient.len();
-                gradients.push((gradient, weight));
+                gradients.push((index, gradient, weight));
                 continue;
             }
             let ZSpaceMetricInput::Scalar(value) = value else {
@@ -730,7 +911,9 @@ pub fn fuse_zspace_partials(
             weight: Some(weight),
             status: "active",
             metric_count,
+            gradient_present,
             gradient_dim,
+            gradient_padded: false,
             telemetry_entry_count,
         });
     }
@@ -745,7 +928,18 @@ pub fn fuse_zspace_partials(
         }
         metrics.insert(key, value);
     }
-    let gradient = reduce_gradients(&gradients, request.strategy);
+    let gradient_reduction =
+        reduce_gradients(&gradients, request.strategy, request.gradient_alignment)?;
+    for source in &mut sources {
+        source.gradient_padded = gradient_reduction
+            .padded_source_indices
+            .binary_search(&source.index)
+            .is_ok();
+    }
+    let gradient_input_count = gradient_reduction.input_count;
+    let gradient_dim = gradient_reduction.dimension;
+    let gradient_padded_source_count = gradient_reduction.padded_source_indices.len();
+    let gradient = gradient_reduction.gradient;
     if let Some((entry, _)) = gradient
         .iter()
         .flatten()
@@ -761,6 +955,7 @@ pub fn fuse_zspace_partials(
         semantic_owner: ZSPACE_FUSION_SEMANTIC_OWNER,
         semantic_backend: ZSPACE_FUSION_SEMANTIC_BACKEND,
         strategy: request.strategy.as_str(),
+        gradient_alignment: request.gradient_alignment.as_str(),
         metrics,
         gradient,
         telemetry,
@@ -768,6 +963,10 @@ pub fn fuse_zspace_partials(
         active_count,
         suppressed_count,
         null_count,
+        gradient_input_count,
+        gradient_dim,
+        gradient_padding_applied: gradient_padded_source_count > 0,
+        gradient_padded_source_count,
         sources,
     })
 }
@@ -892,6 +1091,7 @@ mod tests {
             ],
             weights: Some(vec![0.0, 3.0]),
             strategy: ZSpaceFusionStrategy::Mean,
+            gradient_alignment: ZSpaceGradientAlignment::Strict,
             telemetry: vec![json!({"external": 7.0})],
         })
         .expect("valid fusion");
@@ -966,15 +1166,187 @@ mod tests {
         let inputs = || {
             vec![
                 Some(partial(
-                    json!({"speed": -2.0, "gradient": [-2.0, 4.0]}),
+                    json!({"speed": 0.0, "gradient": [0.0, 6.0]}),
                     1.0,
                     "a",
                     None,
                 )),
                 Some(partial(
-                    json!({"speed": 3.0, "gradient": [3.0]}),
+                    json!({"speed": 2.0, "gradient": [2.0, 4.0]}),
                     1.0,
                     "b",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": 10.0, "gradient": [10.0, 8.0]}),
+                    1.0,
+                    "c",
+                    None,
+                )),
+            ]
+        };
+        let expected = [
+            (ZSpaceFusionStrategy::Mean, 4.0, vec![4.0, 6.0]),
+            (ZSpaceFusionStrategy::Last, 10.0, vec![10.0, 8.0]),
+            (ZSpaceFusionStrategy::Max, 10.0, vec![10.0, 8.0]),
+            (ZSpaceFusionStrategy::Min, 0.0, vec![0.0, 4.0]),
+            (ZSpaceFusionStrategy::Median, 2.0, vec![2.0, 6.0]),
+            (ZSpaceFusionStrategy::Sum, 12.0, vec![12.0, 18.0]),
+        ];
+
+        for (strategy, scalar, gradient) in expected {
+            let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
+                partials: inputs(),
+                strategy,
+                ..ZSpacePartialFusionRequest::default()
+            })
+            .expect("valid fusion");
+            assert!((fused.metrics["speed"] - scalar).abs() < 1e-12);
+            let fused_gradient = fused.gradient.expect("gradient");
+            assert_eq!(fused_gradient.len(), gradient.len());
+            assert!(fused_gradient
+                .iter()
+                .zip(&gradient)
+                .all(|(actual, expected)| (actual - expected).abs() < 1e-12));
+            assert_eq!(fused.gradient_alignment, "strict");
+            assert_eq!(fused.gradient_input_count, 3);
+            assert_eq!(fused.gradient_dim, 2);
+            assert!(!fused.gradient_padding_applied);
+        }
+    }
+
+    #[test]
+    fn sum_and_median_preserve_representable_low_order_signals() {
+        let summed = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                Some(partial(
+                    json!({"speed": 1e16, "gradient": [1e16]}),
+                    1.0,
+                    "large-positive",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": 1.0, "gradient": [1.0]}),
+                    1.0,
+                    "low-order",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": -1e16, "gradient": [-1e16]}),
+                    1.0,
+                    "large-negative",
+                    None,
+                )),
+            ],
+            strategy: ZSpaceFusionStrategy::Sum,
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("compensated sum remains finite");
+        assert_eq!(summed.metrics["speed"], 1.0);
+        assert_eq!(summed.gradient, Some(vec![1.0]));
+
+        let smallest = f64::from_bits(1);
+        let midpoint = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                Some(partial(
+                    json!({"speed": smallest, "gradient": [smallest]}),
+                    1.0,
+                    "a",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": smallest, "gradient": [smallest]}),
+                    1.0,
+                    "b",
+                    None,
+                )),
+            ],
+            strategy: ZSpaceFusionStrategy::Median,
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("median midpoint preserves identical subnormal values");
+        assert_eq!(midpoint.metrics["speed"], smallest);
+        assert_eq!(midpoint.gradient, Some(vec![smallest]));
+    }
+
+    #[test]
+    fn sum_and_median_honor_positive_partial_weights() {
+        let inputs = || {
+            vec![
+                Some(partial(
+                    json!({"speed": 0.0, "gradient": [0.0]}),
+                    1.0,
+                    "light",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": 10.0, "gradient": [10.0]}),
+                    3.0,
+                    "heavy",
+                    None,
+                )),
+            ]
+        };
+        let summed = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: inputs(),
+            strategy: ZSpaceFusionStrategy::Sum,
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("weighted sum");
+        assert_eq!(summed.metrics["speed"], 30.0);
+        assert_eq!(summed.gradient, Some(vec![30.0]));
+
+        let median = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: inputs(),
+            strategy: ZSpaceFusionStrategy::Median,
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect("weighted median");
+        assert_eq!(median.metrics["speed"], 10.0);
+        assert_eq!(median.gradient, Some(vec![10.0]));
+    }
+
+    #[test]
+    fn strict_gradient_alignment_rejects_ragged_inputs() {
+        let error = fuse_zspace_partials(ZSpacePartialFusionRequest {
+            partials: vec![
+                Some(partial(
+                    json!({"gradient": [1.0, 2.0]}),
+                    1.0,
+                    "reference",
+                    None,
+                )),
+                Some(partial(json!({"gradient": [3.0]}), 1.0, "ragged", None)),
+            ],
+            ..ZSpacePartialFusionRequest::default()
+        })
+        .expect_err("strict alignment must reject a ragged gradient");
+
+        assert_eq!(
+            error,
+            ZSpaceFusionError::GradientDimensionMismatch {
+                index: 1,
+                actual: 1,
+                expected_index: 0,
+                expected: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn pad_zero_preserves_legacy_reduction_and_audits_padding() {
+        let inputs = || {
+            vec![
+                Some(partial(
+                    json!({"speed": -2.0, "gradient": [-2.0, 4.0]}),
+                    1.0,
+                    "full",
+                    None,
+                )),
+                Some(partial(
+                    json!({"speed": 3.0, "gradient": [3.0]}),
+                    1.0,
+                    "short",
                     None,
                 )),
             ]
@@ -990,11 +1362,19 @@ mod tests {
             let fused = fuse_zspace_partials(ZSpacePartialFusionRequest {
                 partials: inputs(),
                 strategy,
+                gradient_alignment: ZSpaceGradientAlignment::PadZero,
                 ..ZSpacePartialFusionRequest::default()
             })
-            .expect("valid fusion");
+            .expect("explicit compatibility mode permits padding");
             assert_eq!(fused.metrics["speed"], scalar);
             assert_eq!(fused.gradient, Some(gradient));
+            assert_eq!(fused.gradient_alignment, "pad_zero");
+            assert_eq!(fused.gradient_input_count, 2);
+            assert_eq!(fused.gradient_dim, 2);
+            assert!(fused.gradient_padding_applied);
+            assert_eq!(fused.gradient_padded_source_count, 1);
+            assert!(!fused.sources[0].gradient_padded);
+            assert!(fused.sources[1].gradient_padded);
         }
     }
 

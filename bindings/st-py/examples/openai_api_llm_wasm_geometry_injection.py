@@ -107,6 +107,7 @@ def run_openai_geometry_injection(
         for run_index in range(repeat):
             runtime = st.ApiLLMZSpaceRuntime(
                 list(z_state),
+                gradient_dim=gradient_dim,
                 provider="openai" if live_openai else "local-demo",
                 model=model,
                 create_session=False,

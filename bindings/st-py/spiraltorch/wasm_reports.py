@@ -1007,9 +1007,30 @@ def load_wasm_report_context_artifact(
         metadata_payload = dict(metadata)
     else:
         raise ValueError("WASM context artifact metadata must be an object")
+    partials = [_partial_from_payload(row) for row in partial_rows]
+    gradient_dims = {
+        len(gradient)
+        for partial in partials
+        if isinstance((gradient := partial.resolved().get("gradient")), list)
+    }
+    if len(gradient_dims) > 1:
+        raise ValueError(
+            "WASM context artifact contains inconsistent gradient dimensions: "
+            f"{sorted(gradient_dims)}"
+        )
+    if gradient_dims:
+        actual_gradient_dim = next(iter(gradient_dims))
+        declared_gradient_dim = metadata_payload.get("gradient_dim")
+        if declared_gradient_dim is None:
+            metadata_payload["gradient_dim"] = actual_gradient_dim
+        elif int(declared_gradient_dim) != actual_gradient_dim:
+            raise ValueError(
+                "WASM context artifact gradient_dim metadata does not match its partials: "
+                f"declared {declared_gradient_dim}, actual {actual_gradient_dim}"
+            )
     metadata_payload.setdefault("artifact_path", str(artifact_path))
     metadata_payload.setdefault("artifact_schema", payload.get("schema"))
-    return [_partial_from_payload(row) for row in partial_rows], metadata_payload
+    return partials, metadata_payload
 
 
 def _work_units(summary: Mapping[str, Any]) -> float:

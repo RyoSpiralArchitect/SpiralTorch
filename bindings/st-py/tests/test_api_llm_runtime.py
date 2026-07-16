@@ -363,8 +363,24 @@ def test_api_llm_runtime_calls_callable_and_records_inference() -> None:
     assert runtime.as_dict()["traces"][0]["text"] == trace.text
 
 
+def test_api_llm_runtime_owns_one_gradient_dimension_contract() -> None:
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11, 0.2, -0.08],
+        create_session=False,
+    )
+
+    trace = runtime.record_response(_chat_response())
+
+    assert runtime.gradient_dim == 6
+    assert runtime.gradient_alignment == "strict"
+    assert len(trace.metrics["gradient"]) == 6
+    assert runtime.as_dict()["gradient_dim"] == 6
+    with pytest.raises(ValueError, match="must match the runtime contract"):
+        runtime.record_response(_chat_response(), gradient_dim=4)
+
+
 def test_api_llm_runtime_blends_wasm_context_partials_for_each_prompt() -> None:
-    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=6)
+    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=4)
     runtime = st.ApiLLMZSpaceRuntime(
         [0.12, -0.04, 0.33, -0.11],
         provider="example",
@@ -559,6 +575,7 @@ def test_topos_api_llm_request_plan_can_drive_runtime_adapter_request() -> None:
     plan = st.topos_api_llm_request_plan(
         {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
         request_options={"base_temperature": 0.8},
+        gradient_dim=4,
         observed_depth=4,
         visited_volume=25,
     )
@@ -607,6 +624,7 @@ def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
         psi_total=0.7,
         coherence=0.35,
         distortion_strength=1.25,
+        gradient_dim=4,
         base_temperature=0.7,
         include_penalties=True,
     )
@@ -656,6 +674,7 @@ def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     adapter = st.topos_runtime_adapter(
         {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        gradient_dim=4,
         observed_depth=4,
         visited_volume=25,
         request_options={"base_temperature": 0.8},
@@ -700,6 +719,7 @@ def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
 def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:
     adapter = st.topos_runtime_adapter(
         {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        gradient_dim=4,
         observed_depth=4,
         visited_volume=25,
         request_options={"base_temperature": 0.8},
@@ -882,6 +902,7 @@ def test_provider_wrapper_runtime_adapter_allows_explicit_request_override() -> 
     )
     adapter = st.topos_runtime_adapter(
         {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        gradient_dim=4,
         observed_depth=4,
         visited_volume=25,
         request_options={"base_temperature": 0.8},
@@ -915,6 +936,7 @@ def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context(tmp_path
     )
     context = st.topos_control_partial(
         topos_payload,
+        gradient_dim=4,
         observed_depth=4,
         visited_volume=25,
     )
@@ -1009,7 +1031,7 @@ def test_api_llm_geometry_context_partials_can_send_consensus_only() -> None:
 
 
 def test_runtime_context_prompt_injection_keeps_trace_prompt_original() -> None:
-    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=6)
+    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=4)
     runtime = st.ApiLLMZSpaceRuntime(
         [0.12, -0.04, 0.33, -0.11],
         provider="example",
@@ -1656,6 +1678,8 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     )
 
     assert result["kind"] == "spiraltorch.api_llm_topos_sweep"
+    assert result["gradient_dim"] == 4
+    assert result["gradient_alignment"] == "strict"
     assert result["labels"] == ["open", "guarded"]
     assert set(result["trace_paths"]) == {"open", "guarded"}
     assert result["trace_paths"]["open"].endswith("00-open.jsonl")
@@ -1673,6 +1697,7 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert open_request["temperature"] != pytest.approx(guarded_request["temperature"])
 
     for label in ("open", "guarded"):
+        assert len(result["adapters"][label]["context_partial"]["metrics"]["gradient"]) == 4
         route = result["adapters"][label]["runtime_route"]
         telemetry = result["suites"][label]["traces"][0]["inference"]["telemetry"][
             "payload"
@@ -2418,7 +2443,7 @@ def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
 def test_compare_api_llm_trace_runs_surfaces_wasm_context_tradeoffs(tmp_path) -> None:
     low_loss_context = st.api_llm_wasm_context_partials(
         _canvas_wasm_report(last_loss=0.02, stability=0.94),
-        gradient_dim=6,
+        gradient_dim=4,
     )
     low_loss = st.ApiLLMZSpaceRuntime(
         [0.12, -0.04, 0.33, -0.11],
@@ -2445,7 +2470,7 @@ def test_compare_api_llm_trace_runs_surfaces_wasm_context_tradeoffs(tmp_path) ->
             stability=0.62,
             webgpu_device_ready=False,
         ),
-        gradient_dim=6,
+        gradient_dim=4,
     )
     high_loss = st.ApiLLMZSpaceRuntime(
         [0.12, -0.04, 0.33, -0.11],

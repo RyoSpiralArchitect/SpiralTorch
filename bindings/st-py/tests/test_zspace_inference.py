@@ -20,6 +20,7 @@ from spiraltorch import (
     coherence_partial_from_diagnostics,
     compile_inference,
     decode_zspace_embedding,
+    elliptic_partial_from_telemetry,
     blend_zspace_partials,
     infer_canvas_snapshot,
     infer_canvas_transformer,
@@ -250,25 +251,87 @@ def test_partial_fusion_overrides_bundle_weights_and_suppresses_telemetry():
         telemetry={"external": 7.0},
     )
 
-    assert contract["contract_version"] == "spiraltorch.zspace_partial_fusion.v1"
+    assert contract["contract_version"] == "spiraltorch.zspace_partial_fusion.v2"
     assert contract["metrics"] == {"speed": 5.0}
     assert contract["gradient"] == [5.0]
     assert contract["suppressed_count"] == 1
+    assert contract["gradient_alignment"] == "strict"
+    assert contract["gradient_input_count"] == 1
+    assert contract["gradient_dim"] == 1
+    assert contract["gradient_padding_applied"] is False
     assert contract["telemetry"]["payload"] == {"external": 7.0, "source": 2.0}
     assert contract["sources"][0]["status"] == "suppressed"
 
 
-def test_partial_fusion_applies_extrema_strategy_to_gradient():
+def test_partial_fusion_requires_explicit_legacy_gradient_padding():
+    with pytest.raises(ValueError, match="does not match dimension"):
+        zspace_partial_fusion(
+            [
+                {"speed": -2.0, "gradient": [-2.0, 4.0]},
+                {"speed": 3.0, "gradient": [3.0]},
+            ],
+            strategy="max",
+        )
+
     contract = zspace_partial_fusion(
         [
             {"speed": -2.0, "gradient": [-2.0, 4.0]},
             {"speed": 3.0, "gradient": [3.0]},
         ],
         strategy="max",
+        gradient_alignment="pad_zero",
     )
 
     assert contract["metrics"]["speed"] == 3.0
     assert contract["gradient"] == [3.0, 4.0]
+    assert contract["gradient_alignment"] == "pad_zero"
+    assert contract["gradient_padding_applied"] is True
+    assert contract["gradient_padded_source_count"] == 1
+    assert contract["sources"][1]["gradient_padded"] is True
+
+
+def test_partial_fusion_applies_median_and_sum_to_scalars_and_gradients():
+    partials = [
+        {"speed": 0.0, "gradient": [0.0, 6.0]},
+        {"speed": 2.0, "gradient": [2.0, 4.0]},
+        {"speed": 10.0, "gradient": [10.0, 8.0]},
+    ]
+
+    median = zspace_partial_fusion(partials, strategy="median")
+    total = zspace_partial_fusion(partials, strategy="sum")
+
+    assert median["metrics"]["speed"] == 2.0
+    assert median["gradient"] == [2.0, 6.0]
+    assert total["metrics"]["speed"] == 12.0
+    assert total["gradient"] == [12.0, 18.0]
+
+    weighted_partials = [
+        {"speed": 0.0, "gradient": [0.0]},
+        {"speed": 10.0, "gradient": [10.0]},
+    ]
+    weighted_sum = zspace_partial_fusion(
+        weighted_partials, weights=[1.0, 3.0], strategy="sum"
+    )
+    weighted_median = zspace_partial_fusion(
+        weighted_partials, weights=[1.0, 3.0], strategy="median"
+    )
+    assert weighted_sum["metrics"]["speed"] == 30.0
+    assert weighted_sum["gradient"] == [30.0]
+    assert weighted_median["metrics"]["speed"] == 10.0
+    assert weighted_median["gradient"] == [10.0]
+
+
+def test_elliptic_telemetry_delegates_scalar_and_gradient_reduction_to_rust():
+    telemetry = [
+        {"curvature_radius": 0.0, "rotor_transport": [0.0, 6.0]},
+        {"curvature_radius": 2.0, "rotor_transport": [2.0, 4.0]},
+        {"curvature_radius": 10.0, "rotor_transport": [10.0, 8.0]},
+    ]
+
+    bundle = elliptic_partial_from_telemetry(telemetry, aggregate="median")
+
+    assert bundle.metrics["elliptic_curvature"] == 2.0
+    assert bundle.metrics["gradient"] == [2.0, 6.0]
 
 
 def test_partial_fusion_fails_closed_on_ambiguous_or_invalid_requests():
@@ -277,7 +340,11 @@ def test_partial_fusion_fails_closed_on_ambiguous_or_invalid_requests():
     with pytest.raises(ValueError, match="weights length"):
         zspace_partial_fusion([{"speed": 1.0}], weights=[])
     with pytest.raises(ValueError, match="unknown variant"):
-        zspace_partial_fusion([{"speed": 1.0}], strategy="median")
+        zspace_partial_fusion([{"speed": 1.0}], strategy="product")
+    with pytest.raises(ValueError, match="unknown variant"):
+        zspace_partial_fusion(
+            [{"speed": 1.0}], gradient_alignment="truncate"
+        )
 
 
 def test_zspace_fusion_functions_are_public():
@@ -337,6 +404,21 @@ def test_pipeline_blends_and_clears_partials():
     second = pipeline.infer()
     assert "speed" in second.metrics
     assert pipeline.posterior is not None
+
+
+def test_pipeline_does_not_hide_invalid_fusion_overrides():
+    pipeline = ZSpaceInferencePipeline(
+        [0.22, -0.11, 0.31, -0.07], gradient_alignment="pad_zero"
+    )
+    pipeline.add_partial({"speed": 0.2, "gradient": [0.1, -0.1]})
+    pipeline.add_partial({"speed": 0.6, "gradient": [0.5]})
+
+    assert pipeline.gradient_alignment == "pad_zero"
+    pipeline.infer(clear=False)
+    with pytest.raises(ValueError, match="unknown variant"):
+        pipeline.infer(gradient_alignment="", clear=False)
+    with pytest.raises(ValueError, match="unknown variant"):
+        pipeline.infer(strategy="", clear=False)
 
 
 def test_pipeline_can_queue_geometry_probe_context():

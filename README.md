@@ -207,9 +207,19 @@ const fused = zspacePartialFusionObject({
     { metrics: { speed: 0.8 }, weight: 2.0, origin: "webgpu" },
   ],
   strategy: "mean",
+  gradient_alignment: "strict",
   telemetry: [{ browser: { webgpu_ready: true } }],
 });
 ```
+
+Partial fusion contract v2 rejects ragged active gradients by default instead
+of silently inventing coordinates. Set `gradient_alignment: "pad_zero"` only
+for an explicit legacy-compatible replay; the result reports
+`gradient_padding_applied`, `gradient_padded_source_count`, and per-source
+`gradient_padded` audit fields. The `mean`, `last`, `max`, `min`, `median`, and
+`sum` reducers apply identically to scalar metrics and gradient coordinates in
+Rust, so Python elliptic telemetry and browser clients do not rebuild reduction
+semantics locally.
 
 Posterior decoding follows that same Rust-first boundary. Python's
 `ZSpacePosterior` and the browser's `zspacePosteriorDecodeObject` /
@@ -526,6 +536,10 @@ Without cloning the repo, `pip install spiraltorch` gives you:
   `st.load_api_llm_trace_events(...)`, and compare runs with
   `st.summarize_api_llm_trace_events(...)` or
   `st.compare_api_llm_trace_runs({"baseline": "a.jsonl", "candidate": "b.jsonl"})`.
+  The runtime derives its shared gradient width from `len(z_state)` by default.
+  When injecting a prebuilt Topos/WASM/geometry context, build it with that same
+  `gradient_dim`, or set `gradient_dim=...` on the runtime/suite explicitly;
+  mismatched active gradients fail under the Rust-owned `strict` contract.
   Use `runtime.run_prompts(...)` or `st.run_api_llm_prompt_suite(...)` for a
   multi-prompt bipolar/Z-space suite backed by OpenAI, Anthropic, or any
   compatible callable. Use `st.run_api_llm_prompt_suite_matrix(...)` when the

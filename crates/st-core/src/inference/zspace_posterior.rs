@@ -394,6 +394,7 @@ fn canonical_partial(
         })],
         weights: None,
         strategy: ZSpaceFusionStrategy::Last,
+        gradient_alignment: Default::default(),
         telemetry: Vec::new(),
     })?;
     Ok(CanonicalPosteriorPartial {

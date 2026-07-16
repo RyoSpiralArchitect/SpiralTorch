@@ -180,6 +180,7 @@ def run_demo(
         list(prompts),
         fake_api,
         z_state=list(z_state),
+        gradient_dim=gradient_dim,
         provider=provider,
         model=model,
         create_session=False,

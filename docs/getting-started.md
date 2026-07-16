@@ -90,6 +90,11 @@ client callable, and `ApiLLMZSpaceRuntime` converts text, token usage, latency,
 and probability-like fields into a `ZSpacePartialBundle` plus posterior
 confidence.
 
+`ApiLLMZSpaceRuntime` uses `len(z_state)` as the default gradient width. If you
+attach a prebuilt Topos, WASM, or geometry partial, give its builder the same
+`gradient_dim` (or configure that width on the runtime); Rust rejects ragged
+active gradients unless `gradient_alignment="pad_zero"` is explicitly selected.
+
 ```python
 import spiraltorch as st
 
