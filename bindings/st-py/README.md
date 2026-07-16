@@ -95,7 +95,10 @@ print(receipt["contract_version"], receipt["semantic_owner"])
 `backward()` accepts only scalar outputs; pass a shape-matched `Tensor` seed
 for an explicit vector-Jacobian product. Repeated calls accumulate, while
 `zero_grad_graph()` clears the complete reachable graph. These are Rust
-invariants, not Python-side conventions.
+invariants, not Python-side conventions. Use
+`output.vector_jacobian_product(input, seed)` for a side-effect-free VJP; it
+does not read or mutate accumulated gradients and returns zero when `input` is
+disconnected.
 
 ## What's included
 

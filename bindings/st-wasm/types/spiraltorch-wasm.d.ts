@@ -60,6 +60,7 @@ declare module "spiraltorch-wasm" {
         item(): number;
         backward(): AutogradBackwardReport;
         backwardWithGrad(values: Float32Array): AutogradBackwardReport;
+        vectorJacobianProduct(input: AutogradTensor, values: Float32Array): Float32Array;
         graphSummary(): AutogradGraphSummary;
     }
 

@@ -50,7 +50,9 @@ console.log(x.gradientValues(), receipt.contract_version, autogradSemanticOwner(
 
 Backward passes commit atomically, repeated passes accumulate explicitly, and
 `zeroGradGraph()` clears every reachable node. Python, WASM, and direct Rust all
-report `spiraltorch.autograd.v1` with semantic owner `st-tensor`.
+report `spiraltorch.autograd.v1` with semantic owner `st-tensor`. For probes that
+must not touch accumulated state, use `output.vectorJacobianProduct(input, seed)`;
+a disconnected input returns an all-zero gradient.
 
 ## Shared Topos control and runtime routing
 

@@ -162,7 +162,6 @@ pub enum HypergradError {
     MissingBatch {
         step: usize,
     },
-    MissingGrad(&'static str),
     NonTrainableInput(&'static str),
     InvalidIterations {
         label: &'static str,
@@ -188,7 +187,6 @@ impl fmt::Display for HypergradError {
             Self::MissingBatch { step } => {
                 write!(f, "missing training batch for unrolled step {step}")
             }
-            Self::MissingGrad(name) => write!(f, "missing gradient for {name}"),
             Self::NonTrainableInput(name) => {
                 write!(f, "{name} must be an AutogradTensor trainable leaf")
             }
@@ -268,9 +266,7 @@ where
     }
 
     let validation_loss = val_loss_fn(&weights)?;
-    validation_loss.zero_grad_graph();
-    validation_loss.backward()?;
-    let dval_dhyper = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
+    let dval_dhyper = scalar_vjp(&validation_loss, &hyper)?;
     Ok(UnrolledOut {
         w_final: weights,
         dval_dhyper,
@@ -337,9 +333,7 @@ where
     ensure_step_shape(w0.shape(), base.shape())?;
 
     let validation_loss = val_loss_fn(&w0)?;
-    validation_loss.zero_grad_graph();
-    validation_loss.backward()?;
-    let validation_gradient = w0.grad().ok_or(HypergradError::MissingGrad("w0"))?;
+    let validation_gradient = scalar_vjp(&validation_loss, &w0)?;
     let finite_diff_step = resolve_finite_diff_step(
         options.finite_diff_eps,
         options.finite_diff_mode,
@@ -388,7 +382,7 @@ fn solve_neumann(
     let mut converged = residual <= options.tolerance;
 
     while iterations < options.max_iters && !converged {
-        transpose_term = vjp(base, w0, &transpose_term, "w0")?;
+        transpose_term = vjp(base, w0, &transpose_term)?;
         sensitivity = sensitivity.add(&transpose_term)?;
         residual = stable_l2(&transpose_term);
         if !residual.is_finite() {
@@ -402,7 +396,7 @@ fn solve_neumann(
         converged = residual <= options.tolerance;
     }
 
-    let transpose_sensitivity = vjp(base, w0, &sensitivity, "w0")?;
+    let transpose_sensitivity = vjp(base, w0, &sensitivity)?;
     let equation_residual = sensitivity
         .sub(&transpose_sensitivity)?
         .sub(&equation_gradient)?;
@@ -415,7 +409,7 @@ fn solve_neumann(
     }
     residual_history.push(residual);
     converged = residual <= options.tolerance;
-    let dval_dhyper = vjp(base, hyper, &sensitivity, "hyper")?;
+    let dval_dhyper = vjp(base, hyper, &sensitivity)?;
     Ok(ImplicitOut {
         dval_dhyper,
         diagnostics: diagnostics(
@@ -480,7 +474,7 @@ where
             epsilon,
             options.finite_diff_mode,
         )?;
-        let jt_direction = vjp(base, w0, &direction, "w0")?;
+        let jt_direction = vjp(base, w0, &direction)?;
         let j_jt_direction = jvp(
             step_fn,
             w0,
@@ -532,7 +526,7 @@ where
         residual_squared = next_residual_squared;
     }
 
-    let transpose_sensitivity = vjp(base, w0, &sensitivity, "w0")?;
+    let transpose_sensitivity = vjp(base, w0, &sensitivity)?;
     let equation_residual = sensitivity.sub(&transpose_sensitivity)?.sub(&gradient)?;
     residual = stable_l2(&equation_residual);
     if !residual.is_finite() {
@@ -554,7 +548,7 @@ where
             SolverRoute::fallback(Solver::Cg, "cg_equation_residual"),
         );
     }
-    let dval_dhyper = vjp(base, hyper, &sensitivity, "hyper")?;
+    let dval_dhyper = vjp(base, hyper, &sensitivity)?;
     Ok(ImplicitOut {
         dval_dhyper,
         diagnostics: diagnostics(
@@ -621,11 +615,21 @@ fn vjp(
     output: &AutogradTensor,
     input: &AutogradTensor,
     vector: &Tensor,
-    label: &'static str,
 ) -> HypergradResult<Tensor> {
-    output.zero_grad_graph();
-    output.backward_with_grad(vector)?;
-    input.grad().ok_or(HypergradError::MissingGrad(label))
+    output
+        .vector_jacobian_product(input, vector)
+        .map_err(HypergradError::from)
+}
+
+fn scalar_vjp(output: &AutogradTensor, input: &AutogradTensor) -> HypergradResult<Tensor> {
+    let (rows, cols) = output.shape();
+    if (rows, cols) != (1, 1) {
+        return Err(HypergradError::Tensor(TensorError::NonScalarBackward {
+            rows,
+            cols,
+        }));
+    }
+    vjp(output, input, &Tensor::from_vec(1, 1, vec![1.0])?)
 }
 
 fn ensure_trainable(label: &'static str, tensor: &AutogradTensor) -> HypergradResult<()> {
@@ -778,6 +782,22 @@ mod tests {
         Ok(weights.matmul(coupling)?.add(hyper)?)
     }
 
+    fn hyper_agnostic_step(
+        weights: &AutogradTensor,
+        _hyper: &AutogradTensor,
+        batch: &AutogradTensor,
+    ) -> HypergradResult<AutogradTensor> {
+        Ok(weights.add(batch)?)
+    }
+
+    fn contraction_only_step(
+        weights: &AutogradTensor,
+        _hyper: &AutogradTensor,
+        contraction: &AutogradTensor,
+    ) -> HypergradResult<AutogradTensor> {
+        Ok(weights.hadamard(contraction)?)
+    }
+
     fn half_square_loss(weights: &AutogradTensor) -> HypergradResult<AutogradTensor> {
         Ok(weights.hadamard(weights)?.scale(0.5)?.sum()?)
     }
@@ -800,6 +820,25 @@ mod tests {
 
         assert!((output.w_final.item_f32().unwrap() - 0.8).abs() < 1e-6);
         assert!((output.dval_dhyper.data()[0] + 3.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn unrolled_disconnected_hypergradient_is_zero_not_stale() {
+        let hyper = scalar(0.1, true);
+        hyper.scale(7.0).unwrap().backward().unwrap();
+
+        let output = unrolled(
+            hyper_agnostic_step,
+            scalar(1.0, true),
+            hyper.clone(),
+            vec![scalar(2.0, false)].into_iter(),
+            1,
+            square_loss,
+        )
+        .unwrap();
+
+        assert_eq!(output.dval_dhyper.data(), &[0.0]);
+        assert_eq!(hyper.grad().unwrap().data(), &[7.0]);
     }
 
     #[test]
@@ -829,6 +868,44 @@ mod tests {
             output.diagnostics
         );
         assert_eq!(output.diagnostics.effective_solver, Solver::Neumann);
+    }
+
+    #[test]
+    fn implicit_disconnected_hypergradient_is_zero_not_stale() {
+        let hyper = scalar(0.5, true);
+        hyper.scale(9.0).unwrap().backward().unwrap();
+
+        let output = implicit_with_options(
+            contraction_only_step,
+            scalar(2.0, true),
+            hyper.clone(),
+            vec![scalar(0.2, false)].into_iter(),
+            half_square_loss,
+            ImplicitOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(output.dval_dhyper.data(), &[0.0]);
+        assert_eq!(hyper.grad().unwrap().data(), &[9.0]);
+    }
+
+    #[test]
+    fn implicit_disconnected_validation_gradient_is_zero_not_stale() {
+        let weights = scalar(2.0, true);
+        weights.scale(5.0).unwrap().backward().unwrap();
+
+        let output = implicit_with_options(
+            fixed_point_step,
+            weights.clone(),
+            scalar(0.5, true),
+            vec![scalar(0.2, false)].into_iter(),
+            |_| Ok(scalar(1.0, false)),
+            ImplicitOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(output.dval_dhyper.data(), &[0.0]);
+        assert_eq!(weights.grad().unwrap().data(), &[5.0]);
     }
 
     #[test]

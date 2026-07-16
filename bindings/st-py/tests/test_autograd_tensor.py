@@ -38,6 +38,23 @@ def test_non_scalar_backward_requires_an_explicit_vjp_seed() -> None:
     assert x.grad().tolist()[0] == pytest.approx([2.0, -4.0])
 
 
+def test_vector_jacobian_product_is_side_effect_free_and_disconnect_safe() -> None:
+    x = st.AutogradTensor.variable(tensor([2.0, -3.0]))
+    output = x.hadamard(x)
+    disconnected = st.AutogradTensor.variable(tensor([4.0, 5.0]))
+    disconnected.scale(3.0).sum().backward()
+
+    gradient = output.vector_jacobian_product(x, tensor([0.5, -2.0]))
+    disconnected_gradient = output.vector_jacobian_product(
+        disconnected, tensor([1.0, 1.0])
+    )
+
+    assert gradient.tolist()[0] == pytest.approx([2.0, 12.0])
+    assert disconnected_gradient.tolist()[0] == [0.0, 0.0]
+    assert x.grad() is None
+    assert disconnected.grad().tolist()[0] == pytest.approx([3.0, 3.0])
+
+
 def test_repeated_backward_and_graph_zeroing_are_explicit() -> None:
     x = st.AutogradTensor.variable(tensor([2.0]))
     loss = x.hadamard(x).sum()

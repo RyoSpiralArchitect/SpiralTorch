@@ -34,6 +34,8 @@ meaning of a backward pass.
   persistent gradient is committed.
 - Repeated backward passes accumulate; `zero_grad()` and `zero_grad_graph()`
   clear gradients explicitly.
+- `vector_jacobian_product()` is side-effect-free, ignores accumulated gradient
+  state, and returns zero for a tracked input disconnected from the output.
 - Concurrent backward calls cannot lose updates.
 - Telemetry is emitted after the graph lock is released, so observers may read
   committed gradients without deadlocking.

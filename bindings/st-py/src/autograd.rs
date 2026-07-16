@@ -154,6 +154,13 @@ impl PyAutogradTensor {
             .map_err(tensor_err_to_py)
     }
 
+    fn vector_jacobian_product(&self, input: &Self, seed: &PyTensor) -> PyResult<PyTensor> {
+        self.inner
+            .vector_jacobian_product(&input.inner, &seed.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
     fn mean_squared_error(&self, target: &Self) -> PyResult<Self> {
         self.inner
             .mean_squared_error(&target.inner)

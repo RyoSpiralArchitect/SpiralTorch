@@ -46,6 +46,14 @@ impl AutogradTransport {
             .backward_with_grad(&seed)
             .map_err(|error| error.to_string())
     }
+
+    fn vector_jacobian_product(&self, input: &Self, values: Vec<f32>) -> Result<Tensor, String> {
+        let (rows, cols) = self.inner.shape();
+        let seed = Tensor::from_vec(rows, cols, values).map_err(|error| error.to_string())?;
+        self.inner
+            .vector_jacobian_product(&input.inner, &seed)
+            .map_err(|error| error.to_string())
+    }
 }
 
 /// Returns the native semantic contract version exposed by the browser client.
@@ -267,6 +275,18 @@ impl AutogradTensor {
         to_json_compatible_js(&report.contract_payload())
     }
 
+    #[wasm_bindgen(js_name = vectorJacobianProduct)]
+    pub fn vector_jacobian_product(
+        &self,
+        input: &AutogradTensor,
+        values: Vec<f32>,
+    ) -> Result<Vec<f32>, JsValue> {
+        self.transport
+            .vector_jacobian_product(&input.transport, values)
+            .map(|gradient| gradient.data().to_vec())
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = graphSummary)]
     pub fn graph_summary(&self) -> Result<JsValue, JsValue> {
         to_json_compatible_js(&self.transport.inner.graph_summary().contract_payload())
@@ -302,6 +322,22 @@ mod tests {
 
         y.backward_with_values(vec![0.5, -1.0]).unwrap();
         assert_eq!(x.inner.grad().unwrap().data(), &[2.0, -4.0]);
+    }
+
+    #[test]
+    fn wasm_transport_vjp_is_side_effect_free_and_disconnect_safe() {
+        let x = AutogradTransport::new(1, 2, vec![2.0, -3.0], true).unwrap();
+        let output = AutogradTransport::from_inner(x.inner.hadamard(&x.inner).unwrap());
+        let disconnected = AutogradTransport::new(1, 2, vec![4.0, 5.0], true).unwrap();
+
+        let gradient = output.vector_jacobian_product(&x, vec![0.5, -2.0]).unwrap();
+        let disconnected_gradient = output
+            .vector_jacobian_product(&disconnected, vec![1.0, 1.0])
+            .unwrap();
+
+        assert_eq!(gradient.data(), &[2.0, 12.0]);
+        assert_eq!(disconnected_gradient.data(), &[0.0, 0.0]);
+        assert!(x.inner.grad().is_none());
     }
 
     #[test]

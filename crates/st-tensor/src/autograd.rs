@@ -456,6 +456,29 @@ impl AutogradTensor {
         scalar_value(self.value(), "autograd_item")
     }
 
+    /// Computes a side-effect-free vector-Jacobian product with respect to `input`.
+    ///
+    /// A tracked input that is not connected to this output has derivative zero.
+    /// Existing accumulated gradients are neither read nor modified.
+    pub fn vector_jacobian_product(&self, input: &Self, seed: &Tensor) -> PureResult<Tensor> {
+        self.validate_backward_seed(seed)?;
+        let gradient = {
+            let _serial = backward_lock();
+            let topology = self.topological_order();
+            let mut gradients = self.local_gradients(&topology, seed)?;
+            match gradients.remove(&input.id()) {
+                Some(gradient) => gradient,
+                None => Tensor::zeros(input.shape().0, input.shape().1)?,
+            }
+        };
+        crate::emit_tensor_op(
+            "autograd_vjp",
+            &[seed.shape().0, seed.shape().1],
+            &[input.shape().0, input.shape().1],
+        );
+        Ok(gradient)
+    }
+
     /// Runs reverse mode with an implicit scalar seed of one.
     pub fn backward(&self) -> PureResult<AutogradBackwardReport> {
         let (rows, cols) = self.shape();
@@ -468,13 +491,7 @@ impl AutogradTensor {
 
     /// Runs an atomic vector-Jacobian product with an explicit output seed.
     pub fn backward_with_grad(&self, seed: &Tensor) -> PureResult<AutogradBackwardReport> {
-        if seed.shape() != self.shape() {
-            return Err(TensorError::ShapeMismatch {
-                left: seed.shape(),
-                right: self.shape(),
-            });
-        }
-        validate_finite_tensor("autograd_backward_seed", seed)?;
+        self.validate_backward_seed(seed)?;
         let report = {
             let _serial = backward_lock();
             self.backward_locked(seed)?
@@ -483,35 +500,19 @@ impl AutogradTensor {
         Ok(report)
     }
 
+    fn validate_backward_seed(&self, seed: &Tensor) -> PureResult<()> {
+        if seed.shape() != self.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: seed.shape(),
+                right: self.shape(),
+            });
+        }
+        validate_finite_tensor("autograd_backward_seed", seed)
+    }
+
     fn backward_locked(&self, seed: &Tensor) -> PureResult<AutogradBackwardReport> {
         let topology = self.topological_order();
-        let mut local_gradients = HashMap::<u64, Tensor>::new();
-        local_gradients.insert(self.id(), seed.clone());
-
-        for node in topology.iter().rev() {
-            let Some(upstream) = local_gradients.get(&node.id()).cloned() else {
-                continue;
-            };
-            for (parent, gradient) in node.node.operation.backward(&upstream)? {
-                if !parent.requires_grad() {
-                    continue;
-                }
-                if gradient.shape() != parent.shape() {
-                    return Err(TensorError::ShapeMismatch {
-                        left: gradient.shape(),
-                        right: parent.shape(),
-                    });
-                }
-                validate_finite_tensor("autograd_backward_gradient", &gradient)?;
-                if let Some(existing) = local_gradients.get(&parent.id()) {
-                    let accumulated = existing.add(&gradient)?;
-                    validate_finite_tensor("autograd_backward_accumulation", &accumulated)?;
-                    local_gradients.insert(parent.id(), accumulated);
-                } else {
-                    local_gradients.insert(parent.id(), gradient);
-                }
-            }
-        }
+        let local_gradients = self.local_gradients(&topology, seed)?;
 
         // Build every next value before mutating any node, preserving failure atomicity.
         let mut prepared = Vec::new();
@@ -546,6 +547,41 @@ impl AutogradTensor {
             seed_l2: stable_l2(seed),
         };
         Ok(report)
+    }
+
+    fn local_gradients(
+        &self,
+        topology: &[AutogradTensor],
+        seed: &Tensor,
+    ) -> PureResult<HashMap<u64, Tensor>> {
+        let mut local_gradients = HashMap::<u64, Tensor>::new();
+        local_gradients.insert(self.id(), seed.clone());
+
+        for node in topology.iter().rev() {
+            let Some(upstream) = local_gradients.get(&node.id()).cloned() else {
+                continue;
+            };
+            for (parent, gradient) in node.node.operation.backward(&upstream)? {
+                if !parent.requires_grad() {
+                    continue;
+                }
+                if gradient.shape() != parent.shape() {
+                    return Err(TensorError::ShapeMismatch {
+                        left: gradient.shape(),
+                        right: parent.shape(),
+                    });
+                }
+                validate_finite_tensor("autograd_backward_gradient", &gradient)?;
+                if let Some(existing) = local_gradients.get(&parent.id()) {
+                    let accumulated = existing.add(&gradient)?;
+                    validate_finite_tensor("autograd_backward_accumulation", &accumulated)?;
+                    local_gradients.insert(parent.id(), accumulated);
+                } else {
+                    local_gradients.insert(parent.id(), gradient);
+                }
+            }
+        }
+        Ok(local_gradients)
     }
 
     fn emit_backward_report(&self, seed: &Tensor, report: &AutogradBackwardReport) {
@@ -775,6 +811,40 @@ mod tests {
             finite_difference.push((objective(&plus) - objective(&minus)) / (2.0 * epsilon));
         }
         assert_close(gradient.data(), &finite_difference, 2e-4);
+    }
+
+    #[test]
+    fn vector_jacobian_product_is_side_effect_free() {
+        let variable = AutogradTensor::variable(tensor(1, 2, vec![2.0, -3.0])).unwrap();
+        let output = variable.hadamard(&variable).unwrap();
+        let seed = tensor(1, 2, vec![0.5, -2.0]);
+
+        let gradient = output.vector_jacobian_product(&variable, &seed).unwrap();
+
+        assert_close(gradient.data(), &[2.0, 12.0], 1e-6);
+        assert!(variable.grad().is_none());
+        assert!(output.grad().is_none());
+    }
+
+    #[test]
+    fn disconnected_vector_jacobian_product_is_zero_not_stale() {
+        let connected = AutogradTensor::variable(tensor(1, 2, vec![1.0, -2.0])).unwrap();
+        let output = connected.hadamard(&connected).unwrap();
+        let disconnected = AutogradTensor::variable(tensor(1, 2, vec![4.0, 5.0])).unwrap();
+        disconnected
+            .scale(3.0)
+            .unwrap()
+            .sum()
+            .unwrap()
+            .backward()
+            .unwrap();
+
+        let gradient = output
+            .vector_jacobian_product(&disconnected, &tensor(1, 2, vec![1.0, 1.0]))
+            .unwrap();
+
+        assert_eq!(gradient.data(), &[0.0, 0.0]);
+        assert_eq!(disconnected.grad().unwrap().data(), &[3.0, 3.0]);
     }
 
     #[test]
