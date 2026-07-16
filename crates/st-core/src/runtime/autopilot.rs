@@ -1349,7 +1349,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AutopilotError> {
             file.flush()?;
             file.sync_all()?;
             drop(file);
-            fs::rename(&temporary, path)?;
+            atomic_replace(&temporary, path)?;
             #[cfg(unix)]
             File::open(parent)?.sync_all()?;
             Ok::<(), std::io::Error>(())
@@ -1369,6 +1369,43 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AutopilotError> {
             )
         }),
     ))
+}
+
+#[cfg(not(windows))]
+fn atomic_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // Both paths are NUL-terminated and remain alive for the duration of the call.
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_profile_value(path: &Path, field: &str, value: f64) -> Result<(), AutopilotError> {

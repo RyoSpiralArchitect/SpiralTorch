@@ -79,6 +79,9 @@ st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"
 getrandom = { version = "0.2", features = ["js"] }
 st-tensor = { path = "../st-tensor", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 approx = "0.5"
 tempfile = "3"
