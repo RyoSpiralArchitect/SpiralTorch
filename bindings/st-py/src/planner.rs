@@ -6,7 +6,9 @@ use pyo3::Bound;
 use st_backend_hip as hip_backend;
 #[cfg(feature = "cuda")]
 use st_core::backend::cuda_exec::CudaExecutor;
-use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+use st_core::backend::device_caps::{
+    BackendKind, DeviceCaps, DeviceCapsError, DeviceCapsOverrides,
+};
 use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
@@ -22,17 +24,14 @@ use st_core::backend::runtime_probe::{
     build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
     DeviceReport,
 };
-use st_core::backend::unison_heuristics::RankKind;
+use st_core::backend::unison::RankKind;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use st_core::ops::rank_entry::execute_rank;
 
-#[cfg(feature = "kdsl")]
 use crate::json::json_to_py;
 #[cfg(feature = "kdsl")]
 use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
-use st_core::ops::rank_entry::{plan_rank, plan_rank_with_config, RankPlan};
-#[cfg(feature = "kdsl")]
-use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
+use st_core::ops::rank_entry::{try_plan_rank, try_plan_rank_with_config, RankPlan};
 
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
 pub(crate) struct PyRankPlan {
@@ -83,89 +82,6 @@ impl PyRankPlan {
             5 => "warp_bitonic",
             _ => "auto",
         }
-    }
-}
-
-#[cfg(feature = "kdsl")]
-fn spiralk_ctx_from_plan(plan: &RankPlan) -> SpiralKCtx {
-    let subgroup_capacity = if plan.choice.subgroup {
-        plan.choice.kl.max(1)
-    } else {
-        1
-    };
-    let kernel_capacity = if plan.k <= 1_024 {
-        1
-    } else if plan.k <= 16_384 {
-        2
-    } else {
-        3
-    };
-    let tile_cols = if plan.choice.fft_tile != 0 {
-        plan.choice.fft_tile
-    } else {
-        let tiles = plan.cols.max(1).div_ceil(256);
-        tiles.max(1) * 256
-    };
-    let radix = if plan.choice.fft_radix != 0 {
-        plan.choice.fft_radix
-    } else if plan.k.is_power_of_two() {
-        4
-    } else {
-        2
-    };
-    let segments = if plan.choice.fft_segments != 0 {
-        plan.choice.fft_segments
-    } else if plan.cols > 131_072 {
-        4
-    } else if plan.cols > 32_768 {
-        2
-    } else {
-        1
-    };
-    SpiralKCtx {
-        r: plan.rows,
-        c: plan.cols,
-        k: plan.k,
-        sg: plan.choice.subgroup,
-        sgc: subgroup_capacity,
-        kc: kernel_capacity,
-        tile_cols,
-        radix,
-        segments,
-    }
-}
-
-#[cfg(feature = "kdsl")]
-fn apply_spiralk_overrides(
-    choice: &mut st_core::backend::unison_heuristics::Choice,
-    hard: &SpiralKHard,
-) {
-    if let Some(flag) = hard.use_2ce {
-        choice.use_2ce = flag;
-    }
-    if let Some(value) = hard.wg {
-        choice.wg = value.max(1);
-    }
-    if let Some(value) = hard.kl {
-        choice.kl = value.max(1);
-    }
-    if let Some(value) = hard.ch {
-        choice.ch = value;
-    }
-    if let Some(value) = hard.algo {
-        choice.mkd = value as u32;
-    }
-    if let Some(value) = hard.ctile {
-        choice.ctile = value;
-    }
-    if let Some(value) = hard.tile_cols {
-        choice.fft_tile = value.max(1);
-    }
-    if let Some(value) = hard.radix {
-        choice.fft_radix = value.max(1);
-    }
-    if let Some(value) = hard.segments {
-        choice.fft_segments = value.max(1);
     }
 }
 
@@ -298,9 +214,35 @@ impl PyRankPlan {
         self.inner.fft_spiralk_hint()
     }
 
+    /// Returns the shared Rust-owned planning contract with client provenance.
+    fn contract(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let mut value = serde_json::to_value(self.inner.snapshot())
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+        let object = value
+            .as_object_mut()
+            .expect("rank-plan snapshot serializes as an object");
+        object.insert("execution_client".into(), "python".into());
+        object.insert(
+            "requested_backend".into(),
+            self.requested_backend
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "effective_backend".into(),
+            self.effective_backend
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        json_to_py(py, &value)
+    }
+
     #[cfg(feature = "kdsl")]
     fn spiralk_context(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let ctx = spiralk_ctx_from_plan(self.plan());
+        let ctx = self
+            .plan()
+            .spiralk_context()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let wrapper = PySpiralKContext::from_ctx(ctx);
         Ok(Py::new(py, wrapper)?.into_py(py))
     }
@@ -314,10 +256,15 @@ impl PyRankPlan {
 
     #[cfg(feature = "kdsl")]
     fn rewrite_with_spiralk(&self, script: &str) -> PyResult<PyRankPlan> {
-        let ctx = spiralk_ctx_from_plan(self.plan());
+        let ctx = self
+            .plan()
+            .spiralk_context()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let out = st_kdsl::eval_program(script, &ctx).map_err(spiralk_err_to_py)?;
-        let mut updated = self.inner.clone();
-        apply_spiralk_overrides(&mut updated.choice, &out.hard);
+        let updated = self
+            .inner
+            .try_with_spiralk_hard(&out.hard)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyRankPlan::from_plan_with_metadata(
             updated,
             self.kind_override,
@@ -334,11 +281,16 @@ impl PyRankPlan {
         script: &str,
         max_events: usize,
     ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
-        let ctx = spiralk_ctx_from_plan(self.plan());
+        let ctx = self
+            .plan()
+            .spiralk_context()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let (out, trace) = st_kdsl::eval_program_with_trace(script, &ctx, max_events)
             .map_err(spiralk_err_to_py)?;
-        let mut updated = self.inner.clone();
-        apply_spiralk_overrides(&mut updated.choice, &out.hard);
+        let updated = self
+            .inner
+            .try_with_spiralk_hard(&out.hard)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let out_obj = spiralk_out_to_dict(py, &out)?;
         let trace_value = serde_json::to_value(&trace)
             .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
@@ -381,16 +333,8 @@ pub(crate) fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
         return Ok(BackendKind::Wgpu);
     }
 
-    match raw.to_ascii_lowercase().as_str() {
-        "wgpu" | "webgpu" => Ok(BackendKind::Wgpu),
-        "mps" => Ok(BackendKind::Mps),
-        "cuda" => Ok(BackendKind::Cuda),
-        "hip" | "rocm" => Ok(BackendKind::Hip),
-        "cpu" => Ok(BackendKind::Cpu),
-        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown backend '{other}', expected 'wgpu', 'mps', 'cuda', 'hip', or 'cpu'"
-        ))),
-    }
+    raw.parse::<BackendKind>()
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
 }
 
 fn backend_label(kind: BackendKind) -> &'static str {
@@ -512,14 +456,8 @@ fn parse_backend_for_planner(name: Option<&str>) -> PyResult<BackendResolution> 
 }
 
 fn parse_rank_kind(kind: &str) -> PyResult<RankKind> {
-    match kind.to_ascii_lowercase().as_str() {
-        "topk" | "top_k" => Ok(RankKind::TopK),
-        "midk" | "mid_k" => Ok(RankKind::MidK),
-        "bottomk" | "bottom_k" => Ok(RankKind::BottomK),
-        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown rank kind '{other}', expected 'topk', 'midk', or 'bottomk'"
-        ))),
-    }
+    kind.parse::<RankKind>()
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
 }
 
 fn diagnostic_input(rows: u32, cols: u32) -> Vec<f32> {
@@ -543,14 +481,15 @@ fn execute_backend_probe(
     k: u32,
     strict: bool,
 ) -> Result<(Vec<f32>, Vec<i32>), String> {
-    let caps = build_caps(backend, None, None, None, None);
+    let caps = build_caps(backend, None, None, None, None).map_err(|error| error.to_string())?;
     let mut execution_config = ExecutionConfig::from_env();
     execution_config.accelerator_fallback = if strict {
         AcceleratorFallback::Forbid
     } else {
         AcceleratorFallback::Allow
     };
-    let plan = plan_rank_with_config(kind, rows, cols, k, caps, execution_config);
+    let plan = try_plan_rank_with_config(kind, rows, cols, k, caps, execution_config)
+        .map_err(|error| error.to_string())?;
     let input = diagnostic_input(rows, cols);
     let mut out_vals = vec![0.0f32; (rows as usize).saturating_mul(k as usize)];
     let mut out_idx = vec![0i32; (rows as usize).saturating_mul(k as usize)];
@@ -676,48 +615,21 @@ fn probe_gpu_path(
     Ok(report.into_py(py))
 }
 
-fn apply_overrides(
-    mut caps: DeviceCaps,
-    lane_width: Option<u32>,
-    subgroup: Option<bool>,
-    max_workgroup: Option<u32>,
-    shared_mem_per_workgroup: Option<u32>,
-) -> DeviceCaps {
-    if let Some(width) = lane_width {
-        caps.lane_width = width.max(1);
-    }
-    if let Some(flag) = subgroup {
-        caps.subgroup = flag;
-    }
-    if let Some(max_wg) = max_workgroup {
-        caps.max_workgroup = max_wg.max(1);
-    }
-    if let Some(shared) = shared_mem_per_workgroup {
-        if shared == 0 {
-            caps.shared_mem_per_workgroup = None;
-        } else {
-            caps.shared_mem_per_workgroup = Some(shared);
-        }
-    }
-    caps
-}
-
 pub(crate) fn build_caps(
     backend: BackendKind,
     lane_width: Option<u32>,
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
-) -> DeviceCaps {
-    let base = backend.default_caps();
-
-    apply_overrides(
-        base,
-        lane_width,
-        subgroup,
-        max_workgroup,
-        shared_mem_per_workgroup,
-    )
+) -> Result<DeviceCaps, DeviceCapsError> {
+    backend
+        .default_caps()
+        .try_with_overrides(DeviceCapsOverrides {
+            lane_width,
+            subgroup,
+            max_workgroup,
+            shared_mem_per_workgroup,
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -741,8 +653,10 @@ fn plan_impl(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
-    );
-    let plan = plan_rank(kind, rows, cols, k, caps);
+    )
+    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+    let plan = try_plan_rank(kind, rows, cols, k, caps)
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
     Ok(PyRankPlan::from_plan_with_metadata(
         plan,
         kind_override,
@@ -765,16 +679,10 @@ fn plan(
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
 ) -> PyResult<PyRankPlan> {
-    let (rank_kind, kind_override) = match kind.to_ascii_lowercase().as_str() {
-        "topk" | "top_k" => (RankKind::TopK, None),
-        "midk" | "mid_k" => (RankKind::MidK, None),
-        "bottomk" | "bottom_k" => (RankKind::BottomK, None),
-        "fft" => (RankKind::TopK, Some("fft")),
-        other => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown rank kind '{other}', expected 'topk', 'midk', 'bottomk', or 'fft'"
-            )))
-        }
+    let (rank_kind, kind_override) = if kind.eq_ignore_ascii_case("fft") {
+        (RankKind::TopK, Some("fft"))
+    } else {
+        (parse_rank_kind(kind)?, None)
     };
     plan_impl(
         rank_kind,
@@ -840,7 +748,8 @@ fn describe_device(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
-    );
+    )
+    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
     let report = build_device_report(
         backend_resolution.reported_backend,
         caps,

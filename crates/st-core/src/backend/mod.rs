@@ -41,6 +41,7 @@ pub mod runtime_route;
 pub mod soft_logic;
 pub mod spiralk_fft;
 pub mod temporal_fusion;
+pub mod unison;
 pub mod unison_heuristics;
 pub mod wasm_tuner;
 pub mod wasm_tuner_builder;

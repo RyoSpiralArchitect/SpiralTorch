@@ -506,6 +506,7 @@ pub fn classify_roundtable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::device_caps::DeviceCaps;
     use crate::backend::execution_plan::ExecutionConfig;
     use crate::backend::unison_heuristics::{Choice, RankKind};
 
@@ -513,8 +514,9 @@ mod tests {
         RankPlan {
             kind,
             rows: 1,
-            cols: 1,
+            cols: k.max(1),
             k,
+            device_caps: DeviceCaps::cpu(),
             choice: Choice {
                 use_2ce: false,
                 wg: 32,

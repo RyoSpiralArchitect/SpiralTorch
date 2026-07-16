@@ -204,6 +204,72 @@ declare module "spiraltorch-wasm" {
         passed: boolean;
     };
 
+    export type RankPlanRequest = {
+        kind: "topk" | "top_k" | "midk" | "mid_k" | "bottomk" | "bottom_k";
+        rows: number;
+        cols: number;
+        k: number;
+        backend?: "auto" | "wgpu" | "webgpu" | "mps" | "cuda" | "hip" | "rocm" | "cpu";
+        lane_width?: number;
+        subgroup?: boolean;
+        max_workgroup?: number;
+        shared_mem_per_workgroup?: number;
+        strict_accelerator?: boolean;
+        tensor_util_wgpu_min_values?: number;
+    };
+
+    export type RankPlanLatencyWindow = {
+        target: number;
+        lower: number;
+        upper: number;
+        min_lane: number;
+        max_lane: number;
+        slack: number;
+        stride: number;
+    };
+
+    export type RankPlanContract = {
+        kind: "spiraltorch.rank_plan";
+        contract_version: "spiraltorch.rank_plan.v1";
+        semantic_owner: "st-core::ops::rank_entry";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        requested_backend: "wgpu" | "mps" | "cuda" | "hip" | "cpu";
+        effective_backend: "wgpu" | "mps" | "cuda" | "hip" | "cpu";
+        rank_kind: "topk" | "midk" | "bottomk";
+        rows: number;
+        cols: number;
+        k: number;
+        input_elements: number;
+        output_elements: number;
+        device_caps: {
+            backend: "wgpu" | "mps" | "cuda" | "hip" | "cpu";
+            subgroup: boolean;
+            lane_width: number;
+            max_workgroup: number;
+            shared_mem_per_workgroup: number | null;
+        };
+        choice: {
+            use_two_stage: boolean;
+            workgroup: number;
+            lanes: number;
+            channel_stride: number;
+            merge_kind: number;
+            merge_detail: number;
+            tile: number;
+            compaction_tile: number;
+            subgroup: boolean;
+            fft_tile: number;
+            fft_radix: number;
+            fft_segments: number;
+            latency_window: RankPlanLatencyWindow | null;
+        };
+        execution: {
+            accelerator_fallback: "allow" | "forbid";
+            tensor_util_wgpu_min_values: number;
+        };
+    };
+
     export type ToposRoutePolicyProfile =
         | "balanced"
         | "quality"
@@ -1351,6 +1417,8 @@ declare module "spiraltorch-wasm" {
     export function runtimeDeviceRouteObject(
         request: RuntimeDeviceRouteRequest,
     ): RuntimeDeviceRoute;
+    export function rankPlanJson(requestJson: string): string;
+    export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
     export function toposRoutePolicyEvaluateJson(requestJson: string): string;
     export function toposRoutePolicyEvaluateObject(
         request: ToposRoutePolicyEvaluationRequest,

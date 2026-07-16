@@ -3,23 +3,41 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Unison: backend‑agnostic heuristic chooser.
-//! Reads SpiralK / SoftLogic / Redis the same way for WGPU, HIP, CUDA.
-//! Falls back to generated table & safe defaults.
+//! Stable facade for the backend-aware unified rank chooser.
+//!
+//! The implementation lives in `unison_heuristics`; this module deliberately
+//! contains no fallback table or client-specific normalization. Rust callers,
+//! bindings, and executors therefore enter the same chooser.
 
-use super::wgpu_heuristics; // Choice shape; you can refactor into a common type crate
+use super::device_caps::DeviceCaps;
 
-pub fn choose_unified(rows:usize, cols:usize, k:usize, has_subgroup:bool)->wgpu_heuristics::Choice{
-    // Reuse WGPU path (which already stacks: SoftLogic -> SpiralK hard -> KV -> Table -> Fallback)
-    // For HIP/CUDA callers, pass subgroup=false (or device capability) and consume 'mk' for merge_kind.
-    wgpu_heuristics::choose(rows as u32, cols as u32, k as u32, has_subgroup).unwrap_or_else(||
-        // Fallback (same as inside)
-        super::wgpu_heuristics::Choice{
-            use_2ce: cols>32_768 || k>128,
-            wg: if has_subgroup {256} else {128},
-            kl: if k>=64 {32} else if k>=16 {16} else {8},
-            ch: if cols>16_384 {8192} else {0},
-            mk: if k<=128 {2} else if k<=2048 {1} else {0},
-        }
-    )
+pub use super::unison_heuristics::{Choice, RankKind};
+
+/// Selects one rich rank-k choice through the canonical backend-aware chooser.
+pub fn choose_unified_rank(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    caps: DeviceCaps,
+    kind: RankKind,
+) -> Choice {
+    super::unison_heuristics::choose_unified_rank(rows, cols, k, caps, kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::device_caps::BackendKind;
+
+    #[test]
+    fn facade_preserves_the_rich_backend_choice() {
+        let caps = BackendKind::Wgpu.default_caps();
+        let choice = choose_unified_rank(64, 4_096, 48, caps, RankKind::MidK);
+
+        assert!(choice.wg > 0);
+        assert!(choice.kl > 0);
+        assert!(choice.ctile > 0);
+        assert!(choice.latency_window.is_some());
+        assert_eq!(choice.subgroup, caps.subgroup);
+    }
 }

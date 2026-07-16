@@ -205,6 +205,78 @@ def test_plan_explicit_wgpu_backend() -> None:
     assert int(plan.lanes) >= 1
 
 
+def test_rank_plan_exposes_the_rust_owned_audit_contract() -> None:
+    st = require_native()
+
+    plan = st.plan("midk", 4, 128, 8, backend="wgpu")
+    contract = plan.contract()
+
+    assert contract["kind"] == "spiraltorch.rank_plan"
+    assert contract["contract_version"] == "spiraltorch.rank_plan.v1"
+    assert contract["semantic_owner"] == "st-core::ops::rank_entry"
+    assert contract["semantic_backend"] == "rust"
+    assert contract["execution_client"] == "python"
+    assert contract["requested_backend"] == "wgpu"
+    assert contract["effective_backend"] == "wgpu"
+    assert contract["rank_kind"] == "midk"
+    assert contract["input_elements"] == 512
+    assert contract["output_elements"] == 32
+    assert contract["device_caps"]["backend"] == "wgpu"
+    assert contract["choice"]["workgroup"] == plan.workgroup
+    assert contract["choice"]["compaction_tile"] == plan.compaction_tile
+
+
+def test_rank_plan_rejects_invalid_shape_and_caps_in_rust() -> None:
+    st = require_native()
+
+    with pytest.raises(ValueError, match="dimension 'rows' must be positive"):
+        st.plan("topk", 0, 8, 2, backend="wgpu")
+    with pytest.raises(ValueError, match="k=9 exceeds cols=8"):
+        st.plan("topk", 2, 8, 9, backend="wgpu")
+    with pytest.raises(ValueError, match="lane_width.*must be positive"):
+        st.plan("topk", 2, 8, 2, backend="wgpu", lane_width=0)
+    with pytest.raises(ValueError, match="lane_width=64 exceeds max_workgroup=32"):
+        st.describe_device("wgpu", lane_width=64, max_workgroup=32)
+
+    narrow = st.plan(
+        "topk",
+        2,
+        128,
+        8,
+        backend="wgpu",
+        lane_width=32,
+        max_workgroup=32,
+    )
+    assert narrow.workgroup == 32
+    assert narrow.contract()["device_caps"]["max_workgroup"] == 32
+
+
+def test_spiralk_rewrite_uses_validated_rust_rank_semantics() -> None:
+    st = require_native()
+
+    top = st.plan("topk", 64, 4096, 32, backend="wgpu")
+    rewritten = top.rewrite_with_spiralk(
+        "algo: 2; tile_cols: 2048; radix: 2; segments: 2;"
+    )
+    assert rewritten.merge_strategy == "bitonic"
+    assert rewritten.merge_detail == "bitonic"
+    assert rewritten.fft_tile == 2048
+    assert rewritten.fft_radix == 2
+    assert rewritten.fft_segments == 2
+    assert rewritten.spiralk_context().tile_cols == 2048
+    assert rewritten.contract()["semantic_owner"] == "st-core::ops::rank_entry"
+
+    bottom = st.plan("bottomk", 256, 65536, 1024, backend="wgpu")
+    assert bottom.rewrite_with_spiralk("bottomk: 2;").use_two_stage is True
+
+    with pytest.raises(ValueError, match="choice 'workgroup' must be positive"):
+        top.rewrite_with_spiralk("wg: 0;")
+    with pytest.raises(ValueError, match="choice 'fft_radix'=3 is invalid"):
+        top.rewrite_with_spiralk("radix: 3;")
+    with pytest.raises(ValueError, match="disagree on two-stage execution"):
+        bottom.rewrite_with_spiralk("u2: false; bottomk: 2;")
+
+
 def test_rank_plan_exposes_the_captured_execution_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

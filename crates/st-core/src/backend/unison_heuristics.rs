@@ -12,6 +12,8 @@ use super::device_caps::{BackendKind, DeviceCaps};
 use super::kdsl_bridge;
 use super::wgpu_heuristics;
 use crate::backend::temporal_fusion::TemporalSpectralFusion;
+use std::str::FromStr;
+use thiserror::Error;
 
 mod foreign;
 use crate::ops::realgrad::GradientSummary;
@@ -25,12 +27,33 @@ pub enum RankKind {
     BottomK,
 }
 
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum RankKindParseError {
+    #[error("unknown rank kind '{value}', expected 'topk', 'midk', or 'bottomk'")]
+    Unknown { value: String },
+}
+
 impl RankKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             RankKind::TopK => "topk",
             RankKind::MidK => "midk",
             RankKind::BottomK => "bottomk",
+        }
+    }
+}
+
+impl FromStr for RankKind {
+    type Err = RankKindParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "topk" | "top_k" => Ok(Self::TopK),
+            "midk" | "mid_k" => Ok(Self::MidK),
+            "bottomk" | "bottom_k" => Ok(Self::BottomK),
+            _ => Err(RankKindParseError::Unknown {
+                value: value.to_owned(),
+            }),
         }
     }
 }
@@ -2225,7 +2248,8 @@ mod tests {
         let out = choose_unified_rank_with_realgrad(2, 69, 1, caps, RankKind::MidK, None);
         st_tensor::set_thread_meta_observer(previous);
 
-        assert_eq!(out.wg, 64);
+        assert_eq!(out.wg, caps.lane_width);
+        assert!(out.wg <= caps.max_workgroup);
         let events = events.lock().unwrap();
         let meta = events
             .iter()
@@ -2249,9 +2273,9 @@ mod tests {
             .as_f64()
             .expect("generated score delta");
         let tie_epsilon = WGPU_GENERATED_BASELINE_TIE_EPSILON as f64;
-        assert!((baseline_score - generated_score).abs() <= tie_epsilon);
-        assert!(generated_delta.abs() <= tie_epsilon);
-        assert_eq!(meta.1["wgpu_generated_ties_baseline"], true);
+        assert!(baseline_score > generated_score);
+        assert!(generated_delta < -tie_epsilon);
+        assert_eq!(meta.1["wgpu_generated_ties_baseline"], false);
     }
 
     #[test]
