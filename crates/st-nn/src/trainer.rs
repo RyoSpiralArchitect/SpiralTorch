@@ -74,11 +74,12 @@ use st_core::inference::zspace_coherence::{
     project_zspace_coherence, validate_zspace_coherence_distribution_witness,
     ZSpaceCoherenceClassificationPayload, ZSpaceCoherenceClassificationPolicy,
     ZSpaceCoherenceControlPayload, ZSpaceCoherenceDiagnosticsInput,
-    ZSpaceCoherenceProjectionConfig, ZSpaceCoherenceProjectionRequest,
-    ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION, ZSPACE_COHERENCE_CLASSIFICATION_FORMULA,
-    ZSPACE_COHERENCE_CLASSIFICATION_KIND, ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION,
-    ZSPACE_COHERENCE_CONTROL_FORMULA, ZSPACE_COHERENCE_CONTROL_KIND,
-    ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND, ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
+    ZSpaceCoherenceDistributionWitness, ZSpaceCoherenceProjectionConfig,
+    ZSpaceCoherenceProjectionRequest, ZSPACE_COHERENCE_CLASSIFICATION_CONTRACT_VERSION,
+    ZSPACE_COHERENCE_CLASSIFICATION_FORMULA, ZSPACE_COHERENCE_CLASSIFICATION_KIND,
+    ZSPACE_COHERENCE_CONTROL_CONTRACT_VERSION, ZSPACE_COHERENCE_CONTROL_FORMULA,
+    ZSPACE_COHERENCE_CONTROL_KIND, ZSPACE_COHERENCE_PROJECTION_SEMANTIC_BACKEND,
+    ZSPACE_COHERENCE_PROJECTION_SEMANTIC_OWNER,
 };
 use st_core::ops::rank_entry::RankPlan;
 use st_core::plugin::{global_registry, PluginEvent};
@@ -94,10 +95,12 @@ use st_core::runtime::trainer_checkpoint::{
 #[cfg(feature = "psi")]
 use st_core::runtime::trainer_external::PSI_METER_COMPONENT;
 use st_core::runtime::trainer_external::{
-    build_trainer_external_state_checkpoint_with_desire_trainer,
+    build_trainer_external_state_checkpoint_from_components,
     evaluate_trainer_external_state_checkpoint, evaluate_trainer_external_state_restore,
-    TrainerExternalCheckpointError, TrainerExternalCheckpointValidation,
-    TrainerExternalStateCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT, DESIRE_TRAINER_COMPONENT,
+    TrainerCoherenceBridgeCheckpoint, TrainerCoherenceSignalCheckpoint,
+    TrainerExternalCheckpointComponents, TrainerExternalCheckpointError,
+    TrainerExternalCheckpointValidation, TrainerExternalStateCheckpoint,
+    ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT, DESIRE_TRAINER_COMPONENT,
 };
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
@@ -658,11 +661,12 @@ impl From<CurvatureDecision> for CurvatureMetrics {
 }
 
 /// Coherence statistics required by [`SpectralLearningRatePolicy`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CoherenceSignal {
     dominant_channel: Option<usize>,
     preserved_channels: usize,
     z_bias: f32,
+    distribution_witness: ZSpaceCoherenceDistributionWitness,
     control: ZSpaceCoherenceControlPayload,
     classification: ZSpaceCoherenceClassificationPayload,
     repaired_non_finite_weights: usize,
@@ -757,6 +761,89 @@ impl CoherenceSignal {
     pub fn repairs_total(&self) -> usize {
         self.repaired_weights_total()
             .saturating_add(self.pre_discard_repairs_total())
+    }
+
+    fn checkpoint(
+        &self,
+    ) -> Result<TrainerCoherenceSignalCheckpoint, TrainerExternalCheckpointError> {
+        let portable_counter = |field: &'static str, value: usize| {
+            u64::try_from(value).map_err(|_| TrainerExternalCheckpointError::InvalidState {
+                field: format!("coherence_bridge.signal.{field}"),
+                message: "does not fit the portable checkpoint domain".to_owned(),
+            })
+        };
+        let checkpoint = TrainerCoherenceSignalCheckpoint {
+            dominant_channel: self
+                .dominant_channel
+                .map(|value| portable_counter("dominant_channel", value))
+                .transpose()?,
+            preserved_channels: portable_counter("preserved_channels", self.preserved_channels)?,
+            z_bias: self.z_bias,
+            distribution_witness: self.distribution_witness.clone(),
+            energy_ratio: self.control.energy_ratio,
+            raw_mean_coherence: self.control.raw_mean_coherence,
+            classification_policy: self.classification.policy,
+            repaired_non_finite_weights: portable_counter(
+                "repaired_non_finite_weights",
+                self.repaired_non_finite_weights,
+            )?,
+            repaired_negative_weights: portable_counter(
+                "repaired_negative_weights",
+                self.repaired_negative_weights,
+            )?,
+            pre_discard_repaired_non_finite: portable_counter(
+                "pre_discard_repaired_non_finite",
+                self.pre_discard_repaired_non_finite,
+            )?,
+            pre_discard_repaired_negative: portable_counter(
+                "pre_discard_repaired_negative",
+                self.pre_discard_repaired_negative,
+            )?,
+        };
+        checkpoint.validate()?;
+        Ok(checkpoint)
+    }
+
+    fn from_checkpoint(
+        checkpoint: &TrainerCoherenceSignalCheckpoint,
+    ) -> Result<Self, TrainerExternalCheckpointError> {
+        let projection = checkpoint.canonical_projection()?;
+        let native_counter = |field: &'static str, value: u64| {
+            usize::try_from(value).map_err(|_| TrainerExternalCheckpointError::InvalidState {
+                field: format!("coherence_bridge.signal.{field}"),
+                message: "does not fit this platform".to_owned(),
+            })
+        };
+        Ok(Self {
+            dominant_channel: checkpoint
+                .dominant_channel
+                .map(|value| native_counter("dominant_channel", value))
+                .transpose()?,
+            preserved_channels: native_counter(
+                "preserved_channels",
+                checkpoint.preserved_channels,
+            )?,
+            z_bias: checkpoint.z_bias,
+            distribution_witness: checkpoint.distribution_witness.clone(),
+            control: projection.control,
+            classification: projection.classification,
+            repaired_non_finite_weights: native_counter(
+                "repaired_non_finite_weights",
+                checkpoint.repaired_non_finite_weights,
+            )?,
+            repaired_negative_weights: native_counter(
+                "repaired_negative_weights",
+                checkpoint.repaired_negative_weights,
+            )?,
+            pre_discard_repaired_non_finite: native_counter(
+                "pre_discard_repaired_non_finite",
+                checkpoint.pre_discard_repaired_non_finite,
+            )?,
+            pre_discard_repaired_negative: native_counter(
+                "pre_discard_repaired_negative",
+                checkpoint.pre_discard_repaired_negative,
+            )?,
+        })
     }
 
     fn trace_value_matches(actual: Option<f32>, expected: f64) -> bool {
@@ -860,6 +947,7 @@ impl CoherenceSignal {
             dominant_channel: diagnostics.dominant_channel,
             preserved_channels: diagnostics.preserved_channels,
             z_bias: diagnostics.z_bias,
+            distribution_witness: witness.as_ref().clone(),
             control,
             classification,
             repaired_non_finite_weights: diagnostics.repaired_non_finite_weights,
@@ -870,6 +958,7 @@ impl CoherenceSignal {
     }
 
     fn from_diagnostics(diagnostics: &CoherenceDiagnostics) -> Option<Self> {
+        let distribution_witness = diagnostics.distribution_witness().ok()?;
         let projection = diagnostics
             .project_to_zspace_partial(ZSpaceCoherenceProjectionConfig::default(), None)
             .ok()?;
@@ -879,6 +968,7 @@ impl CoherenceSignal {
             dominant_channel: diagnostics.dominant_channel(),
             preserved_channels: diagnostics.preserved_channels(),
             z_bias: diagnostics.z_bias(),
+            distribution_witness,
             control,
             classification,
             repaired_non_finite_weights: diagnostics.repaired_non_finite_weights(),
@@ -929,9 +1019,9 @@ impl ZSpaceTraceCoherenceBridge {
         }
     }
 
-    pub fn subscribe() -> Self {
+    fn subscribe_with_latest(initial: Option<CoherenceSignal>) -> Self {
         let bus = global_registry().event_bus().clone();
-        let latest: Arc<Mutex<Option<CoherenceSignal>>> = Arc::new(Mutex::new(None));
+        let latest: Arc<Mutex<Option<CoherenceSignal>>> = Arc::new(Mutex::new(initial));
         let latest_clone = Arc::clone(&latest);
         let subscription_id = bus.subscribe(
             "ZSpaceTrace",
@@ -956,6 +1046,21 @@ impl ZSpaceTraceCoherenceBridge {
             subscription_id,
             latest,
         }
+    }
+
+    pub fn subscribe() -> Self {
+        Self::subscribe_with_latest(None)
+    }
+
+    fn checkpoint_latest(&self) -> Option<CoherenceSignal> {
+        self.latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn restore_latest(&self, signal: Option<CoherenceSignal>) {
+        Self::replace_latest(&self.latest, signal);
     }
 
     pub fn drain(&self) -> Option<CoherenceSignal> {
@@ -2956,9 +3061,37 @@ struct PreparedTrainerExternalRestore {
     validation: TrainerExternalCheckpointValidation,
     desire_trainer: Option<PreparedDesireTrainerQueue>,
     desire_roundtable: Option<PreparedDesireRoundtableCheckpoint>,
+    coherence_bridge: Option<PreparedTrainerCoherenceBridgeCheckpoint>,
     #[cfg(feature = "psi")]
     psi_meter: Option<PsiMeter>,
     reattached_components: Vec<String>,
+}
+
+struct PreparedTrainerCoherenceBridgeCheckpoint {
+    subscribed: bool,
+    pending: Option<CoherenceSignal>,
+    latest: Option<CoherenceSignal>,
+}
+
+impl PreparedTrainerCoherenceBridgeCheckpoint {
+    fn prepare(
+        checkpoint: &TrainerCoherenceBridgeCheckpoint,
+    ) -> Result<Self, TrainerExternalCheckpointError> {
+        checkpoint.validate()?;
+        Ok(Self {
+            subscribed: checkpoint.subscribed,
+            pending: checkpoint
+                .pending
+                .as_ref()
+                .map(CoherenceSignal::from_checkpoint)
+                .transpose()?,
+            latest: checkpoint
+                .latest
+                .as_ref()
+                .map(CoherenceSignal::from_checkpoint)
+                .transpose()?,
+        })
+    }
 }
 
 struct PreparedTrainerOptimizerRestore {
@@ -6034,7 +6167,7 @@ impl ModuleTrainer {
             components.push("gnn_roundtable_bridge");
         }
         if self.coherence_bridge.is_some() || self.pending_coherence.is_some() {
-            components.push("coherence_bridge");
+            components.push(COHERENCE_BRIDGE_COMPONENT);
         }
         if matches!(&self.loss_strategy, LossStrategy::Region(_)) {
             components.push("region_loss_strategy");
@@ -6158,18 +6291,46 @@ impl ModuleTrainer {
             .map_err(TrainerExternalCheckpointError::from)?;
         #[cfg(not(feature = "psi"))]
         let psi_meter = None;
+        let coherence_bridge = self.coherence_bridge_checkpoint()?;
         let accumulator_synchronizer = self
             .accumulator_synchronizer
             .as_ref()
             .map(|synchronizer| synchronizer.checkpoint())
             .transpose()?;
-        Ok(build_trainer_external_state_checkpoint_with_desire_trainer(
+        Ok(build_trainer_external_state_checkpoint_from_components(
             self.optimizer_external_state_required(),
-            desire_trainer,
-            desire_roundtable,
-            psi_meter,
-            accumulator_synchronizer,
+            TrainerExternalCheckpointComponents::new()
+                .with_desire_trainer(desire_trainer)
+                .with_desire_roundtable(desire_roundtable)
+                .with_coherence_bridge(coherence_bridge)
+                .with_psi_meter(psi_meter)
+                .with_accumulator_synchronizer(accumulator_synchronizer),
         )?)
+    }
+
+    fn coherence_bridge_checkpoint(
+        &self,
+    ) -> Result<Option<TrainerCoherenceBridgeCheckpoint>, TrainerExternalCheckpointError> {
+        if self.coherence_bridge.is_none() && self.pending_coherence.is_none() {
+            return Ok(None);
+        }
+        let checkpoint = TrainerCoherenceBridgeCheckpoint {
+            subscribed: self.coherence_bridge.is_some(),
+            pending: self
+                .pending_coherence
+                .as_ref()
+                .map(CoherenceSignal::checkpoint)
+                .transpose()?,
+            latest: self
+                .coherence_bridge
+                .as_ref()
+                .and_then(ZSpaceTraceCoherenceBridge::checkpoint_latest)
+                .as_ref()
+                .map(CoherenceSignal::checkpoint)
+                .transpose()?,
+        };
+        checkpoint.validate()?;
+        Ok(Some(checkpoint))
     }
 
     /// Restores supported external state after concrete resources are attached.
@@ -6189,20 +6350,24 @@ impl ModuleTrainer {
         checkpoint: &TrainerExternalStateCheckpoint,
     ) -> Result<PreparedTrainerExternalRestore, TrainerCheckpointError> {
         evaluate_trainer_external_state_checkpoint(checkpoint)?;
-        let target_components = self.optimizer_external_state_required();
+        let mut target_components = self.optimizer_external_state_required();
+        if checkpoint.coherence_bridge.is_some()
+            && target_components
+                .binary_search_by(|component| component.as_str().cmp(COHERENCE_BRIDGE_COMPONENT))
+                .is_err()
+        {
+            target_components.push(COHERENCE_BRIDGE_COMPONENT.to_owned());
+        }
         #[cfg(feature = "psi")]
-        let target_components = {
-            let mut target_components = target_components;
-            if checkpoint.psi_meter.is_some()
-                && target_components
-                    .binary_search_by(|component| component.as_str().cmp(PSI_METER_COMPONENT))
-                    .is_err()
-            {
-                target_components.push(PSI_METER_COMPONENT.to_owned());
-                target_components.sort_unstable();
-            }
-            target_components
-        };
+        if checkpoint.psi_meter.is_some()
+            && target_components
+                .binary_search_by(|component| component.as_str().cmp(PSI_METER_COMPONENT))
+                .is_err()
+        {
+            target_components.push(PSI_METER_COMPONENT.to_owned());
+        }
+        target_components.sort_unstable();
+        target_components.dedup();
         if checkpoint.required_components != target_components {
             return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
         }
@@ -6222,6 +6387,11 @@ impl ModuleTrainer {
         if desire_roundtable.is_some() && self.desire_roundtable_bridge.is_none() {
             return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
         }
+        let coherence_bridge = checkpoint
+            .coherence_bridge
+            .as_ref()
+            .map(PreparedTrainerCoherenceBridgeCheckpoint::prepare)
+            .transpose()?;
 
         #[cfg(feature = "psi")]
         let psi_meter = checkpoint
@@ -6251,6 +6421,7 @@ impl ModuleTrainer {
             validation,
             desire_trainer,
             desire_roundtable,
+            coherence_bridge,
             #[cfg(feature = "psi")]
             psi_meter,
             reattached_components,
@@ -6267,6 +6438,20 @@ impl ModuleTrainer {
             self.desire_roundtable_bridge.as_ref(),
             prepared.desire_roundtable,
         )?;
+        if let Some(coherence) = prepared.coherence_bridge {
+            self.pending_coherence = coherence.pending;
+            if coherence.subscribed {
+                if let Some(bridge) = self.coherence_bridge.as_ref() {
+                    bridge.restore_latest(coherence.latest);
+                } else {
+                    self.coherence_bridge = Some(
+                        ZSpaceTraceCoherenceBridge::subscribe_with_latest(coherence.latest),
+                    );
+                }
+            } else {
+                self.coherence_bridge = None;
+            }
+        }
         #[cfg(feature = "psi")]
         if let Some(psi_meter) = prepared.psi_meter {
             self.psi = Some(psi_meter);
@@ -7058,7 +7243,7 @@ impl ModuleTrainer {
                 spectral_used = coherence_snapshot.is_some();
             }
             if coherence_snapshot.is_some() && !spectral_used {
-                self.pending_coherence = coherence_snapshot;
+                self.pending_coherence = coherence_snapshot.clone();
             }
             validate_band_weights_for_trainer(weights)?;
             bands.scale_inplace(weights.0, weights.1, weights.2)?;
@@ -9016,7 +9201,9 @@ mod tests {
     };
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
-    use st_core::inference::zspace_coherence::summarize_zspace_coherence_distribution;
+    use st_core::inference::zspace_coherence::{
+        build_zspace_coherence_distribution_witness, summarize_zspace_coherence_distribution,
+    };
     use st_core::plugin::{PluginEventRecorder, PluginEventRecorderConfig, PluginEventSnapshot};
     use st_core::runtime::autopilot::{AutoConfig, AutoMode, KnobSpec};
     use st_core::runtime::blackcat::{
@@ -9067,6 +9254,7 @@ mod tests {
         let channels = weights.len();
         let raw_mean_coherence = weights.iter().sum::<f32>() / channels as f32;
         let distribution = summarize_zspace_coherence_distribution(&weights).unwrap();
+        let distribution_witness = build_zspace_coherence_distribution_witness(&weights).unwrap();
         let dominant_channel = weights
             .iter()
             .enumerate()
@@ -9099,6 +9287,7 @@ mod tests {
             dominant_channel,
             preserved_channels,
             z_bias,
+            distribution_witness,
             control: projection.control.unwrap(),
             classification: projection.classification.unwrap(),
             repaired_non_finite_weights: 0,
@@ -10054,6 +10243,134 @@ mod tests {
     }
 
     #[test]
+    fn runtime_bundle_restores_coherence_topology_and_next_two_steps() {
+        let pending = coherence_signal_for_weights(vec![0.72, 0.18, 0.1], 0.82, 0.25);
+        let latest = coherence_signal_for_weights(vec![0.2, 0.55, 0.25], 0.61, -0.15);
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_spectral_learning_rate(SpectralLearningRatePolicy::default());
+        source_trainer.pending_coherence = Some(pending);
+        source_trainer
+            .coherence_bridge
+            .as_ref()
+            .expect("spectral policy coherence bridge")
+            .restore_latest(Some(latest));
+        let mut source_module = FixedGradientModule::new(0.75);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let model_state = source_module.state_dict().unwrap();
+        let bundle = source_trainer
+            .runtime_checkpoint_bundle(&source_module)
+            .unwrap();
+        let encoded = serde_json::to_string(&bundle).unwrap();
+        let bundle: TrainerRuntimeCheckpointBundle = serde_json::from_str(&encoded).unwrap();
+
+        let coherence = bundle
+            .external
+            .coherence_bridge
+            .as_ref()
+            .expect("captured coherence bridge");
+        assert!(coherence.subscribed);
+        assert!(coherence.pending.is_some());
+        assert!(coherence.latest.is_some());
+        assert_eq!(
+            evaluate_trainer_external_state_checkpoint(&bundle.external)
+                .unwrap()
+                .captured_components,
+            [COHERENCE_BRIDGE_COMPONENT]
+        );
+
+        let mut resumed_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut resumed_module = FixedGradientModule::new(0.75);
+        resumed_module.load_state_dict(&model_state).unwrap();
+        resumed_trainer.prepare(&mut resumed_module).unwrap();
+        let receipt = resumed_trainer
+            .restore_runtime_checkpoint_bundle(&mut resumed_module, &bundle)
+            .unwrap();
+
+        assert!(receipt.deterministic_resume_ready);
+        assert!(resumed_trainer.coherence_bridge.is_some());
+        assert_eq!(
+            resumed_trainer.external_state_checkpoint().unwrap(),
+            bundle.external
+        );
+
+        let schedule = source_trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batch = vec![(
+            Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut source_loss = ConstantLoss::new(1.0);
+        let mut resumed_loss = ConstantLoss::new(1.0);
+
+        source_trainer
+            .train_epoch(
+                &mut source_module,
+                &mut source_loss,
+                batch.clone(),
+                &schedule,
+            )
+            .unwrap();
+        resumed_trainer
+            .train_epoch(
+                &mut resumed_module,
+                &mut resumed_loss,
+                batch.clone(),
+                &schedule,
+            )
+            .unwrap();
+        assert_eq!(
+            source_module.state_dict().unwrap(),
+            resumed_module.state_dict().unwrap()
+        );
+        assert_eq!(
+            source_trainer.optimizer_checkpoint(&source_module).unwrap(),
+            resumed_trainer
+                .optimizer_checkpoint(&resumed_module)
+                .unwrap()
+        );
+        assert_eq!(
+            source_trainer.external_state_checkpoint().unwrap(),
+            resumed_trainer.external_state_checkpoint().unwrap()
+        );
+        assert!(source_trainer.pending_coherence.is_none());
+        assert!(source_trainer
+            .coherence_bridge
+            .as_ref()
+            .and_then(ZSpaceTraceCoherenceBridge::checkpoint_latest)
+            .is_some());
+
+        source_trainer
+            .train_epoch(
+                &mut source_module,
+                &mut source_loss,
+                batch.clone(),
+                &schedule,
+            )
+            .unwrap();
+        resumed_trainer
+            .train_epoch(&mut resumed_module, &mut resumed_loss, batch, &schedule)
+            .unwrap();
+        assert_eq!(
+            source_module.state_dict().unwrap(),
+            resumed_module.state_dict().unwrap()
+        );
+        assert_eq!(
+            source_trainer.optimizer_checkpoint(&source_module).unwrap(),
+            resumed_trainer
+                .optimizer_checkpoint(&resumed_module)
+                .unwrap()
+        );
+        assert_eq!(
+            source_trainer.external_state_checkpoint().unwrap(),
+            resumed_trainer.external_state_checkpoint().unwrap()
+        );
+        assert!(source_trainer
+            .coherence_bridge
+            .as_ref()
+            .and_then(ZSpaceTraceCoherenceBridge::checkpoint_latest)
+            .is_none());
+    }
+
+    #[test]
     fn runtime_bundle_composes_roundtable_and_optimizer_readiness() {
         let source_desire = DesireTrainerBridge::new();
         let mut source_bridge = DesireRoundtableBridge::new();
@@ -10288,6 +10605,39 @@ mod tests {
             .restore_external_state_checkpoint(&invalid)
             .is_err());
         assert_eq!(target_trainer.external_state_checkpoint().unwrap(), before);
+    }
+
+    #[test]
+    fn external_checkpoint_restores_pending_coherence_without_subscription() {
+        let expected = coherence_signal_for_weights(vec![0.65, 0.25, 0.1], 0.78, 0.2);
+        let mut source = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source.enable_spectral_learning_rate(SpectralLearningRatePolicy::default());
+        source.disable_zspace_trace_coherence_bridge();
+        source.pending_coherence = Some(expected);
+        let checkpoint = source.external_state_checkpoint().unwrap();
+
+        let coherence = checkpoint
+            .coherence_bridge
+            .as_ref()
+            .expect("pending coherence checkpoint");
+        assert!(!coherence.subscribed);
+        assert!(coherence.pending.is_some());
+        assert!(coherence.latest.is_none());
+
+        let mut target = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target.enable_zspace_trace_coherence_bridge();
+        target.pending_coherence = Some(coherence_signal_for_weights(
+            vec![0.2, 0.3, 0.5],
+            0.45,
+            -0.1,
+        ));
+        let receipt = target
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap();
+
+        assert!(receipt.deterministic_resume_ready);
+        assert!(target.coherence_bridge.is_none());
+        assert_eq!(target.external_state_checkpoint().unwrap(), checkpoint);
     }
 
     #[test]

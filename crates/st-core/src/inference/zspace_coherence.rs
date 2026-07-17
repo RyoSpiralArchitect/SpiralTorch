@@ -568,6 +568,23 @@ pub fn validate_zspace_coherence_distribution_witness(
     summarize_zspace_coherence_distribution(&witness.normalized_weights)
 }
 
+/// Validate observed support and dominant-channel identity against a witness.
+pub fn validate_zspace_coherence_distribution_observation(
+    witness: &ZSpaceCoherenceDistributionWitness,
+    preserved_channels: usize,
+    dominant_channel: Option<usize>,
+) -> Result<ZSpaceCoherenceDistributionSummary, ZSpaceCoherenceProjectionError> {
+    let distribution = validate_zspace_coherence_distribution_witness(witness)?;
+    validate_distribution_observation(
+        &witness.normalized_weights,
+        distribution,
+        Some(preserved_channels),
+        None,
+        dominant_channel,
+    )?;
+    Ok(distribution)
+}
+
 /// Derive dimensionless trainer/runtime controls from a canonical distribution summary.
 pub fn derive_zspace_coherence_control(
     distribution: ZSpaceCoherenceDistributionSummary,
@@ -815,6 +832,59 @@ fn stable_mean(values: &[f64]) -> f64 {
     scale * normalized_mean.clamp(-1.0, 1.0)
 }
 
+fn validate_distribution_observation(
+    normalized_weights: &[f64],
+    distribution: ZSpaceCoherenceDistributionSummary,
+    preserved_channels: Option<usize>,
+    discarded_channels: Option<usize>,
+    dominant_channel: Option<usize>,
+) -> Result<(), ZSpaceCoherenceProjectionError> {
+    let preserved = normalized_weights
+        .iter()
+        .filter(|weight| **weight > 0.0)
+        .count();
+    let discarded = distribution.channels - preserved;
+    for (field, actual, expected) in [
+        ("preserved_channels", preserved_channels, preserved),
+        ("discarded_channels", discarded_channels, discarded),
+    ] {
+        if let Some(actual) = actual {
+            if actual != expected {
+                return Err(ZSpaceCoherenceProjectionError::InconsistentChannelSupport {
+                    field,
+                    actual,
+                    expected,
+                });
+            }
+        }
+    }
+
+    if let Some(dominant) = dominant_channel {
+        if dominant >= distribution.channels {
+            return Err(ZSpaceCoherenceProjectionError::DominantChannelOutOfRange {
+                dominant,
+                channels: distribution.channels,
+            });
+        }
+        let dominant_weight = normalized_weights[dominant];
+        let observed_peak = peak(normalized_weights);
+        let peak_tolerance = f32_accumulation_tolerance(
+            distribution.channels,
+            dominant_weight.abs().max(observed_peak.abs()),
+        );
+        if observed_peak - dominant_weight > peak_tolerance {
+            return Err(
+                ZSpaceCoherenceProjectionError::InconsistentDominantChannel {
+                    dominant,
+                    value: dominant_weight,
+                    peak: observed_peak,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
 fn validate_request(
     request: &ZSpaceCoherenceProjectionRequest,
 ) -> Result<Option<ZSpaceCoherenceDistributionSummary>, ZSpaceCoherenceProjectionError> {
@@ -958,52 +1028,13 @@ fn validate_request(
             );
         }
 
-        let preserved = diagnostics
-            .normalized_weights
-            .iter()
-            .filter(|weight| **weight > 0.0)
-            .count();
-        let discarded = distribution.channels - preserved;
-        for (field, actual, expected) in [
-            (
-                "preserved_channels",
-                diagnostics.preserved_channels,
-                preserved,
-            ),
-            (
-                "discarded_channels",
-                diagnostics.discarded_channels,
-                discarded,
-            ),
-        ] {
-            if let Some(actual) = actual {
-                if actual != expected {
-                    return Err(ZSpaceCoherenceProjectionError::InconsistentChannelSupport {
-                        field,
-                        actual,
-                        expected,
-                    });
-                }
-            }
-        }
-
-        if let Some(dominant) = diagnostics.dominant_channel {
-            let dominant_weight = diagnostics.normalized_weights[dominant];
-            let observed_peak = peak(&diagnostics.normalized_weights);
-            let peak_tolerance = f32_accumulation_tolerance(
-                distribution.channels,
-                dominant_weight.abs().max(observed_peak.abs()),
-            );
-            if observed_peak - dominant_weight > peak_tolerance {
-                return Err(
-                    ZSpaceCoherenceProjectionError::InconsistentDominantChannel {
-                        dominant,
-                        value: dominant_weight,
-                        peak: observed_peak,
-                    },
-                );
-            }
-        }
+        validate_distribution_observation(
+            &diagnostics.normalized_weights,
+            distribution,
+            diagnostics.preserved_channels,
+            diagnostics.discarded_channels,
+            diagnostics.dominant_channel,
+        )?;
     }
 
     if !request.coherence.is_empty() {
@@ -1609,6 +1640,21 @@ mod tests {
                 .concentration,
             epsilon = 1.0e-12
         );
+        assert_eq!(
+            validate_zspace_coherence_distribution_observation(&witness, 3, Some(0)).unwrap(),
+            summary
+        );
+        assert!(matches!(
+            validate_zspace_coherence_distribution_observation(&witness, 2, Some(0)),
+            Err(ZSpaceCoherenceProjectionError::InconsistentChannelSupport {
+                field: "preserved_channels",
+                ..
+            })
+        ));
+        assert!(matches!(
+            validate_zspace_coherence_distribution_observation(&witness, 3, Some(1)),
+            Err(ZSpaceCoherenceProjectionError::InconsistentDominantChannel { dominant: 1, .. })
+        ));
 
         let mut wrong_version = witness.clone();
         wrong_version.contract_version =

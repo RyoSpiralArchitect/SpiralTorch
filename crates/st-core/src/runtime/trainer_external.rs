@@ -7,16 +7,23 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::distributed::AccumulatorSynchronizerCheckpoint;
+use crate::inference::zspace_coherence::{
+    classify_zspace_coherence, derive_zspace_coherence_control, is_zspace_coherence_swap_invariant,
+    validate_zspace_coherence_distribution_observation, ZSpaceCoherenceClassificationPayload,
+    ZSpaceCoherenceClassificationPolicy, ZSpaceCoherenceClassificationRequest,
+    ZSpaceCoherenceControlPayload, ZSpaceCoherenceDistributionWitness,
+};
 
 pub const TRAINER_EXTERNAL_CHECKPOINT_KIND: &str = "spiraltorch.trainer_external_state_checkpoint";
 pub const TRAINER_EXTERNAL_CHECKPOINT_CONTRACT_VERSION: &str =
-    "spiraltorch.trainer_external_state_checkpoint.v2";
+    "spiraltorch.trainer_external_state_checkpoint.v3";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_OWNER: &str = "st-core::runtime::trainer_external";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
 pub const TRAINER_EXTERNAL_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub const DESIRE_TRAINER_COMPONENT: &str = "desire_bridge";
 pub const DESIRE_ROUNDTABLE_COMPONENT: &str = "desire_roundtable_bridge";
+pub const COHERENCE_BRIDGE_COMPONENT: &str = "coherence_bridge";
 pub const PSI_METER_COMPONENT: &str = "psi_meter";
 pub const ACCUMULATOR_SYNCHRONIZER_COMPONENT: &str = "accumulator_synchronizer";
 
@@ -463,6 +470,168 @@ impl DesireRoundtableCheckpoint {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct TrainerCoherenceSignalCheckpoint {
+    pub dominant_channel: Option<u64>,
+    pub preserved_channels: u64,
+    pub z_bias: f32,
+    pub distribution_witness: ZSpaceCoherenceDistributionWitness,
+    pub energy_ratio: f64,
+    pub raw_mean_coherence: f64,
+    pub classification_policy: ZSpaceCoherenceClassificationPolicy,
+    pub repaired_non_finite_weights: u64,
+    pub repaired_negative_weights: u64,
+    pub pre_discard_repaired_non_finite: u64,
+    pub pre_discard_repaired_negative: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrainerCoherenceSignalProjection {
+    pub control: ZSpaceCoherenceControlPayload,
+    pub classification: ZSpaceCoherenceClassificationPayload,
+}
+
+impl TrainerCoherenceSignalCheckpoint {
+    pub fn canonical_projection(
+        &self,
+    ) -> Result<TrainerCoherenceSignalProjection, TrainerExternalCheckpointError> {
+        let preserved_channels = usize::try_from(self.preserved_channels).map_err(|_| {
+            state_error(
+                "coherence_bridge.signal.preserved_channels",
+                "does not fit this platform",
+            )
+        })?;
+        let dominant_channel = self
+            .dominant_channel
+            .map(|dominant| {
+                usize::try_from(dominant).map_err(|_| {
+                    state_error(
+                        "coherence_bridge.signal.dominant_channel",
+                        "does not fit this platform",
+                    )
+                })
+            })
+            .transpose()?;
+        let distribution = validate_zspace_coherence_distribution_observation(
+            &self.distribution_witness,
+            preserved_channels,
+            dominant_channel,
+        )
+        .map_err(|error| TrainerExternalCheckpointError::Coherence(error.to_string()))?;
+        let channels = u64::try_from(distribution.channels).map_err(|_| {
+            state_error(
+                "coherence_bridge.signal.distribution_witness.normalized_weights",
+                "channel count does not fit the portable checkpoint domain",
+            )
+        })?;
+        if !self.z_bias.is_finite() {
+            return Err(state_error(
+                "coherence_bridge.signal.z_bias",
+                "must be finite",
+            ));
+        }
+        for (field, value) in [
+            ("preserved_channels", self.preserved_channels),
+            (
+                "repaired_non_finite_weights",
+                self.repaired_non_finite_weights,
+            ),
+            ("repaired_negative_weights", self.repaired_negative_weights),
+            (
+                "pre_discard_repaired_non_finite",
+                self.pre_discard_repaired_non_finite,
+            ),
+            (
+                "pre_discard_repaired_negative",
+                self.pre_discard_repaired_negative,
+            ),
+        ] {
+            validate_safe_integer(&format!("coherence_bridge.signal.{field}"), value)?;
+        }
+        for (field, non_finite, negative) in [
+            (
+                "repairs_total",
+                self.repaired_non_finite_weights,
+                self.repaired_negative_weights,
+            ),
+            (
+                "pre_discard_repairs_total",
+                self.pre_discard_repaired_non_finite,
+                self.pre_discard_repaired_negative,
+            ),
+        ] {
+            let repairs = non_finite.checked_add(negative).ok_or_else(|| {
+                state_error(
+                    &format!("coherence_bridge.signal.{field}"),
+                    "overflows the portable checkpoint domain",
+                )
+            })?;
+            if repairs > channels {
+                return Err(state_error(
+                    &format!("coherence_bridge.signal.{field}"),
+                    "must not exceed the distribution channel count",
+                ));
+            }
+        }
+
+        let control = derive_zspace_coherence_control(
+            distribution,
+            self.energy_ratio,
+            self.raw_mean_coherence,
+        )
+        .map_err(|error| TrainerExternalCheckpointError::Coherence(error.to_string()))?;
+        let classification = classify_zspace_coherence(ZSpaceCoherenceClassificationRequest {
+            energy_ratio: self.energy_ratio,
+            swap_invariant: is_zspace_coherence_swap_invariant(
+                &self.distribution_witness.normalized_weights,
+            ),
+            policy: self.classification_policy,
+        })
+        .map_err(|error| TrainerExternalCheckpointError::Coherence(error.to_string()))?;
+        Ok(TrainerCoherenceSignalProjection {
+            control,
+            classification,
+        })
+    }
+
+    pub fn validate(&self) -> Result<(), TrainerExternalCheckpointError> {
+        self.canonical_projection().map(|_| ())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrainerCoherenceBridgeCheckpoint {
+    pub subscribed: bool,
+    pub pending: Option<TrainerCoherenceSignalCheckpoint>,
+    pub latest: Option<TrainerCoherenceSignalCheckpoint>,
+}
+
+impl TrainerCoherenceBridgeCheckpoint {
+    pub fn validate(&self) -> Result<(), TrainerExternalCheckpointError> {
+        if !self.subscribed && self.latest.is_some() {
+            return Err(state_error(
+                "coherence_bridge.latest",
+                "requires an active ZSpaceTrace subscription",
+            ));
+        }
+        if !self.subscribed && self.pending.is_none() {
+            return Err(state_error(
+                "coherence_bridge",
+                "must contain a pending signal or an active subscription",
+            ));
+        }
+        if let Some(signal) = &self.pending {
+            signal.validate()?;
+        }
+        if let Some(signal) = &self.latest {
+            signal.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TrainerExternalStateCheckpoint {
     pub kind: String,
     pub contract_version: String,
@@ -471,6 +640,7 @@ pub struct TrainerExternalStateCheckpoint {
     pub required_components: Vec<String>,
     pub desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     pub desire_roundtable: Option<DesireRoundtableCheckpoint>,
+    pub coherence_bridge: Option<TrainerCoherenceBridgeCheckpoint>,
     pub psi_meter: Option<PsiMeterCheckpoint>,
     pub accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
     pub unresolved_components: Vec<String>,
@@ -503,8 +673,56 @@ pub enum TrainerExternalCheckpointError {
     InvalidState { field: String, message: String },
     #[error(transparent)]
     Psi(#[from] PsiMeterCheckpointError),
+    #[error("invalid coherence bridge checkpoint: {0}")]
+    Coherence(String),
     #[error("invalid accumulator synchronizer checkpoint: {0}")]
     Accumulator(String),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TrainerExternalCheckpointComponents {
+    desire_trainer: Option<DesireTrainerQueueCheckpoint>,
+    desire_roundtable: Option<DesireRoundtableCheckpoint>,
+    coherence_bridge: Option<TrainerCoherenceBridgeCheckpoint>,
+    psi_meter: Option<PsiMeterCheckpoint>,
+    accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
+}
+
+impl TrainerExternalCheckpointComponents {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_desire_trainer(mut self, state: Option<DesireTrainerQueueCheckpoint>) -> Self {
+        self.desire_trainer = state;
+        self
+    }
+
+    pub fn with_desire_roundtable(mut self, state: Option<DesireRoundtableCheckpoint>) -> Self {
+        self.desire_roundtable = state;
+        self
+    }
+
+    pub fn with_coherence_bridge(
+        mut self,
+        state: Option<TrainerCoherenceBridgeCheckpoint>,
+    ) -> Self {
+        self.coherence_bridge = state;
+        self
+    }
+
+    pub fn with_psi_meter(mut self, state: Option<PsiMeterCheckpoint>) -> Self {
+        self.psi_meter = state;
+        self
+    }
+
+    pub fn with_accumulator_synchronizer(
+        mut self,
+        state: Option<AccumulatorSynchronizerCheckpoint>,
+    ) -> Self {
+        self.accumulator_synchronizer = state;
+        self
+    }
 }
 
 pub fn build_trainer_external_state_checkpoint(
@@ -513,27 +731,49 @@ pub fn build_trainer_external_state_checkpoint(
     psi_meter: Option<PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
 ) -> Result<TrainerExternalStateCheckpoint, TrainerExternalCheckpointError> {
-    build_trainer_external_state_checkpoint_with_desire_trainer(
+    build_trainer_external_state_checkpoint_from_components(
         required_components,
-        None,
-        desire_roundtable,
-        psi_meter,
-        accumulator_synchronizer,
+        TrainerExternalCheckpointComponents::new()
+            .with_desire_roundtable(desire_roundtable)
+            .with_psi_meter(psi_meter)
+            .with_accumulator_synchronizer(accumulator_synchronizer),
     )
 }
 
 pub fn build_trainer_external_state_checkpoint_with_desire_trainer(
-    mut required_components: Vec<String>,
+    required_components: Vec<String>,
     desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<DesireRoundtableCheckpoint>,
     psi_meter: Option<PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
 ) -> Result<TrainerExternalStateCheckpoint, TrainerExternalCheckpointError> {
+    build_trainer_external_state_checkpoint_from_components(
+        required_components,
+        TrainerExternalCheckpointComponents::new()
+            .with_desire_trainer(desire_trainer)
+            .with_desire_roundtable(desire_roundtable)
+            .with_psi_meter(psi_meter)
+            .with_accumulator_synchronizer(accumulator_synchronizer),
+    )
+}
+
+pub fn build_trainer_external_state_checkpoint_from_components(
+    mut required_components: Vec<String>,
+    components: TrainerExternalCheckpointComponents,
+) -> Result<TrainerExternalStateCheckpoint, TrainerExternalCheckpointError> {
+    let TrainerExternalCheckpointComponents {
+        desire_trainer,
+        desire_roundtable,
+        coherence_bridge,
+        psi_meter,
+        accumulator_synchronizer,
+    } = components;
     required_components.sort_unstable();
     required_components.dedup();
     let captured = captured_components(
         desire_trainer.as_ref(),
         desire_roundtable.as_ref(),
+        coherence_bridge.as_ref(),
         psi_meter.as_ref(),
         accumulator_synchronizer.as_ref(),
     );
@@ -550,6 +790,7 @@ pub fn build_trainer_external_state_checkpoint_with_desire_trainer(
         required_components,
         desire_trainer,
         desire_roundtable,
+        coherence_bridge,
         psi_meter,
         accumulator_synchronizer,
         unresolved_components,
@@ -600,6 +841,9 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
     if let Some(state) = checkpoint.desire_roundtable {
         state.validate()?;
     }
+    if let Some(state) = &checkpoint.coherence_bridge {
+        state.validate()?;
+    }
     if let Some(state) = &checkpoint.psi_meter {
         state.validate()?;
     }
@@ -612,6 +856,7 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
     let captured = captured_components(
         checkpoint.desire_trainer.as_ref(),
         checkpoint.desire_roundtable.as_ref(),
+        checkpoint.coherence_bridge.as_ref(),
         checkpoint.psi_meter.as_ref(),
         checkpoint.accumulator_synchronizer.as_ref(),
     );
@@ -676,15 +921,19 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
 fn captured_components(
     desire_trainer: Option<&DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<&DesireRoundtableCheckpoint>,
+    coherence_bridge: Option<&TrainerCoherenceBridgeCheckpoint>,
     psi_meter: Option<&PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<&AccumulatorSynchronizerCheckpoint>,
 ) -> Vec<String> {
-    let mut captured = Vec::with_capacity(4);
+    let mut captured = Vec::with_capacity(5);
     if desire_trainer.is_some() {
         captured.push(DESIRE_TRAINER_COMPONENT.to_owned());
     }
     if desire_roundtable.is_some() {
         captured.push(DESIRE_ROUNDTABLE_COMPONENT.to_owned());
+    }
+    if coherence_bridge.is_some() {
+        captured.push(COHERENCE_BRIDGE_COMPONENT.to_owned());
     }
     if psi_meter.is_some() {
         captured.push(PSI_METER_COMPONENT.to_owned());
@@ -730,6 +979,17 @@ fn validate_sorted_unique(
         previous = Some(value);
     }
     Ok(())
+}
+
+fn validate_safe_integer(field: &str, value: u64) -> Result<(), TrainerExternalCheckpointError> {
+    if value <= TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+        Ok(())
+    } else {
+        Err(state_error(
+            field,
+            "must not exceed JavaScript's exact integer limit",
+        ))
+    }
 }
 
 fn validate_range(
@@ -841,6 +1101,26 @@ mod tests {
                     samples: 12,
                 }),
             }],
+        }
+    }
+
+    fn coherence_signal_checkpoint() -> TrainerCoherenceSignalCheckpoint {
+        TrainerCoherenceSignalCheckpoint {
+            dominant_channel: Some(0),
+            preserved_channels: 3,
+            z_bias: 0.2,
+            distribution_witness:
+                crate::inference::zspace_coherence::build_zspace_coherence_distribution_witness(&[
+                    0.6_f64, 0.3, 0.1,
+                ])
+                .unwrap(),
+            energy_ratio: 0.75,
+            raw_mean_coherence: 0.4,
+            classification_policy: ZSpaceCoherenceClassificationPolicy::default(),
+            repaired_non_finite_weights: 0,
+            repaired_negative_weights: 0,
+            pre_discard_repaired_non_finite: 0,
+            pre_discard_repaired_negative: 0,
         }
     }
 
@@ -1083,5 +1363,70 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn coherence_signal_reconstructs_only_through_canonical_rust_contracts() {
+        let signal = coherence_signal_checkpoint();
+        let projection = signal.canonical_projection().unwrap();
+
+        assert_eq!(projection.control.channels, 3);
+        assert_eq!(projection.control.raw_mean_coherence, 0.4);
+        assert_eq!(projection.control.energy_ratio, 0.75);
+        assert_eq!(
+            projection.classification.label.as_str(),
+            "cascade_imbalance"
+        );
+        assert!(!projection.classification.swap_invariant);
+
+        let checkpoint = build_trainer_external_state_checkpoint_from_components(
+            vec![COHERENCE_BRIDGE_COMPONENT.to_owned()],
+            TrainerExternalCheckpointComponents::new().with_coherence_bridge(Some(
+                TrainerCoherenceBridgeCheckpoint {
+                    subscribed: true,
+                    pending: Some(signal),
+                    latest: Some(coherence_signal_checkpoint()),
+                },
+            )),
+        )
+        .unwrap();
+        let report = evaluate_trainer_external_state_checkpoint(&checkpoint).unwrap();
+        assert_eq!(report.captured_components, [COHERENCE_BRIDGE_COMPONENT]);
+        assert!(report.deterministic_resume_ready);
+    }
+
+    #[test]
+    fn coherence_checkpoint_rejects_tampered_evidence_and_topology() {
+        let mut invalid_simplex = coherence_signal_checkpoint();
+        invalid_simplex.distribution_witness.normalized_weights[0] = 0.9;
+        assert!(invalid_simplex.validate().is_err());
+
+        let mut invalid_dominant = coherence_signal_checkpoint();
+        invalid_dominant.dominant_channel = Some(3);
+        assert!(invalid_dominant.validate().is_err());
+
+        let mut inconsistent_dominant = coherence_signal_checkpoint();
+        inconsistent_dominant.dominant_channel = Some(1);
+        assert!(inconsistent_dominant.validate().is_err());
+
+        let mut inconsistent_support = coherence_signal_checkpoint();
+        inconsistent_support.preserved_channels = 2;
+        assert!(inconsistent_support.validate().is_err());
+
+        let invalid_topology = TrainerCoherenceBridgeCheckpoint {
+            subscribed: false,
+            pending: None,
+            latest: Some(coherence_signal_checkpoint()),
+        };
+        assert!(invalid_topology.validate().is_err());
+
+        let mut unsafe_counter = coherence_signal_checkpoint();
+        unsafe_counter.repaired_negative_weights = TRAINER_EXTERNAL_MAX_SAFE_INTEGER + 1;
+        assert!(unsafe_counter.validate().is_err());
+
+        let mut impossible_repairs = coherence_signal_checkpoint();
+        impossible_repairs.repaired_non_finite_weights = 2;
+        impossible_repairs.repaired_negative_weights = 2;
+        assert!(impossible_repairs.validate().is_err());
     }
 }

@@ -76,11 +76,16 @@ mod tests {
         ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_BACKEND,
         ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER,
     };
+    use st_core::inference::zspace_coherence::{
+        build_zspace_coherence_distribution_witness, ZSpaceCoherenceClassificationPolicy,
+    };
     use st_core::runtime::trainer_external::{
-        build_trainer_external_state_checkpoint_with_desire_trainer, DesireRoundtableCheckpoint,
+        build_trainer_external_state_checkpoint_from_components, DesireRoundtableCheckpoint,
         DesireTrainerEventCheckpoint, DesireTrainerPhaseCheckpoint, DesireTrainerQueueCheckpoint,
-        DesireTrainerWeightsCheckpoint, TrainerTimestampCheckpoint,
-        ACCUMULATOR_SYNCHRONIZER_COMPONENT, DESIRE_ROUNDTABLE_COMPONENT, DESIRE_TRAINER_COMPONENT,
+        DesireTrainerWeightsCheckpoint, TrainerCoherenceBridgeCheckpoint,
+        TrainerCoherenceSignalCheckpoint, TrainerExternalCheckpointComponents,
+        TrainerTimestampCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT,
+        DESIRE_ROUNDTABLE_COMPONENT, DESIRE_TRAINER_COMPONENT,
     };
 
     fn without_client(mut payload: Value) -> Value {
@@ -92,48 +97,70 @@ mod tests {
     }
 
     fn valid_checkpoint() -> TrainerExternalStateCheckpoint {
-        build_trainer_external_state_checkpoint_with_desire_trainer(
+        let coherence = TrainerCoherenceSignalCheckpoint {
+            dominant_channel: Some(0),
+            preserved_channels: 3,
+            z_bias: 0.2,
+            distribution_witness: build_zspace_coherence_distribution_witness(&[0.6_f64, 0.3, 0.1])
+                .unwrap(),
+            energy_ratio: 0.75,
+            raw_mean_coherence: 0.4,
+            classification_policy: ZSpaceCoherenceClassificationPolicy::default(),
+            repaired_non_finite_weights: 0,
+            repaired_negative_weights: 0,
+            pre_discard_repaired_non_finite: 0,
+            pre_discard_repaired_negative: 0,
+        };
+        build_trainer_external_state_checkpoint_from_components(
             vec![
                 ACCUMULATOR_SYNCHRONIZER_COMPONENT.to_owned(),
+                COHERENCE_BRIDGE_COMPONENT.to_owned(),
                 DESIRE_ROUNDTABLE_COMPONENT.to_owned(),
                 DESIRE_TRAINER_COMPONENT.to_owned(),
             ],
-            Some(DesireTrainerQueueCheckpoint {
-                events: vec![DesireTrainerEventCheckpoint {
-                    timestamp: TrainerTimestampCheckpoint {
-                        unix_seconds: 17,
-                        subsec_nanos: 42,
-                    },
-                    phase: DesireTrainerPhaseCheckpoint::Observation,
-                    temperature: 0.9,
-                    entropy: 0.7,
-                    hypergrad_penalty: 0.1,
-                    weights: DesireTrainerWeightsCheckpoint {
-                        alpha: 0.4,
-                        beta: 0.3,
-                        gamma: 0.2,
-                        lambda: 0.1,
-                    },
-                    trigger: None,
-                }],
-            }),
-            Some(DesireRoundtableCheckpoint {
-                blend: 0.4,
-                drift_gain: 0.3,
-                latest: None,
-                pending_summary: None,
-            }),
-            None,
-            Some(AccumulatorSynchronizerCheckpoint {
-                kind: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_KIND.to_owned(),
-                contract_version: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_CONTRACT_VERSION.to_owned(),
-                semantic_owner: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER.to_owned(),
-                semantic_backend: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_BACKEND.to_owned(),
-                provider: "spiraltorch-wasm.tests.accumulator.v1".to_owned(),
-                rank: 0,
-                world_size: 1,
-                state: Some(json!({ "group": "alpha" })),
-            }),
+            TrainerExternalCheckpointComponents::new()
+                .with_desire_trainer(Some(DesireTrainerQueueCheckpoint {
+                    events: vec![DesireTrainerEventCheckpoint {
+                        timestamp: TrainerTimestampCheckpoint {
+                            unix_seconds: 17,
+                            subsec_nanos: 42,
+                        },
+                        phase: DesireTrainerPhaseCheckpoint::Observation,
+                        temperature: 0.9,
+                        entropy: 0.7,
+                        hypergrad_penalty: 0.1,
+                        weights: DesireTrainerWeightsCheckpoint {
+                            alpha: 0.4,
+                            beta: 0.3,
+                            gamma: 0.2,
+                            lambda: 0.1,
+                        },
+                        trigger: None,
+                    }],
+                }))
+                .with_desire_roundtable(Some(DesireRoundtableCheckpoint {
+                    blend: 0.4,
+                    drift_gain: 0.3,
+                    latest: None,
+                    pending_summary: None,
+                }))
+                .with_coherence_bridge(Some(TrainerCoherenceBridgeCheckpoint {
+                    subscribed: true,
+                    pending: Some(coherence.clone()),
+                    latest: Some(coherence),
+                }))
+                .with_accumulator_synchronizer(Some(AccumulatorSynchronizerCheckpoint {
+                    kind: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_KIND.to_owned(),
+                    contract_version: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_CONTRACT_VERSION
+                        .to_owned(),
+                    semantic_owner: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER.to_owned(),
+                    semantic_backend: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_BACKEND
+                        .to_owned(),
+                    provider: "spiraltorch-wasm.tests.accumulator.v1".to_owned(),
+                    rank: 0,
+                    world_size: 1,
+                    state: Some(json!({ "group": "alpha" })),
+                })),
         )
         .unwrap()
     }
@@ -152,6 +179,7 @@ mod tests {
         assert_eq!(wasm["payload_complete"], true);
         assert_eq!(wasm["deterministic_resume_ready"], false);
         assert_eq!(checkpoint.desire_trainer.unwrap().events.len(), 1);
+        assert!(checkpoint.coherence_bridge.unwrap().subscribed);
         assert_eq!(
             wasm["reattach_required_components"],
             json!([ACCUMULATOR_SYNCHRONIZER_COMPONENT])
@@ -186,6 +214,20 @@ mod tests {
         assert!(matches!(
             trainer_external_state_checkpoint_value(&dishonest),
             Err(TrainerExternalCheckpointError::InvalidState { .. })
+        ));
+
+        let mut invalid_coherence = valid_checkpoint();
+        invalid_coherence
+            .coherence_bridge
+            .as_mut()
+            .unwrap()
+            .pending
+            .as_mut()
+            .unwrap()
+            .dominant_channel = Some(1);
+        assert!(matches!(
+            trainer_external_state_checkpoint_value(&invalid_coherence),
+            Err(TrainerExternalCheckpointError::Coherence(_))
         ));
     }
 }

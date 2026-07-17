@@ -3773,11 +3773,17 @@ Trainer state outside optimizer ownership now begins the same consolidation.
 `st-core::runtime::trainer_external` owns a versioned, deny-unknown checkpoint
 and exact required/captured/unresolved accounting. `DesireRoundtableBridge`
 clones share one control runtime, so Python bundles, pipeline sinks, and
-`ModuleTrainer` cannot silently diverge. The v2 checkpoint captures its
+`ModuleTrainer` cannot silently diverge. The v3 checkpoint captures its
 controls/latest impulse and the pending summary consumed by the next trainer
 step. It also captures the complete `DesireTrainerBridge` FIFO, including phase,
 weights, trigger report, and an exact seconds/nanoseconds timestamp. PSI
 configuration, EMA, and sampling clock remain in the same Rust-owned envelope.
+The same envelope now captures ZSpaceTrace subscription topology and separately
+preserves the coherence signal pending in the trainer and the latest signal
+waiting in the bridge. It stores the normalized-distribution witness and raw
+observations rather than derived controls or labels; restore validates support
+and dominant-channel evidence, then re-derives both through
+`st-core::inference::zspace_coherence` before recreating the Rust subscription.
 `AccumulatorSynchronizer` contributes a provider/topology/state descriptor,
 but Rust reports deterministic resume only after a native trainer verifies an
 already reattached concrete provider. Opaque providers remain unresolved.
@@ -3787,9 +3793,10 @@ it and can never self-report a native resource as reattached. The new
 `st-core::runtime::trainer_checkpoint` envelope binds the optimizer and
 external payloads by SHA-256 and exact component-set equality. `ModuleTrainer`
 prepares topology, model fingerprints, parameter tapes, external replacement
-state, and concrete provider identity before committing either child. Desire
-trainer and roundtable mutexes are acquired together both when one snapshot is
-captured and before either shared state is replaced. Python
+state, coherence evidence/topology, and concrete provider identity before
+committing either child. Desire trainer and roundtable mutexes are acquired
+together both when one snapshot is captured and before either shared state is
+replaced. Python
 therefore has one native restore call, while WASM exposes the identical
 preflight receipt without pretending to run `st-nn` or reattach a native
 resource.

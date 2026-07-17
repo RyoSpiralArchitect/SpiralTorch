@@ -593,6 +593,27 @@ declare module "spiraltorch-wasm" {
         pending_summary: TrainerDesireRoundtablePendingSummaryCheckpoint | null;
     };
 
+    /** Minimal evidence replayed through the canonical Rust coherence contracts. */
+    export type TrainerCoherenceSignalCheckpoint = {
+        dominant_channel: number | null;
+        preserved_channels: number;
+        z_bias: number;
+        distribution_witness: ZSpaceCoherenceDistributionWitness;
+        energy_ratio: number;
+        raw_mean_coherence: number;
+        classification_policy: ZSpaceCoherenceClassificationPolicy;
+        repaired_non_finite_weights: number;
+        repaired_negative_weights: number;
+        pre_discard_repaired_non_finite: number;
+        pre_discard_repaired_negative: number;
+    };
+
+    export type TrainerCoherenceBridgeCheckpoint = {
+        subscribed: boolean;
+        pending: TrainerCoherenceSignalCheckpoint | null;
+        latest: TrainerCoherenceSignalCheckpoint | null;
+    };
+
     export type TrainerAccumulatorSynchronizerCheckpoint = {
         kind: "spiraltorch.accumulator_synchronizer_checkpoint";
         contract_version: "spiraltorch.accumulator_synchronizer_checkpoint.v1";
@@ -607,12 +628,13 @@ declare module "spiraltorch-wasm" {
     /** Rust-produced state for trainer components outside optimizer ownership. */
     export type TrainerExternalStateCheckpoint = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v2";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v3";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         required_components: string[];
         desire_trainer: TrainerDesireQueueCheckpoint | null;
         desire_roundtable: TrainerDesireRoundtableCheckpoint | null;
+        coherence_bridge: TrainerCoherenceBridgeCheckpoint | null;
         psi_meter: TrainerPsiMeterCheckpoint | null;
         accumulator_synchronizer: TrainerAccumulatorSynchronizerCheckpoint | null;
         unresolved_components: string[];
@@ -621,7 +643,7 @@ declare module "spiraltorch-wasm" {
     /** Browser preflight receipt; concrete native resources are never reattached here. */
     export type TrainerExternalStateCheckpointValidation = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v2";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v3";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         execution_client: "wasm";

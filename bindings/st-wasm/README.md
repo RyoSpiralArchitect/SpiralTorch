@@ -517,6 +517,10 @@ provider remains not-ready until Python or another native orchestrator attaches
 and Rust verifies the real resource. Counter, timestamp, rank, and world-size
 fields are capped at JavaScript's largest exactly representable integer so the
 Object and JSON entry points cannot disagree about checkpoint identity.
+Contract v3 also carries trainer-pending and bridge-latest coherence evidence
+plus subscription topology. The browser does not derive a label or control
+metric: Rust validates the distribution witness, support, and dominant channel,
+then reconstructs those semantics through the canonical coherence contract.
 
 Rank planning uses the same boundary. `rankPlanObject` and `rankPlanJson` send shape and
 capability observations to `st-core::ops::rank_entry`; Rust validates `rows`, `cols`, `k`,

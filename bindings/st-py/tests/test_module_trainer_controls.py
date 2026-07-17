@@ -177,13 +177,14 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     assert checkpoint["kind"] == "spiraltorch.trainer_external_state_checkpoint"
     assert (
         checkpoint["contract_version"]
-        == "spiraltorch.trainer_external_state_checkpoint.v2"
+        == "spiraltorch.trainer_external_state_checkpoint.v3"
     )
     assert checkpoint["semantic_owner"] == "st-core::runtime::trainer_external"
     assert checkpoint["semantic_backend"] == "rust"
     assert checkpoint["required_components"] == ["desire_roundtable_bridge"]
     assert checkpoint["unresolved_components"] == []
     assert checkpoint["desire_roundtable"]["blend"] == pytest.approx(0.73)
+    assert checkpoint["coherence_bridge"] is None
 
     target_bundle = st.nn.DesireTelemetryBundle(
         trainer=False,
@@ -213,6 +214,38 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     unknown["commander"] = "python"
     with pytest.raises(ValueError, match="unknown field"):
         target_trainer.restore_external_state_checkpoint(unknown)
+
+
+def test_module_trainer_external_checkpoint_bootstraps_rust_coherence_bridge() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    source = st.nn.ModuleTrainer(backend="cpu")
+    source.enable_spectral_learning_rate()
+    checkpoint = source.external_state_checkpoint()
+
+    assert checkpoint["required_components"] == ["coherence_bridge"]
+    assert checkpoint["coherence_bridge"] == {
+        "subscribed": True,
+        "pending": None,
+        "latest": None,
+    }
+    assert checkpoint["unresolved_components"] == []
+
+    target = st.nn.ModuleTrainer(backend="cpu")
+    receipt = target.restore_external_state_checkpoint(checkpoint)
+
+    assert receipt["captured_components"] == ["coherence_bridge"]
+    assert receipt["deterministic_resume_ready"] is True
+    assert target.external_state_checkpoint() == checkpoint
+
+    before = target.external_state_checkpoint()
+    invalid = json.loads(json.dumps(checkpoint))
+    invalid["coherence_bridge"]["subscribed"] = False
+    with pytest.raises(ValueError, match="pending signal or an active subscription"):
+        target.restore_external_state_checkpoint(invalid)
+    assert target.external_state_checkpoint() == before
 
 
 def test_module_trainer_runtime_bundle_is_atomic_and_rust_owned() -> None:
