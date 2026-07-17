@@ -10,6 +10,17 @@ use super::distributed::st_distributed::{self, DistributedError};
 use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
 use thiserror::Error;
 
+const CPU_ACCUMULATOR_PROVIDER: &str = "spiral-selfsup.cpu_accumulator.v1";
+const DISTRIBUTED_ACCUMULATOR_PROVIDER: &str = "spiral-selfsup.distributed_accumulator.v1";
+
+#[derive(Debug, Clone, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct DistributedAccumulatorCheckpointState {
+    group_id: String,
+    strategy: String,
+    collective_timeout_nanos: u64,
+}
+
 /// Reduction strategy applied to distributed metrics once synchronized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetricReduce {
@@ -79,6 +90,10 @@ impl AccumulatorSynchronizer for CpuDevice {
     fn synchronize_accumulators(&self, gradients: &mut [f32]) -> Result<(), AccumulatorSyncError> {
         TrainingDevice::synchronize_gradients(self, gradients)
             .map_err(AccumulatorSyncError::backend)
+    }
+
+    fn checkpoint_provider(&self) -> &'static str {
+        CPU_ACCUMULATOR_PROVIDER
     }
 }
 
@@ -166,6 +181,57 @@ impl AccumulatorSynchronizer for DistributedDevice {
     fn synchronize_accumulators(&self, gradients: &mut [f32]) -> Result<(), AccumulatorSyncError> {
         TrainingDevice::synchronize_gradients(self, gradients)
             .map_err(AccumulatorSyncError::backend)
+    }
+
+    fn checkpoint_provider(&self) -> &'static str {
+        DISTRIBUTED_ACCUMULATOR_PROVIDER
+    }
+
+    fn checkpoint_state(&self) -> Result<Option<serde_json::Value>, AccumulatorSyncError> {
+        if self.session.collective_in_flight() {
+            return Err(AccumulatorSyncError::backend(
+                "cannot checkpoint a distributed collective in flight",
+            ));
+        }
+        let collective_timeout_nanos = u64::try_from(self.collective_timeout.as_nanos())
+            .map_err(|_| AccumulatorSyncError::backend("collective timeout does not fit u64"))?;
+        let state = DistributedAccumulatorCheckpointState {
+            group_id: self.session.group_id().to_owned(),
+            strategy: "all_reduce_mean".to_owned(),
+            collective_timeout_nanos,
+        };
+        serde_json::to_value(state)
+            .map(Some)
+            .map_err(AccumulatorSyncError::backend)
+    }
+
+    fn validate_checkpoint_state(
+        &self,
+        state: Option<&serde_json::Value>,
+    ) -> Result<(), AccumulatorSyncError> {
+        if self.session.collective_in_flight() {
+            return Err(AccumulatorSyncError::backend(
+                "cannot restore while a distributed collective is in flight",
+            ));
+        }
+        let state = state.ok_or_else(|| {
+            AccumulatorSyncError::backend("distributed checkpoint state is missing")
+        })?;
+        let state: DistributedAccumulatorCheckpointState =
+            serde_json::from_value(state.clone()).map_err(AccumulatorSyncError::backend)?;
+        let collective_timeout_nanos = u64::try_from(self.collective_timeout.as_nanos())
+            .map_err(|_| AccumulatorSyncError::backend("collective timeout does not fit u64"))?;
+        let expected = DistributedAccumulatorCheckpointState {
+            group_id: self.session.group_id().to_owned(),
+            strategy: "all_reduce_mean".to_owned(),
+            collective_timeout_nanos,
+        };
+        if state != expected {
+            return Err(AccumulatorSyncError::backend(format!(
+                "distributed checkpoint state mismatch: expected {expected:?}, got {state:?}"
+            )));
+        }
+        Ok(())
     }
 }
 

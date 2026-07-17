@@ -85,6 +85,14 @@ use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, SoftHeuristicAdoptionReport, StepMetrics,
 };
+#[cfg(feature = "psi")]
+use st_core::runtime::trainer_external::PSI_METER_COMPONENT;
+use st_core::runtime::trainer_external::{
+    build_trainer_external_state_checkpoint, evaluate_trainer_external_state_checkpoint,
+    evaluate_trainer_external_state_restore, TrainerExternalCheckpointError,
+    TrainerExternalCheckpointValidation, TrainerExternalStateCheckpoint,
+    ACCUMULATOR_SYNCHRONIZER_COMPONENT,
+};
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
     evaluate_trainer_optimizer_config, TrainerBackendCounters, TrainerCurvatureSchedulerState,
@@ -2913,10 +2921,16 @@ pub enum TrainerCheckpointError {
     Contract(#[from] TrainerOptimizerCheckpointError),
     #[error(transparent)]
     Tensor(#[from] TensorError),
+    #[error(transparent)]
+    External(#[from] TrainerExternalCheckpointError),
+    #[error(transparent)]
+    Accumulator(#[from] AccumulatorSyncError),
     #[error("checkpoint execution topology does not match the configured trainer")]
     TopologyMismatch,
     #[error("checkpoint parameter set does not match the target module: {message}")]
     ParameterSetMismatch { message: String },
+    #[error("checkpoint external component set does not match the configured trainer")]
+    ExternalComponentSetMismatch,
     #[error("checkpoint epoch {epoch} does not fit this platform")]
     EpochOutOfRange { epoch: u64 },
     #[error("checkpoint counter {field}={value} does not fit this platform")]
@@ -6086,6 +6100,104 @@ impl ModuleTrainer {
         evaluate_trainer_optimizer_config(self.optimizer_config())
     }
 
+    /// Captures the supported runtime components outside optimizer ownership.
+    ///
+    /// Unsupported components remain explicit in the unresolved component list.
+    pub fn external_state_checkpoint(
+        &self,
+    ) -> Result<TrainerExternalStateCheckpoint, TrainerCheckpointError> {
+        let desire_roundtable = self
+            .desire_roundtable_bridge
+            .as_ref()
+            .map(DesireRoundtableBridge::checkpoint)
+            .transpose()?;
+        #[cfg(feature = "psi")]
+        let psi_meter = self
+            .psi
+            .as_ref()
+            .map(PsiMeter::checkpoint)
+            .transpose()
+            .map_err(TrainerExternalCheckpointError::from)?;
+        #[cfg(not(feature = "psi"))]
+        let psi_meter = None;
+        let accumulator_synchronizer = self
+            .accumulator_synchronizer
+            .as_ref()
+            .map(|synchronizer| synchronizer.checkpoint())
+            .transpose()?;
+        Ok(build_trainer_external_state_checkpoint(
+            self.optimizer_external_state_required(),
+            desire_roundtable,
+            psi_meter,
+            accumulator_synchronizer,
+        )?)
+    }
+
+    /// Restores supported external state after concrete resources are attached.
+    ///
+    /// Resource identity and all replacement state are validated before any
+    /// trainer-owned component is mutated.
+    pub fn restore_external_state_checkpoint(
+        &mut self,
+        checkpoint: &TrainerExternalStateCheckpoint,
+    ) -> Result<TrainerExternalCheckpointValidation, TrainerCheckpointError> {
+        evaluate_trainer_external_state_checkpoint(checkpoint)?;
+        let target_components = self.optimizer_external_state_required();
+        #[cfg(feature = "psi")]
+        let target_components = {
+            let mut target_components = target_components;
+            if checkpoint.psi_meter.is_some()
+                && target_components
+                    .binary_search_by(|component| component.as_str().cmp(PSI_METER_COMPONENT))
+                    .is_err()
+            {
+                target_components.push(PSI_METER_COMPONENT.to_owned());
+                target_components.sort_unstable();
+            }
+            target_components
+        };
+        if checkpoint.required_components != target_components {
+            return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
+        }
+
+        #[cfg(feature = "psi")]
+        let psi_meter = checkpoint
+            .psi_meter
+            .clone()
+            .map(PsiMeter::from_checkpoint)
+            .transpose()
+            .map_err(TrainerExternalCheckpointError::from)?;
+        #[cfg(not(feature = "psi"))]
+        if checkpoint.psi_meter.is_some() {
+            return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
+        }
+
+        let mut reattached_components = Vec::new();
+        if let Some(accumulator) = checkpoint.accumulator_synchronizer.as_ref() {
+            let synchronizer = self
+                .accumulator_synchronizer
+                .as_ref()
+                .ok_or(TrainerCheckpointError::ExternalComponentSetMismatch)?;
+            synchronizer.validate_checkpoint(accumulator)?;
+            reattached_components.push(ACCUMULATOR_SYNCHRONIZER_COMPONENT.to_owned());
+        }
+        let validation =
+            evaluate_trainer_external_state_restore(checkpoint, &reattached_components)?;
+
+        if let Some(state) = checkpoint.desire_roundtable {
+            let bridge = self
+                .desire_roundtable_bridge
+                .as_ref()
+                .ok_or(TrainerCheckpointError::ExternalComponentSetMismatch)?;
+            bridge.restore_checkpoint(state)?;
+        }
+        #[cfg(feature = "psi")]
+        if let Some(psi_meter) = psi_meter {
+            self.psi = Some(psi_meter);
+        }
+        Ok(validation)
+    }
+
     /// Captures trainer update policy and every parameter accumulator.
     ///
     /// Parameter values remain in [`Module::state_dict`]. Their fingerprints
@@ -9156,6 +9268,33 @@ mod tests {
             }
             Ok(())
         }
+
+        fn checkpoint_provider(&self) -> &'static str {
+            "st-nn.tests.scaling_accumulator.v1"
+        }
+
+        fn checkpoint_state(&self) -> Result<Option<Value>, AccumulatorSyncError> {
+            Ok(Some(serde_json::json!({ "factor": self.factor })))
+        }
+
+        fn validate_checkpoint_state(
+            &self,
+            state: Option<&Value>,
+        ) -> Result<(), AccumulatorSyncError> {
+            let factor = state
+                .and_then(|state| state.get("factor"))
+                .and_then(Value::as_f64)
+                .ok_or_else(|| AccumulatorSyncError::backend("scaling factor is missing"))?
+                as f32;
+            if factor.to_bits() == self.factor.to_bits() {
+                Ok(())
+            } else {
+                Err(AccumulatorSyncError::backend(format!(
+                    "scaling factor mismatch: expected {}, got {factor}",
+                    self.factor
+                )))
+            }
+        }
     }
 
     #[test]
@@ -9648,6 +9787,138 @@ mod tests {
         assert_eq!(
             target_module.param.optimizer_checkpoint_state(),
             parameter_before
+        );
+    }
+
+    #[test]
+    fn external_checkpoint_restores_shared_desire_controller_state() {
+        let mut source_bridge = DesireRoundtableBridge::new();
+        let source_bundle = DesireTelemetryBundle::new().with_roundtable_bridge(&source_bridge);
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_desire_telemetry(&source_bundle);
+        source_bridge.set_blend(0.73);
+        source_bridge.set_drift_gain(0.62);
+        let checkpoint = source_trainer.external_state_checkpoint().unwrap();
+
+        assert!(checkpoint.unresolved_components.is_empty());
+        assert_eq!(
+            checkpoint.desire_roundtable.unwrap().blend,
+            source_bridge.blend()
+        );
+
+        let target_bridge = DesireRoundtableBridge::new();
+        let target_bundle = DesireTelemetryBundle::new().with_roundtable_bridge(&target_bridge);
+        let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target_trainer.enable_desire_telemetry(&target_bundle);
+        let report = target_trainer
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap();
+
+        assert!(report.payload_complete);
+        assert!(report.deterministic_resume_ready);
+        assert_eq!(target_bridge.blend(), 0.73);
+        assert_eq!(target_bridge.drift_gain(), 0.62);
+
+        let before = target_trainer.external_state_checkpoint().unwrap();
+        let mut invalid = checkpoint;
+        invalid.desire_roundtable.as_mut().unwrap().blend = f32::NAN;
+        assert!(target_trainer
+            .restore_external_state_checkpoint(&invalid)
+            .is_err());
+        assert_eq!(target_trainer.external_state_checkpoint().unwrap(), before);
+    }
+
+    #[test]
+    fn external_checkpoint_verifies_reattached_accumulator_provider_state() {
+        let source_calls = Arc::new(Mutex::new(0));
+        let mut source = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source.set_training_device(ScalingTrainingDevice::new(0.5, Arc::clone(&source_calls)));
+        let checkpoint = source.external_state_checkpoint().unwrap();
+        let preflight = evaluate_trainer_external_state_checkpoint(&checkpoint).unwrap();
+        assert!(!preflight.deterministic_resume_ready);
+        assert_eq!(
+            preflight.reattach_required_components,
+            [ACCUMULATOR_SYNCHRONIZER_COMPONENT]
+        );
+
+        let target_calls = Arc::new(Mutex::new(0));
+        let mut target = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target.set_training_device(ScalingTrainingDevice::new(0.5, Arc::clone(&target_calls)));
+        let restored = target
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap();
+        assert!(restored.payload_complete);
+        assert!(restored.deterministic_resume_ready);
+        assert_eq!(
+            restored.reattached_components,
+            [ACCUMULATOR_SYNCHRONIZER_COMPONENT]
+        );
+
+        let mut wrong = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        wrong.set_training_device(ScalingTrainingDevice::new(0.25, Arc::new(Mutex::new(0))));
+        assert!(wrong
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap_err()
+            .to_string()
+            .contains("scaling factor mismatch"));
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn external_checkpoint_preserves_psi_ema_and_sampling_clock() {
+        let mut config = PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS | PsiComponent::GRAD_NORM,
+            ema_alpha: 0.35,
+            sample_rate: 2,
+            ..PsiConfig::default()
+        };
+        config.weights.insert(PsiComponent::LOSS, 1.0);
+        config.weights.insert(PsiComponent::GRAD_NORM, 0.4);
+        let mut source = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source.psi = Some(PsiMeter::new(config));
+        source.psi.as_mut().unwrap().update(&PsiInput {
+            loss: 0.8,
+            grad_l2: 0.4,
+            ..PsiInput::default()
+        });
+        source.psi.as_mut().unwrap().update(&PsiInput {
+            loss: 1.6,
+            grad_l2: 1.2,
+            ..PsiInput::default()
+        });
+        let checkpoint = source.external_state_checkpoint().unwrap();
+
+        let mut target = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        assert!(target.psi.is_none());
+        let restored = target
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap();
+        assert!(restored.payload_complete);
+        assert!(restored.deterministic_resume_ready);
+        assert!(target.psi.is_some());
+
+        let next = PsiInput {
+            loss: 2.4,
+            grad_l2: 3.0,
+            ..PsiInput::default()
+        };
+        let expected = source.psi.as_mut().unwrap().update(&next);
+        let actual = target.psi.as_mut().unwrap().update(&next);
+        assert_eq!(actual.0.total, expected.0.total);
+        assert_eq!(actual.0.breakdown, expected.0.breakdown);
+        assert_eq!(actual.0.step, expected.0.step);
+        assert_eq!(
+            actual.1.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            expected
+                .1
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            target.psi.as_ref().unwrap().checkpoint().unwrap(),
+            source.psi.as_ref().unwrap().checkpoint().unwrap()
         );
     }
 

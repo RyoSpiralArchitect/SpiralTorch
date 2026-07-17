@@ -480,6 +480,26 @@ Both functions reject unknown fields, contract-version changes, non-finite
 state, invalid tape shapes, and unsorted external-state requirements through
 the Rust validator. They never restore model parameters in the browser.
 
+External runtime state uses a separate preflight surface. The browser can
+inspect exact component coverage and learn which concrete resources a native
+orchestrator must reattach, but it cannot mark those resources as restored:
+
+```ts
+import { trainerExternalStateCheckpointObject } from "spiraltorch-wasm";
+
+const external = trainerExternalStateCheckpointObject(externalCheckpoint);
+console.log(external.unresolved_components);
+console.log(external.reattach_required_components);
+console.log(external.deterministic_resume_ready);
+```
+
+`trainerExternalStateCheckpointJson` exposes the same Rust validator to worker
+messages. WASM adds only `execution_client: "wasm"`; a known distributed
+provider remains not-ready until Python or another native orchestrator attaches
+and Rust verifies the real resource. Counter, timestamp, rank, and world-size
+fields are capped at JavaScript's largest exactly representable integer so the
+Object and JSON entry points cannot disagree about checkpoint identity.
+
 Rank planning uses the same boundary. `rankPlanObject` and `rankPlanJson` send shape and
 capability observations to `st-core::ops::rank_entry`; Rust validates `rows`, `cols`, `k`,
 device limits, runtime surrogate routing, and the complete unified heuristic choice:

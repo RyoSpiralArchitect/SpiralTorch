@@ -7999,6 +7999,7 @@ class _NnRoundtableConfig:
         mid_k: int = ...,
         bottom_k: int = ...,
         here_tolerance: float = ...,
+        psi_enabled: bool = ...,
     ) -> None: ...
 
     @property
@@ -8012,6 +8013,9 @@ class _NnRoundtableConfig:
 
     @property
     def here_tolerance(self) -> float: ...
+
+    @property
+    def psi_enabled(self) -> bool: ...
 
 
 class _NnSoftLogicConfig:
@@ -8212,6 +8216,53 @@ class _NnMaxwellDesireBridge:
     def emit(self, channel: str, pulse: Any) -> Mapping[str, Any] | None: ...
 
 
+class _NnDesireRoundtableBridge:
+    def __init__(self, *, blend: float = ..., drift_gain: float = ...) -> None: ...
+
+    def len(self) -> int: ...
+
+    def is_empty(self) -> bool: ...
+
+    @property
+    def blend(self) -> float: ...
+
+    @blend.setter
+    def blend(self, blend: float) -> None: ...
+
+    @property
+    def drift_gain(self) -> float: ...
+
+    @drift_gain.setter
+    def drift_gain(self, drift_gain: float) -> None: ...
+
+    def impulse(self) -> Dict[str, Any] | None: ...
+
+    def drain_summary(self) -> Dict[str, Any] | None: ...
+
+
+class _NnDesireTelemetryBundle:
+    def __init__(
+        self,
+        *,
+        trainer: bool = ...,
+        roundtable: bool = ...,
+        blend: float = ...,
+        drift_gain: float = ...,
+    ) -> None: ...
+
+    def has_trainer(self) -> bool: ...
+
+    def has_roundtable(self) -> bool: ...
+
+    def trainer_bridge(self) -> Any | None: ...
+
+    def roundtable_bridge(self) -> _NnDesireRoundtableBridge | None: ...
+
+    def drain_trainer_summary(self) -> Dict[str, Any] | None: ...
+
+    def drain_roundtable_summary(self) -> Dict[str, Any] | None: ...
+
+
 class _NnModuleTrainer:
     def __init__(
         self,
@@ -8311,6 +8362,13 @@ class _NnModuleTrainer:
     def restore_optimizer_checkpoint(
         self,
         module: object,
+        checkpoint: Mapping[str, Any],
+    ) -> Dict[str, Any]: ...
+
+    def external_state_checkpoint(self) -> Dict[str, Any]: ...
+
+    def restore_external_state_checkpoint(
+        self,
         checkpoint: Mapping[str, Any],
     ) -> Dict[str, Any]: ...
 
@@ -8434,6 +8492,8 @@ class _NnModule(ModuleType):
     ModuleTrainer: type[_NnModuleTrainer]
     SpectralLearningRatePolicy: type[SpectralLearningRatePolicy]
     MaxwellDesireBridge: type[_NnMaxwellDesireBridge]
+    DesireRoundtableBridge: type[_NnDesireRoundtableBridge]
+    DesireTelemetryBundle: type[_NnDesireTelemetryBundle]
     NarrativeHint: type[_NnNarrativeHint]
     NarrativeSummary: type[_NnNarrativeSummary]
     Scaler: type[_NnScaler]

@@ -26,6 +26,11 @@ use core::fmt;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use crate::runtime::trainer_external::{
+    PsiMeterCheckpoint, PsiMeterCheckpointError, PsiMeterComponent, PsiMeterComponentValue,
+    PSI_METER_CHECKPOINT_CONTRACT_VERSION, PSI_METER_CHECKPOINT_KIND,
+    PSI_METER_CHECKPOINT_SEMANTIC_BACKEND, PSI_METER_CHECKPOINT_SEMANTIC_OWNER,
+};
 use crate::theory::spiral_dynamics::{HopfRegime, PsiSpiralMetrics};
 
 bitflags! {
@@ -62,6 +67,46 @@ impl PsiComponent {
             PsiComponent::POSITIVE_CURVATURE => "positive_curvature",
             _ => "unknown",
         }
+    }
+
+    fn from_checkpoint_component(component: PsiMeterComponent) -> Self {
+        match component {
+            PsiMeterComponent::Loss => Self::LOSS,
+            PsiMeterComponent::GradNorm => Self::GRAD_NORM,
+            PsiMeterComponent::UpdateRatio => Self::UPDATE_RATIO,
+            PsiMeterComponent::ActDrift => Self::ACT_DRIFT,
+            PsiMeterComponent::AttnEntropy => Self::ATTN_ENTROPY,
+            PsiMeterComponent::BandEnergy => Self::BAND_ENERGY,
+            PsiMeterComponent::PositiveCurvature => Self::POSITIVE_CURVATURE,
+        }
+    }
+
+    fn checkpoint_component(self) -> Option<PsiMeterComponent> {
+        match self {
+            Self::LOSS => Some(PsiMeterComponent::Loss),
+            Self::GRAD_NORM => Some(PsiMeterComponent::GradNorm),
+            Self::UPDATE_RATIO => Some(PsiMeterComponent::UpdateRatio),
+            Self::ACT_DRIFT => Some(PsiMeterComponent::ActDrift),
+            Self::ATTN_ENTROPY => Some(PsiMeterComponent::AttnEntropy),
+            Self::BAND_ENERGY => Some(PsiMeterComponent::BandEnergy),
+            Self::POSITIVE_CURVATURE => Some(PsiMeterComponent::PositiveCurvature),
+            _ => None,
+        }
+    }
+
+    fn checkpoint_components() -> [(Self, PsiMeterComponent); 7] {
+        [
+            (Self::ACT_DRIFT, PsiMeterComponent::ActDrift),
+            (Self::ATTN_ENTROPY, PsiMeterComponent::AttnEntropy),
+            (Self::BAND_ENERGY, PsiMeterComponent::BandEnergy),
+            (Self::GRAD_NORM, PsiMeterComponent::GradNorm),
+            (Self::LOSS, PsiMeterComponent::Loss),
+            (
+                Self::POSITIVE_CURVATURE,
+                PsiMeterComponent::PositiveCurvature,
+            ),
+            (Self::UPDATE_RATIO, PsiMeterComponent::UpdateRatio),
+        ]
     }
 
     fn from_token(token: &str) -> Result<Self, String> {
@@ -485,6 +530,67 @@ impl PsiMeter {
         }
     }
 
+    /// Captures configuration, EMA history, and the sampling clock.
+    pub fn checkpoint(&self) -> Result<PsiMeterCheckpoint, PsiMeterCheckpointError> {
+        let known = PsiComponent::checkpoint_components()
+            .into_iter()
+            .fold(PsiComponent::empty(), |mask, (component, _)| {
+                mask | component
+            });
+        if self.cfg.components.bits() & !known.bits() != 0 {
+            return Err(PsiMeterCheckpointError::invalid_state(
+                "components",
+                "contains an unknown component bit",
+            ));
+        }
+        let components = PsiComponent::checkpoint_components()
+            .into_iter()
+            .filter(|(component, _)| self.cfg.components.contains(*component))
+            .map(|(_, checkpoint_component)| checkpoint_component)
+            .collect::<Vec<_>>();
+        let checkpoint = PsiMeterCheckpoint {
+            kind: PSI_METER_CHECKPOINT_KIND.to_owned(),
+            contract_version: PSI_METER_CHECKPOINT_CONTRACT_VERSION.to_owned(),
+            semantic_owner: PSI_METER_CHECKPOINT_SEMANTIC_OWNER.to_owned(),
+            semantic_backend: PSI_METER_CHECKPOINT_SEMANTIC_BACKEND.to_owned(),
+            enabled: self.cfg.enabled,
+            components,
+            weights: psi_component_values("weights", &self.cfg.weights)?,
+            ema_alpha: self.cfg.ema_alpha,
+            sample_rate: self.cfg.sample_rate,
+            thresholds: psi_component_values("thresholds", &self.cfg.thresholds)?,
+            ema: psi_component_values("ema", &self.ema)?,
+            step: self.step,
+        };
+        checkpoint.validate()?;
+        Ok(checkpoint)
+    }
+
+    /// Reconstructs a meter after validating every transported value.
+    pub fn from_checkpoint(
+        checkpoint: PsiMeterCheckpoint,
+    ) -> Result<Self, PsiMeterCheckpointError> {
+        checkpoint.validate()?;
+        let components = checkpoint
+            .components
+            .iter()
+            .map(|component| PsiComponent::from_checkpoint_component(*component))
+            .fold(PsiComponent::empty(), |mask, component| mask | component);
+        let cfg = PsiConfig {
+            enabled: checkpoint.enabled,
+            components,
+            weights: psi_component_map(checkpoint.weights),
+            ema_alpha: checkpoint.ema_alpha,
+            sample_rate: checkpoint.sample_rate,
+            thresholds: psi_component_map(checkpoint.thresholds),
+        };
+        Ok(Self {
+            cfg,
+            ema: psi_component_map(checkpoint.ema),
+            step: checkpoint.step,
+        })
+    }
+
     #[inline]
     fn take_component(&self, c: PsiComponent, x: &PsiInput) -> f32 {
         match c {
@@ -579,6 +685,39 @@ impl PsiMeter {
     }
 }
 
+fn psi_component_values(
+    field: &str,
+    values: &HashMap<PsiComponent, f32>,
+) -> Result<Vec<PsiMeterComponentValue>, PsiMeterCheckpointError> {
+    let mut checkpoint_values = Vec::with_capacity(values.len());
+    for (component, value) in values {
+        let checkpoint_component = component.checkpoint_component().ok_or_else(|| {
+            PsiMeterCheckpointError::invalid_state(
+                field,
+                "contains an unknown or composite component",
+            )
+        })?;
+        checkpoint_values.push(PsiMeterComponentValue {
+            component: checkpoint_component,
+            value: *value,
+        });
+    }
+    checkpoint_values.sort_unstable_by_key(|entry| entry.component);
+    Ok(checkpoint_values)
+}
+
+fn psi_component_map(values: Vec<PsiMeterComponentValue>) -> HashMap<PsiComponent, f32> {
+    values
+        .into_iter()
+        .map(|entry| {
+            (
+                PsiComponent::from_checkpoint_component(entry.component),
+                entry.value,
+            )
+        })
+        .collect()
+}
+
 /// Hint produced by the roundtable scheduler to seed ψ metering defaults.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PsiAutomationHint {
@@ -656,6 +795,85 @@ mod tests {
         });
         let loss = *reading.breakdown.get(&PsiComponent::LOSS).unwrap();
         assert!((loss - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn psi_meter_checkpoint_preserves_sampling_and_ema_continuation() {
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS | PsiComponent::GRAD_NORM,
+            ema_alpha: 0.35,
+            sample_rate: 2,
+            ..Default::default()
+        };
+        cfg.weights.insert(PsiComponent::LOSS, 1.0);
+        cfg.weights.insert(PsiComponent::GRAD_NORM, 0.4);
+        cfg.thresholds.insert(PsiComponent::LOSS, 1.2);
+        let mut meter = PsiMeter::new(cfg);
+        meter.update(&PsiInput {
+            loss: 0.8,
+            grad_l2: 0.4,
+            ..PsiInput::default()
+        });
+        meter.update(&PsiInput {
+            loss: 1.6,
+            grad_l2: 1.2,
+            ..PsiInput::default()
+        });
+
+        let encoded = serde_json::to_string(&meter.checkpoint().unwrap()).unwrap();
+        let checkpoint: PsiMeterCheckpoint = serde_json::from_str(&encoded).unwrap();
+        let mut restored = PsiMeter::from_checkpoint(checkpoint).unwrap();
+        let next = PsiInput {
+            loss: 2.4,
+            grad_l2: 3.0,
+            ..PsiInput::default()
+        };
+        let expected = meter.update(&next);
+        let actual = restored.update(&next);
+
+        assert_eq!(actual.0.total, expected.0.total);
+        assert_eq!(actual.0.breakdown, expected.0.breakdown);
+        assert_eq!(actual.0.step, expected.0.step);
+        assert_eq!(
+            actual.1.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            expected
+                .1
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(restored.checkpoint().unwrap(), meter.checkpoint().unwrap());
+    }
+
+    #[test]
+    fn psi_meter_checkpoint_rejects_tampering_and_unknown_fields() {
+        let meter = PsiMeter::new(PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS,
+            ema_alpha: 0.2,
+            sample_rate: 1,
+            ..Default::default()
+        });
+        let mut checkpoint = meter.checkpoint().unwrap();
+        checkpoint.ema_alpha = f32::NAN;
+        assert!(matches!(
+            PsiMeter::from_checkpoint(checkpoint),
+            Err(PsiMeterCheckpointError::InvalidState { .. })
+        ));
+
+        let mut payload = serde_json::to_value(meter.checkpoint().unwrap()).unwrap();
+        payload
+            .as_object_mut()
+            .unwrap()
+            .insert("commander".to_owned(), serde_json::json!("python"));
+        let error = serde_json::from_value::<PsiMeterCheckpoint>(payload).unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
+
+        let mut payload = serde_json::to_value(meter.checkpoint().unwrap()).unwrap();
+        payload["components"][0] = serde_json::json!("commander");
+        let error = serde_json::from_value::<PsiMeterCheckpoint>(payload).unwrap_err();
+        assert!(error.to_string().contains("unknown variant"));
     }
 
     #[test]

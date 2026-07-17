@@ -156,6 +156,111 @@ def test_module_trainer_optimizer_checkpoint_resumes_through_rust() -> None:
         resumed_trainer.restore_optimizer_checkpoint(resumed_model, nested_tamper)
 
 
+def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    source_bundle = st.nn.DesireTelemetryBundle(
+        trainer=False,
+        roundtable=True,
+        blend=0.4,
+        drift_gain=0.3,
+    )
+    source_bridge = source_bundle.roundtable_bridge()
+    source_trainer = st.nn.ModuleTrainer(backend="cpu")
+    source_trainer.enable_desire_telemetry(source_bundle)
+    source_bridge.blend = 0.73
+    source_bridge.drift_gain = 0.62
+    checkpoint = source_trainer.external_state_checkpoint()
+
+    assert checkpoint["kind"] == "spiraltorch.trainer_external_state_checkpoint"
+    assert (
+        checkpoint["contract_version"]
+        == "spiraltorch.trainer_external_state_checkpoint.v1"
+    )
+    assert checkpoint["semantic_owner"] == "st-core::runtime::trainer_external"
+    assert checkpoint["semantic_backend"] == "rust"
+    assert checkpoint["required_components"] == ["desire_roundtable_bridge"]
+    assert checkpoint["unresolved_components"] == []
+    assert checkpoint["desire_roundtable"]["blend"] == pytest.approx(0.73)
+
+    target_bundle = st.nn.DesireTelemetryBundle(
+        trainer=False,
+        roundtable=True,
+        blend=0.1,
+        drift_gain=0.1,
+    )
+    target_bridge = target_bundle.roundtable_bridge()
+    target_trainer = st.nn.ModuleTrainer(backend="cpu")
+    target_trainer.enable_desire_telemetry(target_bundle)
+    report = target_trainer.restore_external_state_checkpoint(checkpoint)
+
+    assert report["payload_complete"] is True
+    assert report["deterministic_resume_ready"] is True
+    assert report["reattach_required_components"] == []
+    assert target_bridge.blend == pytest.approx(0.73)
+    assert target_bridge.drift_gain == pytest.approx(0.62)
+
+    before = target_trainer.external_state_checkpoint()
+    tampered = json.loads(json.dumps(checkpoint))
+    tampered["desire_roundtable"]["blend"] = 2.0
+    with pytest.raises(ValueError, match="desire_roundtable.blend"):
+        target_trainer.restore_external_state_checkpoint(tampered)
+    assert target_trainer.external_state_checkpoint() == before
+
+    unknown = json.loads(json.dumps(checkpoint))
+    unknown["commander"] = "python"
+    with pytest.raises(ValueError, match="unknown field"):
+        target_trainer.restore_external_state_checkpoint(unknown)
+
+
+def test_module_trainer_external_checkpoint_bootstraps_psi_from_rust_state() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    source = st.nn.ModuleTrainer(backend="cpu")
+    config = st.nn.RoundtableConfig(
+        top_k=1,
+        mid_k=1,
+        bottom_k=1,
+        psi_enabled=True,
+    )
+    assert config.psi_enabled is True
+    schedule = source.roundtable(2, 1, config)
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("psi_checkpoint_linear", 2, 1))
+    source.prepare(model)
+    x = st.Tensor.rand(2, 2, seed=411)
+    y = st.Tensor.rand(2, 1, seed=412)
+    source.train_epoch(model, st.nn.MeanSquaredError(), [(x, y)], schedule)
+    model_state = model.state_dict()
+    optimizer_checkpoint = source.optimizer_checkpoint(model)
+    checkpoint = source.external_state_checkpoint()
+
+    assert checkpoint["required_components"] == ["psi_meter"]
+    assert checkpoint["psi_meter"]["step"] == 1
+    assert checkpoint["unresolved_components"] == []
+
+    target = st.nn.ModuleTrainer(backend="cpu")
+    report = target.restore_external_state_checkpoint(checkpoint)
+    assert report["payload_complete"] is True
+    assert report["deterministic_resume_ready"] is True
+    assert target.external_state_checkpoint()["psi_meter"] == checkpoint["psi_meter"]
+
+    resumed_model = st.nn.Sequential()
+    resumed_model.add(st.nn.Linear("psi_checkpoint_linear", 2, 1))
+    resumed_model.load_state_dict(model_state)
+    target.prepare(resumed_model)
+    optimizer_report = target.restore_optimizer_checkpoint(
+        resumed_model,
+        optimizer_checkpoint,
+    )
+    assert optimizer_report["external_state_required"] == ["psi_meter"]
+    assert optimizer_report["deterministic_resume_ready"] is False
+
+
 def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     st = _load_native()
     if st is None:

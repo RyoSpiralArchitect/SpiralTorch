@@ -3278,6 +3278,7 @@ dependencies = [
  "once_cell",
  "rand",
  "serde",
+ "serde_json",
  "spiral-config",
  "st-core",
  "st-nn",

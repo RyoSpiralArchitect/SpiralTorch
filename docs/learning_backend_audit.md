@@ -1823,9 +1823,10 @@ momentum are active.
 
 Next steps:
 
-1. Give the external components reported by `external_state_required`
-   versioned state contracts, starting with Desire/psi and distributed
-   accumulator synchronizers.
+1. Extend the first external-state slice beyond Desire roundtable, PSI, and
+   distributed accumulator descriptors into the remaining Desire queues,
+   autopilot, graph/coherence bridges, and other stateful controllers while
+   keeping unsupported components explicit.
 2. Add one atomic training bundle that pairs module values, optimizer state,
    dataloader cursor, shuffle RNG, and external controller states.
 3. Promote resume parity from deterministic optimizer steps to seeded
@@ -3767,6 +3768,27 @@ required diagnostics are present. Invalid optional legacy fields are noted and
 omitted; a rejected contract falls back to raw diagnostic display rather than
 aborting the Atlas route. WASM exposes the identical object/JSON request and
 adds only `execution_client: "wasm"`.
+
+Trainer state outside optimizer ownership now begins the same consolidation.
+`st-core::runtime::trainer_external` owns a versioned, deny-unknown checkpoint
+and exact required/captured/unresolved accounting. `DesireRoundtableBridge`
+clones share one control runtime, so Python bundles, pipeline sinks, and
+`ModuleTrainer` cannot silently diverge. The checkpoint currently captures its
+controls/latest impulse plus PSI configuration, EMA, and sampling clock.
+`AccumulatorSynchronizer` contributes a provider/topology/state descriptor,
+but Rust reports deterministic resume only after a native trainer verifies an
+already reattached concrete provider. Opaque providers remain unresolved.
+
+Python only transports and restores this Rust contract. WASM only preflights
+it and can never self-report a native resource as reattached. Telemetry-only
+Desire queues and the remaining stateful controllers are still named in
+`unresolved_components`; extending their Rust contracts is the next checkpoint
+slice rather than hiding them behind a client-side heuristic. Optimizer and
+external receipts deliberately remain separate: the optimizer receipt reports
+whether its payload is standalone, while the external receipt reports captured
+component and native-reattachment readiness. A combined readiness claim waits
+for the next Rust-owned atomic training-bundle contract instead of being
+reconstructed in Python or WASM.
 
 Next steps:
 
