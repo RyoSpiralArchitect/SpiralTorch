@@ -2579,6 +2579,161 @@ def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
     assert rows["compact"]["text_quality_score"] > 0.0
     assert 0.0 <= rows["expanded"]["quality_score"] <= 1.0
     assert 0.0 <= rows["expanded"]["efficiency_score"] <= 1.0
+    assert comparison["selection_semantics"]["semantic_owner"] == (
+        "st-core::runtime::api_llm_route_policy"
+    )
+    assert comparison["selection_semantics"]["semantic_backend"] == "rust"
+    assert comparison["selection_semantics"]["score_formula_version"] == (
+        "spiraltorch.api_llm_route_policy.score.v1"
+    )
+
+
+def test_api_llm_trace_route_policy_treats_missing_costs_as_unknown(tmp_path) -> None:
+    missing_path = tmp_path / "missing.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [
+            {
+                "provider": "example",
+                "model": "missing-cost-model",
+                "prompt": "compare route evidence",
+                "text": "Route evidence was compared.",
+                "finish_reason": "stop",
+            }
+        ],
+        missing_path,
+    )
+    observed_path = tmp_path / "observed.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [
+            {
+                "provider": "example",
+                "model": "observed-cost-model",
+                "prompt": "compare route evidence",
+                "text": "Route evidence was compared.",
+                "finish_reason": "stop",
+                "latency_ms": 100.0,
+                "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
+            }
+        ],
+        observed_path,
+    )
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"missing": missing_path, "observed": observed_path},
+        near_best_tolerance=1.0,
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+
+    assert rows["missing"]["latency_ms_mean"] is None
+    assert rows["missing"]["total_tokens"] is None
+    assert rows["missing"]["latency_cost"] == pytest.approx(0.5)
+    assert rows["missing"]["token_cost"] == pytest.approx(0.5)
+    assert comparison["winners"]["lowest_latency"] == "observed"
+    assert comparison["winners"]["lowest_total_tokens"] == "observed"
+    assert "latency_cost" in rows["missing"]["selection_evidence"]["balanced"][
+        "missing_metrics"
+    ]
+
+
+def test_api_llm_trace_route_policy_normalizes_token_cost_per_observation(
+    tmp_path,
+) -> None:
+    event = {
+        "provider": "example",
+        "model": "token-cost-model",
+        "prompt": "normalize route cost",
+        "text": "Route cost was normalized.",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
+    }
+    one_path = tmp_path / "one.jsonl"
+    st.write_api_llm_trace_jsonl([event], one_path)
+    repeated_path = tmp_path / "repeated.jsonl"
+    st.write_api_llm_trace_jsonl([event] * 8, repeated_path)
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"one": one_path, "repeated": repeated_path},
+        near_best_tolerance=1.0,
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+
+    assert rows["one"]["total_tokens"] == pytest.approx(9.0)
+    assert rows["repeated"]["total_tokens"] == pytest.approx(72.0)
+    assert rows["one"]["token_cost"] == pytest.approx(rows["repeated"]["token_cost"])
+
+
+def test_api_llm_trace_route_policy_requires_native_semantic_core(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "trace.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [{"text": "Rust owns route semantics.", "finish_reason": "stop"}],
+        path,
+    )
+    monkeypatch.setattr(st, "_rs", None)
+
+    with pytest.raises(RuntimeError, match="require the compiled Rust core"):
+        st.compare_api_llm_trace_runs({"route": path})
+
+
+def test_api_llm_trace_route_policy_rejects_native_formula_drift(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "trace.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [{"text": "Rust owns route semantics.", "finish_reason": "stop"}],
+        path,
+    )
+
+    class _DriftedCore:
+        @staticmethod
+        def _api_llm_route_policy_evaluate(_request):
+            return {
+                "kind": "spiraltorch.api_llm_route_policy",
+                "contract_version": "spiraltorch.api_llm_route_policy.v1",
+                "semantic_owner": "st-core::runtime::api_llm_route_policy",
+                "semantic_backend": "rust",
+                "score_formula_version": "spiraltorch.api_llm_route_policy.score.v0",
+            }
+
+    monkeypatch.setattr(st, "_rs", _DriftedCore())
+    with pytest.raises(RuntimeError, match="untrusted contract"):
+        st.compare_api_llm_trace_runs({"route": path})
+
+
+def test_api_llm_trace_route_policy_rejects_incomplete_native_ranking(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "trace.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [{"text": "Rust owns route semantics.", "finish_reason": "stop"}],
+        path,
+    )
+    native_evaluate = st._rs._api_llm_route_policy_evaluate
+
+    class _IncompleteCore:
+        @staticmethod
+        def _api_llm_route_policy_evaluate(request):
+            payload = dict(native_evaluate(request))
+            payload["ranked_labels"] = []
+            return payload
+
+    monkeypatch.setattr(st, "_rs", _IncompleteCore())
+    with pytest.raises(RuntimeError, match="inconsistent ranking"):
+        st.compare_api_llm_trace_runs({"route": path})
+
+
+def test_api_llm_trace_route_policy_rejects_invalid_near_best_tolerance(
+    tmp_path,
+) -> None:
+    path = tmp_path / "trace.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [{"text": "Rust owns route semantics.", "finish_reason": "stop"}],
+        path,
+    )
+
+    with pytest.raises(ValueError, match="near_best_tolerance"):
+        st.compare_api_llm_trace_runs({"route": path}, near_best_tolerance=-0.1)
 
 
 def test_compare_api_llm_trace_runs_surfaces_wasm_context_tradeoffs(tmp_path) -> None:

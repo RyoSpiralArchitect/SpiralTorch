@@ -3,10 +3,25 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::backend::runtime_route::{evaluate_runtime_device_route, RuntimeDeviceRouteRequest};
+use st_core::runtime::api_llm_route_policy::{
+    evaluate_api_llm_route_policy, ApiLlmRoutePolicyEvaluationRequest,
+};
 use st_core::runtime::topos_route_policy::{
     build_topos_route_rewards, evaluate_topos_route_policy, resolve_topos_route_policy,
     ToposRoutePolicyEvaluationRequest, ToposRoutePolicyResolveRequest, ToposRouteRewardsRequest,
 };
+
+#[pyfunction]
+fn _api_llm_route_policy_evaluate(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request: ApiLlmRoutePolicyEvaluationRequest =
+        request_from_py(request, "invalid API LLM route-policy evaluation request")?;
+    let payload = evaluate_api_llm_route_policy(request)
+        .map_err(|error| json_error("API LLM route-policy evaluation failed", error))?;
+    payload_to_py(py, payload, "API LLM route-policy contract encoding failed")
+}
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -72,6 +87,7 @@ fn _runtime_device_route_evaluate(
 }
 
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+    parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_rewards, parent)?)?;
