@@ -85,6 +85,10 @@ use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, SoftHeuristicAdoptionReport, StepMetrics,
 };
+use st_core::runtime::trainer_optimizer::{
+    evaluate_trainer_optimizer_config, TrainerOptimizerConfig, TrainerOptimizerConfigContract,
+    TrainerOptimizerConfigError,
+};
 use st_core::runtime::zspace_optimizer::{
     zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
 };
@@ -4650,7 +4654,18 @@ impl ModuleTrainer {
         hyper_learning_rate: f32,
         fallback_learning_rate: f32,
     ) -> Self {
-        Self::new_with_execution_config(
+        Self::try_new(caps, curvature, hyper_learning_rate, fallback_learning_rate)
+            .expect("invalid ModuleTrainer optimizer configuration")
+    }
+
+    /// Tries to create a trainer after validating the Rust-owned optimizer contract.
+    pub fn try_new(
+        caps: DeviceCaps,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Result<Self, TrainerOptimizerConfigError> {
+        Self::try_new_with_execution_config(
             caps,
             ExecutionConfig::from_env(),
             curvature,
@@ -4667,11 +4682,34 @@ impl ModuleTrainer {
         hyper_learning_rate: f32,
         fallback_learning_rate: f32,
     ) -> Self {
+        Self::try_new_with_execution_config(
+            caps,
+            execution_config,
+            curvature,
+            hyper_learning_rate,
+            fallback_learning_rate,
+        )
+        .expect("invalid ModuleTrainer optimizer configuration")
+    }
+
+    /// Tries to create a trainer bound to an explicit execution contract.
+    pub fn try_new_with_execution_config(
+        caps: DeviceCaps,
+        execution_config: ExecutionConfig,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Result<Self, TrainerOptimizerConfigError> {
+        let optimizer_config = TrainerOptimizerConfig::try_new(
+            curvature,
+            hyper_learning_rate,
+            fallback_learning_rate,
+        )?;
         #[cfg(feature = "psi")]
         let psi = Self::init_psi_meter();
 
         let mut spectral_adapter = SpectralLrAdapter::default().with_sheet_hint(8);
-        spectral_adapter.set_curvature_target(curvature);
+        spectral_adapter.set_curvature_target(optimizer_config.curvature);
 
         let phase_turnover_spike_threshold =
             env::var("SPIRAL_TRAINER_PHASE_TURNOVER_SPIKE_THRESHOLD")
@@ -4697,12 +4735,12 @@ impl ModuleTrainer {
             .map(|value| value.max(0.0))
             .unwrap_or(0.6);
 
-        Self {
+        Ok(Self {
             epoch: 0,
             planner: RankPlanner::with_execution_config(caps, execution_config),
-            curvature,
-            hyper_learning_rate,
-            fallback_learning_rate,
+            curvature: optimizer_config.curvature,
+            hyper_learning_rate: optimizer_config.hyper_learning_rate,
+            fallback_learning_rate: optimizer_config.fallback_learning_rate,
             meta_learning_rate_scale: 1.0,
             meta_optimizer_step: None,
             grad_clip_max_norm: None,
@@ -4763,7 +4801,7 @@ impl ModuleTrainer {
             psychoid_log: false,
             #[cfg(feature = "collapse")]
             collapse: None,
-        }
+        })
     }
 
     /// Enables the graph consensus feedback loop by attaching a bridge that
@@ -5573,6 +5611,24 @@ impl ModuleTrainer {
         }
     }
 
+    /// Returns the optimizer controls as the canonical Rust-owned config.
+    pub fn optimizer_config(&self) -> TrainerOptimizerConfig {
+        TrainerOptimizerConfig {
+            curvature: self.curvature,
+            hyper_learning_rate: self.hyper_learning_rate,
+            fallback_learning_rate: self.fallback_learning_rate,
+            real_learning_rate: self.real_learning_rate,
+            grad_clip_max_norm: self.grad_clip_max_norm,
+        }
+    }
+
+    /// Evaluates the current controls through the versioned semantic contract.
+    pub fn optimizer_config_contract(
+        &self,
+    ) -> Result<TrainerOptimizerConfigContract, TrainerOptimizerConfigError> {
+        evaluate_trainer_optimizer_config(self.optimizer_config())
+    }
+
     /// Returns details for the most recent accumulator synchronization pass.
     pub fn last_accumulator_sync(&self) -> TrainerAccumulatorSyncStats {
         self.last_accumulator_sync
@@ -5669,13 +5725,16 @@ impl ModuleTrainer {
 
     /// Sets the gradient clipping threshold (global L2 norm).
     ///
-    /// Passing a non-positive or non-finite value disables clipping.
-    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) {
-        if max_norm.is_finite() && max_norm > 0.0 {
-            self.grad_clip_max_norm = Some(max_norm);
-        } else {
-            self.grad_clip_max_norm = None;
-        }
+    /// Invalid values are rejected without changing the existing guard.
+    pub fn set_grad_clip_max_norm(
+        &mut self,
+        max_norm: f32,
+    ) -> Result<(), TrainerOptimizerConfigError> {
+        let config = self
+            .optimizer_config()
+            .with_grad_clip_max_norm(Some(max_norm))?;
+        self.grad_clip_max_norm = config.grad_clip_max_norm;
+        Ok(())
     }
 
     /// Disables any previously configured gradient clipping.
@@ -5690,15 +5749,30 @@ impl ModuleTrainer {
 
     /// Enables Euclidean realgrad accumulation with the provided learning rate.
     pub fn with_realgrad(mut self, learning_rate: f32) -> Self {
-        self.enable_realgrad(learning_rate);
+        self.enable_realgrad(learning_rate)
+            .expect("invalid ModuleTrainer realgrad learning rate");
         self
     }
 
+    /// Tries to enable Euclidean realgrad accumulation.
+    pub fn try_with_realgrad(
+        mut self,
+        learning_rate: f32,
+    ) -> Result<Self, TrainerOptimizerConfigError> {
+        self.enable_realgrad(learning_rate)?;
+        Ok(self)
+    }
+
     /// Enables Euclidean realgrad accumulation with the provided learning rate.
-    pub fn enable_realgrad(&mut self, learning_rate: f32) {
-        if learning_rate.is_finite() && learning_rate > 0.0 {
-            self.real_learning_rate = Some(learning_rate);
-        }
+    pub fn enable_realgrad(
+        &mut self,
+        learning_rate: f32,
+    ) -> Result<(), TrainerOptimizerConfigError> {
+        let config = self
+            .optimizer_config()
+            .with_real_learning_rate(Some(learning_rate))?;
+        self.real_learning_rate = config.real_learning_rate;
+        Ok(())
     }
 
     /// Disables the optional realgrad accumulation pathway.
@@ -8634,6 +8708,62 @@ mod tests {
     }
 
     #[test]
+    fn trainer_optimizer_ingress_uses_the_rust_contract() {
+        assert!(matches!(
+            ModuleTrainer::try_new(DeviceCaps::cpu(), 1.0, 0.05, 0.01),
+            Err(TrainerOptimizerConfigError::InvalidCurvature { .. })
+        ));
+        assert!(matches!(
+            ModuleTrainer::try_new(DeviceCaps::cpu(), -1.0, 0.0, 0.01),
+            Err(TrainerOptimizerConfigError::InvalidPositiveFinite {
+                field: "hyper_learning_rate",
+                ..
+            })
+        ));
+        assert!(matches!(
+            ModuleTrainer::try_new(DeviceCaps::cpu(), -1.0, 0.05, f32::NAN),
+            Err(TrainerOptimizerConfigError::InvalidPositiveFinite {
+                field: "fallback_learning_rate",
+                ..
+            })
+        ));
+
+        let mut trainer = ModuleTrainer::try_new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).unwrap();
+        trainer.enable_realgrad(0.02).unwrap();
+        trainer.set_grad_clip_max_norm(0.5).unwrap();
+        let contract = trainer.optimizer_config_contract().unwrap();
+
+        assert_eq!(
+            contract.contract_version,
+            "spiraltorch.trainer_optimizer_config.v1"
+        );
+        assert_eq!(
+            contract.semantic_owner,
+            "st-core::runtime::trainer_optimizer"
+        );
+        assert_eq!(contract.semantic_backend, "rust");
+        assert!(contract.realgrad_enabled);
+        assert!(contract.gradient_clip_enabled);
+        assert_eq!(contract.config.real_learning_rate, Some(0.02));
+        assert_eq!(contract.config.grad_clip_max_norm, Some(0.5));
+    }
+
+    #[test]
+    fn invalid_optional_optimizer_controls_preserve_existing_guards() {
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        trainer.enable_realgrad(0.02).unwrap();
+        trainer.set_grad_clip_max_norm(0.5).unwrap();
+        let before = trainer.optimizer_config();
+
+        assert!(trainer.enable_realgrad(f32::NAN).is_err());
+        assert!(trainer.set_grad_clip_max_norm(0.0).is_err());
+
+        assert_eq!(trainer.optimizer_config(), before);
+        assert_eq!(trainer.real_learning_rate(), Some(0.02));
+        assert_eq!(trainer.grad_clip_max_norm(), Some(0.5));
+    }
+
+    #[test]
     fn trainer_prepares_with_topos_for_wave_gate() {
         let caps = DeviceCaps::wgpu(64, true, 512);
         let mut trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
@@ -8703,7 +8833,7 @@ mod tests {
     fn trainer_optimizer_state_tracks_lr_scale_and_adapter_reset() {
         let caps = DeviceCaps::cpu();
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_realgrad(0.02);
-        trainer.set_grad_clip_max_norm(0.5);
+        trainer.set_grad_clip_max_norm(0.5).unwrap();
         let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
         module.accumulate();
 

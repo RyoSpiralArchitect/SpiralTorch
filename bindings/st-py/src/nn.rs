@@ -5712,19 +5712,6 @@ impl PyNnModuleTrainer {
         max_workgroup: Option<u32>,
         shared_mem_per_workgroup: Option<u32>,
     ) -> PyResult<Self> {
-        if !curvature.is_finite() {
-            return Err(PyValueError::new_err("curvature must be finite"));
-        }
-        if hyper_learning_rate <= 0.0 || !hyper_learning_rate.is_finite() {
-            return Err(PyValueError::new_err(
-                "hyper_learning_rate must be positive and finite",
-            ));
-        }
-        if fallback_learning_rate <= 0.0 || !fallback_learning_rate.is_finite() {
-            return Err(PyValueError::new_err(
-                "fallback_learning_rate must be positive and finite",
-            ));
-        }
         let backend_kind = parse_backend(Some(backend))?;
         let backend_resolution = resolve_backend(backend_kind);
         let effective_backend = backend_resolution.effective_backend;
@@ -5737,12 +5724,13 @@ impl PyNnModuleTrainer {
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
-            inner: RustModuleTrainer::new(
+            inner: RustModuleTrainer::try_new(
                 caps,
                 curvature,
                 hyper_learning_rate,
                 fallback_learning_rate,
-            ),
+            )
+            .map_err(|error| PyValueError::new_err(error.to_string()))?,
             requested_backend: backend_kind.as_str().to_string(),
             effective_backend: effective_backend.as_str().to_string(),
         })
@@ -5889,12 +5877,24 @@ impl PyNnModuleTrainer {
         self.inner.meta_optimizer_step()
     }
 
-    pub fn enable_realgrad(&mut self, learning_rate: f32) {
-        self.inner.enable_realgrad(learning_rate);
+    pub fn enable_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .enable_realgrad(learning_rate)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     pub fn disable_realgrad(&mut self) {
         self.inner.disable_realgrad();
+    }
+
+    pub fn optimizer_config_contract(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let contract = self
+            .inner
+            .optimizer_config_contract()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let value = serde_json::to_value(contract)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
     }
 
     #[pyo3(signature = (module, *, topos=None))]
@@ -6101,8 +6101,10 @@ impl PyNnModuleTrainer {
     }
 
     #[pyo3(signature = (max_norm))]
-    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) {
-        self.inner.set_grad_clip_max_norm(max_norm);
+    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) -> PyResult<()> {
+        self.inner
+            .set_grad_clip_max_norm(max_norm)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     pub fn clear_grad_clip_max_norm(&mut self) {

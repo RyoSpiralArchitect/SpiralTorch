@@ -209,6 +209,28 @@ declare module "spiraltorch-wasm" {
         passed: boolean;
     };
 
+    /** Trainer optimizer controls validated by the Rust semantic core. */
+    export type TrainerOptimizerConfig = {
+        curvature: number;
+        hyper_learning_rate: number;
+        fallback_learning_rate: number;
+        real_learning_rate?: number | null;
+        grad_clip_max_norm?: number | null;
+    };
+
+    /** Versioned validation receipt shared by native and browser clients. */
+    export type TrainerOptimizerConfigContract = {
+        kind: "spiraltorch.trainer_optimizer_config";
+        contract_version: "spiraltorch.trainer_optimizer_config.v1";
+        semantic_owner: "st-core::runtime::trainer_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        validation_rule: string;
+        realgrad_enabled: boolean;
+        gradient_clip_enabled: boolean;
+        config: Required<TrainerOptimizerConfig>;
+    };
+
     export type RankPlanRequest = {
         kind: "topk" | "top_k" | "midk" | "mid_k" | "bottomk" | "bottom_k";
         rows: number;
@@ -1666,6 +1688,10 @@ declare module "spiraltorch-wasm" {
     export function runtimeDeviceRouteObject(
         request: RuntimeDeviceRouteRequest,
     ): RuntimeDeviceRoute;
+    export function trainerOptimizerConfigJson(configJson: string): string;
+    export function trainerOptimizerConfigObject(
+        config: TrainerOptimizerConfig,
+    ): TrainerOptimizerConfigContract;
     export function rankPlanJson(requestJson: string): string;
     export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
     export function apiLlmRoutePolicyEvaluateJson(requestJson: string): string;

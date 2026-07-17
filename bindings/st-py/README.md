@@ -2431,6 +2431,20 @@ Python callers can keep the training loop small while still using the Rust
 roundtable trainer. For heavier HPO/serving flows, use this loop as the inner
 objective and wrap it with your Optuna/Ray/BentoML/TorchServe tool of choice.
 
+Optimizer ingress is also Rust-owned. `ModuleTrainer` validates negative finite
+curvature, positive finite learning rates, optional realgrad, and gradient
+clipping through `st-core::runtime::trainer_optimizer`; Python does not carry a
+parallel validator. Invalid control updates raise `ValueError` without changing
+an already active realgrad rate or clipping guard. The versioned receipt is
+available for run cards and preflight logs:
+
+```python
+trainer.enable_realgrad(5e-3)
+trainer.set_grad_clip_max_norm(1.0)
+optimizer_contract = trainer.optimizer_config_contract()
+assert optimizer_contract["semantic_backend"] == "rust"
+```
+
 ```python
 import spiraltorch as st
 from spiraltorch.nn import Linear, MeanSquaredError, ModuleTrainer, RoundtableConfig, Sequential

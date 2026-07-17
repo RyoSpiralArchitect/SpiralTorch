@@ -36,6 +36,44 @@ def _load_native() -> types.ModuleType | None:
     return None
 
 
+def test_module_trainer_optimizer_contract_is_rust_owned_and_fail_closed() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    with pytest.raises(ValueError, match="curvature must be negative and finite"):
+        st.nn.ModuleTrainer(backend="cpu", curvature=0.5)
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=2e-2,
+        fallback_learning_rate=1e-2,
+    )
+    trainer.enable_realgrad(5e-3)
+    trainer.set_grad_clip_max_norm(1.5)
+    before = trainer.optimizer_config_contract()
+
+    assert before["kind"] == "spiraltorch.trainer_optimizer_config"
+    assert before["contract_version"] == "spiraltorch.trainer_optimizer_config.v1"
+    assert before["semantic_owner"] == "st-core::runtime::trainer_optimizer"
+    assert before["semantic_backend"] == "rust"
+    assert before["realgrad_enabled"] is True
+    assert before["gradient_clip_enabled"] is True
+    assert before["config"]["real_learning_rate"] == pytest.approx(5e-3)
+    assert before["config"]["grad_clip_max_norm"] == pytest.approx(1.5)
+
+    with pytest.raises(ValueError, match="real_learning_rate must be positive and finite"):
+        trainer.enable_realgrad(float("nan"))
+    with pytest.raises(ValueError, match="grad_clip_max_norm must be positive and finite"):
+        trainer.set_grad_clip_max_norm(0.0)
+
+    after = trainer.optimizer_config_contract()
+    assert after == before
+    assert trainer.real_learning_rate == pytest.approx(5e-3)
+    assert trainer.grad_clip_max_norm == pytest.approx(1.5)
+
+
 def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     st = _load_native()
     if st is None:
