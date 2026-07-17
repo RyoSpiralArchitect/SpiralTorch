@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::soft_logic::SoftRule;
-#[cfg(feature = "kdsl")]
+#[cfg(any(feature = "kdsl", feature = "kv-redis"))]
 use super::spiralk_fft::canonical_fft_tile_hint;
 use super::wgpu_heuristics::{Choice, DslOverrides};
 #[cfg(feature = "kdsl")]

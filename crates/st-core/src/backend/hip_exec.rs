@@ -5,7 +5,7 @@
 
 #[cfg(feature = "hip-real")]
 use crate::backend::hip_runtime;
-use crate::backend::rankk_launch::with_registered_buffers_hip;
+use crate::backend::rankk_launch::{with_registered_buffers_hip, LaunchSlices};
 use crate::backend::rankk_software::{run_selection, Selection};
 use crate::ops::rank_entry::{RankKExecutor, RankPlan};
 
@@ -48,20 +48,52 @@ fn dispatch_bottomk(plan: &RankPlan) -> Result<(), String> {
 }
 
 fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String> {
-    with_registered_buffers_hip(|buffers| {
+    with_registered_buffers_hip(|mut buffers| {
+        let mut scratch_vals = vec![0.0; buffers.out_vals.len()];
+        let mut scratch_idx = vec![0; buffers.out_idx.len()];
+
         #[cfg(feature = "hip-real")]
         {
-            match hip_runtime::run_selection(selection, plan, buffers) {
-                Ok(()) => return Ok(()),
+            let native_result = hip_runtime::run_selection(
+                selection,
+                plan,
+                LaunchSlices {
+                    input: buffers.input,
+                    out_vals: &mut scratch_vals,
+                    out_idx: &mut scratch_idx,
+                    rows: buffers.rows,
+                    cols: buffers.cols,
+                    k: buffers.k,
+                },
+            );
+            match native_result {
+                Ok(()) => {
+                    commit_selection_output(&mut buffers, &scratch_vals, &scratch_idx);
+                    return Ok(());
+                }
                 Err(err) => {
                     if plan.accelerator_fallback().is_strict() {
                         return Err(format!("hip launch failed ({err}); fallback disabled"));
                     }
-                    return run_selection(selection, plan, buffers).map_err(|soft_err| {
+                    run_selection(
+                        selection,
+                        plan,
+                        LaunchSlices {
+                            input: buffers.input,
+                            out_vals: &mut scratch_vals,
+                            out_idx: &mut scratch_idx,
+                            rows: buffers.rows,
+                            cols: buffers.cols,
+                            k: buffers.k,
+                        },
+                    )
+                    .map_err(|soft_err| {
                         format!(
                             "hip launch failed ({err}); software fallback also failed: {soft_err}"
                         )
-                    });
+                    })?;
+                    commit_selection_output(&mut buffers, &scratch_vals, &scratch_idx);
+                    return Ok(());
                 }
             }
         }
@@ -74,9 +106,27 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
                         .to_string(),
                 );
             }
-            return run_selection(selection, plan, buffers);
+            run_selection(
+                selection,
+                plan,
+                LaunchSlices {
+                    input: buffers.input,
+                    out_vals: &mut scratch_vals,
+                    out_idx: &mut scratch_idx,
+                    rows: buffers.rows,
+                    cols: buffers.cols,
+                    k: buffers.k,
+                },
+            )?;
+            commit_selection_output(&mut buffers, &scratch_vals, &scratch_idx);
+            return Ok(());
         }
     })
+}
+
+fn commit_selection_output(buffers: &mut LaunchSlices<'_>, values: &[f32], indices: &[i32]) {
+    buffers.out_vals.copy_from_slice(values);
+    buffers.out_idx.copy_from_slice(indices);
 }
 
 #[cfg(test)]
@@ -187,12 +237,32 @@ mod tests {
     }
 
     #[test]
+    fn hip_software_failure_keeps_registered_output_unmodified() {
+        let plan = plan(RankKind::TopK, 2);
+        let input = sample_input();
+        let mut out_vals = vec![23.0f32; ROWS as usize];
+        let mut out_idx = vec![23i32; ROWS as usize];
+
+        let error = with_launch_buffers_hip(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, 1),
+            || HipExecutor::default().launch_topk(&plan),
+        )
+        .expect_err("mismatched plan must fail before committing scratch output");
+
+        assert!(error.contains("plan k 2 did not match buffer k 1"));
+        assert_eq!(out_vals, vec![23.0; ROWS as usize]);
+        assert_eq!(out_idx, vec![23; ROWS as usize]);
+    }
+
+    #[test]
     #[cfg(not(feature = "hip-real"))]
     fn hip_strict_plan_rejects_stub_fallback() {
         let plan = strict_plan(RankKind::TopK, 2);
         let input = sample_input();
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
+        out_vals.fill(17.0);
+        out_idx.fill(17);
 
         let err = with_launch_buffers_hip(
             launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
@@ -202,5 +272,7 @@ mod tests {
 
         assert!(err.contains("hip-real feature is not enabled"));
         assert!(err.contains("fallback disabled"));
+        assert!(out_vals.iter().all(|value| *value == 17.0));
+        assert!(out_idx.iter().all(|index| *index == 17));
     }
 }
