@@ -7120,6 +7120,11 @@ impl ModuleTrainer {
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
     pub fn step<M: Module + ?Sized>(&mut self, module: &mut M) -> PureResult<()> {
+        let backend_policy = BackendPolicy::from_device_caps_with_config(
+            self.planner.device_caps(),
+            self.planner.execution_config(),
+        );
+        let _backend_policy_guard = push_backend_policy(backend_policy);
         self.synchronize_parameter_accumulators(module)?;
         if let Some(limit) = self.grad_clip_max_norm {
             self.clip_grad_global_norm(module, limit)?;
@@ -9805,6 +9810,7 @@ mod tests {
     struct ScalingTrainingDevice {
         factor: f32,
         calls: Arc<Mutex<usize>>,
+        policy_requests: Option<Arc<Mutex<Vec<&'static str>>>>,
         rank: usize,
         world_size: usize,
     }
@@ -9814,9 +9820,15 @@ mod tests {
             Self {
                 factor,
                 calls,
+                policy_requests: None,
                 rank: 1,
                 world_size: 2,
             }
+        }
+
+        fn with_policy_capture(mut self, capture: Arc<Mutex<Vec<&'static str>>>) -> Self {
+            self.policy_requests = Some(capture);
+            self
         }
     }
 
@@ -9837,6 +9849,15 @@ mod tests {
                 .calls
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+            if let Some(capture) = &self.policy_requests {
+                let requested_backend = st_core::backend::execution::current_backend_policy()
+                    .map(BackendPolicy::tensor_util_backend_label)
+                    .unwrap_or("none");
+                capture
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(requested_backend);
+            }
             for value in gradients {
                 *value *= self.factor;
             }
@@ -11179,6 +11200,31 @@ mod tests {
     }
 
     #[test]
+    fn trainer_step_scopes_core_backend_policy_over_accumulator_sync() {
+        assert!(st_core::backend::execution::current_backend_policy().is_none());
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let calls = Arc::new(Mutex::new(0usize));
+        let policy_requests = Arc::new(Mutex::new(Vec::new()));
+        trainer.set_training_device(
+            ScalingTrainingDevice::new(1.0, Arc::clone(&calls))
+                .with_policy_capture(Arc::clone(&policy_requests)),
+        );
+        let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        module.accumulate();
+
+        trainer.step(&mut module).unwrap();
+
+        assert_eq!(
+            *policy_requests
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            vec!["wgpu"]
+        );
+        assert!(st_core::backend::execution::current_backend_policy().is_none());
+    }
+
+    #[test]
     fn trainer_rejects_non_finite_synchronized_accumulator_without_updating_weights() {
         let caps = DeviceCaps::cpu();
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
@@ -11999,11 +12045,23 @@ mod tests {
         if let Some(budget) = trainer.rewrite_budget.as_mut() {
             budget.begin_epoch();
         }
+        let proposal_after_cooldown = GlobalProposal {
+            proposal_id: "proposal-after-cooldown".to_string(),
+            ops: vec![HeurOp {
+                origin: "test".to_string(),
+                kind: HeurOpKind::AppendSoft {
+                    script: "k:topk(3)".to_string(),
+                    weight: 1.0,
+                },
+                issued_at: SystemTime::now(),
+            }],
+            evidence: Vec::new(),
+        };
         trainer
-            .apply_proposal(&proposal, HashMap::new())
+            .apply_proposal(&proposal_after_cooldown, HashMap::new())
             .expect("rewrite allowed after cooldown");
         let after_third = trainer.heuristics_log().entries().len();
-        assert_eq!(after_third, after_first + proposal.ops.len());
+        assert_eq!(after_third, after_first + proposal_after_cooldown.ops.len());
     }
 
     #[test]

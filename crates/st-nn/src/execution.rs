@@ -3,247 +3,31 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Thread-local application of the execution plan owned by `st-core`.
+//! Compatibility re-exports for the execution policy owned by `st-core`.
 
-use serde_json::json;
-use st_core::backend::execution_plan::TensorUtilRoute;
-pub use st_core::backend::execution_plan::{AcceleratorFallback, BackendPolicy, ExecutionConfig};
-use st_tensor::{
-    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorUtilBackend,
+pub use st_core::backend::execution::{
+    current_accelerator_fallback, current_attention_backend, current_backend_policy,
+    current_layer_norm_backend, current_matmul_backend, current_prepacked_matmul_backend,
+    current_softmax_backend, current_tensor_util_backend, current_tensor_util_backend_for_values,
+    push_backend_policy, AcceleratorFallback, BackendPolicy, BackendPolicyGuard, ExecutionConfig,
 };
-use std::cell::RefCell;
-
-thread_local! {
-    static ACTIVE_BACKEND_POLICY: RefCell<Option<BackendPolicy>> = const { RefCell::new(None) };
-}
-
-/// RAII guard that restores the previous thread-local backend policy.
-#[derive(Debug)]
-pub struct BackendPolicyGuard {
-    previous: Option<BackendPolicy>,
-    _tensor_fallback_guard: st_tensor::execution::AcceleratorFallbackGuard,
-}
-
-impl Drop for BackendPolicyGuard {
-    fn drop(&mut self) {
-        ACTIVE_BACKEND_POLICY.with(|slot| {
-            *slot.borrow_mut() = self.previous.take();
-        });
-    }
-}
-
-/// Installs `policy` for the current thread until the returned guard is dropped.
-pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
-    let tensor_fallback_guard = st_tensor::execution::push_accelerator_fallback(
-        policy.execution_config().accelerator_fallback,
-    );
-    let previous = ACTIVE_BACKEND_POLICY.with(|slot| slot.replace(Some(policy)));
-    BackendPolicyGuard {
-        previous,
-        _tensor_fallback_guard: tensor_fallback_guard,
-    }
-}
-
-/// Returns the current thread-local backend policy, if any.
-pub fn current_backend_policy() -> Option<BackendPolicy> {
-    ACTIVE_BACKEND_POLICY.with(|slot| *slot.borrow())
-}
-
-/// Returns the captured accelerator fallback contract, preserving legacy env behavior outside a policy scope.
-pub fn current_accelerator_fallback() -> AcceleratorFallback {
-    st_tensor::execution::current_accelerator_fallback()
-}
-
-/// Returns the current dense matmul backend, falling back to tensor-level Auto.
-pub fn current_matmul_backend() -> MatmulBackend {
-    current_backend_policy()
-        .map(BackendPolicy::matmul_backend)
-        .unwrap_or(MatmulBackend::Auto)
-}
-
-/// Returns the current prepacked matmul backend, falling back to tensor-level Auto.
-pub fn current_prepacked_matmul_backend() -> MatmulBackend {
-    current_backend_policy()
-        .map(BackendPolicy::prepacked_matmul_backend)
-        .unwrap_or(MatmulBackend::Auto)
-}
-
-/// Returns the current layer-normalisation backend, falling back to tensor-level Auto.
-pub fn current_layer_norm_backend() -> LayerNormBackend {
-    current_backend_policy()
-        .map(BackendPolicy::layer_norm_backend)
-        .unwrap_or(LayerNormBackend::Auto)
-}
-
-/// Returns the current fused-attention backend, falling back to tensor-level Auto.
-pub fn current_attention_backend() -> AttentionBackend {
-    current_backend_policy()
-        .map(BackendPolicy::attention_backend)
-        .unwrap_or(AttentionBackend::Auto)
-}
-
-/// Returns the current row-wise softmax backend, falling back to tensor-level Auto.
-pub fn current_softmax_backend() -> SoftmaxBackend {
-    current_backend_policy()
-        .map(BackendPolicy::softmax_backend)
-        .unwrap_or(SoftmaxBackend::Auto)
-}
-
-/// Returns the current tensor utility backend, falling back to legacy Auto.
-pub fn current_tensor_util_backend() -> TensorUtilBackend {
-    current_backend_policy()
-        .map(BackendPolicy::tensor_util_backend)
-        .unwrap_or(TensorUtilBackend::Auto)
-}
-
-/// Applies the core execution plan to a tensor utility operation of `values` elements.
-pub fn current_tensor_util_backend_for_values(values: usize) -> TensorUtilBackend {
-    let Some(policy) = current_backend_policy() else {
-        return TensorUtilBackend::Auto;
-    };
-    let route = policy.tensor_util_route(values);
-    if route.records_threshold_decision() {
-        emit_tensor_util_route(policy, route);
-    }
-    route.selected_backend
-}
-
-fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
-    st_tensor::emit_tensor_op_meta("tensor_util_route", || {
-        json!({
-            "requested_backend": route.requested_backend_label(),
-            "selected_backend": route.selected_backend_label(),
-            "status": route.status.as_str(),
-            "choice_source": "threshold_guard",
-            "semantic_owner": "st-core",
-            "accelerator_fallback": policy
-                .execution_config()
-                .accelerator_fallback
-                .as_str(),
-            "values": route.values,
-            "threshold": route.threshold,
-        })
-    });
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use st_core::backend::device_caps::DeviceCaps;
-    use std::sync::{Arc, Mutex};
-
-    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        crate::test_global_state_lock()
-    }
+    use st_tensor::TensorUtilBackend;
 
     #[test]
-    fn core_policy_remains_available_through_the_st_nn_api() {
+    fn compatibility_surface_shares_the_core_owned_policy_state() {
         let policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
-        assert_eq!(policy.matmul_backend(), MatmulBackend::Auto);
-        assert_eq!(policy.prepacked_matmul_backend(), MatmulBackend::Auto);
-        assert_eq!(policy.layer_norm_backend(), LayerNormBackend::Cpu);
-        assert_eq!(policy.attention_backend(), AttentionBackend::Cpu);
-        assert_eq!(policy.softmax_backend(), SoftmaxBackend::Cpu);
-        assert_eq!(policy.tensor_util_backend(), TensorUtilBackend::Cpu);
-        assert_eq!(policy.device_backend_label(), "cpu");
-        assert_eq!(policy.matmul_backend_label(), "auto");
-        assert_eq!(policy.prepacked_matmul_backend_label(), "auto");
-        assert_eq!(policy.layer_norm_backend_label(), "cpu");
-        assert_eq!(policy.attention_backend_label(), "cpu");
-        assert_eq!(policy.softmax_backend_label(), "cpu");
-        assert_eq!(policy.tensor_util_backend_label(), "cpu");
-    }
+        let _guard = push_backend_policy(policy);
 
-    #[test]
-    fn backend_policy_guard_restores_previous_policy() {
-        assert!(current_backend_policy().is_none());
-        let outer = BackendPolicy::explicit(
-            DeviceCaps::cpu(),
-            MatmulBackend::CpuNaive,
-            MatmulBackend::CpuNaive,
-            LayerNormBackend::Cpu,
-            AttentionBackend::Cpu,
-            SoftmaxBackend::Cpu,
-        );
-        let inner = BackendPolicy::explicit(
-            DeviceCaps::cpu(),
-            MatmulBackend::CpuFaer,
-            MatmulBackend::CpuFaer,
-            LayerNormBackend::Auto,
-            AttentionBackend::Auto,
-            SoftmaxBackend::Auto,
-        );
-
-        let outer_guard = push_backend_policy(outer);
-        assert_eq!(current_matmul_backend(), MatmulBackend::CpuNaive);
-        {
-            let _inner_guard = push_backend_policy(inner);
-            assert_eq!(current_matmul_backend(), MatmulBackend::CpuFaer);
-            assert_eq!(current_prepacked_matmul_backend(), MatmulBackend::CpuFaer);
-            assert_eq!(current_layer_norm_backend(), LayerNormBackend::Auto);
-            assert_eq!(current_attention_backend(), AttentionBackend::Auto);
-            assert_eq!(current_softmax_backend(), SoftmaxBackend::Auto);
-        }
-        assert_eq!(current_matmul_backend(), MatmulBackend::CpuNaive);
-        assert_eq!(current_layer_norm_backend(), LayerNormBackend::Cpu);
-        assert_eq!(current_attention_backend(), AttentionBackend::Cpu);
-        assert_eq!(current_softmax_backend(), SoftmaxBackend::Cpu);
-        drop(outer_guard);
-        assert!(current_backend_policy().is_none());
-    }
-
-    #[test]
-    fn active_policy_owns_the_fallback_contract() {
-        let strict = BackendPolicy::from_device_caps_with_config(
-            DeviceCaps::cpu(),
-            st_core::backend::execution_plan::ExecutionConfig::new(
-                AcceleratorFallback::Forbid,
-                1024,
-            ),
-        );
-        let _guard = push_backend_policy(strict);
-        assert_eq!(current_accelerator_fallback(), AcceleratorFallback::Forbid);
+        assert_eq!(current_backend_policy(), Some(policy));
         assert_eq!(
-            st_tensor::execution::current_accelerator_fallback(),
-            AcceleratorFallback::Forbid
+            st_core::backend::execution::current_backend_policy(),
+            Some(policy)
         );
-    }
-
-    #[test]
-    fn tensor_util_threshold_route_emits_the_core_decision() {
-        let _lock = observer_lock();
-
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let captured = events.clone();
-        let previous_observer = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
-            captured
-                .lock()
-                .unwrap()
-                .push((event.op_name, event.data.clone()));
-        })));
-
-        let policy = BackendPolicy::from_device_caps_with_config(
-            DeviceCaps::wgpu(32, true, 256),
-            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
-        );
-        let guard = push_backend_policy(policy);
-        let selected = current_tensor_util_backend_for_values(8);
-        drop(guard);
-
-        st_tensor::set_thread_meta_observer(previous_observer);
-
-        assert_eq!(selected, TensorUtilBackend::Cpu);
-        let events = events.lock().unwrap();
-        let (_, data) = events
-            .iter()
-            .find(|(op_name, _)| *op_name == "tensor_util_route")
-            .expect("tensor util route metadata");
-        assert_eq!(data["requested_backend"], "wgpu");
-        assert_eq!(data["selected_backend"], "cpu");
-        assert_eq!(data["status"], "cpu_threshold");
-        assert_eq!(data["semantic_owner"], "st-core");
-        assert_eq!(data["values"], 8);
-        assert_eq!(data["threshold"], 1024);
-        assert!(data.get("backend").is_none());
+        assert_eq!(current_tensor_util_backend(), TensorUtilBackend::Cpu);
     }
 }

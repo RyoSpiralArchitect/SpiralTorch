@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::distributed::st_distributed::{self, DistributedError};
+use st_core::backend::execution::current_tensor_util_backend_for_values;
 use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
+use st_tensor::{Tensor, TensorError};
 use thiserror::Error;
 
 const CPU_ACCUMULATOR_PROVIDER: &str = "spiral-selfsup.cpu_accumulator.v1";
@@ -132,11 +134,26 @@ impl DistributedDevice {
         self
     }
 
+    fn scale_buffer_with_policy(buffer: &mut [f32], scale: f32) -> Result<(), TrainingDeviceError> {
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        let backend = current_tensor_util_backend_for_values(buffer.len());
+        let tensor = Tensor::from_vec(1, buffer.len(), buffer.to_vec())?;
+        let scaled = tensor.scale_with_backend(scale, backend)?;
+        buffer.copy_from_slice(scaled.data());
+        Ok(())
+    }
+
     fn all_reduce(&self, buffer: &mut [f32]) -> Result<(), TrainingDeviceError> {
+        let original = buffer.to_vec();
         st_distributed::all_reduce_with_timeout(&self.session, buffer, self.collective_timeout)?;
         if self.strategy == SyncStrategy::AllReduce && self.session.world_size() > 0 {
             let scale = 1.0 / self.session.world_size() as f32;
-            buffer.iter_mut().for_each(|v| *v *= scale);
+            if let Err(error) = Self::scale_buffer_with_policy(buffer, scale) {
+                buffer.copy_from_slice(&original);
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -160,10 +177,14 @@ impl TrainingDevice for DistributedDevice {
         metrics: &mut [f32],
         reduce: MetricReduce,
     ) -> Result<(), TrainingDeviceError> {
+        let original = metrics.to_vec();
         st_distributed::all_reduce_with_timeout(&self.session, metrics, self.collective_timeout)?;
         if reduce == MetricReduce::Mean {
             let scale = 1.0 / TrainingDevice::world_size(self) as f32;
-            metrics.iter_mut().for_each(|value| *value *= scale);
+            if let Err(error) = Self::scale_buffer_with_policy(metrics, scale) {
+                metrics.copy_from_slice(&original);
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -236,9 +257,12 @@ impl AccumulatorSynchronizer for DistributedDevice {
 }
 
 /// Errors surfaced by a [`TrainingDevice`] implementation.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum TrainingDeviceError {
     /// Raised when rendezvous metadata is invalid or inconsistent.
     #[error("distributed rendezvous failed: {0}")]
     Rendezvous(#[from] DistributedError),
+    /// Raised when policy-routed tensor post-processing fails.
+    #[error("distributed tensor operation failed: {0}")]
+    Tensor(#[from] TensorError),
 }

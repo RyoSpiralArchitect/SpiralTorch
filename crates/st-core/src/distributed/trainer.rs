@@ -4,7 +4,11 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::collective::CollectiveArena;
-use st_tensor::{emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed};
+use crate::backend::execution::{current_backend_policy, current_tensor_util_backend_for_values};
+use st_tensor::{
+    emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed, Tensor, TensorError,
+    TensorUtilBackend,
+};
 
 /// Errors emitted by the [`DistributedTrainer`].
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -15,7 +19,7 @@ pub enum DistributedTrainerError {
     NonPositiveLearningRate(f32),
     #[error("gradient dimensionality mismatch: expected {expected}, got {got}")]
     GradientDimension { expected: usize, got: usize },
-    #[error("async gradient payload length {got} is not a multiple of {expected}")]
+    #[error("async gradient payload length mismatch: expected {expected}, got {got}")]
     AsyncPayload { expected: usize, got: usize },
     #[error("{label} contained non-finite value at index {index}: {value}")]
     NonFiniteValue {
@@ -23,6 +27,48 @@ pub enum DistributedTrainerError {
         index: usize,
         value: f32,
     },
+    #[error("tensor operation {operation} failed: {source}")]
+    TensorOperation {
+        operation: &'static str,
+        #[source]
+        source: TensorError,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TensorRoute {
+    backend: TensorUtilBackend,
+    requested_backend: &'static str,
+    selected_backend: &'static str,
+}
+
+#[derive(Debug)]
+struct AsyncMergeResult {
+    next_parameters: Vec<Vec<f32>>,
+    accumulator_l2: f32,
+    parameter_delta_l2: f64,
+    reduction_route: TensorRoute,
+    update_route: TensorRoute,
+    scale: f32,
+    payload_len: usize,
+}
+
+fn current_tensor_route(values: usize) -> TensorRoute {
+    let (requested_backend, selected_backend) = current_backend_policy()
+        .map(|policy| {
+            let route = policy.tensor_util_route(values);
+            (
+                route.requested_backend_label(),
+                route.selected_backend_label(),
+            )
+        })
+        .unwrap_or(("auto", "auto"));
+    let backend = current_tensor_util_backend_for_values(values);
+    TensorRoute {
+        backend,
+        requested_backend,
+        selected_backend,
+    }
 }
 
 fn finite_meta_f32(value: f32) -> serde_json::Value {
@@ -59,7 +105,6 @@ pub struct DistributedTrainer {
     parameters: Vec<Vec<f32>>,
     shard_dim: usize,
     learning_rate: f32,
-    async_buffer: Vec<f32>,
 }
 
 impl DistributedTrainer {
@@ -82,7 +127,6 @@ impl DistributedTrainer {
             parameters: vec![vec![0.0; shard_dim]; shards],
             shard_dim,
             learning_rate,
-            async_buffer: Vec::new(),
         })
     }
 
@@ -106,29 +150,176 @@ impl DistributedTrainer {
         Ok(())
     }
 
-    fn checked_parameter_update(
+    fn tensor_error(operation: &'static str, source: TensorError) -> DistributedTrainerError {
+        DistributedTrainerError::TensorOperation { operation, source }
+    }
+
+    fn first_reduction_overflow(rows: &[Vec<f32>], cols: usize) -> Option<(usize, f32)> {
+        for col in 0..cols {
+            let mut sum = 0.0f32;
+            for row in rows {
+                sum += row[col];
+                if !sum.is_finite() {
+                    return Some((col, sum));
+                }
+            }
+        }
+        None
+    }
+
+    fn map_reduction_error(
+        operation: &'static str,
+        label: &'static str,
+        rows: &[Vec<f32>],
+        cols: usize,
+        source: TensorError,
+    ) -> DistributedTrainerError {
+        if matches!(source, TensorError::NonFiniteValue { .. }) {
+            if let Some((index, value)) = Self::first_reduction_overflow(rows, cols) {
+                return DistributedTrainerError::NonFiniteValue {
+                    label,
+                    index,
+                    value,
+                };
+            }
+        }
+        Self::tensor_error(operation, source)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn map_update_error(
+        operation: &'static str,
         delta_label: &'static str,
         parameter_label: &'static str,
-        index: usize,
-        parameter: f32,
-        delta: f32,
-    ) -> Result<f32, DistributedTrainerError> {
-        if !delta.is_finite() {
-            return Err(DistributedTrainerError::NonFiniteValue {
-                label: delta_label,
-                index,
-                value: delta,
-            });
+        parameters: &[f32],
+        gradients: &[f32],
+        scale: f32,
+        source: TensorError,
+    ) -> DistributedTrainerError {
+        if matches!(source, TensorError::NonFiniteValue { .. }) {
+            for (index, (&parameter, &gradient)) in parameters.iter().zip(gradients).enumerate() {
+                let delta = -scale * gradient;
+                if !delta.is_finite() {
+                    return DistributedTrainerError::NonFiniteValue {
+                        label: delta_label,
+                        index,
+                        value: delta,
+                    };
+                }
+                let next = parameter + scale * gradient;
+                if !next.is_finite() {
+                    return DistributedTrainerError::NonFiniteValue {
+                        label: parameter_label,
+                        index,
+                        value: next,
+                    };
+                }
+            }
         }
-        let next = parameter - delta;
-        if !next.is_finite() {
-            return Err(DistributedTrainerError::NonFiniteValue {
-                label: parameter_label,
-                index,
-                value: next,
-            });
+        Self::tensor_error(operation, source)
+    }
+
+    fn rows_tensor(
+        operation: &'static str,
+        rows: &[Vec<f32>],
+        cols: usize,
+    ) -> Result<Tensor, DistributedTrainerError> {
+        let data = rows.iter().flat_map(|row| row.iter().copied()).collect();
+        Tensor::from_vec(rows.len(), cols, data)
+            .map_err(|error| Self::tensor_error(operation, error))
+    }
+
+    fn split_parameter_tensor(&self, tensor: &Tensor) -> Vec<Vec<f32>> {
+        tensor
+            .data()
+            .chunks(self.shard_dim)
+            .map(|shard| shard.to_vec())
+            .collect()
+    }
+
+    fn prepare_async_merge(
+        &self,
+        gradients: &[Vec<f32>],
+        capture_meta: bool,
+    ) -> Result<AsyncMergeResult, DistributedTrainerError> {
+        let total = self.total_params();
+        let payload_len = gradients.iter().map(Vec::len).sum();
+        for gradient in gradients {
+            if gradient.len() != total {
+                return Err(DistributedTrainerError::AsyncPayload {
+                    expected: total,
+                    got: gradient.len(),
+                });
+            }
+            Self::validate_finite_slice("async_gradient", gradient)?;
         }
-        Ok(next)
+
+        let contributions = gradients.len();
+        let reduction_route = current_tensor_route(payload_len);
+        let gradient_tensor = Self::rows_tensor("async_gradient_tensor", gradients, total)?;
+        let accumulator = gradient_tensor
+            .try_sum_axis0_with_backend(reduction_route.backend)
+            .map_err(|error| {
+                Self::map_reduction_error(
+                    "async_gradient_reduction",
+                    "reduced_async_gradient",
+                    gradients,
+                    total,
+                    error,
+                )
+            })?;
+        Self::validate_finite_slice("reduced_async_gradient", &accumulator)?;
+
+        let parameter_values = self.parameters();
+        let mut next_parameters = Tensor::from_vec(1, total, parameter_values.clone())
+            .map_err(|error| Self::tensor_error("async_parameter_tensor", error))?;
+        let accumulator_tensor = Tensor::from_vec(1, total, accumulator.clone())
+            .map_err(|error| Self::tensor_error("async_accumulator_tensor", error))?;
+        let scale = self.learning_rate / contributions as f32;
+        let update_scale = -scale;
+        let update_route = current_tensor_route(total);
+        next_parameters
+            .add_scaled_with_backend(&accumulator_tensor, update_scale, update_route.backend)
+            .map_err(|error| {
+                Self::map_update_error(
+                    "async_parameter_update",
+                    "async_parameter_delta",
+                    "async_parameter_update",
+                    &parameter_values,
+                    &accumulator,
+                    update_scale,
+                    error,
+                )
+            })?;
+        Self::validate_finite_slice("async_parameter_update", next_parameters.data())?;
+
+        let accumulator_l2 = if capture_meta {
+            l2_norm(&accumulator)
+        } else {
+            0.0
+        };
+        let parameter_delta_l2 = if capture_meta {
+            accumulator
+                .iter()
+                .map(|value| {
+                    let delta = *value as f64 * scale as f64;
+                    delta * delta
+                })
+                .sum::<f64>()
+                .sqrt()
+        } else {
+            0.0
+        };
+
+        Ok(AsyncMergeResult {
+            next_parameters: self.split_parameter_tensor(&next_parameters),
+            accumulator_l2,
+            parameter_delta_l2,
+            reduction_route,
+            update_route,
+            scale,
+            payload_len,
+        })
     }
 
     /// Returns a flattened view over all parameter shards.
@@ -183,42 +374,78 @@ impl DistributedTrainer {
         } else {
             0.0
         };
-        self.arena.all_reduce_sum(gradients);
-        for gradient in gradients.iter() {
-            Self::validate_finite_slice("reduced_gradient", gradient)?;
-        }
+        let reduction_route = current_tensor_route(gradients.len().saturating_mul(self.shard_dim));
+        let gradient_tensor = Self::rows_tensor("sync_gradient_tensor", gradients, self.shard_dim)?;
+        let reduced_gradient = gradient_tensor
+            .try_sum_axis0_with_backend(reduction_route.backend)
+            .map_err(|error| {
+                Self::map_reduction_error(
+                    "sync_gradient_reduction",
+                    "reduced_gradient",
+                    gradients,
+                    self.shard_dim,
+                    error,
+                )
+            })?;
+        Self::validate_finite_slice("reduced_gradient", &reduced_gradient)?;
         let workers = gradients.len() as f32;
+
+        let parameter_values = self.parameters();
+        let update_gradient_values = reduced_gradient
+            .iter()
+            .copied()
+            .cycle()
+            .take(self.total_params())
+            .collect::<Vec<_>>();
+        let mut next_parameters = Tensor::from_vec(
+            self.parameters.len(),
+            self.shard_dim,
+            parameter_values.clone(),
+        )
+        .map_err(|error| Self::tensor_error("sync_parameter_tensor", error))?;
+        let update_gradient = Tensor::from_vec(
+            gradients.len(),
+            self.shard_dim,
+            update_gradient_values.clone(),
+        )
+        .map_err(|error| Self::tensor_error("sync_update_gradient_tensor", error))?;
+        let update_scale = -(self.learning_rate / workers);
+        let update_route = current_tensor_route(self.total_params());
+        next_parameters
+            .add_scaled_with_backend(&update_gradient, update_scale, update_route.backend)
+            .map_err(|error| {
+                Self::map_update_error(
+                    "sync_parameter_update",
+                    "parameter_delta",
+                    "parameter_update",
+                    &parameter_values,
+                    &update_gradient_values,
+                    update_scale,
+                    error,
+                )
+            })?;
+        Self::validate_finite_slice("parameter_update", next_parameters.data())?;
+        let parameter_delta_l2 = if capture_meta {
+            update_gradient_values
+                .iter()
+                .map(|value| {
+                    let delta = *value as f64 * -(update_scale as f64);
+                    delta * delta
+                })
+                .sum::<f64>()
+                .sqrt()
+        } else {
+            0.0
+        };
+        for gradient in gradients.iter_mut() {
+            gradient.copy_from_slice(&reduced_gradient);
+        }
         let reduced_gradient_l2 = if capture_meta {
             nested_l2_norm(gradients)
         } else {
             0.0
         };
-
-        let mut next_parameters = self.parameters.clone();
-        let mut parameter_delta_l2 = 0.0f64;
-        for (shard_idx, (shard, gradient)) in
-            next_parameters.iter_mut().zip(gradients.iter()).enumerate()
-        {
-            for (offset, (param, grad)) in shard.iter_mut().zip(gradient.iter()).enumerate() {
-                let delta = self.learning_rate * (*grad / workers);
-                if capture_meta {
-                    let value = delta as f64;
-                    parameter_delta_l2 += value * value;
-                }
-                let index = shard_idx * self.shard_dim + offset;
-                *param = Self::checked_parameter_update(
-                    "parameter_delta",
-                    "parameter_update",
-                    index,
-                    *param,
-                    delta,
-                )?;
-            }
-        }
-        if capture_meta {
-            parameter_delta_l2 = parameter_delta_l2.sqrt();
-        }
-        self.parameters = next_parameters;
+        self.parameters = self.split_parameter_tensor(&next_parameters);
         emit_tensor_op(
             "distributed_trainer_sync_step",
             &[gradients.len().max(1), self.shard_dim],
@@ -228,13 +455,19 @@ impl DistributedTrainer {
             emit_tensor_op_meta("distributed_trainer_sync_step", || {
                 serde_json::json!({
                     "backend": "cpu",
-                    "requested_backend": "auto",
+                    "requested_backend": reduction_route.requested_backend,
                     "kind": "st_core_distributed_trainer_sync_step",
-                    "gradient_reduction_backend": "cpu_collective_arena",
-                    "parameter_update_backend": "cpu_loop",
-                    "gradient_reduction_mode": "all_reduce_sum_in_place",
-                    "parameter_update_mode": "sharded_sgd_average",
-                    "route_blocker": "host_vec_shards_collective_arena",
+                    "control_backend": "cpu_vec_shards",
+                    "gradient_reduction_backend": format!("tensor_util_{}", reduction_route.selected_backend),
+                    "parameter_update_backend": format!("tensor_util_{}", update_route.selected_backend),
+                    "gradient_reduction_requested_backend": reduction_route.requested_backend,
+                    "parameter_update_requested_backend": update_route.requested_backend,
+                    "gradient_reduction_mode": "tensor_sum_axis0_then_host_broadcast",
+                    "parameter_update_mode": "tensor_add_scaled_sharded_sgd_average",
+                    "route_blocker": "host_collective_broadcast_and_shard_storage",
+                    "numeric_execution_owner": "st-core::backend::execution",
+                    "numeric_backend_semantics": "selected_route",
+                    "actual_numeric_backend_source": "sum_axis0_and_add_scaled_tensor_op_meta",
                     "shards": self.parameters.len(),
                     "shard_dim": self.shard_dim,
                     "workers": gradients.len(),
@@ -261,6 +494,7 @@ impl DistributedTrainer {
         }
         Self::validate_finite_slice("async_gradient", gradient)?;
         self.arena.enqueue_gradient(gradient);
+        let queued_batches = self.arena.queued_gradient_batches();
         emit_tensor_op(
             "distributed_trainer_async_enqueue",
             &[gradient.len().max(1)],
@@ -270,12 +504,13 @@ impl DistributedTrainer {
             emit_tensor_op_meta("distributed_trainer_async_enqueue", || {
                 serde_json::json!({
                     "backend": "cpu",
-                    "requested_backend": "auto",
+                    "requested_backend": "none",
                     "kind": "st_core_distributed_trainer_async_enqueue",
-                    "queue_backend": "cpu_mutex_vec",
-                    "queue_mode": "append_flat_gradient",
-                    "route_blocker": "host_mutex_gradient_queue",
+                    "queue_backend": "cpu_mutex_gradient_batches",
+                    "queue_mode": "append_owned_gradient_batch",
+                    "route_blocker": "host_mutex_gradient_transport",
                     "gradient_len": gradient.len(),
+                    "queued_batches": queued_batches,
                     "total_params": self.total_params(),
                     "gradient_l2": finite_meta_f32(l2_norm(gradient)),
                     "estimated_queue_push_values": gradient.len(),
@@ -288,9 +523,8 @@ impl DistributedTrainer {
     /// Drains all pending asynchronous gradients, applying their averaged update.
     pub fn merge_async_gradients(&mut self) -> Result<bool, DistributedTrainerError> {
         let capture_meta = tensor_op_meta_observer_installed();
-        self.async_buffer.clear();
-        self.arena.drain_gradients(&mut self.async_buffer);
-        if self.async_buffer.is_empty() {
+        let gradients = self.arena.drain_gradient_batches();
+        if gradients.is_empty() {
             emit_tensor_op(
                 "distributed_trainer_async_merge",
                 &[0, self.total_params().max(1)],
@@ -300,13 +534,13 @@ impl DistributedTrainer {
                 emit_tensor_op_meta("distributed_trainer_async_merge", || {
                     serde_json::json!({
                         "backend": "cpu",
-                        "requested_backend": "auto",
+                        "requested_backend": "none",
                         "kind": "st_core_distributed_trainer_async_merge",
-                        "queue_backend": "cpu_mutex_vec",
-                        "gradient_accumulation_backend": "cpu_loop",
-                        "parameter_update_backend": "cpu_loop",
+                        "queue_backend": "cpu_mutex_gradient_batches",
+                        "gradient_accumulation_backend": "none",
+                        "parameter_update_backend": "none",
                         "merge_mode": "empty_queue",
-                        "route_blocker": "host_mutex_gradient_queue",
+                        "route_blocker": "host_mutex_gradient_transport",
                         "merged": false,
                         "contributions": 0,
                         "payload_len": 0,
@@ -320,49 +554,16 @@ impl DistributedTrainer {
             }
             return Ok(false);
         }
-        let total = self.total_params();
-        if !self.async_buffer.len().is_multiple_of(total) {
-            return Err(DistributedTrainerError::AsyncPayload {
-                expected: total,
-                got: self.async_buffer.len(),
-            });
-        }
-        Self::validate_finite_slice("async_gradient", &self.async_buffer)?;
-        let contributions = self.async_buffer.len() / total;
-        let mut accumulator = vec![0.0f32; total];
-        for (idx, value) in self.async_buffer.iter().enumerate() {
-            accumulator[idx % total] += *value;
-        }
-        Self::validate_finite_slice("reduced_async_gradient", &accumulator)?;
-        let scale = self.learning_rate / contributions as f32;
-        let accumulator_l2 = if capture_meta {
-            l2_norm(&accumulator)
-        } else {
-            0.0
-        };
-        let mut next_parameters = self.parameters.clone();
-        let mut parameter_delta_l2 = 0.0f64;
-        for (idx, value) in accumulator.into_iter().enumerate() {
-            let shard_idx = idx / self.shard_dim;
-            let offset = idx % self.shard_dim;
-            let delta = scale * value;
-            if capture_meta {
-                let value = delta as f64;
-                parameter_delta_l2 += value * value;
+        let contributions = gradients.len();
+        let result = match self.prepare_async_merge(&gradients, capture_meta) {
+            Ok(result) => result,
+            Err(error) => {
+                self.arena.restore_gradient_batches(gradients);
+                return Err(error);
             }
-            let parameter = next_parameters[shard_idx][offset];
-            next_parameters[shard_idx][offset] = Self::checked_parameter_update(
-                "async_parameter_delta",
-                "async_parameter_update",
-                idx,
-                parameter,
-                delta,
-            )?;
-        }
-        if capture_meta {
-            parameter_delta_l2 = parameter_delta_l2.sqrt();
-        }
-        self.parameters = next_parameters;
+        };
+        let total = self.total_params();
+        self.parameters = result.next_parameters;
         emit_tensor_op(
             "distributed_trainer_async_merge",
             &[contributions.max(1), total],
@@ -372,25 +573,31 @@ impl DistributedTrainer {
             emit_tensor_op_meta("distributed_trainer_async_merge", || {
                 serde_json::json!({
                     "backend": "cpu",
-                    "requested_backend": "auto",
+                    "requested_backend": result.reduction_route.requested_backend,
                     "kind": "st_core_distributed_trainer_async_merge",
-                    "queue_backend": "cpu_mutex_vec",
-                    "gradient_accumulation_backend": "cpu_loop",
-                    "parameter_update_backend": "cpu_loop",
-                    "merge_mode": "flat_modulo_accumulate_then_sgd",
-                    "route_blocker": "host_mutex_gradient_queue_and_flat_cpu_accumulator",
+                    "control_backend": "cpu_gradient_batch_queue",
+                    "queue_backend": "cpu_mutex_gradient_batches",
+                    "gradient_accumulation_backend": format!("tensor_util_{}", result.reduction_route.selected_backend),
+                    "parameter_update_backend": format!("tensor_util_{}", result.update_route.selected_backend),
+                    "gradient_accumulation_requested_backend": result.reduction_route.requested_backend,
+                    "parameter_update_requested_backend": result.update_route.requested_backend,
+                    "merge_mode": "tensor_sum_axis0_then_tensor_add_scaled",
+                    "route_blocker": "host_mutex_gradient_transport_and_shard_storage",
+                    "numeric_execution_owner": "st-core::backend::execution",
+                    "numeric_backend_semantics": "selected_route",
+                    "actual_numeric_backend_source": "sum_axis0_and_add_scaled_tensor_op_meta",
                     "merged": true,
                     "contributions": contributions,
-                    "payload_len": self.async_buffer.len(),
+                    "payload_len": result.payload_len,
                     "total_params": total,
                     "shards": self.parameters.len(),
                     "shard_dim": self.shard_dim,
                     "learning_rate": finite_meta_f32(self.learning_rate),
-                    "merge_scale": finite_meta_f32(scale),
-                    "accumulator_l2": finite_meta_f32(accumulator_l2),
-                    "parameter_delta_l2": finite_meta_f64(parameter_delta_l2),
-                    "estimated_queue_drain_values": self.async_buffer.len(),
-                    "estimated_accumulation_values": self.async_buffer.len(),
+                    "merge_scale": finite_meta_f32(result.scale),
+                    "accumulator_l2": finite_meta_f32(result.accumulator_l2),
+                    "parameter_delta_l2": finite_meta_f64(result.parameter_delta_l2),
+                    "estimated_queue_drain_values": result.payload_len,
+                    "estimated_accumulation_values": result.payload_len,
                     "estimated_parameter_update_values": total,
                 })
             });
@@ -477,11 +684,33 @@ mod tests {
         assert_eq!(sync.1["workers"], 2);
         assert_eq!(sync.1["shards"], 2);
         assert_eq!(sync.1["shard_dim"], 2);
-        assert_eq!(sync.1["gradient_reduction_backend"], "cpu_collective_arena");
-        assert_eq!(sync.1["parameter_update_backend"], "cpu_loop");
-        assert_eq!(sync.1["gradient_reduction_mode"], "all_reduce_sum_in_place");
-        assert_eq!(sync.1["parameter_update_mode"], "sharded_sgd_average");
-        assert_eq!(sync.1["route_blocker"], "host_vec_shards_collective_arena");
+        assert_eq!(sync.1["requested_backend"], "auto");
+        assert_eq!(sync.1["control_backend"], "cpu_vec_shards");
+        assert_eq!(sync.1["gradient_reduction_backend"], "tensor_util_auto");
+        assert_eq!(sync.1["parameter_update_backend"], "tensor_util_auto");
+        assert_eq!(sync.1["gradient_reduction_requested_backend"], "auto");
+        assert_eq!(sync.1["parameter_update_requested_backend"], "auto");
+        assert_eq!(
+            sync.1["gradient_reduction_mode"],
+            "tensor_sum_axis0_then_host_broadcast"
+        );
+        assert_eq!(
+            sync.1["parameter_update_mode"],
+            "tensor_add_scaled_sharded_sgd_average"
+        );
+        assert_eq!(
+            sync.1["route_blocker"],
+            "host_collective_broadcast_and_shard_storage"
+        );
+        assert_eq!(
+            sync.1["numeric_execution_owner"],
+            "st-core::backend::execution"
+        );
+        assert_eq!(sync.1["numeric_backend_semantics"], "selected_route");
+        assert_eq!(
+            sync.1["actual_numeric_backend_source"],
+            "sum_axis0_and_add_scaled_tensor_op_meta"
+        );
         assert_eq!(sync.1["estimated_reduction_values"], 4);
         assert_eq!(sync.1["estimated_parameter_update_values"], 4);
         assert!(
@@ -503,19 +732,154 @@ mod tests {
         assert_eq!(merge.1["contributions"], 2);
         assert_eq!(merge.1["payload_len"], 8);
         assert_eq!(merge.1["total_params"], 4);
-        assert_eq!(merge.1["queue_backend"], "cpu_mutex_vec");
-        assert_eq!(merge.1["gradient_accumulation_backend"], "cpu_loop");
-        assert_eq!(merge.1["parameter_update_backend"], "cpu_loop");
-        assert_eq!(merge.1["merge_mode"], "flat_modulo_accumulate_then_sgd");
+        assert_eq!(merge.1["requested_backend"], "auto");
+        assert_eq!(merge.1["control_backend"], "cpu_gradient_batch_queue");
+        assert_eq!(merge.1["queue_backend"], "cpu_mutex_gradient_batches");
+        assert_eq!(merge.1["gradient_accumulation_backend"], "tensor_util_auto");
+        assert_eq!(merge.1["parameter_update_backend"], "tensor_util_auto");
+        assert_eq!(merge.1["gradient_accumulation_requested_backend"], "auto");
+        assert_eq!(merge.1["parameter_update_requested_backend"], "auto");
+        assert_eq!(
+            merge.1["merge_mode"],
+            "tensor_sum_axis0_then_tensor_add_scaled"
+        );
         assert_eq!(
             merge.1["route_blocker"],
-            "host_mutex_gradient_queue_and_flat_cpu_accumulator"
+            "host_mutex_gradient_transport_and_shard_storage"
+        );
+        assert_eq!(
+            merge.1["numeric_execution_owner"],
+            "st-core::backend::execution"
+        );
+        assert_eq!(merge.1["numeric_backend_semantics"], "selected_route");
+        assert_eq!(
+            merge.1["actual_numeric_backend_source"],
+            "sum_axis0_and_add_scaled_tensor_op_meta"
         );
         assert_eq!(merge.1["estimated_queue_drain_values"], 8);
         assert_eq!(merge.1["estimated_accumulation_values"], 8);
         assert_eq!(merge.1["estimated_parameter_update_values"], 4);
         assert!((merge.1["merge_scale"].as_f64().unwrap() - 0.25).abs() < 1e-9);
         assert!(merge.1["parameter_delta_l2"].as_f64().unwrap() > 0.0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn cpu_and_wgpu_policy_routes_preserve_distributed_updates() {
+        use crate::backend::device_caps::DeviceCaps;
+        use crate::backend::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+
+        fn run_step_sequence(trainer: &mut DistributedTrainer) -> Vec<Vec<f32>> {
+            let mut gradients = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+            trainer.apply_step(&mut gradients).unwrap();
+            trainer
+                .submit_async_gradient(&[1.0, -2.0, 0.5, 0.25])
+                .unwrap();
+            trainer
+                .submit_async_gradient(&[3.0, 2.0, 1.0, -0.25])
+                .unwrap();
+            assert!(trainer.merge_async_gradients().unwrap());
+            gradients
+        }
+
+        let initial_parameters = [0.5, -0.25, 1.0, -1.5];
+        let execution_config = ExecutionConfig::new(AcceleratorFallback::Allow, 1);
+        let mut cpu_trainer = DistributedTrainer::new(2, 2, 0.1).unwrap();
+        cpu_trainer
+            .broadcast_parameters(&initial_parameters)
+            .unwrap();
+        let cpu_policy =
+            BackendPolicy::from_device_caps_with_config(DeviceCaps::cpu(), execution_config);
+        let cpu_gradients = {
+            let _guard = push_backend_policy(cpu_policy);
+            run_step_sequence(&mut cpu_trainer)
+        };
+
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let mut wgpu_trainer = DistributedTrainer::new(2, 2, 0.1).unwrap();
+        wgpu_trainer
+            .broadcast_parameters(&initial_parameters)
+            .unwrap();
+        let wgpu_policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            execution_config,
+        );
+        let wgpu_gradients = {
+            let _guard = push_backend_policy(wgpu_policy);
+            run_step_sequence(&mut wgpu_trainer)
+        };
+        st_tensor::set_thread_meta_observer(previous);
+
+        for (cpu, wgpu) in cpu_gradients
+            .iter()
+            .flatten()
+            .zip(wgpu_gradients.iter().flatten())
+        {
+            assert!((cpu - wgpu).abs() <= 3.0e-4, "cpu={cpu}, wgpu={wgpu}");
+        }
+        for (cpu, wgpu) in cpu_trainer
+            .parameters()
+            .iter()
+            .zip(wgpu_trainer.parameters())
+        {
+            assert!((cpu - wgpu).abs() <= 3.0e-4, "cpu={cpu}, wgpu={wgpu}");
+        }
+
+        let events = events.lock().unwrap();
+        for op_name in ["sum_axis0", "add_scaled"] {
+            let routed = events
+                .iter()
+                .filter(|(name, _)| *name == op_name)
+                .collect::<Vec<_>>();
+            assert_eq!(routed.len(), 2, "expected sync and async {op_name}");
+            assert!(routed
+                .iter()
+                .all(|(_, data)| data["requested_backend"] == "wgpu"));
+            assert!(routed
+                .iter()
+                .all(|(_, data)| matches!(data["backend"].as_str(), Some("cpu" | "wgpu_dense"))));
+        }
+        let sync = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "distributed_trainer_sync_step"
+                    && data["kind"] == "st_core_distributed_trainer_sync_step"
+            })
+            .expect("distributed sync metadata");
+        assert_eq!(sync.1["requested_backend"], "wgpu");
+        assert_eq!(sync.1["gradient_reduction_backend"], "tensor_util_wgpu");
+        assert_eq!(sync.1["parameter_update_backend"], "tensor_util_wgpu");
+        assert_eq!(sync.1["control_backend"], "cpu_vec_shards");
+        assert_eq!(
+            sync.1["numeric_execution_owner"],
+            "st-core::backend::execution"
+        );
+        let merge = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "distributed_trainer_async_merge"
+                    && data["kind"] == "st_core_distributed_trainer_async_merge"
+                    && data["merged"] == true
+            })
+            .expect("distributed async merge metadata");
+        assert_eq!(merge.1["requested_backend"], "wgpu");
+        assert_eq!(merge.1["gradient_accumulation_backend"], "tensor_util_wgpu");
+        assert_eq!(merge.1["parameter_update_backend"], "tensor_util_wgpu");
+        assert_eq!(merge.1["control_backend"], "cpu_gradient_batch_queue");
+        assert_eq!(
+            merge.1["numeric_execution_owner"],
+            "st-core::backend::execution"
+        );
     }
 
     #[test]
@@ -584,6 +948,7 @@ mod tests {
         let mut trainer = DistributedTrainer::new(1, 1, f32::MAX).unwrap();
         let before = trainer.parameters();
         let mut gradients = vec![vec![2.0]];
+        let gradients_before = gradients.clone();
 
         let err = trainer.apply_step(&mut gradients).unwrap_err();
 
@@ -596,6 +961,7 @@ mod tests {
             }
         );
         assert_eq!(trainer.parameters(), before);
+        assert_eq!(gradients, gradients_before);
     }
 
     #[test]
@@ -604,6 +970,7 @@ mod tests {
         trainer.broadcast_parameters(&[f32::MAX]).unwrap();
         let before = trainer.parameters();
         let mut gradients = vec![vec![-0.5]];
+        let gradients_before = gradients.clone();
 
         let err = trainer.apply_step(&mut gradients).unwrap_err();
 
@@ -616,6 +983,7 @@ mod tests {
             }
         );
         assert_eq!(trainer.parameters(), before);
+        assert_eq!(gradients, gradients_before);
     }
 
     #[test]
@@ -631,6 +999,7 @@ mod tests {
         assert!((params[0] - (-0.4)).abs() <= f32::EPSILON);
         assert!((params[1] - (-0.4)).abs() <= f32::EPSILON);
         assert!((params[2] - (-0.4)).abs() <= f32::EPSILON);
+        assert_eq!(trainer.arena.queued_gradient_batches(), 0);
         assert!(!trainer.merge_async_gradients().unwrap());
     }
 
@@ -666,6 +1035,7 @@ mod tests {
             } if value.is_nan()
         ));
         assert_eq!(trainer.parameters(), before);
+        assert_eq!(trainer.arena.queued_gradient_batches(), 1);
     }
 
     #[test]
@@ -685,6 +1055,7 @@ mod tests {
             }
         );
         assert_eq!(trainer.parameters(), before);
+        assert_eq!(trainer.arena.queued_gradient_batches(), 1);
     }
 
     #[test]
@@ -705,6 +1076,7 @@ mod tests {
             }
         );
         assert_eq!(trainer.parameters(), before);
+        assert_eq!(trainer.arena.queued_gradient_batches(), 1);
     }
 
     #[test]
@@ -719,5 +1091,6 @@ mod tests {
                 got: 1
             }
         );
+        assert_eq!(trainer.arena.queued_gradient_batches(), 1);
     }
 }
