@@ -2082,7 +2082,7 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
                 "response_completion_rate": 1.0,
             },
             {
-                "label": "guarded",
+                "label": " guarded ",
                 "count": 1,
                 "trace_route_score": 0.8,
                 "response_text_quality_score": 0.9,
@@ -2091,11 +2091,11 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
         ],
         "adapter_rows": [
             {"label": "open", "mode": "exploratory", "request_temperature": 0.9},
-            {"label": "guarded", "mode": "guarded", "request_temperature": 0.4},
+            {"label": " guarded ", "mode": "guarded", "request_temperature": 0.4},
         ],
         "response_route_rows": [
             {"label": "open", "completion_rate": 1.0},
-            {"label": "guarded", "completion_rate": 1.0},
+            {"label": " guarded ", "completion_rate": 1.0},
         ],
     }
     agent = _FakeToposRouteAgent(action_dim=2)
@@ -2117,7 +2117,7 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
                 "observed_depth": 1,
                 "visited_volume": 8,
             },
-            "guarded": {
+            " guarded ": {
                 "porosity": 0.02,
                 "max_depth": 10,
                 "max_volume": 100,
@@ -2133,9 +2133,9 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
     )
 
     assert selection["kind"] == "spiraltorch.api_llm_topos_route_policy_selection"
-    assert selection["selected_label"] == "guarded"
+    assert selection["selected_label"] == " guarded "
     assert selection["selected_reward"] == pytest.approx(0.575)
-    assert selection["route_reward"]["label"] == "guarded"
+    assert selection["route_reward"]["label"] == " guarded "
     assert selection["selection_row"]["trace_route_score"] == pytest.approx(0.8)
     assert selection["adapter_row"]["mode"] == "guarded"
     assert selection["response_route_row"]["completion_rate"] == pytest.approx(1.0)

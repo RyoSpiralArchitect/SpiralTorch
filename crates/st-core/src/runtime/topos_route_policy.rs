@@ -568,8 +568,7 @@ fn prepare_rows(
 
     let mut labels = BTreeSet::new();
     for (index, row) in rows.iter_mut().enumerate() {
-        row.label = row.label.trim().to_owned();
-        if row.label.is_empty() {
+        if row.label.trim().is_empty() {
             return Err(ToposRoutePolicyError::EmptyLabel { index });
         }
         if row.label.len() > TOPOS_ROUTE_POLICY_MAX_LABEL_BYTES {
@@ -1018,8 +1017,7 @@ pub fn resolve_topos_route_policy(
     let selected_label = request
         .selected_label
         .as_deref()
-        .map(str::trim)
-        .filter(|label| !label.is_empty());
+        .filter(|label| !label.trim().is_empty());
     let (resolution, selected_position) = if let Some(label) = selected_label {
         let position = request
             .rewards
@@ -1229,7 +1227,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_labels_unknown_profiles_and_non_finite_metrics() {
         let duplicate = evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
-            rows: vec![sample_row("same"), sample_row(" same ")],
+            rows: vec![sample_row("same"), sample_row("same")],
         });
         assert_eq!(
             duplicate,
@@ -1281,6 +1279,25 @@ mod tests {
             serde_json::to_value(request.profile).expect("serialize profile"),
             serde_json::json!("grounded")
         );
+    }
+
+    #[test]
+    fn route_labels_are_opaque_identities() {
+        let payload = build_topos_route_rewards(ToposRouteRewardsRequest {
+            rows: vec![sample_row(" guarded ")],
+            profile: ToposRoutePolicyProfile::Grounded,
+        })
+        .expect("preserve the external route identity");
+        assert_eq!(payload.rewards[0].label, " guarded ");
+        assert_eq!(payload.rewards[0].source_row.label, " guarded ");
+
+        let resolution = resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+            rewards: payload.rewards,
+            selected_label: Some(" guarded ".to_owned()),
+            selected_index: 0,
+        })
+        .expect("resolve the exact external route identity");
+        assert_eq!(resolution.selected_label.as_deref(), Some(" guarded "));
     }
 
     #[test]
