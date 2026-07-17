@@ -3773,7 +3773,7 @@ Trainer state outside optimizer ownership now begins the same consolidation.
 `st-core::runtime::trainer_external` owns a versioned, deny-unknown checkpoint
 and exact required/captured/unresolved accounting. `DesireRoundtableBridge`
 clones share one control runtime, so Python bundles, pipeline sinks, and
-`ModuleTrainer` cannot silently diverge. The v3 checkpoint captures its
+`ModuleTrainer` cannot silently diverge. The v4 checkpoint captures its
 controls/latest impulse and the pending summary consumed by the next trainer
 step. It also captures the complete `DesireTrainerBridge` FIFO, including phase,
 weights, trigger report, and an exact seconds/nanoseconds timestamp. PSI
@@ -3784,6 +3784,13 @@ waiting in the bridge. It stores the normalized-distribution witness and raw
 observations rather than derived controls or labels; restore validates support
 and dominant-channel evidence, then re-derives both through
 `st-core::inference::zspace_coherence` before recreating the Rust subscription.
+`RoundtableGnnBridge` now contributes its history limit, retained FIFO, latest
+signal, and trainer-last signal as one lock snapshot. Raw band energy, schedule
+occupancy, and spectral evidence are validated by
+`st-core::inference::gnn_roundtable`; message-passing multipliers and band-pass
+scales are no longer reconstructed in `st-nn`, Python, or WASM. Native restore
+replaces state inside the already shared bridge so downstream clones retain
+resource identity.
 `AccumulatorSynchronizer` contributes a provider/topology/state descriptor,
 but Rust reports deterministic resume only after a native trainer verifies an
 already reattached concrete provider. Opaque providers remain unresolved.

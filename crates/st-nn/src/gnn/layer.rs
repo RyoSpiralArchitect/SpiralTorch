@@ -320,7 +320,7 @@ impl ZSpaceGraphConvolution {
                 .unwrap_or(1.0);
             let pass_scale = match (self.roundtable.as_ref(), active_band_pass) {
                 (Some(influence), Some(pass)) => {
-                    influence.band_pass_scale_for_step(pass.band, idx, band_intensity)
+                    influence.band_pass_scale_for_step(pass.band, idx, band_intensity)?
                 }
                 _ => 1.0,
             };
@@ -680,8 +680,9 @@ mod tests {
             )
             .unwrap();
         let signal =
-            RoundtableBandSignal::new(BandEnergy::new(0.9, 0.3, 0.1).with_drift(0.2), (2, 1, 1));
-        let influence = RoundtableBandInfluence::from_signal(&signal);
+            RoundtableBandSignal::new(BandEnergy::new(0.9, 0.3, 0.1).with_drift(0.2), (2, 1, 1))
+                .unwrap();
+        let influence = RoundtableBandInfluence::from_signal(&signal).unwrap();
         layer.set_roundtable_influence(Some(influence.clone()));
         let input = Tensor::from_vec(3, 2, vec![1.0, 0.5, 0.5, -0.25, -0.5, 1.0]).unwrap();
 
@@ -713,8 +714,9 @@ mod tests {
         let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
         let mut layer = ZSpaceGraphConvolution::new("gnn_band", context, 2, 1, -1.0, 0.05).unwrap();
         layer.set_tracer(tracer.clone());
-        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
-        layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
+        layer
+            .set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal).unwrap()));
         let gradient = Tensor::from_vec(2, 1, vec![0.2, -0.1]).unwrap();
         layer.set_roundtable_band_pass(Some(
             band_pass_sample(RoundtableBand::Here, &gradient).unwrap(),
@@ -751,8 +753,9 @@ mod tests {
         let mut layer =
             ZSpaceGraphConvolution::new("gnn_tiny_band", context, 2, 1, -1.0, 0.05).unwrap();
         layer.set_tracer(tracer.clone());
-        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
-        layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
+        layer
+            .set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal).unwrap()));
         let tiny_gradient = Tensor::from_vec(2, 1, vec![1.0e-6, -1.0e-6]).unwrap();
         layer.set_roundtable_band_pass(Some(
             band_pass_sample(RoundtableBand::Here, &tiny_gradient).unwrap(),

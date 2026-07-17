@@ -125,8 +125,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         2,
         vec![0.18, -0.04, 0.11, 0.06, -0.07, 0.09, 0.03, -0.12],
     )?;
-    let signal = RoundtableBandSignal::from_schedule(&schedule, schedule.band_energy(&grad_probe)?);
-    let influence = RoundtableBandInfluence::from_signal(&signal);
+    let signal =
+        RoundtableBandSignal::from_schedule(&schedule, schedule.band_energy(&grad_probe)?)?;
+    let influence = RoundtableBandInfluence::from_signal(&signal)?;
     network.apply_roundtable_band(&signal)?;
 
     let output = network.forward(&input)?;

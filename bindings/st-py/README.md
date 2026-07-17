@@ -2490,7 +2490,7 @@ claim.
 
 Supported external runtime state has a separate Rust-owned checkpoint. Python
 only transports this payload and orchestrates native restore; it does not
-rebuild component accounting or readiness rules. The v3 contract captures the
+rebuild component accounting or readiness rules. The v4 contract captures the
 full FIFO consumed by `DesireTrainerBridge`, Desire roundtable controls/latest
 impulse/pending trainer summary, PSI configuration/EMA/sample clock, and known
 accumulator-provider descriptors. It also records the ZSpaceTrace subscription
@@ -2509,6 +2509,13 @@ assert external_state["semantic_backend"] == "rust"
 assert receipt["payload_complete"] is True
 assert receipt["deterministic_resume_ready"] is True
 ```
+
+The same v4 envelope captures a preattached `RoundtableGnnBridge` as one locked
+history/latest snapshot, including its history limit and the trainer's last
+published signal. Checkpoints retain raw band energy, schedule occupancy,
+spectral observations, and exact issuance timestamps. Rust rejects malformed
+evidence and re-derives all message-passing multipliers; Python neither computes
+nor repairs GNN influence values.
 
 Enable Rust PSI metering through the roundtable config when its EMA should be
 part of continuation state. A resumed trainer reconstructs this Rust-owned

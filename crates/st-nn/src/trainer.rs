@@ -49,7 +49,7 @@ use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
     HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableGnnBridge,
-    RoundtableNode,
+    RoundtableGnnBridgeState, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::zspace_coherence::{
@@ -100,7 +100,9 @@ use st_core::runtime::trainer_external::{
     TrainerCoherenceBridgeCheckpoint, TrainerCoherenceSignalCheckpoint,
     TrainerExternalCheckpointComponents, TrainerExternalCheckpointError,
     TrainerExternalCheckpointValidation, TrainerExternalStateCheckpoint,
+    TrainerGnnRoundtableBridgeCheckpoint, TrainerGnnRoundtableSignalCheckpoint,
     ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT, DESIRE_TRAINER_COMPONENT,
+    GNN_ROUNDTABLE_BRIDGE_COMPONENT,
 };
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
@@ -3062,9 +3064,62 @@ struct PreparedTrainerExternalRestore {
     desire_trainer: Option<PreparedDesireTrainerQueue>,
     desire_roundtable: Option<PreparedDesireRoundtableCheckpoint>,
     coherence_bridge: Option<PreparedTrainerCoherenceBridgeCheckpoint>,
+    gnn_roundtable_bridge: Option<PreparedTrainerGnnRoundtableBridgeCheckpoint>,
     #[cfg(feature = "psi")]
     psi_meter: Option<PsiMeter>,
     reattached_components: Vec<String>,
+}
+
+struct PreparedTrainerGnnRoundtableBridgeCheckpoint {
+    state: RoundtableGnnBridgeState,
+    trainer_last: Option<RoundtableBandSignal>,
+}
+
+impl PreparedTrainerGnnRoundtableBridgeCheckpoint {
+    fn prepare(
+        checkpoint: &TrainerGnnRoundtableBridgeCheckpoint,
+    ) -> Result<Self, TrainerExternalCheckpointError> {
+        checkpoint.validate()?;
+        let history_limit = usize::try_from(checkpoint.history_limit).map_err(|_| {
+            TrainerExternalCheckpointError::InvalidState {
+                field: "gnn_roundtable_bridge.history_limit".to_owned(),
+                message: "does not fit this platform".to_owned(),
+            }
+        })?;
+        let history = checkpoint
+            .history
+            .iter()
+            .enumerate()
+            .map(|(index, signal)| {
+                gnn_roundtable_signal_from_checkpoint(
+                    signal,
+                    &format!("gnn_roundtable_bridge.history[{index}]"),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let latest = checkpoint
+            .latest
+            .as_ref()
+            .map(|signal| {
+                gnn_roundtable_signal_from_checkpoint(signal, "gnn_roundtable_bridge.latest")
+            })
+            .transpose()?;
+        let trainer_last = checkpoint
+            .trainer_last
+            .as_ref()
+            .map(|signal| {
+                gnn_roundtable_signal_from_checkpoint(signal, "gnn_roundtable_bridge.trainer_last")
+            })
+            .transpose()?;
+        Ok(Self {
+            state: RoundtableGnnBridgeState {
+                latest,
+                history,
+                history_limit,
+            },
+            trainer_last,
+        })
+    }
 }
 
 struct PreparedTrainerCoherenceBridgeCheckpoint {
@@ -3092,6 +3147,42 @@ impl PreparedTrainerCoherenceBridgeCheckpoint {
                 .transpose()?,
         })
     }
+}
+
+fn gnn_roundtable_signal_checkpoint(
+    signal: &RoundtableBandSignal,
+    field: &str,
+) -> Result<TrainerGnnRoundtableSignalCheckpoint, TrainerExternalCheckpointError> {
+    let observation =
+        signal
+            .observation()
+            .map_err(|error| TrainerExternalCheckpointError::InvalidState {
+                field: format!("{field}.observation"),
+                message: error.to_string(),
+            })?;
+    let issued_at = signal.issued_at_checkpoint();
+    issued_at.validate(&format!("{field}.issued_at"))?;
+    let checkpoint = TrainerGnnRoundtableSignalCheckpoint {
+        observation,
+        issued_at,
+    };
+    checkpoint.canonical_influence()?;
+    Ok(checkpoint)
+}
+
+fn gnn_roundtable_signal_from_checkpoint(
+    checkpoint: &TrainerGnnRoundtableSignalCheckpoint,
+    field: &str,
+) -> Result<RoundtableBandSignal, TrainerExternalCheckpointError> {
+    checkpoint.canonical_influence()?;
+    let timestamp_field = format!("{field}.issued_at");
+    checkpoint.issued_at.validate(&timestamp_field)?;
+    checkpoint.issued_at.try_to_system_time(&timestamp_field)?;
+    RoundtableBandSignal::from_observation_checkpoint(checkpoint.observation, checkpoint.issued_at)
+        .map_err(|error| TrainerExternalCheckpointError::InvalidState {
+            field: format!("{field}.observation"),
+            message: error.to_string(),
+        })
 }
 
 struct PreparedTrainerOptimizerRestore {
@@ -6164,7 +6255,7 @@ impl ModuleTrainer {
             components.push("graph_consensus_bridge");
         }
         if self.gnn_roundtable_bridge.is_some() {
-            components.push("gnn_roundtable_bridge");
+            components.push(GNN_ROUNDTABLE_BRIDGE_COMPONENT);
         }
         if self.coherence_bridge.is_some() || self.pending_coherence.is_some() {
             components.push(COHERENCE_BRIDGE_COMPONENT);
@@ -6292,6 +6383,7 @@ impl ModuleTrainer {
         #[cfg(not(feature = "psi"))]
         let psi_meter = None;
         let coherence_bridge = self.coherence_bridge_checkpoint()?;
+        let gnn_roundtable_bridge = self.gnn_roundtable_bridge_checkpoint()?;
         let accumulator_synchronizer = self
             .accumulator_synchronizer
             .as_ref()
@@ -6303,6 +6395,7 @@ impl ModuleTrainer {
                 .with_desire_trainer(desire_trainer)
                 .with_desire_roundtable(desire_roundtable)
                 .with_coherence_bridge(coherence_bridge)
+                .with_gnn_roundtable_bridge(gnn_roundtable_bridge)
                 .with_psi_meter(psi_meter)
                 .with_accumulator_synchronizer(accumulator_synchronizer),
         )?)
@@ -6328,6 +6421,52 @@ impl ModuleTrainer {
                 .as_ref()
                 .map(CoherenceSignal::checkpoint)
                 .transpose()?,
+        };
+        checkpoint.validate()?;
+        Ok(Some(checkpoint))
+    }
+
+    fn gnn_roundtable_bridge_checkpoint(
+        &self,
+    ) -> Result<Option<TrainerGnnRoundtableBridgeCheckpoint>, TrainerExternalCheckpointError> {
+        let Some(bridge) = self.gnn_roundtable_bridge.as_ref() else {
+            return Ok(None);
+        };
+        let state = bridge.snapshot_state();
+        let history_limit = u64::try_from(state.history_limit).map_err(|_| {
+            TrainerExternalCheckpointError::InvalidState {
+                field: "gnn_roundtable_bridge.history_limit".to_owned(),
+                message: "does not fit the portable checkpoint domain".to_owned(),
+            }
+        })?;
+        let history = state
+            .history
+            .iter()
+            .enumerate()
+            .map(|(index, signal)| {
+                gnn_roundtable_signal_checkpoint(
+                    signal,
+                    &format!("gnn_roundtable_bridge.history[{index}]"),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let latest = state
+            .latest
+            .as_ref()
+            .map(|signal| gnn_roundtable_signal_checkpoint(signal, "gnn_roundtable_bridge.latest"))
+            .transpose()?;
+        let trainer_last = self
+            .gnn_last_roundtable_signal
+            .as_ref()
+            .map(|signal| {
+                gnn_roundtable_signal_checkpoint(signal, "gnn_roundtable_bridge.trainer_last")
+            })
+            .transpose()?;
+        let checkpoint = TrainerGnnRoundtableBridgeCheckpoint {
+            history_limit,
+            history,
+            latest,
+            trainer_last,
         };
         checkpoint.validate()?;
         Ok(Some(checkpoint))
@@ -6392,6 +6531,14 @@ impl ModuleTrainer {
             .as_ref()
             .map(PreparedTrainerCoherenceBridgeCheckpoint::prepare)
             .transpose()?;
+        let gnn_roundtable_bridge = checkpoint
+            .gnn_roundtable_bridge
+            .as_ref()
+            .map(PreparedTrainerGnnRoundtableBridgeCheckpoint::prepare)
+            .transpose()?;
+        if gnn_roundtable_bridge.is_some() && self.gnn_roundtable_bridge.is_none() {
+            return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
+        }
 
         #[cfg(feature = "psi")]
         let psi_meter = checkpoint
@@ -6422,6 +6569,7 @@ impl ModuleTrainer {
             desire_trainer,
             desire_roundtable,
             coherence_bridge,
+            gnn_roundtable_bridge,
             #[cfg(feature = "psi")]
             psi_meter,
             reattached_components,
@@ -6451,6 +6599,13 @@ impl ModuleTrainer {
             } else {
                 self.coherence_bridge = None;
             }
+        }
+        if let Some(gnn_roundtable) = prepared.gnn_roundtable_bridge {
+            self.gnn_roundtable_bridge
+                .as_ref()
+                .expect("GNN roundtable bridge checked during restore preparation")
+                .restore_state(gnn_roundtable.state);
+            self.gnn_last_roundtable_signal = gnn_roundtable.trainer_last;
         }
         #[cfg(feature = "psi")]
         if let Some(psi_meter) = prepared.psi_meter {
@@ -7168,7 +7323,7 @@ impl ModuleTrainer {
             }
             validate_band_energy_for_trainer(&band_energy)?;
             let mut roundtable_signal =
-                RoundtableBandSignal::from_schedule(&step_schedule, band_energy);
+                RoundtableBandSignal::from_schedule(&step_schedule, band_energy)?;
             if let Some(bridge) = self.gnn_roundtable_bridge.as_ref() {
                 roundtable_signal = bridge.publish(roundtable_signal.clone())?;
             }
@@ -10244,6 +10399,7 @@ mod tests {
 
     #[test]
     fn runtime_bundle_restores_coherence_topology_and_next_two_steps() {
+        let _global_state = crate::test_global_state_lock();
         let pending = coherence_signal_for_weights(vec![0.72, 0.18, 0.1], 0.82, 0.25);
         let latest = coherence_signal_for_weights(vec![0.2, 0.55, 0.25], 0.61, -0.15);
         let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
@@ -10368,6 +10524,148 @@ mod tests {
             .as_ref()
             .and_then(ZSpaceTraceCoherenceBridge::checkpoint_latest)
             .is_none());
+    }
+
+    #[test]
+    fn runtime_bundle_restores_gnn_roundtable_state_and_next_step_semantics() {
+        let source_bridge = RoundtableGnnBridge::new();
+        source_bridge.set_history_limit(3).unwrap();
+        source_bridge
+            .publish(RoundtableBandSignal::new(BandEnergy::new(0.7, 0.2, 0.1), (2, 1, 1)).unwrap())
+            .unwrap();
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_gnn_roundtable_bridge(source_bridge.clone());
+        let mut source_module = FixedGradientModule::new(0.75);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let schedule = source_trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batch = vec![(
+            Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut source_loss = ConstantLoss::new(1.0);
+        source_trainer
+            .train_epoch(
+                &mut source_module,
+                &mut source_loss,
+                batch.clone(),
+                &schedule,
+            )
+            .unwrap();
+        let model_state = source_module.state_dict().unwrap();
+        let bundle = source_trainer
+            .runtime_checkpoint_bundle(&source_module)
+            .unwrap();
+
+        let captured = bundle
+            .external
+            .gnn_roundtable_bridge
+            .as_ref()
+            .expect("captured GNN roundtable bridge");
+        assert_eq!(captured.history_limit, 3);
+        assert_eq!(captured.history.len(), 2);
+        assert_eq!(captured.latest.as_ref(), captured.history.last());
+        assert!(captured.trainer_last.is_some());
+
+        let target_bridge = RoundtableGnnBridge::new();
+        target_bridge.set_history_limit(1).unwrap();
+        target_bridge
+            .publish(RoundtableBandSignal::new(BandEnergy::new(0.1, 0.2, 0.7), (1, 1, 2)).unwrap())
+            .unwrap();
+        let mut resumed_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        resumed_trainer.enable_gnn_roundtable_bridge(target_bridge.clone());
+        let mut resumed_module = FixedGradientModule::new(0.75);
+        resumed_module.load_state_dict(&model_state).unwrap();
+        resumed_trainer.prepare(&mut resumed_module).unwrap();
+        let receipt = resumed_trainer
+            .restore_runtime_checkpoint_bundle(&mut resumed_module, &bundle)
+            .unwrap();
+
+        assert!(receipt.deterministic_resume_ready);
+        assert_eq!(
+            target_bridge.snapshot_state(),
+            source_bridge.snapshot_state()
+        );
+        assert_eq!(
+            resumed_trainer.external_state_checkpoint().unwrap(),
+            bundle.external
+        );
+
+        let mut resumed_loss = ConstantLoss::new(1.0);
+        source_trainer
+            .train_epoch(
+                &mut source_module,
+                &mut source_loss,
+                batch.clone(),
+                &schedule,
+            )
+            .unwrap();
+        resumed_trainer
+            .train_epoch(&mut resumed_module, &mut resumed_loss, batch, &schedule)
+            .unwrap();
+
+        assert_eq!(
+            source_module.state_dict().unwrap(),
+            resumed_module.state_dict().unwrap()
+        );
+        assert_eq!(
+            source_trainer.optimizer_checkpoint(&source_module).unwrap(),
+            resumed_trainer
+                .optimizer_checkpoint(&resumed_module)
+                .unwrap()
+        );
+        let source_state = source_bridge.snapshot_state();
+        let resumed_state = target_bridge.snapshot_state();
+        assert_eq!(source_state.history_limit, resumed_state.history_limit);
+        assert_eq!(source_state.history.len(), resumed_state.history.len());
+        for (source, resumed) in source_state.history.iter().zip(&resumed_state.history) {
+            assert_eq!(
+                source.observation().unwrap(),
+                resumed.observation().unwrap()
+            );
+        }
+        assert_eq!(
+            source_state.latest.unwrap().observation().unwrap(),
+            resumed_state.latest.unwrap().observation().unwrap()
+        );
+        assert_eq!(
+            source_trainer
+                .gnn_roundtable_signal()
+                .unwrap()
+                .observation()
+                .unwrap(),
+            resumed_trainer
+                .gnn_roundtable_signal()
+                .unwrap()
+                .observation()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn external_checkpoint_rejects_gnn_roundtable_tampering_without_mutation() {
+        let source_bridge = RoundtableGnnBridge::new();
+        source_bridge
+            .publish(RoundtableBandSignal::new(BandEnergy::new(0.6, 0.3, 0.1), (2, 1, 1)).unwrap())
+            .unwrap();
+        let mut source = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source.enable_gnn_roundtable_bridge(source_bridge);
+        let checkpoint = source.external_state_checkpoint().unwrap();
+
+        let target_bridge = RoundtableGnnBridge::new();
+        target_bridge
+            .publish(RoundtableBandSignal::new(BandEnergy::new(0.1, 0.3, 0.6), (1, 1, 2)).unwrap())
+            .unwrap();
+        let mut target = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target.enable_gnn_roundtable_bridge(target_bridge);
+        let before = target.external_state_checkpoint().unwrap();
+        let mut tampered = checkpoint;
+        tampered.gnn_roundtable_bridge.as_mut().unwrap().history[0]
+            .observation
+            .spectral
+            .sheet_confidence = 1.5;
+
+        assert!(target.restore_external_state_checkpoint(&tampered).is_err());
+        assert_eq!(target.external_state_checkpoint().unwrap(), before);
     }
 
     #[test]
@@ -11261,6 +11559,7 @@ mod tests {
 
     #[test]
     fn trace_bridge_accepts_only_current_consistent_rust_control_contracts() {
+        let _global_state = crate::test_global_state_lock();
         let topos = OpenCartesianTopos::new(-1.0, 1.0e-5, 10.0, 256, 8192).unwrap();
         let mut sequencer = ZSpaceCoherenceSequencer::new(64, 4, -1.0, topos).unwrap();
         let recorder = ZSpaceTraceRecorder::new(ZSpaceTraceConfig {

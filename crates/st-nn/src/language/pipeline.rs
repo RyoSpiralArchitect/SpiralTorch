@@ -2037,26 +2037,19 @@ pub(crate) fn commit_desire_checkpoint_restore(
 }
 
 fn desire_timestamp_to_checkpoint(timestamp: SystemTime) -> PureResult<TrainerTimestampCheckpoint> {
-    let duration = timestamp
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| TensorError::InvalidValue {
+    TrainerTimestampCheckpoint::try_from_system_time("desire timestamp", timestamp).map_err(|_| {
+        TensorError::InvalidValue {
             label: "desire timestamp before unix epoch",
-        })?;
-    Ok(TrainerTimestampCheckpoint {
-        unix_seconds: duration.as_secs(),
-        subsec_nanos: duration.subsec_nanos(),
+        }
     })
 }
 
 fn desire_timestamp_from_checkpoint(
     timestamp: TrainerTimestampCheckpoint,
 ) -> PureResult<SystemTime> {
-    UNIX_EPOCH
-        .checked_add(Duration::new(
-            timestamp.unix_seconds,
-            timestamp.subsec_nanos,
-        ))
-        .ok_or(TensorError::InvalidValue {
+    timestamp
+        .try_to_system_time("desire timestamp")
+        .map_err(|_| TensorError::InvalidValue {
             label: "desire timestamp overflow",
         })
 }

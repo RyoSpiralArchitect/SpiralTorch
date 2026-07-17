@@ -31,6 +31,7 @@ use crate::schedule::{BandEnergy, RoundtableSchedule};
 use crate::{PureResult, TensorError};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::CloudConnector;
+use st_core::inference::gnn_roundtable::GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS;
 use st_core::runtime::blackcat::zmeta::ZMetaParams;
 use st_core::runtime::blackcat::{
     bandit::SoftBanditMode, BlackCatRuntime, ChoiceGroups, StepMetrics,
@@ -137,13 +138,18 @@ impl DistConfig {
     }
 }
 
-const ROUND_GNN_BRIDGE_ERR: &str = "roundtable gnn bridge poisoned";
-
 #[derive(Debug)]
 struct RoundtableGnnInner {
     latest: Option<RoundtableBandSignal>,
     history: Vec<RoundtableBandSignal>,
     history_limit: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RoundtableGnnBridgeState {
+    pub latest: Option<RoundtableBandSignal>,
+    pub history: Vec<RoundtableBandSignal>,
+    pub history_limit: usize,
 }
 
 impl Default for RoundtableGnnInner {
@@ -169,16 +175,21 @@ impl RoundtableGnnBridge {
         Self::default()
     }
 
-    fn guard(&self) -> PureResult<std::sync::MutexGuard<'_, RoundtableGnnInner>> {
-        self.inner.lock().map_err(|_| TensorError::InvalidValue {
-            label: ROUND_GNN_BRIDGE_ERR,
-        })
+    fn guard(&self) -> std::sync::MutexGuard<'_, RoundtableGnnInner> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Overrides how many historic signals are retained.
     pub fn set_history_limit(&self, limit: usize) -> PureResult<()> {
-        let mut guard = self.guard()?;
-        guard.history_limit = limit.max(1);
+        if !(1..=GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS).contains(&limit) {
+            return Err(TensorError::InvalidValue {
+                label: "roundtable GNN history limit",
+            });
+        }
+        let mut guard = self.guard();
+        guard.history_limit = limit;
         if guard.history.len() > guard.history_limit {
             let excess = guard.history.len() - guard.history_limit;
             guard.history.drain(0..excess);
@@ -197,7 +208,8 @@ impl RoundtableGnnBridge {
 
     /// Publishes an already prepared roundtable signal.
     pub fn publish(&self, signal: RoundtableBandSignal) -> PureResult<RoundtableBandSignal> {
-        let mut guard = self.guard()?;
+        signal.validate()?;
+        let mut guard = self.guard();
         Self::push_signal(&mut guard, &signal);
         Ok(signal)
     }
@@ -208,33 +220,51 @@ impl RoundtableGnnBridge {
         schedule: &RoundtableSchedule,
         energy: &BandEnergy,
     ) -> PureResult<RoundtableBandSignal> {
-        let signal = RoundtableBandSignal::from_schedule(schedule, *energy);
+        let signal = RoundtableBandSignal::from_schedule(schedule, *energy)?;
         self.publish(signal)
     }
 
     /// Returns the most recently published signal.
     pub fn latest(&self) -> PureResult<Option<RoundtableBandSignal>> {
-        let guard = self.guard()?;
+        let guard = self.guard();
         Ok(guard.latest.clone())
     }
 
     /// Drains the stored history of signals.
     pub fn drain(&self) -> PureResult<Vec<RoundtableBandSignal>> {
-        let mut guard = self.guard()?;
+        let mut guard = self.guard();
         Ok(std::mem::take(&mut guard.history))
     }
 
     /// Returns the number of stored signals.
     pub fn len(&self) -> usize {
-        match self.inner.lock() {
-            Ok(guard) => guard.history.len(),
-            Err(_) => 0,
-        }
+        self.guard().history.len()
     }
 
     /// Returns `true` if no signal has been recorded yet.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Returns the maximum number of retained signals.
+    pub fn history_limit(&self) -> usize {
+        self.guard().history_limit
+    }
+
+    pub(crate) fn snapshot_state(&self) -> RoundtableGnnBridgeState {
+        let guard = self.guard();
+        RoundtableGnnBridgeState {
+            latest: guard.latest.clone(),
+            history: guard.history.clone(),
+            history_limit: guard.history_limit,
+        }
+    }
+
+    pub(crate) fn restore_state(&self, state: RoundtableGnnBridgeState) {
+        let mut guard = self.guard();
+        guard.latest = state.latest;
+        guard.history = state.history;
+        guard.history_limit = state.history_limit;
     }
 }
 
@@ -1283,6 +1313,37 @@ mod tests {
         let drained = bridge.drain().unwrap();
         assert_eq!(drained.len(), 1);
         assert!(bridge.is_empty());
+    }
+
+    #[test]
+    fn gnn_bridge_state_restores_atomically_and_recovers_poison() {
+        let bridge = RoundtableGnnBridge::new();
+        assert!(bridge.set_history_limit(0).is_err());
+        assert!(bridge
+            .set_history_limit(GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS + 1)
+            .is_err());
+        bridge.set_history_limit(2).unwrap();
+
+        let first = RoundtableBandSignal::new(BandEnergy::new(0.7, 0.2, 0.1), (2, 1, 1)).unwrap();
+        let second = RoundtableBandSignal::new(BandEnergy::new(0.2, 0.6, 0.2), (1, 2, 1)).unwrap();
+        bridge.publish(first).unwrap();
+        bridge.publish(second.clone()).unwrap();
+        let expected = bridge.snapshot_state();
+
+        bridge.drain().unwrap();
+        bridge.set_history_limit(1).unwrap();
+        bridge.restore_state(expected.clone());
+        assert_eq!(bridge.snapshot_state(), expected);
+        assert_eq!(bridge.latest().unwrap(), Some(second));
+
+        let poisoned = bridge.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = poisoned.inner.lock().unwrap();
+            panic!("poison GNN bridge for recovery coverage");
+        })
+        .join()
+        .is_err());
+        assert_eq!(bridge.snapshot_state(), expected);
     }
 
     fn demo_runtime() -> BlackCatRuntime {

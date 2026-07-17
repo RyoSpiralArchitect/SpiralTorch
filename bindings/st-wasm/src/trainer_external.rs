@@ -76,6 +76,10 @@ mod tests {
         ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_BACKEND,
         ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER,
     };
+    use st_core::inference::gnn_roundtable::{
+        GnnRoundtableBandEnergyObservation, GnnRoundtableBandSizes, GnnRoundtableSignalObservation,
+        GnnRoundtableSpectralObservation,
+    };
     use st_core::inference::zspace_coherence::{
         build_zspace_coherence_distribution_witness, ZSpaceCoherenceClassificationPolicy,
     };
@@ -84,8 +88,9 @@ mod tests {
         DesireTrainerEventCheckpoint, DesireTrainerPhaseCheckpoint, DesireTrainerQueueCheckpoint,
         DesireTrainerWeightsCheckpoint, TrainerCoherenceBridgeCheckpoint,
         TrainerCoherenceSignalCheckpoint, TrainerExternalCheckpointComponents,
+        TrainerGnnRoundtableBridgeCheckpoint, TrainerGnnRoundtableSignalCheckpoint,
         TrainerTimestampCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT,
-        DESIRE_ROUNDTABLE_COMPONENT, DESIRE_TRAINER_COMPONENT,
+        DESIRE_ROUNDTABLE_COMPONENT, DESIRE_TRAINER_COMPONENT, GNN_ROUNDTABLE_BRIDGE_COMPONENT,
     };
 
     fn without_client(mut payload: Value) -> Value {
@@ -111,12 +116,39 @@ mod tests {
             pre_discard_repaired_non_finite: 0,
             pre_discard_repaired_negative: 0,
         };
+        let gnn_signal = TrainerGnnRoundtableSignalCheckpoint {
+            observation: GnnRoundtableSignalObservation {
+                band_energy: GnnRoundtableBandEnergyObservation {
+                    above: 1.4,
+                    here: 0.45,
+                    beneath: 0.2,
+                    drift: 0.35,
+                },
+                band_sizes: GnnRoundtableBandSizes {
+                    above: 4,
+                    here: 2,
+                    beneath: 2,
+                },
+                spectral: GnnRoundtableSpectralObservation {
+                    sheet_index: 1,
+                    sheet_confidence: 0.9,
+                    curvature: 0.6,
+                    spin: 0.85,
+                    energy: 0.72,
+                },
+            },
+            issued_at: TrainerTimestampCheckpoint {
+                unix_seconds: 19,
+                subsec_nanos: 11,
+            },
+        };
         build_trainer_external_state_checkpoint_from_components(
             vec![
                 ACCUMULATOR_SYNCHRONIZER_COMPONENT.to_owned(),
                 COHERENCE_BRIDGE_COMPONENT.to_owned(),
                 DESIRE_ROUNDTABLE_COMPONENT.to_owned(),
                 DESIRE_TRAINER_COMPONENT.to_owned(),
+                GNN_ROUNDTABLE_BRIDGE_COMPONENT.to_owned(),
             ],
             TrainerExternalCheckpointComponents::new()
                 .with_desire_trainer(Some(DesireTrainerQueueCheckpoint {
@@ -149,6 +181,12 @@ mod tests {
                     pending: Some(coherence.clone()),
                     latest: Some(coherence),
                 }))
+                .with_gnn_roundtable_bridge(Some(TrainerGnnRoundtableBridgeCheckpoint {
+                    history_limit: 4,
+                    history: vec![gnn_signal.clone()],
+                    latest: Some(gnn_signal.clone()),
+                    trainer_last: Some(gnn_signal),
+                }))
                 .with_accumulator_synchronizer(Some(AccumulatorSynchronizerCheckpoint {
                     kind: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_KIND.to_owned(),
                     contract_version: ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_CONTRACT_VERSION
@@ -180,6 +218,7 @@ mod tests {
         assert_eq!(wasm["deterministic_resume_ready"], false);
         assert_eq!(checkpoint.desire_trainer.unwrap().events.len(), 1);
         assert!(checkpoint.coherence_bridge.unwrap().subscribed);
+        assert_eq!(checkpoint.gnn_roundtable_bridge.unwrap().history.len(), 1);
         assert_eq!(
             wasm["reattach_required_components"],
             json!([ACCUMULATOR_SYNCHRONIZER_COMPONENT])
@@ -228,6 +267,16 @@ mod tests {
         assert!(matches!(
             trainer_external_state_checkpoint_value(&invalid_coherence),
             Err(TrainerExternalCheckpointError::Coherence(_))
+        ));
+
+        let mut invalid_gnn = valid_checkpoint();
+        invalid_gnn.gnn_roundtable_bridge.as_mut().unwrap().history[0]
+            .observation
+            .spectral
+            .sheet_confidence = 1.5;
+        assert!(matches!(
+            trainer_external_state_checkpoint_value(&invalid_gnn),
+            Err(TrainerExternalCheckpointError::GnnRoundtable(_))
         ));
     }
 }

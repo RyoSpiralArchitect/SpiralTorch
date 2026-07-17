@@ -6,7 +6,14 @@
 #[cfg(feature = "psi")]
 pub mod coherence;
 use crate::schedule::{BandEnergy, RoundtableSchedule};
+use crate::{PureResult, TensorError};
+use st_core::inference::gnn_roundtable::{
+    derive_gnn_roundtable_influence, validate_gnn_roundtable_signal,
+    GnnRoundtableBandEnergyObservation, GnnRoundtableBandSizes, GnnRoundtableInfluencePayload,
+    GnnRoundtableSignalObservation, GnnRoundtableSpectralObservation,
+};
 use st_core::ops::zspace_round::RoundtableBand;
+use st_core::runtime::trainer_external::TrainerTimestampCheckpoint;
 use std::time::SystemTime;
 
 pub mod context;
@@ -33,36 +40,44 @@ pub use stack::{GraphActivation, GraphLayerSpec, ZSpaceGraphNetwork, ZSpaceGraph
 
 /// Snapshot of the roundtable energy split and corresponding schedule that should
 /// influence graph message passing.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RoundtableBandSignal {
     energy: BandEnergy,
     band_sizes: (u32, u32, u32),
     issued_at: SystemTime,
+    issued_at_checkpoint: TrainerTimestampCheckpoint,
 }
 
 impl RoundtableBandSignal {
     /// Builds a signal from explicit energy magnitudes and band sizes.
-    pub fn new(energy: BandEnergy, band_sizes: (u32, u32, u32)) -> Self {
-        Self {
+    pub fn new(energy: BandEnergy, band_sizes: (u32, u32, u32)) -> PureResult<Self> {
+        let issued_at = SystemTime::now();
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
+        let signal = Self {
             energy,
             band_sizes,
-            issued_at: SystemTime::now(),
-        }
+            issued_at,
+            issued_at_checkpoint,
+        };
+        signal.validate()?;
+        Ok(signal)
     }
 
     /// Builds a signal directly from the active roundtable schedule.
-    pub fn from_schedule(schedule: &RoundtableSchedule, energy: BandEnergy) -> Self {
-        Self {
+    pub fn from_schedule(schedule: &RoundtableSchedule, energy: BandEnergy) -> PureResult<Self> {
+        Self::new(
             energy,
-            band_sizes: (schedule.above().k, schedule.here().k, schedule.beneath().k),
-            issued_at: SystemTime::now(),
-        }
+            (schedule.above().k, schedule.here().k, schedule.beneath().k),
+        )
     }
 
     /// Overrides the timestamp associated with the signal.
-    pub fn with_issued_at(mut self, issued_at: SystemTime) -> Self {
+    pub fn with_issued_at(mut self, issued_at: SystemTime) -> PureResult<Self> {
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
         self.issued_at = issued_at;
-        self
+        self.issued_at_checkpoint = issued_at_checkpoint;
+        self.validate()?;
+        Ok(self)
     }
 
     /// Returns the raw band energy magnitudes.
@@ -80,10 +95,138 @@ impl RoundtableBandSignal {
         self.issued_at
     }
 
+    /// Returns the exact cross-runtime timestamp retained by the signal.
+    pub fn issued_at_checkpoint(&self) -> TrainerTimestampCheckpoint {
+        self.issued_at_checkpoint
+    }
+
     /// Returns the combined depth of the schedule.
-    pub fn depth(&self) -> u32 {
+    pub fn depth(&self) -> u64 {
         let (above, here, beneath) = self.band_sizes;
-        above + here + beneath
+        u64::from(above) + u64::from(here) + u64::from(beneath)
+    }
+
+    /// Returns the portable observation validated by the canonical Rust contract.
+    pub fn observation(&self) -> PureResult<GnnRoundtableSignalObservation> {
+        let sheet_index = u64::try_from(self.energy.spectral.sheet_index).map_err(|_| {
+            TensorError::InvalidValue {
+                label: "GNN roundtable sheet index",
+            }
+        })?;
+        Ok(GnnRoundtableSignalObservation {
+            band_energy: GnnRoundtableBandEnergyObservation {
+                above: f64::from(self.energy.above),
+                here: f64::from(self.energy.here),
+                beneath: f64::from(self.energy.beneath),
+                drift: f64::from(self.energy.drift),
+            },
+            band_sizes: GnnRoundtableBandSizes {
+                above: self.band_sizes.0,
+                here: self.band_sizes.1,
+                beneath: self.band_sizes.2,
+            },
+            spectral: GnnRoundtableSpectralObservation {
+                sheet_index,
+                sheet_confidence: f64::from(self.energy.spectral.sheet_confidence),
+                curvature: f64::from(self.energy.spectral.curvature),
+                spin: f64::from(self.energy.spectral.spin),
+                energy: f64::from(self.energy.spectral.energy),
+            },
+        })
+    }
+
+    /// Rebuilds a native signal from a Rust-validated portable observation.
+    pub fn from_observation(
+        observation: GnnRoundtableSignalObservation,
+        issued_at: SystemTime,
+    ) -> PureResult<Self> {
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
+        Self::from_observation_checkpoint(observation, issued_at_checkpoint)
+    }
+
+    /// Rebuilds a signal while preserving an exact portable checkpoint timestamp.
+    pub fn from_observation_checkpoint(
+        observation: GnnRoundtableSignalObservation,
+        issued_at_checkpoint: TrainerTimestampCheckpoint,
+    ) -> PureResult<Self> {
+        validate_gnn_roundtable_signal(observation).map_err(|_| TensorError::InvalidValue {
+            label: "GNN roundtable signal observation",
+        })?;
+        issued_at_checkpoint
+            .validate("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        let issued_at = issued_at_checkpoint
+            .try_to_system_time("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        let sheet_index = usize::try_from(observation.spectral.sheet_index).map_err(|_| {
+            TensorError::InvalidValue {
+                label: "GNN roundtable sheet index",
+            }
+        })?;
+        let signal = Self {
+            energy: BandEnergy::new(
+                observation.band_energy.above as f32,
+                observation.band_energy.here as f32,
+                observation.band_energy.beneath as f32,
+            )
+            .with_drift(observation.band_energy.drift as f32)
+            .with_spectral(st_core::ops::zspace_round::SpectralFeatureSample {
+                sheet_index,
+                sheet_confidence: observation.spectral.sheet_confidence as f32,
+                curvature: observation.spectral.curvature as f32,
+                spin: observation.spectral.spin as f32,
+                energy: observation.spectral.energy as f32,
+            }),
+            band_sizes: (
+                observation.band_sizes.above,
+                observation.band_sizes.here,
+                observation.band_sizes.beneath,
+            ),
+            issued_at,
+            issued_at_checkpoint,
+        };
+        signal.validate()?;
+        Ok(signal)
+    }
+
+    /// Validates all signal evidence without deriving graph coefficients.
+    pub fn validate(&self) -> PureResult<()> {
+        validate_gnn_roundtable_signal(self.observation()?).map_err(|_| {
+            TensorError::InvalidValue {
+                label: "GNN roundtable signal",
+            }
+        })?;
+        self.issued_at_checkpoint
+            .validate("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        let projected = self
+            .issued_at_checkpoint
+            .try_to_system_time("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        if projected != self.issued_at {
+            return Err(TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp projection",
+            });
+        }
+        Ok(())
+    }
+
+    fn checkpoint_for_system_time(issued_at: SystemTime) -> PureResult<TrainerTimestampCheckpoint> {
+        TrainerTimestampCheckpoint::try_from_system_time(
+            "gnn_roundtable_signal.issued_at",
+            issued_at,
+        )
+        .map_err(|_| TensorError::InvalidValue {
+            label: "GNN roundtable signal timestamp",
+        })
     }
 }
 
@@ -92,88 +235,21 @@ impl RoundtableBandSignal {
 #[derive(Clone, Debug)]
 pub struct RoundtableBandInfluence {
     signal: RoundtableBandSignal,
-    multipliers: (f32, f32, f32),
-    drift_bias: f32,
+    projection: GnnRoundtableInfluencePayload,
 }
 
 impl RoundtableBandInfluence {
     /// Builds a new influence from the provided signal.
-    pub fn from_signal(signal: &RoundtableBandSignal) -> Self {
-        let energy = signal.energy();
-        let total = (energy.above.abs() + energy.here.abs() + energy.beneath.abs()).max(1e-6);
-        let bary = [
-            (energy.above.abs() / total).clamp(0.0, 1.0),
-            (energy.here.abs() / total).clamp(0.0, 1.0),
-            (energy.beneath.abs() / total).clamp(0.0, 1.0),
-        ];
-        let depth = signal.depth().max(1);
-        let (k_above, k_here, k_beneath) = signal.band_sizes();
-        let share = [
-            k_above as f32 / depth as f32,
-            k_here as f32 / depth as f32,
-            k_beneath as f32 / depth as f32,
-        ];
-        let spectral_focus = energy.spectral_focus();
-        let spectral_curvature = energy.spectral_curvature();
-        let spectral_stability = energy.spectral_stability();
-        let spectral_spin = energy.spectral.spin.clamp(-1.0, 1.0);
-        let bary_asymmetry = (bary[0] - bary[2]).abs().clamp(0.0, 1.0);
-        let energy_reliance =
-            (0.5 + 0.35 * spectral_focus + 0.25 * bary_asymmetry).clamp(0.55, 0.9);
-        let schedule_reliance = 1.0 - energy_reliance;
-        let occupancy = [
-            energy_reliance * bary[0] + schedule_reliance * share[0],
-            energy_reliance * bary[1] + schedule_reliance * share[1],
-            energy_reliance * bary[2] + schedule_reliance * share[2],
-        ];
-        let schedule_asymmetry = (occupancy[0] - occupancy[2]).clamp(-1.0, 1.0);
-        let direction =
-            (0.6 * schedule_asymmetry + 0.4 * spectral_focus * spectral_spin).clamp(-1.0, 1.0);
-        let curvature_pull = (spectral_focus * spectral_curvature).clamp(0.0, 1.0);
-        let edge_bias = (bary[0].max(bary[2]) - bary[1]).max(0.0);
-        let edge_emphasis =
-            (0.5 * edge_bias + 0.5 * direction.abs() * spectral_focus).clamp(0.0, 1.0);
-        let edge_lift = (1.0 + 0.18 * edge_emphasis).clamp(1.0, 1.35);
-        let center_damping = (1.0 - 0.24 * edge_emphasis).clamp(0.72, 1.0);
-        let stability_lift = (0.92 + 0.16 * spectral_stability + 0.10 * edge_bias).clamp(0.85, 1.2);
-        let neutrality =
-            ((occupancy[1] + spectral_stability + curvature_pull) / 3.0).clamp(0.0, 1.0);
-        let directional_relaxation = (1.0 - curvature_pull).clamp(0.65, 1.0);
-        let mut multipliers = (
-            (0.72 + 0.62 * occupancy[0])
-                * (1.0 + 0.26 * direction.max(0.0) + 0.12 * edge_bias)
-                * directional_relaxation,
-            (0.78 + 0.52 * occupancy[1])
-                * (1.0 + 0.18 * curvature_pull + 0.12 * neutrality)
-                * (1.0 + 0.07 * (1.0 - spectral_focus))
-                * center_damping,
-            (0.72 + 0.62 * occupancy[2])
-                * (1.0 + 0.26 * (-direction).max(0.0) + 0.12 * edge_bias)
-                * directional_relaxation,
-        );
-        multipliers.0 *= edge_lift;
-        multipliers.2 *= edge_lift;
-        if direction > 0.0 {
-            multipliers.0 *= stability_lift;
-        } else if direction < 0.0 {
-            multipliers.2 *= stability_lift;
-        } else {
-            multipliers.1 *= stability_lift;
-        }
-        multipliers.0 = multipliers.0.clamp(0.35, 1.75);
-        multipliers.1 = multipliers.1.clamp(0.35, 1.75);
-        multipliers.2 = multipliers.2.clamp(0.35, 1.75);
-        let directional_bias = (0.55 * energy.drift.tanh() + 0.45 * direction).clamp(-1.0, 1.0);
-        let drift_bias = ((1.0 + 0.22 * directional_bias)
-            * (1.0 + 0.08 * edge_emphasis)
-            * (1.0 - 0.12 * curvature_pull)
-            * (1.0 - 0.06 * neutrality * spectral_stability))
-            .clamp(0.55, 1.45);
-        Self {
+    pub fn from_signal(signal: &RoundtableBandSignal) -> PureResult<Self> {
+        let projection = derive_gnn_roundtable_influence(signal.observation()?).map_err(|_| {
+            TensorError::InvalidValue {
+                label: "GNN roundtable influence",
+            }
+        })?;
+        Ok(Self {
             signal: signal.clone(),
-            multipliers,
-            drift_bias,
-        }
+            projection,
+        })
     }
 
     /// Returns the raw signal that produced this influence.
@@ -183,30 +259,21 @@ impl RoundtableBandInfluence {
 
     /// Returns the per-band multipliers derived from the signal.
     pub fn multipliers(&self) -> (f32, f32, f32) {
-        self.multipliers
+        (
+            self.projection.multipliers[0] as f32,
+            self.projection.multipliers[1] as f32,
+            self.projection.multipliers[2] as f32,
+        )
     }
 
     /// Returns the drift bias used to emphasise the Above/Beneath steps.
     pub fn drift_bias(&self) -> f32 {
-        self.drift_bias
+        self.projection.drift_bias as f32
     }
 
     /// Returns the scaling applied to the provided message passing step.
     pub fn scale_for_step(&self, step_index: usize) -> f32 {
-        let mut scale = match step_index {
-            0 => self.multipliers.1,
-            1 => self.multipliers.0 * self.drift_bias,
-            _ => {
-                let mut base = self.multipliers.2 / self.drift_bias.max(0.5);
-                if step_index > 2 {
-                    let decay = 1.0 - ((step_index - 2) as f32 * 0.05);
-                    base *= decay.max(0.6);
-                }
-                base
-            }
-        };
-        scale = scale.clamp(0.25, 2.0);
-        scale
+        self.projection.scale_for_step(step_index as u64) as f32
     }
 
     /// Returns the replay-specific bias for a message passing step while a
@@ -216,38 +283,13 @@ impl RoundtableBandInfluence {
         band: RoundtableBand,
         step_index: usize,
         intensity: f32,
-    ) -> f32 {
-        let intensity = intensity.clamp(0.0, 1.0);
-        let average =
-            ((self.multipliers.0 + self.multipliers.1 + self.multipliers.2) / 3.0).max(0.35);
-        let alignment = match band {
-            RoundtableBand::Above => (self.multipliers.0 / average).clamp(0.8, 1.35),
-            RoundtableBand::Here => (self.multipliers.1 / average).clamp(0.8, 1.35),
-            RoundtableBand::Beneath => (self.multipliers.2 / average).clamp(0.8, 1.35),
-        };
-        let focus = intensity * alignment;
-        let scale = match band {
-            RoundtableBand::Above => match step_index {
-                0 => 1.0 - 0.10 * focus,
-                1 => 1.0 + 0.24 * focus,
-                _ => 1.0 - 0.14 * focus,
-            },
-            RoundtableBand::Here => match step_index {
-                0 => 1.0 + 0.20 * focus,
-                1 => 1.0 - 0.07 * focus,
-                _ => 1.0 - 0.10 * focus,
-            },
-            RoundtableBand::Beneath => match step_index {
-                0 => 1.0 - 0.12 * focus,
-                1 => 1.0 - 0.08 * focus,
-                _ => {
-                    let tail_bias =
-                        (1.0 - ((step_index.saturating_sub(2)) as f32 * 0.06)).clamp(0.82, 1.0);
-                    1.0 + 0.24 * focus * tail_bias
-                }
-            },
-        };
-        scale.clamp(0.7, 1.35)
+    ) -> PureResult<f32> {
+        self.projection
+            .band_pass_scale_for_step(band, step_index as u64, f64::from(intensity))
+            .map(|scale| scale as f32)
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable band-pass influence",
+            })
     }
 }
 
@@ -255,6 +297,31 @@ impl RoundtableBandInfluence {
 mod tests {
     use super::*;
     use st_core::ops::zspace_round::SpectralFeatureSample;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn signal_rejects_timestamp_that_checkpoint_cannot_represent() {
+        let issued_at = UNIX_EPOCH.checked_sub(Duration::from_secs(1)).unwrap();
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
+
+        assert!(signal.with_issued_at(issued_at).is_err());
+    }
+
+    #[test]
+    fn signal_preserves_exact_portable_timestamp_beyond_system_time_resolution() {
+        let source = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
+        let timestamp = TrainerTimestampCheckpoint {
+            unix_seconds: 17,
+            subsec_nanos: 42,
+        };
+        let restored = RoundtableBandSignal::from_observation_checkpoint(
+            source.observation().unwrap(),
+            timestamp,
+        )
+        .unwrap();
+
+        assert_eq!(restored.issued_at_checkpoint(), timestamp);
+    }
 
     #[test]
     fn directional_signal_biases_above_step() {
@@ -269,8 +336,9 @@ mod tests {
                     energy: 0.72,
                 }),
             (4, 2, 2),
-        );
-        let influence = RoundtableBandInfluence::from_signal(&signal);
+        )
+        .unwrap();
+        let influence = RoundtableBandInfluence::from_signal(&signal).unwrap();
         let (above, here, beneath) = influence.multipliers();
         assert!(above > beneath);
         assert!(influence.scale_for_step(1) > influence.scale_for_step(2));
@@ -288,8 +356,9 @@ mod tests {
                 energy: 0.58,
             }),
             (2, 5, 2),
-        );
-        let influence = RoundtableBandInfluence::from_signal(&signal);
+        )
+        .unwrap();
+        let influence = RoundtableBandInfluence::from_signal(&signal).unwrap();
         let (above, here, beneath) = influence.multipliers();
         assert!(here > above);
         assert!(here > beneath);
@@ -307,8 +376,9 @@ mod tests {
                 energy: 0.08,
             }),
             (1, 2, 1),
-        );
-        let influence = RoundtableBandInfluence::from_signal(&signal);
+        )
+        .unwrap();
+        let influence = RoundtableBandInfluence::from_signal(&signal).unwrap();
         let (above, here, beneath) = influence.multipliers();
         assert!(above > beneath);
         assert!(influence.scale_for_step(1) > influence.scale_for_step(0));
@@ -318,18 +388,33 @@ mod tests {
     #[test]
     fn band_pass_scaling_biases_matching_steps() {
         let signal =
-            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.5, 0.25).with_drift(0.3), (2, 1, 1));
-        let influence = RoundtableBandInfluence::from_signal(&signal);
+            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.5, 0.25).with_drift(0.3), (2, 1, 1))
+                .unwrap();
+        let influence = RoundtableBandInfluence::from_signal(&signal).unwrap();
         let intensity = 0.75;
-        let above = influence.band_pass_scale_for_step(RoundtableBand::Above, 1, intensity);
-        let here = influence.band_pass_scale_for_step(RoundtableBand::Here, 0, intensity);
-        let beneath = influence.band_pass_scale_for_step(RoundtableBand::Beneath, 2, intensity);
+        let above = influence
+            .band_pass_scale_for_step(RoundtableBand::Above, 1, intensity)
+            .unwrap();
+        let here = influence
+            .band_pass_scale_for_step(RoundtableBand::Here, 0, intensity)
+            .unwrap();
+        let beneath = influence
+            .band_pass_scale_for_step(RoundtableBand::Beneath, 2, intensity)
+            .unwrap();
         assert!(above > 1.0);
         assert!(here > 1.0);
         assert!(beneath > 1.0);
-        assert!(influence.band_pass_scale_for_step(RoundtableBand::Above, 2, intensity) < above);
         assert!(
-            influence.band_pass_scale_for_step(RoundtableBand::Beneath, 0, intensity) < beneath
+            influence
+                .band_pass_scale_for_step(RoundtableBand::Above, 2, intensity)
+                .unwrap()
+                < above
+        );
+        assert!(
+            influence
+                .band_pass_scale_for_step(RoundtableBand::Beneath, 0, intensity)
+                .unwrap()
+                < beneath
         );
     }
 }

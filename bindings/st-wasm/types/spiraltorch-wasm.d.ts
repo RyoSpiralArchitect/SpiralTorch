@@ -614,6 +614,40 @@ declare module "spiraltorch-wasm" {
         latest: TrainerCoherenceSignalCheckpoint | null;
     };
 
+    /** Raw evidence validated by the canonical Rust GNN roundtable contract. */
+    export type GnnRoundtableSignalObservation = {
+        band_energy: {
+            above: number;
+            here: number;
+            beneath: number;
+            drift: number;
+        };
+        band_sizes: {
+            above: number;
+            here: number;
+            beneath: number;
+        };
+        spectral: {
+            sheet_index: number;
+            sheet_confidence: number;
+            curvature: number;
+            spin: number;
+            energy: number;
+        };
+    };
+
+    export type TrainerGnnRoundtableSignalCheckpoint = {
+        observation: GnnRoundtableSignalObservation;
+        issued_at: TrainerTimestampCheckpoint;
+    };
+
+    export type TrainerGnnRoundtableBridgeCheckpoint = {
+        history_limit: number;
+        history: TrainerGnnRoundtableSignalCheckpoint[];
+        latest: TrainerGnnRoundtableSignalCheckpoint | null;
+        trainer_last: TrainerGnnRoundtableSignalCheckpoint | null;
+    };
+
     export type TrainerAccumulatorSynchronizerCheckpoint = {
         kind: "spiraltorch.accumulator_synchronizer_checkpoint";
         contract_version: "spiraltorch.accumulator_synchronizer_checkpoint.v1";
@@ -628,13 +662,14 @@ declare module "spiraltorch-wasm" {
     /** Rust-produced state for trainer components outside optimizer ownership. */
     export type TrainerExternalStateCheckpoint = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v3";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v4";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         required_components: string[];
         desire_trainer: TrainerDesireQueueCheckpoint | null;
         desire_roundtable: TrainerDesireRoundtableCheckpoint | null;
         coherence_bridge: TrainerCoherenceBridgeCheckpoint | null;
+        gnn_roundtable_bridge: TrainerGnnRoundtableBridgeCheckpoint | null;
         psi_meter: TrainerPsiMeterCheckpoint | null;
         accumulator_synchronizer: TrainerAccumulatorSynchronizerCheckpoint | null;
         unresolved_components: string[];
@@ -643,7 +678,7 @@ declare module "spiraltorch-wasm" {
     /** Browser preflight receipt; concrete native resources are never reattached here. */
     export type TrainerExternalStateCheckpointValidation = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v3";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v4";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         execution_client: "wasm";

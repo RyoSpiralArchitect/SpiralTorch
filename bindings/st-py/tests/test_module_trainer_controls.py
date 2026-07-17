@@ -177,7 +177,7 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     assert checkpoint["kind"] == "spiraltorch.trainer_external_state_checkpoint"
     assert (
         checkpoint["contract_version"]
-        == "spiraltorch.trainer_external_state_checkpoint.v3"
+        == "spiraltorch.trainer_external_state_checkpoint.v4"
     )
     assert checkpoint["semantic_owner"] == "st-core::runtime::trainer_external"
     assert checkpoint["semantic_backend"] == "rust"
@@ -185,6 +185,7 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     assert checkpoint["unresolved_components"] == []
     assert checkpoint["desire_roundtable"]["blend"] == pytest.approx(0.73)
     assert checkpoint["coherence_bridge"] is None
+    assert checkpoint["gnn_roundtable_bridge"] is None
 
     target_bundle = st.nn.DesireTelemetryBundle(
         trainer=False,
@@ -246,6 +247,70 @@ def test_module_trainer_external_checkpoint_bootstraps_rust_coherence_bridge() -
     with pytest.raises(ValueError, match="pending signal or an active subscription"):
         target.restore_external_state_checkpoint(invalid)
     assert target.external_state_checkpoint() == before
+
+
+def test_module_trainer_external_checkpoint_restores_shared_gnn_bridge() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    with pytest.raises(ValueError, match="history limit"):
+        st.nn.RoundtableGnnBridge(history_limit=0)
+
+    source_bridge = st.nn.RoundtableGnnBridge(history_limit=3)
+    source = st.nn.ModuleTrainer(backend="cpu")
+    source.enable_gnn_roundtable_bridge(source_bridge)
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("gnn_checkpoint_linear", 2, 1))
+    source.prepare(model)
+    schedule = source.roundtable(
+        2,
+        1,
+        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1),
+    )
+    source.train_epoch(
+        model,
+        st.nn.MeanSquaredError(),
+        [(st.Tensor.rand(2, 2, seed=421), st.Tensor.rand(2, 1, seed=422))],
+        schedule,
+    )
+    checkpoint = source.external_state_checkpoint()
+    bridge_state = checkpoint["gnn_roundtable_bridge"]
+    signal = bridge_state["history"][0]
+
+    assert checkpoint["required_components"] == ["gnn_roundtable_bridge"]
+    assert bridge_state["history_limit"] == 3
+    assert len(bridge_state["history"]) == 1
+    assert bridge_state["latest"] == signal
+    assert bridge_state["trainer_last"] == signal
+    assert signal["observation"]["band_sizes"] == {
+        "above": 1,
+        "here": 1,
+        "beneath": 1,
+    }
+    assert "multipliers" not in signal
+    assert set(signal["issued_at"]) == {"unix_seconds", "subsec_nanos"}
+    assert source_bridge.len() == 1
+    assert source_bridge.is_empty() is False
+    assert source_bridge.latest() == signal
+    assert source.gnn_roundtable_signal() == signal
+
+    target_bridge = st.nn.RoundtableGnnBridge(history_limit=1)
+    target = st.nn.ModuleTrainer(backend="cpu")
+    target.enable_gnn_roundtable_bridge(target_bridge)
+    receipt = target.restore_external_state_checkpoint(checkpoint)
+
+    assert receipt["captured_components"] == ["gnn_roundtable_bridge"]
+    assert receipt["deterministic_resume_ready"] is True
+    assert target_bridge.history_limit == 3
+    assert target.external_state_checkpoint() == checkpoint
+    assert target_bridge.latest() == signal
+    assert target.gnn_roundtable_signal() == signal
+    assert target_bridge.drain() == [signal]
+
+    unattached = st.nn.ModuleTrainer(backend="cpu")
+    with pytest.raises(ValueError, match="external component set"):
+        unattached.restore_external_state_checkpoint(checkpoint)
 
 
 def test_module_trainer_runtime_bundle_is_atomic_and_rust_owned() -> None:

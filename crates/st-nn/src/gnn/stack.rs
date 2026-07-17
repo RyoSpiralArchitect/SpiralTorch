@@ -303,7 +303,7 @@ impl Module for ZSpaceGraphNetwork {
     }
 
     fn apply_roundtable_band(&mut self, signal: &RoundtableBandSignal) -> PureResult<()> {
-        let influence = RoundtableBandInfluence::from_signal(signal);
+        let influence = RoundtableBandInfluence::from_signal(signal)?;
         for layer in &mut self.layers {
             layer.set_roundtable(Some(influence.clone()));
         }
@@ -460,7 +460,8 @@ mod tests {
         let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
         let baseline = network.forward(&input).unwrap();
         let signal =
-            RoundtableBandSignal::new(BandEnergy::new(1.5, 0.5, 0.2).with_drift(0.3), (2, 1, 1));
+            RoundtableBandSignal::new(BandEnergy::new(1.5, 0.5, 0.2).with_drift(0.3), (2, 1, 1))
+                .unwrap();
         network.apply_roundtable_band(&signal).unwrap();
         let adjusted = network.forward(&input).unwrap();
         assert_ne!(baseline.data(), adjusted.data());
@@ -489,7 +490,8 @@ mod tests {
         builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(2).unwrap()));
         let mut network = builder.build("stack_rt_trace").unwrap();
         let signal =
-            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.35, 0.12).with_drift(0.25), (2, 1, 1));
+            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.35, 0.12).with_drift(0.25), (2, 1, 1))
+                .unwrap();
         network.apply_roundtable_band(&signal).unwrap();
         let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
 
