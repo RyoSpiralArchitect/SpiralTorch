@@ -4,9 +4,14 @@
 //! restore concrete resources; browser clients only preflight the same payload.
 
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 use crate::distributed::AccumulatorSynchronizerCheckpoint;
+use crate::inference::gnn_roundtable::{
+    derive_gnn_roundtable_influence, GnnRoundtableInfluencePayload, GnnRoundtableSignalObservation,
+    GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS,
+};
 use crate::inference::zspace_coherence::{
     classify_zspace_coherence, derive_zspace_coherence_control, is_zspace_coherence_swap_invariant,
     validate_zspace_coherence_distribution_observation, ZSpaceCoherenceClassificationPayload,
@@ -16,7 +21,7 @@ use crate::inference::zspace_coherence::{
 
 pub const TRAINER_EXTERNAL_CHECKPOINT_KIND: &str = "spiraltorch.trainer_external_state_checkpoint";
 pub const TRAINER_EXTERNAL_CHECKPOINT_CONTRACT_VERSION: &str =
-    "spiraltorch.trainer_external_state_checkpoint.v3";
+    "spiraltorch.trainer_external_state_checkpoint.v4";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_OWNER: &str = "st-core::runtime::trainer_external";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
 pub const TRAINER_EXTERNAL_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -24,6 +29,7 @@ pub const TRAINER_EXTERNAL_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const DESIRE_TRAINER_COMPONENT: &str = "desire_bridge";
 pub const DESIRE_ROUNDTABLE_COMPONENT: &str = "desire_roundtable_bridge";
 pub const COHERENCE_BRIDGE_COMPONENT: &str = "coherence_bridge";
+pub const GNN_ROUNDTABLE_BRIDGE_COMPONENT: &str = "gnn_roundtable_bridge";
 pub const PSI_METER_COMPONENT: &str = "psi_meter";
 pub const ACCUMULATOR_SYNCHRONIZER_COMPONENT: &str = "accumulator_synchronizer";
 
@@ -40,6 +46,31 @@ pub struct TrainerTimestampCheckpoint {
 }
 
 impl TrainerTimestampCheckpoint {
+    pub fn try_from_system_time(
+        field: &str,
+        timestamp: SystemTime,
+    ) -> Result<Self, TrainerExternalCheckpointError> {
+        let duration = timestamp
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| state_error(field, "must not precede the Unix epoch"))?;
+        let checkpoint = Self {
+            unix_seconds: duration.as_secs(),
+            subsec_nanos: duration.subsec_nanos(),
+        };
+        checkpoint.validate(field)?;
+        Ok(checkpoint)
+    }
+
+    pub fn try_to_system_time(
+        self,
+        field: &str,
+    ) -> Result<SystemTime, TrainerExternalCheckpointError> {
+        self.validate(field)?;
+        UNIX_EPOCH
+            .checked_add(Duration::new(self.unix_seconds, self.subsec_nanos))
+            .ok_or_else(|| state_error(field, "overflows SystemTime"))
+    }
+
     fn validate(&self, field: &str) -> Result<(), TrainerExternalCheckpointError> {
         if self.unix_seconds > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
             return Err(state_error(
@@ -632,6 +663,81 @@ impl TrainerCoherenceBridgeCheckpoint {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct TrainerGnnRoundtableSignalCheckpoint {
+    pub observation: GnnRoundtableSignalObservation,
+    pub issued_at: TrainerTimestampCheckpoint,
+}
+
+impl TrainerGnnRoundtableSignalCheckpoint {
+    pub fn canonical_influence(
+        &self,
+    ) -> Result<GnnRoundtableInfluencePayload, TrainerExternalCheckpointError> {
+        derive_gnn_roundtable_influence(self.observation)
+            .map_err(|error| TrainerExternalCheckpointError::GnnRoundtable(error.to_string()))
+    }
+
+    fn validate(&self, field: &str) -> Result<(), TrainerExternalCheckpointError> {
+        self.issued_at.validate(&format!("{field}.issued_at"))?;
+        self.canonical_influence().map(|_| ())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrainerGnnRoundtableBridgeCheckpoint {
+    pub history_limit: u64,
+    pub history: Vec<TrainerGnnRoundtableSignalCheckpoint>,
+    pub latest: Option<TrainerGnnRoundtableSignalCheckpoint>,
+    pub trainer_last: Option<TrainerGnnRoundtableSignalCheckpoint>,
+}
+
+impl TrainerGnnRoundtableBridgeCheckpoint {
+    pub fn validate(&self) -> Result<(), TrainerExternalCheckpointError> {
+        validate_safe_integer("gnn_roundtable_bridge.history_limit", self.history_limit)?;
+        if self.history_limit == 0
+            || self.history_limit
+                > u64::try_from(GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS).unwrap_or(u64::MAX)
+        {
+            return Err(state_error(
+                "gnn_roundtable_bridge.history_limit",
+                "must be within the canonical bridge history range",
+            ));
+        }
+        let history_limit = usize::try_from(self.history_limit).map_err(|_| {
+            state_error(
+                "gnn_roundtable_bridge.history_limit",
+                "does not fit this platform",
+            )
+        })?;
+        if self.history.len() > history_limit {
+            return Err(state_error(
+                "gnn_roundtable_bridge.history",
+                "must not exceed history_limit",
+            ));
+        }
+        for (index, signal) in self.history.iter().enumerate() {
+            signal.validate(&format!("gnn_roundtable_bridge.history[{index}]"))?;
+        }
+        if let Some(signal) = &self.latest {
+            signal.validate("gnn_roundtable_bridge.latest")?;
+        }
+        if let Some(signal) = &self.trainer_last {
+            signal.validate("gnn_roundtable_bridge.trainer_last")?;
+        }
+        if let Some(last_history) = self.history.last() {
+            if self.latest.as_ref() != Some(last_history) {
+                return Err(state_error(
+                    "gnn_roundtable_bridge.latest",
+                    "must equal the newest retained history signal",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TrainerExternalStateCheckpoint {
     pub kind: String,
     pub contract_version: String,
@@ -641,6 +747,7 @@ pub struct TrainerExternalStateCheckpoint {
     pub desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     pub desire_roundtable: Option<DesireRoundtableCheckpoint>,
     pub coherence_bridge: Option<TrainerCoherenceBridgeCheckpoint>,
+    pub gnn_roundtable_bridge: Option<TrainerGnnRoundtableBridgeCheckpoint>,
     pub psi_meter: Option<PsiMeterCheckpoint>,
     pub accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
     pub unresolved_components: Vec<String>,
@@ -675,6 +782,8 @@ pub enum TrainerExternalCheckpointError {
     Psi(#[from] PsiMeterCheckpointError),
     #[error("invalid coherence bridge checkpoint: {0}")]
     Coherence(String),
+    #[error("invalid GNN roundtable bridge checkpoint: {0}")]
+    GnnRoundtable(String),
     #[error("invalid accumulator synchronizer checkpoint: {0}")]
     Accumulator(String),
 }
@@ -684,6 +793,7 @@ pub struct TrainerExternalCheckpointComponents {
     desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<DesireRoundtableCheckpoint>,
     coherence_bridge: Option<TrainerCoherenceBridgeCheckpoint>,
+    gnn_roundtable_bridge: Option<TrainerGnnRoundtableBridgeCheckpoint>,
     psi_meter: Option<PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
 }
@@ -708,6 +818,14 @@ impl TrainerExternalCheckpointComponents {
         state: Option<TrainerCoherenceBridgeCheckpoint>,
     ) -> Self {
         self.coherence_bridge = state;
+        self
+    }
+
+    pub fn with_gnn_roundtable_bridge(
+        mut self,
+        state: Option<TrainerGnnRoundtableBridgeCheckpoint>,
+    ) -> Self {
+        self.gnn_roundtable_bridge = state;
         self
     }
 
@@ -765,6 +883,7 @@ pub fn build_trainer_external_state_checkpoint_from_components(
         desire_trainer,
         desire_roundtable,
         coherence_bridge,
+        gnn_roundtable_bridge,
         psi_meter,
         accumulator_synchronizer,
     } = components;
@@ -774,6 +893,7 @@ pub fn build_trainer_external_state_checkpoint_from_components(
         desire_trainer.as_ref(),
         desire_roundtable.as_ref(),
         coherence_bridge.as_ref(),
+        gnn_roundtable_bridge.as_ref(),
         psi_meter.as_ref(),
         accumulator_synchronizer.as_ref(),
     );
@@ -791,6 +911,7 @@ pub fn build_trainer_external_state_checkpoint_from_components(
         desire_trainer,
         desire_roundtable,
         coherence_bridge,
+        gnn_roundtable_bridge,
         psi_meter,
         accumulator_synchronizer,
         unresolved_components,
@@ -844,6 +965,9 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
     if let Some(state) = &checkpoint.coherence_bridge {
         state.validate()?;
     }
+    if let Some(state) = &checkpoint.gnn_roundtable_bridge {
+        state.validate()?;
+    }
     if let Some(state) = &checkpoint.psi_meter {
         state.validate()?;
     }
@@ -857,6 +981,7 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
         checkpoint.desire_trainer.as_ref(),
         checkpoint.desire_roundtable.as_ref(),
         checkpoint.coherence_bridge.as_ref(),
+        checkpoint.gnn_roundtable_bridge.as_ref(),
         checkpoint.psi_meter.as_ref(),
         checkpoint.accumulator_synchronizer.as_ref(),
     );
@@ -922,10 +1047,11 @@ fn captured_components(
     desire_trainer: Option<&DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<&DesireRoundtableCheckpoint>,
     coherence_bridge: Option<&TrainerCoherenceBridgeCheckpoint>,
+    gnn_roundtable_bridge: Option<&TrainerGnnRoundtableBridgeCheckpoint>,
     psi_meter: Option<&PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<&AccumulatorSynchronizerCheckpoint>,
 ) -> Vec<String> {
-    let mut captured = Vec::with_capacity(5);
+    let mut captured = Vec::with_capacity(6);
     if desire_trainer.is_some() {
         captured.push(DESIRE_TRAINER_COMPONENT.to_owned());
     }
@@ -934,6 +1060,9 @@ fn captured_components(
     }
     if coherence_bridge.is_some() {
         captured.push(COHERENCE_BRIDGE_COMPONENT.to_owned());
+    }
+    if gnn_roundtable_bridge.is_some() {
+        captured.push(GNN_ROUNDTABLE_BRIDGE_COMPONENT.to_owned());
     }
     if psi_meter.is_some() {
         captured.push(PSI_METER_COMPONENT.to_owned());
@@ -1121,6 +1250,38 @@ mod tests {
             repaired_negative_weights: 0,
             pre_discard_repaired_non_finite: 0,
             pre_discard_repaired_negative: 0,
+        }
+    }
+
+    fn gnn_roundtable_signal_checkpoint(
+        unix_seconds: u64,
+        subsec_nanos: u32,
+    ) -> TrainerGnnRoundtableSignalCheckpoint {
+        TrainerGnnRoundtableSignalCheckpoint {
+            observation: GnnRoundtableSignalObservation {
+                band_energy: crate::inference::gnn_roundtable::GnnRoundtableBandEnergyObservation {
+                    above: 1.4,
+                    here: 0.45,
+                    beneath: 0.2,
+                    drift: 0.35,
+                },
+                band_sizes: crate::inference::gnn_roundtable::GnnRoundtableBandSizes {
+                    above: 4,
+                    here: 2,
+                    beneath: 2,
+                },
+                spectral: crate::inference::gnn_roundtable::GnnRoundtableSpectralObservation {
+                    sheet_index: 1,
+                    sheet_confidence: 0.9,
+                    curvature: 0.6,
+                    spin: 0.85,
+                    energy: 0.72,
+                },
+            },
+            issued_at: TrainerTimestampCheckpoint {
+                unix_seconds,
+                subsec_nanos,
+            },
         }
     }
 
@@ -1428,5 +1589,101 @@ mod tests {
         impossible_repairs.repaired_non_finite_weights = 2;
         impossible_repairs.repaired_negative_weights = 2;
         assert!(impossible_repairs.validate().is_err());
+    }
+
+    #[test]
+    fn timestamp_checkpoint_roundtrips_nanoseconds_through_the_shared_contract() {
+        let timestamp = UNIX_EPOCH + Duration::new(17, 42);
+        let checkpoint =
+            TrainerTimestampCheckpoint::try_from_system_time("timestamp", timestamp).unwrap();
+        assert_eq!(checkpoint.unix_seconds, 17);
+        assert_eq!(checkpoint.subsec_nanos, 42);
+        assert_eq!(
+            checkpoint.try_to_system_time("timestamp").unwrap(),
+            timestamp
+        );
+        assert!(TrainerTimestampCheckpoint::try_from_system_time(
+            "timestamp",
+            UNIX_EPOCH.checked_sub(Duration::from_nanos(1)).unwrap(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn gnn_roundtable_checkpoint_rederives_influence_and_preserves_fifo() {
+        let first = gnn_roundtable_signal_checkpoint(17, 42);
+        let second = gnn_roundtable_signal_checkpoint(18, 7);
+        let bridge = TrainerGnnRoundtableBridgeCheckpoint {
+            history_limit: 4,
+            history: vec![first.clone(), second.clone()],
+            latest: Some(second.clone()),
+            trainer_last: Some(first),
+        };
+        let checkpoint = build_trainer_external_state_checkpoint_from_components(
+            vec![GNN_ROUNDTABLE_BRIDGE_COMPONENT.to_owned()],
+            TrainerExternalCheckpointComponents::new().with_gnn_roundtable_bridge(Some(bridge)),
+        )
+        .unwrap();
+        let encoded = serde_json::to_string(&checkpoint).unwrap();
+        let decoded: TrainerExternalStateCheckpoint = serde_json::from_str(&encoded).unwrap();
+        let report = evaluate_trainer_external_state_checkpoint(&decoded).unwrap();
+        let influence = decoded
+            .gnn_roundtable_bridge
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .canonical_influence()
+            .unwrap();
+
+        assert_eq!(checkpoint, decoded);
+        assert_eq!(
+            report.captured_components,
+            [GNN_ROUNDTABLE_BRIDGE_COMPONENT]
+        );
+        assert!(report.deterministic_resume_ready);
+        assert!(influence.multipliers[0] > influence.multipliers[2]);
+    }
+
+    #[test]
+    fn gnn_roundtable_checkpoint_rejects_signal_and_history_tampering() {
+        let first = gnn_roundtable_signal_checkpoint(17, 42);
+        let second = gnn_roundtable_signal_checkpoint(18, 7);
+        let valid = TrainerGnnRoundtableBridgeCheckpoint {
+            history_limit: 2,
+            history: vec![first.clone(), second.clone()],
+            latest: Some(second),
+            trainer_last: Some(first.clone()),
+        };
+        valid.validate().unwrap();
+
+        let mut negative_energy = valid.clone();
+        negative_energy.history[0].observation.band_energy.above = -0.1;
+        assert!(matches!(
+            negative_energy.validate(),
+            Err(TrainerExternalCheckpointError::GnnRoundtable(_))
+        ));
+
+        let mut zero_band = valid.clone();
+        zero_band.history[0].observation.band_sizes.here = 0;
+        assert!(zero_band.validate().is_err());
+
+        let mut invalid_timestamp = valid.clone();
+        invalid_timestamp.history[0].issued_at.subsec_nanos = 1_000_000_000;
+        assert!(invalid_timestamp.validate().is_err());
+
+        let mut over_limit = valid.clone();
+        over_limit.history_limit = 1;
+        assert!(over_limit.validate().is_err());
+
+        let mut inconsistent_latest = valid.clone();
+        inconsistent_latest.latest = Some(first);
+        assert!(inconsistent_latest.validate().is_err());
+
+        let mut excessive_limit = valid;
+        excessive_limit.history_limit =
+            u64::try_from(GNN_ROUNDTABLE_MAX_HISTORY_SIGNALS).unwrap() + 1;
+        assert!(excessive_limit.validate().is_err());
     }
 }

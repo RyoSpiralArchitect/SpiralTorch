@@ -631,7 +631,7 @@ impl GradientBands {
 }
 
 /// Aggregate magnitude per roundtable band.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandEnergy {
     pub above: f32,
     pub here: f32,

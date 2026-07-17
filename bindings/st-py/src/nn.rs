@@ -40,7 +40,9 @@ use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
 use st_core::runtime::trainer_checkpoint::TrainerRuntimeCheckpointBundle;
 #[cfg(feature = "nn")]
-use st_core::runtime::trainer_external::TrainerExternalStateCheckpoint;
+use st_core::runtime::trainer_external::{
+    TrainerExternalStateCheckpoint, TrainerTimestampCheckpoint,
+};
 #[cfg(feature = "nn")]
 use st_core::runtime::trainer_optimizer::TrainerOptimizerCheckpoint;
 #[cfg(feature = "nn")]
@@ -89,14 +91,14 @@ use st_nn::{
     GeometryBiasUpdate, GeometryCoherenceSample, HyperbolicCrossEntropy, LayerNorm, Linear,
     LoraLinear as RustLoraLinear, MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
     ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
-    RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
-    SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
-    TextInfusionEvery, TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
-    TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
-    ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer,
-    ZSpaceParameterControlReceipt, ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae,
-    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState,
-    ZSpaceVaeStats,
+    RoundtableBandSignal, RoundtableConfig as RustRoundtableConfig, RoundtableGnnBridge,
+    RoundtableSchedule as RustRoundtableSchedule, SemanticBridge, Sequential, SparseKernel,
+    SymbolGeometry, TemperatureController, TextInfusionEvery, TextInfusionMode,
+    TrainingRunConfig as RustTrainingRunConfig, TrainingRunReport as RustTrainingRunReport,
+    WaveGate, WaveRnn, ZRelativityModule, ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer,
+    ZSpaceLayerNorm, ZSpaceMixer, ZSpaceParameterControlReceipt,
+    ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
+    ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
@@ -6214,6 +6216,23 @@ impl PyNnModuleTrainer {
         self.inner.disable_zspace_trace_coherence_bridge();
     }
 
+    pub fn enable_gnn_roundtable_bridge(&mut self, bridge: &PyRoundtableGnnBridge) {
+        self.inner
+            .enable_gnn_roundtable_bridge(bridge.inner.clone());
+    }
+
+    pub fn disable_gnn_roundtable_bridge(&mut self) {
+        self.inner.disable_gnn_roundtable_bridge();
+    }
+
+    pub fn gnn_roundtable_signal(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .gnn_roundtable_signal()
+            .as_ref()
+            .map(|signal| gnn_roundtable_signal_to_py(py, signal))
+            .transpose()
+    }
+
     #[getter]
     pub fn grad_clip_max_norm(&self) -> Option<f32> {
         self.inner.grad_clip_max_norm()
@@ -6470,6 +6489,85 @@ fn desire_roundtable_summary_to_py(
     dict.set_item("mean_drift", summary.mean_drift)?;
     dict.set_item("last_timestamp_ms", system_time_ms(summary.last_timestamp))?;
     Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+fn gnn_roundtable_signal_to_py(
+    py: Python<'_>,
+    signal: &RoundtableBandSignal,
+) -> PyResult<PyObject> {
+    let observation = signal.observation().map_err(tensor_err_to_py)?;
+    let issued_at = TrainerTimestampCheckpoint::try_from_system_time(
+        "gnn_roundtable_signal.issued_at",
+        signal.issued_at(),
+    )
+    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    json_to_py(
+        py,
+        &serde_json::json!({
+            "observation": observation,
+            "issued_at": issued_at,
+        }),
+    )
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "RoundtableGnnBridge", unsendable)]
+pub(crate) struct PyRoundtableGnnBridge {
+    inner: RoundtableGnnBridge,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyRoundtableGnnBridge {
+    #[new]
+    #[pyo3(signature = (*, history_limit=64))]
+    pub fn new(history_limit: usize) -> PyResult<Self> {
+        let inner = RoundtableGnnBridge::new();
+        inner
+            .set_history_limit(history_limit)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    pub fn history_limit(&self) -> usize {
+        self.inner.history_limit()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn latest(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner
+            .latest()
+            .map_err(tensor_err_to_py)?
+            .as_ref()
+            .map(|signal| gnn_roundtable_signal_to_py(py, signal))
+            .transpose()
+    }
+
+    pub fn drain(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let signals = self.inner.drain().map_err(tensor_err_to_py)?;
+        let list = PyList::empty(py);
+        for signal in &signals {
+            list.append(gnn_roundtable_signal_to_py(py, signal)?)?;
+        }
+        Ok(list.into_py(py))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RoundtableGnnBridge(len={}, history_limit={})",
+            self.inner.len(),
+            self.inner.history_limit()
+        )
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -10622,6 +10720,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyRoundtableSchedule>()?;
     module.add_class::<PyEpochStats>()?;
     module.add_class::<PyNnModuleTrainer>()?;
+    module.add_class::<PyRoundtableGnnBridge>()?;
     module.add_class::<PyDesireTrainerBridge>()?;
     module.add_class::<PyDesireRoundtableBridge>()?;
     module.add_class::<PyDesireTelemetryBundle>()?;
@@ -10702,6 +10801,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",
+            "RoundtableGnnBridge",
             "DesireTrainerBridge",
             "DesireRoundtableBridge",
             "DesireTelemetryBundle",
