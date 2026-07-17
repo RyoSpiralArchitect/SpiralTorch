@@ -177,7 +177,7 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     assert checkpoint["kind"] == "spiraltorch.trainer_external_state_checkpoint"
     assert (
         checkpoint["contract_version"]
-        == "spiraltorch.trainer_external_state_checkpoint.v1"
+        == "spiraltorch.trainer_external_state_checkpoint.v2"
     )
     assert checkpoint["semantic_owner"] == "st-core::runtime::trainer_external"
     assert checkpoint["semantic_backend"] == "rust"
@@ -275,12 +275,15 @@ def test_module_trainer_runtime_bundle_is_atomic_and_rust_owned() -> None:
     assert target.external_state_checkpoint() == before
 
 
-def test_module_trainer_runtime_bundle_refuses_unresolved_python_queue() -> None:
+def test_module_trainer_runtime_bundle_restores_rust_owned_desire_queue() -> None:
     st = _load_native()
     if st is None:
         pytest.skip("native SpiralTorch extension unavailable")
 
     source_desire = st.nn.DesireTelemetryBundle(trainer=True, roundtable=False)
+    pipeline = st.nn.DesirePipeline(vocab_size=2, bundle=source_desire)
+    for previous_token in (0, 1, 0):
+        pipeline.step([2.0, 0.4], previous_token, concept=[0.6, 0.4])
     source = st.nn.ModuleTrainer(backend="cpu")
     source.enable_desire_telemetry(source_desire)
     source_model = st.nn.Sequential()
@@ -288,7 +291,9 @@ def test_module_trainer_runtime_bundle_refuses_unresolved_python_queue() -> None
     source.prepare(source_model)
     state = source_model.state_dict()
     bundle = source.runtime_checkpoint_bundle(source_model)
-    assert bundle["external"]["unresolved_components"] == ["desire_bridge"]
+    assert bundle["external"]["unresolved_components"] == []
+    source_queue = bundle["external"]["desire_trainer"]
+    assert len(source_queue["events"]) == 3
 
     target_desire = st.nn.DesireTelemetryBundle(trainer=True, roundtable=False)
     target = st.nn.ModuleTrainer(backend="cpu")
@@ -298,8 +303,11 @@ def test_module_trainer_runtime_bundle_refuses_unresolved_python_queue() -> None
     target_model.load_state_dict(state)
     target.prepare(target_model)
 
-    with pytest.raises(RuntimeError, match="runtime checkpoint is not ready"):
-        target.restore_runtime_checkpoint_bundle(target_model, bundle)
+    receipt = target.restore_runtime_checkpoint_bundle(target_model, bundle)
+    assert receipt["deterministic_resume_ready"] is True
+    assert receipt["captured_components"] == ["desire_bridge"]
+    assert target.external_state_checkpoint()["desire_trainer"] == source_queue
+    assert target_desire.trainer_bridge().len() == 3
 
 
 def test_module_trainer_external_checkpoint_bootstraps_psi_from_rust_state() -> None:

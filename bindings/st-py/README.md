@@ -2488,9 +2488,12 @@ claim.
 
 Supported external runtime state has a separate Rust-owned checkpoint. Python
 only transports this payload and orchestrates native restore; it does not
-rebuild component accounting or readiness rules. Desire roundtable controls,
-PSI configuration/EMA/sample clock, and known accumulator-provider descriptors
-are captured today. Unsupported queues and controllers remain explicit in
+rebuild component accounting or readiness rules. The v2 contract captures the
+full FIFO consumed by `DesireTrainerBridge`, Desire roundtable controls/latest
+impulse/pending trainer summary, PSI configuration/EMA/sample clock, and known
+accumulator-provider descriptors. Desire timestamps use exact
+`unix_seconds + subsec_nanos` fields, so browser transport does not round Rust
+state to milliseconds. Other unsupported controllers remain explicit in
 `unresolved_components`, while an accumulator resource must already be
 reattached and verified before the receipt can report deterministic resume:
 

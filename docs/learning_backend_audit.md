@@ -3773,8 +3773,11 @@ Trainer state outside optimizer ownership now begins the same consolidation.
 `st-core::runtime::trainer_external` owns a versioned, deny-unknown checkpoint
 and exact required/captured/unresolved accounting. `DesireRoundtableBridge`
 clones share one control runtime, so Python bundles, pipeline sinks, and
-`ModuleTrainer` cannot silently diverge. The checkpoint currently captures its
-controls/latest impulse plus PSI configuration, EMA, and sampling clock.
+`ModuleTrainer` cannot silently diverge. The v2 checkpoint captures its
+controls/latest impulse and the pending summary consumed by the next trainer
+step. It also captures the complete `DesireTrainerBridge` FIFO, including phase,
+weights, trigger report, and an exact seconds/nanoseconds timestamp. PSI
+configuration, EMA, and sampling clock remain in the same Rust-owned envelope.
 `AccumulatorSynchronizer` contributes a provider/topology/state descriptor,
 but Rust reports deterministic resume only after a native trainer verifies an
 already reattached concrete provider. Opaque providers remain unresolved.
@@ -3784,15 +3787,17 @@ it and can never self-report a native resource as reattached. The new
 `st-core::runtime::trainer_checkpoint` envelope binds the optimizer and
 external payloads by SHA-256 and exact component-set equality. `ModuleTrainer`
 prepares topology, model fingerprints, parameter tapes, external replacement
-state, and concrete provider identity before committing either child. Python
+state, and concrete provider identity before committing either child. Desire
+trainer and roundtable mutexes are acquired together both when one snapshot is
+captured and before either shared state is replaced. Python
 therefore has one native restore call, while WASM exposes the identical
 preflight receipt without pretending to run `st-nn` or reattach a native
 resource.
 
-Telemetry-only Desire queues and the remaining stateful controllers are still
-named in `unresolved_components`; a runtime bundle containing any of them is
-not restorable. Extending those Rust checkpoint contracts is the next slice,
-not a Python/WASM readiness heuristic. Standalone optimizer and external
+The remaining unsupported stateful controllers are still named in
+`unresolved_components`; a runtime bundle containing any of them is not
+restorable. Extending those Rust checkpoint contracts remains Rust work, not a
+Python/WASM readiness heuristic. Standalone optimizer and external
 receipts remain useful for component audit, but only the Rust bundle composes
 their validity into one deterministic-resume claim.
 

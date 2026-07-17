@@ -31,12 +31,13 @@ use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
+use crate::language::{
+    checkpoint_desire_bridges, commit_desire_checkpoint_restore, DesireRoundtableBridge,
+    DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireTrainerSummary,
+    PreparedDesireRoundtableCheckpoint, PreparedDesireTrainerQueue,
+};
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
-use crate::language::{
-    DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
-    DesireTrainerSummary,
-};
 use crate::loss::Loss;
 use crate::module::{Module, PreparedParameterOptimizerState};
 use crate::optim::{
@@ -93,10 +94,10 @@ use st_core::runtime::trainer_checkpoint::{
 #[cfg(feature = "psi")]
 use st_core::runtime::trainer_external::PSI_METER_COMPONENT;
 use st_core::runtime::trainer_external::{
-    build_trainer_external_state_checkpoint, evaluate_trainer_external_state_checkpoint,
-    evaluate_trainer_external_state_restore, DesireRoundtableCheckpoint,
+    build_trainer_external_state_checkpoint_with_desire_trainer,
+    evaluate_trainer_external_state_checkpoint, evaluate_trainer_external_state_restore,
     TrainerExternalCheckpointError, TrainerExternalCheckpointValidation,
-    TrainerExternalStateCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT,
+    TrainerExternalStateCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT, DESIRE_TRAINER_COMPONENT,
 };
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
@@ -2953,7 +2954,8 @@ pub enum TrainerCheckpointError {
 
 struct PreparedTrainerExternalRestore {
     validation: TrainerExternalCheckpointValidation,
-    desire_roundtable: Option<DesireRoundtableCheckpoint>,
+    desire_trainer: Option<PreparedDesireTrainerQueue>,
+    desire_roundtable: Option<PreparedDesireRoundtableCheckpoint>,
     #[cfg(feature = "psi")]
     psi_meter: Option<PsiMeter>,
     reattached_components: Vec<String>,
@@ -6016,7 +6018,7 @@ impl ModuleTrainer {
             components.push("accumulator_synchronizer");
         }
         if self.desire_bridge.is_some() {
-            components.push("desire_bridge");
+            components.push(DESIRE_TRAINER_COMPONENT);
         }
         if self.desire_roundtable_bridge.is_some() {
             components.push("desire_roundtable_bridge");
@@ -6143,11 +6145,10 @@ impl ModuleTrainer {
     pub fn external_state_checkpoint(
         &self,
     ) -> Result<TrainerExternalStateCheckpoint, TrainerCheckpointError> {
-        let desire_roundtable = self
-            .desire_roundtable_bridge
-            .as_ref()
-            .map(DesireRoundtableBridge::checkpoint)
-            .transpose()?;
+        let (desire_trainer, desire_roundtable) = checkpoint_desire_bridges(
+            self.desire_bridge.as_ref(),
+            self.desire_roundtable_bridge.as_ref(),
+        )?;
         #[cfg(feature = "psi")]
         let psi_meter = self
             .psi
@@ -6162,8 +6163,9 @@ impl ModuleTrainer {
             .as_ref()
             .map(|synchronizer| synchronizer.checkpoint())
             .transpose()?;
-        Ok(build_trainer_external_state_checkpoint(
+        Ok(build_trainer_external_state_checkpoint_with_desire_trainer(
             self.optimizer_external_state_required(),
+            desire_trainer,
             desire_roundtable,
             psi_meter,
             accumulator_synchronizer,
@@ -6205,6 +6207,22 @@ impl ModuleTrainer {
             return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
         }
 
+        let desire_trainer = checkpoint
+            .desire_trainer
+            .as_ref()
+            .map(DesireTrainerBridge::prepare_checkpoint_restore)
+            .transpose()?;
+        if desire_trainer.is_some() && self.desire_bridge.is_none() {
+            return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
+        }
+        let desire_roundtable = checkpoint
+            .desire_roundtable
+            .map(DesireRoundtableBridge::prepare_checkpoint_restore)
+            .transpose()?;
+        if desire_roundtable.is_some() && self.desire_roundtable_bridge.is_none() {
+            return Err(TrainerCheckpointError::ExternalComponentSetMismatch);
+        }
+
         #[cfg(feature = "psi")]
         let psi_meter = checkpoint
             .psi_meter
@@ -6231,7 +6249,8 @@ impl ModuleTrainer {
 
         Ok(PreparedTrainerExternalRestore {
             validation,
-            desire_roundtable: checkpoint.desire_roundtable,
+            desire_trainer,
+            desire_roundtable,
             #[cfg(feature = "psi")]
             psi_meter,
             reattached_components,
@@ -6242,13 +6261,12 @@ impl ModuleTrainer {
         &mut self,
         prepared: PreparedTrainerExternalRestore,
     ) -> Result<TrainerExternalCheckpointValidation, TrainerCheckpointError> {
-        if let Some(state) = prepared.desire_roundtable {
-            let bridge = self
-                .desire_roundtable_bridge
-                .as_ref()
-                .ok_or(TrainerCheckpointError::ExternalComponentSetMismatch)?;
-            bridge.restore_checkpoint(state)?;
-        }
+        commit_desire_checkpoint_restore(
+            self.desire_bridge.as_ref(),
+            prepared.desire_trainer,
+            self.desire_roundtable_bridge.as_ref(),
+            prepared.desire_roundtable,
+        )?;
         #[cfg(feature = "psi")]
         if let Some(psi_meter) = prepared.psi_meter {
             self.psi = Some(psi_meter);
@@ -9141,6 +9159,38 @@ mod tests {
         DesireAutomation::new(desire, cfg)
     }
 
+    fn populate_desire_bridges(
+        trainer_bridge: Option<&DesireTrainerBridge>,
+        roundtable_bridge: Option<&DesireRoundtableBridge>,
+        steps: usize,
+    ) {
+        let mut bundle = DesireTelemetryBundle::new();
+        if let Some(bridge) = trainer_bridge {
+            bundle = bundle.with_trainer_bridge(bridge);
+        }
+        if let Some(bridge) = roundtable_bridge {
+            bundle = bundle.with_roundtable_bridge(bridge);
+        }
+        let mut pipeline = DesirePipeline::builder(build_language_automation())
+            .with_telemetry_bundle(&bundle)
+            .build();
+        let logits = vec![2.0, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..steps {
+            pipeline
+                .step_at(
+                    &logits,
+                    step % 2,
+                    &concept,
+                    start + Duration::from_millis((step * 100) as u64),
+                    anchor + Duration::from_millis((step * 100) as u64),
+                )
+                .unwrap();
+        }
+    }
+
     struct FixedGradientModule {
         param: Parameter,
         grad_value: f32,
@@ -10005,11 +10055,18 @@ mod tests {
 
     #[test]
     fn runtime_bundle_composes_roundtable_and_optimizer_readiness() {
+        let source_desire = DesireTrainerBridge::new();
         let mut source_bridge = DesireRoundtableBridge::new();
         source_bridge.set_blend(0.74);
         source_bridge.set_drift_gain(0.58);
+        populate_desire_bridges(Some(&source_desire), Some(&source_bridge), 4);
+        let expected_desire = source_desire.checkpoint().unwrap();
+        let expected_roundtable = source_bridge.checkpoint().unwrap();
+        let source_telemetry = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&source_desire)
+            .with_roundtable_bridge(&source_bridge);
         let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        source_trainer.enable_desire_roundtable_bridge(source_bridge);
+        source_trainer.enable_desire_telemetry(&source_telemetry);
         let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
         source_trainer.prepare(&mut source_module).unwrap();
         let model_state = source_module.state_dict().unwrap();
@@ -10022,12 +10079,17 @@ mod tests {
                 .deterministic_resume_ready
         );
 
+        let target_desire = DesireTrainerBridge::new();
+        let target_desire_probe = target_desire.clone();
         let mut target_bridge = DesireRoundtableBridge::new();
         target_bridge.set_blend(0.12);
         target_bridge.set_drift_gain(0.2);
         let target_probe = target_bridge.clone();
+        let target_telemetry = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&target_desire)
+            .with_roundtable_bridge(&target_bridge);
         let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        target_trainer.enable_desire_roundtable_bridge(target_bridge);
+        target_trainer.enable_desire_telemetry(&target_telemetry);
         let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
         target_module.load_state_dict(&model_state).unwrap();
         target_trainer.prepare(&mut target_module).unwrap();
@@ -10037,34 +10099,48 @@ mod tests {
             .unwrap();
 
         assert!(receipt.deterministic_resume_ready);
-        assert_eq!(receipt.captured_components, ["desire_roundtable_bridge"]);
+        assert_eq!(
+            receipt.captured_components,
+            [DESIRE_TRAINER_COMPONENT, "desire_roundtable_bridge"]
+        );
+        assert_eq!(target_desire_probe.checkpoint().unwrap(), expected_desire);
+        assert_eq!(target_probe.checkpoint().unwrap(), expected_roundtable);
         assert_eq!(target_probe.blend(), 0.74);
         assert_eq!(target_probe.drift_gain(), 0.58);
     }
 
     #[test]
     fn runtime_bundle_model_mismatch_preserves_external_and_optimizer_state() {
-        let mut source_bridge = DesireRoundtableBridge::new();
-        source_bridge.set_blend(0.8);
+        let source_desire = DesireTrainerBridge::new();
+        let mut source_roundtable = DesireRoundtableBridge::new();
+        source_roundtable.set_blend(0.8);
+        populate_desire_bridges(Some(&source_desire), Some(&source_roundtable), 4);
+        let source_telemetry = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&source_desire)
+            .with_roundtable_bridge(&source_roundtable);
         let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        source_trainer.enable_desire_roundtable_bridge(source_bridge);
+        source_trainer.enable_desire_telemetry(&source_telemetry);
         let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
         source_trainer.prepare(&mut source_module).unwrap();
         let bundle = source_trainer
             .runtime_checkpoint_bundle(&source_module)
             .unwrap();
 
-        let mut target_bridge = DesireRoundtableBridge::new();
-        target_bridge.set_blend(0.15);
-        let target_probe = target_bridge.clone();
+        let target_desire = DesireTrainerBridge::new();
+        let mut target_roundtable = DesireRoundtableBridge::new();
+        target_roundtable.set_blend(0.15);
+        populate_desire_bridges(Some(&target_desire), Some(&target_roundtable), 2);
+        let target_telemetry = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&target_desire)
+            .with_roundtable_bridge(&target_roundtable);
         let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        target_trainer.enable_desire_roundtable_bridge(target_bridge);
+        target_trainer.enable_desire_telemetry(&target_telemetry);
         let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
         target_trainer.prepare(&mut target_module).unwrap();
         target_module.param.value_mut().data_mut()[0] = 99.0;
         let trainer_before = target_trainer.optimizer_state();
         let parameter_before = target_module.param.optimizer_checkpoint_state();
-        let roundtable_before = target_probe.checkpoint().unwrap();
+        let external_before = target_trainer.external_state_checkpoint().unwrap();
 
         assert!(target_trainer
             .restore_runtime_checkpoint_bundle(&mut target_module, &bundle)
@@ -10075,32 +10151,75 @@ mod tests {
             target_module.param.optimizer_checkpoint_state(),
             parameter_before
         );
-        assert_eq!(target_probe.checkpoint().unwrap(), roundtable_before);
+        assert_eq!(
+            target_trainer.external_state_checkpoint().unwrap(),
+            external_before
+        );
     }
 
     #[test]
-    fn runtime_bundle_refuses_unresolved_desire_queue() {
+    fn runtime_bundle_restores_and_consumes_desire_queue() {
+        let source_bridge = DesireTrainerBridge::new();
+        let mut pipeline = DesirePipeline::builder(build_language_automation())
+            .with_trainer_bridge(&source_bridge)
+            .build();
+        let logits = vec![2.0, 0.4];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            pipeline
+                .step_at(
+                    &logits,
+                    step % 2,
+                    &concept,
+                    start + Duration::from_millis((step * 100) as u64),
+                    anchor + Duration::from_millis((step * 100) as u64),
+                )
+                .unwrap();
+        }
+        let expected_queue = source_bridge.checkpoint().unwrap();
+
         let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        source_trainer.enable_desire_pipeline(DesireTrainerBridge::new());
+        source_trainer.enable_desire_pipeline(source_bridge);
         let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
         source_trainer.prepare(&mut source_module).unwrap();
+        let model_state = source_module.state_dict().unwrap();
         let bundle = source_trainer
             .runtime_checkpoint_bundle(&source_module)
             .unwrap();
         let portable = evaluate_trainer_runtime_checkpoint_bundle(&bundle).unwrap();
-        assert_eq!(portable.unresolved_components, ["desire_bridge"]);
+        assert!(portable.unresolved_components.is_empty());
+        assert_eq!(portable.captured_components, [DESIRE_TRAINER_COMPONENT]);
+        assert_eq!(bundle.external.desire_trainer, Some(expected_queue.clone()));
 
+        let target_bridge = DesireTrainerBridge::new();
+        let target_probe = target_bridge.clone();
         let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
-        target_trainer.enable_desire_pipeline(DesireTrainerBridge::new());
+        target_trainer.enable_desire_pipeline(target_bridge);
         let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_module.load_state_dict(&model_state).unwrap();
         target_trainer.prepare(&mut target_module).unwrap();
-        let before = target_trainer.optimizer_state();
+        let receipt = target_trainer
+            .restore_runtime_checkpoint_bundle(&mut target_module, &bundle)
+            .unwrap();
+        assert!(receipt.deterministic_resume_ready);
+        assert_eq!(target_probe.checkpoint().unwrap(), expected_queue);
 
-        assert!(matches!(
-            target_trainer.restore_runtime_checkpoint_bundle(&mut target_module, &bundle),
-            Err(TrainerCheckpointError::RuntimeCheckpointNotReady { .. })
-        ));
-        assert_eq!(target_trainer.optimizer_state(), before);
+        let schedule = target_trainer.roundtable(1, 1, RoundtableConfig::default());
+        let mut loss = MeanSquaredError::new();
+        target_trainer
+            .train_epoch(
+                &mut target_module,
+                &mut loss,
+                vec![(
+                    Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap(),
+                    Tensor::from_vec(1, 2, vec![0.0, 0.0]).unwrap(),
+                )],
+                &schedule,
+            )
+            .unwrap();
+        assert!(target_probe.is_empty());
     }
 
     #[test]
@@ -10169,6 +10288,32 @@ mod tests {
             .restore_external_state_checkpoint(&invalid)
             .is_err());
         assert_eq!(target_trainer.external_state_checkpoint().unwrap(), before);
+    }
+
+    #[test]
+    fn external_checkpoint_leaves_unresolved_desire_queue_untouched() {
+        let bridge = DesireTrainerBridge::new();
+        populate_desire_bridges(Some(&bridge), None, 3);
+        let before = bridge.checkpoint().unwrap();
+        let telemetry = DesireTelemetryBundle::new().with_trainer_bridge(&bridge);
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        trainer.enable_desire_telemetry(&telemetry);
+        let checkpoint =
+            st_core::runtime::trainer_external::build_trainer_external_state_checkpoint(
+                vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let report = trainer
+            .restore_external_state_checkpoint(&checkpoint)
+            .unwrap();
+
+        assert!(!report.payload_complete);
+        assert!(!report.deterministic_resume_ready);
+        assert_eq!(bridge.checkpoint().unwrap(), before);
     }
 
     #[test]

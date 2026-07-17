@@ -29,6 +29,10 @@ pub use info_geometry::{
 };
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use maxwell::{MaxwellDesireBridge, NarrativeHint, NarrativeSummary};
+pub(crate) use pipeline::{
+    checkpoint_desire_bridges, commit_desire_checkpoint_restore,
+    PreparedDesireRoundtableCheckpoint, PreparedDesireTrainerQueue,
+};
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
