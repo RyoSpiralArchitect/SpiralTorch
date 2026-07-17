@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use thiserror::Error;
 
+use super::route_selection::RouteSelectionProfile;
+
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
 pub const TOPOS_ROUTE_POLICY_CONTRACT_VERSION: &str = "spiraltorch.topos_route_policy.v2";
 /// Payload kind for route-profile evaluation.
@@ -144,12 +146,28 @@ impl ToposRoutePolicyProfile {
     ];
 
     pub const fn as_str(self) -> &'static str {
+        self.shared().as_str()
+    }
+
+    const fn shared(self) -> RouteSelectionProfile {
         match self {
-            Self::Balanced => "balanced",
-            Self::Quality => "quality",
-            Self::Grounded => "grounded",
-            Self::Efficiency => "efficiency",
-            Self::Latency => "latency",
+            ToposRoutePolicyProfile::Balanced => RouteSelectionProfile::Balanced,
+            ToposRoutePolicyProfile::Quality => RouteSelectionProfile::Quality,
+            ToposRoutePolicyProfile::Grounded => RouteSelectionProfile::Grounded,
+            ToposRoutePolicyProfile::Efficiency => RouteSelectionProfile::Efficiency,
+            ToposRoutePolicyProfile::Latency => RouteSelectionProfile::Latency,
+        }
+    }
+}
+
+impl From<RouteSelectionProfile> for ToposRoutePolicyProfile {
+    fn from(profile: RouteSelectionProfile) -> Self {
+        match profile {
+            RouteSelectionProfile::Balanced => Self::Balanced,
+            RouteSelectionProfile::Quality => Self::Quality,
+            RouteSelectionProfile::Grounded => Self::Grounded,
+            RouteSelectionProfile::Efficiency => Self::Efficiency,
+            RouteSelectionProfile::Latency => Self::Latency,
         }
     }
 }
@@ -158,16 +176,11 @@ impl FromStr for ToposRoutePolicyProfile {
     type Err = ToposRoutePolicyError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "balanced" => Ok(Self::Balanced),
-            "quality" => Ok(Self::Quality),
-            "grounded" => Ok(Self::Grounded),
-            "efficiency" => Ok(Self::Efficiency),
-            "latency" => Ok(Self::Latency),
-            _ => Err(ToposRoutePolicyError::UnknownProfile {
+        RouteSelectionProfile::from_str(value)
+            .map(Self::from)
+            .map_err(|_| ToposRoutePolicyError::UnknownProfile {
                 profile: value.to_owned(),
-            }),
-        }
+            })
     }
 }
 
@@ -1253,6 +1266,12 @@ mod tests {
             "profile": "commander"
         }));
         assert!(unknown.is_err());
+        assert_eq!(
+            ToposRoutePolicyProfile::from_str("commander"),
+            Err(ToposRoutePolicyError::UnknownProfile {
+                profile: "commander".to_owned()
+            })
+        );
 
         let mut invalid = sample_row("invalid");
         invalid.response_confidence = Some(f64::NAN);

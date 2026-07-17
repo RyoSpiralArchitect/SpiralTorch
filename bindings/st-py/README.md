@@ -221,7 +221,18 @@ value:
   `prompt_coverage`, `prompt_echo_rate`, `response_signal_rate`,
   `repetition_rate`, and `text_quality_score`. For route selection, comparison
   payloads include `selection_profiles` for `balanced`, `quality`, `grounded`,
-  `efficiency`, and `latency` routing. Use
+  `efficiency`, and `latency` routing. Those scores, normalized latency/token
+  costs, health penalties, deterministic rank, metric winners, and near-best
+  membership come from the typed
+  `st-core::runtime::api_llm_route_policy` contract, not a Python replica.
+  Aggregate token totals are normalized per observed response before cost
+  scoring, so longer trace runs are not penalized merely for containing more
+  samples.
+  Its v1 evidence witness treats missing latency/token measurements as unknown
+  rather than free, shrinks sparse or partial evidence toward a neutral prior,
+  and excludes zero-observation rows from selection. The comparison payload's
+  `selection_semantics` records the exact Rust owner and score-formula version;
+  Python deliberately stops if that native contract is absent or stale. Use
   `compare_api_llm_matrix_reports(...)` to compare repeated live provider
   `report.json` sweeps and inspect profile-winner stability plus carried WASM
   context loss/WebGPU readiness and context-consistency status across runs; the

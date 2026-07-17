@@ -1,5 +1,6 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
+mod api_llm_policy;
 mod autograd;
 mod cobol;
 mod concept_diffusion;
@@ -35,6 +36,7 @@ mod tuner;
 #[cfg(target_arch = "wasm32")]
 mod utils;
 
+pub use api_llm_policy::*;
 pub use autograd::*;
 #[cfg(target_arch = "wasm32")]
 pub use canvas::*;

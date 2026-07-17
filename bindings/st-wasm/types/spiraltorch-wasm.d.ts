@@ -275,12 +275,145 @@ declare module "spiraltorch-wasm" {
         };
     };
 
-    export type ToposRoutePolicyProfile =
+    export type RouteSelectionProfile =
         | "balanced"
         | "quality"
         | "grounded"
         | "efficiency"
         | "latency";
+
+    export type ToposRoutePolicyProfile = RouteSelectionProfile;
+
+    export type ApiLlmRoutePolicyRowInput = {
+        label: string;
+        /** Positive observations make a route active; omitted or zero rows cannot win. */
+        count?: number;
+        runtime_ready_rate?: number | null;
+        completion_rate?: number | null;
+        incomplete_rate?: number | null;
+        empty_text_rate?: number | null;
+        refusal_rate?: number | null;
+        total_tokens?: number | null;
+        latency_ms_mean?: number | null;
+        confidence_mean?: number | null;
+        text_quality_score?: number | null;
+        stability_mean?: number | null;
+        frac_mean?: number | null;
+        wasm_loss_mean?: number | null;
+        wasm_stability_hint_mean?: number | null;
+        wasm_webgpu_device_ready_rate?: number | null;
+        topos_context_observed_rate?: number | null;
+        topos_closure_pressure_mean?: number | null;
+        topos_openness_mean?: number | null;
+        topos_training_gradient_bias_scale_mean?: number | null;
+        topos_optimizer_effective_gradient_bias_scale_mean?: number | null;
+        topos_training_clip_scale_mean?: number | null;
+        topos_training_plan_rate_scale_mean?: number | null;
+        topos_optimizer_rate_scale_mean?: number | null;
+        topos_optimizer_raw_rate_scale_mean?: number | null;
+        topos_inference_context_weight_mean?: number | null;
+        topos_inference_plan_context_weight_mean?: number | null;
+        topos_inference_plan_temperature_mean?: number | null;
+        topos_runtime_control_energy_mean?: number | null;
+        topos_runtime_closure_risk_mean?: number | null;
+        topos_runtime_exploration_budget_mean?: number | null;
+        topos_runtime_route_score_mean?: number | null;
+        topos_runtime_route_guard_score_mean?: number | null;
+        topos_runtime_route_exploration_score_mean?: number | null;
+        topos_runtime_route_context_score_mean?: number | null;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        quality_score?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        latency_cost?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        token_cost?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        health_penalty?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        efficiency_score?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        route_score?: number;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        selection_scores?: Partial<Record<RouteSelectionProfile, number>>;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        selection_evidence?: Partial<
+            Record<RouteSelectionProfile, ApiLlmRoutePolicyScoreEvidence>
+        >;
+    };
+
+    export type ApiLlmRoutePolicyScoreEvidence = {
+        profile: RouteSelectionProfile;
+        formula_version: "spiraltorch.api_llm_route_policy.score.v1";
+        raw_score: number;
+        score: number;
+        evidence_coverage: number;
+        sample_count: number;
+        sample_confidence: number;
+        effective_confidence: number;
+        observed_metrics: string[];
+        partial_metrics: string[];
+        missing_metrics: string[];
+        metric_coverage: Record<string, number>;
+    };
+
+    export type ApiLlmRoutePolicyRow = ApiLlmRoutePolicyRowInput & {
+        quality_score: number;
+        latency_cost: number;
+        token_cost: number;
+        health_penalty: number;
+        efficiency_score: number;
+        route_score: number;
+        selection_scores: Record<RouteSelectionProfile, number>;
+        selection_evidence: Record<
+            RouteSelectionProfile,
+            ApiLlmRoutePolicyScoreEvidence
+        >;
+    };
+
+    export type ApiLlmRoutePolicyEvaluationRequest = {
+        rows: ApiLlmRoutePolicyRowInput[];
+        near_best_tolerance?: number;
+    };
+
+    export type ApiLlmRoutePolicyWinner = {
+        label: string | null;
+        score: number;
+        route_score: number;
+        quality_score: number;
+        text_quality_score: number | null;
+        efficiency_score: number;
+        latency_ms_mean: number | null;
+        total_tokens: number | null;
+        completion_rate: number | null;
+        wasm_loss_mean: number | null;
+        wasm_webgpu_device_ready_rate: number | null;
+        score_evidence: ApiLlmRoutePolicyScoreEvidence | null;
+    };
+
+    export type ApiLlmRoutePolicyEvaluation = {
+        kind: "spiraltorch.api_llm_route_policy";
+        contract_version: "spiraltorch.api_llm_route_policy.v1";
+        semantic_owner: "st-core::runtime::api_llm_route_policy";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        row_count: number;
+        active_row_count: number;
+        inactive_row_count: number;
+        near_best_tolerance: number;
+        score_formula_version: "spiraltorch.api_llm_route_policy.score.v1";
+        score_formula: string;
+        score_prior_mean: number;
+        score_prior_strength: number;
+        rows: ApiLlmRoutePolicyRow[];
+        ranked_labels: string[];
+        near_best: Array<{
+            label: string;
+            route_score: number;
+            route_score_delta: number;
+        }>;
+        profiles: Record<RouteSelectionProfile, ApiLlmRoutePolicyWinner>;
+        winners: Record<string, string | null>;
+    };
 
     export type ToposRoutePolicyScoreEvidence = {
         profile: ToposRoutePolicyProfile;
@@ -1535,6 +1668,10 @@ declare module "spiraltorch-wasm" {
     ): RuntimeDeviceRoute;
     export function rankPlanJson(requestJson: string): string;
     export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
+    export function apiLlmRoutePolicyEvaluateJson(requestJson: string): string;
+    export function apiLlmRoutePolicyEvaluateObject(
+        request: ApiLlmRoutePolicyEvaluationRequest,
+    ): ApiLlmRoutePolicyEvaluation;
     export function toposRoutePolicyEvaluateJson(requestJson: string): string;
     export function toposRoutePolicyEvaluateObject(
         request: ToposRoutePolicyEvaluationRequest,

@@ -349,7 +349,33 @@ console.log(groundState.probability, groundState.effects.rayleigh_energy_drop);
 and persistence. Browser code never owns a second Hamiltonian or normalization
 heuristic.
 
-Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
+API LLM trace comparison follows the same boundary. Browser code can submit
+the same measured rows used by Python, while
+`st-core::runtime::api_llm_route_policy` alone owns normalization, health and
+cost treatment, profile scores, deterministic winners, ranking, and near-best
+membership:
+
+```ts
+import { apiLlmRoutePolicyEvaluateObject } from "spiraltorch-wasm";
+
+const comparison = apiLlmRoutePolicyEvaluateObject({
+    rows: [
+        { label: "fast", count: 4, latency_ms_mean: 80, total_tokens: 32 },
+        { label: "grounded", count: 4, text_quality_score: 0.9 },
+    ],
+    near_best_tolerance: 0.05,
+});
+
+console.log(comparison.profiles, comparison.winners, comparison.near_best);
+```
+
+Missing costs stay unknown instead of becoming zero-cost wins, sparse evidence
+shrinks toward the neutral prior, aggregate token totals are scored per
+observation, and zero-count rows remain inactive.
+`apiLlmRoutePolicyEvaluateJson` exposes the identical contract for workers and
+persistence.
+
+Topos route-policy scoring follows the same boundary. Browser code supplies measured route rows,
 while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
 tie-breaking, reward projection, and selected-route resolution. The v2 contract treats
 missing metrics as a neutral prior rather than a free latency/token win, shrinks scores by

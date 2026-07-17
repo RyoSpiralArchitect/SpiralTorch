@@ -70,6 +70,12 @@ _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 _SELECTION_PROFILES = ("balanced", "quality", "grounded", "efficiency", "latency")
+_API_LLM_ROUTE_POLICY_CONTRACT_VERSION = "spiraltorch.api_llm_route_policy.v1"
+_API_LLM_ROUTE_POLICY_SCORE_FORMULA_VERSION = (
+    "spiraltorch.api_llm_route_policy.score.v1"
+)
+_API_LLM_ROUTE_POLICY_KIND = "spiraltorch.api_llm_route_policy"
+_API_LLM_ROUTE_POLICY_SEMANTIC_OWNER = "st-core::runtime::api_llm_route_policy"
 _TOPOS_ROUTE_POLICY_CONTRACT_VERSION = "spiraltorch.topos_route_policy.v2"
 _TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION = "spiraltorch.topos_route_policy.score.v2"
 _TOPOS_ROUTE_POLICY_KIND = "spiraltorch.topos_route_policy"
@@ -2388,6 +2394,7 @@ def summarize_api_llm_trace_events(
         "completion_rate": completed_count / len(events) if events else 0.0,
         "runtime_statuses": _count_labels(_trace_runtime_status(event) for event in events),
         "runtime_ready_count": ready_count,
+        "runtime_ready_observed_count": len(ready_observed),
         "runtime_ready_rate": ready_count / len(ready_observed) if ready_observed else 0.0,
         "usage": usage,
         "total_tokens": total_tokens,
@@ -2423,15 +2430,16 @@ def _summary_stat(
     *,
     key: str | None = None,
     stat: str = "mean",
-) -> float:
+) -> float | None:
     source = summary.get(section)
     if key is not None and isinstance(source, Mapping):
         source = source.get(key)
     if isinstance(source, Mapping):
+        if (_finite_float(source.get("count")) or 0.0) <= 0.0:
+            return None
         numeric = _finite_float(source.get(stat))
-        return 0.0 if numeric is None else numeric
-    numeric = _finite_float(source)
-    return 0.0 if numeric is None else numeric
+        return numeric
+    return _finite_float(source)
 
 
 def _summary_metric(
@@ -2439,15 +2447,29 @@ def _summary_metric(
     metric: str,
     *,
     stat: str = "mean",
-) -> float:
+) -> float | None:
     metrics = summary.get("metrics")
     if not isinstance(metrics, Mapping):
-        return 0.0
+        return None
     source = metrics.get(metric)
     if not isinstance(source, Mapping):
-        return 0.0
+        return None
+    if (_finite_float(source.get("count")) or 0.0) <= 0.0:
+        return None
     numeric = _finite_float(source.get(stat))
-    return 0.0 if numeric is None else numeric
+    return numeric
+
+
+def _summary_total_tokens(summary: Mapping[str, Any]) -> float | None:
+    usage = summary.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    total_tokens = usage.get("total_tokens")
+    if not isinstance(total_tokens, Mapping):
+        return None
+    if (_finite_float(total_tokens.get("count")) or 0.0) <= 0.0:
+        return None
+    return _finite_float(summary.get("total_tokens"))
 
 
 def _wasm_context_stat(
@@ -2537,115 +2559,6 @@ def _safe_trace_label(label: str, *, fallback: str) -> str:
     return safe or fallback
 
 
-def _bounded_unit(value: Any) -> float:
-    return max(0.0, min(1.0, _finite_float(value) or 0.0))
-
-
-def _quality_score(row: Mapping[str, Any]) -> float:
-    confidence = _finite_float(row.get("confidence_mean")) or 0.0
-    stability = _finite_float(row.get("stability_mean")) or 0.0
-    frac = _finite_float(row.get("frac_mean")) or 0.0
-    return max(
-        0.0,
-        min(1.0, 0.5 * confidence + 0.3 * stability + 0.2 * frac),
-    )
-
-
-def _latency_cost(row: Mapping[str, Any]) -> float:
-    latency = max(0.0, _finite_float(row.get("latency_ms_mean")) or 0.0)
-    return min(1.0, math.log1p(latency) / math.log1p(10_000.0))
-
-
-def _token_cost(row: Mapping[str, Any]) -> float:
-    tokens = max(0.0, _finite_float(row.get("total_tokens")) or 0.0)
-    return min(1.0, math.log1p(tokens) / math.log1p(4096.0))
-
-
-def _health_penalty(row: Mapping[str, Any]) -> float:
-    empty_text_rate = _bounded_unit(row.get("empty_text_rate"))
-    refusal_rate = _bounded_unit(row.get("refusal_rate"))
-    incomplete_rate = _bounded_unit(row.get("incomplete_rate"))
-    return 0.35 * empty_text_rate + 0.25 * refusal_rate + 0.08 * incomplete_rate
-
-
-def _route_score(row: Mapping[str, Any]) -> float:
-    quality = _quality_score(row)
-    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
-    latency_penalty = 0.05 * _latency_cost(row)
-    token_penalty = 0.05 * _token_cost(row)
-    health_penalty = _health_penalty(row)
-    return max(
-        0.0,
-        min(
-            1.0,
-            quality
-            + 0.05 * runtime_ready
-            - latency_penalty
-            - token_penalty
-            - health_penalty,
-        ),
-    )
-
-
-def _efficiency_score(row: Mapping[str, Any]) -> float:
-    quality = _quality_score(row)
-    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
-    cost_reward = 0.5 * (1.0 - _latency_cost(row)) + 0.5 * (1.0 - _token_cost(row))
-    return max(
-        0.0,
-        min(
-            1.0,
-            0.60 * quality
-            + 0.35 * cost_reward
-            + 0.05 * runtime_ready
-            - _health_penalty(row),
-        ),
-    )
-
-
-def _selection_profile_score(row: Mapping[str, Any], profile: str) -> float:
-    quality = _quality_score(row)
-    text_quality = _bounded_unit(row.get("text_quality_score"))
-    completion = _bounded_unit(row.get("completion_rate"))
-    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
-    latency_reward = 1.0 - _latency_cost(row)
-    token_reward = 1.0 - _token_cost(row)
-    health_penalty = _health_penalty(row)
-    if profile == "quality":
-        score = (
-            0.65 * quality
-            + 0.20 * text_quality
-            + 0.10 * completion
-            + 0.05 * runtime_ready
-        )
-    elif profile == "grounded":
-        score = (
-            0.55 * text_quality
-            + 0.25 * quality
-            + 0.15 * completion
-            + 0.05 * runtime_ready
-        )
-    elif profile == "efficiency":
-        score = (
-            0.40 * quality
-            + 0.20 * text_quality
-            + 0.20 * latency_reward
-            + 0.15 * token_reward
-            + 0.05 * runtime_ready
-        )
-    elif profile == "latency":
-        score = (
-            0.35 * latency_reward
-            + 0.25 * quality
-            + 0.20 * text_quality
-            + 0.15 * completion
-            + 0.05 * runtime_ready
-        )
-    else:
-        score = _route_score(row)
-    return max(0.0, min(1.0, score - health_penalty))
-
-
 def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[str, Any]:
     wasm_context = summary.get("wasm_context")
     wasm_context_map = wasm_context if isinstance(wasm_context, Mapping) else {}
@@ -2658,13 +2571,17 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "provider": _dominant_label(summary.get("providers")),
         "model": _dominant_label(summary.get("models")),
         "runtime_status": _dominant_label(summary.get("runtime_statuses")),
-        "runtime_ready_rate": _finite_float(summary.get("runtime_ready_rate")) or 0.0,
-        "completion_rate": _finite_float(summary.get("completion_rate")) or 0.0,
-        "incomplete_rate": _finite_float(summary.get("incomplete_rate")) or 0.0,
-        "empty_text_rate": _finite_float(summary.get("empty_text_rate")) or 0.0,
-        "refusal_rate": _finite_float(summary.get("refusal_rate")) or 0.0,
+        "runtime_ready_rate": (
+            _finite_float(summary.get("runtime_ready_rate"))
+            if int(summary.get("runtime_ready_observed_count") or 0) > 0
+            else None
+        ),
+        "completion_rate": _finite_float(summary.get("completion_rate")),
+        "incomplete_rate": _finite_float(summary.get("incomplete_rate")),
+        "empty_text_rate": _finite_float(summary.get("empty_text_rate")),
+        "refusal_rate": _finite_float(summary.get("refusal_rate")),
         "stop_detail_category": _dominant_label(summary.get("stop_detail_categories")),
-        "total_tokens": _finite_float(summary.get("total_tokens")) or 0.0,
+        "total_tokens": _summary_total_tokens(summary),
         "latency_ms_mean": _summary_stat(summary, "latency_ms"),
         "confidence_mean": _summary_stat(summary, "confidence"),
         "text_chars_mean": _summary_stat(summary, "text_chars"),
@@ -2874,16 +2791,6 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         ),
         "last_text_preview": summary.get("last_text_preview"),
     }
-    row["quality_score"] = _quality_score(row)
-    row["latency_cost"] = _latency_cost(row)
-    row["token_cost"] = _token_cost(row)
-    row["health_penalty"] = _health_penalty(row)
-    row["efficiency_score"] = _efficiency_score(row)
-    row["route_score"] = _route_score(row)
-    row["selection_scores"] = {
-        profile: _selection_profile_score(row, profile)
-        for profile in _SELECTION_PROFILES
-    }
     return row
 
 
@@ -2907,112 +2814,271 @@ def _winner(
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def _near_best_routes(
+_API_LLM_ROUTE_POLICY_ROW_KEYS = (
+    "label",
+    "count",
+    "runtime_ready_rate",
+    "completion_rate",
+    "incomplete_rate",
+    "empty_text_rate",
+    "refusal_rate",
+    "total_tokens",
+    "latency_ms_mean",
+    "confidence_mean",
+    "text_quality_score",
+    "stability_mean",
+    "frac_mean",
+    "wasm_loss_mean",
+    "wasm_stability_hint_mean",
+    "wasm_webgpu_device_ready_rate",
+    "topos_context_observed_rate",
+    "topos_closure_pressure_mean",
+    "topos_openness_mean",
+    "topos_training_gradient_bias_scale_mean",
+    "topos_optimizer_effective_gradient_bias_scale_mean",
+    "topos_training_clip_scale_mean",
+    "topos_training_plan_rate_scale_mean",
+    "topos_optimizer_rate_scale_mean",
+    "topos_optimizer_raw_rate_scale_mean",
+    "topos_inference_context_weight_mean",
+    "topos_inference_plan_context_weight_mean",
+    "topos_inference_plan_temperature_mean",
+    "topos_runtime_control_energy_mean",
+    "topos_runtime_closure_risk_mean",
+    "topos_runtime_exploration_budget_mean",
+    "topos_runtime_route_score_mean",
+    "topos_runtime_route_guard_score_mean",
+    "topos_runtime_route_exploration_score_mean",
+    "topos_runtime_route_context_score_mean",
+)
+_API_LLM_ROUTE_POLICY_PROJECTION_KEYS = (
+    "quality_score",
+    "latency_cost",
+    "token_cost",
+    "health_penalty",
+    "efficiency_score",
+    "route_score",
+    "selection_scores",
+    "selection_evidence",
+)
+
+
+def _api_llm_route_policy_contract(
     rows: Sequence[Mapping[str, Any]],
     *,
-    tolerance: float,
+    near_best_tolerance: float,
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    function = getattr(native, "_api_llm_route_policy_evaluate", None)
+    if not callable(function):
+        raise RuntimeError(
+            "API LLM route-policy semantics require the compiled Rust core; "
+            "rebuild or reinstall SpiralTorch with _api_llm_route_policy_evaluate"
+        )
+    request_rows = [
+        {key: row.get(key) for key in _API_LLM_ROUTE_POLICY_ROW_KEYS}
+        for row in rows
+    ]
+    payload = function(
+        {
+            "rows": request_rows,
+            "near_best_tolerance": near_best_tolerance,
+        }
+    )
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("native API LLM route-policy core returned a non-mapping payload")
+    contract = dict(payload)
+    if (
+        contract.get("kind") != _API_LLM_ROUTE_POLICY_KIND
+        or contract.get("contract_version")
+        != _API_LLM_ROUTE_POLICY_CONTRACT_VERSION
+        or contract.get("semantic_owner") != _API_LLM_ROUTE_POLICY_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != "rust"
+        or contract.get("score_formula_version")
+        != _API_LLM_ROUTE_POLICY_SCORE_FORMULA_VERSION
+    ):
+        raise RuntimeError("native API LLM route-policy core returned an untrusted contract")
+
+    native_rows = contract.get("rows")
+    if not isinstance(native_rows, Sequence) or isinstance(
+        native_rows, (str, bytes, bytearray)
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid rows")
+    if len(native_rows) != len(rows) or any(
+        not isinstance(row, Mapping) for row in native_rows
+    ):
+        raise RuntimeError("native API LLM route-policy core returned inconsistent rows")
+    source_labels = [str(row.get("label")) for row in rows]
+    source_label_set = set(source_labels)
+    active_label_set = {
+        str(row.get("label")) for row in rows if int(row.get("count") or 0) > 0
+    }
+    native_labels = [str(row.get("label")) for row in native_rows]
+    if (
+        len(source_label_set) != len(source_labels)
+        or set(native_labels) != source_label_set
+    ):
+        raise RuntimeError("native API LLM route-policy core returned inconsistent labels")
+    if (
+        contract.get("row_count") != len(rows)
+        or contract.get("active_row_count") != len(active_label_set)
+        or contract.get("inactive_row_count") != len(rows) - len(active_label_set)
+    ):
+        raise RuntimeError("native API LLM route-policy core returned an inconsistent row count")
+    contract_tolerance = _finite_float(contract.get("near_best_tolerance"))
+    if contract_tolerance is None or contract_tolerance != float(near_best_tolerance):
+        raise RuntimeError(
+            "native API LLM route-policy core returned an inconsistent tolerance"
+        )
+
+    profiles = contract.get("profiles")
+    if not isinstance(profiles, Mapping) or set(profiles) != set(_SELECTION_PROFILES):
+        raise RuntimeError("native API LLM route-policy core returned invalid profiles")
+    if any(
+        not isinstance(winner, Mapping)
+        or (
+            winner.get("label") is not None
+            and str(winner.get("label")) not in active_label_set
+        )
+        for winner in profiles.values()
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid profile winners")
+    winners = contract.get("winners")
+    if not isinstance(winners, Mapping):
+        raise RuntimeError("native API LLM route-policy core returned invalid winners")
+    if any(
+        label is not None and str(label) not in active_label_set
+        for label in winners.values()
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid winner labels")
+    ranked_labels = contract.get("ranked_labels")
+    if not isinstance(ranked_labels, Sequence) or isinstance(
+        ranked_labels, (str, bytes, bytearray)
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid ranking")
+    ranked_label_values = [str(label) for label in ranked_labels]
+    if (
+        len(set(ranked_label_values)) != len(ranked_label_values)
+        or set(ranked_label_values) != active_label_set
+        or (
+            ranked_label_values
+            and winners.get("best_score") != ranked_label_values[0]
+        )
+    ):
+        raise RuntimeError("native API LLM route-policy core returned inconsistent ranking")
+    near_best = contract.get("near_best")
+    if not isinstance(near_best, Sequence) or isinstance(
+        near_best, (str, bytes, bytearray)
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid near-best rows")
+    near_best_labels = [
+        str(witness.get("label"))
+        for witness in near_best
+        if isinstance(witness, Mapping)
+    ]
+    if (
+        len(near_best_labels) != len(near_best)
+        or len(set(near_best_labels)) != len(near_best_labels)
+        or any(label not in active_label_set for label in near_best_labels)
+    ):
+        raise RuntimeError("native API LLM route-policy core returned invalid near-best labels")
+    return contract
+
+
+def _api_llm_route_policy_rows(
+    rows: Sequence[Mapping[str, Any]],
+    contract: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    candidates: list[tuple[float, Mapping[str, Any]]] = []
-    for row in rows:
-        if int(row.get("count") or 0) <= 0:
-            continue
-        score = _finite_float(row.get("route_score"))
-        if score is not None:
-            candidates.append((score, row))
-    if not candidates:
-        return []
-    best_score = max(score for score, _row in candidates)
-    bounded_tolerance = max(0.0, float(tolerance))
+    source_by_label = {str(row.get("label")): row for row in rows}
+    projected: list[dict[str, Any]] = []
+    for native_row in contract["rows"]:
+        label = str(native_row.get("label"))
+        row = dict(source_by_label[label])
+        for key in _API_LLM_ROUTE_POLICY_PROJECTION_KEYS:
+            if key not in native_row:
+                raise RuntimeError(
+                    f"native API LLM route-policy core omitted projection {key}"
+                )
+            row[key] = native_row[key]
+        projected.append(row)
+    return projected
+
+
+def _api_llm_route_policy_near_best(
+    rows: Sequence[Mapping[str, Any]],
+    contract: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    by_label = {str(row.get("label")): row for row in rows}
     near: list[dict[str, Any]] = []
-    for score, row in sorted(candidates, key=lambda item: item[0], reverse=True):
-        delta = best_score - score
-        if delta > bounded_tolerance:
-            continue
+    for witness in contract["near_best"]:
+        if not isinstance(witness, Mapping):
+            raise RuntimeError("native API LLM route-policy core returned invalid near-best rows")
+        label = str(witness.get("label"))
+        row = by_label.get(label)
+        if row is None:
+            raise RuntimeError(
+                "native API LLM route-policy core returned inconsistent near-best labels"
+            )
         near.append(
             {
-                "label": row.get("label"),
-                "route_score": score,
-                "route_score_delta": delta,
-                "quality_score": _finite_float(row.get("quality_score")) or 0.0,
-                "text_quality_score": _finite_float(row.get("text_quality_score")) or 0.0,
-                "prompt_coverage_mean": _finite_float(
-                    row.get("prompt_coverage_mean")
-                )
-                or 0.0,
-                "efficiency_score": _finite_float(row.get("efficiency_score")) or 0.0,
-                "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
-                "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
-                "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
-                "empty_text_rate": _finite_float(row.get("empty_text_rate")) or 0.0,
-                "refusal_rate": _finite_float(row.get("refusal_rate")) or 0.0,
+                "label": label,
+                "route_score": witness.get("route_score"),
+                "route_score_delta": witness.get("route_score_delta"),
+                "quality_score": row.get("quality_score"),
+                "text_quality_score": row.get("text_quality_score"),
+                "prompt_coverage_mean": row.get("prompt_coverage_mean"),
+                "efficiency_score": row.get("efficiency_score"),
+                "latency_ms_mean": row.get("latency_ms_mean"),
+                "total_tokens": row.get("total_tokens"),
+                "completion_rate": row.get("completion_rate"),
+                "empty_text_rate": row.get("empty_text_rate"),
+                "refusal_rate": row.get("refusal_rate"),
                 "wasm_family": row.get("wasm_family"),
-                "wasm_loss_mean": _finite_float(row.get("wasm_loss_mean")),
-                "wasm_webgpu_device_ready_rate": _finite_float(
-                    row.get("wasm_webgpu_device_ready_rate")
+                "wasm_loss_mean": row.get("wasm_loss_mean"),
+                "wasm_webgpu_device_ready_rate": row.get(
+                    "wasm_webgpu_device_ready_rate"
                 ),
-                "topos_context_observed_rate": _finite_float(
-                    row.get("topos_context_observed_rate")
+                "topos_context_observed_rate": row.get(
+                    "topos_context_observed_rate"
                 ),
-                "topos_closure_pressure_mean": _finite_float(
-                    row.get("topos_closure_pressure_mean")
+                "topos_closure_pressure_mean": row.get(
+                    "topos_closure_pressure_mean"
                 ),
-                "topos_inference_context_weight_mean": _finite_float(
-                    row.get("topos_inference_context_weight_mean")
+                "topos_inference_context_weight_mean": row.get(
+                    "topos_inference_context_weight_mean"
                 ),
-                "topos_optimizer_rate_scale_mean": _finite_float(
-                    row.get("topos_optimizer_rate_scale_mean")
+                "topos_optimizer_rate_scale_mean": row.get(
+                    "topos_optimizer_rate_scale_mean"
                 ),
             }
         )
     return near
 
 
-def _selection_profiles(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
-    profiles: dict[str, dict[str, Any]] = {}
-    for profile in _SELECTION_PROFILES:
-        candidates: list[tuple[float, Mapping[str, Any]]] = []
-        for row in rows:
-            if int(row.get("count") or 0) <= 0:
-                continue
-            selection_scores = row.get("selection_scores")
-            score = (
-                _finite_float(selection_scores.get(profile))
-                if isinstance(selection_scores, Mapping)
-                else None
-            )
-            if score is not None:
-                candidates.append((score, row))
-        if not candidates:
-            profiles[profile] = {"label": None, "score": 0.0}
-            continue
-        score, row = max(
-            candidates,
-            key=lambda item: (
-                item[0],
-                _finite_float(item[1].get("route_score")) or 0.0,
-                str(item[1].get("label")),
-            ),
+def _api_llm_route_policy_semantics(contract: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: contract.get(key)
+        for key in (
+            "kind",
+            "contract_version",
+            "semantic_owner",
+            "semantic_backend",
+            "row_count",
+            "active_row_count",
+            "inactive_row_count",
+            "score_formula_version",
+            "score_formula",
+            "score_prior_mean",
+            "score_prior_strength",
         )
-        profiles[profile] = {
-            "label": row.get("label"),
-            "score": score,
-            "route_score": _finite_float(row.get("route_score")) or 0.0,
-            "quality_score": _finite_float(row.get("quality_score")) or 0.0,
-            "text_quality_score": _finite_float(row.get("text_quality_score")) or 0.0,
-            "efficiency_score": _finite_float(row.get("efficiency_score")) or 0.0,
-            "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
-            "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
-            "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
-            "wasm_loss_mean": _finite_float(row.get("wasm_loss_mean")),
-            "wasm_webgpu_device_ready_rate": _finite_float(
-                row.get("wasm_webgpu_device_ready_rate")
-            ),
-        }
-    return profiles
+    }
 
 
 def _comparison_wasm_context(
     rows: Sequence[Mapping[str, Any]],
+    *,
+    winners: Mapping[str, Any],
 ) -> dict[str, Any]:
     observed = [
         row
@@ -3031,14 +3097,18 @@ def _comparison_wasm_context(
         "observed_runs": len(observed),
         "observed_run_rate": len(observed) / len(rows) if rows else 0.0,
         "families": dict(sorted(families.items())),
-        "lowest_loss": _winner(rows, "wasm_loss_mean", higher_is_better=False),
-        "highest_stability_hint": _winner(rows, "wasm_stability_hint_mean"),
-        "highest_webgpu_device_ready": _winner(rows, "wasm_webgpu_device_ready_rate"),
+        "lowest_loss": winners.get("lowest_wasm_loss"),
+        "highest_stability_hint": winners.get("highest_wasm_stability_hint"),
+        "highest_webgpu_device_ready": winners.get(
+            "highest_wasm_webgpu_device_ready"
+        ),
     }
 
 
 def _comparison_topos_context(
     rows: Sequence[Mapping[str, Any]],
+    *,
+    winners: Mapping[str, Any],
 ) -> dict[str, Any]:
     observed = [
         row
@@ -3049,81 +3119,55 @@ def _comparison_topos_context(
     return {
         "observed_runs": len(observed),
         "observed_run_rate": len(observed) / len(rows) if rows else 0.0,
-        "lowest_closure_pressure": _winner(
-            rows,
-            "topos_closure_pressure_mean",
-            higher_is_better=False,
+        "lowest_closure_pressure": winners.get("lowest_topos_closure_pressure"),
+        "highest_openness": winners.get("highest_topos_openness"),
+        "highest_training_gradient_bias": winners.get(
+            "highest_topos_training_gradient_bias"
         ),
-        "highest_openness": _winner(rows, "topos_openness_mean"),
-        "highest_training_gradient_bias": _winner(
-            rows,
-            "topos_training_gradient_bias_scale_mean",
+        "highest_effective_training_gradient_bias": winners.get(
+            "highest_topos_effective_training_gradient_bias"
         ),
-        "highest_effective_training_gradient_bias": _winner(
-            rows,
-            "topos_optimizer_effective_gradient_bias_scale_mean",
+        "lowest_training_clip_scale": winners.get(
+            "lowest_topos_training_clip_scale"
         ),
-        "lowest_training_clip_scale": _winner(
-            rows,
-            "topos_training_clip_scale_mean",
-            higher_is_better=False,
+        "lowest_training_plan_rate_scale": winners.get(
+            "lowest_topos_training_plan_rate_scale"
         ),
-        "lowest_training_plan_rate_scale": _winner(
-            rows,
-            "topos_training_plan_rate_scale_mean",
-            higher_is_better=False,
+        "highest_inference_context_weight": winners.get(
+            "highest_topos_inference_context_weight"
         ),
-        "highest_inference_context_weight": _winner(
-            rows,
-            "topos_inference_context_weight_mean",
+        "highest_inference_plan_context_weight": winners.get(
+            "highest_topos_inference_plan_context_weight"
         ),
-        "highest_inference_plan_context_weight": _winner(
-            rows,
-            "topos_inference_plan_context_weight_mean",
+        "lowest_inference_plan_temperature": winners.get(
+            "lowest_topos_inference_plan_temperature"
         ),
-        "lowest_inference_plan_temperature": _winner(
-            rows,
-            "topos_inference_plan_temperature_mean",
-            higher_is_better=False,
+        "highest_runtime_control_energy": winners.get(
+            "highest_topos_runtime_control_energy"
         ),
-        "highest_runtime_control_energy": _winner(
-            rows,
-            "topos_runtime_control_energy_mean",
+        "lowest_runtime_closure_risk": winners.get(
+            "lowest_topos_runtime_closure_risk"
         ),
-        "lowest_runtime_closure_risk": _winner(
-            rows,
-            "topos_runtime_closure_risk_mean",
-            higher_is_better=False,
+        "highest_runtime_exploration_budget": winners.get(
+            "highest_topos_runtime_exploration_budget"
         ),
-        "highest_runtime_exploration_budget": _winner(
-            rows,
-            "topos_runtime_exploration_budget_mean",
+        "highest_runtime_route_score": winners.get(
+            "highest_topos_runtime_route_score"
         ),
-        "highest_runtime_route_score": _winner(
-            rows,
-            "topos_runtime_route_score_mean",
+        "highest_runtime_route_guard_score": winners.get(
+            "highest_topos_runtime_route_guard_score"
         ),
-        "highest_runtime_route_guard_score": _winner(
-            rows,
-            "topos_runtime_route_guard_score_mean",
+        "highest_runtime_route_exploration_score": winners.get(
+            "highest_topos_runtime_route_exploration_score"
         ),
-        "highest_runtime_route_exploration_score": _winner(
-            rows,
-            "topos_runtime_route_exploration_score_mean",
+        "highest_runtime_route_context_score": winners.get(
+            "highest_topos_runtime_route_context_score"
         ),
-        "highest_runtime_route_context_score": _winner(
-            rows,
-            "topos_runtime_route_context_score_mean",
+        "lowest_optimizer_rate_scale": winners.get(
+            "lowest_topos_optimizer_rate_scale"
         ),
-        "lowest_optimizer_rate_scale": _winner(
-            rows,
-            "topos_optimizer_rate_scale_mean",
-            higher_is_better=False,
-        ),
-        "lowest_optimizer_raw_rate_scale": _winner(
-            rows,
-            "topos_optimizer_raw_rate_scale_mean",
-            higher_is_better=False,
+        "lowest_optimizer_raw_rate_scale": winners.get(
+            "lowest_topos_optimizer_raw_rate_scale"
         ),
         "temperature_scale": _numeric_stats_with_range(
             row.get("topos_temperature_scale_mean") for row in observed
@@ -3737,73 +3781,21 @@ def compare_api_llm_trace_runs(
     for label, path in entries:
         summary = summarize_api_llm_trace_events(path, event_type=event_type)
         rows.append(_comparison_row(label, path, summary))
-    rows.sort(
-        key=lambda row: (row["route_score"], row["confidence_mean"], row["label"]),
-        reverse=True,
+    contract = _api_llm_route_policy_contract(
+        rows,
+        near_best_tolerance=near_best_tolerance,
     )
-    winners = {
-        "best_score": _winner(rows, "route_score"),
-        "highest_quality": _winner(rows, "quality_score"),
-        "highest_text_quality": _winner(rows, "text_quality_score"),
-        "highest_efficiency": _winner(rows, "efficiency_score"),
-        "highest_confidence": _winner(rows, "confidence_mean"),
-        "highest_stability": _winner(rows, "stability_mean"),
-        "highest_completion_rate": _winner(rows, "completion_rate"),
-        "lowest_empty_text": _winner(rows, "empty_text_rate", higher_is_better=False),
-        "lowest_refusal": _winner(rows, "refusal_rate", higher_is_better=False),
-        "lowest_latency": _winner(rows, "latency_ms_mean", higher_is_better=False),
-        "lowest_total_tokens": _winner(rows, "total_tokens", higher_is_better=False),
-        "highest_runtime_ready": _winner(rows, "runtime_ready_rate"),
-        "lowest_wasm_loss": _winner(
-            rows,
-            "wasm_loss_mean",
-            higher_is_better=False,
-        ),
-        "highest_wasm_stability_hint": _winner(rows, "wasm_stability_hint_mean"),
-        "highest_wasm_webgpu_device_ready": _winner(
-            rows,
-            "wasm_webgpu_device_ready_rate",
-        ),
-        "highest_topos_context_observed": _winner(rows, "topos_context_observed_rate"),
-        "lowest_topos_closure_pressure": _winner(
-            rows,
-            "topos_closure_pressure_mean",
-            higher_is_better=False,
-        ),
-        "highest_topos_openness": _winner(rows, "topos_openness_mean"),
-        "highest_topos_training_gradient_bias": _winner(
-            rows,
-            "topos_training_gradient_bias_scale_mean",
-        ),
-        "lowest_topos_optimizer_rate_scale": _winner(
-            rows,
-            "topos_optimizer_rate_scale_mean",
-            higher_is_better=False,
-        ),
-        "highest_topos_inference_context_weight": _winner(
-            rows,
-            "topos_inference_context_weight_mean",
-        ),
-        "highest_topos_runtime_control_energy": _winner(
-            rows,
-            "topos_runtime_control_energy_mean",
-        ),
-        "lowest_topos_runtime_closure_risk": _winner(
-            rows,
-            "topos_runtime_closure_risk_mean",
-            higher_is_better=False,
-        ),
-        "highest_topos_runtime_route_score": _winner(
-            rows,
-            "topos_runtime_route_score_mean",
-        ),
-    }
+    rows = _api_llm_route_policy_rows(rows, contract)
+    winners = dict(contract["winners"])
     best = winners.get("best_score")
-    near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
-    near_best = _near_best_routes(rows, tolerance=near_best_tolerance_value)
-    selection_profiles = _selection_profiles(rows)
-    wasm_context = _comparison_wasm_context(rows)
-    topos_context = _comparison_topos_context(rows)
+    near_best_tolerance_value = float(contract["near_best_tolerance"])
+    near_best = _api_llm_route_policy_near_best(rows, contract)
+    selection_profiles = {
+        str(profile): dict(payload)
+        for profile, payload in contract["profiles"].items()
+    }
+    wasm_context = _comparison_wasm_context(rows, winners=winners)
+    topos_context = _comparison_topos_context(rows, winners=winners)
     recommendations: list[str] = []
     if best:
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
@@ -3865,6 +3857,7 @@ def compare_api_llm_trace_runs(
         "near_best_tolerance": near_best_tolerance_value,
         "near_best": near_best,
         "selection_profiles": selection_profiles,
+        "selection_semantics": _api_llm_route_policy_semantics(contract),
         "wasm_context": wasm_context,
         "topos_context": topos_context,
         "winners": winners,
