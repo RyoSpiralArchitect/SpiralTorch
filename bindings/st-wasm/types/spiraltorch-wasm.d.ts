@@ -524,16 +524,73 @@ declare module "spiraltorch-wasm" {
         step: number;
     };
 
+    export type TrainerTimestampCheckpoint = {
+        unix_seconds: number;
+        subsec_nanos: number;
+    };
+
+    export type TrainerDesirePhaseCheckpoint =
+        | "observation"
+        | "injection"
+        | "integration";
+
+    export type TrainerDesireWeightsCheckpoint = {
+        alpha: number;
+        beta: number;
+        gamma: number;
+        lambda: number;
+    };
+
+    export type TrainerDesireTriggerCheckpoint = {
+        report_tokens: number[];
+        report_scores: number[];
+        mean_penalty: number;
+        mean_entropy: number;
+        temperature: number;
+        samples: number;
+    };
+
+    export type TrainerDesireEventCheckpoint = {
+        timestamp: TrainerTimestampCheckpoint;
+        phase: TrainerDesirePhaseCheckpoint;
+        temperature: number;
+        entropy: number;
+        hypergrad_penalty: number;
+        weights: TrainerDesireWeightsCheckpoint;
+        trigger: TrainerDesireTriggerCheckpoint | null;
+    };
+
+    export type TrainerDesireQueueCheckpoint = {
+        events: TrainerDesireEventCheckpoint[];
+    };
+
     export type TrainerDesireRoundtableImpulseCheckpoint = {
         multipliers: [number, number, number];
         drift: number;
-        timestamp_unix_millis: number;
+        timestamp: TrainerTimestampCheckpoint;
+    };
+
+    export type TrainerDesireRoundtablePendingSummaryCheckpoint = {
+        steps: number;
+        triggers: number;
+        sum_entropy: number;
+        sum_temperature: number;
+        sum_alpha: number;
+        sum_beta: number;
+        sum_gamma: number;
+        sum_lambda: number;
+        sum_above: number;
+        sum_here: number;
+        sum_beneath: number;
+        sum_drift: number;
+        last_timestamp: TrainerTimestampCheckpoint;
     };
 
     export type TrainerDesireRoundtableCheckpoint = {
         blend: number;
         drift_gain: number;
         latest: TrainerDesireRoundtableImpulseCheckpoint | null;
+        pending_summary: TrainerDesireRoundtablePendingSummaryCheckpoint | null;
     };
 
     export type TrainerAccumulatorSynchronizerCheckpoint = {
@@ -550,10 +607,11 @@ declare module "spiraltorch-wasm" {
     /** Rust-produced state for trainer components outside optimizer ownership. */
     export type TrainerExternalStateCheckpoint = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v1";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v2";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         required_components: string[];
+        desire_trainer: TrainerDesireQueueCheckpoint | null;
         desire_roundtable: TrainerDesireRoundtableCheckpoint | null;
         psi_meter: TrainerPsiMeterCheckpoint | null;
         accumulator_synchronizer: TrainerAccumulatorSynchronizerCheckpoint | null;
@@ -563,7 +621,7 @@ declare module "spiraltorch-wasm" {
     /** Browser preflight receipt; concrete native resources are never reattached here. */
     export type TrainerExternalStateCheckpointValidation = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v1";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v2";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         execution_client: "wasm";

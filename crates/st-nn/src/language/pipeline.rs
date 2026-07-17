@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::automation::{DesireAutomatedStep, DesireAutomation, DesireRewriteTrigger};
-use super::desire::{DesirePhase, DesireSolution, DesireWeights};
+use super::desire::{DesireAvoidanceReport, DesirePhase, DesireSolution, DesireWeights};
 use super::geometry::ConceptHint;
 use super::logbook::{DesireLogReplay, DesireLogbook};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
@@ -13,6 +13,9 @@ use crate::PureResult;
 use st_core::coop::ai::{CoopAgent, CoopProposal};
 use st_core::runtime::trainer_external::{
     DesireRoundtableCheckpoint, DesireRoundtableImpulseCheckpoint,
+    DesireRoundtablePendingSummaryCheckpoint, DesireTrainerEventCheckpoint,
+    DesireTrainerPhaseCheckpoint, DesireTrainerQueueCheckpoint, DesireTrainerTriggerCheckpoint,
+    DesireTrainerWeightsCheckpoint, TrainerTimestampCheckpoint,
 };
 use st_tensor::TensorError;
 use std::cmp::Ordering;
@@ -1217,6 +1220,10 @@ pub struct DesireTrainerBridge {
     shared: Arc<Mutex<Vec<DesireTrainerEvent>>>,
 }
 
+pub(crate) struct PreparedDesireTrainerQueue {
+    events: Vec<DesireTrainerEvent>,
+}
+
 impl DesireTrainerBridge {
     pub fn new() -> Self {
         Self {
@@ -1249,6 +1256,34 @@ impl DesireTrainerBridge {
         }
         Ok(Some(DesireTrainerSummary::from_events(&events)))
     }
+
+    /// Captures the exact FIFO consumed by the next trainer step.
+    pub fn checkpoint(&self) -> PureResult<DesireTrainerQueueCheckpoint> {
+        let events = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire trainer bridge poisoned",
+        })?;
+        desire_trainer_checkpoint_from_events(&events)
+    }
+
+    pub(crate) fn prepare_checkpoint_restore(
+        checkpoint: &DesireTrainerQueueCheckpoint,
+    ) -> PureResult<PreparedDesireTrainerQueue> {
+        checkpoint
+            .validate()
+            .map_err(|error| TensorError::Generic(error.to_string()))?;
+        let events = checkpoint
+            .events
+            .iter()
+            .map(desire_trainer_event_from_checkpoint)
+            .collect::<PureResult<Vec<_>>>()?;
+        Ok(PreparedDesireTrainerQueue { events })
+    }
+
+    /// Atomically replaces the shared FIFO for every bridge clone.
+    pub fn restore_checkpoint(&self, checkpoint: &DesireTrainerQueueCheckpoint) -> PureResult<()> {
+        let prepared = Self::prepare_checkpoint_restore(checkpoint)?;
+        commit_desire_checkpoint_restore(Some(self), Some(prepared), None, None)
+    }
 }
 
 impl DesirePipelineSink for DesireTrainerBridge {
@@ -1269,6 +1304,122 @@ impl DesirePipelineSink for DesireTrainerBridge {
     }
 }
 
+fn desire_trainer_event_to_checkpoint(
+    event: &DesireTrainerEvent,
+) -> PureResult<DesireTrainerEventCheckpoint> {
+    let trigger = event
+        .trigger
+        .as_ref()
+        .map(|trigger| {
+            Ok(DesireTrainerTriggerCheckpoint {
+                report_tokens: trigger
+                    .report
+                    .tokens
+                    .iter()
+                    .copied()
+                    .map(|token| {
+                        u64::try_from(token).map_err(|_| TensorError::InvalidValue {
+                            label: "desire trainer report token overflow",
+                        })
+                    })
+                    .collect::<PureResult<Vec<_>>>()?,
+                report_scores: trigger.report.scores.clone(),
+                mean_penalty: trigger.mean_penalty,
+                mean_entropy: trigger.mean_entropy,
+                temperature: trigger.temperature,
+                samples: u64::try_from(trigger.samples).map_err(|_| TensorError::InvalidValue {
+                    label: "desire trainer trigger sample overflow",
+                })?,
+            })
+        })
+        .transpose()?;
+    Ok(DesireTrainerEventCheckpoint {
+        timestamp: desire_timestamp_to_checkpoint(event.timestamp)?,
+        phase: match event.phase {
+            DesirePhase::Observation => DesireTrainerPhaseCheckpoint::Observation,
+            DesirePhase::Injection => DesireTrainerPhaseCheckpoint::Injection,
+            DesirePhase::Integration => DesireTrainerPhaseCheckpoint::Integration,
+        },
+        temperature: event.temperature,
+        entropy: event.entropy,
+        hypergrad_penalty: event.hypergrad_penalty,
+        weights: DesireTrainerWeightsCheckpoint {
+            alpha: event.weights.alpha,
+            beta: event.weights.beta,
+            gamma: event.weights.gamma,
+            lambda: event.weights.lambda,
+        },
+        trigger,
+    })
+}
+
+fn desire_trainer_checkpoint_from_events(
+    events: &[DesireTrainerEvent],
+) -> PureResult<DesireTrainerQueueCheckpoint> {
+    let checkpoint = DesireTrainerQueueCheckpoint {
+        events: events
+            .iter()
+            .map(desire_trainer_event_to_checkpoint)
+            .collect::<PureResult<Vec<_>>>()?,
+    };
+    checkpoint
+        .validate()
+        .map_err(|error| TensorError::Generic(error.to_string()))?;
+    Ok(checkpoint)
+}
+
+fn desire_trainer_event_from_checkpoint(
+    event: &DesireTrainerEventCheckpoint,
+) -> PureResult<DesireTrainerEvent> {
+    let trigger = event
+        .trigger
+        .as_ref()
+        .map(|trigger| {
+            Ok(DesireRewriteTrigger {
+                report: DesireAvoidanceReport {
+                    tokens: trigger
+                        .report_tokens
+                        .iter()
+                        .copied()
+                        .map(|token| {
+                            usize::try_from(token).map_err(|_| TensorError::InvalidValue {
+                                label: "desire trainer report token does not fit this platform",
+                            })
+                        })
+                        .collect::<PureResult<Vec<_>>>()?,
+                    scores: trigger.report_scores.clone(),
+                },
+                mean_penalty: trigger.mean_penalty,
+                mean_entropy: trigger.mean_entropy,
+                temperature: trigger.temperature,
+                samples: usize::try_from(trigger.samples).map_err(|_| {
+                    TensorError::InvalidValue {
+                        label: "desire trainer trigger samples do not fit this platform",
+                    }
+                })?,
+            })
+        })
+        .transpose()?;
+    Ok(DesireTrainerEvent {
+        timestamp: desire_timestamp_from_checkpoint(event.timestamp)?,
+        phase: match event.phase {
+            DesireTrainerPhaseCheckpoint::Observation => DesirePhase::Observation,
+            DesireTrainerPhaseCheckpoint::Injection => DesirePhase::Injection,
+            DesireTrainerPhaseCheckpoint::Integration => DesirePhase::Integration,
+        },
+        temperature: event.temperature,
+        entropy: event.entropy,
+        hypergrad_penalty: event.hypergrad_penalty,
+        weights: DesireWeights {
+            alpha: event.weights.alpha,
+            beta: event.weights.beta,
+            gamma: event.weights.gamma,
+            lambda: event.weights.lambda,
+        },
+        trigger,
+    })
+}
+
 #[derive(Clone, Debug)]
 pub struct DesireRoundtableEvent {
     pub timestamp: SystemTime,
@@ -1285,11 +1436,147 @@ pub struct DesireRoundtableImpulse {
     pub timestamp: SystemTime,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DesireRoundtablePendingSummary {
+    steps: usize,
+    triggers: usize,
+    sum_entropy: f32,
+    sum_temperature: f32,
+    sum_alpha: f32,
+    sum_beta: f32,
+    sum_gamma: f32,
+    sum_lambda: f32,
+    sum_above: f32,
+    sum_here: f32,
+    sum_beneath: f32,
+    sum_drift: f32,
+    last_timestamp: SystemTime,
+}
+
+impl Default for DesireRoundtablePendingSummary {
+    fn default() -> Self {
+        Self {
+            steps: 0,
+            triggers: 0,
+            sum_entropy: 0.0,
+            sum_temperature: 0.0,
+            sum_alpha: 0.0,
+            sum_beta: 0.0,
+            sum_gamma: 0.0,
+            sum_lambda: 0.0,
+            sum_above: 0.0,
+            sum_here: 0.0,
+            sum_beneath: 0.0,
+            sum_drift: 0.0,
+            last_timestamp: UNIX_EPOCH,
+        }
+    }
+}
+
+impl DesireRoundtablePendingSummary {
+    fn absorb(&mut self, event: &DesireRoundtableEvent) {
+        self.steps += 1;
+        self.triggers += usize::from(event.trigger.is_some());
+        self.sum_entropy += event.solution.entropy;
+        self.sum_temperature += event.solution.temperature;
+        self.sum_alpha += event.solution.weights.alpha;
+        self.sum_beta += event.solution.weights.beta;
+        self.sum_gamma += event.solution.weights.gamma;
+        self.sum_lambda += event.solution.weights.lambda;
+        self.sum_above += event.multipliers.0;
+        self.sum_here += event.multipliers.1;
+        self.sum_beneath += event.multipliers.2;
+        self.sum_drift += event.drift;
+        if event.timestamp > self.last_timestamp {
+            self.last_timestamp = event.timestamp;
+        }
+    }
+
+    fn absorb_all(&mut self, events: &[DesireRoundtableEvent]) {
+        for event in events {
+            self.absorb(event);
+        }
+    }
+
+    fn checkpoint(self) -> PureResult<Option<DesireRoundtablePendingSummaryCheckpoint>> {
+        if self.steps == 0 {
+            return Ok(None);
+        }
+        Ok(Some(DesireRoundtablePendingSummaryCheckpoint {
+            steps: u64::try_from(self.steps).map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable pending step overflow",
+            })?,
+            triggers: u64::try_from(self.triggers).map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable pending trigger overflow",
+            })?,
+            sum_entropy: self.sum_entropy,
+            sum_temperature: self.sum_temperature,
+            sum_alpha: self.sum_alpha,
+            sum_beta: self.sum_beta,
+            sum_gamma: self.sum_gamma,
+            sum_lambda: self.sum_lambda,
+            sum_above: self.sum_above,
+            sum_here: self.sum_here,
+            sum_beneath: self.sum_beneath,
+            sum_drift: self.sum_drift,
+            last_timestamp: desire_timestamp_to_checkpoint(self.last_timestamp)?,
+        }))
+    }
+
+    fn from_checkpoint(checkpoint: DesireRoundtablePendingSummaryCheckpoint) -> PureResult<Self> {
+        Ok(Self {
+            steps: usize::try_from(checkpoint.steps).map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable pending steps do not fit this platform",
+            })?,
+            triggers: usize::try_from(checkpoint.triggers).map_err(|_| {
+                TensorError::InvalidValue {
+                    label: "desire roundtable pending triggers do not fit this platform",
+                }
+            })?,
+            sum_entropy: checkpoint.sum_entropy,
+            sum_temperature: checkpoint.sum_temperature,
+            sum_alpha: checkpoint.sum_alpha,
+            sum_beta: checkpoint.sum_beta,
+            sum_gamma: checkpoint.sum_gamma,
+            sum_lambda: checkpoint.sum_lambda,
+            sum_above: checkpoint.sum_above,
+            sum_here: checkpoint.sum_here,
+            sum_beneath: checkpoint.sum_beneath,
+            sum_drift: checkpoint.sum_drift,
+            last_timestamp: desire_timestamp_from_checkpoint(checkpoint.last_timestamp)?,
+        })
+    }
+
+    fn into_summary(self) -> DesireRoundtableSummary {
+        let denominator = self.steps.max(1) as f32;
+        DesireRoundtableSummary {
+            steps: self.steps,
+            triggers: self.triggers,
+            mean_entropy: self.sum_entropy / denominator,
+            mean_temperature: self.sum_temperature / denominator,
+            mean_alpha: self.sum_alpha / denominator,
+            mean_beta: self.sum_beta / denominator,
+            mean_gamma: self.sum_gamma / denominator,
+            mean_lambda: self.sum_lambda / denominator,
+            mean_above: self.sum_above / denominator,
+            mean_here: self.sum_here / denominator,
+            mean_beneath: self.sum_beneath / denominator,
+            mean_drift: self.sum_drift / denominator,
+            last_timestamp: self.last_timestamp,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct DesireRoundtableRuntime {
     blend: f32,
     drift_gain: f32,
     latest: Option<DesireRoundtableImpulse>,
+    pending_summary: Option<DesireRoundtablePendingSummary>,
+}
+
+pub(crate) struct PreparedDesireRoundtableCheckpoint {
+    runtime: DesireRoundtableRuntime,
 }
 
 #[derive(Clone)]
@@ -1368,6 +1655,54 @@ mod coop_tests {
         assert!(bridge.restore_checkpoint(invalid).is_err());
         assert_eq!(bridge.checkpoint().unwrap(), before);
     }
+
+    #[test]
+    fn combined_desire_restore_does_not_mutate_before_every_lock_is_ready() {
+        let trainer = DesireTrainerBridge::new();
+        let trainer_before = trainer.checkpoint().unwrap();
+        let trainer_replacement = DesireTrainerQueueCheckpoint {
+            events: vec![DesireTrainerEventCheckpoint {
+                timestamp: TrainerTimestampCheckpoint {
+                    unix_seconds: 7,
+                    subsec_nanos: 11,
+                },
+                phase: DesireTrainerPhaseCheckpoint::Integration,
+                temperature: 0.9,
+                entropy: 0.5,
+                hypergrad_penalty: 0.2,
+                weights: DesireTrainerWeightsCheckpoint {
+                    alpha: 0.4,
+                    beta: 0.3,
+                    gamma: 0.2,
+                    lambda: 0.1,
+                },
+                trigger: None,
+            }],
+        };
+        let prepared_trainer =
+            DesireTrainerBridge::prepare_checkpoint_restore(&trainer_replacement).unwrap();
+
+        let roundtable = DesireRoundtableBridge::new();
+        let prepared_roundtable =
+            DesireRoundtableBridge::prepare_checkpoint_restore(roundtable.checkpoint().unwrap())
+                .unwrap();
+        let poisoned = roundtable.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = poisoned.runtime.lock().unwrap();
+            panic!("poison roundtable runtime for atomic restore test");
+        })
+        .join()
+        .is_err());
+
+        assert!(commit_desire_checkpoint_restore(
+            Some(&trainer),
+            Some(prepared_trainer),
+            Some(&roundtable),
+            Some(prepared_roundtable),
+        )
+        .is_err());
+        assert_eq!(trainer.checkpoint().unwrap(), trainer_before);
+    }
 }
 
 impl DesireRoundtableBridge {
@@ -1377,6 +1712,7 @@ impl DesireRoundtableBridge {
                 blend: 0.35,
                 drift_gain: 0.35,
                 latest: None,
+                pending_summary: None,
             })),
             shared: Arc::new(Mutex::new(Vec::new())),
         }
@@ -1425,10 +1761,17 @@ impl DesireRoundtableBridge {
     }
 
     pub fn len(&self) -> usize {
-        match self.shared.lock() {
-            Ok(guard) => guard.len(),
-            Err(_) => 0,
-        }
+        let Ok(events) = self.shared.lock() else {
+            return 0;
+        };
+        let Ok(runtime) = self.runtime.lock() else {
+            return 0;
+        };
+        events.len()
+            + runtime
+                .pending_summary
+                .map(|summary| summary.steps)
+                .unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1450,49 +1793,42 @@ impl DesireRoundtableBridge {
     }
 
     pub fn drain_summary(&self) -> PureResult<Option<DesireRoundtableSummary>> {
-        let events = self.drain()?;
-        if events.is_empty() {
+        let mut events = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        let mut runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        let mut pending = runtime.pending_summary.take().unwrap_or_default();
+        pending.absorb_all(&events);
+        events.clear();
+        if pending.steps == 0 {
             return Ok(None);
         }
-        Ok(Some(DesireRoundtableSummary::from_events(&events)))
+        Ok(Some(pending.into_summary()))
     }
 
-    /// Captures every value that changes future roundtable impulses.
+    /// Captures controls, the latest impulse, and the next trainer summary.
     pub fn checkpoint(&self) -> PureResult<DesireRoundtableCheckpoint> {
+        let events = self.shared.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
         let runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire roundtable bridge poisoned",
         })?;
-        let latest = runtime
-            .latest
-            .as_ref()
-            .map(|impulse| {
-                Ok(DesireRoundtableImpulseCheckpoint {
-                    multipliers: [
-                        impulse.multipliers.0,
-                        impulse.multipliers.1,
-                        impulse.multipliers.2,
-                    ],
-                    drift: impulse.drift,
-                    timestamp_unix_millis: desire_timestamp_to_millis(impulse.timestamp)?,
-                })
-            })
-            .transpose()?;
-        let checkpoint = DesireRoundtableCheckpoint {
-            blend: runtime.blend,
-            drift_gain: runtime.drift_gain,
-            latest,
-        };
-        checkpoint
-            .validate()
-            .map_err(|error| TensorError::Generic(error.to_string()))?;
-        Ok(checkpoint)
+        desire_roundtable_checkpoint_from_state(&events, &runtime)
     }
 
-    /// Atomically restores shared control and impulse state for every clone.
-    pub fn restore_checkpoint(&self, checkpoint: DesireRoundtableCheckpoint) -> PureResult<()> {
+    pub(crate) fn prepare_checkpoint_restore(
+        checkpoint: DesireRoundtableCheckpoint,
+    ) -> PureResult<PreparedDesireRoundtableCheckpoint> {
         checkpoint
             .validate()
             .map_err(|error| TensorError::Generic(error.to_string()))?;
+        let pending_summary = checkpoint
+            .pending_summary
+            .map(DesireRoundtablePendingSummary::from_checkpoint)
+            .transpose()?;
         let latest = checkpoint
             .latest
             .map(|impulse| {
@@ -1503,17 +1839,24 @@ impl DesireRoundtableBridge {
                         impulse.multipliers[2],
                     ),
                     drift: impulse.drift,
-                    timestamp: desire_timestamp_from_millis(impulse.timestamp_unix_millis)?,
+                    timestamp: desire_timestamp_from_checkpoint(impulse.timestamp)?,
                 })
             })
             .transpose()?;
-        let mut runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
-            label: "desire roundtable bridge poisoned",
-        })?;
-        runtime.blend = checkpoint.blend;
-        runtime.drift_gain = checkpoint.drift_gain;
-        runtime.latest = latest;
-        Ok(())
+        Ok(PreparedDesireRoundtableCheckpoint {
+            runtime: DesireRoundtableRuntime {
+                blend: checkpoint.blend,
+                drift_gain: checkpoint.drift_gain,
+                latest,
+                pending_summary,
+            },
+        })
+    }
+
+    /// Atomically restores shared control, impulse, and trainer summary state.
+    pub fn restore_checkpoint(&self, checkpoint: DesireRoundtableCheckpoint) -> PureResult<()> {
+        let prepared = Self::prepare_checkpoint_restore(checkpoint)?;
+        commit_desire_checkpoint_restore(None, None, Some(self), Some(prepared))
     }
 
     fn project(
@@ -1546,22 +1889,175 @@ impl DesireRoundtableBridge {
     }
 }
 
-fn desire_timestamp_to_millis(timestamp: SystemTime) -> PureResult<u64> {
+fn desire_roundtable_checkpoint_from_state(
+    events: &[DesireRoundtableEvent],
+    runtime: &DesireRoundtableRuntime,
+) -> PureResult<DesireRoundtableCheckpoint> {
+    let latest = runtime
+        .latest
+        .as_ref()
+        .map(|impulse| {
+            Ok(DesireRoundtableImpulseCheckpoint {
+                multipliers: [
+                    impulse.multipliers.0,
+                    impulse.multipliers.1,
+                    impulse.multipliers.2,
+                ],
+                drift: impulse.drift,
+                timestamp: desire_timestamp_to_checkpoint(impulse.timestamp)?,
+            })
+        })
+        .transpose()?;
+    let mut pending = runtime.pending_summary.unwrap_or_default();
+    pending.absorb_all(events);
+    let checkpoint = DesireRoundtableCheckpoint {
+        blend: runtime.blend,
+        drift_gain: runtime.drift_gain,
+        latest,
+        pending_summary: pending.checkpoint()?,
+    };
+    checkpoint
+        .validate()
+        .map_err(|error| TensorError::Generic(error.to_string()))?;
+    Ok(checkpoint)
+}
+
+/// Captures both externally shared Desire bridges at one lock boundary.
+pub(crate) fn checkpoint_desire_bridges(
+    trainer_bridge: Option<&DesireTrainerBridge>,
+    roundtable_bridge: Option<&DesireRoundtableBridge>,
+) -> PureResult<(
+    Option<DesireTrainerQueueCheckpoint>,
+    Option<DesireRoundtableCheckpoint>,
+)> {
+    let trainer_events = trainer_bridge
+        .map(|bridge| {
+            bridge.shared.lock().map_err(|_| TensorError::InvalidValue {
+                label: "desire trainer bridge poisoned",
+            })
+        })
+        .transpose()?;
+    let roundtable_events = roundtable_bridge
+        .map(|bridge| {
+            bridge.shared.lock().map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable bridge poisoned",
+            })
+        })
+        .transpose()?;
+    let roundtable_runtime = roundtable_bridge
+        .map(|bridge| {
+            bridge
+                .runtime
+                .lock()
+                .map_err(|_| TensorError::InvalidValue {
+                    label: "desire roundtable bridge poisoned",
+                })
+        })
+        .transpose()?;
+
+    let trainer = trainer_events
+        .as_ref()
+        .map(|events| desire_trainer_checkpoint_from_events(events))
+        .transpose()?;
+    let roundtable = match (roundtable_events.as_ref(), roundtable_runtime.as_ref()) {
+        (Some(events), Some(runtime)) => {
+            Some(desire_roundtable_checkpoint_from_state(events, runtime)?)
+        }
+        (None, None) => None,
+        _ => {
+            return Err(TensorError::InvalidValue {
+                label: "desire checkpoint capture target mismatch",
+            })
+        }
+    };
+    Ok((trainer, roundtable))
+}
+
+pub(crate) fn commit_desire_checkpoint_restore(
+    trainer_bridge: Option<&DesireTrainerBridge>,
+    trainer: Option<PreparedDesireTrainerQueue>,
+    roundtable_bridge: Option<&DesireRoundtableBridge>,
+    roundtable: Option<PreparedDesireRoundtableCheckpoint>,
+) -> PureResult<()> {
+    if (trainer.is_some() && trainer_bridge.is_none())
+        || (roundtable.is_some() && roundtable_bridge.is_none())
+    {
+        return Err(TensorError::InvalidValue {
+            label: "desire checkpoint restore target mismatch",
+        });
+    }
+    let trainer_bridge = if trainer.is_some() {
+        trainer_bridge
+    } else {
+        None
+    };
+    let roundtable_bridge = if roundtable.is_some() {
+        roundtable_bridge
+    } else {
+        None
+    };
+
+    let mut trainer_events = trainer_bridge
+        .map(|bridge| {
+            bridge.shared.lock().map_err(|_| TensorError::InvalidValue {
+                label: "desire trainer bridge poisoned",
+            })
+        })
+        .transpose()?;
+    let mut roundtable_events = roundtable_bridge
+        .map(|bridge| {
+            bridge.shared.lock().map_err(|_| TensorError::InvalidValue {
+                label: "desire roundtable bridge poisoned",
+            })
+        })
+        .transpose()?;
+    let mut roundtable_runtime = roundtable_bridge
+        .map(|bridge| {
+            bridge
+                .runtime
+                .lock()
+                .map_err(|_| TensorError::InvalidValue {
+                    label: "desire roundtable bridge poisoned",
+                })
+        })
+        .transpose()?;
+
+    if let (Some(events), Some(prepared)) = (trainer_events.as_mut(), trainer) {
+        **events = prepared.events;
+    }
+    if let (Some(events), Some(runtime), Some(prepared)) = (
+        roundtable_events.as_mut(),
+        roundtable_runtime.as_mut(),
+        roundtable,
+    ) {
+        events.clear();
+        **runtime = prepared.runtime;
+    }
+    Ok(())
+}
+
+fn desire_timestamp_to_checkpoint(timestamp: SystemTime) -> PureResult<TrainerTimestampCheckpoint> {
     let duration = timestamp
         .duration_since(UNIX_EPOCH)
         .map_err(|_| TensorError::InvalidValue {
-            label: "desire roundtable timestamp before unix epoch",
+            label: "desire timestamp before unix epoch",
         })?;
-    u64::try_from(duration.as_millis()).map_err(|_| TensorError::InvalidValue {
-        label: "desire roundtable timestamp overflow",
+    Ok(TrainerTimestampCheckpoint {
+        unix_seconds: duration.as_secs(),
+        subsec_nanos: duration.subsec_nanos(),
     })
 }
 
-fn desire_timestamp_from_millis(timestamp: u64) -> PureResult<SystemTime> {
+fn desire_timestamp_from_checkpoint(
+    timestamp: TrainerTimestampCheckpoint,
+) -> PureResult<SystemTime> {
     UNIX_EPOCH
-        .checked_add(Duration::from_millis(timestamp))
+        .checked_add(Duration::new(
+            timestamp.unix_seconds,
+            timestamp.subsec_nanos,
+        ))
         .ok_or(TensorError::InvalidValue {
-            label: "desire roundtable timestamp overflow",
+            label: "desire timestamp overflow",
         })
 }
 
@@ -1634,7 +2130,7 @@ impl DesirePipelineSink for DesireRoundtableBridge {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DesireRoundtableSummary {
     pub steps: usize,
     pub triggers: usize,
@@ -1653,56 +2149,9 @@ pub struct DesireRoundtableSummary {
 
 impl DesireRoundtableSummary {
     pub fn from_events(events: &[DesireRoundtableEvent]) -> Self {
-        let mut steps = 0usize;
-        let mut triggers = 0usize;
-        let mut sum_entropy = 0.0f32;
-        let mut sum_temperature = 0.0f32;
-        let mut sum_alpha = 0.0f32;
-        let mut sum_beta = 0.0f32;
-        let mut sum_gamma = 0.0f32;
-        let mut sum_lambda = 0.0f32;
-        let mut sum_above = 0.0f32;
-        let mut sum_here = 0.0f32;
-        let mut sum_beneath = 0.0f32;
-        let mut sum_drift = 0.0f32;
-        let mut last_timestamp = UNIX_EPOCH;
-
-        for event in events {
-            steps += 1;
-            if event.trigger.is_some() {
-                triggers += 1;
-            }
-            sum_entropy += event.solution.entropy;
-            sum_temperature += event.solution.temperature;
-            sum_alpha += event.solution.weights.alpha;
-            sum_beta += event.solution.weights.beta;
-            sum_gamma += event.solution.weights.gamma;
-            sum_lambda += event.solution.weights.lambda;
-            sum_above += event.multipliers.0;
-            sum_here += event.multipliers.1;
-            sum_beneath += event.multipliers.2;
-            sum_drift += event.drift;
-            if event.timestamp > last_timestamp {
-                last_timestamp = event.timestamp;
-            }
-        }
-
-        let denom = steps.max(1) as f32;
-        Self {
-            steps,
-            triggers,
-            mean_entropy: sum_entropy / denom,
-            mean_temperature: sum_temperature / denom,
-            mean_alpha: sum_alpha / denom,
-            mean_beta: sum_beta / denom,
-            mean_gamma: sum_gamma / denom,
-            mean_lambda: sum_lambda / denom,
-            mean_above: sum_above / denom,
-            mean_here: sum_here / denom,
-            mean_beneath: sum_beneath / denom,
-            mean_drift: sum_drift / denom,
-            last_timestamp,
-        }
+        let mut pending = DesireRoundtablePendingSummary::default();
+        pending.absorb_all(events);
+        pending.into_summary()
     }
 }
 
@@ -3191,7 +3640,15 @@ mod language_pipeline {
             }
 
             assert!(bridge.len() >= 6);
+            let checkpoint = bridge.checkpoint().unwrap();
+            assert_eq!(checkpoint.events.len(), 6);
+            let restored = DesireTrainerBridge::new();
+            let restored_clone = restored.clone();
+            restored.restore_checkpoint(&checkpoint).unwrap();
+            assert_eq!(restored_clone.checkpoint().unwrap(), checkpoint);
             let summary = bridge.drain_summary().unwrap().unwrap();
+            let restored_summary = restored_clone.drain_summary().unwrap().unwrap();
+            assert_eq!(restored_summary, summary);
             assert_eq!(summary.total, 6);
             assert!(summary.observation >= 1);
             assert!(summary.integration >= 1);
@@ -3230,7 +3687,15 @@ mod language_pipeline {
             assert!(impulse.multipliers.0.is_finite());
             assert!(impulse.multipliers.1.is_finite());
             assert!(impulse.drift.abs() <= 1.0);
+            let checkpoint = bridge.checkpoint().unwrap();
+            assert_eq!(checkpoint.pending_summary.unwrap().steps, 5);
+            let restored = DesireRoundtableBridge::new();
+            let restored_clone = restored.clone();
+            restored.restore_checkpoint(checkpoint).unwrap();
+            assert_eq!(restored_clone.checkpoint().unwrap(), checkpoint);
             let summary = bridge.drain_summary().unwrap().unwrap();
+            let restored_summary = restored_clone.drain_summary().unwrap().unwrap();
+            assert_eq!(restored_summary, summary);
             assert_eq!(summary.steps, 5);
             assert!(summary.mean_above.is_finite());
             assert!(summary.mean_here.is_finite());

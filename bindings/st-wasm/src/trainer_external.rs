@@ -77,8 +77,10 @@ mod tests {
         ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER,
     };
     use st_core::runtime::trainer_external::{
-        build_trainer_external_state_checkpoint, DesireRoundtableCheckpoint,
-        ACCUMULATOR_SYNCHRONIZER_COMPONENT, DESIRE_ROUNDTABLE_COMPONENT,
+        build_trainer_external_state_checkpoint_with_desire_trainer, DesireRoundtableCheckpoint,
+        DesireTrainerEventCheckpoint, DesireTrainerPhaseCheckpoint, DesireTrainerQueueCheckpoint,
+        DesireTrainerWeightsCheckpoint, TrainerTimestampCheckpoint,
+        ACCUMULATOR_SYNCHRONIZER_COMPONENT, DESIRE_ROUNDTABLE_COMPONENT, DESIRE_TRAINER_COMPONENT,
     };
 
     fn without_client(mut payload: Value) -> Value {
@@ -90,15 +92,36 @@ mod tests {
     }
 
     fn valid_checkpoint() -> TrainerExternalStateCheckpoint {
-        build_trainer_external_state_checkpoint(
+        build_trainer_external_state_checkpoint_with_desire_trainer(
             vec![
                 ACCUMULATOR_SYNCHRONIZER_COMPONENT.to_owned(),
                 DESIRE_ROUNDTABLE_COMPONENT.to_owned(),
+                DESIRE_TRAINER_COMPONENT.to_owned(),
             ],
+            Some(DesireTrainerQueueCheckpoint {
+                events: vec![DesireTrainerEventCheckpoint {
+                    timestamp: TrainerTimestampCheckpoint {
+                        unix_seconds: 17,
+                        subsec_nanos: 42,
+                    },
+                    phase: DesireTrainerPhaseCheckpoint::Observation,
+                    temperature: 0.9,
+                    entropy: 0.7,
+                    hypergrad_penalty: 0.1,
+                    weights: DesireTrainerWeightsCheckpoint {
+                        alpha: 0.4,
+                        beta: 0.3,
+                        gamma: 0.2,
+                        lambda: 0.1,
+                    },
+                    trigger: None,
+                }],
+            }),
             Some(DesireRoundtableCheckpoint {
                 blend: 0.4,
                 drift_gain: 0.3,
                 latest: None,
+                pending_summary: None,
             }),
             None,
             Some(AccumulatorSynchronizerCheckpoint {
@@ -128,6 +151,7 @@ mod tests {
         assert_eq!(wasm["semantic_backend"], "rust");
         assert_eq!(wasm["payload_complete"], true);
         assert_eq!(wasm["deterministic_resume_ready"], false);
+        assert_eq!(checkpoint.desire_trainer.unwrap().events.len(), 1);
         assert_eq!(
             wasm["reattach_required_components"],
             json!([ACCUMULATOR_SYNCHRONIZER_COMPONENT])

@@ -10,11 +10,12 @@ use crate::distributed::AccumulatorSynchronizerCheckpoint;
 
 pub const TRAINER_EXTERNAL_CHECKPOINT_KIND: &str = "spiraltorch.trainer_external_state_checkpoint";
 pub const TRAINER_EXTERNAL_CHECKPOINT_CONTRACT_VERSION: &str =
-    "spiraltorch.trainer_external_state_checkpoint.v1";
+    "spiraltorch.trainer_external_state_checkpoint.v2";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_OWNER: &str = "st-core::runtime::trainer_external";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
 pub const TRAINER_EXTERNAL_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
+pub const DESIRE_TRAINER_COMPONENT: &str = "desire_bridge";
 pub const DESIRE_ROUNDTABLE_COMPONENT: &str = "desire_roundtable_bridge";
 pub const PSI_METER_COMPONENT: &str = "psi_meter";
 pub const ACCUMULATOR_SYNCHRONIZER_COMPONENT: &str = "accumulator_synchronizer";
@@ -23,6 +24,151 @@ pub const PSI_METER_CHECKPOINT_KIND: &str = "spiraltorch.psi_meter_checkpoint";
 pub const PSI_METER_CHECKPOINT_CONTRACT_VERSION: &str = "spiraltorch.psi_meter_checkpoint.v1";
 pub const PSI_METER_CHECKPOINT_SEMANTIC_OWNER: &str = "st-core::telemetry::psi";
 pub const PSI_METER_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrainerTimestampCheckpoint {
+    pub unix_seconds: u64,
+    pub subsec_nanos: u32,
+}
+
+impl TrainerTimestampCheckpoint {
+    fn validate(&self, field: &str) -> Result<(), TrainerExternalCheckpointError> {
+        if self.unix_seconds > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+            return Err(state_error(
+                &format!("{field}.unix_seconds"),
+                "must not exceed JavaScript's exact integer limit",
+            ));
+        }
+        if self.subsec_nanos >= 1_000_000_000 {
+            return Err(state_error(
+                &format!("{field}.subsec_nanos"),
+                "must be less than one second",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesireTrainerPhaseCheckpoint {
+    Observation,
+    Injection,
+    Integration,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesireTrainerWeightsCheckpoint {
+    pub alpha: f32,
+    pub beta: f32,
+    pub gamma: f32,
+    pub lambda: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesireTrainerTriggerCheckpoint {
+    pub report_tokens: Vec<u64>,
+    pub report_scores: Vec<f32>,
+    pub mean_penalty: f32,
+    pub mean_entropy: f32,
+    pub temperature: f32,
+    pub samples: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesireTrainerEventCheckpoint {
+    pub timestamp: TrainerTimestampCheckpoint,
+    pub phase: DesireTrainerPhaseCheckpoint,
+    pub temperature: f32,
+    pub entropy: f32,
+    pub hypergrad_penalty: f32,
+    pub weights: DesireTrainerWeightsCheckpoint,
+    pub trigger: Option<DesireTrainerTriggerCheckpoint>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesireTrainerQueueCheckpoint {
+    /// Events remain in the exact FIFO order consumed by the next trainer step.
+    pub events: Vec<DesireTrainerEventCheckpoint>,
+}
+
+impl DesireTrainerQueueCheckpoint {
+    pub fn validate(&self) -> Result<(), TrainerExternalCheckpointError> {
+        for (event_index, event) in self.events.iter().enumerate() {
+            let prefix = format!("desire_trainer.events[{event_index}]");
+            event.timestamp.validate(&format!("{prefix}.timestamp"))?;
+            validate_positive(&format!("{prefix}.temperature"), event.temperature)?;
+            validate_non_negative(&format!("{prefix}.entropy"), event.entropy)?;
+            validate_non_negative(
+                &format!("{prefix}.hypergrad_penalty"),
+                event.hypergrad_penalty,
+            )?;
+            for (label, value) in [
+                ("alpha", event.weights.alpha),
+                ("beta", event.weights.beta),
+                ("gamma", event.weights.gamma),
+                ("lambda", event.weights.lambda),
+            ] {
+                validate_non_negative(&format!("{prefix}.weights.{label}"), value)?;
+            }
+            if let Some(trigger) = &event.trigger {
+                validate_desire_trainer_trigger(&prefix, trigger)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_desire_trainer_trigger(
+    event_prefix: &str,
+    trigger: &DesireTrainerTriggerCheckpoint,
+) -> Result<(), TrainerExternalCheckpointError> {
+    let prefix = format!("{event_prefix}.trigger");
+    if trigger.report_tokens.len() != trigger.report_scores.len() {
+        return Err(state_error(
+            &format!("{prefix}.report_tokens"),
+            "must have the same length as report_scores",
+        ));
+    }
+    for (index, token) in trigger.report_tokens.iter().enumerate() {
+        if *token > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+            return Err(state_error(
+                &format!("{prefix}.report_tokens[{index}]"),
+                "must not exceed JavaScript's exact integer limit",
+            ));
+        }
+        if trigger.report_tokens[..index].contains(token) {
+            return Err(state_error(
+                &format!("{prefix}.report_tokens[{index}]"),
+                "must be unique within the trigger report",
+            ));
+        }
+    }
+    for (index, score) in trigger.report_scores.iter().copied().enumerate() {
+        validate_non_negative(&format!("{prefix}.report_scores[{index}]"), score)?;
+    }
+    validate_non_negative(&format!("{prefix}.mean_penalty"), trigger.mean_penalty)?;
+    validate_non_negative(&format!("{prefix}.mean_entropy"), trigger.mean_entropy)?;
+    validate_positive(&format!("{prefix}.temperature"), trigger.temperature)?;
+    if trigger.samples == 0 {
+        return Err(state_error(
+            &format!("{prefix}.samples"),
+            "must be positive",
+        ));
+    }
+    if trigger.samples > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+        return Err(state_error(
+            &format!("{prefix}.samples"),
+            "must not exceed JavaScript's exact integer limit",
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -218,7 +364,25 @@ fn validate_psi_component_values(
 pub struct DesireRoundtableImpulseCheckpoint {
     pub multipliers: [f32; 3],
     pub drift: f32,
-    pub timestamp_unix_millis: u64,
+    pub timestamp: TrainerTimestampCheckpoint,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesireRoundtablePendingSummaryCheckpoint {
+    pub steps: u64,
+    pub triggers: u64,
+    pub sum_entropy: f32,
+    pub sum_temperature: f32,
+    pub sum_alpha: f32,
+    pub sum_beta: f32,
+    pub sum_gamma: f32,
+    pub sum_lambda: f32,
+    pub sum_above: f32,
+    pub sum_here: f32,
+    pub sum_beneath: f32,
+    pub sum_drift: f32,
+    pub last_timestamp: TrainerTimestampCheckpoint,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -227,6 +391,7 @@ pub struct DesireRoundtableCheckpoint {
     pub blend: f32,
     pub drift_gain: f32,
     pub latest: Option<DesireRoundtableImpulseCheckpoint>,
+    pub pending_summary: Option<DesireRoundtablePendingSummaryCheckpoint>,
 }
 
 impl DesireRoundtableCheckpoint {
@@ -243,10 +408,52 @@ impl DesireRoundtableCheckpoint {
                 )?;
             }
             validate_range("desire_roundtable.latest.drift", latest.drift, -1.0, 1.0)?;
-            if latest.timestamp_unix_millis > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+            latest
+                .timestamp
+                .validate("desire_roundtable.latest.timestamp")?;
+        }
+        if let Some(pending) = self.pending_summary {
+            if pending.steps == 0 {
                 return Err(state_error(
-                    "desire_roundtable.latest.timestamp_unix_millis",
+                    "desire_roundtable.pending_summary.steps",
+                    "must be positive when a pending summary is present",
+                ));
+            }
+            if pending.steps > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
+                return Err(state_error(
+                    "desire_roundtable.pending_summary.steps",
                     "must not exceed JavaScript's exact integer limit",
+                ));
+            }
+            if pending.triggers > pending.steps {
+                return Err(state_error(
+                    "desire_roundtable.pending_summary.triggers",
+                    "must not exceed steps",
+                ));
+            }
+            pending
+                .last_timestamp
+                .validate("desire_roundtable.pending_summary.last_timestamp")?;
+            for (label, value) in [
+                ("sum_entropy", pending.sum_entropy),
+                ("sum_temperature", pending.sum_temperature),
+                ("sum_alpha", pending.sum_alpha),
+                ("sum_beta", pending.sum_beta),
+                ("sum_gamma", pending.sum_gamma),
+                ("sum_lambda", pending.sum_lambda),
+                ("sum_above", pending.sum_above),
+                ("sum_here", pending.sum_here),
+                ("sum_beneath", pending.sum_beneath),
+            ] {
+                validate_non_negative(
+                    &format!("desire_roundtable.pending_summary.{label}"),
+                    value,
+                )?;
+            }
+            if !pending.sum_drift.is_finite() {
+                return Err(state_error(
+                    "desire_roundtable.pending_summary.sum_drift",
+                    "must be finite",
                 ));
             }
         }
@@ -262,6 +469,7 @@ pub struct TrainerExternalStateCheckpoint {
     pub semantic_owner: String,
     pub semantic_backend: String,
     pub required_components: Vec<String>,
+    pub desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     pub desire_roundtable: Option<DesireRoundtableCheckpoint>,
     pub psi_meter: Option<PsiMeterCheckpoint>,
     pub accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
@@ -300,7 +508,23 @@ pub enum TrainerExternalCheckpointError {
 }
 
 pub fn build_trainer_external_state_checkpoint(
+    required_components: Vec<String>,
+    desire_roundtable: Option<DesireRoundtableCheckpoint>,
+    psi_meter: Option<PsiMeterCheckpoint>,
+    accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
+) -> Result<TrainerExternalStateCheckpoint, TrainerExternalCheckpointError> {
+    build_trainer_external_state_checkpoint_with_desire_trainer(
+        required_components,
+        None,
+        desire_roundtable,
+        psi_meter,
+        accumulator_synchronizer,
+    )
+}
+
+pub fn build_trainer_external_state_checkpoint_with_desire_trainer(
     mut required_components: Vec<String>,
+    desire_trainer: Option<DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<DesireRoundtableCheckpoint>,
     psi_meter: Option<PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<AccumulatorSynchronizerCheckpoint>,
@@ -308,6 +532,7 @@ pub fn build_trainer_external_state_checkpoint(
     required_components.sort_unstable();
     required_components.dedup();
     let captured = captured_components(
+        desire_trainer.as_ref(),
         desire_roundtable.as_ref(),
         psi_meter.as_ref(),
         accumulator_synchronizer.as_ref(),
@@ -323,6 +548,7 @@ pub fn build_trainer_external_state_checkpoint(
         semantic_owner: TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_OWNER.to_owned(),
         semantic_backend: TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_BACKEND.to_owned(),
         required_components,
+        desire_trainer,
         desire_roundtable,
         psi_meter,
         accumulator_synchronizer,
@@ -368,6 +594,9 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
     )?;
     validate_sorted_unique("required_components", &checkpoint.required_components)?;
     validate_sorted_unique("unresolved_components", &checkpoint.unresolved_components)?;
+    if let Some(state) = &checkpoint.desire_trainer {
+        state.validate()?;
+    }
     if let Some(state) = checkpoint.desire_roundtable {
         state.validate()?;
     }
@@ -381,6 +610,7 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
     }
 
     let captured = captured_components(
+        checkpoint.desire_trainer.as_ref(),
         checkpoint.desire_roundtable.as_ref(),
         checkpoint.psi_meter.as_ref(),
         checkpoint.accumulator_synchronizer.as_ref(),
@@ -444,11 +674,15 @@ fn evaluate_trainer_external_state_checkpoint_with_reattached(
 }
 
 fn captured_components(
+    desire_trainer: Option<&DesireTrainerQueueCheckpoint>,
     desire_roundtable: Option<&DesireRoundtableCheckpoint>,
     psi_meter: Option<&PsiMeterCheckpoint>,
     accumulator_synchronizer: Option<&AccumulatorSynchronizerCheckpoint>,
 ) -> Vec<String> {
-    let mut captured = Vec::with_capacity(3);
+    let mut captured = Vec::with_capacity(4);
+    if desire_trainer.is_some() {
+        captured.push(DESIRE_TRAINER_COMPONENT.to_owned());
+    }
     if desire_roundtable.is_some() {
         captured.push(DESIRE_ROUNDTABLE_COMPONENT.to_owned());
     }
@@ -514,6 +748,22 @@ fn validate_range(
     }
 }
 
+fn validate_non_negative(field: &str, value: f32) -> Result<(), TrainerExternalCheckpointError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(state_error(field, "must be finite and non-negative"))
+    }
+}
+
+fn validate_positive(field: &str, value: f32) -> Result<(), TrainerExternalCheckpointError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(state_error(field, "must be finite and positive"))
+    }
+}
+
 fn state_error(field: &str, message: &str) -> TrainerExternalCheckpointError {
     TrainerExternalCheckpointError::InvalidState {
         field: field.to_owned(),
@@ -565,23 +815,58 @@ mod tests {
         }
     }
 
+    fn desire_trainer_checkpoint() -> DesireTrainerQueueCheckpoint {
+        DesireTrainerQueueCheckpoint {
+            events: vec![DesireTrainerEventCheckpoint {
+                timestamp: TrainerTimestampCheckpoint {
+                    unix_seconds: 17,
+                    subsec_nanos: 23,
+                },
+                phase: DesireTrainerPhaseCheckpoint::Injection,
+                temperature: 0.8,
+                entropy: 1.2,
+                hypergrad_penalty: 0.3,
+                weights: DesireTrainerWeightsCheckpoint {
+                    alpha: 0.7,
+                    beta: 0.2,
+                    gamma: 0.5,
+                    lambda: 0.1,
+                },
+                trigger: Some(DesireTrainerTriggerCheckpoint {
+                    report_tokens: vec![7, 11],
+                    report_scores: vec![0.8, 0.4],
+                    mean_penalty: 0.3,
+                    mean_entropy: 1.2,
+                    temperature: 0.8,
+                    samples: 12,
+                }),
+            }],
+        }
+    }
+
     #[test]
     fn external_checkpoint_accounts_for_captured_and_unresolved_components() {
-        let checkpoint = build_trainer_external_state_checkpoint(
+        let checkpoint = build_trainer_external_state_checkpoint_with_desire_trainer(
             vec![
                 PSI_METER_COMPONENT.to_owned(),
                 "blackcat_runtime".to_owned(),
+                DESIRE_TRAINER_COMPONENT.to_owned(),
                 DESIRE_ROUNDTABLE_COMPONENT.to_owned(),
                 ACCUMULATOR_SYNCHRONIZER_COMPONENT.to_owned(),
             ],
+            Some(desire_trainer_checkpoint()),
             Some(DesireRoundtableCheckpoint {
                 blend: 0.4,
                 drift_gain: 0.3,
                 latest: Some(DesireRoundtableImpulseCheckpoint {
                     multipliers: [1.1, 0.9, 1.0],
                     drift: 0.2,
-                    timestamp_unix_millis: 7,
+                    timestamp: TrainerTimestampCheckpoint {
+                        unix_seconds: 7,
+                        subsec_nanos: 0,
+                    },
                 }),
+                pending_summary: None,
             }),
             Some(psi_checkpoint()),
             Some(accumulator_checkpoint()),
@@ -693,8 +978,12 @@ mod tests {
                 latest: Some(DesireRoundtableImpulseCheckpoint {
                     multipliers: [1.0; 3],
                     drift: 0.0,
-                    timestamp_unix_millis: TRAINER_EXTERNAL_MAX_SAFE_INTEGER + 1,
+                    timestamp: TrainerTimestampCheckpoint {
+                        unix_seconds: TRAINER_EXTERNAL_MAX_SAFE_INTEGER + 1,
+                        subsec_nanos: 0,
+                    },
                 }),
+                pending_summary: None,
             }),
             None,
             None,
@@ -703,5 +992,96 @@ mod tests {
             result,
             Err(TrainerExternalCheckpointError::InvalidState { .. })
         ));
+    }
+
+    #[test]
+    fn desire_trainer_queue_is_captured_in_fifo_order() {
+        let mut queue = desire_trainer_checkpoint();
+        let mut second = queue.events[0].clone();
+        second.timestamp = TrainerTimestampCheckpoint {
+            unix_seconds: 23,
+            subsec_nanos: 42,
+        };
+        second.phase = DesireTrainerPhaseCheckpoint::Integration;
+        second.trigger = None;
+        queue.events.push(second);
+
+        let checkpoint = build_trainer_external_state_checkpoint_with_desire_trainer(
+            vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+            Some(queue.clone()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let encoded = serde_json::to_string(&checkpoint).unwrap();
+        let decoded: TrainerExternalStateCheckpoint = serde_json::from_str(&encoded).unwrap();
+        let report = evaluate_trainer_external_state_checkpoint(&decoded).unwrap();
+
+        assert_eq!(decoded.desire_trainer, Some(queue));
+        assert_eq!(report.captured_components, [DESIRE_TRAINER_COMPONENT]);
+        assert!(report.payload_complete);
+        assert!(report.deterministic_resume_ready);
+    }
+
+    #[test]
+    fn desire_trainer_queue_rejects_malformed_trigger_without_reconstruction() {
+        let mut queue = desire_trainer_checkpoint();
+        queue.events[0]
+            .trigger
+            .as_mut()
+            .unwrap()
+            .report_scores
+            .pop();
+
+        let error = build_trainer_external_state_checkpoint_with_desire_trainer(
+            vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+            Some(queue),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("same length"));
+    }
+
+    #[test]
+    fn desire_trainer_queue_rejects_non_finite_and_unsafe_values() {
+        let mut non_finite = desire_trainer_checkpoint();
+        non_finite.events[0].weights.gamma = f32::NAN;
+        assert!(build_trainer_external_state_checkpoint_with_desire_trainer(
+            vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+            Some(non_finite),
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        let mut unsafe_integer = desire_trainer_checkpoint();
+        unsafe_integer.events[0]
+            .trigger
+            .as_mut()
+            .unwrap()
+            .report_tokens[0] = TRAINER_EXTERNAL_MAX_SAFE_INTEGER + 1;
+        assert!(build_trainer_external_state_checkpoint_with_desire_trainer(
+            vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+            Some(unsafe_integer),
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        let mut invalid_timestamp = desire_trainer_checkpoint();
+        invalid_timestamp.events[0].timestamp.subsec_nanos = 1_000_000_000;
+        assert!(build_trainer_external_state_checkpoint_with_desire_trainer(
+            vec![DESIRE_TRAINER_COMPONENT.to_owned()],
+            Some(invalid_timestamp),
+            None,
+            None,
+            None,
+        )
+        .is_err());
     }
 }
