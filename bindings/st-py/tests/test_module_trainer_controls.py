@@ -74,6 +74,88 @@ def test_module_trainer_optimizer_contract_is_rust_owned_and_fail_closed() -> No
     assert trainer.grad_clip_max_norm == pytest.approx(1.5)
 
 
+def test_module_trainer_optimizer_checkpoint_resumes_through_rust() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    def make_trainer():
+        trainer = st.nn.ModuleTrainer(
+            backend="cpu",
+            curvature=-1.0,
+            hyper_learning_rate=2e-2,
+            fallback_learning_rate=1e-2,
+        )
+        trainer.enable_realgrad(5e-3)
+        return trainer
+
+    def make_model(name: str):
+        model = st.nn.Sequential()
+        model.add(st.nn.Linear(name, 2, 1))
+        return model
+
+    def run_steps(trainer, model, steps: int) -> None:
+        loss = st.nn.MeanSquaredError()
+        x = st.Tensor.rand(2, 2, seed=401)
+        y = st.Tensor.rand(2, 1, seed=402)
+        for _ in range(steps):
+            prediction = model.forward(x)
+            gradient = loss.backward(prediction, y)
+            model.backward(x, gradient)
+            trainer.step(model)
+
+    source_trainer = make_trainer()
+    source_model = make_model("checkpoint_linear")
+    source_trainer.prepare(source_model)
+    run_steps(source_trainer, source_model, 2)
+    model_state = source_model.state_dict()
+    checkpoint = source_trainer.optimizer_checkpoint(source_model)
+
+    assert checkpoint["kind"] == "spiraltorch.trainer_optimizer_checkpoint"
+    assert (
+        checkpoint["contract_version"]
+        == "spiraltorch.trainer_optimizer_checkpoint.v1"
+    )
+    assert checkpoint["semantic_backend"] == "rust"
+    assert checkpoint["parameters"][0]["hypergrad"] is not None
+    assert checkpoint["parameters"][0]["realgrad"] is not None
+    assert set(checkpoint["state"]["phase_tracker"]) >= {
+        "turnover_spike_threshold",
+        "loss_ema_alpha",
+        "loss_spike_ratio",
+        "drift_spike_threshold",
+        "loss_ema",
+        "loss_spiking",
+    }
+
+    run_steps(source_trainer, source_model, 3)
+    expected = dict(source_model.state_dict())
+
+    resumed_trainer = make_trainer()
+    resumed_model = make_model("checkpoint_linear")
+    resumed_model.load_state_dict(model_state)
+    resumed_trainer.prepare(resumed_model)
+    report = resumed_trainer.restore_optimizer_checkpoint(resumed_model, checkpoint)
+    assert report["deterministic_resume_ready"] is True
+    assert report["parameter_count"] == 2
+    run_steps(resumed_trainer, resumed_model, 3)
+
+    actual = dict(resumed_model.state_dict())
+    assert set(actual) == set(expected)
+    for name in actual:
+        assert actual[name].tolist() == expected[name].tolist()
+
+    tampered = json.loads(json.dumps(checkpoint))
+    tampered["commander"] = "python"
+    with pytest.raises(ValueError, match="unknown field"):
+        resumed_trainer.restore_optimizer_checkpoint(resumed_model, tampered)
+
+    nested_tamper = json.loads(json.dumps(checkpoint))
+    nested_tamper["state"]["phase_tracker"]["commander"] = "python"
+    with pytest.raises(ValueError, match="unknown field"):
+        resumed_trainer.restore_optimizer_checkpoint(resumed_model, nested_tamper)
+
+
 def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     st = _load_native()
     if st is None:

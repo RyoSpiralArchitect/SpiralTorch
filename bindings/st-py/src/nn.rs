@@ -38,6 +38,8 @@ use st_core::backend::runtime_probe::resolve_backend;
 #[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
+use st_core::runtime::trainer_optimizer::TrainerOptimizerCheckpoint;
+#[cfg(feature = "nn")]
 use st_core::runtime::zspace_optimizer::zspace_parameter_control_from_value;
 #[cfg(feature = "nn")]
 use st_core::{
@@ -5893,6 +5895,40 @@ impl PyNnModuleTrainer {
             .optimizer_config_contract()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let value = serde_json::to_value(contract)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn optimizer_checkpoint(
+        &self,
+        py: Python<'_>,
+        module: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let checkpoint = with_module_ref(module, |module_inner| {
+            self.inner
+                .optimizer_checkpoint(module_inner)
+                .map_err(|error| TensorError::Generic(error.to_string()))
+        })?;
+        let value = serde_json::to_value(checkpoint)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn restore_optimizer_checkpoint(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<PyAny>,
+        checkpoint: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let value = crate::json::py_to_json(checkpoint)?;
+        let checkpoint: TrainerOptimizerCheckpoint = serde_json::from_value(value)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let validation = with_module_mut(module, |module_inner| {
+            self.inner
+                .restore_optimizer_checkpoint(module_inner, &checkpoint)
+                .map_err(|error| TensorError::Generic(error.to_string()))
+        })?;
+        let value = serde_json::to_value(validation)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         json_to_py(py, &value)
     }

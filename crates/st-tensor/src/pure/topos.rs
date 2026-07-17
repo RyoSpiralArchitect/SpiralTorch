@@ -666,6 +666,46 @@ pub struct ToposOptimizerStateControl {
     effective_momentum_damping: f32,
 }
 
+/// Lossless transport form of [`ToposOptimizerStateControl`].
+///
+/// The live control keeps rule labels as static Rust strings. Checkpoints only
+/// transport the validated numeric degrees of freedom and reconstruct those
+/// labels through [`ToposOptimizerStateControl::new`].
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToposOptimizerStateCheckpoint {
+    pub gradient_bias_scale: f32,
+    pub gradient_bias_basis: [f32; TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+    pub gradient_clip_scale: f32,
+    pub momentum_damping: f32,
+}
+
+impl ToposOptimizerStateCheckpoint {
+    pub fn validate(self) -> PureResult<()> {
+        self.into_control().map(|_| ())
+    }
+
+    pub fn into_control(self) -> PureResult<ToposOptimizerStateControl> {
+        ToposOptimizerStateControl::new(
+            self.gradient_bias_scale,
+            self.gradient_bias_basis,
+            self.gradient_clip_scale,
+            self.momentum_damping,
+        )
+    }
+}
+
+impl From<ToposOptimizerStateControl> for ToposOptimizerStateCheckpoint {
+    fn from(control: ToposOptimizerStateControl) -> Self {
+        Self {
+            gradient_bias_scale: control.gradient_bias_scale(),
+            gradient_bias_basis: *control.gradient_bias_basis(),
+            gradient_clip_scale: control.gradient_clip_scale(),
+            momentum_damping: control.momentum_damping(),
+        }
+    }
+}
+
 impl Default for ToposOptimizerStateControl {
     fn default() -> Self {
         Self::neutral()
@@ -3174,6 +3214,51 @@ pub struct OpenCartesianTopos {
     site: ZBoxSite,
 }
 
+/// Serializable reconstruction state for an [`OpenCartesianTopos`].
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenCartesianToposCheckpoint {
+    pub curvature: f32,
+    pub tolerance: f32,
+    pub saturation: f32,
+    pub porosity: f32,
+    pub max_depth: usize,
+    pub max_volume: usize,
+    pub site_radius_min: f32,
+    pub site_radius_max: f32,
+    pub guard_density_min: f32,
+    pub guard_density_max: f32,
+    pub guard_mass_tolerance: f32,
+}
+
+impl OpenCartesianToposCheckpoint {
+    /// Validates every nested guard by reconstructing the live Rust object.
+    pub fn validate(self) -> PureResult<()> {
+        self.into_topos().map(|_| ())
+    }
+
+    /// Reconstructs the complete guard, including a custom site and porosity.
+    pub fn into_topos(self) -> PureResult<OpenCartesianTopos> {
+        let guard = LawvereTierneyGuard::new(
+            self.guard_density_min,
+            self.guard_density_max,
+            self.guard_mass_tolerance,
+        )?;
+        let site = ZBoxSite::default_for(self.curvature)?
+            .with_radius_window(self.site_radius_min, self.site_radius_max)?
+            .with_guard(guard);
+        OpenCartesianTopos::new(
+            self.curvature,
+            self.tolerance,
+            self.saturation,
+            self.max_depth,
+            self.max_volume,
+        )?
+        .with_porosity(self.porosity)?
+        .with_site(site)
+    }
+}
+
 impl OpenCartesianTopos {
     /// Builds a new guard. `curvature` must remain negative, `tolerance` and
     /// `saturation` must be positive. `max_depth` and `max_volume` are expressed
@@ -3229,6 +3314,24 @@ impl OpenCartesianTopos {
             max_volume,
             site,
         })
+    }
+
+    /// Captures all values that influence guard behavior.
+    pub fn checkpoint(&self) -> OpenCartesianToposCheckpoint {
+        let guard = self.site.guard();
+        OpenCartesianToposCheckpoint {
+            curvature: self.curvature,
+            tolerance: self.tolerance,
+            saturation: self.saturation,
+            porosity: self.porosity,
+            max_depth: self.max_depth,
+            max_volume: self.max_volume,
+            site_radius_min: self.site.radius_min(),
+            site_radius_max: self.site.radius_max(),
+            guard_density_min: guard.density_min(),
+            guard_density_max: guard.density_max(),
+            guard_mass_tolerance: guard.mass_tolerance(),
+        }
     }
 
     /// Returns the curvature enforced by the topos.

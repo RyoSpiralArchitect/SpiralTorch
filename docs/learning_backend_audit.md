@@ -1808,11 +1808,28 @@ future checkpoints.
 
 Next steps:
 
-1. Promote the existing optimizer state snapshot into a versioned serializable
-   checkpoint containing hypergrad, realgrad, adapter policy, and backend policy.
-2. Include backend counters and fallback counts in checkpoints.
-3. Add resume tests that confirm one interrupted run matches an uninterrupted
-   run for a deterministic seed.
+The optimizer snapshot is now a versioned, serializable
+`spiraltorch.trainer_optimizer_checkpoint.v1` contract. Rust captures every
+parameter's Euclidean, hypergrad, and realgrad accumulator; Topos gradient
+control and persistent momentum; custom open-cartesian guard state; local
+spectral adapter state; curvature, coherence-spectral, and SoftLogic policy
+state; phase-event thresholds and edge-detector history; cumulative
+backend/fallback counters; and the frozen execution topology. Model values
+remain in `Module::state_dict` and are fingerprint-guarded during a transactional
+restore. Python creates and restores the native checkpoint, while WASM only
+validates the identical payload. Rust tests compare an interrupted JSON round
+trip with an uninterrupted multi-step run while both hypergrad and realgrad
+momentum are active.
+
+Next steps:
+
+1. Give the external components reported by `external_state_required`
+   versioned state contracts, starting with Desire/psi and distributed
+   accumulator synchronizers.
+2. Add one atomic training bundle that pairs module values, optimizer state,
+   dataloader cursor, shuffle RNG, and external controller states.
+3. Promote resume parity from deterministic optimizer steps to seeded
+   multi-epoch CPU/WGPU learning tests.
 
 ### P2: Replace backend panics with trainable errors
 

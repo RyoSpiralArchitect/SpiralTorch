@@ -465,6 +465,21 @@ messages. Both entry points call `st-core::runtime::trainer_optimizer` and add
 only `execution_client: "wasm"`; WASM does not own or execute the `st-nn`
 parameter update loop.
 
+WASM can also preflight a checkpoint produced by Rust or Python orchestration:
+
+```ts
+import { trainerOptimizerCheckpointObject } from "spiraltorch-wasm";
+
+const receipt = trainerOptimizerCheckpointObject(checkpoint);
+console.log(receipt.parameter_count, receipt.deterministic_resume_ready);
+console.log(receipt.external_state_required);
+```
+
+`trainerOptimizerCheckpointJson` provides the equivalent worker-message path.
+Both functions reject unknown fields, contract-version changes, non-finite
+state, invalid tape shapes, and unsorted external-state requirements through
+the Rust validator. They never restore model parameters in the browser.
+
 Rank planning uses the same boundary. `rankPlanObject` and `rankPlanJson` send shape and
 capability observations to `st-core::ops::rank_entry`; Rust validates `rows`, `cols`, `k`,
 device limits, runtime surrogate routing, and the complete unified heuristic choice:

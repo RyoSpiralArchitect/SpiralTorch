@@ -28,6 +28,7 @@ use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::ops::zspace_round::RoundtableBand;
 use st_core::ops::zspace_round::SpectralFeatureSample;
+use st_core::runtime::trainer_optimizer::TrainerParameterOptimizerState;
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
@@ -47,6 +48,12 @@ pub struct Parameter {
     realgrad: Option<AmegaRealgrad>,
     packed_matmul: RefCell<Option<PackedB>>,
     packed_matmul_transpose: RefCell<Option<PackedB>>,
+}
+
+pub(crate) struct PreparedParameterOptimizerState {
+    gradient: Option<Tensor>,
+    hypergrad: Option<AmegaHypergrad>,
+    realgrad: Option<AmegaRealgrad>,
 }
 
 impl core::fmt::Debug for Parameter {
@@ -103,6 +110,77 @@ impl Parameter {
     /// Returns the currently cached Euclidean gradient when no hypergrad tape is active.
     pub fn gradient(&self) -> Option<&Tensor> {
         self.gradient.as_ref()
+    }
+
+    pub(crate) fn optimizer_checkpoint_state(&self) -> TrainerParameterOptimizerState {
+        let (rows, cols) = self.value.shape();
+        TrainerParameterOptimizerState {
+            name: self.name.clone(),
+            rows,
+            cols,
+            value_fingerprint: parameter_value_fingerprint(&self.name, &self.value),
+            euclidean_gradient: self
+                .gradient
+                .as_ref()
+                .map(|gradient| gradient.data().to_vec()),
+            hypergrad: self.hypergrad.as_ref().map(AmegaHypergrad::checkpoint),
+            realgrad: self.realgrad.as_ref().map(AmegaRealgrad::checkpoint),
+        }
+    }
+
+    pub(crate) fn prepare_optimizer_checkpoint_restore(
+        &self,
+        state: &TrainerParameterOptimizerState,
+    ) -> PureResult<PreparedParameterOptimizerState> {
+        if state.name != self.name {
+            return Err(TensorError::Generic(format!(
+                "optimizer checkpoint parameter mismatch: expected {}, got {}",
+                self.name, state.name
+            )));
+        }
+        if (state.rows, state.cols) != self.value.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.value.shape(),
+                right: (state.rows, state.cols),
+            });
+        }
+        let actual_fingerprint = parameter_value_fingerprint(&self.name, &self.value);
+        if actual_fingerprint != state.value_fingerprint {
+            return Err(TensorError::Generic(format!(
+                "optimizer checkpoint value fingerprint mismatch for {}: expected {}, got {}",
+                self.name, state.value_fingerprint, actual_fingerprint
+            )));
+        }
+        let gradient = state
+            .euclidean_gradient
+            .as_ref()
+            .map(|values| Tensor::from_vec(state.rows, state.cols, values.clone()))
+            .transpose()?;
+        let hypergrad = state
+            .hypergrad
+            .clone()
+            .map(AmegaHypergrad::from_checkpoint)
+            .transpose()?;
+        let realgrad = state
+            .realgrad
+            .clone()
+            .map(AmegaRealgrad::from_checkpoint)
+            .transpose()?;
+        Ok(PreparedParameterOptimizerState {
+            gradient,
+            hypergrad,
+            realgrad,
+        })
+    }
+
+    pub(crate) fn commit_optimizer_checkpoint_restore(
+        &mut self,
+        state: PreparedParameterOptimizerState,
+    ) {
+        self.gradient = state.gradient;
+        self.hypergrad = state.hypergrad;
+        self.realgrad = state.realgrad;
+        self.invalidate_matmul_pack();
     }
 
     /// Attaches a hypergrad tape to the parameter.
@@ -625,6 +703,27 @@ impl Parameter {
     }
 }
 
+fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    let mut write = |bytes: &[u8]| {
+        for &byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    };
+    write(name.as_bytes());
+    let (rows, cols) = value.shape();
+    write(&(rows as u64).to_le_bytes());
+    write(&(cols as u64).to_le_bytes());
+    for scalar in value.data() {
+        write(&scalar.to_bits().to_le_bytes());
+    }
+    format!("{hash:016x}")
+}
+
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
 /// pure Rust so it can be used from WebGPU, HIP, or CPU flows alike.
 pub trait Module {
@@ -643,6 +742,11 @@ pub trait Module {
     ) -> PureResult<()>;
 
     /// Visits mutable parameters.
+    ///
+    /// Implementations must expose the same parameter names as
+    /// [`Self::visit_parameters`] and must not perform fallible work after a
+    /// successful visitor call. Trainer checkpoint restore relies on this
+    /// stable traversal contract to commit a fully prevalidated state.
     fn visit_parameters_mut(
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,

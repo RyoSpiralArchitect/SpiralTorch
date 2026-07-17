@@ -2445,6 +2445,33 @@ optimizer_contract = trainer.optimizer_config_contract()
 assert optimizer_contract["semantic_backend"] == "rust"
 ```
 
+The same Rust owner now defines optimizer resume state. A checkpoint includes
+hypergrad and realgrad accumulators, Topos momentum and custom guards, local
+spectral state, curvature/spectral/SoftLogic policy state, cumulative backend
+counters, phase-event thresholds and edge-detector history, and the execution
+topology. Model values stay in the module
+`state_dict`; per-parameter fingerprints reject a mismatched model before any
+state is mutated:
+
+```python
+model_state = model.state_dict()
+optimizer_state = trainer.optimizer_checkpoint(model)
+
+resumed_model.load_state_dict(model_state)
+resumed_trainer.prepare(resumed_model)
+receipt = resumed_trainer.restore_optimizer_checkpoint(
+    resumed_model,
+    optimizer_state,
+)
+assert receipt["semantic_backend"] == "rust"
+assert receipt["deterministic_resume_ready"] is True
+```
+
+Restore is transactional and fail-closed. `external_state_required` names
+enabled bridges or distributed runtimes whose own state must be checkpointed
+alongside this optimizer contract; Python neither suppresses nor reinterprets
+that limitation.
+
 ```python
 import spiraltorch as st
 from spiraltorch.nn import Linear, MeanSquaredError, ModuleTrainer, RoundtableConfig, Sequential

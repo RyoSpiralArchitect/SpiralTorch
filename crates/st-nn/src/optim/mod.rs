@@ -6,6 +6,7 @@
 use crate::module::Module;
 use crate::PureResult;
 use st_core::ops::zspace_round::SpectralFeatureSample;
+pub use st_core::runtime::trainer_optimizer::SpectralLrAdapterState;
 use st_core::runtime::zspace_optimizer::{
     zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
 };
@@ -46,39 +47,10 @@ pub struct SpectralLrAdapter {
     avg_energy: f32,
 }
 
-/// Serializable summary of [`SpectralLrAdapter`] state.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpectralLrAdapterState {
-    pub sheet_hint: usize,
-    pub smoothing: f32,
-    pub curvature_target: f32,
-    pub curvature_gain: f32,
-    pub spin_gain: f32,
-    pub energy_gain: f32,
-    pub sheet_gain: f32,
-    pub min_scale: f32,
-    pub max_scale: f32,
-    pub avg_curvature: f32,
-    pub avg_spin: f32,
-    pub avg_energy: f32,
-}
-
 impl Default for SpectralLrAdapter {
     fn default() -> Self {
-        Self {
-            sheet_hint: 8,
-            smoothing: 0.2,
-            curvature_target: 0.0,
-            curvature_gain: 0.3,
-            spin_gain: 0.2,
-            energy_gain: 0.15,
-            sheet_gain: 0.1,
-            min_scale: 0.25,
-            max_scale: 4.0,
-            avg_curvature: 0.0,
-            avg_spin: 0.0,
-            avg_energy: 0.0,
-        }
+        Self::from_state(SpectralLrAdapterState::default())
+            .expect("default spectral adapter state is valid")
     }
 }
 
@@ -124,6 +96,27 @@ impl SpectralLrAdapter {
             avg_spin: self.avg_spin,
             avg_energy: self.avg_energy,
         }
+    }
+
+    /// Reconstructs an adapter after the Rust checkpoint contract validates it.
+    pub fn from_state(state: SpectralLrAdapterState) -> PureResult<Self> {
+        state
+            .validate()
+            .map_err(|error| TensorError::Generic(error.to_string()))?;
+        Ok(Self {
+            sheet_hint: state.sheet_hint,
+            smoothing: state.smoothing,
+            curvature_target: state.curvature_target,
+            curvature_gain: state.curvature_gain,
+            spin_gain: state.spin_gain,
+            energy_gain: state.energy_gain,
+            sheet_gain: state.sheet_gain,
+            min_scale: state.min_scale,
+            max_scale: state.max_scale,
+            avg_curvature: state.avg_curvature,
+            avg_spin: state.avg_spin,
+            avg_energy: state.avg_energy,
+        })
     }
 
     fn smooth(current: f32, observed: f32, alpha: f32) -> f32 {
@@ -1001,11 +994,13 @@ mod tests {
         let _ = adapter.scale_factor("weight", &features);
 
         let state = adapter.state();
+        let restored = SpectralLrAdapter::from_state(state).unwrap();
         assert_eq!(state.sheet_hint, 4);
         assert_eq!(state.curvature_target, 0.25);
         assert!(state.avg_curvature > 0.0);
         assert!(state.avg_spin > 0.0);
         assert!(state.avg_energy > 0.0);
+        assert_eq!(restored.state(), state);
     }
 
     #[test]
