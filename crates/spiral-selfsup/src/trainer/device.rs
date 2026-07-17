@@ -134,26 +134,68 @@ impl DistributedDevice {
         self
     }
 
-    fn scale_buffer_with_policy(buffer: &mut [f32], scale: f32) -> Result<(), TrainingDeviceError> {
+    fn scaled_buffer_with_policy(buffer: &[f32], scale: f32) -> Result<Vec<f32>, TensorError> {
         if buffer.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let backend = current_tensor_util_backend_for_values(buffer.len());
         let tensor = Tensor::from_vec(1, buffer.len(), buffer.to_vec())?;
         let scaled = tensor.scale_with_backend(scale, backend)?;
-        buffer.copy_from_slice(scaled.data());
+        Ok(scaled.data().to_vec())
+    }
+
+    fn commit_mean_scale_with<F>(
+        &self,
+        buffer: &mut [f32],
+        scale: f32,
+        prepare: F,
+    ) -> Result<(), TrainingDeviceError>
+    where
+        F: FnOnce(&[f32], f32) -> Result<Vec<f32>, TensorError>,
+    {
+        let candidate = prepare(buffer, scale).and_then(|candidate| {
+            if candidate.len() == buffer.len() {
+                Ok(candidate)
+            } else {
+                Err(TensorError::DataLength {
+                    expected: buffer.len(),
+                    got: candidate.len(),
+                })
+            }
+        });
+        let mut ready = [if candidate.is_ok() { 1.0 } else { 0.0 }];
+        st_distributed::all_reduce_with_timeout(
+            &self.session,
+            &mut ready,
+            self.collective_timeout,
+        )?;
+
+        let world_size = self.session.world_size();
+        let successful_ranks = ready[0].clamp(0.0, world_size as f32) as usize;
+        if successful_ranks != world_size {
+            return match candidate {
+                Err(source) => Err(TrainingDeviceError::Tensor(source)),
+                Ok(_) => Err(TrainingDeviceError::PeerTensorFailure {
+                    failed_ranks: world_size.saturating_sub(successful_ranks),
+                    world_size,
+                }),
+            };
+        }
+
+        let candidate = candidate.map_err(TrainingDeviceError::Tensor)?;
+        buffer.copy_from_slice(&candidate);
         Ok(())
     }
 
+    fn commit_mean_scale(&self, buffer: &mut [f32], scale: f32) -> Result<(), TrainingDeviceError> {
+        self.commit_mean_scale_with(buffer, scale, Self::scaled_buffer_with_policy)
+    }
+
     fn all_reduce(&self, buffer: &mut [f32]) -> Result<(), TrainingDeviceError> {
-        let original = buffer.to_vec();
         st_distributed::all_reduce_with_timeout(&self.session, buffer, self.collective_timeout)?;
         if self.strategy == SyncStrategy::AllReduce && self.session.world_size() > 0 {
             let scale = 1.0 / self.session.world_size() as f32;
-            if let Err(error) = Self::scale_buffer_with_policy(buffer, scale) {
-                buffer.copy_from_slice(&original);
-                return Err(error);
-            }
+            self.commit_mean_scale(buffer, scale)?;
         }
         Ok(())
     }
@@ -177,14 +219,10 @@ impl TrainingDevice for DistributedDevice {
         metrics: &mut [f32],
         reduce: MetricReduce,
     ) -> Result<(), TrainingDeviceError> {
-        let original = metrics.to_vec();
         st_distributed::all_reduce_with_timeout(&self.session, metrics, self.collective_timeout)?;
         if reduce == MetricReduce::Mean {
             let scale = 1.0 / TrainingDevice::world_size(self) as f32;
-            if let Err(error) = Self::scale_buffer_with_policy(metrics, scale) {
-                metrics.copy_from_slice(&original);
-                return Err(error);
-            }
+            self.commit_mean_scale(metrics, scale)?;
         }
         Ok(())
     }
@@ -265,4 +303,55 @@ pub enum TrainingDeviceError {
     /// Raised when policy-routed tensor post-processing fails.
     #[error("distributed tensor operation failed: {0}")]
     Tensor(#[from] TensorError),
+    /// Raised on peers when any rank rejects the prepared tensor result.
+    #[error("distributed tensor post-processing failed on {failed_ranks} of {world_size} ranks")]
+    PeerTensorFailure {
+        failed_ranks: usize,
+        world_size: usize,
+    },
+}
+
+#[cfg(test)]
+mod policy_commit_tests {
+    use super::*;
+
+    #[test]
+    fn mean_scale_failure_is_rejected_by_every_rank_without_local_rollback() {
+        let world_size = 2;
+        let mut handles = Vec::new();
+        for rank in 0..world_size {
+            handles.push(std::thread::spawn(move || {
+                let device =
+                    DistributedDevice::new("mean-scale-two-phase-commit", rank, world_size)
+                        .unwrap();
+                let mut values = vec![3.0, 4.0];
+                let result = device.commit_mean_scale_with(&mut values, 0.5, |buffer, scale| {
+                    if rank == 0 {
+                        Err(TensorError::IoError {
+                            message: "injected rank-local scale failure".to_owned(),
+                        })
+                    } else {
+                        Ok(buffer.iter().map(|value| value * scale).collect())
+                    }
+                });
+                (result, values)
+            }));
+        }
+
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        assert!(matches!(results[0].0, Err(TrainingDeviceError::Tensor(_))));
+        assert_eq!(
+            results[1].0,
+            Err(TrainingDeviceError::PeerTensorFailure {
+                failed_ranks: 1,
+                world_size,
+            })
+        );
+        for (_, values) in results {
+            assert_eq!(values, vec![3.0, 4.0]);
+        }
+    }
 }

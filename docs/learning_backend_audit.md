@@ -3849,10 +3849,14 @@ caller gradients nor trainer weights.
 The production `spiral-selfsup::DistributedDevice` follows the same boundary.
 Its rendezvous collective remains host transport, while post-all-reduce mean
 scaling uses `current_tensor_util_backend_for_values()` and
-`Tensor::scale_with_backend()`. A failed numeric scale restores the caller's
-pre-collective buffer. The `ModuleTrainer` integration test therefore exercises
-one policy from planner through accumulator synchronization and local parameter
-application instead of leaving the real distributed path as a hidden CPU loop.
+`Tensor::scale_with_backend()`. Each rank prepares that scaled result in scratch,
+then a one-value collective vote commits it only when every rank succeeded. A
+rank-local backend failure therefore leaves the same completed reduction on all
+peers and returns an error everywhere instead of rolling one participant back
+to a divergent pre-collective buffer. The `ModuleTrainer` integration test
+therefore exercises one policy from planner through accumulator synchronization
+and local parameter application instead of leaving the real distributed path as
+a hidden CPU loop.
 
 Next steps:
 
