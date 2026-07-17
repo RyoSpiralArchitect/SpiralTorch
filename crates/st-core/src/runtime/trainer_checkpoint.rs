@@ -22,7 +22,7 @@ use thiserror::Error;
 pub const TRAINER_RUNTIME_CHECKPOINT_BUNDLE_KIND: &str =
     "spiraltorch.trainer_runtime_checkpoint_bundle";
 pub const TRAINER_RUNTIME_CHECKPOINT_BUNDLE_CONTRACT_VERSION: &str =
-    "spiraltorch.trainer_runtime_checkpoint_bundle.v1";
+    "spiraltorch.trainer_runtime_checkpoint_bundle.v2";
 pub const TRAINER_RUNTIME_CHECKPOINT_BUNDLE_SEMANTIC_OWNER: &str =
     "st-core::runtime::trainer_checkpoint";
 pub const TRAINER_RUNTIME_CHECKPOINT_BUNDLE_SEMANTIC_BACKEND: &str = "rust";

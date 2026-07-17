@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::collective::CollectiveArena;
+use super::collective::{CollectiveArena, CollectiveError};
 use crate::backend::execution::current_tensor_util_route;
 use st_tensor::{
     emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed, Tensor, TensorError,
@@ -33,6 +33,8 @@ pub enum DistributedTrainerError {
         #[source]
         source: TensorError,
     },
+    #[error(transparent)]
+    Collective(#[from] CollectiveError),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -175,6 +177,30 @@ impl DistributedTrainer {
             }
         }
         Self::tensor_error(operation, source)
+    }
+
+    fn map_collective_reduction_error(
+        rows: &[Vec<f32>],
+        cols: usize,
+        error: CollectiveError,
+    ) -> DistributedTrainerError {
+        match error {
+            CollectiveError::NonFiniteReduction { index, value } => {
+                DistributedTrainerError::NonFiniteValue {
+                    label: "reduced_gradient",
+                    index,
+                    value,
+                }
+            }
+            CollectiveError::TensorOperation { source, .. } => Self::map_reduction_error(
+                "sync_gradient_reduction",
+                "reduced_gradient",
+                rows,
+                cols,
+                source,
+            ),
+            error => DistributedTrainerError::Collective(error),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -365,20 +391,17 @@ impl DistributedTrainer {
         } else {
             0.0
         };
-        let reduction_route = current_tensor_route(gradients.len().saturating_mul(self.shard_dim));
-        let gradient_tensor = Self::rows_tensor("sync_gradient_tensor", gradients, self.shard_dim)?;
-        let reduced_gradient = gradient_tensor
-            .try_sum_axis0_with_backend(reduction_route.backend)
+        let mut collective_gradients = gradients.to_vec();
+        let collective_report = self
+            .arena
+            .all_reduce_sum(&mut collective_gradients)
             .map_err(|error| {
-                Self::map_reduction_error(
-                    "sync_gradient_reduction",
-                    "reduced_gradient",
-                    gradients,
-                    self.shard_dim,
-                    error,
-                )
+                Self::map_collective_reduction_error(gradients, self.shard_dim, error)
             })?;
-        Self::validate_finite_slice("reduced_gradient", &reduced_gradient)?;
+        let reduced_gradient = collective_gradients
+            .into_iter()
+            .next()
+            .ok_or(DistributedTrainerError::EmptyTopology)?;
         let workers = gradients.len() as f32;
 
         let parameter_values = self.parameters();
@@ -446,19 +469,22 @@ impl DistributedTrainer {
             emit_tensor_op_meta("distributed_trainer_sync_step", || {
                 serde_json::json!({
                     "backend": "cpu",
-                    "requested_backend": reduction_route.requested_backend,
+                    "requested_backend": collective_report.requested_backend.as_str(),
                     "kind": "st_core_distributed_trainer_sync_step",
                     "control_backend": "cpu_vec_shards",
-                    "gradient_reduction_backend": format!("tensor_util_{}", reduction_route.selected_backend),
+                    "gradient_reduction_backend": format!("tensor_util_{}", collective_report.selected_backend),
                     "parameter_update_backend": format!("tensor_util_{}", update_route.selected_backend),
-                    "gradient_reduction_requested_backend": reduction_route.requested_backend,
+                    "gradient_reduction_requested_backend": collective_report.requested_backend.as_str(),
                     "parameter_update_requested_backend": update_route.requested_backend,
-                    "gradient_reduction_mode": "tensor_sum_axis0_then_host_broadcast",
+                    "gradient_reduction_mode": "collective_arena_tensor_sum_axis0_then_host_broadcast",
                     "parameter_update_mode": "tensor_add_scaled_sharded_sgd_average",
                     "route_blocker": "host_collective_broadcast_and_shard_storage",
                     "numeric_execution_owner": "st-core::backend::execution",
                     "numeric_backend_semantics": "selected_route",
                     "actual_numeric_backend_source": "sum_axis0_and_add_scaled_tensor_op_meta",
+                    "collective_contract_version": collective_report.contract_version.as_str(),
+                    "collective_input_sha256": collective_report.input_sha256.as_str(),
+                    "collective_output_sha256": collective_report.output_sha256.as_str(),
                     "shards": self.parameters.len(),
                     "shard_dim": self.shard_dim,
                     "workers": gradients.len(),
@@ -484,7 +510,7 @@ impl DistributedTrainer {
             });
         }
         Self::validate_finite_slice("async_gradient", gradient)?;
-        self.arena.enqueue_gradient(gradient);
+        self.arena.enqueue_gradient(gradient)?;
         let queued_batches = self.arena.queued_gradient_batches();
         emit_tensor_op(
             "distributed_trainer_async_enqueue",
@@ -514,8 +540,8 @@ impl DistributedTrainer {
     /// Drains all pending asynchronous gradients, applying their averaged update.
     pub fn merge_async_gradients(&mut self) -> Result<bool, DistributedTrainerError> {
         let capture_meta = tensor_op_meta_observer_installed();
-        let gradients = self.arena.drain_gradient_batches();
-        if gradients.is_empty() {
+        let lease = self.arena.lease_gradient_batches();
+        if lease.is_empty() {
             emit_tensor_op(
                 "distributed_trainer_async_merge",
                 &[0, self.total_params().max(1)],
@@ -543,18 +569,14 @@ impl DistributedTrainer {
                     })
                 });
             }
+            lease.commit();
             return Ok(false);
         }
-        let contributions = gradients.len();
-        let result = match self.prepare_async_merge(&gradients, capture_meta) {
-            Ok(result) => result,
-            Err(error) => {
-                self.arena.restore_gradient_batches(gradients);
-                return Err(error);
-            }
-        };
+        let contributions = lease.batches().len();
+        let result = self.prepare_async_merge(lease.batches(), capture_meta)?;
         let total = self.total_params();
         self.parameters = result.next_parameters;
+        lease.commit();
         emit_tensor_op(
             "distributed_trainer_async_merge",
             &[contributions.max(1), total],
@@ -683,7 +705,7 @@ mod tests {
         assert_eq!(sync.1["parameter_update_requested_backend"], "auto");
         assert_eq!(
             sync.1["gradient_reduction_mode"],
-            "tensor_sum_axis0_then_host_broadcast"
+            "collective_arena_tensor_sum_axis0_then_host_broadcast"
         );
         assert_eq!(
             sync.1["parameter_update_mode"],
@@ -704,6 +726,18 @@ mod tests {
         );
         assert_eq!(sync.1["estimated_reduction_values"], 4);
         assert_eq!(sync.1["estimated_parameter_update_values"], 4);
+        assert_eq!(
+            sync.1["collective_contract_version"],
+            crate::distributed::collective::COLLECTIVE_EXECUTION_REPORT_CONTRACT_VERSION
+        );
+        assert_eq!(
+            sync.1["collective_input_sha256"].as_str().unwrap().len(),
+            64
+        );
+        assert_eq!(
+            sync.1["collective_output_sha256"].as_str().unwrap().len(),
+            64
+        );
         assert!(
             sync.1["reduced_gradient_l2"].as_f64().unwrap()
                 > sync.1["gradient_l2_before"].as_f64().unwrap()
@@ -1015,7 +1049,9 @@ mod tests {
     fn async_merge_rejects_non_finite_without_mutating_parameters() {
         let mut trainer = DistributedTrainer::new(1, 2, 0.2).unwrap();
         let before = trainer.parameters();
-        trainer.arena.enqueue_gradient(&[1.0, f32::NAN]);
+        trainer
+            .arena
+            .restore_gradient_batches(vec![vec![1.0, f32::NAN]]);
         let err = trainer.merge_async_gradients().unwrap_err();
         assert!(matches!(
             err,
@@ -1073,7 +1109,7 @@ mod tests {
     #[test]
     fn async_merge_detects_incomplete_payload() {
         let mut trainer = DistributedTrainer::new(1, 2, 0.2).unwrap();
-        trainer.arena.enqueue_gradient(&[1.0]);
+        trainer.arena.restore_gradient_batches(vec![vec![1.0]]);
         let err = trainer.merge_async_gradients().unwrap_err();
         assert_eq!(
             err,

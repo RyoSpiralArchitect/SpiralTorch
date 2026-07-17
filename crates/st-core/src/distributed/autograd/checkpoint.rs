@@ -15,6 +15,7 @@ use super::{
     AgentConfig, AmebaAutograd, AutogradError, CommittedRound, ExecutionOutcome, GradientMessage,
 };
 use crate::causal::NodeId;
+use crate::distributed::wire::{canonical_u64, parse_canonical_u64};
 
 pub const AMEBA_AUTOGRAD_CHECKPOINT_KIND: &str = "spiraltorch.ameba_autograd_checkpoint";
 pub const AMEBA_AUTOGRAD_CHECKPOINT_CONTRACT_VERSION: &str =
@@ -33,25 +34,6 @@ pub const AMEBA_AUTOGRAD_REPLAY_SEMANTIC_BACKEND: &str = "rust";
 
 const STATE_DIGEST_DOMAIN: &[u8] = b"spiraltorch.ameba_autograd.state.v1\0";
 const RECEIPT_DIGEST_DOMAIN: &[u8] = b"spiraltorch.ameba_autograd.receipt.v1\0";
-
-mod canonical_u64 {
-    use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
-
-    pub(super) fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&value.to_string())
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let encoded = String::deserialize(deserializer)?;
-        super::parse_canonical_u64(&encoded).map_err(D::Error::custom)
-    }
-}
 
 /// Versioned, integrity-bound snapshot of the complete Ameba runtime state.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -929,16 +911,6 @@ fn finish_sha256(hasher: Sha256) -> String {
 
 fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).expect("supported Rust targets have at most 64-bit usize")
-}
-
-fn parse_canonical_u64(value: &str) -> Result<u64, &'static str> {
-    if value.is_empty()
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
-        || (value.len() > 1 && value.starts_with('0'))
-    {
-        return Err("must be a canonical unsigned decimal u64");
-    }
-    value.parse().map_err(|_| "must fit the complete u64 range")
 }
 
 fn parse_node_id(field: &str, value: &str) -> Result<NodeId, AmebaAutogradCheckpointError> {

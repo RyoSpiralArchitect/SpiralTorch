@@ -648,21 +648,22 @@ declare module "spiraltorch-wasm" {
         trainer_last: TrainerGnnRoundtableSignalCheckpoint | null;
     };
 
+    /** Native topology uses canonical decimal strings to preserve the complete Rust u64 range. */
     export type TrainerAccumulatorSynchronizerCheckpoint = {
         kind: "spiraltorch.accumulator_synchronizer_checkpoint";
-        contract_version: "spiraltorch.accumulator_synchronizer_checkpoint.v1";
+        contract_version: "spiraltorch.accumulator_synchronizer_checkpoint.v2";
         semantic_owner: "st-core::distributed::AccumulatorSynchronizer";
         semantic_backend: "rust";
         provider: string;
-        rank: number;
-        world_size: number;
+        rank: string;
+        world_size: string;
         state: Record<string, unknown> | null;
     };
 
     /** Rust-produced state for trainer components outside optimizer ownership. */
     export type TrainerExternalStateCheckpoint = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v4";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v5";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         required_components: string[];
@@ -678,7 +679,7 @@ declare module "spiraltorch-wasm" {
     /** Browser preflight receipt; concrete native resources are never reattached here. */
     export type TrainerExternalStateCheckpointValidation = {
         kind: "spiraltorch.trainer_external_state_checkpoint";
-        contract_version: "spiraltorch.trainer_external_state_checkpoint.v4";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v5";
         semantic_owner: "st-core::runtime::trainer_external";
         semantic_backend: "rust";
         execution_client: "wasm";
@@ -697,7 +698,7 @@ declare module "spiraltorch-wasm" {
     /** Integrity-bound Rust envelope for optimizer and supported external state. */
     export type TrainerRuntimeCheckpointBundle = {
         kind: "spiraltorch.trainer_runtime_checkpoint_bundle";
-        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v1";
+        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v2";
         semantic_owner: "st-core::runtime::trainer_checkpoint";
         semantic_backend: "rust";
         resume_scope: TrainerRuntimeCheckpointResumeScope;
@@ -710,7 +711,7 @@ declare module "spiraltorch-wasm" {
     /** Browser preflight receipt; native restore and resource attachment happen elsewhere. */
     export type TrainerRuntimeCheckpointValidation = {
         kind: "spiraltorch.trainer_runtime_checkpoint_bundle";
-        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v1";
+        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v2";
         semantic_owner: "st-core::runtime::trainer_checkpoint";
         semantic_backend: "rust";
         execution_client: "wasm";
