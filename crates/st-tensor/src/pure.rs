@@ -31,15 +31,16 @@ pub use self::topos::{
     topos_optimizer_gradient_bias_amplitude, topos_optimizer_gradient_bias_basis,
     topos_optimizer_gradient_clip_threshold, GraphGuardProfile, GraphGuardReport,
     LawvereTierneyGuard, ModalityProfile, MultiModalAtlas, MultiModalBiome, MultiModalToposGuard,
-    OpenCartesianTopos, RewardBoundary, RewardBoundarySignal, RewriteMonad, TensorBiome,
-    ToposAtlas, ToposControlPlanOptions, ToposControlSignal, ToposControlSignalInput,
-    ToposControlSignalPayload, ToposInferenceHints, ToposInferenceHintsInput,
-    ToposInferenceHintsPayload, ToposInferencePlan, ToposInferencePlanOptions,
-    ToposInferencePlanPayload, ToposOptimizerApplicationPayload, ToposOptimizerGradientStep,
-    ToposOptimizerSnapshotPayload, ToposOptimizerStateControl, ToposRuntimeMode,
-    ToposRuntimeProfile, ToposRuntimeProfileInput, ToposRuntimeProfilePayload, ToposRuntimeRoute,
-    ToposRuntimeRoutePayload, ToposRuntimeRouteScores, ToposRuntimeRouteScoresPayload,
-    ToposTrainingHints, ToposTrainingHintsInput, ToposTrainingHintsPayload, ToposTrainingPlan,
+    OpenCartesianTopos, OpenCartesianToposCheckpoint, RewardBoundary, RewardBoundarySignal,
+    RewriteMonad, TensorBiome, ToposAtlas, ToposControlPlanOptions, ToposControlSignal,
+    ToposControlSignalInput, ToposControlSignalPayload, ToposInferenceHints,
+    ToposInferenceHintsInput, ToposInferenceHintsPayload, ToposInferencePlan,
+    ToposInferencePlanOptions, ToposInferencePlanPayload, ToposOptimizerApplicationPayload,
+    ToposOptimizerGradientStep, ToposOptimizerSnapshotPayload, ToposOptimizerStateCheckpoint,
+    ToposOptimizerStateControl, ToposRuntimeMode, ToposRuntimeProfile, ToposRuntimeProfileInput,
+    ToposRuntimeProfilePayload, ToposRuntimeRoute, ToposRuntimeRoutePayload,
+    ToposRuntimeRouteScores, ToposRuntimeRouteScoresPayload, ToposTrainingHints,
+    ToposTrainingHintsInput, ToposTrainingHintsPayload, ToposTrainingPlan,
     ToposTrainingPlanPayload, ToposZSpaceProjection, ToposZSpaceProjectionOptions,
     ToposZSpaceProjectionPayload, ZBox, ZBoxSite, TOPOS_CONTROL_SIGNAL_CONTRACT_VERSION,
     TOPOS_CONTROL_SIGNAL_KIND, TOPOS_CONTROL_SIGNAL_SEMANTIC_BACKEND,
@@ -7621,6 +7622,21 @@ pub struct AmegaHypergrad {
     optimizer_momentum: Vec<f32>,
 }
 
+/// Serializable state required to continue an [`AmegaHypergrad`] update
+/// without resetting its accumulator or Topos momentum.
+#[derive(Clone, Debug, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmegaHypergradCheckpoint {
+    pub curvature: f32,
+    pub learning_rate: f32,
+    pub rows: usize,
+    pub cols: usize,
+    pub gradient: Vec<f32>,
+    pub topos: OpenCartesianToposCheckpoint,
+    pub optimizer_state: ToposOptimizerStateCheckpoint,
+    pub optimizer_momentum: Vec<f32>,
+}
+
 struct PreparedAmegaUpdate {
     weights: Tensor,
     next_momentum: Option<Vec<f32>>,
@@ -8994,6 +9010,51 @@ pub struct AmegaRealgrad {
     optimizer_momentum: Vec<f32>,
 }
 
+/// Serializable state required to continue an [`AmegaRealgrad`] update.
+#[derive(Clone, Debug, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmegaRealgradCheckpoint {
+    pub learning_rate: f32,
+    pub rows: usize,
+    pub cols: usize,
+    pub gradient: Vec<f32>,
+    pub optimizer_state: ToposOptimizerStateCheckpoint,
+    pub optimizer_momentum: Vec<f32>,
+}
+
+fn validate_amega_checkpoint_shape(
+    label: &'static str,
+    rows: usize,
+    cols: usize,
+    gradient: &[f32],
+    optimizer_momentum: &[f32],
+) -> PureResult<()> {
+    if rows == 0 || cols == 0 {
+        return Err(TensorError::InvalidDimensions { rows, cols });
+    }
+    let expected = rows
+        .checked_mul(cols)
+        .ok_or(TensorError::InvalidValue { label })?;
+    if gradient.len() != expected {
+        return Err(TensorError::DataLength {
+            expected,
+            got: gradient.len(),
+        });
+    }
+    if !optimizer_momentum.is_empty() && optimizer_momentum.len() != expected {
+        return Err(TensorError::DataLength {
+            expected,
+            got: optimizer_momentum.len(),
+        });
+    }
+    for &value in gradient.iter().chain(optimizer_momentum) {
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+    }
+    Ok(())
+}
+
 impl AmegaHypergrad {
     /// Create a new hypergradient tape with the provided curvature and step size.
     pub fn new(curvature: f32, learning_rate: f32, rows: usize, cols: usize) -> PureResult<Self> {
@@ -9031,6 +9092,65 @@ impl AmegaHypergrad {
             topos,
             optimizer_state_control: ToposOptimizerStateControl::neutral(),
             optimizer_momentum: Vec::new(),
+        })
+    }
+
+    /// Captures the complete tape state for a lossless optimizer checkpoint.
+    pub fn checkpoint(&self) -> AmegaHypergradCheckpoint {
+        AmegaHypergradCheckpoint {
+            curvature: self.curvature,
+            learning_rate: self.learning_rate,
+            rows: self.rows,
+            cols: self.cols,
+            gradient: self.gradient.clone(),
+            topos: self.topos.checkpoint(),
+            optimizer_state: self.optimizer_state_control.into(),
+            optimizer_momentum: self.optimizer_momentum.clone(),
+        }
+    }
+
+    /// Reconstructs a tape after validating every transported value.
+    pub fn from_checkpoint(checkpoint: AmegaHypergradCheckpoint) -> PureResult<Self> {
+        validate_amega_checkpoint_shape(
+            "hypergrad_checkpoint",
+            checkpoint.rows,
+            checkpoint.cols,
+            &checkpoint.gradient,
+            &checkpoint.optimizer_momentum,
+        )?;
+        if checkpoint.curvature >= 0.0 || !checkpoint.curvature.is_finite() {
+            return Err(TensorError::NonHyperbolicCurvature {
+                curvature: checkpoint.curvature,
+            });
+        }
+        if checkpoint.learning_rate <= 0.0 || !checkpoint.learning_rate.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: checkpoint.learning_rate,
+            });
+        }
+        if checkpoint.topos.curvature.to_bits() != checkpoint.curvature.to_bits() {
+            return Err(TensorError::CurvatureMismatch {
+                expected: checkpoint.curvature,
+                got: checkpoint.topos.curvature,
+            });
+        }
+        let topos = checkpoint.topos.into_topos()?;
+        let optimizer_state_control = checkpoint.optimizer_state.into_control()?;
+        let summary = GradientSummary::from_slice(&checkpoint.gradient);
+        Ok(Self {
+            curvature: checkpoint.curvature,
+            learning_rate: checkpoint.learning_rate,
+            rows: checkpoint.rows,
+            cols: checkpoint.cols,
+            gradient: checkpoint.gradient,
+            summary: Cell::new(summary),
+            summary_dirty: Cell::new(false),
+            min_dirty: Cell::new(false),
+            max_dirty: Cell::new(false),
+            linf_dirty: Cell::new(false),
+            topos,
+            optimizer_state_control,
+            optimizer_momentum: checkpoint.optimizer_momentum,
         })
     }
 
@@ -10180,6 +10300,43 @@ impl AmegaRealgrad {
             gradient: vec![0.0; rows * cols],
             optimizer_state_control: ToposOptimizerStateControl::neutral(),
             optimizer_momentum: Vec::new(),
+        })
+    }
+
+    /// Captures the complete tape state for a lossless optimizer checkpoint.
+    pub fn checkpoint(&self) -> AmegaRealgradCheckpoint {
+        AmegaRealgradCheckpoint {
+            learning_rate: self.learning_rate,
+            rows: self.rows,
+            cols: self.cols,
+            gradient: self.gradient.clone(),
+            optimizer_state: self.optimizer_state_control.into(),
+            optimizer_momentum: self.optimizer_momentum.clone(),
+        }
+    }
+
+    /// Reconstructs a tape after validating every transported value.
+    pub fn from_checkpoint(checkpoint: AmegaRealgradCheckpoint) -> PureResult<Self> {
+        validate_amega_checkpoint_shape(
+            "realgrad_checkpoint",
+            checkpoint.rows,
+            checkpoint.cols,
+            &checkpoint.gradient,
+            &checkpoint.optimizer_momentum,
+        )?;
+        if checkpoint.learning_rate <= 0.0 || !checkpoint.learning_rate.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: checkpoint.learning_rate,
+            });
+        }
+        let optimizer_state_control = checkpoint.optimizer_state.into_control()?;
+        Ok(Self {
+            learning_rate: checkpoint.learning_rate,
+            rows: checkpoint.rows,
+            cols: checkpoint.cols,
+            gradient: checkpoint.gradient,
+            optimizer_state_control,
+            optimizer_momentum: checkpoint.optimizer_momentum,
         })
     }
 
@@ -15807,6 +15964,79 @@ mod tests {
         unwrap_ok(tape.accumulate_pair(&prediction, &target));
         assert!((tape.gradient()[0] - 0.25).abs() < 1e-6);
         assert!((tape.gradient()[1] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amega_hypergrad_checkpoint_preserves_topos_gradient_and_momentum() {
+        let guard = unwrap_ok(LawvereTierneyGuard::new(1.0e-5, 250.0, 1.0e-4));
+        let site = unwrap_ok(
+            ZBoxSite::default_for(-0.7).and_then(|site| site.with_radius_window(0.02, 12.0)),
+        )
+        .with_guard(guard);
+        let topos = unwrap_ok(
+            OpenCartesianTopos::new(-0.7, 1.0e-5, 500.0, 32, 2)
+                .and_then(|topos| topos.with_porosity(0.4))
+                .and_then(|topos| topos.with_site(site)),
+        );
+        let mut tape = unwrap_ok(AmegaHypergrad::with_topos(-0.7, 0.03, 1, 2, topos));
+        let control = unwrap_ok(ToposOptimizerStateControl::new(
+            0.1,
+            [0.25, -0.25, 0.5, -0.5, 0.1, -0.1, 0.2, -0.2, 0.0, 0.3],
+            0.8,
+            0.5,
+        ));
+        tape.configure_optimizer_state(control);
+        tape.gradient_mut().copy_from_slice(&[0.4, -0.2]);
+        let mut weights = unwrap_ok(Tensor::from_vec(1, 2, vec![0.8, -0.6]));
+        unwrap_ok(tape.apply(&mut weights));
+        tape.gradient_mut().copy_from_slice(&[0.1, 0.3]);
+
+        let encoded = serde_json::to_string(&tape.checkpoint()).unwrap();
+        let decoded: AmegaHypergradCheckpoint = serde_json::from_str(&encoded).unwrap();
+        let mut restored = unwrap_ok(AmegaHypergrad::from_checkpoint(decoded));
+
+        assert_eq!(restored.checkpoint(), tape.checkpoint());
+        let mut expected_weights = weights.clone();
+        let mut restored_weights = weights;
+        unwrap_ok(tape.apply(&mut expected_weights));
+        unwrap_ok(restored.apply(&mut restored_weights));
+        assert_eq!(restored_weights.data(), expected_weights.data());
+        assert_eq!(restored.optimizer_momentum(), tape.optimizer_momentum());
+    }
+
+    #[test]
+    fn amega_realgrad_checkpoint_is_lossless_and_rejects_non_finite_state() {
+        let mut tape = unwrap_ok(AmegaRealgrad::new(0.02, 1, 2));
+        let control = unwrap_ok(ToposOptimizerStateControl::new(
+            0.05,
+            [0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4, 0.0, 0.2],
+            0.9,
+            0.4,
+        ));
+        tape.configure_optimizer_state(control);
+        tape.gradient_mut().copy_from_slice(&[0.3, -0.5]);
+        let mut weights = unwrap_ok(Tensor::from_vec(1, 2, vec![0.2, 0.7]));
+        unwrap_ok(tape.apply(&mut weights));
+        tape.gradient_mut().copy_from_slice(&[-0.1, 0.25]);
+
+        let checkpoint = tape.checkpoint();
+        let mut restored = unwrap_ok(AmegaRealgrad::from_checkpoint(checkpoint.clone()));
+        assert_eq!(restored.checkpoint(), checkpoint);
+        let mut expected_weights = weights.clone();
+        let mut restored_weights = weights;
+        unwrap_ok(tape.apply(&mut expected_weights));
+        unwrap_ok(restored.apply(&mut restored_weights));
+        assert_eq!(restored_weights.data(), expected_weights.data());
+
+        let mut invalid = checkpoint;
+        invalid.optimizer_momentum[0] = f32::NAN;
+        assert!(matches!(
+            AmegaRealgrad::from_checkpoint(invalid),
+            Err(TensorError::NonFiniteValue {
+                label: "realgrad_checkpoint",
+                ..
+            })
+        ));
     }
 
     #[test]

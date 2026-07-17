@@ -38,7 +38,7 @@ use crate::language::{
     DesireTrainerSummary,
 };
 use crate::loss::Loss;
-use crate::module::Module;
+use crate::module::{Module, PreparedParameterOptimizerState};
 use crate::optim::{
     emit_parameter_control_receipt, parameter_control_error, plan_zspace_parameter_control,
     scale_module_learning_rates, LocalLearningRateAdapter, SpectralLrAdapter,
@@ -86,8 +86,13 @@ use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, SoftHeuristicAdoptionReport, StepMetrics,
 };
 use st_core::runtime::trainer_optimizer::{
-    evaluate_trainer_optimizer_config, TrainerOptimizerConfig, TrainerOptimizerConfigContract,
-    TrainerOptimizerConfigError,
+    build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
+    evaluate_trainer_optimizer_config, TrainerBackendCounters, TrainerCurvatureSchedulerState,
+    TrainerExecutionTopology, TrainerOptimizerCheckpoint, TrainerOptimizerCheckpointError,
+    TrainerOptimizerCheckpointValidation, TrainerOptimizerConfig, TrainerOptimizerConfigContract,
+    TrainerOptimizerConfigError, TrainerOptimizerRuntimeState, TrainerPhaseTrackerState,
+    TrainerSoftLogicConfigState, TrainerSoftLogicFeedbackState, TrainerSoftLogicState,
+    TrainerSpectralPolicyState, TRAINER_CURVATURE_PRESSURE_MAX,
 };
 use st_core::runtime::zspace_optimizer::{
     zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
@@ -115,6 +120,7 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+use thiserror::Error;
 
 #[cfg(all(test, feature = "selfsup"))]
 fn tensor_meta_observer_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -143,8 +149,6 @@ pub struct CurvatureScheduler {
     dither_sign: f32,
 }
 
-const CURVATURE_PRESSURE_MAX: f32 = 1.0e19;
-
 impl CurvatureScheduler {
     /// Builds a scheduler anchored to the provided curvature range and target
     /// gradient pressure. `initial` is clamped into `[min_curvature,
@@ -160,7 +164,11 @@ impl CurvatureScheduler {
         Self {
             min_curvature,
             max_curvature,
-            target_pressure: target_pressure.max(0.0),
+            target_pressure: if target_pressure.is_finite() {
+                target_pressure.clamp(0.0, TRAINER_CURVATURE_PRESSURE_MAX)
+            } else {
+                0.0
+            },
             tolerance: 0.05,
             step: 0.05,
             kp: 1.0,
@@ -386,6 +394,53 @@ impl CurvatureScheduler {
         }
     }
 
+    /// Captures configuration and pressure history for deterministic resume.
+    pub fn state(&self) -> TrainerCurvatureSchedulerState {
+        TrainerCurvatureSchedulerState {
+            min_curvature: self.min_curvature,
+            max_curvature: self.max_curvature,
+            target_pressure: self.target_pressure,
+            tolerance: self.tolerance,
+            step: self.step,
+            proportional_gain: self.kp,
+            smoothing: self.alpha,
+            current: self.current,
+            ema_pressure: self.ema_pressure,
+            ema_pressure2: self.ema_pressure2,
+            stability_threshold: self.stability_threshold,
+            stability_boost: self.stability_boost,
+            stable_steps: self.stable_steps,
+            dither_strength: self.dither_strength,
+            dither_period: self.dither_period,
+            dither_sign: self.dither_sign,
+        }
+    }
+
+    /// Reconstructs a scheduler only after the Rust checkpoint validator accepts it.
+    pub fn from_state(
+        state: TrainerCurvatureSchedulerState,
+    ) -> Result<Self, TrainerOptimizerCheckpointError> {
+        state.validate()?;
+        Ok(Self {
+            min_curvature: state.min_curvature,
+            max_curvature: state.max_curvature,
+            target_pressure: state.target_pressure,
+            tolerance: state.tolerance,
+            step: state.step,
+            kp: state.proportional_gain,
+            alpha: state.smoothing,
+            current: state.current,
+            ema_pressure: state.ema_pressure,
+            ema_pressure2: state.ema_pressure2,
+            stability_threshold: state.stability_threshold,
+            stability_boost: state.stability_boost,
+            stable_steps: state.stable_steps,
+            dither_strength: state.dither_strength,
+            dither_period: state.dither_period,
+            dither_sign: state.dither_sign,
+        })
+    }
+
     /// Synchronises the scheduler with an externally adjusted curvature and
     /// clears the pressure history so subsequent observations start fresh.
     pub fn sync(&mut self, curvature: f32) {
@@ -415,7 +470,9 @@ impl CurvatureScheduler {
 
     /// Adjusts the target pressure for future observations.
     pub fn set_target_pressure(&mut self, target_pressure: f32) {
-        self.target_pressure = target_pressure.max(0.0);
+        if target_pressure.is_finite() {
+            self.target_pressure = target_pressure.clamp(0.0, TRAINER_CURVATURE_PRESSURE_MAX);
+        }
     }
 
     /// Adjusts the maximum step a single observation may move the curvature by.
@@ -480,7 +537,7 @@ impl CurvatureScheduler {
     /// Records a raw pressure observation without requiring a full gradient summary.
     pub fn observe_pressure(&mut self, raw_pressure: f32) -> CurvatureDecision {
         let raw_pressure = if raw_pressure.is_finite() {
-            raw_pressure.max(0.0).min(CURVATURE_PRESSURE_MAX)
+            raw_pressure.clamp(0.0, TRAINER_CURVATURE_PRESSURE_MAX)
         } else {
             0.0
         };
@@ -493,8 +550,7 @@ impl CurvatureScheduler {
             Some(prev) => prev + alpha * (raw_pressure - prev),
             None => raw_pressure,
         }
-        .max(0.0)
-        .min(CURVATURE_PRESSURE_MAX);
+        .clamp(0.0, TRAINER_CURVATURE_PRESSURE_MAX);
         self.ema_pressure = Some(smoothed);
         let raw_sq =
             (f64::from(raw_pressure) * f64::from(raw_pressure)).min(f64::from(f32::MAX)) as f32;
@@ -502,8 +558,7 @@ impl CurvatureScheduler {
             Some(prev) => prev + alpha * (raw_sq - prev),
             None => raw_sq,
         }
-        .max(0.0)
-        .min(f32::MAX);
+        .clamp(0.0, f32::MAX);
         self.ema_pressure2 = Some(smoothed_sq);
         let variance =
             (f64::from(smoothed_sq) - f64::from(smoothed) * f64::from(smoothed)).max(0.0);
@@ -1781,6 +1836,28 @@ pub struct EpochTensorBackendStats {
 }
 
 impl EpochTensorBackendStats {
+    fn checkpoint_counters(&self) -> TrainerBackendCounters {
+        TrainerBackendCounters {
+            epochs_recorded: 1,
+            ops_total: self.ops_total as u64,
+            fallbacks: self.fallbacks as u64,
+            backend_wgpu: self.backend_wgpu as u64,
+            backend_cuda: self.backend_cuda as u64,
+            backend_hip: self.backend_hip as u64,
+            backend_cpu: self
+                .backend_cpu
+                .saturating_add(self.backend_cpu_simd)
+                .saturating_add(self.backend_f64_cpu)
+                .saturating_add(self.backend_faer)
+                .saturating_add(self.backend_naive) as u64,
+            backend_other: self.backend_other as u64,
+            requested_wgpu_hits: self.requested_wgpu_hits as u64,
+            requested_wgpu_runtime_fallbacks: self.requested_wgpu_runtime_fallbacks as u64,
+            requested_wgpu_component_hits: self.requested_wgpu_component_hits as u64,
+            requested_wgpu_component_fallbacks: self.requested_wgpu_component_fallbacks as u64,
+        }
+    }
+
     pub fn requested_wgpu_total(&self) -> usize {
         self.requested_wgpu_hits
             .saturating_add(self.requested_wgpu_runtime_fallbacks)
@@ -2750,6 +2827,7 @@ pub struct ModuleTrainer {
     spectral_adapter: SpectralLrAdapter,
     accumulator_synchronizer: Option<Arc<dyn AccumulatorSynchronizer>>,
     last_accumulator_sync: TrainerAccumulatorSyncStats,
+    cumulative_backend_counters: TrainerBackendCounters,
     desire_bridge: Option<DesireTrainerBridge>,
     desire_roundtable_bridge: Option<DesireRoundtableBridge>,
     last_desire_roundtable_summary: Option<DesireRoundtableSummary>,
@@ -2826,6 +2904,23 @@ pub struct TrainerOptimizerState {
     pub training_rank: usize,
     pub training_world_size: usize,
     pub spectral_adapter: SpectralLrAdapterState,
+    pub backend_counters: TrainerBackendCounters,
+}
+
+#[derive(Debug, Error)]
+pub enum TrainerCheckpointError {
+    #[error(transparent)]
+    Contract(#[from] TrainerOptimizerCheckpointError),
+    #[error(transparent)]
+    Tensor(#[from] TensorError),
+    #[error("checkpoint execution topology does not match the configured trainer")]
+    TopologyMismatch,
+    #[error("checkpoint parameter set does not match the target module: {message}")]
+    ParameterSetMismatch { message: String },
+    #[error("checkpoint epoch {epoch} does not fit this platform")]
+    EpochOutOfRange { epoch: u64 },
+    #[error("checkpoint counter {field}={value} does not fit this platform")]
+    CounterOutOfRange { field: &'static str, value: u64 },
 }
 
 impl TrainerOptimizerState {
@@ -2928,6 +3023,22 @@ impl TrainerOptimizerState {
         extra.insert(
             "optim_state_adapter_max_scale".to_string(),
             self.spectral_adapter.max_scale as f64,
+        );
+        extra.insert(
+            "optim_state_backend_epochs".to_string(),
+            self.backend_counters.epochs_recorded as f64,
+        );
+        extra.insert(
+            "optim_state_backend_ops".to_string(),
+            self.backend_counters.ops_total as f64,
+        );
+        extra.insert(
+            "optim_state_backend_fallbacks".to_string(),
+            self.backend_counters.fallbacks as f64,
+        );
+        extra.insert(
+            "optim_state_wgpu_runtime_fallbacks".to_string(),
+            self.backend_counters.requested_wgpu_runtime_fallbacks as f64,
         );
     }
 }
@@ -3493,6 +3604,49 @@ impl Default for SoftLogicConfig {
 }
 
 impl SoftLogicConfig {
+    fn checkpoint_state(self) -> TrainerSoftLogicConfigState {
+        TrainerSoftLogicConfigState {
+            inertia: self.inertia,
+            inertia_min: self.inertia_min,
+            inertia_drift_k: self.inertia_drift_k,
+            inertia_z_k: self.inertia_z_k,
+            drift_gain: self.drift_gain,
+            psi_gain: self.psi_gain,
+            loss_gain: self.loss_gain,
+            floor: self.floor,
+            scale_gain: self.scale_gain,
+            region_gain: self.region_gain,
+            region_factor_gain: self.region_factor_gain,
+            energy_equalize_gain: self.energy_equalize_gain,
+            mean_normalize_gain: self.mean_normalize_gain,
+            energy_equalize_auto: self.energy_equalize_auto,
+            mean_normalize_auto: self.mean_normalize_auto,
+        }
+    }
+
+    fn from_checkpoint_state(
+        state: TrainerSoftLogicConfigState,
+    ) -> Result<Self, TrainerOptimizerCheckpointError> {
+        state.validate()?;
+        Ok(Self {
+            inertia: state.inertia,
+            inertia_min: state.inertia_min,
+            inertia_drift_k: state.inertia_drift_k,
+            inertia_z_k: state.inertia_z_k,
+            drift_gain: state.drift_gain,
+            psi_gain: state.psi_gain,
+            loss_gain: state.loss_gain,
+            floor: state.floor,
+            scale_gain: state.scale_gain,
+            region_gain: state.region_gain,
+            region_factor_gain: state.region_factor_gain,
+            energy_equalize_gain: state.energy_equalize_gain,
+            mean_normalize_gain: state.mean_normalize_gain,
+            energy_equalize_auto: state.energy_equalize_auto,
+            mean_normalize_auto: state.mean_normalize_auto,
+        })
+    }
+
     pub fn clamp_inplace(&mut self) {
         if !self.inertia.is_finite() {
             self.inertia = 0.65;
@@ -3719,6 +3873,73 @@ impl SoftLogicFlex {
         self.equalize_guard_on = false;
         self.equalize_clamp_on = false;
         self.normalize_on = false;
+    }
+
+    fn state(&self) -> TrainerSoftLogicState {
+        TrainerSoftLogicState {
+            config: self.config.checkpoint_state(),
+            last_weights: [
+                self.last_weights.0,
+                self.last_weights.1,
+                self.last_weights.2,
+            ],
+            last_z: self.last_z,
+            last_feedback: self.last_feedback.as_ref().map(|feedback| {
+                TrainerSoftLogicFeedbackState {
+                    z_signal: feedback.z_signal,
+                    scale_log_radius: feedback.scale.map(|scale| scale.log_radius),
+                }
+            }),
+            last_inertia: self.last_inertia,
+            last_region: self.last_region,
+            last_region_factor: self.last_region_factor,
+            last_region_scale: [
+                self.last_region_scale.0,
+                self.last_region_scale.1,
+                self.last_region_scale.2,
+            ],
+            equalize_state: self.equalize_state,
+            mean_normalize_state: self.mean_normalize_state,
+            pending_events: self.pending_events.clone(),
+            equalize_guard_on: self.equalize_guard_on,
+            equalize_clamp_on: self.equalize_clamp_on,
+            normalize_on: self.normalize_on,
+        }
+    }
+
+    fn from_state(state: TrainerSoftLogicState) -> Result<Self, TrainerOptimizerCheckpointError> {
+        state.validate()?;
+        let config = SoftLogicConfig::from_checkpoint_state(state.config)?;
+        let last_feedback = state.last_feedback.map(|feedback| SoftlogicZFeedback {
+            z_signal: feedback.z_signal,
+            scale: feedback.scale_log_radius.and_then(ZScale::from_log),
+            ..SoftlogicZFeedback::default()
+        });
+        Ok(Self {
+            config,
+            last_weights: (
+                state.last_weights[0],
+                state.last_weights[1],
+                state.last_weights[2],
+            ),
+            last_z: state.last_z,
+            last_feedback,
+            last_inertia: state.last_inertia,
+            last_region: state.last_region,
+            last_region_factor: state.last_region_factor,
+            last_region_scale: (
+                state.last_region_scale[0],
+                state.last_region_scale[1],
+                state.last_region_scale[2],
+            ),
+            equalize_state: state.equalize_state,
+            mean_normalize_state: state.mean_normalize_state,
+            adaptive_metrics: SoftLogicAdaptiveMetrics::default(),
+            pending_events: state.pending_events,
+            equalize_guard_on: state.equalize_guard_on,
+            equalize_clamp_on: state.equalize_clamp_on,
+            normalize_on: state.normalize_on,
+        })
     }
 
     fn adaptive_metrics(&self) -> SoftLogicAdaptiveMetrics {
@@ -4101,6 +4322,114 @@ impl SpectralLearningRatePolicy {
         }
     }
 
+    /// Captures configuration and every smoothing accumulator used by the policy.
+    pub fn state(&self) -> TrainerSpectralPolicyState {
+        TrainerSpectralPolicyState {
+            smoothing: self.smoothing,
+            event_smoothing: self.event_smoothing,
+            turnover_smoothing: self.turnover_smoothing,
+            coherence_gain: self.coherence_gain,
+            curvature_gain: self.curvature_gain,
+            sheet_gain: self.sheet_gain,
+            spin_gain: self.spin_gain,
+            radius_gain: self.radius_gain,
+            energy_gain: self.energy_gain,
+            phase_gain: self.phase_gain,
+            stuck_phase_gain: self.stuck_phase_gain,
+            max_phase_gain: self.max_phase_gain,
+            stuck_turnover_threshold: self.stuck_turnover_threshold,
+            dominant_turnover: self.dominant_turnover,
+            last_dominant: self.last_dominant,
+            last_label: self.last_label,
+            min_lr_scale: self.min_lr_scale,
+            max_lr_scale: self.max_lr_scale,
+            max_lr_step: self.max_lr_step,
+            min_band_scale: self.min_band_scale,
+            max_band_scale: self.max_band_scale,
+            band_state: [self.band_state.0, self.band_state.1, self.band_state.2],
+            lr_state: self.lr_state,
+            applied_lr_scale: self.applied_lr_scale,
+            local_lr_state: [
+                self.local_lr_state.0,
+                self.local_lr_state.1,
+                self.local_lr_state.2,
+            ],
+        }
+    }
+
+    /// Reconstructs a policy after Rust validates all transported state.
+    pub fn from_state(
+        state: TrainerSpectralPolicyState,
+    ) -> Result<Self, TrainerOptimizerCheckpointError> {
+        state.validate()?;
+        Ok(Self {
+            smoothing: state.smoothing,
+            event_smoothing: state.event_smoothing,
+            turnover_smoothing: state.turnover_smoothing,
+            coherence_gain: state.coherence_gain,
+            curvature_gain: state.curvature_gain,
+            sheet_gain: state.sheet_gain,
+            spin_gain: state.spin_gain,
+            radius_gain: state.radius_gain,
+            energy_gain: state.energy_gain,
+            phase_gain: state.phase_gain,
+            stuck_phase_gain: state.stuck_phase_gain,
+            max_phase_gain: state.max_phase_gain,
+            stuck_turnover_threshold: state.stuck_turnover_threshold,
+            dominant_turnover: state.dominant_turnover,
+            last_dominant: state.last_dominant,
+            last_label: state.last_label,
+            min_lr_scale: state.min_lr_scale,
+            max_lr_scale: state.max_lr_scale,
+            max_lr_step: state.max_lr_step,
+            min_band_scale: state.min_band_scale,
+            max_band_scale: state.max_band_scale,
+            band_state: (
+                state.band_state[0],
+                state.band_state[1],
+                state.band_state[2],
+            ),
+            lr_state: state.lr_state,
+            applied_lr_scale: state.applied_lr_scale,
+            local_lr_state: (
+                state.local_lr_state[0],
+                state.local_lr_state[1],
+                state.local_lr_state[2],
+            ),
+        })
+    }
+
+    fn clamp_state_to_bounds(&mut self) {
+        self.band_state.0 = self
+            .band_state
+            .0
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.band_state.1 = self
+            .band_state
+            .1
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.band_state.2 = self
+            .band_state
+            .2
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.local_lr_state.0 = self
+            .local_lr_state
+            .0
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.local_lr_state.1 = self
+            .local_lr_state
+            .1
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.local_lr_state.2 = self
+            .local_lr_state
+            .2
+            .clamp(self.min_band_scale, self.max_band_scale);
+        self.lr_state = self.lr_state.clamp(self.min_lr_scale, self.max_lr_scale);
+        self.applied_lr_scale = self
+            .applied_lr_scale
+            .clamp(self.min_lr_scale, self.max_lr_scale);
+    }
+
     pub fn with_smoothing(mut self, smoothing: f32) -> Self {
         if smoothing.is_finite() && smoothing > 0.0 {
             self.smoothing = smoothing.clamp(1.0e-3, 1.0);
@@ -4187,6 +4516,7 @@ impl SpectralLearningRatePolicy {
         if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
             self.min_lr_scale = min;
             self.max_lr_scale = max;
+            self.clamp_state_to_bounds();
         }
         self
     }
@@ -4195,6 +4525,7 @@ impl SpectralLearningRatePolicy {
         if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
             self.min_band_scale = min;
             self.max_band_scale = max;
+            self.clamp_state_to_bounds();
         }
         self
     }
@@ -4296,6 +4627,7 @@ impl SpectralLearningRatePolicy {
         self.max_phase_gain = self.max_phase_gain.max(0.0);
         self.phase_gain = self.phase_gain.max(0.0);
         self.stuck_phase_gain = self.stuck_phase_gain.max(0.0);
+        self.clamp_state_to_bounds();
     }
 
     /// Applies environment overrides and returns `self` for fluent construction.
@@ -4769,6 +5101,7 @@ impl ModuleTrainer {
             spectral_adapter,
             accumulator_synchronizer: None,
             last_accumulator_sync: TrainerAccumulatorSyncStats::disabled(),
+            cumulative_backend_counters: TrainerBackendCounters::default(),
             desire_bridge: None,
             desire_roundtable_bridge: None,
             last_desire_roundtable_summary: None,
@@ -5599,6 +5932,119 @@ impl ModuleTrainer {
         (false, 0, 1)
     }
 
+    fn optimizer_external_state_required(&self) -> Vec<String> {
+        let mut components = Vec::new();
+        if self.blackcat.is_some() {
+            components.push("blackcat_runtime");
+        }
+        if self.blackcat_moderator.is_some() {
+            components.push("blackcat_moderator");
+        }
+        if self.autopilot.is_some() {
+            components.push("autopilot");
+        }
+        if self.band_weight_fn.is_some() {
+            components.push("band_weight_function");
+        }
+        if self.text_infusion.is_some() {
+            components.push("text_infusion");
+        }
+        if self.injector_enabled {
+            components.push("injector");
+        }
+        if self.distribution.is_some() {
+            components.push("roundtable_distribution");
+        }
+        if self.meta_conductor.is_some() {
+            components.push("meta_conductor");
+        }
+        if self.rewrite_budget.is_some() {
+            components.push("rewrite_budget");
+        }
+        if self.accumulator_synchronizer.is_some() {
+            components.push("accumulator_synchronizer");
+        }
+        if self.desire_bridge.is_some() {
+            components.push("desire_bridge");
+        }
+        if self.desire_roundtable_bridge.is_some() {
+            components.push("desire_roundtable_bridge");
+        }
+        #[cfg(feature = "psi")]
+        if self.desire_psi_bridge.is_some() {
+            components.push("desire_psi_bridge");
+        }
+        if self.graph_bridge.is_some() || self.graph_pending.is_some() {
+            components.push("graph_consensus_bridge");
+        }
+        if self.gnn_roundtable_bridge.is_some() {
+            components.push("gnn_roundtable_bridge");
+        }
+        if self.coherence_bridge.is_some() || self.pending_coherence.is_some() {
+            components.push("coherence_bridge");
+        }
+        if matches!(&self.loss_strategy, LossStrategy::Region(_)) {
+            components.push("region_loss_strategy");
+        }
+        #[cfg(feature = "golden")]
+        if self.golden_pulse.is_some()
+            || self.golden_directive.is_some()
+            || self.golden_council.is_some()
+        {
+            components.push("golden_runtime");
+        }
+        #[cfg(feature = "psi")]
+        if self.psi.is_some() {
+            components.push("psi_meter");
+        }
+        #[cfg(feature = "psychoid")]
+        if self.psychoid.is_some() {
+            components.push("psychoid_meter");
+        }
+        #[cfg(feature = "collapse")]
+        if self.collapse.is_some() {
+            components.push("collapse_drive");
+        }
+        components.sort_unstable();
+        components.dedup();
+        components.into_iter().map(str::to_owned).collect()
+    }
+
+    fn optimizer_execution_topology(&self) -> TrainerExecutionTopology {
+        let caps = self.planner.device_caps();
+        let execution = self.planner.execution_config();
+        let (training_device_enabled, training_rank, training_world_size) =
+            self.accumulator_synchronizer_snapshot();
+        TrainerExecutionTopology {
+            backend: caps.backend.as_str().to_owned(),
+            subgroup: caps.subgroup,
+            lane_width: caps.lane_width,
+            max_workgroup: caps.max_workgroup,
+            shared_mem_per_workgroup: caps.shared_mem_per_workgroup,
+            accelerator_fallback: execution.accelerator_fallback.as_str().to_owned(),
+            tensor_util_wgpu_min_values: execution.tensor_util_wgpu_min_values,
+            training_device_enabled,
+            training_rank,
+            training_world_size,
+            external_state_required: self.optimizer_external_state_required(),
+        }
+    }
+
+    fn optimizer_phase_tracker_state(&self) -> TrainerPhaseTrackerState {
+        TrainerPhaseTrackerState {
+            turnover_spike_threshold: self.phase_turnover_spike_threshold,
+            loss_ema_alpha: self.phase_loss_ema_alpha,
+            loss_spike_ratio: self.phase_loss_spike_ratio,
+            drift_spike_threshold: self.phase_drift_spike_threshold,
+            last_label: self.phase_last_label,
+            last_turnover: self.phase_last_turnover,
+            last_band: self.phase_last_band,
+            last_drift_abs: self.phase_last_drift_abs,
+            loss_ema: self.phase_loss_ema,
+            loss_spiking: self.phase_loss_spiking,
+        }
+    }
+
     /// Returns a copyable optimizer-facing state snapshot.
     pub fn optimizer_state(&self) -> TrainerOptimizerState {
         let (training_device_enabled, training_rank, training_world_size) =
@@ -5618,6 +6064,7 @@ impl ModuleTrainer {
             training_rank,
             training_world_size,
             spectral_adapter: self.spectral_adapter.state(),
+            backend_counters: self.cumulative_backend_counters,
         }
     }
 
@@ -5637,6 +6084,190 @@ impl ModuleTrainer {
         &self,
     ) -> Result<TrainerOptimizerConfigContract, TrainerOptimizerConfigError> {
         evaluate_trainer_optimizer_config(self.optimizer_config())
+    }
+
+    /// Captures trainer update policy and every parameter accumulator.
+    ///
+    /// Parameter values remain in [`Module::state_dict`]. Their fingerprints
+    /// make restoring optimizer state against the wrong model fail closed.
+    pub fn optimizer_checkpoint<M: Module + ?Sized>(
+        &self,
+        module: &M,
+    ) -> Result<TrainerOptimizerCheckpoint, TrainerCheckpointError> {
+        let mut parameters = Vec::new();
+        module.visit_parameters(&mut |parameter| {
+            parameters.push(parameter.optimizer_checkpoint_state());
+            Ok(())
+        })?;
+        let epoch =
+            u64::try_from(self.epoch).map_err(|_| TrainerCheckpointError::CounterOutOfRange {
+                field: "epoch",
+                value: u64::MAX,
+            })?;
+        let state = TrainerOptimizerRuntimeState {
+            epoch,
+            meta_learning_rate_scale: self.meta_learning_rate_scale,
+            meta_optimizer_step: self.meta_optimizer_step,
+            spectral_adapter: self.spectral_adapter.state(),
+            curvature_scheduler: self
+                .curvature_scheduler
+                .as_ref()
+                .map(CurvatureScheduler::state),
+            spectral_policy: self
+                .spectral_policy
+                .as_ref()
+                .map(SpectralLearningRatePolicy::state),
+            phase_tracker: self.optimizer_phase_tracker_state(),
+            softlogic: self.softlogic.state(),
+            backend_counters: self.cumulative_backend_counters,
+            last_accumulator_sync_buffers: u64::try_from(self.last_accumulator_sync.buffers)
+                .map_err(|_| TrainerCheckpointError::CounterOutOfRange {
+                    field: "last_accumulator_sync_buffers",
+                    value: u64::MAX,
+                })?,
+            last_accumulator_sync_values: u64::try_from(self.last_accumulator_sync.values)
+                .map_err(|_| TrainerCheckpointError::CounterOutOfRange {
+                    field: "last_accumulator_sync_values",
+                    value: u64::MAX,
+                })?,
+        };
+        Ok(build_trainer_optimizer_checkpoint(
+            self.optimizer_config(),
+            self.optimizer_execution_topology(),
+            state,
+            parameters,
+        )?)
+    }
+
+    /// Restores a checkpoint as one transaction after validating the model and
+    /// execution topology. No trainer or parameter state changes on failure.
+    pub fn restore_optimizer_checkpoint<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        checkpoint: &TrainerOptimizerCheckpoint,
+    ) -> Result<TrainerOptimizerCheckpointValidation, TrainerCheckpointError> {
+        let validation = evaluate_trainer_optimizer_checkpoint(checkpoint)?;
+        if checkpoint.topology != self.optimizer_execution_topology() {
+            return Err(TrainerCheckpointError::TopologyMismatch);
+        }
+
+        let epoch = usize::try_from(checkpoint.state.epoch).map_err(|_| {
+            TrainerCheckpointError::EpochOutOfRange {
+                epoch: checkpoint.state.epoch,
+            }
+        })?;
+        let sync_buffers = usize::try_from(checkpoint.state.last_accumulator_sync_buffers)
+            .map_err(|_| TrainerCheckpointError::CounterOutOfRange {
+                field: "last_accumulator_sync_buffers",
+                value: checkpoint.state.last_accumulator_sync_buffers,
+            })?;
+        let sync_values =
+            usize::try_from(checkpoint.state.last_accumulator_sync_values).map_err(|_| {
+                TrainerCheckpointError::CounterOutOfRange {
+                    field: "last_accumulator_sync_values",
+                    value: checkpoint.state.last_accumulator_sync_values,
+                }
+            })?;
+        let spectral_adapter = SpectralLrAdapter::from_state(checkpoint.state.spectral_adapter)?;
+        let curvature_scheduler = checkpoint
+            .state
+            .curvature_scheduler
+            .map(CurvatureScheduler::from_state)
+            .transpose()?;
+        let spectral_policy = checkpoint
+            .state
+            .spectral_policy
+            .map(SpectralLearningRatePolicy::from_state)
+            .transpose()?;
+        let softlogic = SoftLogicFlex::from_state(checkpoint.state.softlogic.clone())?;
+
+        let checkpoint_parameters = checkpoint
+            .parameters
+            .iter()
+            .map(|state| (state.name.as_str(), state))
+            .collect::<HashMap<_, _>>();
+        let mut prepared = HashMap::<String, PreparedParameterOptimizerState>::new();
+        module.visit_parameters(&mut |parameter| {
+            if prepared.contains_key(parameter.name()) {
+                return Err(TensorError::Generic(format!(
+                    "duplicate target parameter {}",
+                    parameter.name()
+                )));
+            }
+            let Some(state) = checkpoint_parameters.get(parameter.name()) else {
+                return Err(TensorError::MissingParameter {
+                    name: parameter.name().to_owned(),
+                });
+            };
+            let state = parameter.prepare_optimizer_checkpoint_restore(state)?;
+            prepared.insert(parameter.name().to_owned(), state);
+            Ok(())
+        })?;
+        if prepared.len() != checkpoint.parameters.len() {
+            let missing = checkpoint
+                .parameters
+                .iter()
+                .filter(|state| !prepared.contains_key(&state.name))
+                .map(|state| state.name.clone())
+                .collect::<Vec<_>>();
+            return Err(TrainerCheckpointError::ParameterSetMismatch {
+                message: format!("target module is missing [{}]", missing.join(", ")),
+            });
+        }
+
+        module.visit_parameters_mut(&mut |parameter| {
+            let state = prepared.remove(parameter.name()).ok_or_else(|| {
+                TensorError::Generic(format!(
+                    "parameter traversal changed while restoring {}",
+                    parameter.name()
+                ))
+            })?;
+            parameter.commit_optimizer_checkpoint_restore(state);
+            Ok(())
+        })?;
+        if !prepared.is_empty() {
+            return Err(TrainerCheckpointError::ParameterSetMismatch {
+                message: format!(
+                    "mutable target traversal omitted [{}]",
+                    prepared.keys().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            });
+        }
+
+        self.epoch = epoch;
+        self.curvature = checkpoint.config.curvature;
+        self.hyper_learning_rate = checkpoint.config.hyper_learning_rate;
+        self.fallback_learning_rate = checkpoint.config.fallback_learning_rate;
+        self.real_learning_rate = checkpoint.config.real_learning_rate;
+        self.grad_clip_max_norm = checkpoint.config.grad_clip_max_norm;
+        self.meta_learning_rate_scale = checkpoint.state.meta_learning_rate_scale;
+        self.meta_optimizer_step = checkpoint.state.meta_optimizer_step;
+        self.spectral_adapter = spectral_adapter;
+        self.curvature_scheduler = curvature_scheduler;
+        self.spectral_policy = spectral_policy;
+        self.phase_turnover_spike_threshold =
+            checkpoint.state.phase_tracker.turnover_spike_threshold;
+        self.phase_loss_ema_alpha = checkpoint.state.phase_tracker.loss_ema_alpha;
+        self.phase_loss_spike_ratio = checkpoint.state.phase_tracker.loss_spike_ratio;
+        self.phase_drift_spike_threshold = checkpoint.state.phase_tracker.drift_spike_threshold;
+        self.phase_last_label = checkpoint.state.phase_tracker.last_label;
+        self.phase_last_turnover = checkpoint.state.phase_tracker.last_turnover;
+        self.phase_last_band = checkpoint.state.phase_tracker.last_band;
+        self.phase_last_drift_abs = checkpoint.state.phase_tracker.last_drift_abs;
+        self.phase_loss_ema = checkpoint.state.phase_tracker.loss_ema;
+        self.phase_loss_spiking = checkpoint.state.phase_tracker.loss_spiking;
+        self.softlogic = softlogic;
+        self.cumulative_backend_counters = checkpoint.state.backend_counters;
+        self.last_accumulator_sync = TrainerAccumulatorSyncStats {
+            enabled: checkpoint.topology.training_device_enabled,
+            rank: checkpoint.topology.training_rank,
+            world_size: checkpoint.topology.training_world_size,
+            buffers: sync_buffers,
+            values: sync_values,
+        };
+        self.last_curvature_metrics = None;
+        self.last_spectral_metrics = None;
+        Ok(validation)
     }
 
     /// Returns details for the most recent accumulator synchronization pass.
@@ -7134,6 +7765,8 @@ impl ModuleTrainer {
             },
             tensor_backend: epoch_tensor_backend,
         };
+        self.cumulative_backend_counters
+            .saturating_accumulate(stats.tensor_backend.checkpoint_counters());
         global_registry()
             .event_bus()
             .publish(&PluginEvent::EpochEnd {
@@ -8087,7 +8720,7 @@ mod tests {
     use st_core::telemetry::xai::GraphFlowTracer;
     use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
     use st_core::theory::zpulse::ZSource;
-    use st_tensor::topos::OpenCartesianTopos;
+    use st_tensor::topos::{OpenCartesianTopos, ToposOptimizerStateControl};
     use std::collections::{BTreeMap, HashMap};
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
@@ -8864,6 +9497,160 @@ mod tests {
         assert_eq!(after_scale.spectral_adapter.avg_energy, 0.0);
     }
 
+    fn configure_checkpoint_momentum(module: &mut SpectralGradientModule) {
+        let control = ToposOptimizerStateControl::new(
+            0.1,
+            [0.2, -0.2, 0.3, -0.3, 0.1, -0.1, 0.4, -0.4, 0.0, 0.25],
+            0.85,
+            0.5,
+        )
+        .unwrap();
+        module
+            .param
+            .hypergrad_mut()
+            .expect("prepared hypergrad")
+            .configure_optimizer_state(control);
+        module
+            .param
+            .realgrad_mut()
+            .expect("prepared realgrad")
+            .configure_optimizer_state(control);
+    }
+
+    fn configure_checkpoint_phase_tracker(trainer: &mut ModuleTrainer) {
+        trainer.phase_turnover_spike_threshold = 0.42;
+        trainer.phase_loss_ema_alpha = 0.2;
+        trainer.phase_loss_spike_ratio = 0.4;
+        trainer.phase_drift_spike_threshold = 0.3;
+        trainer.phase_last_label = Some(CoherenceLabel::SymmetricPulse);
+        trainer.phase_last_turnover = Some(0.55);
+        trainer.phase_last_band = Some(2);
+        trainer.phase_last_drift_abs = Some(0.65);
+        trainer.phase_loss_ema = Some(1.25);
+        trainer.phase_loss_spiking = true;
+    }
+
+    fn run_checkpoint_steps(
+        trainer: &mut ModuleTrainer,
+        module: &mut SpectralGradientModule,
+        steps: usize,
+    ) {
+        for _ in 0..steps {
+            module.accumulate();
+            trainer.step(module).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_optimizer_run_matches_uninterrupted_rust_resume() {
+        let make_trainer =
+            || ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_realgrad(0.02);
+        let gradient = vec![0.8, -0.4, 0.6, -0.2];
+
+        let mut uninterrupted_trainer = make_trainer();
+        let mut uninterrupted_module = SpectralGradientModule::new(gradient.clone());
+        uninterrupted_trainer
+            .prepare(&mut uninterrupted_module)
+            .unwrap();
+        configure_checkpoint_momentum(&mut uninterrupted_module);
+        configure_checkpoint_phase_tracker(&mut uninterrupted_trainer);
+        run_checkpoint_steps(&mut uninterrupted_trainer, &mut uninterrupted_module, 5);
+
+        let mut interrupted_trainer = make_trainer();
+        let mut interrupted_module = SpectralGradientModule::new(gradient.clone());
+        interrupted_trainer
+            .prepare(&mut interrupted_module)
+            .unwrap();
+        configure_checkpoint_momentum(&mut interrupted_module);
+        configure_checkpoint_phase_tracker(&mut interrupted_trainer);
+        run_checkpoint_steps(&mut interrupted_trainer, &mut interrupted_module, 2);
+        let model_state = interrupted_module.state_dict().unwrap();
+        let checkpoint = interrupted_trainer
+            .optimizer_checkpoint(&interrupted_module)
+            .unwrap();
+        let encoded = serde_json::to_string(&checkpoint).unwrap();
+        let checkpoint: TrainerOptimizerCheckpoint = serde_json::from_str(&encoded).unwrap();
+
+        let mut resumed_trainer = make_trainer();
+        let mut resumed_module = SpectralGradientModule::new(gradient);
+        resumed_module.load_state_dict(&model_state).unwrap();
+        resumed_trainer.prepare(&mut resumed_module).unwrap();
+        let validation = resumed_trainer
+            .restore_optimizer_checkpoint(&mut resumed_module, &checkpoint)
+            .unwrap();
+        assert!(validation.deterministic_resume_ready);
+        assert_eq!(validation.hypergrad_parameters, 1);
+        assert_eq!(validation.realgrad_parameters, 1);
+        run_checkpoint_steps(&mut resumed_trainer, &mut resumed_module, 3);
+
+        assert_eq!(
+            resumed_module.weights().data(),
+            uninterrupted_module.weights().data()
+        );
+        assert_eq!(
+            resumed_trainer.optimizer_state(),
+            uninterrupted_trainer.optimizer_state()
+        );
+        assert_eq!(
+            resumed_trainer.optimizer_phase_tracker_state(),
+            uninterrupted_trainer.optimizer_phase_tracker_state()
+        );
+        assert_eq!(
+            resumed_module
+                .param
+                .hypergrad()
+                .unwrap()
+                .optimizer_momentum(),
+            uninterrupted_module
+                .param
+                .hypergrad()
+                .unwrap()
+                .optimizer_momentum()
+        );
+        assert_eq!(
+            resumed_module
+                .param
+                .realgrad()
+                .unwrap()
+                .optimizer_momentum(),
+            uninterrupted_module
+                .param
+                .realgrad()
+                .unwrap()
+                .optimizer_momentum()
+        );
+    }
+
+    #[test]
+    fn optimizer_restore_rejects_wrong_model_without_partial_mutation() {
+        let mut source_trainer =
+            ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_realgrad(0.02);
+        let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        source_trainer.prepare(&mut source_module).unwrap();
+        source_module.accumulate();
+        source_trainer.step(&mut source_module).unwrap();
+        let checkpoint = source_trainer.optimizer_checkpoint(&source_module).unwrap();
+
+        let mut target_trainer =
+            ModuleTrainer::new(DeviceCaps::cpu(), -0.8, 0.03, 0.02).with_realgrad(0.01);
+        let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_trainer.prepare(&mut target_module).unwrap();
+        target_module.param.value_mut().data_mut()[0] = 99.0;
+        let trainer_before = target_trainer.optimizer_state();
+        let parameter_before = target_module.param.optimizer_checkpoint_state();
+
+        let error = target_trainer
+            .restore_optimizer_checkpoint(&mut target_module, &checkpoint)
+            .expect_err("mismatched model values must fail closed");
+
+        assert!(error.to_string().contains("fingerprint mismatch"));
+        assert_eq!(target_trainer.optimizer_state(), trainer_before);
+        assert_eq!(
+            target_module.param.optimizer_checkpoint_state(),
+            parameter_before
+        );
+    }
+
     #[test]
     fn trainer_consumes_meta_reports_as_idempotent_parameter_control() {
         let caps = DeviceCaps::cpu();
@@ -9234,6 +10021,33 @@ mod tests {
         assert!(band.l1().is_finite());
         assert!(band.l1() > 0.0);
         assert!((0.0..=1.0).contains(&band.spectral.sheet_confidence));
+    }
+
+    #[test]
+    fn spectral_policy_reconfigured_bounds_keep_checkpoint_state_admissible() {
+        let policy = SpectralLearningRatePolicy::default()
+            .with_lr_bounds(2.0, 3.0)
+            .with_band_bounds(1.5, 2.5);
+        let state = policy.state();
+
+        assert_eq!(state.lr_state, 2.0);
+        assert_eq!(state.applied_lr_scale, 2.0);
+        assert_eq!(state.band_state, [1.5; 3]);
+        assert_eq!(state.local_lr_state, [1.5; 3]);
+        assert_eq!(
+            SpectralLearningRatePolicy::from_state(state)
+                .unwrap()
+                .state(),
+            state
+        );
+
+        let mut invalid = state;
+        invalid.max_lr_step = 0.5;
+        assert!(SpectralLearningRatePolicy::from_state(invalid).is_err());
+
+        let mut invalid = state;
+        invalid.local_lr_state[0] = 9.0;
+        assert!(SpectralLearningRatePolicy::from_state(invalid).is_err());
     }
 
     #[test]
@@ -12205,12 +13019,25 @@ mod tests {
         let decision = scheduler.observe_pressure(f32::MAX);
 
         assert!(decision.raw_pressure.is_finite());
-        assert!(decision.raw_pressure <= CURVATURE_PRESSURE_MAX);
+        assert!(decision.raw_pressure <= TRAINER_CURVATURE_PRESSURE_MAX);
         assert!(decision.smoothed_pressure.is_finite());
         assert!(scheduler.current().is_finite());
         assert!(scheduler.last_pressure().unwrap().is_finite());
         assert!(scheduler.last_pressure_variance().unwrap().is_finite());
         assert!(scheduler.last_pressure_rel_variance().unwrap().is_finite());
+    }
+
+    #[test]
+    fn curvature_scheduler_rejects_non_finite_pressure_targets() {
+        let mut scheduler = CurvatureScheduler::new(-1.0, -2.0, -0.2, f32::INFINITY);
+        assert_eq!(scheduler.target_pressure(), 0.0);
+
+        scheduler.set_target_pressure(0.75);
+        scheduler.set_target_pressure(f32::NAN);
+        assert_eq!(scheduler.target_pressure(), 0.75);
+
+        scheduler.set_target_pressure(f32::MAX);
+        assert_eq!(scheduler.target_pressure(), TRAINER_CURVATURE_PRESSURE_MAX);
     }
 
     #[test]

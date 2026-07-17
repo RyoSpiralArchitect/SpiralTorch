@@ -138,7 +138,8 @@ pub use trainer::selfsup::{
 pub use trainer::{
     EpochStats, EpochTensorBackendStats, ModuleTrainer, SoftLogicConfig, SpectralAdjustmentMetrics,
     SpectralLearningRatePolicy, TextInfusionEvery, TextInfusionMode, TrainerAccumulatorSyncStats,
-    TrainerOptimizerState, TrainingEpochStats, TrainingRunConfig, TrainingRunReport,
+    TrainerCheckpointError, TrainerOptimizerState, TrainingEpochStats, TrainingRunConfig,
+    TrainingRunReport,
 };
 pub use z_rba::{
     AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,

@@ -231,6 +231,270 @@ declare module "spiraltorch-wasm" {
         config: Required<TrainerOptimizerConfig>;
     };
 
+    export type ToposOptimizerStateCheckpoint = {
+        gradient_bias_scale: number;
+        gradient_bias_basis: [
+            number,
+            number,
+            number,
+            number,
+            number,
+            number,
+            number,
+            number,
+            number,
+            number,
+        ];
+        gradient_clip_scale: number;
+        momentum_damping: number;
+    };
+
+    export type OpenCartesianToposCheckpoint = {
+        curvature: number;
+        tolerance: number;
+        saturation: number;
+        porosity: number;
+        max_depth: number;
+        max_volume: number;
+        site_radius_min: number;
+        site_radius_max: number;
+        guard_density_min: number;
+        guard_density_max: number;
+        guard_mass_tolerance: number;
+    };
+
+    export type AmegaHypergradCheckpoint = {
+        curvature: number;
+        learning_rate: number;
+        rows: number;
+        cols: number;
+        gradient: number[];
+        topos: OpenCartesianToposCheckpoint;
+        optimizer_state: ToposOptimizerStateCheckpoint;
+        optimizer_momentum: number[];
+    };
+
+    export type AmegaRealgradCheckpoint = {
+        learning_rate: number;
+        rows: number;
+        cols: number;
+        gradient: number[];
+        optimizer_state: ToposOptimizerStateCheckpoint;
+        optimizer_momentum: number[];
+    };
+
+    export type ZSpaceRegionDescriptor = {
+        spin_alignment: number;
+        normalized_radius: number;
+        curvature_radius: number;
+        geodesic_radius: number;
+        sheet_index: number;
+        sheet_count: number;
+        topological_sector: number;
+    };
+
+    export type SpectralLrAdapterState = {
+        sheet_hint: number;
+        smoothing: number;
+        curvature_target: number;
+        curvature_gain: number;
+        spin_gain: number;
+        energy_gain: number;
+        sheet_gain: number;
+        min_scale: number;
+        max_scale: number;
+        avg_curvature: number;
+        avg_spin: number;
+        avg_energy: number;
+    };
+
+    export type TrainerCurvatureSchedulerState = {
+        min_curvature: number;
+        max_curvature: number;
+        target_pressure: number;
+        tolerance: number;
+        step: number;
+        proportional_gain: number;
+        smoothing: number;
+        current: number;
+        ema_pressure: number | null;
+        ema_pressure2: number | null;
+        stability_threshold: number;
+        stability_boost: number;
+        stable_steps: number;
+        dither_strength: number;
+        dither_period: number;
+        dither_sign: number;
+    };
+
+    export type TrainerSoftLogicConfigState = {
+        inertia: number;
+        inertia_min: number;
+        inertia_drift_k: number;
+        inertia_z_k: number;
+        drift_gain: number;
+        psi_gain: number;
+        loss_gain: number;
+        floor: number;
+        scale_gain: number;
+        region_gain: number;
+        region_factor_gain: number;
+        energy_equalize_gain: number;
+        mean_normalize_gain: number;
+        energy_equalize_auto: number;
+        mean_normalize_auto: number;
+    };
+
+    export type TrainerSoftLogicFeedbackState = {
+        z_signal: number;
+        scale_log_radius: number | null;
+    };
+
+    export type TrainerSoftLogicState = {
+        config: TrainerSoftLogicConfigState;
+        last_weights: [number, number, number];
+        last_z: number;
+        last_feedback: TrainerSoftLogicFeedbackState | null;
+        last_inertia: number;
+        last_region: ZSpaceRegionDescriptor | null;
+        last_region_factor: number;
+        last_region_scale: [number, number, number];
+        equalize_state: number;
+        mean_normalize_state: number;
+        pending_events: string[];
+        equalize_guard_on: boolean;
+        equalize_clamp_on: boolean;
+        normalize_on: boolean;
+    };
+
+    export type TrainerSpectralPolicyState = {
+        smoothing: number;
+        event_smoothing: number;
+        turnover_smoothing: number;
+        coherence_gain: number;
+        curvature_gain: number;
+        sheet_gain: number;
+        spin_gain: number;
+        radius_gain: number;
+        energy_gain: number;
+        phase_gain: number;
+        stuck_phase_gain: number;
+        max_phase_gain: number;
+        stuck_turnover_threshold: number;
+        dominant_turnover: number;
+        last_dominant: number | null;
+        last_label: ZSpaceCoherenceLabel | null;
+        min_lr_scale: number;
+        max_lr_scale: number;
+        max_lr_step: number;
+        min_band_scale: number;
+        max_band_scale: number;
+        band_state: [number, number, number];
+        lr_state: number;
+        applied_lr_scale: number;
+        local_lr_state: [number, number, number];
+    };
+
+    export type TrainerPhaseTrackerState = {
+        turnover_spike_threshold: number;
+        loss_ema_alpha: number;
+        loss_spike_ratio: number;
+        drift_spike_threshold: number;
+        last_label: ZSpaceCoherenceLabel | null;
+        last_turnover: number | null;
+        last_band: number | null;
+        last_drift_abs: number | null;
+        loss_ema: number | null;
+        loss_spiking: boolean;
+    };
+
+    export type TrainerBackendCounters = {
+        epochs_recorded: number;
+        ops_total: number;
+        fallbacks: number;
+        backend_wgpu: number;
+        backend_cuda: number;
+        backend_hip: number;
+        backend_cpu: number;
+        backend_other: number;
+        requested_wgpu_hits: number;
+        requested_wgpu_runtime_fallbacks: number;
+        requested_wgpu_component_hits: number;
+        requested_wgpu_component_fallbacks: number;
+    };
+
+    export type TrainerOptimizerRuntimeState = {
+        epoch: number;
+        meta_learning_rate_scale: number;
+        meta_optimizer_step: number | null;
+        spectral_adapter: SpectralLrAdapterState;
+        curvature_scheduler: TrainerCurvatureSchedulerState | null;
+        spectral_policy: TrainerSpectralPolicyState | null;
+        phase_tracker: TrainerPhaseTrackerState;
+        softlogic: TrainerSoftLogicState;
+        backend_counters: TrainerBackendCounters;
+        last_accumulator_sync_buffers: number;
+        last_accumulator_sync_values: number;
+    };
+
+    export type TrainerParameterOptimizerState = {
+        name: string;
+        rows: number;
+        cols: number;
+        value_fingerprint: string;
+        euclidean_gradient: number[] | null;
+        hypergrad: AmegaHypergradCheckpoint | null;
+        realgrad: AmegaRealgradCheckpoint | null;
+    };
+
+    export type TrainerOptimizerResumeScope =
+        "trainer_optimizer_and_builtin_update_policy;parameter_values_external_and_fingerprint_guarded;external_runtime_components_reported";
+
+    export type TrainerExecutionTopology = {
+        backend: "cpu" | "wgpu" | "mps" | "cuda" | "hip";
+        subgroup: boolean;
+        lane_width: number;
+        max_workgroup: number;
+        shared_mem_per_workgroup: number | null;
+        accelerator_fallback: "allow" | "forbid";
+        tensor_util_wgpu_min_values: number;
+        training_device_enabled: boolean;
+        training_rank: number;
+        training_world_size: number;
+        external_state_required: string[];
+    };
+
+    /** Rust-produced optimizer checkpoint. WASM validates but does not execute it. */
+    export type TrainerOptimizerCheckpoint = {
+        kind: "spiraltorch.trainer_optimizer_checkpoint";
+        contract_version: "spiraltorch.trainer_optimizer_checkpoint.v1";
+        semantic_owner: "st-core::runtime::trainer_optimizer";
+        semantic_backend: "rust";
+        resume_scope: TrainerOptimizerResumeScope;
+        config: Required<TrainerOptimizerConfig>;
+        topology: TrainerExecutionTopology;
+        state: TrainerOptimizerRuntimeState;
+        parameters: TrainerParameterOptimizerState[];
+    };
+
+    /** Browser-side receipt produced by the same Rust checkpoint validator. */
+    export type TrainerOptimizerCheckpointValidation = {
+        kind: "spiraltorch.trainer_optimizer_checkpoint";
+        contract_version: "spiraltorch.trainer_optimizer_checkpoint.v1";
+        semantic_owner: "st-core::runtime::trainer_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        resume_scope: TrainerOptimizerResumeScope;
+        parameter_count: number;
+        hypergrad_parameters: number;
+        realgrad_parameters: number;
+        euclidean_parameters: number;
+        captures_inflight_accumulators: boolean;
+        parameter_values_external: true;
+        deterministic_resume_ready: boolean;
+        external_state_required: string[];
+    };
+
     export type RankPlanRequest = {
         kind: "topk" | "top_k" | "midk" | "mid_k" | "bottomk" | "bottom_k";
         rows: number;
@@ -1692,6 +1956,10 @@ declare module "spiraltorch-wasm" {
     export function trainerOptimizerConfigObject(
         config: TrainerOptimizerConfig,
     ): TrainerOptimizerConfigContract;
+    export function trainerOptimizerCheckpointJson(checkpointJson: string): string;
+    export function trainerOptimizerCheckpointObject(
+        checkpoint: TrainerOptimizerCheckpoint,
+    ): TrainerOptimizerCheckpointValidation;
     export function rankPlanJson(requestJson: string): string;
     export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
     export function apiLlmRoutePolicyEvaluateJson(requestJson: string): string;

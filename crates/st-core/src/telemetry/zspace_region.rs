@@ -11,7 +11,8 @@ use crate::telemetry::hub::SoftlogicEllipticSample;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Coarse spin buckets extracted from [`SoftlogicEllipticSample`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ZSpaceSpinBand {
     /// Strongly aligned with the leading sheet (positive spin).
     Leading,
@@ -49,7 +50,8 @@ impl ZSpaceSpinBand {
 }
 
 /// Coarse radius buckets derived from the normalised geodesic radius.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ZSpaceRadiusBand {
     /// Interior region near the pulse core.
     Core,
@@ -87,7 +89,8 @@ impl ZSpaceRadiusBand {
 }
 
 /// Discrete key describing a Z-space region bucket.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ZSpaceRegionKey {
     /// Spin band component of the key.
     pub spin: ZSpaceSpinBand,
@@ -108,7 +111,8 @@ impl ZSpaceRegionKey {
 }
 
 /// Parsed region descriptor surfaced from a Softlogic elliptic sample.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ZSpaceRegionDescriptor {
     /// Raw spin alignment in \([-1, 1]\).
     pub spin_alignment: f32,
