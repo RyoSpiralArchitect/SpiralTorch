@@ -237,7 +237,13 @@ value:
   provider evidence and orchestrates stAgent, while the compiled
   `st-core::runtime::topos_route_policy` contract exclusively owns profile
   normalization, scoring, deterministic tie-breaking, reward projection, and
-  selected-route resolution. The same contract is exposed to browser clients
+  selected-route resolution. Its v2 evidence contract ignores client-provided
+  score fields, uses a neutral prior for missing metrics, shrinks by sample
+  count, excludes zero-observation routes, and revalidates the source evidence
+  when a learned selection is resolved. Stored v1 reward arrays lack this v2
+  witness and must be rebuilt from the original sweep rows before resolution;
+  legacy rows without a positive observation `count` must be remeasured.
+  The same contract is exposed to browser clients
   through `spiraltorch-wasm`; Python deliberately has no semantic fallback when
   the Rust core is unavailable. Browser-side
   WASM learning reports can also be
@@ -2508,7 +2514,10 @@ For API-model topological routing, use
 an stAgent-shaped policy and capture the selected route trace. Use
 `api_llm_topos_route_policy_selection(policy, report=..., topos_profiles=...)`
 to recover the selected route record and, when raw profiles are available,
-rebuild the request/runtime-route payload for the next hosted-model call.
+rebuild the request/runtime-route payload for the next hosted-model call. The
+returned `resolution_semantics` preserves the Rust resolver witness; Python
+does not recalculate the selected reward or fall back from a stale label to a
+different positional route.
 
 ## Open-topos learning and inference hints
 

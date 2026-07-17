@@ -70,7 +70,8 @@ _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 _SELECTION_PROFILES = ("balanced", "quality", "grounded", "efficiency", "latency")
-_TOPOS_ROUTE_POLICY_CONTRACT_VERSION = "spiraltorch.topos_route_policy.v1"
+_TOPOS_ROUTE_POLICY_CONTRACT_VERSION = "spiraltorch.topos_route_policy.v2"
+_TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION = "spiraltorch.topos_route_policy.score.v2"
 _TOPOS_ROUTE_POLICY_KIND = "spiraltorch.topos_route_policy"
 _TOPOS_ROUTE_REWARDS_KIND = "spiraltorch.topos_route_rewards"
 _TOPOS_ROUTE_POLICY_RESOLUTION_KIND = "spiraltorch.topos_route_policy_resolution"
@@ -5156,6 +5157,8 @@ def _native_topos_route_policy_contract(
         != _TOPOS_ROUTE_POLICY_CONTRACT_VERSION
         or contract.get("semantic_owner") != _TOPOS_ROUTE_POLICY_SEMANTIC_OWNER
         or contract.get("semantic_backend") != "rust"
+        or contract.get("score_formula_version")
+        != _TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION
     ):
         raise RuntimeError("native Topos route-policy core returned an untrusted contract")
     return contract
@@ -5250,14 +5253,19 @@ def api_llm_topos_sweep_route_rewards(
         rewards, (str, bytes, bytearray)
     ):
         raise RuntimeError("native Topos route-policy core returned invalid rewards")
-    return [dict(row) for row in rewards if isinstance(row, Mapping)]
+    if any(not isinstance(row, Mapping) for row in rewards):
+        raise RuntimeError("native Topos route-policy core returned invalid reward rows")
+    reward_count = contract.get("reward_count")
+    if not isinstance(reward_count, int) or reward_count != len(rewards):
+        raise RuntimeError("native Topos route-policy core returned inconsistent rewards")
+    return [dict(row) for row in rewards]
 
 
-def _selected_topos_route_reward(
+def _topos_route_policy_resolution(
     policy: Mapping[str, Any],
     selected_label: Any,
     selected_index: Any,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     rows = [
         dict(row)
         for row in _list_from_sequence(policy.get("route_rewards"))
@@ -5269,13 +5277,11 @@ def _selected_topos_route_reward(
     }
     if selected_index is not None:
         request["selected_index"] = selected_index
-    contract = _topos_route_policy_contract(
+    return _topos_route_policy_contract(
         "_topos_route_policy_resolve",
         request,
         expected_kind=_TOPOS_ROUTE_POLICY_RESOLUTION_KIND,
     )
-    route_reward = contract.get("route_reward")
-    return dict(route_reward) if isinstance(route_reward, Mapping) else None
 
 
 def _topos_profile_entry_by_label(
@@ -5306,17 +5312,19 @@ def api_llm_topos_route_policy_selection(
 
     raw_index = policy.get("selected_index")
     selected_label = policy.get("selected_label")
-    route_reward = _selected_topos_route_reward(
+    resolution = _topos_route_policy_resolution(
         policy,
         selected_label,
         raw_index,
     )
-    selected_index = int(raw_index) if raw_index is not None else 0
+    route_reward_value = resolution.get("route_reward")
+    route_reward = (
+        dict(route_reward_value) if isinstance(route_reward_value, Mapping) else None
+    )
+    selected_position = resolution.get("selected_position")
+    selected_index = int(selected_position) if selected_position is not None else 0
     if route_reward is not None:
         selected_label = route_reward.get("label")
-        raw_index = _finite_float(route_reward.get("index"))
-        if raw_index is not None:
-            selected_index = int(raw_index)
     if selected_label is None or str(selected_label) == "":
         raise ValueError("policy does not contain a selected topos route label")
     label_value = str(selected_label)
@@ -5349,16 +5357,29 @@ def api_llm_topos_route_policy_selection(
             adapter = dict(report_adapter)
 
     route_reward_map = route_reward or {}
-    selected_reward = _finite_float(policy.get("selected_reward"))
-    if selected_reward is None:
-        selected_reward = _finite_float(route_reward_map.get("reward"))
+    selected_reward = _finite_float(route_reward_map.get("reward"))
+    selected_profile = route_reward_map.get("profile", policy.get("profile"))
     return {
         "kind": "spiraltorch.api_llm_topos_route_policy_selection",
         "selected_label": label_value,
         "selected_index": selected_index,
         "selected_reward": selected_reward,
-        "profile": policy.get("profile"),
+        "profile": selected_profile,
         "selection_trace": dict(_mapping_or_empty(policy.get("selection_trace"))),
+        "resolution_semantics": {
+            key: resolution.get(key)
+            for key in (
+                "kind",
+                "contract_version",
+                "semantic_owner",
+                "semantic_backend",
+                "score_formula_version",
+                "resolution",
+                "selected_position",
+                "selected_label",
+                "selected_reward",
+            )
+        },
         "route_reward": dict(route_reward_map),
         "selection_row": selection_row,
         "adapter_row": adapter_row,
@@ -5470,16 +5491,27 @@ def train_stagent_topos_route_policy(
     _agent_set_epsilon(agent, selection_epsilon)
     policy_after = _agent_policy_report(agent, state)
     trace = _agent_select_action_trace(agent, state, policy_after)
-    raw_action = _finite_float(trace.get("action"))
-    selected_index = int(raw_action) if raw_action is not None else 0
-    selected_row = _selected_topos_route_reward(
+    if "action" not in trace:
+        raise ValueError("agent selection trace must include an action")
+    resolution = _topos_route_policy_resolution(
         {"route_rewards": route_rewards},
         None,
-        selected_index,
+        trace["action"],
+    )
+    selected_row_value = resolution.get("route_reward")
+    selected_row = (
+        dict(selected_row_value) if isinstance(selected_row_value, Mapping) else None
+    )
+    selected_position = resolution.get("selected_position")
+    if selected_position is None:
+        raise RuntimeError("native Topos route-policy core did not select an active reward")
+    selected_index = int(selected_position)
+    resolved_profile = (
+        selected_row.get("profile") if selected_row else route_rewards[0].get("profile")
     )
     return {
         "kind": "spiraltorch.api_llm_topos_sweep_stagent_route_policy",
-        "profile": profile,
+        "profile": resolved_profile,
         "state": state,
         "episodes": bounded_episodes,
         "labels": [row["label"] for row in route_rewards],
@@ -5487,6 +5519,20 @@ def train_stagent_topos_route_policy(
         "policy_before": policy_before,
         "policy_after": policy_after,
         "selection_trace": trace,
+        "resolution_semantics": {
+            key: resolution.get(key)
+            for key in (
+                "kind",
+                "contract_version",
+                "semantic_owner",
+                "semantic_backend",
+                "score_formula_version",
+                "resolution",
+                "selected_position",
+                "selected_label",
+                "selected_reward",
+            )
+        },
         "selected_index": selected_index,
         "selected_label": selected_row.get("label") if selected_row else None,
         "selected_reward": selected_row.get("reward") if selected_row else None,
@@ -5579,6 +5625,10 @@ def api_llm_topos_sweep_report(
                 "semantic_backend",
                 "row_count",
                 "active_row_count",
+                "score_formula_version",
+                "score_formula",
+                "score_prior_mean",
+                "score_prior_strength",
             )
         },
         "comparison": dict(comparison),

@@ -282,8 +282,21 @@ declare module "spiraltorch-wasm" {
         | "efficiency"
         | "latency";
 
+    export type ToposRoutePolicyScoreEvidence = {
+        profile: ToposRoutePolicyProfile;
+        formula_version: "spiraltorch.topos_route_policy.score.v2";
+        raw_score: number;
+        score: number;
+        evidence_coverage: number;
+        sample_count: number;
+        sample_confidence: number;
+        observed_metrics: string[];
+        missing_metrics: string[];
+    };
+
     export type ToposRoutePolicyRow = {
         label: string;
+        /** Positive observations make a route active; omitted or zero rows are not rewarded. */
         count?: number;
         trace_route_score?: number | null;
         trace_quality_score?: number | null;
@@ -305,7 +318,12 @@ declare module "spiraltorch-wasm" {
         context_weight?: number | null;
         request_temperature?: number | null;
         mode?: string | null;
+        /** Compatibility/output field. Rust ignores client-provided values. */
         selection_scores?: Partial<Record<ToposRoutePolicyProfile, number>>;
+        /** Compatibility/output field. Rust ignores client-provided values. */
+        selection_evidence?: Partial<
+            Record<ToposRoutePolicyProfile, ToposRoutePolicyScoreEvidence>
+        >;
     };
 
     export type ToposRoutePolicyWinner = {
@@ -325,6 +343,7 @@ declare module "spiraltorch-wasm" {
         closure_pressure: number | null;
         openness: number | null;
         context_weight: number | null;
+        score_evidence: ToposRoutePolicyScoreEvidence | null;
     };
 
     export type ToposRoutePolicyEvaluationRequest = {
@@ -333,12 +352,16 @@ declare module "spiraltorch-wasm" {
 
     export type ToposRoutePolicyEvaluation = {
         kind: "spiraltorch.topos_route_policy";
-        contract_version: "spiraltorch.topos_route_policy.v1";
+        contract_version: "spiraltorch.topos_route_policy.v2";
         semantic_owner: "st-core::runtime::topos_route_policy";
         semantic_backend: "rust";
         execution_client: "wasm";
         row_count: number;
         active_row_count: number;
+        score_formula_version: "spiraltorch.topos_route_policy.score.v2";
+        score_formula: string;
+        score_prior_mean: number;
+        score_prior_strength: number;
         rows: ToposRoutePolicyRow[];
         profiles: Record<ToposRoutePolicyProfile, ToposRoutePolicyWinner>;
     };
@@ -360,17 +383,25 @@ declare module "spiraltorch-wasm" {
         response_completion_rate: number;
         response_incomplete_rate: number;
         adapter_runtime_route_score: number;
+        score_evidence: ToposRoutePolicyScoreEvidence;
+        source_row: ToposRoutePolicyRow;
     };
 
     export type ToposRouteRewards = {
         kind: "spiraltorch.topos_route_rewards";
-        contract_version: "spiraltorch.topos_route_policy.v1";
+        contract_version: "spiraltorch.topos_route_policy.v2";
         semantic_owner: "st-core::runtime::topos_route_policy";
         semantic_backend: "rust";
         execution_client: "wasm";
         profile: ToposRoutePolicyProfile;
         input_row_count: number;
+        active_row_count: number;
+        inactive_row_count: number;
         reward_count: number;
+        score_formula_version: "spiraltorch.topos_route_policy.score.v2";
+        score_formula: string;
+        score_prior_mean: number;
+        score_prior_strength: number;
         rewards: ToposRouteReward[];
     };
 
@@ -382,10 +413,11 @@ declare module "spiraltorch-wasm" {
 
     export type ToposRoutePolicyResolution = {
         kind: "spiraltorch.topos_route_policy_resolution";
-        contract_version: "spiraltorch.topos_route_policy.v1";
+        contract_version: "spiraltorch.topos_route_policy.v2";
         semantic_owner: "st-core::runtime::topos_route_policy";
         semantic_backend: "rust";
         execution_client: "wasm";
+        score_formula_version: "spiraltorch.topos_route_policy.score.v2";
         resolution: "label" | "index" | "none";
         selected_position: number | null;
         selected_label: string | null;

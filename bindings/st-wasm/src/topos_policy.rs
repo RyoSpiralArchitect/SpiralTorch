@@ -192,10 +192,14 @@ mod tests {
             "rows": [
                 {
                     "label": "open",
+                    "count": 2,
+                    "response_text_quality_score": 0.2,
                     "selection_scores": {"grounded": 0.2}
                 },
                 {
                     "label": "guarded",
+                    "count": 2,
+                    "response_text_quality_score": 0.8,
                     "selection_scores": {"grounded": 0.8}
                 }
             ]
@@ -226,6 +230,11 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(actual["resolution"], "label");
         assert_eq!(actual["selected_label"], "guarded");
+        assert_eq!(
+            actual["score_formula_version"],
+            "spiraltorch.topos_route_policy.score.v2"
+        );
+        assert_eq!(actual["route_reward"]["score_evidence"]["sample_count"], 2);
     }
 
     #[test]
@@ -264,6 +273,26 @@ mod tests {
                 actual: 1,
                 expected: 0
             }
+        ));
+
+        let legacy = resolve_request_from_json(
+            r#"{
+                "rewards":[{
+                    "index":0,
+                    "label":"guarded",
+                    "profile":"grounded",
+                    "reward":0.8,
+                    "count":1
+                }],
+                "selected_label":"guarded"
+            }"#,
+        )
+        .expect("legacy rewards remain decodable for migration diagnostics");
+        let error = topos_route_policy_resolve_value(legacy)
+            .expect_err("the shared Rust resolver must require the v2 witness");
+        assert!(matches!(
+            error,
+            ToposRoutePolicyError::MissingRewardWitness { index: 0 }
         ));
     }
 }

@@ -351,7 +351,12 @@ heuristic.
 
 Route-policy scoring follows the same boundary. Browser code supplies measured route rows,
 while `st-core::runtime::topos_route_policy` alone owns profile normalization, scoring,
-tie-breaking, reward projection, and selected-route resolution:
+tie-breaking, reward projection, and selected-route resolution. The v2 contract treats
+missing metrics as a neutral prior rather than a free latency/token win, shrinks scores by
+the observed sample count, excludes zero-observation routes from rewards, and carries the
+source row plus score evidence so resolution can reject drift. Stored v1 rewards must be
+rebuilt from their original route rows because they do not carry this v2 witness; legacy
+rows without a positive observation `count` must be remeasured:
 
 ```ts
 import {
