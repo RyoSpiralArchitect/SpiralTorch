@@ -99,9 +99,19 @@ def test_describe_runtime_devices_collects_backend_readiness(
     assert st.planner.describe_runtime_devices is st.describe_runtime_devices
     assert summary["backends"] == ["wgpu", "cpu", "mps"]
     assert summary["kind"] == "spiraltorch.runtime_device_route"
-    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v3"
+    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v4"
     assert summary["semantic_owner"] == "st-core::backend::runtime_route"
     assert summary["semantic_backend"] == "rust"
+    assert summary["execution_client"] == "python"
+    assert summary["committed"] is True
+    assert len(summary["request_sha256"]) == 64
+    assert len(summary["output_sha256"]) == 64
+    assert summary["requested_backends"] == ["wgpu", "cpu", "mps"]
+    assert [row["requested_backend"] for row in summary["evidence"]] == [
+        "wgpu",
+        "cpu",
+        "mps",
+    ]
     assert summary["ready_backends"] == ["wgpu"]
     assert summary["not_ready_backends"] == ["cpu", "mps"]
     assert summary["error_backends"] == ["mps"]
@@ -117,6 +127,7 @@ def test_describe_runtime_devices_collects_backend_readiness(
     assert summary["runtime_ready_basis"] == "required_ready_backends"
     assert summary["runtime_missing_ready_backends"] == ["mps"]
     assert summary["reports"][2]["error"] == "mps placeholder"
+    assert st.validate_runtime_device_route_contract(summary) == summary
     assert calls == [
         ("wgpu", {"workgroup": 128}),
         ("cpu", {"workgroup": 128}),
@@ -159,6 +170,8 @@ def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> 
     assert contract["routes"][0]["native_readiness"] == "not_ready"
     assert contract["routes"][0]["route_readiness"] == "ready"
     assert contract["routes"][0]["diagnostic"] == "native MPS kernels are not wired"
+    assert contract["execution_client"] == "python"
+    assert contract["committed"] is True
     assert contract["passed"] is True
 
 
@@ -197,6 +210,62 @@ def test_runtime_device_route_rejects_conflicting_readiness() -> None:
                 }
             ]
         )
+
+
+def test_runtime_device_route_rejects_cross_report_effective_backend_drift() -> None:
+    st = require_native()
+
+    with pytest.raises(ValueError, match="effective backend 'wgpu' readiness"):
+        st.evaluate_runtime_device_route(
+            [
+                {
+                    "requested_backend": "mps",
+                    "effective_backend": "wgpu",
+                    "runtime_ready": True,
+                    "requested_backend_runtime_ready": False,
+                    "effective_backend_runtime_ready": True,
+                    "runtime_status": "kernel_wired",
+                },
+                {
+                    "requested_backend": "wgpu",
+                    "runtime_ready": False,
+                    "runtime_status": "feature_disabled",
+                },
+            ]
+        )
+
+
+def test_runtime_device_route_contract_validation_is_rust_owned() -> None:
+    st = require_native()
+    request = {
+        "reports": [
+            {
+                "requested_backend": "cpu",
+                "runtime_ready": True,
+                "runtime_status": "cpu",
+            }
+        ],
+        "requested_backends": ["cpu"],
+        "required_available_backends": [],
+        "required_ready_backends": ["cpu"],
+    }
+    contract = st.evaluate_runtime_device_route(
+        request["reports"],
+        requested_backends=request["requested_backends"],
+        required_ready_backends=request["required_ready_backends"],
+    )
+
+    assert "validate_runtime_device_route_contract" in st.__all__
+    assert st.validate_runtime_device_route_contract(contract) == contract
+    assert (
+        st.validate_runtime_device_route_contract(contract, request=request)
+        == contract
+    )
+
+    tampered = json.loads(json.dumps(contract))
+    tampered["routes"][0]["route_ready"] = False
+    with pytest.raises(ValueError, match="derived fields do not match replay"):
+        st.validate_runtime_device_route_contract(tampered)
 
 
 def test_plan_explicit_wgpu_backend() -> None:

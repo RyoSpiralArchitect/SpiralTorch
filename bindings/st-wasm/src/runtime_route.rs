@@ -1,6 +1,7 @@
 use serde_json::Value;
 use st_core::backend::runtime_route::{
-    evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRouteRequest,
+    evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
+    RuntimeDeviceRouteRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -20,14 +21,13 @@ fn request_from_json(request_json: &str) -> Result<RuntimeDeviceRouteRequest, St
     request_from_value(value)
 }
 
-fn add_execution_client(payload: &mut Value) {
-    payload
-        .as_object_mut()
-        .expect("runtime-device route payload is an object")
-        .insert(
-            "execution_client".to_owned(),
-            Value::String("wasm".to_owned()),
-        );
+fn payload_from_value(value: Value) -> Result<RuntimeDeviceRoutePayload, String> {
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn payload_from_json(payload_json: &str) -> Result<RuntimeDeviceRoutePayload, String> {
+    let value = serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
+    payload_from_value(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -41,10 +41,21 @@ fn to_json_compatible_js(value: &Value) -> Result<JsValue, JsValue> {
 pub fn runtime_device_route_value(
     request: RuntimeDeviceRouteRequest,
 ) -> Result<Value, RuntimeDeviceRouteError> {
-    let mut payload = serde_json::to_value(evaluate_runtime_device_route(request)?)
-        .expect("runtime-device route payload is serializable");
-    add_execution_client(&mut payload);
-    Ok(payload)
+    let payload = evaluate_runtime_device_route(request)?.with_execution_client("wasm")?;
+    Ok(serde_json::to_value(payload).expect("runtime-device route payload is serializable"))
+}
+
+/// Validate a persisted route contract through the same Rust semantic owner.
+pub fn validate_runtime_device_route_value(
+    payload: RuntimeDeviceRoutePayload,
+    request: Option<RuntimeDeviceRouteRequest>,
+) -> Result<Value, RuntimeDeviceRouteError> {
+    if let Some(request) = request {
+        payload.validate_against(request)?;
+    } else {
+        payload.validate()?;
+    }
+    Ok(serde_json::to_value(payload).expect("runtime-device route payload is serializable"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -61,6 +72,49 @@ pub fn runtime_device_route_object(request: &JsValue) -> Result<JsValue, JsValue
     let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
     let request = request_from_value(request).map_err(js_error)?;
     let payload = runtime_device_route_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteValidateJson)]
+pub fn runtime_device_route_validate_json(payload_json: &str) -> Result<String, JsValue> {
+    let payload = payload_from_json(payload_json).map_err(js_error)?;
+    let payload = validate_runtime_device_route_value(payload, None).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteValidateObject)]
+pub fn runtime_device_route_validate_object(payload: &JsValue) -> Result<JsValue, JsValue> {
+    let payload = serde_wasm_bindgen::from_value::<Value>(payload.clone()).map_err(js_error)?;
+    let payload = payload_from_value(payload).map_err(js_error)?;
+    let payload = validate_runtime_device_route_value(payload, None).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteValidateAgainstJson)]
+pub fn runtime_device_route_validate_against_json(
+    payload_json: &str,
+    request_json: &str,
+) -> Result<String, JsValue> {
+    let payload = payload_from_json(payload_json).map_err(js_error)?;
+    let request = request_from_json(request_json).map_err(js_error)?;
+    let payload = validate_runtime_device_route_value(payload, Some(request)).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteValidateAgainstObject)]
+pub fn runtime_device_route_validate_against_object(
+    payload: &JsValue,
+    request: &JsValue,
+) -> Result<JsValue, JsValue> {
+    let payload = serde_wasm_bindgen::from_value::<Value>(payload.clone()).map_err(js_error)?;
+    let payload = payload_from_value(payload).map_err(js_error)?;
+    let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = request_from_value(request).map_err(js_error)?;
+    let payload = validate_runtime_device_route_value(payload, Some(request)).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -102,11 +156,20 @@ mod tests {
             evaluate_runtime_device_route(request.clone()).expect("valid Rust route"),
         )
         .expect("serializable Rust route");
-        let wasm = without_client(
-            runtime_device_route_value(request).expect("valid WASM route transport"),
-        );
+        let wasm_transport =
+            runtime_device_route_value(request).expect("valid WASM route transport");
+        assert_eq!(wasm_transport["execution_client"], "wasm");
+        let wasm = without_client(wasm_transport);
 
         assert_eq!(wasm, rust);
+        assert_eq!(
+            wasm["contract_version"],
+            "spiraltorch.runtime_device_route.v4"
+        );
+        assert_eq!(wasm["committed"], true);
+        assert_eq!(wasm["request_sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(wasm["output_sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(wasm["evidence"][0]["requested_backend"], "mps");
         assert_eq!(wasm["routes"][0]["route"], "surrogate");
         assert_eq!(wasm["routes"][0]["native_readiness"], "not_ready");
         assert_eq!(wasm["routes"][0]["native_ready"], false);
@@ -170,6 +233,40 @@ mod tests {
         assert!(matches!(
             error,
             RuntimeDeviceRouteError::ConflictingRouteReadiness { index: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn wasm_can_validate_and_replay_persisted_route_contracts() {
+        let request = request_from_json(
+            r#"{
+                "reports":[{
+                    "requested_backend":"wgpu",
+                    "runtime_ready":true,
+                    "runtime_status":"kernel_wired"
+                }],
+                "requested_backends":["wgpu"],
+                "required_ready_backends":["wgpu"]
+            }"#,
+        )
+        .expect("valid route request");
+        let payload = runtime_device_route_value(request.clone()).expect("valid route payload");
+        let typed = payload_from_value(payload.clone()).expect("typed route payload");
+        let validated = validate_runtime_device_route_value(typed, Some(request))
+            .expect("persisted payload replays");
+        assert_eq!(validated, payload);
+
+        let mut tampered = payload;
+        tampered["routes"][0]["route_ready"] = false.into();
+        let typed = payload_from_value(tampered).expect("tampered shape still decodes");
+        let error = validate_runtime_device_route_value(typed, None)
+            .expect_err("Rust validation must reject route tampering");
+        assert!(matches!(
+            error,
+            RuntimeDeviceRouteError::InvalidPayload {
+                field: "payload",
+                ..
+            }
         ));
     }
 }

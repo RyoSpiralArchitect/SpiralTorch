@@ -2,6 +2,11 @@
 
 ## 0.4.13
 
+- Runtime-device route v4: retain canonical evidence in the Rust payload, bind
+  the request and derived decision with domain-separated SHA-256 commitments,
+  reject cross-report effective-backend readiness drift, and expose Rust-owned
+  self-validation and request replay to Python and WASM. Python no longer keeps
+  a second copy of the contract identity constants.
 - Z-space trace schema v2: record the complete Rust-owned coherence simplex as
   a versioned distribution witness, decode stable plugin records before trainer
   replay, and reject missing, contradictory, or non-Rust evidence. Python and

@@ -438,8 +438,11 @@ console.log(runtime.routes[0].native_ready, runtime.routes[0].route_ready);
 
 This reports native MPS honestly as unavailable while preserving a ready WGPU surrogate.
 The browser binding adds only `execution_client: "wasm"`; it owns no readiness precedence
-or fallback heuristic. Contract v2 also preserves absent evidence as `unknown` instead of
-silently rewriting it to `not_ready`; unknown routes remain fail-closed for execution.
+or fallback heuristic. Contract v4 preserves absent evidence as `unknown`, retains the
+canonical observations, binds the request and output with SHA-256, and rejects conflicting
+claims about one effective backend. `runtimeDeviceRouteValidateObject` and
+`runtimeDeviceRouteValidateAgainstObject` call the same Rust self-validation and replay path;
+unknown routes remain fail-closed for execution.
 
 Trainer optimizer preflight follows the same client boundary. Browsers can
 validate a proposed curvature, learning-rate, realgrad, and gradient-clip

@@ -6,11 +6,13 @@
 //! rebuilding readiness precedence and requirement gates in their host language.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.runtime_device_route.v3";
+pub const RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.runtime_device_route.v4";
 /// Payload kind for runtime-device route evaluation.
 pub const RUNTIME_DEVICE_ROUTE_KIND: &str = "spiraltorch.runtime_device_route";
 /// Crate/module that owns runtime-device route semantics.
@@ -23,6 +25,11 @@ pub const RUNTIME_DEVICE_ROUTE_MAX_BACKENDS: usize = 64;
 pub const RUNTIME_DEVICE_ROUTE_MAX_LABEL_BYTES: usize = 64;
 pub const RUNTIME_DEVICE_ROUTE_MAX_STATUS_BYTES: usize = 128;
 pub const RUNTIME_DEVICE_ROUTE_MAX_DIAGNOSTIC_BYTES: usize = 4_096;
+
+const RUNTIME_DEVICE_ROUTE_REQUEST_DIGEST_DOMAIN: &[u8] =
+    b"spiraltorch.runtime_device_route.request.v4\0";
+const RUNTIME_DEVICE_ROUTE_OUTPUT_DIGEST_DOMAIN: &[u8] =
+    b"spiraltorch.runtime_device_route.output.v4\0";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum RuntimeDeviceRouteError {
@@ -45,6 +52,15 @@ pub enum RuntimeDeviceRouteError {
         actual: usize,
         max: usize,
     },
+    #[error(
+        "runtime-device label '{field}' at index {index} contains unsupported byte {byte} at position {position}"
+    )]
+    InvalidLabelCharacter {
+        field: &'static str,
+        index: usize,
+        position: usize,
+        byte: u8,
+    },
     #[error("runtime-device label '{label}' appears more than once in '{field}'")]
     DuplicateLabel { field: &'static str, label: String },
     #[error("runtime-device report for requested backend '{backend}' appears more than once")]
@@ -57,6 +73,15 @@ pub enum RuntimeDeviceRouteError {
         index: usize,
         actual: usize,
         max: usize,
+    },
+    #[error(
+        "runtime-device status '{field}' at report {index} contains unsupported byte {byte} at position {position}"
+    )]
+    InvalidStatusCharacter {
+        field: &'static str,
+        index: usize,
+        position: usize,
+        byte: u8,
     },
     #[error(
         "runtime-device diagnostic at report {index} has {actual} bytes, exceeding limit {max}"
@@ -97,6 +122,21 @@ pub enum RuntimeDeviceRouteError {
         "runtime-device report {index} for '{backend}' cannot be route-ready while its runtime status is 'error'"
     )]
     ErrorStatusMarkedReady { index: usize, backend: String },
+    #[error(
+        "runtime-device reports disagree on effective backend '{backend}' readiness: '{first_requested_backend}' says {first_readiness:?}, '{second_requested_backend}' says {second_readiness:?}"
+    )]
+    ConflictingEffectiveBackendReadiness {
+        backend: String,
+        first_requested_backend: String,
+        first_readiness: RuntimeDeviceReadiness,
+        second_requested_backend: String,
+        second_readiness: RuntimeDeviceReadiness,
+    },
+    #[error("invalid runtime-device route payload field '{field}': {message}")]
+    InvalidPayload {
+        field: &'static str,
+        message: String,
+    },
 }
 
 /// One client-observed device report. Fields intentionally mirror the stable
@@ -121,7 +161,7 @@ pub struct RuntimeDeviceRouteEvidence {
 }
 
 /// Runtime-device observations plus the gates a caller wants to enforce.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuntimeDeviceRouteRequest {
     pub reports: Vec<RuntimeDeviceRouteEvidence>,
@@ -160,8 +200,29 @@ pub enum RuntimeDeviceReadyBasis {
     AnyReadyBackend,
 }
 
+/// Structural class of one selected runtime route.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeDeviceRouteClass {
+    Direct,
+    Surrogate,
+    Unavailable,
+}
+
+/// Canonical status derived from readiness and probe-error evidence.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeDeviceRouteStatus {
+    Ready,
+    SurrogateReady,
+    NotReady,
+    Unknown,
+    Error,
+}
+
 /// Canonical interpretation of one runtime-device report.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeDeviceRouteRow {
     pub requested_backend: String,
     pub effective_backend: String,
@@ -177,8 +238,8 @@ pub struct RuntimeDeviceRouteRow {
     /// The requested and effective backend labels differ, regardless of route
     /// readiness.
     pub fallback: bool,
-    pub route: &'static str,
-    pub route_status: &'static str,
+    pub route: RuntimeDeviceRouteClass,
+    pub route_status: RuntimeDeviceRouteStatus,
     pub runtime_status: String,
     pub requested_backend_runtime_status: Option<String>,
     pub effective_backend_runtime_status: Option<String>,
@@ -186,12 +247,20 @@ pub struct RuntimeDeviceRouteRow {
 }
 
 /// Stable result consumed by Python preflight, native Rust callers, and WASM.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeDeviceRoutePayload {
-    pub kind: &'static str,
-    pub contract_version: &'static str,
-    pub semantic_owner: &'static str,
-    pub semantic_backend: &'static str,
+    pub kind: String,
+    pub contract_version: String,
+    pub semantic_owner: String,
+    pub semantic_backend: String,
+    /// Transport provenance. This field is excluded from semantic commitments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_client: Option<String>,
+    /// Canonicalized caller observations retained for deterministic replay.
+    pub evidence: Vec<RuntimeDeviceRouteEvidence>,
+    /// Canonicalized explicit requests before required/report backends are appended.
+    pub requested_backends: Vec<String>,
     pub backends: Vec<String>,
     pub report_count: usize,
     pub routes: Vec<RuntimeDeviceRouteRow>,
@@ -232,6 +301,126 @@ pub struct RuntimeDeviceRoutePayload {
     pub required_ready_backends_passed: Option<bool>,
     pub failures: Vec<String>,
     pub passed: bool,
+    pub request_sha256: String,
+    pub output_sha256: String,
+    pub committed: bool,
+}
+
+impl RuntimeDeviceRoutePayload {
+    /// Attach transport provenance without changing the Rust-owned commitment.
+    pub fn with_execution_client(
+        mut self,
+        execution_client: impl AsRef<str>,
+    ) -> Result<Self, RuntimeDeviceRouteError> {
+        self.execution_client = Some(normalized_label(
+            execution_client.as_ref(),
+            "execution_client",
+            0,
+        )?);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Validate identity, commitments, every derived projection, and replay.
+    pub fn validate(&self) -> Result<(), RuntimeDeviceRouteError> {
+        for (field, actual, expected) in [
+            ("kind", self.kind.as_str(), RUNTIME_DEVICE_ROUTE_KIND),
+            (
+                "contract_version",
+                self.contract_version.as_str(),
+                RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION,
+            ),
+            (
+                "semantic_owner",
+                self.semantic_owner.as_str(),
+                RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER,
+            ),
+            (
+                "semantic_backend",
+                self.semantic_backend.as_str(),
+                RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND,
+            ),
+        ] {
+            if actual != expected {
+                return Err(invalid_payload(
+                    field,
+                    format!("must be {expected}, got {actual}"),
+                ));
+            }
+        }
+        if let Some(execution_client) = self.execution_client.as_deref() {
+            let normalized = normalized_label(execution_client, "execution_client", 0)?;
+            if normalized != execution_client {
+                return Err(invalid_payload(
+                    "execution_client",
+                    "must already use its canonical lowercase label",
+                ));
+            }
+        }
+        for (field, digest) in [
+            ("request_sha256", self.request_sha256.as_str()),
+            ("output_sha256", self.output_sha256.as_str()),
+        ] {
+            if !valid_sha256(digest) {
+                return Err(invalid_payload(
+                    field,
+                    "must be a 64-digit lowercase SHA-256",
+                ));
+            }
+        }
+        if !self.committed {
+            return Err(invalid_payload(
+                "committed",
+                "runtime-device route payloads must describe a committed decision",
+            ));
+        }
+
+        let expected = build_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: self.evidence.clone(),
+            requested_backends: self.requested_backends.clone(),
+            required_available_backends: self.required_available_backends.clone(),
+            required_ready_backends: self.required_ready_backends.clone(),
+        })?;
+        if self.request_sha256 != expected.request_sha256 {
+            return Err(invalid_payload(
+                "request_sha256",
+                "does not bind the embedded canonical evidence and requirements",
+            ));
+        }
+        if self.output_sha256 != expected.output_sha256 {
+            return Err(invalid_payload(
+                "output_sha256",
+                "does not bind the Rust-derived route decision",
+            ));
+        }
+        let mut actual = self.clone();
+        actual.execution_client = None;
+        if actual != expected {
+            return Err(invalid_payload(
+                "payload",
+                "derived fields do not match replay of the embedded canonical evidence",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Replay an external request and require this payload to match it exactly.
+    pub fn validate_against(
+        &self,
+        request: RuntimeDeviceRouteRequest,
+    ) -> Result<(), RuntimeDeviceRouteError> {
+        self.validate()?;
+        let expected = build_runtime_device_route(request)?;
+        let mut actual = self.clone();
+        actual.execution_client = None;
+        if actual != expected {
+            return Err(invalid_payload(
+                "request",
+                "payload does not match replay of the supplied runtime-device request",
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn normalized_label(
@@ -250,6 +439,18 @@ fn normalized_label(
             actual: normalized.len(),
             max: RUNTIME_DEVICE_ROUTE_MAX_LABEL_BYTES,
         });
+    }
+    for (position, byte) in normalized.bytes().enumerate() {
+        let supported = byte.is_ascii_alphanumeric()
+            || (position > 0 && matches!(byte, b'.' | b'_' | b':' | b'+' | b'-' | b'/'));
+        if !supported {
+            return Err(RuntimeDeviceRouteError::InvalidLabelCharacter {
+                field,
+                index,
+                position,
+                byte,
+            });
+        }
     }
     Ok(normalized)
 }
@@ -294,7 +495,22 @@ fn normalized_status(
             max: RUNTIME_DEVICE_ROUTE_MAX_STATUS_BYTES,
         });
     }
-    Ok((!normalized.is_empty()).then_some(normalized))
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    for (position, byte) in normalized.bytes().enumerate() {
+        let supported = byte.is_ascii_alphanumeric()
+            || (position > 0 && matches!(byte, b'.' | b'_' | b':' | b'+' | b'-' | b'/'));
+        if !supported {
+            return Err(RuntimeDeviceRouteError::InvalidStatusCharacter {
+                field,
+                index,
+                position,
+                byte,
+            });
+        }
+    }
+    Ok(Some(normalized))
 }
 
 fn normalized_diagnostic(
@@ -315,10 +531,10 @@ fn normalized_diagnostic(
     Ok((!normalized.is_empty()).then(|| normalized.to_owned()))
 }
 
-fn evaluate_report(
+fn normalize_evidence(
     evidence: &RuntimeDeviceRouteEvidence,
     index: usize,
-) -> Result<RuntimeDeviceRouteRow, RuntimeDeviceRouteError> {
+) -> Result<RuntimeDeviceRouteEvidence, RuntimeDeviceRouteError> {
     let requested_backend = normalized_label(
         &evidence.requested_backend,
         "reports.requested_backend",
@@ -328,6 +544,42 @@ fn evaluate_report(
         Some(value) => normalized_label(value, "reports.effective_backend", index)?,
         None => requested_backend.clone(),
     };
+    Ok(RuntimeDeviceRouteEvidence {
+        requested_backend,
+        effective_backend: Some(effective_backend),
+        runtime_ready: evidence.runtime_ready,
+        requested_backend_runtime_ready: evidence.requested_backend_runtime_ready,
+        effective_backend_runtime_ready: evidence.effective_backend_runtime_ready,
+        available: evidence.available,
+        runtime_status: normalized_status(
+            evidence.runtime_status.as_deref(),
+            "reports.runtime_status",
+            index,
+        )?,
+        requested_backend_runtime_status: normalized_status(
+            evidence.requested_backend_runtime_status.as_deref(),
+            "reports.requested_backend_runtime_status",
+            index,
+        )?,
+        effective_backend_runtime_status: normalized_status(
+            evidence.effective_backend_runtime_status.as_deref(),
+            "reports.effective_backend_runtime_status",
+            index,
+        )?,
+        status: normalized_status(evidence.status.as_deref(), "reports.status", index)?,
+        error: normalized_diagnostic(evidence.error.as_deref(), index)?,
+    })
+}
+
+fn evaluate_report(
+    evidence: &RuntimeDeviceRouteEvidence,
+    index: usize,
+) -> Result<RuntimeDeviceRouteRow, RuntimeDeviceRouteError> {
+    let requested_backend = evidence.requested_backend.clone();
+    let effective_backend = evidence
+        .effective_backend
+        .clone()
+        .expect("canonical runtime-device evidence always has an effective backend");
     let direct = requested_backend == effective_backend;
 
     if direct {
@@ -393,22 +645,10 @@ fn evaluate_report(
     let native_readiness = native_ready.into();
     let route_readiness = route_ready_evidence.into();
 
-    let runtime_status = normalized_status(
-        evidence.runtime_status.as_deref(),
-        "reports.runtime_status",
-        index,
-    )?;
-    let requested_runtime_status = normalized_status(
-        evidence.requested_backend_runtime_status.as_deref(),
-        "reports.requested_backend_runtime_status",
-        index,
-    )?;
-    let effective_runtime_status = normalized_status(
-        evidence.effective_backend_runtime_status.as_deref(),
-        "reports.effective_backend_runtime_status",
-        index,
-    )?;
-    let legacy_status = normalized_status(evidence.status.as_deref(), "reports.status", index)?;
+    let runtime_status = evidence.runtime_status.clone();
+    let requested_runtime_status = evidence.requested_backend_runtime_status.clone();
+    let effective_runtime_status = evidence.effective_backend_runtime_status.clone();
+    let legacy_status = evidence.status.clone();
     let runtime_status = runtime_status
         .clone()
         .or_else(|| effective_runtime_status.clone())
@@ -425,13 +665,28 @@ fn evaluate_report(
 
     let fallback = !direct;
     let (route, route_status) = if probe_error {
-        ("unavailable", "error")
+        (
+            RuntimeDeviceRouteClass::Unavailable,
+            RuntimeDeviceRouteStatus::Error,
+        )
     } else {
         match (route_readiness, fallback) {
-            (RuntimeDeviceReadiness::Ready, true) => ("surrogate", "surrogate_ready"),
-            (RuntimeDeviceReadiness::Ready, false) => ("direct", "ready"),
-            (RuntimeDeviceReadiness::NotReady, _) => ("unavailable", "not_ready"),
-            (RuntimeDeviceReadiness::Unknown, _) => ("unavailable", "unknown"),
+            (RuntimeDeviceReadiness::Ready, true) => (
+                RuntimeDeviceRouteClass::Surrogate,
+                RuntimeDeviceRouteStatus::SurrogateReady,
+            ),
+            (RuntimeDeviceReadiness::Ready, false) => (
+                RuntimeDeviceRouteClass::Direct,
+                RuntimeDeviceRouteStatus::Ready,
+            ),
+            (RuntimeDeviceReadiness::NotReady, _) => (
+                RuntimeDeviceRouteClass::Unavailable,
+                RuntimeDeviceRouteStatus::NotReady,
+            ),
+            (RuntimeDeviceReadiness::Unknown, _) => (
+                RuntimeDeviceRouteClass::Unavailable,
+                RuntimeDeviceRouteStatus::Unknown,
+            ),
         }
     };
 
@@ -449,7 +704,7 @@ fn evaluate_report(
         runtime_status,
         requested_backend_runtime_status: requested_runtime_status,
         effective_backend_runtime_status: effective_runtime_status,
-        diagnostic: normalized_diagnostic(evidence.error.as_deref(), index)?,
+        diagnostic: evidence.error.clone(),
     })
 }
 
@@ -461,9 +716,49 @@ fn append_missing(backends: &mut Vec<String>, seen: &mut BTreeSet<String>, value
     }
 }
 
+fn validate_effective_backend_consistency(
+    routes: &[RuntimeDeviceRouteRow],
+) -> Result<(), RuntimeDeviceRouteError> {
+    let mut observed = BTreeMap::<String, (RuntimeDeviceReadiness, String)>::new();
+    for route in routes {
+        if route.route_readiness == RuntimeDeviceReadiness::Unknown {
+            continue;
+        }
+        if let Some((first_readiness, first_requested_backend)) =
+            observed.get(&route.effective_backend)
+        {
+            if *first_readiness != route.route_readiness {
+                return Err(
+                    RuntimeDeviceRouteError::ConflictingEffectiveBackendReadiness {
+                        backend: route.effective_backend.clone(),
+                        first_requested_backend: first_requested_backend.clone(),
+                        first_readiness: *first_readiness,
+                        second_requested_backend: route.requested_backend.clone(),
+                        second_readiness: route.route_readiness,
+                    },
+                );
+            }
+        } else {
+            observed.insert(
+                route.effective_backend.clone(),
+                (route.route_readiness, route.requested_backend.clone()),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Evaluate runtime-device observations and requirement gates through the
 /// canonical Rust-owned route contract.
 pub fn evaluate_runtime_device_route(
+    request: RuntimeDeviceRouteRequest,
+) -> Result<RuntimeDeviceRoutePayload, RuntimeDeviceRouteError> {
+    let payload = build_runtime_device_route(request)?;
+    payload.validate()?;
+    Ok(payload)
+}
+
+fn build_runtime_device_route(
     request: RuntimeDeviceRouteRequest,
 ) -> Result<RuntimeDeviceRoutePayload, RuntimeDeviceRouteError> {
     if request.reports.len() > RUNTIME_DEVICE_ROUTE_MAX_REPORTS {
@@ -480,10 +775,12 @@ pub fn evaluate_runtime_device_route(
     let required_ready =
         normalized_labels(&request.required_ready_backends, "required_ready_backends")?;
 
+    let mut evidence = Vec::with_capacity(request.reports.len());
     let mut routes = Vec::with_capacity(request.reports.len());
     let mut route_index = BTreeMap::new();
-    for (index, evidence) in request.reports.iter().enumerate() {
-        let route = evaluate_report(evidence, index)?;
+    for (index, raw_evidence) in request.reports.iter().enumerate() {
+        let canonical_evidence = normalize_evidence(raw_evidence, index)?;
+        let route = evaluate_report(&canonical_evidence, index)?;
         if route_index
             .insert(route.requested_backend.clone(), routes.len())
             .is_some()
@@ -492,10 +789,13 @@ pub fn evaluate_runtime_device_route(
                 backend: route.requested_backend,
             });
         }
+        evidence.push(canonical_evidence);
         routes.push(route);
     }
+    validate_effective_backend_consistency(&routes)?;
 
-    let mut backends = requested;
+    let requested_backends = requested;
+    let mut backends = requested_backends.clone();
     let mut seen = backends.iter().cloned().collect::<BTreeSet<_>>();
     append_missing(&mut backends, &mut seen, &required_available);
     append_missing(&mut backends, &mut seen, &required_ready);
@@ -629,11 +929,21 @@ pub fn evaluate_runtime_device_route(
         }
     }));
 
-    Ok(RuntimeDeviceRoutePayload {
-        kind: RUNTIME_DEVICE_ROUTE_KIND,
-        contract_version: RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION,
-        semantic_owner: RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER,
-        semantic_backend: RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND,
+    let canonical_request = RuntimeDeviceRouteRequest {
+        reports: evidence.clone(),
+        requested_backends: requested_backends.clone(),
+        required_available_backends: required_available.clone(),
+        required_ready_backends: required_ready.clone(),
+    };
+    let request_sha256 = runtime_device_route_request_sha256(&canonical_request);
+    let mut payload = RuntimeDeviceRoutePayload {
+        kind: RUNTIME_DEVICE_ROUTE_KIND.to_owned(),
+        contract_version: RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION.to_owned(),
+        semantic_owner: RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER.to_owned(),
+        semantic_backend: RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND.to_owned(),
+        execution_client: None,
+        evidence,
+        requested_backends,
         report_count: routes.len(),
         routes,
         all_ready: !backends.is_empty() && not_ready_backends.is_empty(),
@@ -665,7 +975,51 @@ pub fn evaluate_runtime_device_route(
         required_ready_backends_passed,
         passed: failures.is_empty(),
         failures,
-    })
+        request_sha256,
+        output_sha256: String::new(),
+        committed: true,
+    };
+    payload.output_sha256 = runtime_device_route_output_sha256(&payload);
+    Ok(payload)
+}
+
+fn runtime_device_route_request_sha256(request: &RuntimeDeviceRouteRequest) -> String {
+    sha256_serialized(RUNTIME_DEVICE_ROUTE_REQUEST_DIGEST_DOMAIN, request)
+}
+
+fn runtime_device_route_output_sha256(payload: &RuntimeDeviceRoutePayload) -> String {
+    let mut canonical = payload.clone();
+    canonical.execution_client = None;
+    canonical.output_sha256.clear();
+    sha256_serialized(RUNTIME_DEVICE_ROUTE_OUTPUT_DIGEST_DOMAIN, &canonical)
+}
+
+fn sha256_serialized<T: Serialize>(domain: &[u8], value: &T) -> String {
+    let encoded = serde_json::to_vec(value)
+        .expect("runtime-device route commitment values must serialize deterministically");
+    let mut digest = Sha256::new();
+    digest.update(domain);
+    digest.update(encoded);
+    let digest = digest.finalize();
+    let mut hexadecimal = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hexadecimal, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hexadecimal
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn invalid_payload(field: &'static str, message: impl ToString) -> RuntimeDeviceRouteError {
+    RuntimeDeviceRouteError::InvalidPayload {
+        field,
+        message: message.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -718,8 +1072,8 @@ mod tests {
         assert!(payload.runtime_missing_ready_backends.is_empty());
         assert!(payload.passed);
         let mps = &payload.routes[1];
-        assert_eq!(mps.route, "surrogate");
-        assert_eq!(mps.route_status, "surrogate_ready");
+        assert_eq!(mps.route, RuntimeDeviceRouteClass::Surrogate);
+        assert_eq!(mps.route_status, RuntimeDeviceRouteStatus::SurrogateReady);
         assert_eq!(mps.native_readiness, RuntimeDeviceReadiness::NotReady);
         assert_eq!(mps.route_readiness, RuntimeDeviceReadiness::Ready);
         assert_eq!(
@@ -821,8 +1175,8 @@ mod tests {
         assert_eq!(route.native_ready, None);
         assert_eq!(route.route_readiness, RuntimeDeviceReadiness::Unknown);
         assert!(!route.route_ready);
-        assert_eq!(route.route, "unavailable");
-        assert_eq!(route.route_status, "unknown");
+        assert_eq!(route.route, RuntimeDeviceRouteClass::Unavailable);
+        assert_eq!(route.route_status, RuntimeDeviceRouteStatus::Unknown);
         assert_eq!(payload.native_readiness_unknown_backends, ["cpu"]);
         assert_eq!(payload.route_readiness_unknown_backends, ["cpu"]);
         assert!(payload.route_not_ready_backends.is_empty());
@@ -949,7 +1303,10 @@ mod tests {
             payload.routes[0].route_readiness,
             RuntimeDeviceReadiness::Unknown
         );
-        assert_eq!(payload.routes[0].route_status, "unknown");
+        assert_eq!(
+            payload.routes[0].route_status,
+            RuntimeDeviceRouteStatus::Unknown
+        );
         assert_eq!(payload.route_readiness_unknown_backends, ["mps"]);
     }
 
@@ -1016,5 +1373,140 @@ mod tests {
                 backend: "wgpu".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn payload_is_canonical_committed_and_replay_validated() {
+        let request = RuntimeDeviceRouteRequest {
+            reports: vec![evidence(" WGPU ", true, " KERNEL_WIRED ")],
+            requested_backends: vec![" WGPU ".to_owned()],
+            required_ready_backends: vec![" WGPU ".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        };
+        let payload = evaluate_runtime_device_route(request.clone()).expect("valid route request");
+
+        assert_eq!(
+            payload.contract_version,
+            RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION
+        );
+        assert_eq!(payload.requested_backends, ["wgpu"]);
+        assert_eq!(payload.evidence[0].requested_backend, "wgpu");
+        assert_eq!(
+            payload.evidence[0].effective_backend.as_deref(),
+            Some("wgpu")
+        );
+        assert_eq!(
+            payload.evidence[0].runtime_status.as_deref(),
+            Some("kernel_wired")
+        );
+        assert!(valid_sha256(&payload.request_sha256));
+        assert!(valid_sha256(&payload.output_sha256));
+        assert!(payload.committed);
+        payload
+            .validate()
+            .expect("self-contained payload validates");
+        payload
+            .validate_against(request)
+            .expect("payload replays against its original request");
+
+        let encoded = serde_json::to_vec(&payload).expect("payload serializes");
+        let decoded: RuntimeDeviceRoutePayload =
+            serde_json::from_slice(&encoded).expect("payload deserializes");
+        decoded.validate().expect("wire round-trip validates");
+    }
+
+    #[test]
+    fn payload_validation_rejects_tampering_and_wrong_replay_input() {
+        let request = RuntimeDeviceRouteRequest {
+            reports: vec![evidence("cpu", true, "cpu")],
+            requested_backends: vec!["cpu".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        };
+        let payload = evaluate_runtime_device_route(request.clone()).expect("valid route request");
+
+        let mut tampered = payload.clone();
+        tampered.routes[0].route_ready = false;
+        assert!(matches!(
+            tampered.validate(),
+            Err(RuntimeDeviceRouteError::InvalidPayload {
+                field: "payload",
+                ..
+            })
+        ));
+
+        let different = RuntimeDeviceRouteRequest {
+            reports: vec![evidence("cpu", false, "feature_disabled")],
+            requested_backends: vec!["cpu".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        };
+        assert!(matches!(
+            payload.validate_against(different),
+            Err(RuntimeDeviceRouteError::InvalidPayload {
+                field: "request",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn execution_client_is_transport_only_and_commitment_stable() {
+        let payload = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![evidence("cpu", true, "cpu")],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect("valid route request");
+        let committed = payload.output_sha256.clone();
+        let transported = payload
+            .with_execution_client(" WASM ")
+            .expect("valid transport client");
+
+        assert_eq!(transported.execution_client.as_deref(), Some("wasm"));
+        assert_eq!(transported.output_sha256, committed);
+        transported
+            .validate()
+            .expect("transported payload validates");
+    }
+
+    #[test]
+    fn effective_backend_readiness_must_agree_across_reports() {
+        let mut mps = evidence("mps", true, "kernel_wired");
+        mps.effective_backend = Some("wgpu".to_owned());
+        mps.requested_backend_runtime_ready = Some(false);
+        let error = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![mps, evidence("wgpu", false, "feature_disabled")],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect_err("effective-backend drift must fail closed");
+
+        assert!(matches!(
+            error,
+            RuntimeDeviceRouteError::ConflictingEffectiveBackendReadiness {
+                ref backend,
+                ..
+            } if backend == "wgpu"
+        ));
+    }
+
+    #[test]
+    fn backend_and_status_labels_reject_ambiguous_wire_tokens() {
+        let invalid_backend = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![evidence("wgpu\nshadow", true, "kernel_wired")],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect_err("control characters must not enter backend labels");
+        assert!(matches!(
+            invalid_backend,
+            RuntimeDeviceRouteError::InvalidLabelCharacter { .. }
+        ));
+
+        let invalid_status = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![evidence("wgpu", true, "kernel wired")],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect_err("status labels must remain machine-readable tokens");
+        assert!(matches!(
+            invalid_status,
+            RuntimeDeviceRouteError::InvalidStatusCharacter { .. }
+        ));
     }
 }
