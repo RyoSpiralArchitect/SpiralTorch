@@ -38,6 +38,8 @@ use st_core::backend::runtime_probe::resolve_backend;
 #[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
+use st_core::runtime::trainer_external::TrainerExternalStateCheckpoint;
+#[cfg(feature = "nn")]
 use st_core::runtime::trainer_optimizer::TrainerOptimizerCheckpoint;
 #[cfg(feature = "nn")]
 use st_core::runtime::zspace_optimizer::zspace_parameter_control_from_value;
@@ -4434,21 +4436,30 @@ pub(crate) struct PyRoundtableConfig {
 #[pymethods]
 impl PyRoundtableConfig {
     #[new]
-    #[pyo3(signature = (*, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5))]
-    pub fn new(top_k: u32, mid_k: u32, bottom_k: u32, here_tolerance: f32) -> PyResult<Self> {
+    #[pyo3(signature = (*, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psi_enabled=false))]
+    pub fn new(
+        top_k: u32,
+        mid_k: u32,
+        bottom_k: u32,
+        here_tolerance: f32,
+        psi_enabled: bool,
+    ) -> PyResult<Self> {
         if !here_tolerance.is_finite() {
             return Err(PyValueError::new_err("here_tolerance must be finite"));
         }
         if top_k == 0 || mid_k == 0 || bottom_k == 0 {
             return Err(PyValueError::new_err("top_k/mid_k/bottom_k must be >= 1"));
         }
-        let config = RustRoundtableConfig {
+        let mut config = RustRoundtableConfig {
             top_k,
             mid_k,
             bottom_k,
             here_tolerance: here_tolerance.max(0.0),
             ..Default::default()
         };
+        if psi_enabled {
+            config = config.enable_psi();
+        }
         Ok(Self { inner: config })
     }
 
@@ -4472,10 +4483,19 @@ impl PyRoundtableConfig {
         self.inner.here_tolerance
     }
 
+    #[getter]
+    pub fn psi_enabled(&self) -> bool {
+        self.inner.psi_enabled
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "RoundtableConfig(top_k={}, mid_k={}, bottom_k={}, here_tolerance={})",
-            self.inner.top_k, self.inner.mid_k, self.inner.bottom_k, self.inner.here_tolerance
+            "RoundtableConfig(top_k={}, mid_k={}, bottom_k={}, here_tolerance={}, psi_enabled={})",
+            self.inner.top_k,
+            self.inner.mid_k,
+            self.inner.bottom_k,
+            self.inner.here_tolerance,
+            self.inner.psi_enabled
         )
     }
 }
@@ -5928,6 +5948,33 @@ impl PyNnModuleTrainer {
                 .restore_optimizer_checkpoint(module_inner, &checkpoint)
                 .map_err(|error| TensorError::Generic(error.to_string()))
         })?;
+        let value = serde_json::to_value(validation)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn external_state_checkpoint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let checkpoint = self
+            .inner
+            .external_state_checkpoint()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let value = serde_json::to_value(checkpoint)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn restore_external_state_checkpoint(
+        &mut self,
+        py: Python<'_>,
+        checkpoint: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let value = crate::json::py_to_json(checkpoint)?;
+        let checkpoint: TrainerExternalStateCheckpoint = serde_json::from_value(value)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let validation = self
+            .inner
+            .restore_external_state_checkpoint(&checkpoint)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let value = serde_json::to_value(validation)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         json_to_py(py, &value)

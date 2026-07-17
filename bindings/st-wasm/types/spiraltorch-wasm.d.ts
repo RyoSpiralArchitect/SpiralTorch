@@ -495,6 +495,87 @@ declare module "spiraltorch-wasm" {
         external_state_required: string[];
     };
 
+    export type TrainerPsiComponent =
+        | "act_drift"
+        | "attn_entropy"
+        | "band_energy"
+        | "grad_norm"
+        | "loss"
+        | "positive_curvature"
+        | "update_ratio";
+
+    export type TrainerExternalPsiComponentValue = {
+        component: TrainerPsiComponent;
+        value: number;
+    };
+
+    export type TrainerPsiMeterCheckpoint = {
+        kind: "spiraltorch.psi_meter_checkpoint";
+        contract_version: "spiraltorch.psi_meter_checkpoint.v1";
+        semantic_owner: "st-core::telemetry::psi";
+        semantic_backend: "rust";
+        enabled: boolean;
+        components: TrainerPsiComponent[];
+        weights: TrainerExternalPsiComponentValue[];
+        ema_alpha: number;
+        sample_rate: number;
+        thresholds: TrainerExternalPsiComponentValue[];
+        ema: TrainerExternalPsiComponentValue[];
+        step: number;
+    };
+
+    export type TrainerDesireRoundtableImpulseCheckpoint = {
+        multipliers: [number, number, number];
+        drift: number;
+        timestamp_unix_millis: number;
+    };
+
+    export type TrainerDesireRoundtableCheckpoint = {
+        blend: number;
+        drift_gain: number;
+        latest: TrainerDesireRoundtableImpulseCheckpoint | null;
+    };
+
+    export type TrainerAccumulatorSynchronizerCheckpoint = {
+        kind: "spiraltorch.accumulator_synchronizer_checkpoint";
+        contract_version: "spiraltorch.accumulator_synchronizer_checkpoint.v1";
+        semantic_owner: "st-core::distributed::AccumulatorSynchronizer";
+        semantic_backend: "rust";
+        provider: string;
+        rank: number;
+        world_size: number;
+        state: Record<string, unknown> | null;
+    };
+
+    /** Rust-produced state for trainer components outside optimizer ownership. */
+    export type TrainerExternalStateCheckpoint = {
+        kind: "spiraltorch.trainer_external_state_checkpoint";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v1";
+        semantic_owner: "st-core::runtime::trainer_external";
+        semantic_backend: "rust";
+        required_components: string[];
+        desire_roundtable: TrainerDesireRoundtableCheckpoint | null;
+        psi_meter: TrainerPsiMeterCheckpoint | null;
+        accumulator_synchronizer: TrainerAccumulatorSynchronizerCheckpoint | null;
+        unresolved_components: string[];
+    };
+
+    /** Browser preflight receipt; concrete native resources are never reattached here. */
+    export type TrainerExternalStateCheckpointValidation = {
+        kind: "spiraltorch.trainer_external_state_checkpoint";
+        contract_version: "spiraltorch.trainer_external_state_checkpoint.v1";
+        semantic_owner: "st-core::runtime::trainer_external";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        required_components: string[];
+        captured_components: string[];
+        unresolved_components: string[];
+        reattach_required_components: string[];
+        reattached_components: string[];
+        payload_complete: boolean;
+        deterministic_resume_ready: boolean;
+    };
+
     export type RankPlanRequest = {
         kind: "topk" | "top_k" | "midk" | "mid_k" | "bottomk" | "bottom_k";
         rows: number;
@@ -1960,6 +2041,10 @@ declare module "spiraltorch-wasm" {
     export function trainerOptimizerCheckpointObject(
         checkpoint: TrainerOptimizerCheckpoint,
     ): TrainerOptimizerCheckpointValidation;
+    export function trainerExternalStateCheckpointJson(checkpointJson: string): string;
+    export function trainerExternalStateCheckpointObject(
+        checkpoint: TrainerExternalStateCheckpoint,
+    ): TrainerExternalStateCheckpointValidation;
     export function rankPlanJson(requestJson: string): string;
     export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
     export function apiLlmRoutePolicyEvaluateJson(requestJson: string): string;

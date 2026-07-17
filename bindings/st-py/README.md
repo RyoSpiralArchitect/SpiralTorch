@@ -2456,7 +2456,10 @@ state is mutated:
 ```python
 model_state = model.state_dict()
 optimizer_state = trainer.optimizer_checkpoint(model)
+external_state = trainer.external_state_checkpoint()
 
+# Attach the same Desire bridges or distributed provider before this call.
+external_receipt = resumed_trainer.restore_external_state_checkpoint(external_state)
 resumed_model.load_state_dict(model_state)
 resumed_trainer.prepare(resumed_model)
 receipt = resumed_trainer.restore_optimizer_checkpoint(
@@ -2464,13 +2467,40 @@ receipt = resumed_trainer.restore_optimizer_checkpoint(
     optimizer_state,
 )
 assert receipt["semantic_backend"] == "rust"
-assert receipt["deterministic_resume_ready"] is True
+assert receipt["external_state_required"] == external_state["required_components"]
 ```
 
 Restore is transactional and fail-closed. `external_state_required` names
 enabled bridges or distributed runtimes whose own state must be checkpointed
 alongside this optimizer contract; Python neither suppresses nor reinterprets
-that limitation.
+that limitation. The optimizer receipt's `deterministic_resume_ready` describes
+the optimizer payload in isolation, so it remains `False` whenever that list is
+non-empty even after a separate external restore succeeds. The two successful
+receipts are kept distinct until Rust owns an atomic training-bundle receipt.
+
+Supported external runtime state has a separate Rust-owned checkpoint. Python
+only transports this payload and orchestrates native restore; it does not
+rebuild component accounting or readiness rules. Desire roundtable controls,
+PSI configuration/EMA/sample clock, and known accumulator-provider descriptors
+are captured today. Unsupported queues and controllers remain explicit in
+`unresolved_components`, while an accumulator resource must already be
+reattached and verified before the receipt can report deterministic resume:
+
+```python
+assert external_state["semantic_backend"] == "rust"
+assert external_receipt["payload_complete"] is True
+assert external_receipt["deterministic_resume_ready"] is True
+```
+
+Enable Rust PSI metering through the roundtable config when its EMA should be
+part of continuation state. A resumed trainer reconstructs this Rust-owned
+meter directly from the checkpoint; unlike bridges and distributed providers,
+it does not require a placeholder meter or a dummy training step first:
+
+```python
+config = st.nn.RoundtableConfig(psi_enabled=True)
+schedule = trainer.roundtable(rows, cols, config)
+```
 
 ```python
 import spiraltorch as st

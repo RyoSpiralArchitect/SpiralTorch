@@ -153,12 +153,20 @@ pub(crate) mod st_distributed {
     }
 
     impl RendezvousSession {
+        pub fn group_id(&self) -> &str {
+            &self.group_id
+        }
+
         pub fn rank(&self) -> usize {
             self.rank
         }
 
         pub fn world_size(&self) -> usize {
             self.world_size
+        }
+
+        pub fn collective_in_flight(&self) -> bool {
+            self.collective_in_flight.load(AtomicOrdering::Acquire)
         }
 
         fn group(&self) -> &Arc<GroupState> {

@@ -11,6 +11,9 @@ use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::schedule::BandEnergy;
 use crate::PureResult;
 use st_core::coop::ai::{CoopAgent, CoopProposal};
+use st_core::runtime::trainer_external::{
+    DesireRoundtableCheckpoint, DesireRoundtableImpulseCheckpoint,
+};
 use st_tensor::TensorError;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
@@ -1282,12 +1285,23 @@ pub struct DesireRoundtableImpulse {
     pub timestamp: SystemTime,
 }
 
-#[derive(Clone, Default)]
-pub struct DesireRoundtableBridge {
+#[derive(Clone, Debug)]
+struct DesireRoundtableRuntime {
     blend: f32,
     drift_gain: f32,
+    latest: Option<DesireRoundtableImpulse>,
+}
+
+#[derive(Clone)]
+pub struct DesireRoundtableBridge {
+    runtime: Arc<Mutex<DesireRoundtableRuntime>>,
     shared: Arc<Mutex<Vec<DesireRoundtableEvent>>>,
-    latest: Arc<Mutex<Option<DesireRoundtableImpulse>>>,
+}
+
+impl Default for DesireRoundtableBridge {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -1298,8 +1312,8 @@ mod coop_tests {
     fn desire_roundtable_coop_agent_reacts_to_credit() {
         let mut bridge = DesireRoundtableBridge::new();
         {
-            let mut guard = bridge.latest.lock().unwrap();
-            *guard = Some(DesireRoundtableImpulse {
+            let mut guard = bridge.runtime.lock().unwrap();
+            guard.latest = Some(DesireRoundtableImpulse {
                 multipliers: (1.1, 0.9, 1.0),
                 drift: 0.3,
                 timestamp: SystemTime::now(),
@@ -1309,48 +1323,105 @@ mod coop_tests {
         let proposal = CoopAgent::propose(&mut bridge);
         assert!(proposal.weight > 0.0);
 
-        let before_blend = bridge.blend;
-        let before_gain = bridge.drift_gain;
+        let before_blend = bridge.blend();
+        let before_gain = bridge.drift_gain();
         CoopAgent::observe(&mut bridge, -0.2, -0.6);
-        assert!(bridge.blend >= before_blend);
-        assert!(bridge.drift_gain > before_gain);
+        assert!(bridge.blend() >= before_blend);
+        assert!(bridge.drift_gain() > before_gain);
+    }
+
+    #[test]
+    fn desire_roundtable_checkpoint_restores_every_shared_clone() {
+        let mut bridge = DesireRoundtableBridge::new();
+        let mut clone = bridge.clone();
+        clone.set_blend(0.72);
+        clone.set_drift_gain(0.61);
+        {
+            let mut runtime = bridge.runtime.lock().unwrap();
+            runtime.latest = Some(DesireRoundtableImpulse {
+                multipliers: (1.2, 0.8, 1.0),
+                drift: -0.35,
+                timestamp: UNIX_EPOCH + Duration::from_millis(42),
+            });
+        }
+        let encoded = serde_json::to_string(&bridge.checkpoint().unwrap()).unwrap();
+        let checkpoint: DesireRoundtableCheckpoint = serde_json::from_str(&encoded).unwrap();
+
+        bridge.set_blend(0.1);
+        bridge.set_drift_gain(0.2);
+        bridge.runtime.lock().unwrap().latest = None;
+        clone.restore_checkpoint(checkpoint).unwrap();
+
+        assert_eq!(bridge.checkpoint().unwrap(), checkpoint);
+        assert_eq!(clone.checkpoint().unwrap(), checkpoint);
+        assert_eq!(bridge.blend(), 0.72);
+        assert_eq!(bridge.drift_gain(), 0.61);
+    }
+
+    #[test]
+    fn desire_roundtable_restore_rejects_tampering_without_mutation() {
+        let bridge = DesireRoundtableBridge::new();
+        let before = bridge.checkpoint().unwrap();
+        let mut invalid = before;
+        invalid.blend = f32::NAN;
+
+        assert!(bridge.restore_checkpoint(invalid).is_err());
+        assert_eq!(bridge.checkpoint().unwrap(), before);
     }
 }
 
 impl DesireRoundtableBridge {
     pub fn new() -> Self {
         Self {
-            blend: 0.35,
-            drift_gain: 0.35,
+            runtime: Arc::new(Mutex::new(DesireRoundtableRuntime {
+                blend: 0.35,
+                drift_gain: 0.35,
+                latest: None,
+            })),
             shared: Arc::new(Mutex::new(Vec::new())),
-            latest: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn with_blend(mut self, blend: f32) -> Self {
-        self.blend = blend.clamp(0.0, 1.0);
+        self.set_blend(blend);
         self
     }
 
     pub fn blend(&self) -> f32 {
-        self.blend
+        self.runtime
+            .lock()
+            .map(|runtime| runtime.blend)
+            .unwrap_or(0.35)
     }
 
     pub fn set_blend(&mut self, blend: f32) {
-        self.blend = blend.clamp(0.0, 1.0);
+        if !blend.is_finite() {
+            return;
+        }
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime.blend = blend.clamp(0.0, 1.0);
+        }
     }
 
     pub fn with_drift_gain(mut self, gain: f32) -> Self {
-        self.drift_gain = gain.clamp(0.0, 1.0);
+        self.set_drift_gain(gain);
         self
     }
 
     pub fn drift_gain(&self) -> f32 {
-        self.drift_gain
+        self.runtime
+            .lock()
+            .map(|runtime| runtime.drift_gain)
+            .unwrap_or(0.35)
     }
 
     pub fn set_drift_gain(&mut self, gain: f32) {
-        self.drift_gain = gain.clamp(0.0, 1.0);
+        if !gain.is_finite() {
+            return;
+        }
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime.drift_gain = gain.clamp(0.0, 1.0);
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -1365,10 +1436,10 @@ impl DesireRoundtableBridge {
     }
 
     pub fn impulse(&self) -> PureResult<Option<DesireRoundtableImpulse>> {
-        let guard = self.latest.lock().map_err(|_| TensorError::InvalidValue {
+        let guard = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire roundtable bridge poisoned",
         })?;
-        Ok(guard.clone())
+        Ok(guard.latest.clone())
     }
 
     pub fn drain(&self) -> PureResult<Vec<DesireRoundtableEvent>> {
@@ -1386,7 +1457,71 @@ impl DesireRoundtableBridge {
         Ok(Some(DesireRoundtableSummary::from_events(&events)))
     }
 
-    fn project(&self, weights: &DesireWeights) -> DesireRoundtableImpulse {
+    /// Captures every value that changes future roundtable impulses.
+    pub fn checkpoint(&self) -> PureResult<DesireRoundtableCheckpoint> {
+        let runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        let latest = runtime
+            .latest
+            .as_ref()
+            .map(|impulse| {
+                Ok(DesireRoundtableImpulseCheckpoint {
+                    multipliers: [
+                        impulse.multipliers.0,
+                        impulse.multipliers.1,
+                        impulse.multipliers.2,
+                    ],
+                    drift: impulse.drift,
+                    timestamp_unix_millis: desire_timestamp_to_millis(impulse.timestamp)?,
+                })
+            })
+            .transpose()?;
+        let checkpoint = DesireRoundtableCheckpoint {
+            blend: runtime.blend,
+            drift_gain: runtime.drift_gain,
+            latest,
+        };
+        checkpoint
+            .validate()
+            .map_err(|error| TensorError::Generic(error.to_string()))?;
+        Ok(checkpoint)
+    }
+
+    /// Atomically restores shared control and impulse state for every clone.
+    pub fn restore_checkpoint(&self, checkpoint: DesireRoundtableCheckpoint) -> PureResult<()> {
+        checkpoint
+            .validate()
+            .map_err(|error| TensorError::Generic(error.to_string()))?;
+        let latest = checkpoint
+            .latest
+            .map(|impulse| {
+                Ok(DesireRoundtableImpulse {
+                    multipliers: (
+                        impulse.multipliers[0],
+                        impulse.multipliers[1],
+                        impulse.multipliers[2],
+                    ),
+                    drift: impulse.drift,
+                    timestamp: desire_timestamp_from_millis(impulse.timestamp_unix_millis)?,
+                })
+            })
+            .transpose()?;
+        let mut runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        runtime.blend = checkpoint.blend;
+        runtime.drift_gain = checkpoint.drift_gain;
+        runtime.latest = latest;
+        Ok(())
+    }
+
+    fn project(
+        weights: &DesireWeights,
+        blend: f32,
+        drift_gain: f32,
+        timestamp: SystemTime,
+    ) -> DesireRoundtableImpulse {
         const EPS: f32 = 1e-6;
         let above = weights.alpha.max(0.0);
         let here = weights.gamma.max(0.0);
@@ -1395,20 +1530,39 @@ impl DesireRoundtableBridge {
         let bary = [above / total, here / total, beneath / total];
         const ONE_THIRD: f32 = 1.0 / 3.0;
         let mut multipliers = (
-            1.0 + self.blend * (bary[0] - ONE_THIRD),
-            1.0 + self.blend * (bary[1] - ONE_THIRD),
-            1.0 + self.blend * (bary[2] - ONE_THIRD),
+            1.0 + blend * (bary[0] - ONE_THIRD),
+            1.0 + blend * (bary[1] - ONE_THIRD),
+            1.0 + blend * (bary[2] - ONE_THIRD),
         );
         multipliers.0 = multipliers.0.clamp(0.35, 1.65);
         multipliers.1 = multipliers.1.clamp(0.35, 1.65);
         multipliers.2 = multipliers.2.clamp(0.35, 1.65);
-        let drift = (weights.lambda.tanh() * self.drift_gain).clamp(-1.0, 1.0);
+        let drift = (weights.lambda.tanh() * drift_gain).clamp(-1.0, 1.0);
         DesireRoundtableImpulse {
             multipliers,
             drift,
-            timestamp: SystemTime::now(),
+            timestamp,
         }
     }
+}
+
+fn desire_timestamp_to_millis(timestamp: SystemTime) -> PureResult<u64> {
+    let duration = timestamp
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable timestamp before unix epoch",
+        })?;
+    u64::try_from(duration.as_millis()).map_err(|_| TensorError::InvalidValue {
+        label: "desire roundtable timestamp overflow",
+    })
+}
+
+fn desire_timestamp_from_millis(timestamp: u64) -> PureResult<SystemTime> {
+    UNIX_EPOCH
+        .checked_add(Duration::from_millis(timestamp))
+        .ok_or(TensorError::InvalidValue {
+            label: "desire roundtable timestamp overflow",
+        })
 }
 
 impl CoopAgent for DesireRoundtableBridge {
@@ -1426,8 +1580,11 @@ impl CoopAgent for DesireRoundtableBridge {
     fn observe(&mut self, team_reward: f32, credit: f32) {
         let reward_push = team_reward.tanh();
         let credit_push = credit.tanh();
+        let Ok(mut runtime) = self.runtime.lock() else {
+            return;
+        };
 
-        let mut blend = self.blend;
+        let mut blend = runtime.blend;
         if reward_push < 0.0 {
             blend += (-reward_push) * 0.05;
         } else {
@@ -1438,41 +1595,41 @@ impl CoopAgent for DesireRoundtableBridge {
         } else {
             blend -= credit_push * 0.02;
         }
-        self.blend = blend.clamp(0.05, 0.95);
+        runtime.blend = blend.clamp(0.05, 0.95);
 
-        let mut drift_gain = self.drift_gain;
+        let mut drift_gain = runtime.drift_gain;
         if credit_push > 0.0 {
             drift_gain *= 1.0 - 0.08 * credit_push;
         } else {
             drift_gain *= 1.0 + 0.05 * (-credit_push);
         }
         drift_gain = (drift_gain * (1.0 - 0.03 * reward_push.abs())).clamp(0.1, 1.2);
-        self.drift_gain = drift_gain;
+        runtime.drift_gain = drift_gain;
     }
 }
 
 impl DesirePipelineSink for DesireRoundtableBridge {
     fn on_step(&mut self, step: &DesireAutomatedStep, timestamp: SystemTime) -> PureResult<()> {
-        let impulse = self.project(&step.solution.weights);
-        {
-            let mut guard = self.shared.lock().map_err(|_| TensorError::InvalidValue {
-                label: "desire roundtable bridge poisoned",
-            })?;
-            guard.push(DesireRoundtableEvent {
-                timestamp,
-                solution: step.solution.clone(),
-                trigger: step.trigger.clone(),
-                multipliers: impulse.multipliers,
-                drift: impulse.drift,
-            });
-        }
-        let mut latest = self.latest.lock().map_err(|_| TensorError::InvalidValue {
+        let mut events = self.shared.lock().map_err(|_| TensorError::InvalidValue {
             label: "desire roundtable bridge poisoned",
         })?;
-        *latest = Some(DesireRoundtableImpulse {
+        let mut runtime = self.runtime.lock().map_err(|_| TensorError::InvalidValue {
+            label: "desire roundtable bridge poisoned",
+        })?;
+        let impulse = Self::project(
+            &step.solution.weights,
+            runtime.blend,
+            runtime.drift_gain,
             timestamp,
-            ..impulse
+        );
+        events.push(DesireRoundtableEvent {
+            timestamp,
+            solution: step.solution.clone(),
+            trigger: step.trigger.clone(),
+            multipliers: impulse.multipliers,
+            drift: impulse.drift,
         });
+        runtime.latest = Some(impulse);
         Ok(())
     }
 }

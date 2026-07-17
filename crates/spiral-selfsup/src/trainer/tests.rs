@@ -1,6 +1,6 @@
 use super::distributed::st_distributed::DistributedError;
-use super::{DistributedDevice, MetricReduce, TrainingDevice, TrainingDeviceError};
-use st_core::distributed::AccumulatorSynchronizer;
+use super::{CpuDevice, DistributedDevice, MetricReduce, TrainingDevice, TrainingDeviceError};
+use st_core::distributed::{AccumulatorSynchronizer, AccumulatorSynchronizerCheckpoint};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,57 @@ fn distributed_device_implements_accumulator_synchronizer_bridge() {
     for handle in handles {
         assert_eq!(handle.join().unwrap(), vec![1.5, 4.0]);
     }
+}
+
+#[test]
+fn cpu_accumulator_checkpoint_has_a_verifiable_provider_identity() {
+    let device = CpuDevice::new();
+    let encoded = serde_json::to_string(&AccumulatorSynchronizer::checkpoint(&device).unwrap())
+        .expect("CPU checkpoint should serialize");
+    let checkpoint: AccumulatorSynchronizerCheckpoint =
+        serde_json::from_str(&encoded).expect("CPU checkpoint should deserialize");
+
+    assert_eq!(checkpoint.provider, "spiral-selfsup.cpu_accumulator.v1");
+    assert!(checkpoint.state.is_none());
+    AccumulatorSynchronizer::validate_checkpoint(&device, &checkpoint).unwrap();
+}
+
+#[test]
+fn distributed_accumulator_checkpoint_verifies_provider_state() {
+    let checkpoint = {
+        let device = DistributedDevice::new("checkpoint-provider", 0, 1)
+            .unwrap()
+            .with_collective_timeout(Duration::from_millis(37));
+        AccumulatorSynchronizer::checkpoint(&device).unwrap()
+    };
+    assert_eq!(
+        checkpoint.provider,
+        "spiral-selfsup.distributed_accumulator.v1"
+    );
+    assert_eq!(
+        checkpoint.state.as_ref().unwrap()["group_id"],
+        "checkpoint-provider"
+    );
+    assert_eq!(
+        checkpoint.state.as_ref().unwrap()["strategy"],
+        "all_reduce_mean"
+    );
+
+    let restored = DistributedDevice::new("checkpoint-provider", 0, 1)
+        .unwrap()
+        .with_collective_timeout(Duration::from_millis(37));
+    AccumulatorSynchronizer::validate_checkpoint(&restored, &checkpoint).unwrap();
+    drop(restored);
+
+    let wrong = DistributedDevice::new("checkpoint-provider-wrong", 0, 1)
+        .unwrap()
+        .with_collective_timeout(Duration::from_millis(37));
+    assert!(
+        AccumulatorSynchronizer::validate_checkpoint(&wrong, &checkpoint)
+            .unwrap_err()
+            .to_string()
+            .contains("distributed checkpoint state mismatch")
+    );
 }
 
 #[test]
