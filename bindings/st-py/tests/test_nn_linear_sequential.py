@@ -65,6 +65,43 @@ def test_linear_forward_backward_smoke() -> None:
     assert loss_value.shape() == (1, 1)
 
 
+def test_lora_linear_exposes_the_rust_adapter_contract() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+    assert hasattr(st, "nn")
+    assert hasattr(st.nn, "LoraLinear")
+
+    with pytest.raises(ValueError, match="lora_alpha"):
+        st.nn.LoraLinear(2, 1, 1, alpha=0.0, name="adapter")
+    with pytest.raises(ValueError, match="lora_rank"):
+        st.nn.LoraLinear(2, 1, 2, alpha=2.0, name="adapter")
+
+    layer = st.nn.LoraLinear(2, 1, 1, alpha=2.0, name="adapter")
+    assert layer.rank == 1
+    assert layer.alpha == pytest.approx(2.0)
+    assert layer.scale == pytest.approx(2.0)
+    assert [name for name, _ in layer.state_dict()] == [
+        "adapter::lora_a",
+        "adapter::lora_b",
+    ]
+    assert [name for name, _ in layer.base_state_dict()] == [
+        "adapter::bias",
+        "adapter::weight",
+    ]
+
+    x = st.Tensor((1, 2), data=[0.5, -0.1])
+    grad_output = st.Tensor((1, 1), data=[0.3])
+    before = layer.forward(x)
+    _ = layer.backward(x, grad_output)
+    layer.apply_step(0.05)
+    layer.zero_accumulators()
+    after = layer.forward(x)
+
+    assert before.shape() == after.shape()
+    assert before.tolist() != after.tolist()
+
+
 def test_sequential_add_and_train_step() -> None:
     st = _load_native()
     if st is None:
