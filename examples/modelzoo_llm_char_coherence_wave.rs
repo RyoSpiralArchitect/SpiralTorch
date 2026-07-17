@@ -1080,12 +1080,13 @@ fn main() -> PureResult<()> {
         .prompt
         .clone()
         .unwrap_or_else(|| text.chars().take(steps).collect::<String>());
-    let mut trainer = ModuleTrainer::new(
+    let mut trainer = ModuleTrainer::try_new(
         backend_sel.caps,
         curvature,
         args.learning_rate,
         args.learning_rate,
-    );
+    )
+    .map_err(|error| error.into_tensor_error())?;
     if let Some(text) = args.infuse.as_deref() {
         let every = match args.infuse_every.as_str() {
             "once" => TextInfusionEvery::Once,

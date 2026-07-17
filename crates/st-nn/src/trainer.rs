@@ -4648,6 +4648,11 @@ impl RewriteBudget {
 
 impl ModuleTrainer {
     /// Creates a new trainer with the provided device capabilities and learning rates.
+    ///
+    /// # Panics
+    ///
+    /// Panics when optimizer controls violate the Rust contract. Use
+    /// [`Self::try_new`] for user-provided or otherwise untrusted controls.
     pub fn new(
         caps: DeviceCaps,
         curvature: f32,
@@ -4675,6 +4680,11 @@ impl ModuleTrainer {
     }
 
     /// Creates a trainer bound to an explicit, stable execution contract.
+    ///
+    /// # Panics
+    ///
+    /// Panics when optimizer controls violate the Rust contract. Use
+    /// [`Self::try_new_with_execution_config`] for untrusted controls.
     pub fn new_with_execution_config(
         caps: DeviceCaps,
         execution_config: ExecutionConfig,

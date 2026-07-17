@@ -22,6 +22,24 @@ pub enum TrainerOptimizerConfigError {
     InvalidPositiveFinite { field: &'static str, value: f32 },
 }
 
+impl TrainerOptimizerConfigError {
+    /// Preserves established tensor error categories at `PureResult` boundaries.
+    pub fn into_tensor_error(self) -> st_tensor::TensorError {
+        match self {
+            Self::InvalidCurvature { value } => {
+                st_tensor::TensorError::NonHyperbolicCurvature { curvature: value }
+            }
+            Self::InvalidPositiveFinite {
+                field: "hyper_learning_rate" | "fallback_learning_rate" | "real_learning_rate",
+                value,
+            } => st_tensor::TensorError::NonPositiveLearningRate { rate: value },
+            Self::InvalidPositiveFinite { field, value } => st_tensor::TensorError::Generic(
+                format!("{field} must be positive and finite, got {value}"),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrainerOptimizerConfig {
@@ -220,5 +238,34 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn optimizer_errors_preserve_existing_tensor_error_categories() {
+        let curvature =
+            TrainerOptimizerConfigError::InvalidCurvature { value: 0.5 }.into_tensor_error();
+        assert!(matches!(
+            curvature,
+            st_tensor::TensorError::NonHyperbolicCurvature { curvature: 0.5 }
+        ));
+
+        let rate = TrainerOptimizerConfigError::InvalidPositiveFinite {
+            field: "hyper_learning_rate",
+            value: 0.0,
+        }
+        .into_tensor_error();
+        assert!(matches!(
+            rate,
+            st_tensor::TensorError::NonPositiveLearningRate { rate: 0.0 }
+        ));
+
+        let clip = TrainerOptimizerConfigError::InvalidPositiveFinite {
+            field: "grad_clip_max_norm",
+            value: 0.0,
+        }
+        .into_tensor_error();
+        assert!(
+            matches!(clip, st_tensor::TensorError::Generic(message) if message.contains("grad_clip_max_norm"))
+        );
     }
 }
