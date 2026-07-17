@@ -40,9 +40,7 @@ use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
 use st_core::runtime::trainer_checkpoint::TrainerRuntimeCheckpointBundle;
 #[cfg(feature = "nn")]
-use st_core::runtime::trainer_external::{
-    TrainerExternalStateCheckpoint, TrainerTimestampCheckpoint,
-};
+use st_core::runtime::trainer_external::TrainerExternalStateCheckpoint;
 #[cfg(feature = "nn")]
 use st_core::runtime::trainer_optimizer::TrainerOptimizerCheckpoint;
 #[cfg(feature = "nn")]
@@ -6497,11 +6495,10 @@ fn gnn_roundtable_signal_to_py(
     signal: &RoundtableBandSignal,
 ) -> PyResult<PyObject> {
     let observation = signal.observation().map_err(tensor_err_to_py)?;
-    let issued_at = TrainerTimestampCheckpoint::try_from_system_time(
-        "gnn_roundtable_signal.issued_at",
-        signal.issued_at(),
-    )
-    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let issued_at = signal.issued_at_checkpoint();
+    issued_at
+        .validate("gnn_roundtable_signal.issued_at")
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
     json_to_py(
         py,
         &serde_json::json!({

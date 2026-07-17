@@ -45,15 +45,19 @@ pub struct RoundtableBandSignal {
     energy: BandEnergy,
     band_sizes: (u32, u32, u32),
     issued_at: SystemTime,
+    issued_at_checkpoint: TrainerTimestampCheckpoint,
 }
 
 impl RoundtableBandSignal {
     /// Builds a signal from explicit energy magnitudes and band sizes.
     pub fn new(energy: BandEnergy, band_sizes: (u32, u32, u32)) -> PureResult<Self> {
+        let issued_at = SystemTime::now();
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
         let signal = Self {
             energy,
             band_sizes,
-            issued_at: SystemTime::now(),
+            issued_at,
+            issued_at_checkpoint,
         };
         signal.validate()?;
         Ok(signal)
@@ -69,7 +73,9 @@ impl RoundtableBandSignal {
 
     /// Overrides the timestamp associated with the signal.
     pub fn with_issued_at(mut self, issued_at: SystemTime) -> PureResult<Self> {
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
         self.issued_at = issued_at;
+        self.issued_at_checkpoint = issued_at_checkpoint;
         self.validate()?;
         Ok(self)
     }
@@ -87,6 +93,11 @@ impl RoundtableBandSignal {
     /// Returns when the signal was emitted.
     pub fn issued_at(&self) -> SystemTime {
         self.issued_at
+    }
+
+    /// Returns the exact cross-runtime timestamp retained by the signal.
+    pub fn issued_at_checkpoint(&self) -> TrainerTimestampCheckpoint {
+        self.issued_at_checkpoint
     }
 
     /// Returns the combined depth of the schedule.
@@ -129,9 +140,28 @@ impl RoundtableBandSignal {
         observation: GnnRoundtableSignalObservation,
         issued_at: SystemTime,
     ) -> PureResult<Self> {
+        let issued_at_checkpoint = Self::checkpoint_for_system_time(issued_at)?;
+        Self::from_observation_checkpoint(observation, issued_at_checkpoint)
+    }
+
+    /// Rebuilds a signal while preserving an exact portable checkpoint timestamp.
+    pub fn from_observation_checkpoint(
+        observation: GnnRoundtableSignalObservation,
+        issued_at_checkpoint: TrainerTimestampCheckpoint,
+    ) -> PureResult<Self> {
         validate_gnn_roundtable_signal(observation).map_err(|_| TensorError::InvalidValue {
             label: "GNN roundtable signal observation",
         })?;
+        issued_at_checkpoint
+            .validate("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        let issued_at = issued_at_checkpoint
+            .try_to_system_time("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
         let sheet_index = usize::try_from(observation.spectral.sheet_index).map_err(|_| {
             TensorError::InvalidValue {
                 label: "GNN roundtable sheet index",
@@ -157,6 +187,7 @@ impl RoundtableBandSignal {
                 observation.band_sizes.beneath,
             ),
             issued_at,
+            issued_at_checkpoint,
         };
         signal.validate()?;
         Ok(signal)
@@ -169,11 +200,30 @@ impl RoundtableBandSignal {
                 label: "GNN roundtable signal",
             }
         })?;
+        self.issued_at_checkpoint
+            .validate("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        let projected = self
+            .issued_at_checkpoint
+            .try_to_system_time("gnn_roundtable_signal.issued_at")
+            .map_err(|_| TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp",
+            })?;
+        if projected != self.issued_at {
+            return Err(TensorError::InvalidValue {
+                label: "GNN roundtable signal timestamp projection",
+            });
+        }
+        Ok(())
+    }
+
+    fn checkpoint_for_system_time(issued_at: SystemTime) -> PureResult<TrainerTimestampCheckpoint> {
         TrainerTimestampCheckpoint::try_from_system_time(
             "gnn_roundtable_signal.issued_at",
-            self.issued_at,
+            issued_at,
         )
-        .map(|_| ())
         .map_err(|_| TensorError::InvalidValue {
             label: "GNN roundtable signal timestamp",
         })
@@ -251,10 +301,26 @@ mod tests {
 
     #[test]
     fn signal_rejects_timestamp_that_checkpoint_cannot_represent() {
-        let issued_at = UNIX_EPOCH.checked_sub(Duration::from_nanos(1)).unwrap();
+        let issued_at = UNIX_EPOCH.checked_sub(Duration::from_secs(1)).unwrap();
         let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
 
         assert!(signal.with_issued_at(issued_at).is_err());
+    }
+
+    #[test]
+    fn signal_preserves_exact_portable_timestamp_beyond_system_time_resolution() {
+        let source = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1)).unwrap();
+        let timestamp = TrainerTimestampCheckpoint {
+            unix_seconds: 17,
+            subsec_nanos: 42,
+        };
+        let restored = RoundtableBandSignal::from_observation_checkpoint(
+            source.observation().unwrap(),
+            timestamp,
+        )
+        .unwrap();
+
+        assert_eq!(restored.issued_at_checkpoint(), timestamp);
     }
 
     #[test]

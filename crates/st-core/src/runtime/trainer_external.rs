@@ -46,13 +46,11 @@ pub struct TrainerTimestampCheckpoint {
 }
 
 impl TrainerTimestampCheckpoint {
-    pub fn try_from_system_time(
+    /// Builds an exact portable timestamp from its duration since the Unix epoch.
+    pub fn try_from_unix_duration(
         field: &str,
-        timestamp: SystemTime,
+        duration: Duration,
     ) -> Result<Self, TrainerExternalCheckpointError> {
-        let duration = timestamp
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| state_error(field, "must not precede the Unix epoch"))?;
         let checkpoint = Self {
             unix_seconds: duration.as_secs(),
             subsec_nanos: duration.subsec_nanos(),
@@ -61,17 +59,37 @@ impl TrainerTimestampCheckpoint {
         Ok(checkpoint)
     }
 
+    pub fn try_from_system_time(
+        field: &str,
+        timestamp: SystemTime,
+    ) -> Result<Self, TrainerExternalCheckpointError> {
+        let duration = timestamp
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| state_error(field, "must not precede the Unix epoch"))?;
+        Self::try_from_unix_duration(field, duration)
+    }
+
+    /// Returns the exact portable duration represented by this timestamp.
+    pub fn try_to_unix_duration(
+        self,
+        field: &str,
+    ) -> Result<Duration, TrainerExternalCheckpointError> {
+        self.validate(field)?;
+        Ok(Duration::new(self.unix_seconds, self.subsec_nanos))
+    }
+
     pub fn try_to_system_time(
         self,
         field: &str,
     ) -> Result<SystemTime, TrainerExternalCheckpointError> {
-        self.validate(field)?;
+        let duration = self.try_to_unix_duration(field)?;
         UNIX_EPOCH
-            .checked_add(Duration::new(self.unix_seconds, self.subsec_nanos))
+            .checked_add(duration)
             .ok_or_else(|| state_error(field, "overflows SystemTime"))
     }
 
-    fn validate(&self, field: &str) -> Result<(), TrainerExternalCheckpointError> {
+    /// Validates the cross-runtime integer and nanosecond bounds.
+    pub fn validate(&self, field: &str) -> Result<(), TrainerExternalCheckpointError> {
         if self.unix_seconds > TRAINER_EXTERNAL_MAX_SAFE_INTEGER {
             return Err(state_error(
                 &format!("{field}.unix_seconds"),
@@ -1593,18 +1611,32 @@ mod tests {
 
     #[test]
     fn timestamp_checkpoint_roundtrips_nanoseconds_through_the_shared_contract() {
-        let timestamp = UNIX_EPOCH + Duration::new(17, 42);
+        let duration = Duration::new(17, 42);
         let checkpoint =
-            TrainerTimestampCheckpoint::try_from_system_time("timestamp", timestamp).unwrap();
+            TrainerTimestampCheckpoint::try_from_unix_duration("timestamp", duration).unwrap();
         assert_eq!(checkpoint.unix_seconds, 17);
         assert_eq!(checkpoint.subsec_nanos, 42);
         assert_eq!(
-            checkpoint.try_to_system_time("timestamp").unwrap(),
-            timestamp
+            checkpoint.try_to_unix_duration("timestamp").unwrap(),
+            duration
+        );
+
+        // SystemTime is only an OS boundary view and may have coarser resolution.
+        let platform_timestamp = UNIX_EPOCH + duration;
+        let platform_checkpoint = TrainerTimestampCheckpoint::try_from_system_time(
+            "platform_timestamp",
+            platform_timestamp,
+        )
+        .unwrap();
+        assert_eq!(
+            platform_checkpoint
+                .try_to_system_time("platform_timestamp")
+                .unwrap(),
+            platform_timestamp
         );
         assert!(TrainerTimestampCheckpoint::try_from_system_time(
             "timestamp",
-            UNIX_EPOCH.checked_sub(Duration::from_nanos(1)).unwrap(),
+            UNIX_EPOCH.checked_sub(Duration::from_secs(1)).unwrap(),
         )
         .is_err());
     }

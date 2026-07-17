@@ -101,8 +101,8 @@ use st_core::runtime::trainer_external::{
     TrainerExternalCheckpointComponents, TrainerExternalCheckpointError,
     TrainerExternalCheckpointValidation, TrainerExternalStateCheckpoint,
     TrainerGnnRoundtableBridgeCheckpoint, TrainerGnnRoundtableSignalCheckpoint,
-    TrainerTimestampCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT,
-    DESIRE_TRAINER_COMPONENT, GNN_ROUNDTABLE_BRIDGE_COMPONENT,
+    ACCUMULATOR_SYNCHRONIZER_COMPONENT, COHERENCE_BRIDGE_COMPONENT, DESIRE_TRAINER_COMPONENT,
+    GNN_ROUNDTABLE_BRIDGE_COMPONENT,
 };
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
@@ -3160,10 +3160,8 @@ fn gnn_roundtable_signal_checkpoint(
                 field: format!("{field}.observation"),
                 message: error.to_string(),
             })?;
-    let issued_at = TrainerTimestampCheckpoint::try_from_system_time(
-        &format!("{field}.issued_at"),
-        signal.issued_at(),
-    )?;
+    let issued_at = signal.issued_at_checkpoint();
+    issued_at.validate(&format!("{field}.issued_at"))?;
     let checkpoint = TrainerGnnRoundtableSignalCheckpoint {
         observation,
         issued_at,
@@ -3177,15 +3175,14 @@ fn gnn_roundtable_signal_from_checkpoint(
     field: &str,
 ) -> Result<RoundtableBandSignal, TrainerExternalCheckpointError> {
     checkpoint.canonical_influence()?;
-    let issued_at = checkpoint
-        .issued_at
-        .try_to_system_time(&format!("{field}.issued_at"))?;
-    RoundtableBandSignal::from_observation(checkpoint.observation, issued_at).map_err(|error| {
-        TrainerExternalCheckpointError::InvalidState {
+    let timestamp_field = format!("{field}.issued_at");
+    checkpoint.issued_at.validate(&timestamp_field)?;
+    checkpoint.issued_at.try_to_system_time(&timestamp_field)?;
+    RoundtableBandSignal::from_observation_checkpoint(checkpoint.observation, checkpoint.issued_at)
+        .map_err(|error| TrainerExternalCheckpointError::InvalidState {
             field: format!("{field}.observation"),
             message: error.to_string(),
-        }
-    })
+        })
 }
 
 struct PreparedTrainerOptimizerRestore {
@@ -10402,6 +10399,7 @@ mod tests {
 
     #[test]
     fn runtime_bundle_restores_coherence_topology_and_next_two_steps() {
+        let _global_state = crate::test_global_state_lock();
         let pending = coherence_signal_for_weights(vec![0.72, 0.18, 0.1], 0.82, 0.25);
         let latest = coherence_signal_for_weights(vec![0.2, 0.55, 0.25], 0.61, -0.15);
         let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
@@ -11561,6 +11559,7 @@ mod tests {
 
     #[test]
     fn trace_bridge_accepts_only_current_consistent_rust_control_contracts() {
+        let _global_state = crate::test_global_state_lock();
         let topos = OpenCartesianTopos::new(-1.0, 1.0e-5, 10.0, 256, 8192).unwrap();
         let mut sequencer = ZSpaceCoherenceSequencer::new(64, 4, -1.0, topos).unwrap();
         let recorder = ZSpaceTraceRecorder::new(ZSpaceTraceConfig {
