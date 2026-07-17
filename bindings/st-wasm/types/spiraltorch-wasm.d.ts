@@ -576,6 +576,44 @@ declare module "spiraltorch-wasm" {
         deterministic_resume_ready: boolean;
     };
 
+    export type TrainerRuntimeCheckpointResumeScope =
+        "module_trainer_optimizer_and_supported_external_runtime_state;parameter_values_external_and_fingerprint_guarded;concrete_resources_reattached_before_commit";
+
+    /** Integrity-bound Rust envelope for optimizer and supported external state. */
+    export type TrainerRuntimeCheckpointBundle = {
+        kind: "spiraltorch.trainer_runtime_checkpoint_bundle";
+        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v1";
+        semantic_owner: "st-core::runtime::trainer_checkpoint";
+        semantic_backend: "rust";
+        resume_scope: TrainerRuntimeCheckpointResumeScope;
+        optimizer_sha256: string;
+        external_sha256: string;
+        optimizer: TrainerOptimizerCheckpoint;
+        external: TrainerExternalStateCheckpoint;
+    };
+
+    /** Browser preflight receipt; native restore and resource attachment happen elsewhere. */
+    export type TrainerRuntimeCheckpointValidation = {
+        kind: "spiraltorch.trainer_runtime_checkpoint_bundle";
+        contract_version: "spiraltorch.trainer_runtime_checkpoint_bundle.v1";
+        semantic_owner: "st-core::runtime::trainer_checkpoint";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        resume_scope: TrainerRuntimeCheckpointResumeScope;
+        optimizer_sha256: string;
+        external_sha256: string;
+        parameter_count: number;
+        captures_inflight_accumulators: boolean;
+        parameter_values_external: true;
+        required_components: string[];
+        captured_components: string[];
+        unresolved_components: string[];
+        reattach_required_components: string[];
+        reattached_components: string[];
+        payload_complete: boolean;
+        deterministic_resume_ready: boolean;
+    };
+
     export type RankPlanRequest = {
         kind: "topk" | "top_k" | "midk" | "mid_k" | "bottomk" | "bottom_k";
         rows: number;
@@ -2045,6 +2083,10 @@ declare module "spiraltorch-wasm" {
     export function trainerExternalStateCheckpointObject(
         checkpoint: TrainerExternalStateCheckpoint,
     ): TrainerExternalStateCheckpointValidation;
+    export function trainerRuntimeCheckpointBundleJson(bundleJson: string): string;
+    export function trainerRuntimeCheckpointBundleObject(
+        bundle: TrainerRuntimeCheckpointBundle,
+    ): TrainerRuntimeCheckpointValidation;
     export function rankPlanJson(requestJson: string): string;
     export function rankPlanObject(request: RankPlanRequest): RankPlanContract;
     export function apiLlmRoutePolicyEvaluateJson(requestJson: string): string;

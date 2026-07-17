@@ -2455,28 +2455,36 @@ state is mutated:
 
 ```python
 model_state = model.state_dict()
-optimizer_state = trainer.optimizer_checkpoint(model)
-external_state = trainer.external_state_checkpoint()
+runtime_bundle = trainer.runtime_checkpoint_bundle(model)
 
-# Attach the same Desire bridges or distributed provider before this call.
-external_receipt = resumed_trainer.restore_external_state_checkpoint(external_state)
+# Attach the same Desire bridges or distributed provider first.
 resumed_model.load_state_dict(model_state)
 resumed_trainer.prepare(resumed_model)
-receipt = resumed_trainer.restore_optimizer_checkpoint(
+receipt = resumed_trainer.restore_runtime_checkpoint_bundle(
     resumed_model,
-    optimizer_state,
+    runtime_bundle,
 )
 assert receipt["semantic_backend"] == "rust"
-assert receipt["external_state_required"] == external_state["required_components"]
+assert receipt["deterministic_resume_ready"] is True
 ```
 
-Restore is transactional and fail-closed. `external_state_required` names
+The bundle is versioned by `st-core::runtime::trainer_checkpoint`. SHA-256
+digests bind its independently versioned optimizer and external child payloads,
+so accidentally mixing or modifying either child fails before trainer,
+parameter, Desire, or PSI state is changed. Model values remain external and
+fingerprint-guarded. Concrete resources must be attached before the single
+restore call, and unsupported external components make the bundle fail closed.
+
+The lower-level `optimizer_checkpoint()` and `external_state_checkpoint()`
+methods remain available for component audit and staged orchestration.
+`external_state_required` names
 enabled bridges or distributed runtimes whose own state must be checkpointed
 alongside this optimizer contract; Python neither suppresses nor reinterprets
 that limitation. The optimizer receipt's `deterministic_resume_ready` describes
 the optimizer payload in isolation, so it remains `False` whenever that list is
-non-empty even after a separate external restore succeeds. The two successful
-receipts are kept distinct until Rust owns an atomic training-bundle receipt.
+non-empty even when the combined bundle is complete. Only the bundle receipt
+composes child coverage and native resource reattachment into one readiness
+claim.
 
 Supported external runtime state has a separate Rust-owned checkpoint. Python
 only transports this payload and orchestrates native restore; it does not
@@ -2487,9 +2495,10 @@ are captured today. Unsupported queues and controllers remain explicit in
 reattached and verified before the receipt can report deterministic resume:
 
 ```python
+external_state = runtime_bundle["external"]
 assert external_state["semantic_backend"] == "rust"
-assert external_receipt["payload_complete"] is True
-assert external_receipt["deterministic_resume_ready"] is True
+assert receipt["payload_complete"] is True
+assert receipt["deterministic_resume_ready"] is True
 ```
 
 Enable Rust PSI metering through the roundtable config when its EMA should be
