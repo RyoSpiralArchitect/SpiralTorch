@@ -21,7 +21,7 @@ use crate::inference::zspace_coherence::{
 
 pub const TRAINER_EXTERNAL_CHECKPOINT_KIND: &str = "spiraltorch.trainer_external_state_checkpoint";
 pub const TRAINER_EXTERNAL_CHECKPOINT_CONTRACT_VERSION: &str =
-    "spiraltorch.trainer_external_state_checkpoint.v4";
+    "spiraltorch.trainer_external_state_checkpoint.v5";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_OWNER: &str = "st-core::runtime::trainer_external";
 pub const TRAINER_EXTERNAL_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
 pub const TRAINER_EXTERNAL_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;

@@ -10,15 +10,21 @@ pub mod topk3_stage;
 pub mod topk_dist;
 pub mod trainer;
 
+mod wire;
+
 pub const ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_KIND: &str =
     "spiraltorch.accumulator_synchronizer_checkpoint";
 pub const ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_CONTRACT_VERSION: &str =
-    "spiraltorch.accumulator_synchronizer_checkpoint.v1";
+    "spiraltorch.accumulator_synchronizer_checkpoint.v2";
 pub const ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_OWNER: &str =
     "st-core::distributed::AccumulatorSynchronizer";
 pub const ACCUMULATOR_SYNCHRONIZER_CHECKPOINT_SEMANTIC_BACKEND: &str = "rust";
 pub const ACCUMULATOR_SYNCHRONIZER_OPAQUE_PROVIDER: &str =
     "spiraltorch.accumulator_synchronizer.opaque";
+#[deprecated(
+    since = "1.10.0",
+    note = "checkpoint topology now uses canonical decimal-string u64 wire values"
+)]
 pub const ACCUMULATOR_SYNCHRONIZER_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Stable identity and optional provider state for an attached collective.
@@ -33,7 +39,9 @@ pub struct AccumulatorSynchronizerCheckpoint {
     pub semantic_owner: String,
     pub semantic_backend: String,
     pub provider: String,
+    #[serde(with = "wire::canonical_u64")]
     pub rank: u64,
+    #[serde(with = "wire::canonical_u64")]
     pub world_size: u64,
     pub state: Option<serde_json::Value>,
 }
@@ -77,14 +85,6 @@ impl AccumulatorSynchronizerCheckpoint {
             return Err(AccumulatorSyncError::backend(format!(
                 "checkpoint rank {} must be within world size {}",
                 self.rank, self.world_size
-            )));
-        }
-        if self.rank > ACCUMULATOR_SYNCHRONIZER_MAX_SAFE_INTEGER
-            || self.world_size > ACCUMULATOR_SYNCHRONIZER_MAX_SAFE_INTEGER
-        {
-            return Err(AccumulatorSyncError::backend(format!(
-                "checkpoint rank and world size must not exceed JavaScript's exact integer limit {}",
-                ACCUMULATOR_SYNCHRONIZER_MAX_SAFE_INTEGER
             )));
         }
         if self.state.as_ref().is_some_and(|state| !state.is_object()) {
@@ -253,17 +253,31 @@ mod tests {
     }
 
     #[test]
-    fn synchronizer_checkpoint_rejects_cross_runtime_integer_overflow() {
+    fn synchronizer_checkpoint_preserves_cross_runtime_u64_topology() {
         let synchronizer = TestSynchronizer {
             rank: 0,
             world_size: 1,
         };
         let mut checkpoint = synchronizer.checkpoint().unwrap();
-        checkpoint.world_size = ACCUMULATOR_SYNCHRONIZER_MAX_SAFE_INTEGER + 1;
-        assert!(checkpoint
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("exact integer limit"));
+        checkpoint.rank = u64::MAX - 1;
+        checkpoint.world_size = u64::MAX;
+        checkpoint.validate().unwrap();
+
+        let wire = serde_json::to_value(&checkpoint).unwrap();
+        assert_eq!(wire["rank"], serde_json::json!((u64::MAX - 1).to_string()));
+        assert_eq!(wire["world_size"], serde_json::json!(u64::MAX.to_string()));
+        assert_eq!(
+            serde_json::from_value::<AccumulatorSynchronizerCheckpoint>(wire.clone()).unwrap(),
+            checkpoint
+        );
+
+        let mut numeric = wire;
+        numeric["world_size"] = serde_json::json!(u64::MAX);
+        assert!(serde_json::from_value::<AccumulatorSynchronizerCheckpoint>(numeric).is_err());
+
+        let mut previous_contract = checkpoint;
+        previous_contract.contract_version =
+            "spiraltorch.accumulator_synchronizer_checkpoint.v1".to_owned();
+        assert!(previous_contract.validate().is_err());
     }
 }

@@ -205,8 +205,10 @@ mod tests {
 
     #[test]
     fn wasm_external_checkpoint_preflight_matches_the_rust_validator() {
-        let checkpoint =
-            checkpoint_from_json(&serde_json::to_string(&valid_checkpoint()).unwrap()).unwrap();
+        let wire = serde_json::to_value(valid_checkpoint()).unwrap();
+        assert_eq!(wire["accumulator_synchronizer"]["rank"], "0");
+        assert_eq!(wire["accumulator_synchronizer"]["world_size"], "1");
+        let checkpoint = checkpoint_from_json(&serde_json::to_string(&wire).unwrap()).unwrap();
         let rust =
             serde_json::to_value(evaluate_trainer_external_state_checkpoint(&checkpoint).unwrap())
                 .unwrap();

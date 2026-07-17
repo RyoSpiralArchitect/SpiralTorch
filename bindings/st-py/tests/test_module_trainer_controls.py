@@ -177,7 +177,7 @@ def test_module_trainer_external_checkpoint_restores_rust_owned_state() -> None:
     assert checkpoint["kind"] == "spiraltorch.trainer_external_state_checkpoint"
     assert (
         checkpoint["contract_version"]
-        == "spiraltorch.trainer_external_state_checkpoint.v4"
+        == "spiraltorch.trainer_external_state_checkpoint.v5"
     )
     assert checkpoint["semantic_owner"] == "st-core::runtime::trainer_external"
     assert checkpoint["semantic_backend"] == "rust"
@@ -335,7 +335,7 @@ def test_module_trainer_runtime_bundle_is_atomic_and_rust_owned() -> None:
     assert bundle["kind"] == "spiraltorch.trainer_runtime_checkpoint_bundle"
     assert (
         bundle["contract_version"]
-        == "spiraltorch.trainer_runtime_checkpoint_bundle.v1"
+        == "spiraltorch.trainer_runtime_checkpoint_bundle.v2"
     )
     assert bundle["semantic_owner"] == "st-core::runtime::trainer_checkpoint"
     assert bundle["semantic_backend"] == "rust"

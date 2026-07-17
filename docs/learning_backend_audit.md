@@ -3785,7 +3785,7 @@ Trainer state outside optimizer ownership now begins the same consolidation.
 `st-core::runtime::trainer_external` owns a versioned, deny-unknown checkpoint
 and exact required/captured/unresolved accounting. `DesireRoundtableBridge`
 clones share one control runtime, so Python bundles, pipeline sinks, and
-`ModuleTrainer` cannot silently diverge. The v4 checkpoint captures its
+`ModuleTrainer` cannot silently diverge. The v5 checkpoint captures its
 controls/latest impulse and the pending summary consumed by the next trainer
 step. It also captures the complete `DesireTrainerBridge` FIFO, including phase,
 weights, trigger report, and an exact seconds/nanoseconds timestamp. PSI
@@ -3839,24 +3839,42 @@ that policy for direct/manual steps as well as epoch loops, including the
 `AccumulatorSynchronizer` callback and parameter update, then restores the
 previous thread state through the shared guard.
 
-`st-core::distributed::DistributedTrainer` now sends synchronous and
-asynchronous dense reduction through `Tensor::try_sum_axis0_with_backend()` and
-parameter updates through `Tensor::add_scaled_with_backend()`. CPU remains the
-honest control and transport plane for shard storage, broadcast, and queue
-locking; it is no longer reported as the numeric reduction/update backend when
-the tensor policy selected WGPU. Composite events expose requested and selected
-numeric routes, their `st-core::backend::execution` owner, and the remaining
-host blocker separately. A CPU/WGPU parity test covers both synchronous and
-asynchronous updates and verifies the underlying `sum_axis0` and `add_scaled`
-events on the real `wgpu_dense` path or its explicit allowed fallback.
+`st-core::distributed::CollectiveArena` now owns synchronous all-reduce and
+broadcast semantics instead of leaving a second reduction loop in
+`DistributedTrainer`. It rejects empty participant sets, unequal widths,
+non-finite inputs, count overflow, and non-finite reductions before mutating any
+caller row. Successful operations return a deny-unknown, versioned
+`CollectiveExecutionReport` that binds ordered input and output float bits with
+domain-separated SHA-256 digests. Counts use canonical decimal-string `u64`
+encoding, shared with Ameba and `AccumulatorSynchronizer` checkpoints, so the
+complete Rust range crosses Python, JavaScript, and WASM without a fabricated
+JavaScript-safe ceiling. This changes the nested synchronizer contract to v2,
+the external-state envelope to v5, and the integrity-bound runtime bundle to v2.
+Older numeric-topology envelopes are rejected rather than silently coerced or
+rounded; callers must recapture them through the current Rust contract.
+
+`DistributedTrainer` consumes that collective contract for synchronous steps;
+asynchronous dense reduction still uses the same
+`Tensor::try_sum_axis0_with_backend()` kernel, and parameter updates use
+`Tensor::add_scaled_with_backend()`. CPU remains the honest control and
+transport plane for shard storage, broadcast, and queue locking; it is not
+reported as the numeric reduction/update backend when the tensor policy selected
+WGPU. The collective report exposes requested and selected routes, the host
+control backend, the numeric kernel, and the lower Tensor event that proves the
+actual backend separately. A CPU/WGPU parity test verifies identical output
+digests and covers both synchronous and asynchronous trainer updates on the real
+`wgpu_dense` path or its explicit allowed fallback.
 
 The asynchronous queue now stores complete gradient batches rather than one
-flat modulo-addressed buffer. Merge validates and computes a complete scratch
-result before committing parameters; malformed, non-finite, or overflowing
-batches are restored ahead of concurrently enqueued work, and poisoned queue
-locks are recovered. Synchronous apply likewise commits the reduced gradient
-broadcast and parameter state together, so an update failure mutates neither
-caller gradients nor trainer weights.
+flat modulo-addressed buffer. A Rust RAII drain lease restores uncommitted
+batches ahead of concurrently enqueued work on ordinary errors and panic unwind;
+poisoned queue locks are recovered. Merge validates and computes a complete
+scratch result before committing parameters and then commits the lease.
+Synchronous apply likewise prepares the collective result and parameter state
+in scratch, so an update failure mutates neither caller gradients nor trainer
+weights. Python and WASM therefore do not need their own rollback, normalization,
+or backend-readiness interpretation for this path: they can expose the Rust
+result and report as clients of one contract.
 
 The production `spiral-selfsup::DistributedDevice` follows the same boundary.
 Its rendezvous collective remains host transport, while post-all-reduce mean
