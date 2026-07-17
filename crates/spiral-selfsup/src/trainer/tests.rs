@@ -4,6 +4,48 @@ use st_core::distributed::{AccumulatorSynchronizer, AccumulatorSynchronizerCheck
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "wgpu")]
+#[test]
+fn distributed_mean_scaling_obeys_the_core_wgpu_policy() {
+    use st_core::backend::device_caps::DeviceCaps;
+    use st_core::backend::execution::{
+        push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+    };
+    use std::sync::Mutex;
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+    let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+        captured
+            .lock()
+            .unwrap()
+            .push((event.op_name, event.data.clone()));
+    })));
+    let policy = BackendPolicy::from_device_caps_with_config(
+        DeviceCaps::wgpu(32, true, 256),
+        ExecutionConfig::new(AcceleratorFallback::Allow, 1),
+    );
+    let device = DistributedDevice::new("policy-routed-mean", 0, 1).unwrap();
+    let mut gradients = vec![1.5, -2.0, 0.25, 4.0];
+    {
+        let _guard = push_backend_policy(policy);
+        device.synchronize_gradients(&mut gradients).unwrap();
+    }
+    st_tensor::set_thread_meta_observer(previous);
+
+    assert_eq!(gradients, vec![1.5, -2.0, 0.25, 4.0]);
+    let events = events.lock().unwrap();
+    let scale = events
+        .iter()
+        .find(|(op_name, _)| *op_name == "scale")
+        .expect("distributed mean scale metadata");
+    assert_eq!(scale.1["requested_backend"], "wgpu");
+    assert!(matches!(
+        scale.1["backend"].as_str(),
+        Some("cpu" | "wgpu_dense")
+    ));
+}
+
 #[test]
 fn distributed_device_all_reduce_averages_gradients() {
     let world = 2;

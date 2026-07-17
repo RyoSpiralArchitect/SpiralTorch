@@ -3815,6 +3815,49 @@ Python/WASM readiness heuristic. Standalone optimizer and external
 receipts remain useful for component audit, but only the Rust bundle composes
 their validity into one deterministic-resume claim.
 
+### Distributed execution policy ownership
+
+The active tensor execution policy now has one semantic owner in
+`st-core::backend::execution`. Its thread-local scope, accelerator-fallback
+guard, threshold route, and route telemetry no longer originate in `st-nn`;
+`st-nn::execution` is an explicit compatibility re-export. This lets lower
+Rust crates consume the same captured policy without depending on the trainer
+layer or reconstructing its backend choice. `ModuleTrainer::step()` installs
+that policy for direct/manual steps as well as epoch loops, including the
+`AccumulatorSynchronizer` callback and parameter update, then restores the
+previous thread state through the shared guard.
+
+`st-core::distributed::DistributedTrainer` now sends synchronous and
+asynchronous dense reduction through `Tensor::try_sum_axis0_with_backend()` and
+parameter updates through `Tensor::add_scaled_with_backend()`. CPU remains the
+honest control and transport plane for shard storage, broadcast, and queue
+locking; it is no longer reported as the numeric reduction/update backend when
+the tensor policy selected WGPU. Composite events expose requested and selected
+numeric routes, their `st-core::backend::execution` owner, and the remaining
+host blocker separately. A CPU/WGPU parity test covers both synchronous and
+asynchronous updates and verifies the underlying `sum_axis0` and `add_scaled`
+events on the real `wgpu_dense` path or its explicit allowed fallback.
+
+The asynchronous queue now stores complete gradient batches rather than one
+flat modulo-addressed buffer. Merge validates and computes a complete scratch
+result before committing parameters; malformed, non-finite, or overflowing
+batches are restored ahead of concurrently enqueued work, and poisoned queue
+locks are recovered. Synchronous apply likewise commits the reduced gradient
+broadcast and parameter state together, so an update failure mutates neither
+caller gradients nor trainer weights.
+
+The production `spiral-selfsup::DistributedDevice` follows the same boundary.
+Its rendezvous collective remains host transport, while post-all-reduce mean
+scaling uses `current_tensor_util_backend_for_values()` and
+`Tensor::scale_with_backend()`. Each rank prepares that scaled result in scratch,
+then a one-value collective vote commits it only when every rank succeeded. A
+rank-local backend failure therefore leaves the same completed reduction on all
+peers and returns an error everywhere instead of rolling one participant back
+to a divergent pre-collective buffer. The `ModuleTrainer` integration test
+therefore exercises one policy from planner through accumulator synchronization
+and local parameter application instead of leaving the real distributed path as
+a hidden CPU loop.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op
@@ -3840,9 +3883,14 @@ Next steps:
    threshold-protected or data-movement work, not CPU-heavy debt; only add fused
    head/readout kernels if longer learning traces show those tiny reductions
    dominate latency.
-6. Promote the self-supervised accumulator-sync comparison from local smoke and
-   two-rank unit coverage into a reusable distributed run artifact, then add
-   schedule/early-stop controls around `best_info_nce` and `final_minus_best`.
+6. Promote the policy-routed self-supervised accumulator-sync comparison from
+   local smoke and two-rank unit coverage into a reusable distributed
+   `train_epoch()` artifact, then add schedule/early-stop controls around
+   `best_info_nce` and `final_minus_best`.
+7. Move `st-core::distributed::AmebaAutograd` forward propagation and weight
+   updates from their remaining `cpu_loop` numeric metadata into the same
+   tensor-policy contract while keeping mailbox routing and agent ownership on
+   the host control plane.
 
 ## Suggested PR Sequence
 
@@ -3854,6 +3902,6 @@ Next steps:
    Z-RBA projections to normalization-heavy and fused-attention learning paths.
 3. Broaden backend routing beyond GELU backward into normalization backward and
    remaining reduction-heavy learning paths.
-4. `TrainingDevice` bridge for `ModuleTrainer` accumulator synchronization,
-   including two-rank smoke coverage.
+4. Tensor-policy routing for `AmebaAutograd` forward propagation and local
+   weight updates, including transactional CPU/WGPU parity coverage.
 5. End-to-end parity harnesses for char-LM and graph-regressor one-step runs.
