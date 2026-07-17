@@ -3946,6 +3946,9 @@ probability, policy, count, or digest fails. Runtime Redis and HIP providers are
 explicitly enabled adapters that contribute weighted votes only. Missing
 features, malformed payloads, invalid RCCL topology, copy/all-gather failures,
 and empty requested providers are errors rather than local-value fallbacks.
+Environment-derived configuration enables Redis only when both `kv-redis` and
+`REDIS_URL` are present, while HIP/RCCL requires the explicit
+`SPIRAL_UNISON_HIP=1` opt-in; a compiled accelerator is not itself a request.
 
 `st-core::distributed::topk_dist` now defines one exact merge for any number of
 candidate shards. It verifies complete value/index pairs before sorting, rejects

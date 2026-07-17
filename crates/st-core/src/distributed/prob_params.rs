@@ -36,6 +36,7 @@ const CONSENSUS_OUTPUT_DIGEST_DOMAIN: &[u8] = b"spiraltorch.lane_consensus.outpu
 const PROBABILITY_SUM_BASE_TOLERANCE: f64 = 1.0e-12;
 const PROBABILITY_SUM_EPSILON_MULTIPLIER: f64 = 8.0;
 const DEFAULT_REDIS_SAMPLE_LIMIT: usize = 16;
+const HIP_ENV_OPT_IN: &str = "SPIRAL_UNISON_HIP";
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -682,7 +683,9 @@ impl LaneConsensusRuntimeConfig {
         Ok(())
     }
 
-    /// Explicitly opts into the historical environment-driven runtime policy.
+    /// Reads the historical environment policy without auto-enabling unavailable
+    /// providers. Redis requires its feature and `REDIS_URL`; HIP requires an
+    /// explicit `SPIRAL_UNISON_HIP` truthy flag.
     pub fn from_env() -> Result<Self, LaneProbabilityError> {
         let policy = match std::env::var("SPIRAL_UNISON_AGG") {
             Ok(value) => LaneConsensusPolicy::parse(&value)?,
@@ -694,22 +697,28 @@ impl LaneConsensusRuntimeConfig {
                 })
             }
         };
-        let include_redis = std::env::var_os("REDIS_URL").is_some();
-        let include_hip = cfg!(all(feature = "hip", feature = "hip-real"));
-        let redis_sample_limit = match std::env::var("SPIRAL_UNISON_REDIS_SAMPLES") {
-            Ok(value) => value.parse::<usize>().map_err(|error| {
-                LaneProbabilityError::RuntimeEnvironment {
-                    field: "SPIRAL_UNISON_REDIS_SAMPLES",
-                    message: error.to_string(),
+        let (include_redis, include_hip) = resolve_runtime_provider_flags(
+            std::env::var_os("REDIS_URL").is_some(),
+            env_flag(HIP_ENV_OPT_IN)?,
+        )?;
+        let redis_sample_limit = if include_redis {
+            match std::env::var("SPIRAL_UNISON_REDIS_SAMPLES") {
+                Ok(value) => value.parse::<usize>().map_err(|error| {
+                    LaneProbabilityError::RuntimeEnvironment {
+                        field: "SPIRAL_UNISON_REDIS_SAMPLES",
+                        message: error.to_string(),
+                    }
+                })?,
+                Err(std::env::VarError::NotPresent) => DEFAULT_REDIS_SAMPLE_LIMIT,
+                Err(error) => {
+                    return Err(LaneProbabilityError::RuntimeEnvironment {
+                        field: "SPIRAL_UNISON_REDIS_SAMPLES",
+                        message: error.to_string(),
+                    })
                 }
-            })?,
-            Err(std::env::VarError::NotPresent) => DEFAULT_REDIS_SAMPLE_LIMIT,
-            Err(error) => {
-                return Err(LaneProbabilityError::RuntimeEnvironment {
-                    field: "SPIRAL_UNISON_REDIS_SAMPLES",
-                    message: error.to_string(),
-                })
             }
+        } else {
+            DEFAULT_REDIS_SAMPLE_LIMIT
         };
         let config = Self {
             policy,
@@ -1078,6 +1087,44 @@ pub fn canonical_lane_draw(seed: u64) -> f64 {
     value ^= value >> 31;
     let mantissa = value >> 11;
     mantissa as f64 * (1.0 / ((1u64 << 53) as f64))
+}
+
+fn env_flag(field: &'static str) -> Result<bool, LaneProbabilityError> {
+    let value = match std::env::var(field) {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(false),
+        Err(error) => {
+            return Err(LaneProbabilityError::RuntimeEnvironment {
+                field,
+                message: error.to_string(),
+            })
+        }
+    };
+    parse_env_flag_value(field, &value)
+}
+
+fn parse_env_flag_value(field: &'static str, value: &str) -> Result<bool, LaneProbabilityError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(LaneProbabilityError::RuntimeEnvironment {
+            field,
+            message: "must be one of 1, true, yes, on, 0, false, no, or off".to_owned(),
+        }),
+    }
+}
+
+fn resolve_runtime_provider_flags(
+    redis_url_present: bool,
+    hip_requested: bool,
+) -> Result<(bool, bool), LaneProbabilityError> {
+    let include_redis = cfg!(feature = "kv-redis") && redis_url_present;
+    if hip_requested && !cfg!(all(feature = "hip", feature = "hip-real")) {
+        return Err(LaneProbabilityError::ProviderUnavailable {
+            provider: "hip_rccl",
+        });
+    }
+    Ok((include_redis, hip_requested))
 }
 
 fn validate_support_size(size: usize) -> Result<(), LaneProbabilityError> {
@@ -1472,6 +1519,40 @@ mod tests {
         let mut numeric = serde_json::to_value(&outcome.report).unwrap();
         numeric["support_size"] = serde_json::json!(2);
         assert!(serde_json::from_value::<LaneConsensusReport>(numeric).is_err());
+    }
+
+    #[test]
+    fn environment_provider_resolution_is_feature_gated_and_explicit() {
+        for value in ["1", "TRUE", " yes ", "on"] {
+            assert!(parse_env_flag_value(HIP_ENV_OPT_IN, value).unwrap());
+        }
+        for value in ["0", "FALSE", " no ", "off"] {
+            assert!(!parse_env_flag_value(HIP_ENV_OPT_IN, value).unwrap());
+        }
+        assert!(matches!(
+            parse_env_flag_value(HIP_ENV_OPT_IN, "auto"),
+            Err(LaneProbabilityError::RuntimeEnvironment {
+                field: HIP_ENV_OPT_IN,
+                ..
+            })
+        ));
+
+        let (redis_enabled, hip_enabled) = resolve_runtime_provider_flags(true, false).unwrap();
+        assert_eq!(redis_enabled, cfg!(feature = "kv-redis"));
+        assert!(!hip_enabled);
+
+        #[cfg(not(all(feature = "hip", feature = "hip-real")))]
+        assert_eq!(
+            resolve_runtime_provider_flags(false, true),
+            Err(LaneProbabilityError::ProviderUnavailable {
+                provider: "hip_rccl"
+            })
+        );
+        #[cfg(all(feature = "hip", feature = "hip-real"))]
+        assert_eq!(
+            resolve_runtime_provider_flags(false, true).unwrap(),
+            (false, true)
+        );
     }
 
     #[test]
