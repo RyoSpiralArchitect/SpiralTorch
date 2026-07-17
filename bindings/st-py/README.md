@@ -2457,7 +2457,8 @@ state is mutated:
 model_state = model.state_dict()
 runtime_bundle = trainer.runtime_checkpoint_bundle(model)
 
-# Attach the same Desire bridges or distributed provider first.
+# Attach the same shared Desire bridges or distributed provider first.
+# Rust-owned PSI/coherence runtimes can bootstrap from the bundle.
 resumed_model.load_state_dict(model_state)
 resumed_trainer.prepare(resumed_model)
 receipt = resumed_trainer.restore_runtime_checkpoint_bundle(
@@ -2471,9 +2472,10 @@ assert receipt["deterministic_resume_ready"] is True
 The bundle is versioned by `st-core::runtime::trainer_checkpoint`. SHA-256
 digests bind its independently versioned optimizer and external child payloads,
 so accidentally mixing or modifying either child fails before trainer,
-parameter, Desire, or PSI state is changed. Model values remain external and
-fingerprint-guarded. Concrete resources must be attached before the single
-restore call, and unsupported external components make the bundle fail closed.
+parameter, Desire, PSI, or coherence state is changed. Model values remain
+external and fingerprint-guarded. Concrete resources must be attached before
+the single restore call, and unsupported external components make the bundle
+fail closed.
 
 The lower-level `optimizer_checkpoint()` and `external_state_checkpoint()`
 methods remain available for component audit and staged orchestration.
@@ -2488,13 +2490,17 @@ claim.
 
 Supported external runtime state has a separate Rust-owned checkpoint. Python
 only transports this payload and orchestrates native restore; it does not
-rebuild component accounting or readiness rules. The v2 contract captures the
+rebuild component accounting or readiness rules. The v3 contract captures the
 full FIFO consumed by `DesireTrainerBridge`, Desire roundtable controls/latest
 impulse/pending trainer summary, PSI configuration/EMA/sample clock, and known
-accumulator-provider descriptors. Desire timestamps use exact
-`unix_seconds + subsec_nanos` fields, so browser transport does not round Rust
-state to milliseconds. Other unsupported controllers remain explicit in
-`unresolved_components`, while an accumulator resource must already be
+accumulator-provider descriptors. It also records the ZSpaceTrace subscription
+topology plus the trainer-pending and bridge-latest coherence signals. Those
+signals retain only the distribution witness, raw observations, repair counts,
+and classification policy; control metrics and labels are re-derived by the
+canonical Rust coherence contract during validation and restore. Desire
+timestamps use exact `unix_seconds + subsec_nanos` fields, so browser transport
+does not round Rust state to milliseconds. Other unsupported controllers remain
+explicit in `unresolved_components`, while an accumulator resource must already be
 reattached and verified before the receipt can report deterministic resume:
 
 ```python
