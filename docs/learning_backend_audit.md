@@ -3882,6 +3882,30 @@ hop. Each round and full drain is scratch-built and committed atomically. A
 near-tolerance regression proves TensorOpMeta observation cannot alter routing,
 and CPU/WGPU parity covers a complete multi-round cascade.
 
+The same runtime now has a versioned, Rust-owned checkpoint and replay contract.
+Checkpoint agents are canonicalized by numeric `NodeId`, while neighbor order and
+the `VecDeque` message order remain explicit execution semantics. Node IDs are
+encoded as canonical decimal strings so the complete `u64` range survives JSON,
+Python, JavaScript, and WASM transports without precision loss. A domain-separated
+SHA-256 binds topology, learning controls, exact float bits, weights, hop state,
+and every queued payload. Stateful hop values and receipt counters use the same
+canonical decimal-string wire rule, so no `u64` evidence is rounded by a
+JavaScript or WASM JSON transport. Restore rebuilds the candidate through the same
+constructor/topology checks and commits only after queue provenance and integrity
+validation succeed, so malformed or tampered payloads cannot partially replace a
+live mesh.
+
+`propagate_round_with_receipt()` and `drain_with_receipt()` bind the pre/post state
+hashes to observer-independent per-round counts and requested/selected Tensor
+routes. Native replay starts from the checkpoint in scratch state and commits only
+if the complete receipt, final state hash, and route summaries match. This keeps
+actual kernel evidence in the underlying Tensor events without mislabelling a
+policy-selected route as the physical backend. CPU, WGPU-selected, observer-on/off,
+empty-queue, tamper, wrong-checkpoint, and failed-drain regressions cover the
+portable contract before it reaches a language binding. Speculative replay does
+not emit a normal round-commit event; only a successful live-state replacement
+emits `ameba_autograd_replay_commit` with the verified receipt and state hashes.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op
@@ -3911,9 +3935,10 @@ Next steps:
    local smoke and two-rank unit coverage into a reusable distributed
    `train_epoch()` artifact, then add schedule/early-stop controls around
    `best_info_nce` and `final_minus_best`.
-7. Add a deterministic checkpoint/restore and receipt contract for
-   `AmebaAutograd` agent topology, weights, queue order, and route settings before
-   exposing this now-policy-routed substrate to Python/WASM clients.
+7. Expose the versioned `AmebaAutograd` checkpoint and replay receipt through thin
+   Python/WASM adapters. Bindings should transport the Rust payload and validation
+   reports rather than reimplement NodeId parsing, canonical hashing, topology
+   preflight, route comparison, or commit rules.
 
 ## Suggested PR Sequence
 
@@ -3925,6 +3950,6 @@ Next steps:
    Z-RBA projections to normalization-heavy and fused-attention learning paths.
 3. Broaden backend routing beyond GELU backward into normalization backward and
    remaining reduction-heavy learning paths.
-4. Deterministic `AmebaAutograd` checkpoint/restore plus replay receipts over the
-   transactional Tensor-policy implementation.
+4. Thin Python/WASM exposure for the deterministic Rust `AmebaAutograd`
+   checkpoint/restore and replay-receipt contract.
 5. End-to-end parity harnesses for char-LM and graph-regressor one-step runs.

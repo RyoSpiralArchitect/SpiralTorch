@@ -11,6 +11,21 @@ use st_tensor::{
     emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed, Tensor, TensorError,
 };
 
+mod checkpoint;
+
+pub use checkpoint::{
+    evaluate_ameba_autograd_checkpoint, evaluate_ameba_autograd_replay_receipt,
+    AmebaAutogradAgentCheckpoint, AmebaAutogradCheckpoint, AmebaAutogradCheckpointError,
+    AmebaAutogradCheckpointState, AmebaAutogradCheckpointValidation,
+    AmebaAutogradMessageCheckpoint, AmebaAutogradReplayError, AmebaAutogradReplayOperation,
+    AmebaAutogradReplayReceipt, AmebaAutogradReplayValidation, AmebaAutogradRoundReceipt,
+    AMEBA_AUTOGRAD_CHECKPOINT_CONTRACT_VERSION, AMEBA_AUTOGRAD_CHECKPOINT_KIND,
+    AMEBA_AUTOGRAD_CHECKPOINT_RESUME_SCOPE, AMEBA_AUTOGRAD_CHECKPOINT_SEMANTIC_BACKEND,
+    AMEBA_AUTOGRAD_CHECKPOINT_SEMANTIC_OWNER, AMEBA_AUTOGRAD_REPLAY_CONTRACT_VERSION,
+    AMEBA_AUTOGRAD_REPLAY_KIND, AMEBA_AUTOGRAD_REPLAY_SEMANTIC_BACKEND,
+    AMEBA_AUTOGRAD_REPLAY_SEMANTIC_OWNER,
+};
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum AutogradError {
     #[error("agent {0} already registered")]
@@ -196,6 +211,18 @@ struct RoundStats {
     forwarded_values: usize,
     weight_update_routes: NumericRouteSummary,
     forwarding_routes: NumericRouteSummary,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CommittedRound {
+    stats: RoundStats,
+    pending_after: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ExecutionOutcome {
+    total_processed: usize,
+    rounds: Vec<CommittedRound>,
 }
 
 impl RoundStats {
@@ -424,14 +451,33 @@ impl AmebaAutograd {
     }
 
     pub fn propagate_round(&mut self) -> Result<usize, AutogradError> {
+        Ok(self.transact_round()?.total_processed)
+    }
+
+    fn transact_round(&mut self) -> Result<ExecutionOutcome, AutogradError> {
+        self.transact_round_with_meta(true)
+    }
+
+    fn transact_round_with_meta(
+        &mut self,
+        emit_round_meta: bool,
+    ) -> Result<ExecutionOutcome, AutogradError> {
         self.validate_topology()?;
-        let capture_meta = tensor_op_meta_observer_installed();
+        let capture_meta = emit_round_meta && tensor_op_meta_observer_installed();
         let mut scratch = self.clone();
         let (processed, stats) = scratch.process_round_in_place(capture_meta)?;
         let pending_after = scratch.pending.len();
         *self = scratch;
-        emit_autograd_round_meta(self, stats, pending_after, capture_meta);
-        Ok(processed)
+        if emit_round_meta {
+            emit_autograd_round_meta(self, stats, pending_after, capture_meta);
+        }
+        Ok(ExecutionOutcome {
+            total_processed: processed,
+            rounds: vec![CommittedRound {
+                stats,
+                pending_after,
+            }],
+        })
     }
 
     fn process_round_in_place(
@@ -463,21 +509,40 @@ impl AmebaAutograd {
     }
 
     pub fn drain(&mut self) -> Result<usize, AutogradError> {
+        Ok(self.transact_drain()?.total_processed)
+    }
+
+    fn transact_drain(&mut self) -> Result<ExecutionOutcome, AutogradError> {
+        self.transact_drain_with_meta(true)
+    }
+
+    fn transact_drain_with_meta(
+        &mut self,
+        emit_round_meta: bool,
+    ) -> Result<ExecutionOutcome, AutogradError> {
         self.validate_topology()?;
-        let capture_meta = tensor_op_meta_observer_installed();
+        let capture_meta = emit_round_meta && tensor_op_meta_observer_installed();
         let mut scratch = self.clone();
         let mut total = 0usize;
         let mut completed_rounds = Vec::new();
         while !scratch.pending.is_empty() {
             let (processed, stats) = scratch.process_round_in_place(capture_meta)?;
             total = total.saturating_add(processed);
-            completed_rounds.push((stats, scratch.pending.len()));
+            completed_rounds.push(CommittedRound {
+                stats,
+                pending_after: scratch.pending.len(),
+            });
         }
         *self = scratch;
-        for (stats, pending_after) in completed_rounds {
-            emit_autograd_round_meta(self, stats, pending_after, capture_meta);
+        if emit_round_meta {
+            for round in &completed_rounds {
+                emit_autograd_round_meta(self, round.stats, round.pending_after, capture_meta);
+            }
         }
-        Ok(total)
+        Ok(ExecutionOutcome {
+            total_processed: total,
+            rounds: completed_rounds,
+        })
     }
 
     pub fn weights(&self, id: NodeId) -> Result<&[f32], AutogradError> {
