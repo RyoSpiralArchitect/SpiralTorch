@@ -9,7 +9,8 @@ pub use st_core::backend::execution::{
     current_accelerator_fallback, current_attention_backend, current_backend_policy,
     current_layer_norm_backend, current_matmul_backend, current_prepacked_matmul_backend,
     current_softmax_backend, current_tensor_util_backend, current_tensor_util_backend_for_values,
-    push_backend_policy, AcceleratorFallback, BackendPolicy, BackendPolicyGuard, ExecutionConfig,
+    current_tensor_util_route, push_backend_policy, AcceleratorFallback, BackendPolicy,
+    BackendPolicyGuard, ExecutionConfig, TensorUtilRoute, TensorUtilRouteStatus,
 };
 
 #[cfg(test)]

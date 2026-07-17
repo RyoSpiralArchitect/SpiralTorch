@@ -626,11 +626,15 @@ reduced gradients still must produce finite update deltas and finite next
 parameters before any shard is committed, so huge-but-finite LR/gradient pairs
 cannot partially write `inf` into old distributed trainer state.
 `st-core::distributed::AmebaAutograd` now applies the same finite-value contract
-one layer earlier: tolerance, agent learning rates, non-negative damping,
-initial weights, seed gradients, local update deltas, and forwarded gradients
-are checked before weights are committed. Non-finite, sign-inverting, or
-overflowed distributed messages therefore cannot partially mutate agent weights
-before surfacing an error.
+one layer earlier: tolerance, agent learning rates, damping in the mathematical
+`[0, 1]` interval, initial weights, seed gradients, local update deltas, and
+forwarded gradients are checked before weights are committed. Execution also
+preflights every neighbor edge for existence and equal gradient dimension while
+preserving `max_hops=0` as an explicit local-only step. Non-finite,
+sign-inverting, malformed-topology, or overflowing distributed messages
+therefore cannot partially mutate agent weights before surfacing an error.
+One round and a full `drain()` both execute against scratch agent/queue state and
+commit only after the complete requested scope succeeds.
 `ModuleTrainer` now has an optional `st-core::distributed::AccumulatorSynchronizer`
 slot, and `spiral-selfsup` devices implement that bridge without creating a
 crate cycle. Before each optimizer step the trainer synchronizes every active
@@ -1966,6 +1970,13 @@ The compiled distributed training helpers now expose their actual synchronizatio
 work as well. `AmebaAutograd::propagate_round` emits `ameba_autograd_round`
 metadata with processed messages, forwarded messages, tolerance absorptions,
 max-hop stops, pending queue depth, aggregate signal, and update magnitude.
+Its local SGD update and damping projection now use policy-routed
+`Tensor::add_scaled_with_backend()` and `Tensor::scale_with_backend()` rather
+than private CPU arithmetic. Composite events keep the `HashMap`/`VecDeque`
+control plane and payload cloning on CPU while reporting requested and selected
+numeric routes, exact routed values, and the underlying Tensor metadata source.
+Signal and norm accounting uses observer-independent `f64` accumulation, so
+enabling telemetry cannot change a near-tolerance routing decision.
 `DistributedTrainer` emits `distributed_trainer_sync_step`,
 `distributed_trainer_async_enqueue`, and `distributed_trainer_async_merge`
 metadata with worker/contribution counts, shard topology, gradient norms,
@@ -3566,10 +3577,11 @@ while P2 candidates now include `st-core` distributed gradient/autograd CPU
 metadata, engine allreduce/ZeRO hook dispatch, and ZRBA covariance's CPU
 eigensolver island. These are not proven runtime debt until exercised by a trace,
 but the `st-core` entries now expose their concrete host mechanisms:
-`DistributedTrainer` reports `cpu_collective_arena`, `cpu_mutex_vec`, CPU
-accumulation/update modes, and queue/update value estimates; `AmebaAutograd`
-reports its `cpu_vecdeque` message queue, `cpu_hashmap` agent state, CPU loop
-weight updates, and the stateful graph/message-queue blocker;
+`DistributedTrainer` reports host shard/queue control separately from its
+policy-routed Tensor reductions and updates; `AmebaAutograd` reports its
+`cpu_vecdeque` message queue and `cpu_hashmap` agent state separately from
+policy-routed Tensor weight updates and damping projections, while retaining the
+stateful graph/message-queue blocker;
 `distributed_topk_merge` reports host pair filtering, CPU sort/truncate mode,
 and sort item estimates; engine hook points report opaque registered host
 callbacks for one-bit allreduce and ZeRO partition hooks. Backend residuals now
@@ -3858,6 +3870,18 @@ therefore exercises one policy from planner through accumulator synchronization
 and local parameter application instead of leaving the real distributed path as
 a hidden CPU loop.
 
+`st-core::distributed::AmebaAutograd` now consumes the same complete
+`TensorUtilRoute` for every local update and forwarding projection. The active
+policy is resolved once in `st-core::backend::execution`; `st-nn` only re-exports
+that route surface. Agent maps, message queues, edge selection, and payload
+cloning remain the honest host control plane, while `add_scaled` and `scale`
+events reveal the actual CPU/WGPU numeric backend. Strict topology preflight
+rejects unknown or dimension-changing edges, damping is confined to `[0, 1]`,
+and zero max hops means local-only execution rather than a silent rewrite to one
+hop. Each round and full drain is scratch-built and committed atomically. A
+near-tolerance regression proves TensorOpMeta observation cannot alter routing,
+and CPU/WGPU parity covers a complete multi-round cascade.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op
@@ -3887,10 +3911,9 @@ Next steps:
    local smoke and two-rank unit coverage into a reusable distributed
    `train_epoch()` artifact, then add schedule/early-stop controls around
    `best_info_nce` and `final_minus_best`.
-7. Move `st-core::distributed::AmebaAutograd` forward propagation and weight
-   updates from their remaining `cpu_loop` numeric metadata into the same
-   tensor-policy contract while keeping mailbox routing and agent ownership on
-   the host control plane.
+7. Add a deterministic checkpoint/restore and receipt contract for
+   `AmebaAutograd` agent topology, weights, queue order, and route settings before
+   exposing this now-policy-routed substrate to Python/WASM clients.
 
 ## Suggested PR Sequence
 
@@ -3902,6 +3925,6 @@ Next steps:
    Z-RBA projections to normalization-heavy and fused-attention learning paths.
 3. Broaden backend routing beyond GELU backward into normalization backward and
    remaining reduction-heavy learning paths.
-4. Tensor-policy routing for `AmebaAutograd` forward propagation and local
-   weight updates, including transactional CPU/WGPU parity coverage.
+4. Deterministic `AmebaAutograd` checkpoint/restore plus replay receipts over the
+   transactional Tensor-policy implementation.
 5. End-to-end parity harnesses for char-LM and graph-regressor one-step runs.

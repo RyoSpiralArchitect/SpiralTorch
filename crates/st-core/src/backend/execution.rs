@@ -11,8 +11,9 @@ use st_tensor::{
 };
 use std::cell::RefCell;
 
-use super::execution_plan::TensorUtilRoute;
-pub use super::execution_plan::{AcceleratorFallback, BackendPolicy, ExecutionConfig};
+pub use super::execution_plan::{
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, TensorUtilRoute, TensorUtilRouteStatus,
+};
 
 thread_local! {
     static ACTIVE_BACKEND_POLICY: RefCell<Option<BackendPolicy>> = const { RefCell::new(None) };
@@ -97,16 +98,27 @@ pub fn current_tensor_util_backend() -> TensorUtilBackend {
         .unwrap_or(TensorUtilBackend::Auto)
 }
 
-/// Applies the core execution plan to a tensor utility operation of `values` elements.
-pub fn current_tensor_util_backend_for_values(values: usize) -> TensorUtilBackend {
+/// Resolves the complete tensor utility route for an operation of `values` elements.
+pub fn current_tensor_util_route(values: usize) -> TensorUtilRoute {
     let Some(policy) = current_backend_policy() else {
-        return TensorUtilBackend::Auto;
+        return TensorUtilRoute {
+            requested_backend: TensorUtilBackend::Auto,
+            selected_backend: TensorUtilBackend::Auto,
+            values,
+            threshold: 0,
+            status: TensorUtilRouteStatus::Direct,
+        };
     };
     let route = policy.tensor_util_route(values);
     if route.records_threshold_decision() {
         emit_tensor_util_route(policy, route);
     }
-    route.selected_backend
+    route
+}
+
+/// Applies the core execution plan to a tensor utility operation of `values` elements.
+pub fn current_tensor_util_backend_for_values(values: usize) -> TensorUtilBackend {
+    current_tensor_util_route(values).selected_backend
 }
 
 fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
@@ -202,12 +214,14 @@ mod tests {
             ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
         );
         let guard = push_backend_policy(policy);
-        let selected = current_tensor_util_backend_for_values(8);
+        let route = current_tensor_util_route(8);
         drop(guard);
 
         st_tensor::set_thread_meta_observer(previous_observer);
 
-        assert_eq!(selected, TensorUtilBackend::Cpu);
+        assert_eq!(route.requested_backend, TensorUtilBackend::GpuWgpu);
+        assert_eq!(route.selected_backend, TensorUtilBackend::Cpu);
+        assert_eq!(route.status, TensorUtilRouteStatus::CpuThreshold);
         let events = events.lock().unwrap();
         let (_, data) = events
             .iter()
@@ -220,5 +234,18 @@ mod tests {
         assert_eq!(data["values"], 8);
         assert_eq!(data["threshold"], 1024);
         assert!(data.get("backend").is_none());
+    }
+
+    #[test]
+    fn tensor_utility_route_without_a_policy_preserves_legacy_auto() {
+        assert!(current_backend_policy().is_none());
+
+        let route = current_tensor_util_route(37);
+
+        assert_eq!(route.requested_backend, TensorUtilBackend::Auto);
+        assert_eq!(route.selected_backend, TensorUtilBackend::Auto);
+        assert_eq!(route.status, TensorUtilRouteStatus::Direct);
+        assert_eq!(route.values, 37);
+        assert_eq!(route.threshold, 0);
     }
 }

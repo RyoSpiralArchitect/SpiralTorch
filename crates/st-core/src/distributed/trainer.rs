@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::collective::CollectiveArena;
-use crate::backend::execution::{current_backend_policy, current_tensor_util_backend_for_values};
+use crate::backend::execution::current_tensor_util_route;
 use st_tensor::{
     emit_tensor_op, emit_tensor_op_meta, tensor_op_meta_observer_installed, Tensor, TensorError,
     TensorUtilBackend,
@@ -54,20 +54,11 @@ struct AsyncMergeResult {
 }
 
 fn current_tensor_route(values: usize) -> TensorRoute {
-    let (requested_backend, selected_backend) = current_backend_policy()
-        .map(|policy| {
-            let route = policy.tensor_util_route(values);
-            (
-                route.requested_backend_label(),
-                route.selected_backend_label(),
-            )
-        })
-        .unwrap_or(("auto", "auto"));
-    let backend = current_tensor_util_backend_for_values(values);
+    let route = current_tensor_util_route(values);
     TensorRoute {
-        backend,
-        requested_backend,
-        selected_backend,
+        backend: route.selected_backend,
+        requested_backend: route.requested_backend_label(),
+        selected_backend: route.selected_backend_label(),
     }
 }
 
