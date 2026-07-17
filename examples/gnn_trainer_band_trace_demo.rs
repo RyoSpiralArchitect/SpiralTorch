@@ -535,12 +535,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.curvature,
         args.learning_rate,
     )?;
-    let mut trainer = ModuleTrainer::new(
+    let mut trainer = ModuleTrainer::try_new(
         backend_sel.caps,
         args.curvature,
         args.learning_rate,
         args.learning_rate * 0.2,
-    );
+    )?;
     trainer.prepare(&mut model)?;
     let schedule = trainer.roundtable(
         args.batch_size as u32,

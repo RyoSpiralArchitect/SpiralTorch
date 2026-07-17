@@ -17,6 +17,7 @@ mod temperature_control;
 mod topos_control;
 mod topos_policy;
 mod topos_route;
+mod trainer_optimizer;
 mod training_projection;
 mod zspace_coherence;
 mod zspace_fusion;
@@ -62,6 +63,7 @@ pub use temperature_control::*;
 pub use topos_control::*;
 pub use topos_policy::*;
 pub use topos_route::*;
+pub use trainer_optimizer::*;
 pub use training_projection::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;

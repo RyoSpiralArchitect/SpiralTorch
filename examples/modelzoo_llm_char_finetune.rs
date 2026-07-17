@@ -1115,12 +1115,13 @@ fn main() -> PureResult<()> {
         "llm_char_finetune"
     };
 
-    let mut trainer = ModuleTrainer::new(
+    let mut trainer = ModuleTrainer::try_new(
         backend_sel.caps,
         curvature,
         args.learning_rate,
         args.learning_rate,
-    );
+    )
+    .map_err(|error| error.into_tensor_error())?;
     let roundtable_config = RoundtableConfig::default()
         .with_top_k(1)
         .with_mid_k(1)

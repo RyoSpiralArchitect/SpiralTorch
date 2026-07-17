@@ -441,6 +441,30 @@ The browser binding adds only `execution_client: "wasm"`; it owns no readiness p
 or fallback heuristic. Contract v2 also preserves absent evidence as `unknown` instead of
 silently rewriting it to `not_ready`; unknown routes remain fail-closed for execution.
 
+Trainer optimizer preflight follows the same client boundary. Browsers can
+validate a proposed curvature, learning-rate, realgrad, and gradient-clip
+configuration before handing it to a native training runtime, but they do not
+rebuild those admissibility rules:
+
+```ts
+import { trainerOptimizerConfigObject } from "spiraltorch-wasm";
+
+const optimizer = trainerOptimizerConfigObject({
+    curvature: -1.0,
+    hyper_learning_rate: 0.02,
+    fallback_learning_rate: 0.01,
+    real_learning_rate: 0.005,
+    grad_clip_max_norm: 1.0,
+});
+
+console.log(optimizer.contract_version, optimizer.semantic_owner);
+```
+
+`trainerOptimizerConfigJson` exposes the same fail-closed contract for worker
+messages. Both entry points call `st-core::runtime::trainer_optimizer` and add
+only `execution_client: "wasm"`; WASM does not own or execute the `st-nn`
+parameter update loop.
+
 Rank planning uses the same boundary. `rankPlanObject` and `rankPlanJson` send shape and
 capability observations to `st-core::ops::rank_entry`; Rust validates `rows`, `cols`, `k`,
 device limits, runtime surrogate routing, and the complete unified heuristic choice:

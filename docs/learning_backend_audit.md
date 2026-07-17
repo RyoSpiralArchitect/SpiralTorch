@@ -1,6 +1,7 @@
 # Learning Backend Audit
 
 Date: 2026-06-14
+Updated: 2026-07-16
 
 This note tracks the Rust backend surfaces that matter most for turning
 SpiralTorch into a serious learning stack. The focus is not raw kernel breadth
@@ -1795,10 +1796,20 @@ matmul caches. `ModuleTrainer` applies local spectral scaling through
 `LocalLearningRateAdapter`. This works, but optimizer state is not yet a first
 class serializable training component.
 
+Optimizer ingress is now centralized in the versioned
+`st-core::runtime::trainer_optimizer` contract. Direct Rust construction has
+fallible `ModuleTrainer::try_new` entry points, while Python delegates its
+constructor and optional realgrad/gradient-clip controls to the same Rust
+validator. WASM exposes that contract as a preflight client without pretending
+to run `st-nn`. Invalid optional-control updates fail without disabling or
+mutating an existing guard. `ModuleTrainer::optimizer_config_contract()` makes
+the exact accepted configuration and semantic owner available to traces and
+future checkpoints.
+
 Next steps:
 
-1. Define a trainer optimizer state snapshot for hypergrad, realgrad, adapter
-   policy, and backend policy.
+1. Promote the existing optimizer state snapshot into a versioned serializable
+   checkpoint containing hypergrad, realgrad, adapter policy, and backend policy.
 2. Include backend counters and fallback counts in checkpoints.
 3. Add resume tests that confirm one interrupted run matches an uninterrupted
    run for a deterministic seed.

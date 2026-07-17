@@ -11,6 +11,7 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::execution_plan::ExecutionConfig;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ops::rank_entry::{plan_rank_with_config, RankPlan};
+use st_core::runtime::trainer_optimizer::TrainerOptimizerConfig;
 use st_core::telemetry::atlas::{
     AtlasFragment, AtlasFrame, AtlasPerspective, AtlasRoute, AtlasRouteSummary,
 };
@@ -258,21 +259,12 @@ impl SpiralSessionBuilder {
     }
 
     fn validate(&self) -> PureResult<()> {
-        if self.curvature >= 0.0 || !self.curvature.is_finite() {
-            return Err(TensorError::NonHyperbolicCurvature {
-                curvature: self.curvature,
-            });
-        }
-        if self.hyper_learning_rate <= 0.0 || !self.hyper_learning_rate.is_finite() {
-            return Err(TensorError::NonPositiveLearningRate {
-                rate: self.hyper_learning_rate,
-            });
-        }
-        if self.fallback_learning_rate <= 0.0 || !self.fallback_learning_rate.is_finite() {
-            return Err(TensorError::NonPositiveLearningRate {
-                rate: self.fallback_learning_rate,
-            });
-        }
+        TrainerOptimizerConfig::try_new(
+            self.curvature,
+            self.hyper_learning_rate,
+            self.fallback_learning_rate,
+        )
+        .map_err(|error| error.into_tensor_error())?;
         if !self.barycenter.entropy_weight.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "entropy_weight",
@@ -1199,10 +1191,20 @@ mod tests {
     }
 
     #[test]
-    fn invalid_rates_are_rejected() {
+    fn invalid_optimizer_controls_are_rejected_by_the_core_contract() {
+        let mut curvature_builder = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256));
+        curvature_builder.set_curvature(0.5);
+        assert!(matches!(
+            curvature_builder.build(),
+            Err(TensorError::NonHyperbolicCurvature { curvature: 0.5 })
+        ));
+
         let mut builder = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256));
         builder.set_hyper_learning_rate(-0.1);
-        assert!(builder.build().is_err());
+        assert!(matches!(
+            builder.build(),
+            Err(TensorError::NonPositiveLearningRate { rate: -0.1 })
+        ));
     }
 
     #[test]

@@ -221,12 +221,13 @@ fn run() -> st_nn::PureResult<()> {
             message: err.to_string(),
         })?;
     }
-    let mut trainer = ModuleTrainer::new(
+    let mut trainer = ModuleTrainer::try_new(
         backend_sel.caps,
         args.curvature,
         args.learning_rate,
         args.learning_rate,
-    );
+    )
+    .map_err(|error| error.into_tensor_error())?;
     let schedule = trainer.roundtable(
         args.steps as u32,
         1,

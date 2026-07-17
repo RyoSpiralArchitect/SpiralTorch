@@ -11,4 +11,5 @@ pub mod golden;
 pub(crate) mod persistence;
 pub mod route_selection;
 pub mod topos_route_policy;
+pub mod trainer_optimizer;
 pub mod zspace_optimizer;
