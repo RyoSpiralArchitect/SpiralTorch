@@ -1816,11 +1816,19 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert 0.0 <= selection_rows["guarded"]["selection_scores"]["grounded"] <= 1.0
     assert report["selection_semantics"] == {
         "kind": "spiraltorch.topos_route_policy",
-        "contract_version": "spiraltorch.topos_route_policy.v1",
+        "contract_version": "spiraltorch.topos_route_policy.v2",
         "semantic_owner": "st-core::runtime::topos_route_policy",
         "semantic_backend": "rust",
         "row_count": 2,
         "active_row_count": 2,
+        "score_formula_version": "spiraltorch.topos_route_policy.score.v2",
+        "score_formula": (
+            "raw=clamp(weighted_mean(profile_metric_or_0.5)+0.08*"
+            "(0.5-incomplete_or_0.5),0,1);confidence=n/(n+1);score=0.5+"
+            "confidence*(raw-0.5);count=0_inactive"
+        ),
+        "score_prior_mean": 0.5,
+        "score_prior_strength": 1.0,
     }
     assert any("multiple runtime modes" in item for item in report["recommendations"])
 
@@ -1877,8 +1885,10 @@ def test_topos_sweep_route_rewards_train_stagent_policy() -> None:
 
     rewards = st.api_llm_topos_sweep_route_rewards(report, profile="grounded")
     assert [row["label"] for row in rewards] == ["open", "guarded"]
-    assert rewards[0]["reward"] == pytest.approx(0.33)
-    assert rewards[1]["reward"] == pytest.approx(0.91)
+    assert rewards[0]["reward"] == pytest.approx(0.5933333333333334)
+    assert rewards[1]["reward"] == pytest.approx(0.6266666666666667)
+    assert rewards[0]["score_evidence"]["sample_confidence"] == pytest.approx(2 / 3)
+    assert rewards[0]["source_row"]["label"] == "open"
 
     agent = _FakeToposRouteAgent(action_dim=len(rewards))
     policy = st.train_stagent_topos_route_policy(
@@ -1892,7 +1902,7 @@ def test_topos_sweep_route_rewards_train_stagent_policy() -> None:
 
     assert policy["kind"] == "spiraltorch.api_llm_topos_sweep_stagent_route_policy"
     assert policy["selected_label"] == "guarded"
-    assert policy["selected_reward"] == pytest.approx(0.91)
+    assert policy["selected_reward"] == pytest.approx(0.6266666666666667)
     assert policy["selection_trace"]["action"] == 1
     assert policy["policy_after"]["q_values"][1] > policy["policy_after"]["q_values"][0]
     assert policy["update_count"] == 8
@@ -1918,7 +1928,23 @@ def test_topos_route_policy_is_owned_by_rust_and_rejects_unknown_profiles() -> N
     assert rewards[0]["profile"] == "balanced"
     normalized = st.api_llm_topos_sweep_route_rewards(report, profile=" Grounded ")
     assert normalized[0]["profile"] == "grounded"
-    assert normalized[0]["reward"] == pytest.approx(0.8)
+    assert normalized[0]["reward"] == pytest.approx(0.5)
+    assert normalized[0]["reward"] != pytest.approx(0.7)
+    assert normalized[0]["score_evidence"]["evidence_coverage"] == pytest.approx(0.0)
+    assert (
+        st.api_llm_topos_sweep_route_rewards(
+            {
+                "selection_rows": [
+                    {
+                        "label": "unobserved",
+                        "count": 0,
+                        "selection_scores": {"balanced": 1.0},
+                    }
+                ]
+            }
+        )
+        == []
+    )
     with pytest.raises(ValueError, match="unknown route-policy profile 'commander'"):
         st.api_llm_topos_sweep_route_rewards(report, profile="commander")
 
@@ -1934,31 +1960,84 @@ def test_topos_route_policy_requires_the_native_semantic_core(monkeypatch) -> No
         st.api_llm_topos_sweep_route_rewards(report)
 
 
+def test_topos_route_policy_rejects_native_formula_drift(monkeypatch) -> None:
+    class _DriftedCore:
+        @staticmethod
+        def _topos_route_policy_rewards(_request):
+            return {
+                "kind": "spiraltorch.topos_route_rewards",
+                "contract_version": "spiraltorch.topos_route_policy.v2",
+                "semantic_owner": "st-core::runtime::topos_route_policy",
+                "semantic_backend": "rust",
+                "score_formula_version": "spiraltorch.topos_route_policy.score.v1",
+                "reward_count": 0,
+                "rewards": [],
+            }
+
+    monkeypatch.setattr(st, "_rs", _DriftedCore())
+    with pytest.raises(RuntimeError, match="untrusted contract"):
+        st.api_llm_topos_sweep_route_rewards({"selection_rows": []})
+
+
 def test_topos_route_policy_selection_resolves_label_before_action_index() -> None:
+    rewards = st.api_llm_topos_sweep_route_rewards(
+        {
+            "selection_rows": [
+                {"label": "open", "count": 1, "trace_route_score": 0.2},
+                {"label": "guarded", "count": 1, "trace_route_score": 0.8},
+            ]
+        }
+    )
     policy = {
         "selected_index": 0,
         "selected_label": "guarded",
-        "route_rewards": [
-            {"index": 0, "label": "open", "reward": 0.2},
-            {"index": 1, "label": "guarded", "reward": 0.8},
-        ],
+        "route_rewards": rewards,
     }
 
     selection = st.api_llm_topos_route_policy_selection(policy)
     assert selection["selected_label"] == "guarded"
     assert selection["selected_index"] == 1
-    assert selection["route_reward"]["reward"] == pytest.approx(0.8)
+    assert selection["route_reward"]["reward"] == pytest.approx(rewards[1]["reward"])
+    assert selection["resolution_semantics"]["resolution"] == "label"
+    with pytest.raises(ValueError, match="is not present in the reward set"):
+        st.api_llm_topos_route_policy_selection(
+            {
+                **policy,
+                "selected_label": "stale-route",
+            }
+        )
 
 
 def test_topos_route_policy_selection_rejects_reward_identity_drift() -> None:
+    rewards = st.api_llm_topos_sweep_route_rewards(
+        {"selection_rows": [{"label": "guarded", "count": 1}]}
+    )
+    rewards[0]["index"] = 1
     policy = {
         "selected_index": 0,
-        "route_rewards": [
-            {"index": 1, "label": "guarded", "reward": 0.8},
-        ],
+        "route_rewards": rewards,
     }
 
     with pytest.raises(ValueError, match="declares index 1; expected 0"):
+        st.api_llm_topos_route_policy_selection(policy)
+
+
+def test_topos_route_policy_selection_explains_legacy_reward_migration() -> None:
+    policy = {
+        "selected_index": 0,
+        "selected_label": "guarded",
+        "route_rewards": [
+            {
+                "index": 0,
+                "label": "guarded",
+                "profile": "grounded",
+                "reward": 0.8,
+                "count": 1,
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="missing the v2 source-row/score-evidence witness"):
         st.api_llm_topos_route_policy_selection(policy)
 
 
@@ -1978,12 +2057,13 @@ def test_topos_route_policy_wire_integers_are_target_independent() -> None:
 def test_topos_route_policy_selection_leaves_index_validation_to_rust(
     selected_index: object,
 ) -> None:
+    rewards = st.api_llm_topos_sweep_route_rewards(
+        {"selection_rows": [{"label": "guarded", "count": 1}]}
+    )
     policy = {
         "selected_index": selected_index,
         "selected_label": "guarded",
-        "route_rewards": [
-            {"index": 0, "label": "guarded", "reward": 0.8},
-        ],
+        "route_rewards": rewards,
     }
 
     with pytest.raises(ValueError, match="expected u32"):
@@ -1998,22 +2078,24 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
                 "label": "open",
                 "count": 1,
                 "trace_route_score": 0.4,
-                "selection_scores": {"grounded": 0.2},
+                "response_text_quality_score": 0.2,
+                "response_completion_rate": 1.0,
             },
             {
-                "label": "guarded",
+                "label": " guarded ",
                 "count": 1,
                 "trace_route_score": 0.8,
-                "selection_scores": {"grounded": 0.9},
+                "response_text_quality_score": 0.9,
+                "response_completion_rate": 1.0,
             },
         ],
         "adapter_rows": [
             {"label": "open", "mode": "exploratory", "request_temperature": 0.9},
-            {"label": "guarded", "mode": "guarded", "request_temperature": 0.4},
+            {"label": " guarded ", "mode": "guarded", "request_temperature": 0.4},
         ],
         "response_route_rows": [
             {"label": "open", "completion_rate": 1.0},
-            {"label": "guarded", "completion_rate": 1.0},
+            {"label": " guarded ", "completion_rate": 1.0},
         ],
     }
     agent = _FakeToposRouteAgent(action_dim=2)
@@ -2035,7 +2117,7 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
                 "observed_depth": 1,
                 "visited_volume": 8,
             },
-            "guarded": {
+            " guarded ": {
                 "porosity": 0.02,
                 "max_depth": 10,
                 "max_volume": 100,
@@ -2051,9 +2133,9 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
     )
 
     assert selection["kind"] == "spiraltorch.api_llm_topos_route_policy_selection"
-    assert selection["selected_label"] == "guarded"
-    assert selection["selected_reward"] == pytest.approx(0.9)
-    assert selection["route_reward"]["label"] == "guarded"
+    assert selection["selected_label"] == " guarded "
+    assert selection["selected_reward"] == pytest.approx(0.575)
+    assert selection["route_reward"]["label"] == " guarded "
     assert selection["selection_row"]["trace_route_score"] == pytest.approx(0.8)
     assert selection["adapter_row"]["mode"] == "guarded"
     assert selection["response_route_row"]["completion_rate"] == pytest.approx(1.0)
@@ -2065,31 +2147,30 @@ def test_topos_route_policy_selection_rebuilds_selected_adapter() -> None:
 
 
 def test_topos_route_policy_selection_can_use_report_rows_without_profiles() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {"label": "open", "count": 1, "trace_route_score": 0.2},
+            {"label": "guarded", "count": 1, "trace_route_score": 0.8},
+        ],
+        "adapter_rows": [{"label": "guarded", "mode": "guarded"}],
+    }
+    rewards = st.api_llm_topos_sweep_route_rewards(report)
     policy = {
         "kind": "spiraltorch.api_llm_topos_sweep_stagent_route_policy",
         "profile": "balanced",
         "selected_index": 1,
         "selected_label": "guarded",
-        "selected_reward": 0.8,
+        "selected_reward": 0.99,
         "selection_trace": {"action": 1, "q_values": [0.2, 0.8]},
-        "route_rewards": [
-            {"index": 0, "label": "open", "reward": 0.2},
-            {"index": 1, "label": "guarded", "reward": 0.8},
-        ],
-    }
-    report = {
-        "kind": "spiraltorch.api_llm_topos_sweep_report",
-        "selection_rows": [
-            {"label": "open", "selection_scores": {"balanced": 0.2}},
-            {"label": "guarded", "selection_scores": {"balanced": 0.8}},
-        ],
-        "adapter_rows": [{"label": "guarded", "mode": "guarded"}],
+        "route_rewards": rewards,
     }
 
     selection = st.api_llm_topos_route_policy_selection(policy, report=report)
 
     assert selection["selected_label"] == "guarded"
-    assert selection["route_reward"]["reward"] == pytest.approx(0.8)
+    assert selection["route_reward"]["reward"] == pytest.approx(rewards[1]["reward"])
+    assert selection["selected_reward"] != pytest.approx(0.99)
     assert selection["adapter_row"]["mode"] == "guarded"
     assert selection["adapter"] is None
     assert selection["request"] == {}
@@ -2100,8 +2181,8 @@ def test_topos_sweep_route_policy_rejects_agent_action_mismatch() -> None:
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "selection_rows": [
-            {"label": "open", "selection_scores": {"balanced": 0.4}},
-            {"label": "guarded", "selection_scores": {"balanced": 0.7}},
+            {"label": "open", "count": 1, "trace_route_score": 0.4},
+            {"label": "guarded", "count": 1, "trace_route_score": 0.7},
         ],
     }
     agent = _FakeToposRouteAgent(action_dim=3)
@@ -2114,8 +2195,8 @@ def test_topos_sweep_route_policy_can_derive_trace_from_policy_report() -> None:
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "selection_rows": [
-            {"label": "open", "selection_scores": {"balanced": 0.2}},
-            {"label": "guarded", "selection_scores": {"balanced": 0.8}},
+            {"label": "open", "count": 1, "trace_route_score": 0.2},
+            {"label": "guarded", "count": 1, "trace_route_score": 0.8},
         ],
     }
     agent = _FakeToposRoutePolicyOnlyAgent(action_dim=2)
@@ -2125,6 +2206,20 @@ def test_topos_sweep_route_policy_can_derive_trace_from_policy_report() -> None:
     assert policy["selected_label"] == "guarded"
     assert policy["selection_trace"]["source"] == "policy_report"
     assert policy["selection_trace"]["greedy_action"] == 1
+
+
+def test_topos_sweep_route_policy_leaves_agent_action_validation_to_rust() -> None:
+    report = {
+        "selection_rows": [
+            {"label": "open", "count": 1, "trace_route_score": 0.2},
+            {"label": "guarded", "count": 1, "trace_route_score": 0.8},
+        ]
+    }
+    agent = _FakeToposRouteAgent(action_dim=2)
+    agent.select_action_trace = lambda _state: {"action": 0.5}  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="expected u32"):
+        st.train_stagent_topos_route_policy(report, agent)
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:

@@ -10,7 +10,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const TOPOS_ROUTE_POLICY_CONTRACT_VERSION: &str = "spiraltorch.topos_route_policy.v1";
+pub const TOPOS_ROUTE_POLICY_CONTRACT_VERSION: &str = "spiraltorch.topos_route_policy.v2";
 /// Payload kind for route-profile evaluation.
 pub const TOPOS_ROUTE_POLICY_KIND: &str = "spiraltorch.topos_route_policy";
 /// Payload kind for projected route rewards.
@@ -21,10 +21,29 @@ pub const TOPOS_ROUTE_POLICY_RESOLUTION_KIND: &str = "spiraltorch.topos_route_po
 pub const TOPOS_ROUTE_POLICY_SEMANTIC_OWNER: &str = "st-core::runtime::topos_route_policy";
 /// Backend label attached to payloads produced by the canonical implementation.
 pub const TOPOS_ROUTE_POLICY_SEMANTIC_BACKEND: &str = "rust";
+/// Stable identity for the evidence-aware score calculation.
+pub const TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION: &str =
+    "spiraltorch.topos_route_policy.score.v2";
+/// Human-readable form of the score calculation carried in audit payloads.
+pub const TOPOS_ROUTE_POLICY_SCORE_FORMULA: &str =
+    "raw=clamp(weighted_mean(profile_metric_or_0.5)+0.08*(0.5-incomplete_or_0.5),0,1);confidence=n/(n+1);score=0.5+confidence*(raw-0.5);count=0_inactive";
+pub const TOPOS_ROUTE_POLICY_PRIOR_MEAN: f64 = 0.5;
+pub const TOPOS_ROUTE_POLICY_PRIOR_STRENGTH: f64 = 1.0;
+pub const TOPOS_ROUTE_POLICY_INCOMPLETE_ADJUSTMENT_WEIGHT: f64 = 0.08;
+pub const TOPOS_ROUTE_POLICY_CONTEXT_WEIGHT_MAX: f64 = 1.25;
 
 pub const TOPOS_ROUTE_POLICY_MAX_ROWS: usize = 4_096;
 pub const TOPOS_ROUTE_POLICY_MAX_LABEL_BYTES: usize = 256;
 pub const TOPOS_ROUTE_POLICY_MAX_MODE_BYTES: usize = 256;
+
+fn discard_client_projection<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default,
+{
+    let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(T::default())
+}
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ToposRoutePolicyError {
@@ -48,10 +67,14 @@ pub enum ToposRoutePolicyError {
     DuplicateLabel { label: String },
     #[error("metric '{field}' at route row {index} must be finite")]
     NonFiniteMetric { index: usize, field: &'static str },
-    #[error("selection score '{profile}' at route row {index} is not a known profile")]
-    UnknownScoreProfile { index: usize, profile: String },
-    #[error("selection score '{profile}' at route row {index} must be finite")]
-    NonFiniteSelectionScore { index: usize, profile: String },
+    #[error("metric '{field}' at route row {index} must be in the inclusive range [0, 1]")]
+    MetricOutOfRange { index: usize, field: &'static str },
+    #[error("metric '{field}' at route row {index} must be non-negative")]
+    NegativeMetric { index: usize, field: &'static str },
+    #[error(
+        "metric 'context_weight' at route row {index} must be in the inclusive range [0, 1.25]"
+    )]
+    ContextWeightOutOfRange { index: usize },
     #[error("unknown route-policy profile '{profile}'")]
     UnknownProfile { profile: String },
     #[error("route reward count {actual} exceeds limit {max}")]
@@ -68,6 +91,12 @@ pub enum ToposRoutePolicyError {
     NonFiniteReward { index: usize, field: &'static str },
     #[error("route reward at row {index} must be in the inclusive range [0, 1]")]
     RewardOutOfRange { index: usize },
+    #[error("route reward at row {index} has zero observations and is not an active route")]
+    InactiveReward { index: usize },
+    #[error(
+        "route reward at row {index} is missing the v2 source-row/score-evidence witness; rebuild rewards from the original route rows"
+    )]
+    MissingRewardWitness { index: usize },
     #[error("route reward at position {position} declares index {actual}; expected {expected}")]
     RewardIndexMismatch {
         position: usize,
@@ -84,6 +113,14 @@ pub enum ToposRoutePolicyError {
     },
     #[error("selected label has {actual} bytes, exceeding limit {max}")]
     SelectedLabelTooLong { actual: usize, max: usize },
+    #[error("selected route label '{label}' is not present in the reward set")]
+    SelectedLabelNotFound { label: String },
+    #[error("selected route index {index} is outside reward set length {len}")]
+    SelectedIndexOutOfRange { index: u32, len: usize },
+    #[error(
+        "route reward evidence at row {index} does not match the Rust score contract: {field}"
+    )]
+    RewardEvidenceMismatch { index: usize, field: &'static str },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -169,7 +206,36 @@ pub struct ToposRoutePolicyRow {
     pub context_weight: Option<f64>,
     pub request_temperature: Option<f64>,
     pub mode: Option<String>,
+    /// Canonical scores emitted by Rust. Client-provided values are accepted as
+    /// transport compatibility fields but are never deserialized or trusted.
+    #[serde(
+        default,
+        deserialize_with = "discard_client_projection",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub selection_scores: BTreeMap<String, f64>,
+    /// Evidence breakdown for each canonical score. This is output-only for
+    /// the same reason as `selection_scores`.
+    #[serde(
+        default,
+        deserialize_with = "discard_client_projection",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub selection_evidence: BTreeMap<String, ToposRoutePolicyScoreEvidence>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToposRoutePolicyScoreEvidence {
+    pub profile: ToposRoutePolicyProfile,
+    pub formula_version: String,
+    pub raw_score: f64,
+    pub score: f64,
+    pub evidence_coverage: f64,
+    pub sample_count: u32,
+    pub sample_confidence: f64,
+    pub observed_metrics: Vec<String>,
+    pub missing_metrics: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -196,6 +262,7 @@ pub struct ToposRoutePolicyProfileWinner {
     pub closure_pressure: Option<f64>,
     pub openness: Option<f64>,
     pub context_weight: Option<f64>,
+    pub score_evidence: Option<ToposRoutePolicyScoreEvidence>,
 }
 
 impl Default for ToposRoutePolicyProfileWinner {
@@ -217,6 +284,7 @@ impl Default for ToposRoutePolicyProfileWinner {
             closure_pressure: None,
             openness: None,
             context_weight: None,
+            score_evidence: None,
         }
     }
 }
@@ -229,6 +297,10 @@ pub struct ToposRoutePolicyEvaluationPayload {
     pub semantic_backend: &'static str,
     pub row_count: usize,
     pub active_row_count: usize,
+    pub score_formula_version: &'static str,
+    pub score_formula: &'static str,
+    pub score_prior_mean: f64,
+    pub score_prior_strength: f64,
     pub rows: Vec<ToposRoutePolicyRow>,
     pub profiles: BTreeMap<String, ToposRoutePolicyProfileWinner>,
 }
@@ -255,6 +327,8 @@ pub struct ToposRouteReward {
     pub response_completion_rate: f64,
     pub response_incomplete_rate: f64,
     pub adapter_runtime_route_score: f64,
+    pub score_evidence: ToposRoutePolicyScoreEvidence,
+    pub source_row: ToposRoutePolicyRow,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -265,7 +339,13 @@ pub struct ToposRouteRewardsPayload {
     pub semantic_backend: &'static str,
     pub profile: ToposRoutePolicyProfile,
     pub input_row_count: usize,
+    pub active_row_count: usize,
+    pub inactive_row_count: usize,
     pub reward_count: usize,
+    pub score_formula_version: &'static str,
+    pub score_formula: &'static str,
+    pub score_prior_mean: f64,
+    pub score_prior_strength: f64,
     pub rewards: Vec<ToposRouteReward>,
 }
 
@@ -283,6 +363,7 @@ pub struct ToposRoutePolicyResolutionPayload {
     pub contract_version: &'static str,
     pub semantic_owner: &'static str,
     pub semantic_backend: &'static str,
+    pub score_formula_version: &'static str,
     pub resolution: &'static str,
     pub selected_position: Option<usize>,
     pub selected_label: Option<String>,
@@ -294,86 +375,190 @@ fn finite_or_zero(value: Option<f64>) -> f64 {
     value.unwrap_or(0.0)
 }
 
-fn bounded_unit(value: Option<f64>) -> f64 {
-    finite_or_zero(value).clamp(0.0, 1.0)
+fn unit_reward(value: Option<f64>) -> Option<f64> {
+    value.map(|value| value.clamp(0.0, 1.0))
 }
 
-fn latency_cost(value: Option<f64>) -> f64 {
-    let latency = finite_or_zero(value).max(0.0);
-    (latency.ln_1p() / 10_000.0_f64.ln_1p()).min(1.0)
+fn inverse_unit_reward(value: Option<f64>) -> Option<f64> {
+    unit_reward(value).map(|value| 1.0 - value)
 }
 
-fn token_cost(value: Option<f64>) -> f64 {
-    let tokens = finite_or_zero(value).max(0.0);
-    (tokens.ln_1p() / 4_096.0_f64.ln_1p()).min(1.0)
+fn context_weight_reward(value: Option<f64>) -> Option<f64> {
+    value.map(|value| (value / TOPOS_ROUTE_POLICY_CONTEXT_WEIGHT_MAX).clamp(0.0, 1.0))
 }
 
-fn score_row(row: &ToposRoutePolicyRow, profile: ToposRoutePolicyProfile) -> f64 {
-    let trace_route = bounded_unit(row.trace_route_score);
-    let trace_quality = bounded_unit(row.trace_quality_score);
-    let trace_efficiency = bounded_unit(row.trace_efficiency_score);
-    let response_quality = bounded_unit(row.response_text_quality_score);
-    let prompt_coverage = bounded_unit(row.response_prompt_coverage);
-    let completion = bounded_unit(row.response_completion_rate);
-    let confidence = bounded_unit(row.response_confidence);
-    let adapter_route = bounded_unit(row.adapter_runtime_route_score);
-    let adapter_guard = bounded_unit(row.adapter_guard_score);
-    let adapter_context = bounded_unit(row.adapter_context_score);
-    let openness = bounded_unit(row.openness);
-    let context_weight = bounded_unit(row.context_weight);
-    let closure_reward = 1.0 - bounded_unit(row.closure_pressure);
-    let latency_reward = 1.0 - latency_cost(row.latency_ms_mean);
-    let token_reward = 1.0 - token_cost(row.total_tokens);
-    let incomplete_penalty = 0.08 * bounded_unit(row.response_incomplete_rate);
+fn latency_reward(value: Option<f64>) -> Option<f64> {
+    value.map(|latency| 1.0 - (latency.ln_1p() / 10_000.0_f64.ln_1p()).min(1.0))
+}
 
-    let score = match profile {
-        ToposRoutePolicyProfile::Quality => {
-            0.30 * trace_quality
-                + 0.30 * response_quality
-                + 0.15 * prompt_coverage
-                + 0.10 * confidence
-                + 0.10 * completion
-                + 0.05 * adapter_route
+fn token_reward(value: Option<f64>) -> Option<f64> {
+    value.map(|tokens| 1.0 - (tokens.ln_1p() / 4_096.0_f64.ln_1p()).min(1.0))
+}
+
+#[derive(Clone, Copy)]
+struct WeightedMetric {
+    name: &'static str,
+    value: Option<f64>,
+    weight: f64,
+}
+
+impl WeightedMetric {
+    const fn new(name: &'static str, value: Option<f64>, weight: f64) -> Self {
+        Self {
+            name,
+            value,
+            weight,
         }
-        ToposRoutePolicyProfile::Grounded => {
-            0.30 * response_quality
-                + 0.20 * prompt_coverage
-                + 0.20 * context_weight
-                + 0.15 * adapter_guard
-                + 0.10 * completion
-                + 0.05 * adapter_context
-        }
-        ToposRoutePolicyProfile::Efficiency => {
-            0.25 * trace_efficiency
-                + 0.20 * latency_reward
-                + 0.20 * token_reward
-                + 0.15 * response_quality
-                + 0.10 * completion
-                + 0.10 * adapter_route
-        }
-        ToposRoutePolicyProfile::Latency => {
-            0.40 * latency_reward
-                + 0.20 * token_reward
-                + 0.15 * response_quality
-                + 0.10 * completion
-                + 0.10 * trace_route
-                + 0.05 * adapter_route
-        }
-        ToposRoutePolicyProfile::Balanced => {
-            0.25 * trace_route
-                + 0.20 * adapter_route
-                + 0.20 * response_quality
-                + 0.10 * completion
-                + 0.10 * trace_efficiency
-                + 0.10 * closure_reward
-                + 0.05 * openness
-        }
+    }
+}
+
+fn profile_metrics(
+    row: &ToposRoutePolicyRow,
+    profile: ToposRoutePolicyProfile,
+) -> Vec<WeightedMetric> {
+    let trace_route = unit_reward(row.trace_route_score);
+    let trace_quality = unit_reward(row.trace_quality_score);
+    let trace_efficiency = unit_reward(row.trace_efficiency_score);
+    let trace_text_quality = unit_reward(row.trace_text_quality_score);
+    let response_quality = unit_reward(row.response_text_quality_score);
+    let prompt_coverage = unit_reward(row.response_prompt_coverage);
+    let completion = unit_reward(row.response_completion_rate);
+    let confidence = unit_reward(row.response_confidence);
+    let adapter_route = unit_reward(row.adapter_runtime_route_score);
+    let adapter_guard = unit_reward(row.adapter_guard_score);
+    let adapter_exploration = unit_reward(row.adapter_exploration_score);
+    let adapter_context = unit_reward(row.adapter_context_score);
+    let closure = inverse_unit_reward(row.closure_pressure);
+    let openness = unit_reward(row.openness);
+    let context_weight = context_weight_reward(row.context_weight);
+
+    match profile {
+        ToposRoutePolicyProfile::Quality => vec![
+            WeightedMetric::new("trace_quality_score", trace_quality, 0.25),
+            WeightedMetric::new("trace_text_quality_score", trace_text_quality, 0.10),
+            WeightedMetric::new("response_text_quality_score", response_quality, 0.25),
+            WeightedMetric::new("response_prompt_coverage", prompt_coverage, 0.15),
+            WeightedMetric::new("response_confidence", confidence, 0.10),
+            WeightedMetric::new("response_completion_rate", completion, 0.10),
+            WeightedMetric::new("adapter_runtime_route_score", adapter_route, 0.05),
+        ],
+        ToposRoutePolicyProfile::Grounded => vec![
+            WeightedMetric::new("response_text_quality_score", response_quality, 0.25),
+            WeightedMetric::new("response_prompt_coverage", prompt_coverage, 0.20),
+            WeightedMetric::new("context_weight_reward", context_weight, 0.15),
+            WeightedMetric::new("adapter_guard_score", adapter_guard, 0.15),
+            WeightedMetric::new("response_completion_rate", completion, 0.10),
+            WeightedMetric::new("adapter_context_score", adapter_context, 0.10),
+            WeightedMetric::new("closure_reward", closure, 0.05),
+        ],
+        ToposRoutePolicyProfile::Efficiency => vec![
+            WeightedMetric::new("trace_efficiency_score", trace_efficiency, 0.20),
+            WeightedMetric::new("latency_reward", latency_reward(row.latency_ms_mean), 0.20),
+            WeightedMetric::new("token_reward", token_reward(row.total_tokens), 0.20),
+            WeightedMetric::new("response_text_quality_score", response_quality, 0.10),
+            WeightedMetric::new("response_completion_rate", completion, 0.10),
+            WeightedMetric::new("adapter_runtime_route_score", adapter_route, 0.10),
+            WeightedMetric::new("trace_route_score", trace_route, 0.10),
+        ],
+        ToposRoutePolicyProfile::Latency => vec![
+            WeightedMetric::new("latency_reward", latency_reward(row.latency_ms_mean), 0.40),
+            WeightedMetric::new("token_reward", token_reward(row.total_tokens), 0.20),
+            WeightedMetric::new("response_text_quality_score", response_quality, 0.15),
+            WeightedMetric::new("response_completion_rate", completion, 0.10),
+            WeightedMetric::new("trace_route_score", trace_route, 0.10),
+            WeightedMetric::new("adapter_runtime_route_score", adapter_route, 0.05),
+        ],
+        ToposRoutePolicyProfile::Balanced => vec![
+            WeightedMetric::new("trace_route_score", trace_route, 0.18),
+            WeightedMetric::new("adapter_runtime_route_score", adapter_route, 0.15),
+            WeightedMetric::new("response_text_quality_score", response_quality, 0.16),
+            WeightedMetric::new("trace_text_quality_score", trace_text_quality, 0.08),
+            WeightedMetric::new("response_completion_rate", completion, 0.10),
+            WeightedMetric::new("trace_efficiency_score", trace_efficiency, 0.10),
+            WeightedMetric::new("closure_reward", closure, 0.08),
+            WeightedMetric::new("openness", openness, 0.05),
+            WeightedMetric::new("adapter_exploration_score", adapter_exploration, 0.05),
+            WeightedMetric::new("adapter_context_score", adapter_context, 0.05),
+        ],
+    }
+}
+
+fn sample_confidence(count: u32) -> f64 {
+    let count = f64::from(count);
+    count / (count + TOPOS_ROUTE_POLICY_PRIOR_STRENGTH)
+}
+
+fn score_row(
+    row: &ToposRoutePolicyRow,
+    profile: ToposRoutePolicyProfile,
+) -> ToposRoutePolicyScoreEvidence {
+    let metrics = profile_metrics(row, profile);
+    let total_weight = metrics.iter().map(|metric| metric.weight).sum::<f64>();
+    let observed_weight = metrics
+        .iter()
+        .filter(|metric| metric.value.is_some())
+        .map(|metric| metric.weight)
+        .sum::<f64>();
+    let weighted_score = metrics
+        .iter()
+        .map(|metric| metric.weight * metric.value.unwrap_or(TOPOS_ROUTE_POLICY_PRIOR_MEAN))
+        .sum::<f64>()
+        / total_weight;
+    let incomplete_rate = row
+        .response_incomplete_rate
+        .unwrap_or(TOPOS_ROUTE_POLICY_PRIOR_MEAN)
+        .clamp(0.0, 1.0);
+    let incomplete_adjustment = (TOPOS_ROUTE_POLICY_PRIOR_MEAN - incomplete_rate)
+        * TOPOS_ROUTE_POLICY_INCOMPLETE_ADJUSTMENT_WEIGHT;
+    let raw_score = (weighted_score + incomplete_adjustment).clamp(0.0, 1.0);
+    let confidence = sample_confidence(row.count);
+    let score = (TOPOS_ROUTE_POLICY_PRIOR_MEAN
+        + confidence * (raw_score - TOPOS_ROUTE_POLICY_PRIOR_MEAN))
+        .clamp(0.0, 1.0);
+    let mut observed_metrics = metrics
+        .iter()
+        .filter(|metric| metric.value.is_some())
+        .map(|metric| metric.name.to_owned())
+        .collect::<Vec<_>>();
+    let mut missing_metrics = metrics
+        .iter()
+        .filter(|metric| metric.value.is_none())
+        .map(|metric| metric.name.to_owned())
+        .collect::<Vec<_>>();
+    if row.response_incomplete_rate.is_some() {
+        observed_metrics.push("response_incomplete_rate".to_owned());
+    } else {
+        missing_metrics.push("response_incomplete_rate".to_owned());
+    }
+    let total_evidence_weight = total_weight + TOPOS_ROUTE_POLICY_INCOMPLETE_ADJUSTMENT_WEIGHT;
+    let observed_evidence_weight = observed_weight
+        + if row.response_incomplete_rate.is_some() {
+            TOPOS_ROUTE_POLICY_INCOMPLETE_ADJUSTMENT_WEIGHT
+        } else {
+            0.0
+        };
+    let evidence_coverage = if observed_evidence_weight == 0.0 {
+        0.0
+    } else {
+        (observed_evidence_weight / total_evidence_weight).clamp(0.0, 1.0)
     };
 
-    (score - incomplete_penalty).clamp(0.0, 1.0)
+    ToposRoutePolicyScoreEvidence {
+        profile,
+        formula_version: TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION.to_owned(),
+        raw_score,
+        score,
+        evidence_coverage,
+        sample_count: row.count,
+        sample_confidence: confidence,
+        observed_metrics,
+        missing_metrics,
+    }
 }
 
-fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyError> {
+fn prepare_rows(
+    mut rows: Vec<ToposRoutePolicyRow>,
+) -> Result<Vec<ToposRoutePolicyRow>, ToposRoutePolicyError> {
     if rows.len() > TOPOS_ROUTE_POLICY_MAX_ROWS {
         return Err(ToposRoutePolicyError::TooManyRows {
             actual: rows.len(),
@@ -382,7 +567,7 @@ fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyErr
     }
 
     let mut labels = BTreeSet::new();
-    for (index, row) in rows.iter().enumerate() {
+    for (index, row) in rows.iter_mut().enumerate() {
         if row.label.trim().is_empty() {
             return Err(ToposRoutePolicyError::EmptyLabel { index });
         }
@@ -398,6 +583,11 @@ fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyErr
                 label: row.label.clone(),
             });
         }
+        row.mode = row
+            .mode
+            .take()
+            .map(|mode| mode.trim().to_owned())
+            .filter(|mode| !mode.is_empty());
         if let Some(mode) = &row.mode {
             if mode.len() > TOPOS_ROUTE_POLICY_MAX_MODE_BYTES {
                 return Err(ToposRoutePolicyError::ModeTooLong {
@@ -408,7 +598,7 @@ fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyErr
             }
         }
 
-        for (field, value) in [
+        let unit_metrics = [
             ("trace_route_score", row.trace_route_score),
             ("trace_quality_score", row.trace_quality_score),
             ("trace_efficiency_score", row.trace_efficiency_score),
@@ -421,8 +611,6 @@ fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyErr
             ("response_completion_rate", row.response_completion_rate),
             ("response_incomplete_rate", row.response_incomplete_rate),
             ("response_confidence", row.response_confidence),
-            ("latency_ms_mean", row.latency_ms_mean),
-            ("total_tokens", row.total_tokens),
             (
                 "adapter_runtime_route_score",
                 row.adapter_runtime_route_score,
@@ -432,30 +620,46 @@ fn validate_rows(rows: &[ToposRoutePolicyRow]) -> Result<(), ToposRoutePolicyErr
             ("adapter_context_score", row.adapter_context_score),
             ("closure_pressure", row.closure_pressure),
             ("openness", row.openness),
-            ("context_weight", row.context_weight),
+        ];
+        for (field, value) in unit_metrics {
+            if value.is_some_and(|value| !value.is_finite()) {
+                return Err(ToposRoutePolicyError::NonFiniteMetric { index, field });
+            }
+            if value.is_some_and(|value| !(0.0..=1.0).contains(&value)) {
+                return Err(ToposRoutePolicyError::MetricOutOfRange { index, field });
+            }
+        }
+        for (field, value) in [
+            ("latency_ms_mean", row.latency_ms_mean),
+            ("total_tokens", row.total_tokens),
             ("request_temperature", row.request_temperature),
+            ("context_weight", row.context_weight),
         ] {
             if value.is_some_and(|value| !value.is_finite()) {
                 return Err(ToposRoutePolicyError::NonFiniteMetric { index, field });
             }
+            if value.is_some_and(|value| value < 0.0) {
+                return Err(ToposRoutePolicyError::NegativeMetric { index, field });
+            }
+        }
+        if row
+            .context_weight
+            .is_some_and(|value| value > TOPOS_ROUTE_POLICY_CONTEXT_WEIGHT_MAX)
+        {
+            return Err(ToposRoutePolicyError::ContextWeightOutOfRange { index });
         }
 
-        for (profile, score) in &row.selection_scores {
-            if ToposRoutePolicyProfile::from_str(profile).is_err() {
-                return Err(ToposRoutePolicyError::UnknownScoreProfile {
-                    index,
-                    profile: profile.clone(),
-                });
-            }
-            if !score.is_finite() {
-                return Err(ToposRoutePolicyError::NonFiniteSelectionScore {
-                    index,
-                    profile: profile.clone(),
-                });
-            }
-        }
+        row.selection_evidence = ToposRoutePolicyProfile::ALL
+            .into_iter()
+            .map(|profile| (profile.as_str().to_owned(), score_row(row, profile)))
+            .collect();
+        row.selection_scores = row
+            .selection_evidence
+            .iter()
+            .map(|(profile, evidence)| (profile.clone(), evidence.score))
+            .collect();
     }
-    Ok(())
+    Ok(rows)
 }
 
 fn winner_from_row(
@@ -479,6 +683,7 @@ fn winner_from_row(
         closure_pressure: row.closure_pressure,
         openness: row.openness,
         context_weight: row.context_weight,
+        score_evidence: row.selection_evidence.get(profile.as_str()).cloned(),
     }
 }
 
@@ -503,14 +708,7 @@ fn candidate_is_better(
 pub fn evaluate_topos_route_policy(
     request: ToposRoutePolicyEvaluationRequest,
 ) -> Result<ToposRoutePolicyEvaluationPayload, ToposRoutePolicyError> {
-    validate_rows(&request.rows)?;
-    let mut rows = request.rows;
-    for row in &mut rows {
-        row.selection_scores = ToposRoutePolicyProfile::ALL
-            .into_iter()
-            .map(|profile| (profile.as_str().to_owned(), score_row(row, profile)))
-            .collect();
-    }
+    let rows = prepare_rows(request.rows)?;
 
     let mut profiles = BTreeMap::new();
     for profile in ToposRoutePolicyProfile::ALL {
@@ -535,6 +733,10 @@ pub fn evaluate_topos_route_policy(
         semantic_backend: TOPOS_ROUTE_POLICY_SEMANTIC_BACKEND,
         row_count: rows.len(),
         active_row_count: rows.iter().filter(|row| row.count > 0).count(),
+        score_formula_version: TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION,
+        score_formula: TOPOS_ROUTE_POLICY_SCORE_FORMULA,
+        score_prior_mean: TOPOS_ROUTE_POLICY_PRIOR_MEAN,
+        score_prior_strength: TOPOS_ROUTE_POLICY_PRIOR_STRENGTH,
         rows,
         profiles,
     })
@@ -544,16 +746,19 @@ pub fn evaluate_topos_route_policy(
 pub fn build_topos_route_rewards(
     request: ToposRouteRewardsRequest,
 ) -> Result<ToposRouteRewardsPayload, ToposRoutePolicyError> {
-    validate_rows(&request.rows)?;
     let profile = request.profile;
-    let mut rewards = Vec::with_capacity(request.rows.len());
-    for (source_index, row) in request.rows.iter().enumerate() {
-        let reward = row
-            .selection_scores
-            .get(profile.as_str())
-            .copied()
-            .unwrap_or_else(|| finite_or_zero(row.trace_route_score))
-            .clamp(0.0, 1.0);
+    let rows = prepare_rows(request.rows)?;
+    let input_row_count = rows.len();
+    let active_row_count = rows.iter().filter(|row| row.count > 0).count();
+    let mut rewards = Vec::with_capacity(active_row_count);
+    for (source_index, row) in rows.iter().enumerate() {
+        if row.count == 0 {
+            continue;
+        }
+        let score_evidence = row.selection_evidence[profile.as_str()].clone();
+        let mut source_row = row.clone();
+        source_row.selection_scores.clear();
+        source_row.selection_evidence.clear();
         rewards.push(ToposRouteReward {
             index: u32::try_from(rewards.len())
                 .expect("validated route reward count fits the wire contract"),
@@ -561,13 +766,15 @@ pub fn build_topos_route_rewards(
                 .expect("validated route row count fits the wire contract"),
             label: row.label.clone(),
             profile,
-            reward,
+            reward: score_evidence.score,
             count: row.count,
             trace_route_score: finite_or_zero(row.trace_route_score),
             response_text_quality_score: finite_or_zero(row.response_text_quality_score),
             response_completion_rate: finite_or_zero(row.response_completion_rate),
             response_incomplete_rate: finite_or_zero(row.response_incomplete_rate),
             adapter_runtime_route_score: finite_or_zero(row.adapter_runtime_route_score),
+            score_evidence,
+            source_row,
         });
     }
 
@@ -577,8 +784,14 @@ pub fn build_topos_route_rewards(
         semantic_owner: TOPOS_ROUTE_POLICY_SEMANTIC_OWNER,
         semantic_backend: TOPOS_ROUTE_POLICY_SEMANTIC_BACKEND,
         profile,
-        input_row_count: request.rows.len(),
+        input_row_count,
+        active_row_count,
+        inactive_row_count: input_row_count - active_row_count,
         reward_count: rewards.len(),
+        score_formula_version: TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION,
+        score_formula: TOPOS_ROUTE_POLICY_SCORE_FORMULA,
+        score_prior_mean: TOPOS_ROUTE_POLICY_PRIOR_MEAN,
+        score_prior_strength: TOPOS_ROUTE_POLICY_PRIOR_STRENGTH,
         rewards,
     })
 }
@@ -592,6 +805,7 @@ fn validate_rewards(rewards: &[ToposRouteReward]) -> Result<(), ToposRoutePolicy
     }
     let mut labels = BTreeSet::new();
     let mut expected_profile = None;
+    let mut previous_source_index = None;
     for (index, reward) in rewards.iter().enumerate() {
         let expected_index =
             u32::try_from(index).expect("validated route reward count fits the wire contract");
@@ -602,6 +816,22 @@ fn validate_rewards(rewards: &[ToposRouteReward]) -> Result<(), ToposRoutePolicy
                 expected: expected_index,
             });
         }
+        if usize::try_from(reward.source_index)
+            .map(|source_index| source_index >= TOPOS_ROUTE_POLICY_MAX_ROWS)
+            .unwrap_or(true)
+        {
+            return Err(ToposRoutePolicyError::RewardEvidenceMismatch {
+                index,
+                field: "source_index_range",
+            });
+        }
+        if previous_source_index.is_some_and(|previous| reward.source_index <= previous) {
+            return Err(ToposRoutePolicyError::RewardEvidenceMismatch {
+                index,
+                field: "source_index_order",
+            });
+        }
+        previous_source_index = Some(reward.source_index);
         if let Some(profile) = expected_profile {
             if reward.profile != profile {
                 return Err(ToposRoutePolicyError::MixedRewardProfiles {
@@ -623,6 +853,14 @@ fn validate_rewards(rewards: &[ToposRouteReward]) -> Result<(), ToposRoutePolicy
                 max: TOPOS_ROUTE_POLICY_MAX_LABEL_BYTES,
             });
         }
+        if reward.source_row.label.trim().is_empty()
+            || reward.score_evidence.formula_version.trim().is_empty()
+        {
+            return Err(ToposRoutePolicyError::MissingRewardWitness { index });
+        }
+        if reward.count == 0 {
+            return Err(ToposRoutePolicyError::InactiveReward { index });
+        }
         if !labels.insert(reward.label.clone()) {
             return Err(ToposRoutePolicyError::DuplicateLabel {
                 label: reward.label.clone(),
@@ -641,6 +879,10 @@ fn validate_rewards(rewards: &[ToposRouteReward]) -> Result<(), ToposRoutePolicy
                 "adapter_runtime_route_score",
                 reward.adapter_runtime_route_score,
             ),
+            ("raw_score", reward.score_evidence.raw_score),
+            ("score", reward.score_evidence.score),
+            ("evidence_coverage", reward.score_evidence.evidence_coverage),
+            ("sample_confidence", reward.score_evidence.sample_confidence),
         ] {
             if !value.is_finite() {
                 return Err(ToposRoutePolicyError::NonFiniteReward { index, field });
@@ -648,6 +890,111 @@ fn validate_rewards(rewards: &[ToposRouteReward]) -> Result<(), ToposRoutePolicy
         }
         if !(0.0..=1.0).contains(&reward.reward) {
             return Err(ToposRoutePolicyError::RewardOutOfRange { index });
+        }
+        for (field, value) in [
+            ("raw_score", reward.score_evidence.raw_score),
+            ("score", reward.score_evidence.score),
+            ("evidence_coverage", reward.score_evidence.evidence_coverage),
+            ("sample_confidence", reward.score_evidence.sample_confidence),
+        ] {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(ToposRoutePolicyError::RewardEvidenceMismatch { index, field });
+            }
+        }
+
+        let mut source_rows = prepare_rows(vec![reward.source_row.clone()])?;
+        let source = source_rows
+            .pop()
+            .expect("one validated reward source row is retained");
+        let expected_evidence = &source.selection_evidence[reward.profile.as_str()];
+        let same_float = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-12;
+        for (field, matches) in [
+            ("source_row.label", reward.source_row.label == source.label),
+            ("source_row.mode", reward.source_row.mode == source.mode),
+            ("label", reward.label == source.label),
+            ("count", reward.count == source.count),
+            (
+                "trace_route_score",
+                same_float(
+                    reward.trace_route_score,
+                    finite_or_zero(source.trace_route_score),
+                ),
+            ),
+            (
+                "response_text_quality_score",
+                same_float(
+                    reward.response_text_quality_score,
+                    finite_or_zero(source.response_text_quality_score),
+                ),
+            ),
+            (
+                "response_completion_rate",
+                same_float(
+                    reward.response_completion_rate,
+                    finite_or_zero(source.response_completion_rate),
+                ),
+            ),
+            (
+                "response_incomplete_rate",
+                same_float(
+                    reward.response_incomplete_rate,
+                    finite_or_zero(source.response_incomplete_rate),
+                ),
+            ),
+            (
+                "adapter_runtime_route_score",
+                same_float(
+                    reward.adapter_runtime_route_score,
+                    finite_or_zero(source.adapter_runtime_route_score),
+                ),
+            ),
+            (
+                "score_evidence.profile",
+                reward.score_evidence.profile == reward.profile,
+            ),
+            (
+                "score_evidence.formula_version",
+                reward.score_evidence.formula_version == TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION,
+            ),
+            (
+                "score_evidence.raw_score",
+                same_float(reward.score_evidence.raw_score, expected_evidence.raw_score),
+            ),
+            (
+                "score_evidence.score",
+                same_float(reward.score_evidence.score, expected_evidence.score),
+            ),
+            (
+                "score_evidence.evidence_coverage",
+                same_float(
+                    reward.score_evidence.evidence_coverage,
+                    expected_evidence.evidence_coverage,
+                ),
+            ),
+            (
+                "score_evidence.sample_count",
+                reward.score_evidence.sample_count == expected_evidence.sample_count,
+            ),
+            (
+                "score_evidence.sample_confidence",
+                same_float(
+                    reward.score_evidence.sample_confidence,
+                    expected_evidence.sample_confidence,
+                ),
+            ),
+            (
+                "score_evidence.observed_metrics",
+                reward.score_evidence.observed_metrics == expected_evidence.observed_metrics,
+            ),
+            (
+                "score_evidence.missing_metrics",
+                reward.score_evidence.missing_metrics == expected_evidence.missing_metrics,
+            ),
+            ("reward", same_float(reward.reward, expected_evidence.score)),
+        ] {
+            if !matches {
+                return Err(ToposRoutePolicyError::RewardEvidenceMismatch { index, field });
+            }
         }
     }
     Ok(())
@@ -667,25 +1014,30 @@ pub fn resolve_topos_route_policy(
         }
     }
 
-    let by_label = request
+    let selected_label = request
         .selected_label
         .as_deref()
-        .filter(|label| !label.trim().is_empty())
-        .and_then(|label| {
-            request
-                .rewards
-                .iter()
-                .position(|reward| reward.label == label)
-        });
-    let selected_index = usize::try_from(request.selected_index).ok();
-    let (resolution, selected_position) = if let Some(position) = by_label {
+        .filter(|label| !label.trim().is_empty());
+    let (resolution, selected_position) = if let Some(label) = selected_label {
+        let position = request
+            .rewards
+            .iter()
+            .position(|reward| reward.label == label)
+            .ok_or_else(|| ToposRoutePolicyError::SelectedLabelNotFound {
+                label: label.to_owned(),
+            })?;
         ("label", Some(position))
-    } else if let Some(position) =
-        selected_index.filter(|position| *position < request.rewards.len())
-    {
-        ("index", Some(position))
-    } else {
+    } else if request.rewards.is_empty() {
         ("none", None)
+    } else {
+        let position = usize::try_from(request.selected_index)
+            .ok()
+            .filter(|position| *position < request.rewards.len())
+            .ok_or(ToposRoutePolicyError::SelectedIndexOutOfRange {
+                index: request.selected_index,
+                len: request.rewards.len(),
+            })?;
+        ("index", Some(position))
     };
     let route_reward = selected_position.map(|position| request.rewards[position].clone());
 
@@ -694,6 +1046,7 @@ pub fn resolve_topos_route_policy(
         contract_version: TOPOS_ROUTE_POLICY_CONTRACT_VERSION,
         semantic_owner: TOPOS_ROUTE_POLICY_SEMANTIC_OWNER,
         semantic_backend: TOPOS_ROUTE_POLICY_SEMANTIC_BACKEND,
+        score_formula_version: TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION,
         resolution,
         selected_position,
         selected_label: route_reward.as_ref().map(|reward| reward.label.clone()),
@@ -713,6 +1066,7 @@ mod tests {
             trace_route_score: Some(0.8),
             trace_quality_score: Some(0.9),
             trace_efficiency_score: Some(0.7),
+            trace_text_quality_score: Some(0.8),
             response_text_quality_score: Some(0.6),
             response_prompt_coverage: Some(0.5),
             response_completion_rate: Some(1.0),
@@ -722,6 +1076,7 @@ mod tests {
             total_tokens: Some(0.0),
             adapter_runtime_route_score: Some(0.75),
             adapter_guard_score: Some(0.85),
+            adapter_exploration_score: Some(0.6),
             adapter_context_score: Some(0.65),
             closure_pressure: Some(0.2),
             openness: Some(0.7),
@@ -735,18 +1090,32 @@ mod tests {
     }
 
     #[test]
-    fn profile_scores_match_the_previous_python_contract() {
+    fn profile_scores_are_evidence_aware_and_auditable() {
         let payload = evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
             rows: vec![sample_row("guarded")],
         })
         .expect("evaluate route policy");
         let scores = &payload.rows[0].selection_scores;
-        assert_close(scores["quality"], 0.6825);
-        assert_close(scores["grounded"], 0.70);
-        assert_close(scores["efficiency"], 0.82);
-        assert_close(scores["latency"], 0.8875);
-        assert_close(scores["balanced"], 0.735);
+        assert_close(scores["quality"], 0.61375);
+        assert_close(scores["grounded"], 0.60525);
+        assert_close(scores["efficiency"], 0.6875);
+        assert_close(scores["latency"], 0.71375);
+        assert_close(scores["balanced"], 0.634);
+        let balanced = &payload.rows[0].selection_evidence["balanced"];
+        assert_close(balanced.raw_score, 0.768);
+        assert_close(balanced.evidence_coverage, 1.0);
+        assert_close(balanced.sample_confidence, 0.5);
+        assert_eq!(balanced.sample_count, 1);
+        assert!(balanced.missing_metrics.is_empty());
+        assert_eq!(
+            balanced.observed_metrics.last().map(String::as_str),
+            Some("response_incomplete_rate")
+        );
         assert_eq!(payload.semantic_backend, "rust");
+        assert_eq!(
+            payload.score_formula_version,
+            TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION
+        );
         assert_eq!(payload.active_row_count, 1);
     }
 
@@ -763,24 +1132,50 @@ mod tests {
     }
 
     #[test]
-    fn rewards_prefer_profile_score_and_fall_back_to_route_score() {
+    fn rewards_recompute_scores_and_exclude_inactive_routes() {
         let mut scored = sample_row("guarded");
-        scored.selection_scores.insert("grounded".to_owned(), 0.91);
-        let fallback = ToposRoutePolicyRow {
+        scored.selection_scores.insert("grounded".to_owned(), 0.99);
+        let inactive = ToposRoutePolicyRow {
+            label: "inactive".to_owned(),
+            count: 0,
+            selection_scores: BTreeMap::from([("grounded".to_owned(), 1.0)]),
+            ..ToposRoutePolicyRow::default()
+        };
+        let sparse = ToposRoutePolicyRow {
             label: "exploratory".to_owned(),
             count: 2,
-            trace_route_score: Some(1.2),
+            trace_route_score: Some(0.8),
             ..ToposRoutePolicyRow::default()
         };
         let payload = build_topos_route_rewards(ToposRouteRewardsRequest {
-            rows: vec![scored, fallback],
+            rows: vec![scored, inactive, sparse],
             profile: ToposRoutePolicyProfile::Grounded,
         })
         .expect("build route rewards");
-        assert_eq!(payload.rewards[0].reward, 0.91);
-        assert_eq!(payload.rewards[1].reward, 1.0);
+        assert_close(payload.rewards[0].reward, 0.60525);
+        assert_close(payload.rewards[1].reward, 0.5);
+        assert_eq!(
+            payload.rewards[1]
+                .score_evidence
+                .missing_metrics
+                .last()
+                .map(String::as_str),
+            Some("response_incomplete_rate")
+        );
         assert_eq!(payload.rewards[1].index, 1);
-        assert_eq!(payload.rewards[1].source_index, 1);
+        assert_eq!(payload.rewards[1].source_index, 2);
+        assert_eq!(payload.input_row_count, 3);
+        assert_eq!(payload.active_row_count, 2);
+        assert_eq!(payload.inactive_row_count, 1);
+        assert_eq!(payload.reward_count, 2);
+        assert_eq!(
+            payload.rewards[0].score_evidence.formula_version,
+            TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION
+        );
+        assert_eq!(payload.rewards[0].source_row.label, "guarded");
+        let wire = serde_json::to_value(&payload.rewards[0]).expect("serialize reward");
+        assert!(wire["source_row"].get("selection_scores").is_none());
+        assert!(wire["source_row"].get("selection_evidence").is_none());
     }
 
     #[test]
@@ -801,13 +1196,32 @@ mod tests {
         assert_eq!(by_label.selected_position, Some(1));
 
         let by_index = resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
-            rewards,
-            selected_label: Some("missing".to_owned()),
+            rewards: rewards.clone(),
+            selected_label: None,
             selected_index: 0,
         })
         .expect("resolve by index");
         assert_eq!(by_index.resolution, "index");
         assert_eq!(by_index.selected_label.as_deref(), Some("guarded"));
+
+        assert_eq!(
+            resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+                rewards: rewards.clone(),
+                selected_label: Some("missing".to_owned()),
+                selected_index: 0,
+            }),
+            Err(ToposRoutePolicyError::SelectedLabelNotFound {
+                label: "missing".to_owned()
+            })
+        );
+        assert_eq!(
+            resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+                rewards,
+                selected_label: None,
+                selected_index: 2,
+            }),
+            Err(ToposRoutePolicyError::SelectedIndexOutOfRange { index: 2, len: 2 })
+        );
     }
 
     #[test]
@@ -819,6 +1233,18 @@ mod tests {
             duplicate,
             Err(ToposRoutePolicyError::DuplicateLabel {
                 label: "same".to_owned()
+            })
+        );
+
+        let mut out_of_range = sample_row("out-of-range");
+        out_of_range.trace_route_score = Some(1.01);
+        assert_eq!(
+            evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
+                rows: vec![out_of_range]
+            }),
+            Err(ToposRoutePolicyError::MetricOutOfRange {
+                index: 0,
+                field: "trace_route_score"
             })
         );
 
@@ -852,6 +1278,82 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request.profile).expect("serialize profile"),
             serde_json::json!("grounded")
+        );
+    }
+
+    #[test]
+    fn route_labels_are_opaque_identities() {
+        let payload = build_topos_route_rewards(ToposRouteRewardsRequest {
+            rows: vec![sample_row(" guarded ")],
+            profile: ToposRoutePolicyProfile::Grounded,
+        })
+        .expect("preserve the external route identity");
+        assert_eq!(payload.rewards[0].label, " guarded ");
+        assert_eq!(payload.rewards[0].source_row.label, " guarded ");
+
+        let resolution = resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+            rewards: payload.rewards,
+            selected_label: Some(" guarded ".to_owned()),
+            selected_index: 0,
+        })
+        .expect("resolve the exact external route identity");
+        assert_eq!(resolution.selected_label.as_deref(), Some(" guarded "));
+    }
+
+    #[test]
+    fn context_weight_uses_the_tensor_contract_boundary() {
+        let mut at_boundary = sample_row("boundary");
+        at_boundary.context_weight = Some(TOPOS_ROUTE_POLICY_CONTEXT_WEIGHT_MAX);
+        let payload = evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
+            rows: vec![at_boundary],
+        })
+        .expect("accept the st-tensor context-weight maximum");
+        assert_close(payload.rows[0].selection_scores["grounded"], 0.62625);
+
+        let mut above_boundary = sample_row("above-boundary");
+        above_boundary.context_weight = Some(TOPOS_ROUTE_POLICY_CONTEXT_WEIGHT_MAX + 0.0001);
+        assert_eq!(
+            evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
+                rows: vec![above_boundary],
+            }),
+            Err(ToposRoutePolicyError::ContextWeightOutOfRange { index: 0 })
+        );
+    }
+
+    #[test]
+    fn evidence_coverage_includes_the_incomplete_adjustment_input() {
+        let mut missing_incomplete = sample_row("missing-incomplete");
+        missing_incomplete.response_incomplete_rate = None;
+        let payload = evaluate_topos_route_policy(ToposRoutePolicyEvaluationRequest {
+            rows: vec![missing_incomplete],
+        })
+        .expect("evaluate incomplete evidence coverage");
+        let evidence = &payload.rows[0].selection_evidence["balanced"];
+        assert_close(evidence.evidence_coverage, 1.0 / 1.08);
+        assert_eq!(
+            evidence.missing_metrics.last().map(String::as_str),
+            Some("response_incomplete_rate")
+        );
+    }
+
+    #[test]
+    fn client_score_projections_are_discarded_at_wire_ingress() {
+        let request: ToposRoutePolicyEvaluationRequest =
+            serde_json::from_value(serde_json::json!({
+                "rows": [{
+                    "label": "wire",
+                    "count": 1,
+                    "trace_route_score": 0.8,
+                    "selection_scores": {"balanced": 1.0},
+                    "selection_evidence": {"balanced": {"score": 1.0}}
+                }]
+            }))
+            .expect("accept compatibility projections without trusting them");
+        let payload = evaluate_topos_route_policy(request).expect("evaluate canonical score");
+        assert_ne!(payload.rows[0].selection_scores["balanced"], 1.0);
+        assert_eq!(
+            payload.rows[0].selection_evidence["balanced"].formula_version,
+            TOPOS_ROUTE_POLICY_SCORE_FORMULA_VERSION
         );
     }
 
@@ -895,6 +1397,31 @@ mod tests {
             })
         );
 
+        let mut tampered = rewards.clone();
+        tampered[0].source_row.response_text_quality_score = Some(0.0);
+        assert!(matches!(
+            resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+                rewards: tampered,
+                selected_label: None,
+                selected_index: 0,
+            }),
+            Err(ToposRoutePolicyError::RewardEvidenceMismatch { index: 0, .. })
+        ));
+
+        let mut impossible_source_index = rewards.clone();
+        impossible_source_index[0].source_index = TOPOS_ROUTE_POLICY_MAX_ROWS as u32;
+        assert_eq!(
+            resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+                rewards: impossible_source_index,
+                selected_label: None,
+                selected_index: 0,
+            }),
+            Err(ToposRoutePolicyError::RewardEvidenceMismatch {
+                index: 0,
+                field: "source_index_range",
+            })
+        );
+
         let mut mixed_profile = rewards;
         mixed_profile[1].profile = ToposRoutePolicyProfile::Grounded;
         assert_eq!(
@@ -908,6 +1435,26 @@ mod tests {
                 expected: "balanced",
                 actual: "grounded",
             })
+        );
+    }
+
+    #[test]
+    fn resolver_explains_legacy_rewards_without_v2_witnesses() {
+        let legacy_reward: ToposRouteReward = serde_json::from_value(serde_json::json!({
+            "index": 0,
+            "label": "guarded",
+            "profile": "grounded",
+            "reward": 0.7,
+            "count": 1
+        }))
+        .expect("decode a legacy-shaped reward for migration diagnostics");
+        assert_eq!(
+            resolve_topos_route_policy(ToposRoutePolicyResolveRequest {
+                rewards: vec![legacy_reward],
+                selected_label: Some("guarded".to_owned()),
+                selected_index: 0,
+            }),
+            Err(ToposRoutePolicyError::MissingRewardWitness { index: 0 })
         );
     }
 }
