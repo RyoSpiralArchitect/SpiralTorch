@@ -19,10 +19,8 @@ use st_core::backend::rankk_launch::with_launch_buffers_hip;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::runtime_probe::{
-    backend_feature_enabled, backend_placeholder, backend_real_kernels_compiled,
-    backend_runtime_ready, backend_runtime_recommendation, backend_runtime_status,
-    build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
-    DeviceReport,
+    evaluate_runtime_device_probe, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
+    RuntimeDeviceProbeRequest,
 };
 use st_core::backend::unison::RankKind;
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -353,115 +351,6 @@ fn backend_label(kind: BackendKind) -> &'static str {
     kind.as_str()
 }
 
-fn caps_to_pydict(py: Python<'_>, caps: DeviceCaps) -> PyResult<Bound<'_, PyDict>> {
-    let report = PyDict::new(py);
-    report.set_item("backend", backend_label(caps.backend))?;
-    report.set_item("subgroup", caps.subgroup)?;
-    report.set_item("lane_width", caps.lane_width)?;
-    report.set_item("max_workgroup", caps.max_workgroup)?;
-    match caps.shared_mem_per_workgroup {
-        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
-        None => report.set_item("shared_mem_per_workgroup", py.None())?,
-    };
-    Ok(report)
-}
-
-fn set_backend_runtime_fields(
-    out: &Bound<'_, PyDict>,
-    prefix: &str,
-    backend: BackendKind,
-) -> PyResult<()> {
-    out.set_item(
-        format!("{prefix}_backend_feature_enabled"),
-        backend_feature_enabled(backend),
-    )?;
-    out.set_item(
-        format!("{prefix}_backend_real_kernels_compiled"),
-        backend_real_kernels_compiled(backend),
-    )?;
-    out.set_item(
-        format!("{prefix}_backend_placeholder"),
-        backend_placeholder(backend),
-    )?;
-    out.set_item(
-        format!("{prefix}_backend_runtime_status"),
-        backend_runtime_status(backend),
-    )?;
-    out.set_item(
-        format!("{prefix}_backend_runtime_ready"),
-        backend_runtime_ready(backend),
-    )?;
-    out.set_item(
-        format!("{prefix}_backend_runtime_recommendation"),
-        backend_runtime_recommendation(backend),
-    )?;
-    Ok(())
-}
-
-fn device_report_to_pydict(py: Python<'_>, report: DeviceReport) -> PyResult<Bound<'_, PyDict>> {
-    let out = caps_to_pydict(py, report.caps)?;
-    out.set_item("backend", backend_label(report.reported_backend))?;
-    out.set_item("requested_backend", backend_label(report.reported_backend))?;
-    out.set_item(
-        "effective_backend",
-        backend_label(report.effective_backend()),
-    )?;
-    set_backend_runtime_fields(&out, "requested", report.reported_backend)?;
-    set_backend_runtime_fields(&out, "effective", report.effective_backend())?;
-    out.set_item(
-        "runtime_status",
-        backend_runtime_status(report.effective_backend()),
-    )?;
-    out.set_item(
-        "runtime_ready",
-        backend_runtime_ready(report.effective_backend()),
-    )?;
-    out.set_item(
-        "runtime_recommendation",
-        backend_runtime_recommendation(report.effective_backend()),
-    )?;
-
-    if let Some(mps_probe) = report.mps_probe {
-        out.set_item("status", mps_probe.status().as_str())?;
-        out.set_item("feature_enabled", mps_probe.feature_enabled)?;
-        out.set_item("platform_supported", mps_probe.platform_supported)?;
-        out.set_item("host_class", mps_probe.host_class.as_str())?;
-        out.set_item("backend_wired", mps_probe.backend_wired)?;
-        out.set_item("placeholder", mps_probe.placeholder())?;
-        out.set_item("available", mps_probe.available())?;
-        out.set_item("initialized", mps_probe.initialized)?;
-        out.set_item(
-            "planner_surrogate_backend",
-            backend_label(mps_probe.planner_surrogate_backend),
-        )?;
-        out.set_item("planner_route", mps_probe.planner_route())?;
-        out.set_item(
-            "recommended_backend",
-            backend_label(mps_probe.recommended_backend()),
-        )?;
-        out.set_item("recommendation", mps_probe.recommendation())?;
-        out.set_item("error", mps_probe.error())?;
-    }
-
-    if let Some(requested) = report.requested_workgroup {
-        out.set_item("requested_workgroup", requested)?;
-    }
-    if let Some(aligned) = report.aligned_workgroup {
-        out.set_item("aligned_workgroup", aligned)?;
-    }
-    if let Some(score) = report.occupancy_score {
-        out.set_item("occupancy_score", score)?;
-    }
-    if let Some(tile) = report.preferred_tile {
-        out.set_item("preferred_tile", tile)?;
-    }
-    if let Some(tile) = report.preferred_compaction_tile {
-        out.set_item("preferred_compaction_tile", tile)?;
-    }
-
-    Ok(out)
-}
-
 fn parse_backend_for_planner(name: Option<&str>) -> PyResult<BackendResolution> {
     let requested_backend = parse_backend(name)?;
     Ok(resolve_backend(requested_backend))
@@ -762,17 +651,19 @@ fn describe_device(
         shared_mem_per_workgroup,
     )
     .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-    let report = build_device_report(
-        backend_resolution.reported_backend,
+    let report = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+        requested_backend: backend_resolution.reported_backend,
         caps,
-        backend_resolution.mps_probe,
-        workgroup,
+        mps_probe: backend_resolution.mps_probe,
+        requested_workgroup: workgroup,
         cols,
         tile_hint,
         compaction_hint,
-    );
+    })
+    .and_then(|report| report.with_execution_client("python"))
+    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
 
-    Ok(device_report_to_pydict(py, report)?.into_py(py))
+    json_to_py(py, &report.to_transport_value())
 }
 
 #[pyfunction]
@@ -800,33 +691,10 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
 #[pyfunction]
 fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
     let probe = core_mps_probe();
-
-    let out = PyDict::new(py);
-    out.set_item("backend", "mps")?;
-    out.set_item("status", probe.status().as_str())?;
-    out.set_item("feature_enabled", probe.feature_enabled)?;
-    out.set_item("platform_supported", probe.platform_supported)?;
-    out.set_item("host_class", probe.host_class.as_str())?;
-    out.set_item("backend_wired", probe.backend_wired)?;
-    out.set_item("placeholder", probe.placeholder())?;
-    out.set_item("available", probe.available())?;
-    out.set_item("initialized", probe.initialized)?;
-    out.set_item("host_os", probe.host_os())?;
-    out.set_item("host_arch", probe.host_arch())?;
-    out.set_item(
-        "planner_surrogate_backend",
-        backend_label(probe.planner_surrogate_backend),
-    )?;
-    out.set_item("planner_route", probe.planner_route())?;
-    out.set_item("planner_caps", caps_to_pydict(py, probe.planner_caps)?)?;
-    out.set_item(
-        "recommended_backend",
-        backend_label(probe.recommended_backend()),
-    )?;
-    out.set_item("recommendation", probe.recommendation())?;
-    out.set_item("devices", PyList::empty(py))?;
-    out.set_item("error", probe.error())?;
-    Ok(out.into_py(py))
+    probe
+        .validate()
+        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+    json_to_py(py, &probe.to_transport_value())
 }
 
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {

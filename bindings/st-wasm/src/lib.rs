@@ -11,6 +11,7 @@ mod generation_control;
 mod imaginary_time_schrodinger;
 mod rank_plan;
 mod reports;
+mod runtime_probe;
 mod runtime_route;
 mod scale_stack;
 mod temperature_control;
@@ -59,6 +60,7 @@ pub use mellin::*;
 #[cfg(target_arch = "wasm32")]
 pub use rank_plan::*;
 pub use reports::*;
+pub use runtime_probe::*;
 pub use runtime_route::*;
 pub use scale_stack::*;
 pub use temperature_control::*;

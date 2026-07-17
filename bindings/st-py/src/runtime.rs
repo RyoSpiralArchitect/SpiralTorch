@@ -2,6 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
+use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
 use st_core::backend::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRoutePayload, RuntimeDeviceRouteRequest,
 };
@@ -43,6 +44,19 @@ where
 {
     let payload = serde_json::to_value(payload).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &payload)
+}
+
+fn runtime_device_probe_payload_from_py(
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<RuntimeDeviceProbePayload> {
+    let value = crate::json::py_to_json(payload)?;
+    let canonical = value
+        .as_object()
+        .and_then(|object| object.get("contract"))
+        .cloned()
+        .unwrap_or(value);
+    serde_json::from_value(canonical)
+        .map_err(|error| json_error("invalid runtime-device probe payload", error))
 }
 
 #[pyfunction]
@@ -118,9 +132,41 @@ fn _runtime_device_route_validate_against(
     payload_to_py(py, payload, "runtime-device route contract encoding failed")
 }
 
+#[pyfunction]
+fn _runtime_device_probe_validate(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload = runtime_device_probe_payload_from_py(payload)?;
+    payload
+        .validate()
+        .map_err(|error| json_error("runtime-device probe validation failed", error))?;
+    payload_to_py(py, payload, "runtime-device probe contract encoding failed")
+}
+
+#[pyfunction]
+fn _runtime_device_probe_validate_against(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload = runtime_device_probe_payload_from_py(payload)?;
+    let request: RuntimeDeviceProbeRequest =
+        request_from_py(request, "invalid runtime-device probe replay request")?;
+    payload
+        .validate_against(request)
+        .map_err(|error| json_error("runtime-device probe replay failed", error))?;
+    payload_to_py(py, payload, "runtime-device probe contract encoding failed")
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_device_probe_validate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_device_probe_validate_against,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_validate, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_device_route_validate_against,

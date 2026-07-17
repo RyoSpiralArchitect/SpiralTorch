@@ -190,6 +190,15 @@ fn global_device() -> Result<Arc<CudaDevice>, String> {
     Ok(Arc::clone(DEVICE.get().unwrap_or(&created)))
 }
 
+/// Initialize CUDA device 0 without compiling or loading any kernels.
+///
+/// Runtime probes use this to distinguish a compiled CUDA feature from an
+/// actually reachable CUDA driver/device.
+#[cfg(feature = "cuda")]
+pub fn probe_device() -> Result<(), String> {
+    global_device().map(|_| ())
+}
+
 #[cfg(feature = "cuda")]
 fn registry() -> &'static Mutex<HashMap<&'static str, Arc<ModuleEntry>>> {
     MODULES.get_or_init(|| Mutex::new(HashMap::new()))
