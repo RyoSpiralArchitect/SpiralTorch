@@ -480,6 +480,24 @@ Both functions reject unknown fields, contract-version changes, non-finite
 state, invalid tape shapes, and unsorted external-state requirements through
 the Rust validator. They never restore model parameters in the browser.
 
+Optimizer and external payloads can be transported as one integrity-bound
+runtime bundle:
+
+```ts
+import { trainerRuntimeCheckpointBundleObject } from "spiraltorch-wasm";
+
+const bundle = trainerRuntimeCheckpointBundleObject(runtimeCheckpointBundle);
+console.log(bundle.optimizer_sha256, bundle.external_sha256);
+console.log(bundle.unresolved_components, bundle.deterministic_resume_ready);
+```
+
+`trainerRuntimeCheckpointBundleJson` provides the worker-message equivalent.
+Both entry points call `st-core::runtime::trainer_checkpoint`; WASM adds only
+`execution_client: "wasm"`. The browser verifies metadata, child SHA-256
+digests, and exact component alignment, but cannot claim that a native
+distributed provider has been reattached or execute the `ModuleTrainer`
+restore transaction.
+
 External runtime state uses a separate preflight surface. The browser can
 inspect exact component coverage and learn which concrete resources a native
 orchestrator must reattach, but it cannot mark those resources as restored:

@@ -38,6 +38,8 @@ use st_core::backend::runtime_probe::resolve_backend;
 #[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
+use st_core::runtime::trainer_checkpoint::TrainerRuntimeCheckpointBundle;
+#[cfg(feature = "nn")]
 use st_core::runtime::trainer_external::TrainerExternalStateCheckpoint;
 #[cfg(feature = "nn")]
 use st_core::runtime::trainer_optimizer::TrainerOptimizerCheckpoint;
@@ -5975,6 +5977,40 @@ impl PyNnModuleTrainer {
             .inner
             .restore_external_state_checkpoint(&checkpoint)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let value = serde_json::to_value(validation)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn runtime_checkpoint_bundle(
+        &self,
+        py: Python<'_>,
+        module: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let bundle = with_module_ref(module, |module_inner| {
+            self.inner
+                .runtime_checkpoint_bundle(module_inner)
+                .map_err(|error| TensorError::Generic(error.to_string()))
+        })?;
+        let value = serde_json::to_value(bundle)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn restore_runtime_checkpoint_bundle(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<PyAny>,
+        bundle: &Bound<PyAny>,
+    ) -> PyResult<PyObject> {
+        let value = crate::json::py_to_json(bundle)?;
+        let bundle: TrainerRuntimeCheckpointBundle = serde_json::from_value(value)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let validation = with_module_mut(module, |module_inner| {
+            self.inner
+                .restore_runtime_checkpoint_bundle(module_inner, &bundle)
+                .map_err(|error| TensorError::Generic(error.to_string()))
+        })?;
         let value = serde_json::to_value(validation)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         json_to_py(py, &value)

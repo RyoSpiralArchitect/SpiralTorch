@@ -3780,15 +3780,21 @@ but Rust reports deterministic resume only after a native trainer verifies an
 already reattached concrete provider. Opaque providers remain unresolved.
 
 Python only transports and restores this Rust contract. WASM only preflights
-it and can never self-report a native resource as reattached. Telemetry-only
-Desire queues and the remaining stateful controllers are still named in
-`unresolved_components`; extending their Rust contracts is the next checkpoint
-slice rather than hiding them behind a client-side heuristic. Optimizer and
-external receipts deliberately remain separate: the optimizer receipt reports
-whether its payload is standalone, while the external receipt reports captured
-component and native-reattachment readiness. A combined readiness claim waits
-for the next Rust-owned atomic training-bundle contract instead of being
-reconstructed in Python or WASM.
+it and can never self-report a native resource as reattached. The new
+`st-core::runtime::trainer_checkpoint` envelope binds the optimizer and
+external payloads by SHA-256 and exact component-set equality. `ModuleTrainer`
+prepares topology, model fingerprints, parameter tapes, external replacement
+state, and concrete provider identity before committing either child. Python
+therefore has one native restore call, while WASM exposes the identical
+preflight receipt without pretending to run `st-nn` or reattach a native
+resource.
+
+Telemetry-only Desire queues and the remaining stateful controllers are still
+named in `unresolved_components`; a runtime bundle containing any of them is
+not restorable. Extending those Rust checkpoint contracts is the next slice,
+not a Python/WASM readiness heuristic. Standalone optimizer and external
+receipts remain useful for component audit, but only the Rust bundle composes
+their validity into one deterministic-resume claim.
 
 Next steps:
 

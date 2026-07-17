@@ -85,13 +85,18 @@ use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, SoftHeuristicAdoptionReport, StepMetrics,
 };
+use st_core::runtime::trainer_checkpoint::{
+    build_trainer_runtime_checkpoint_bundle, evaluate_trainer_runtime_checkpoint_bundle,
+    evaluate_trainer_runtime_checkpoint_restore, TrainerRuntimeCheckpointBundle,
+    TrainerRuntimeCheckpointError, TrainerRuntimeCheckpointValidation,
+};
 #[cfg(feature = "psi")]
 use st_core::runtime::trainer_external::PSI_METER_COMPONENT;
 use st_core::runtime::trainer_external::{
     build_trainer_external_state_checkpoint, evaluate_trainer_external_state_checkpoint,
-    evaluate_trainer_external_state_restore, TrainerExternalCheckpointError,
-    TrainerExternalCheckpointValidation, TrainerExternalStateCheckpoint,
-    ACCUMULATOR_SYNCHRONIZER_COMPONENT,
+    evaluate_trainer_external_state_restore, DesireRoundtableCheckpoint,
+    TrainerExternalCheckpointError, TrainerExternalCheckpointValidation,
+    TrainerExternalStateCheckpoint, ACCUMULATOR_SYNCHRONIZER_COMPONENT,
 };
 use st_core::runtime::trainer_optimizer::{
     build_trainer_optimizer_checkpoint, evaluate_trainer_optimizer_checkpoint,
@@ -2918,6 +2923,8 @@ pub struct TrainerOptimizerState {
 #[derive(Debug, Error)]
 pub enum TrainerCheckpointError {
     #[error(transparent)]
+    Runtime(#[from] TrainerRuntimeCheckpointError),
+    #[error(transparent)]
     Contract(#[from] TrainerOptimizerCheckpointError),
     #[error(transparent)]
     Tensor(#[from] TensorError),
@@ -2935,6 +2942,36 @@ pub enum TrainerCheckpointError {
     EpochOutOfRange { epoch: u64 },
     #[error("checkpoint counter {field}={value} does not fit this platform")]
     CounterOutOfRange { field: &'static str, value: u64 },
+    #[error(
+        "runtime checkpoint is not ready: unresolved components [{unresolved}], missing resource reattachments [{missing_reattachments}]"
+    )]
+    RuntimeCheckpointNotReady {
+        unresolved: String,
+        missing_reattachments: String,
+    },
+}
+
+struct PreparedTrainerExternalRestore {
+    validation: TrainerExternalCheckpointValidation,
+    desire_roundtable: Option<DesireRoundtableCheckpoint>,
+    #[cfg(feature = "psi")]
+    psi_meter: Option<PsiMeter>,
+    reattached_components: Vec<String>,
+}
+
+struct PreparedTrainerOptimizerRestore {
+    validation: TrainerOptimizerCheckpointValidation,
+    config: TrainerOptimizerConfig,
+    topology: TrainerExecutionTopology,
+    state: TrainerOptimizerRuntimeState,
+    epoch: usize,
+    sync_buffers: usize,
+    sync_values: usize,
+    spectral_adapter: SpectralLrAdapter,
+    curvature_scheduler: Option<CurvatureScheduler>,
+    spectral_policy: Option<SpectralLearningRatePolicy>,
+    softlogic: SoftLogicFlex,
+    parameters: HashMap<String, PreparedParameterOptimizerState>,
 }
 
 impl TrainerOptimizerState {
@@ -6141,6 +6178,14 @@ impl ModuleTrainer {
         &mut self,
         checkpoint: &TrainerExternalStateCheckpoint,
     ) -> Result<TrainerExternalCheckpointValidation, TrainerCheckpointError> {
+        let prepared = self.prepare_external_state_checkpoint_restore(checkpoint)?;
+        self.commit_external_state_checkpoint_restore(prepared)
+    }
+
+    fn prepare_external_state_checkpoint_restore(
+        &self,
+        checkpoint: &TrainerExternalStateCheckpoint,
+    ) -> Result<PreparedTrainerExternalRestore, TrainerCheckpointError> {
         evaluate_trainer_external_state_checkpoint(checkpoint)?;
         let target_components = self.optimizer_external_state_required();
         #[cfg(feature = "psi")]
@@ -6184,7 +6229,20 @@ impl ModuleTrainer {
         let validation =
             evaluate_trainer_external_state_restore(checkpoint, &reattached_components)?;
 
-        if let Some(state) = checkpoint.desire_roundtable {
+        Ok(PreparedTrainerExternalRestore {
+            validation,
+            desire_roundtable: checkpoint.desire_roundtable,
+            #[cfg(feature = "psi")]
+            psi_meter,
+            reattached_components,
+        })
+    }
+
+    fn commit_external_state_checkpoint_restore(
+        &mut self,
+        prepared: PreparedTrainerExternalRestore,
+    ) -> Result<TrainerExternalCheckpointValidation, TrainerCheckpointError> {
+        if let Some(state) = prepared.desire_roundtable {
             let bridge = self
                 .desire_roundtable_bridge
                 .as_ref()
@@ -6192,10 +6250,10 @@ impl ModuleTrainer {
             bridge.restore_checkpoint(state)?;
         }
         #[cfg(feature = "psi")]
-        if let Some(psi_meter) = psi_meter {
+        if let Some(psi_meter) = prepared.psi_meter {
             self.psi = Some(psi_meter);
         }
-        Ok(validation)
+        Ok(prepared.validation)
     }
 
     /// Captures trainer update policy and every parameter accumulator.
@@ -6251,6 +6309,67 @@ impl ModuleTrainer {
         )?)
     }
 
+    /// Captures optimizer and supported external runtime state in one
+    /// integrity-bound Rust contract.
+    pub fn runtime_checkpoint_bundle<M: Module + ?Sized>(
+        &self,
+        module: &M,
+    ) -> Result<TrainerRuntimeCheckpointBundle, TrainerCheckpointError> {
+        let optimizer = self.optimizer_checkpoint(module)?;
+        let external = self.external_state_checkpoint()?;
+        Ok(build_trainer_runtime_checkpoint_bundle(
+            optimizer, external,
+        )?)
+    }
+
+    /// Restores an integrity-bound runtime bundle only after every child
+    /// payload, model fingerprint, topology, and concrete resource is ready.
+    pub fn restore_runtime_checkpoint_bundle<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        bundle: &TrainerRuntimeCheckpointBundle,
+    ) -> Result<TrainerRuntimeCheckpointValidation, TrainerCheckpointError> {
+        let portable = evaluate_trainer_runtime_checkpoint_bundle(bundle)?;
+        if !portable.payload_complete {
+            return Err(TrainerCheckpointError::RuntimeCheckpointNotReady {
+                unresolved: portable.unresolved_components.join(", "),
+                missing_reattachments: portable.reattach_required_components.join(", "),
+            });
+        }
+
+        let external = self.prepare_external_state_checkpoint_restore(&bundle.external)?;
+        let mut projected_topology = self.optimizer_execution_topology();
+        projected_topology.external_state_required = bundle.external.required_components.clone();
+        let optimizer = self.prepare_optimizer_checkpoint_restore_for_topology(
+            module,
+            &bundle.optimizer,
+            &projected_topology,
+        )?;
+        let validation =
+            evaluate_trainer_runtime_checkpoint_restore(bundle, &external.reattached_components)?;
+        if !validation.deterministic_resume_ready {
+            let missing_reattachments = validation
+                .reattach_required_components
+                .iter()
+                .filter(|component| {
+                    validation
+                        .reattached_components
+                        .binary_search(component)
+                        .is_err()
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            return Err(TrainerCheckpointError::RuntimeCheckpointNotReady {
+                unresolved: validation.unresolved_components.join(", "),
+                missing_reattachments: missing_reattachments.join(", "),
+            });
+        }
+
+        self.commit_external_state_checkpoint_restore(external)?;
+        self.commit_optimizer_checkpoint_restore(module, optimizer)?;
+        Ok(validation)
+    }
+
     /// Restores a checkpoint as one transaction after validating the model and
     /// execution topology. No trainer or parameter state changes on failure.
     pub fn restore_optimizer_checkpoint<M: Module + ?Sized>(
@@ -6258,8 +6377,27 @@ impl ModuleTrainer {
         module: &mut M,
         checkpoint: &TrainerOptimizerCheckpoint,
     ) -> Result<TrainerOptimizerCheckpointValidation, TrainerCheckpointError> {
+        let prepared = self.prepare_optimizer_checkpoint_restore(module, checkpoint)?;
+        self.commit_optimizer_checkpoint_restore(module, prepared)
+    }
+
+    fn prepare_optimizer_checkpoint_restore<M: Module + ?Sized>(
+        &self,
+        module: &mut M,
+        checkpoint: &TrainerOptimizerCheckpoint,
+    ) -> Result<PreparedTrainerOptimizerRestore, TrainerCheckpointError> {
+        let topology = self.optimizer_execution_topology();
+        self.prepare_optimizer_checkpoint_restore_for_topology(module, checkpoint, &topology)
+    }
+
+    fn prepare_optimizer_checkpoint_restore_for_topology<M: Module + ?Sized>(
+        &self,
+        module: &mut M,
+        checkpoint: &TrainerOptimizerCheckpoint,
+        target_topology: &TrainerExecutionTopology,
+    ) -> Result<PreparedTrainerOptimizerRestore, TrainerCheckpointError> {
         let validation = evaluate_trainer_optimizer_checkpoint(checkpoint)?;
-        if checkpoint.topology != self.optimizer_execution_topology() {
+        if checkpoint.topology != *target_topology {
             return Err(TrainerCheckpointError::TopologyMismatch);
         }
 
@@ -6327,59 +6465,101 @@ impl ModuleTrainer {
             });
         }
 
+        let mut mutable_parameter_names = Vec::with_capacity(prepared.len());
         module.visit_parameters_mut(&mut |parameter| {
-            let state = prepared.remove(parameter.name()).ok_or_else(|| {
-                TensorError::Generic(format!(
-                    "parameter traversal changed while restoring {}",
-                    parameter.name()
-                ))
-            })?;
+            mutable_parameter_names.push(parameter.name().to_owned());
+            Ok(())
+        })?;
+        mutable_parameter_names.sort_unstable();
+        let mut prepared_parameter_names = prepared.keys().cloned().collect::<Vec<_>>();
+        prepared_parameter_names.sort_unstable();
+        if mutable_parameter_names != prepared_parameter_names {
+            return Err(TrainerCheckpointError::ParameterSetMismatch {
+                message: "immutable and mutable parameter traversals do not match".to_owned(),
+            });
+        }
+
+        Ok(PreparedTrainerOptimizerRestore {
+            validation,
+            config: checkpoint.config,
+            topology: checkpoint.topology.clone(),
+            state: checkpoint.state.clone(),
+            epoch,
+            sync_buffers,
+            sync_values,
+            spectral_adapter,
+            curvature_scheduler,
+            spectral_policy,
+            softlogic,
+            parameters: prepared,
+        })
+    }
+
+    fn commit_optimizer_checkpoint_restore<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        mut prepared: PreparedTrainerOptimizerRestore,
+    ) -> Result<TrainerOptimizerCheckpointValidation, TrainerCheckpointError> {
+        module.visit_parameters_mut(&mut |parameter| {
+            let state = prepared
+                .parameters
+                .remove(parameter.name())
+                .ok_or_else(|| {
+                    TensorError::Generic(format!(
+                        "parameter traversal changed while restoring {}",
+                        parameter.name()
+                    ))
+                })?;
             parameter.commit_optimizer_checkpoint_restore(state);
             Ok(())
         })?;
-        if !prepared.is_empty() {
+        if !prepared.parameters.is_empty() {
             return Err(TrainerCheckpointError::ParameterSetMismatch {
                 message: format!(
                     "mutable target traversal omitted [{}]",
-                    prepared.keys().cloned().collect::<Vec<_>>().join(", ")
+                    prepared
+                        .parameters
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             });
         }
 
-        self.epoch = epoch;
-        self.curvature = checkpoint.config.curvature;
-        self.hyper_learning_rate = checkpoint.config.hyper_learning_rate;
-        self.fallback_learning_rate = checkpoint.config.fallback_learning_rate;
-        self.real_learning_rate = checkpoint.config.real_learning_rate;
-        self.grad_clip_max_norm = checkpoint.config.grad_clip_max_norm;
-        self.meta_learning_rate_scale = checkpoint.state.meta_learning_rate_scale;
-        self.meta_optimizer_step = checkpoint.state.meta_optimizer_step;
-        self.spectral_adapter = spectral_adapter;
-        self.curvature_scheduler = curvature_scheduler;
-        self.spectral_policy = spectral_policy;
-        self.phase_turnover_spike_threshold =
-            checkpoint.state.phase_tracker.turnover_spike_threshold;
-        self.phase_loss_ema_alpha = checkpoint.state.phase_tracker.loss_ema_alpha;
-        self.phase_loss_spike_ratio = checkpoint.state.phase_tracker.loss_spike_ratio;
-        self.phase_drift_spike_threshold = checkpoint.state.phase_tracker.drift_spike_threshold;
-        self.phase_last_label = checkpoint.state.phase_tracker.last_label;
-        self.phase_last_turnover = checkpoint.state.phase_tracker.last_turnover;
-        self.phase_last_band = checkpoint.state.phase_tracker.last_band;
-        self.phase_last_drift_abs = checkpoint.state.phase_tracker.last_drift_abs;
-        self.phase_loss_ema = checkpoint.state.phase_tracker.loss_ema;
-        self.phase_loss_spiking = checkpoint.state.phase_tracker.loss_spiking;
-        self.softlogic = softlogic;
-        self.cumulative_backend_counters = checkpoint.state.backend_counters;
+        self.epoch = prepared.epoch;
+        self.curvature = prepared.config.curvature;
+        self.hyper_learning_rate = prepared.config.hyper_learning_rate;
+        self.fallback_learning_rate = prepared.config.fallback_learning_rate;
+        self.real_learning_rate = prepared.config.real_learning_rate;
+        self.grad_clip_max_norm = prepared.config.grad_clip_max_norm;
+        self.meta_learning_rate_scale = prepared.state.meta_learning_rate_scale;
+        self.meta_optimizer_step = prepared.state.meta_optimizer_step;
+        self.spectral_adapter = prepared.spectral_adapter;
+        self.curvature_scheduler = prepared.curvature_scheduler;
+        self.spectral_policy = prepared.spectral_policy;
+        self.phase_turnover_spike_threshold = prepared.state.phase_tracker.turnover_spike_threshold;
+        self.phase_loss_ema_alpha = prepared.state.phase_tracker.loss_ema_alpha;
+        self.phase_loss_spike_ratio = prepared.state.phase_tracker.loss_spike_ratio;
+        self.phase_drift_spike_threshold = prepared.state.phase_tracker.drift_spike_threshold;
+        self.phase_last_label = prepared.state.phase_tracker.last_label;
+        self.phase_last_turnover = prepared.state.phase_tracker.last_turnover;
+        self.phase_last_band = prepared.state.phase_tracker.last_band;
+        self.phase_last_drift_abs = prepared.state.phase_tracker.last_drift_abs;
+        self.phase_loss_ema = prepared.state.phase_tracker.loss_ema;
+        self.phase_loss_spiking = prepared.state.phase_tracker.loss_spiking;
+        self.softlogic = prepared.softlogic;
+        self.cumulative_backend_counters = prepared.state.backend_counters;
         self.last_accumulator_sync = TrainerAccumulatorSyncStats {
-            enabled: checkpoint.topology.training_device_enabled,
-            rank: checkpoint.topology.training_rank,
-            world_size: checkpoint.topology.training_world_size,
-            buffers: sync_buffers,
-            values: sync_values,
+            enabled: prepared.topology.training_device_enabled,
+            rank: prepared.topology.training_rank,
+            world_size: prepared.topology.training_world_size,
+            buffers: prepared.sync_buffers,
+            values: prepared.sync_values,
         };
         self.last_curvature_metrics = None;
         self.last_spectral_metrics = None;
-        Ok(validation)
+        Ok(prepared.validation)
     }
 
     /// Returns details for the most recent accumulator synchronization pass.
@@ -9761,6 +9941,169 @@ mod tests {
     }
 
     #[test]
+    fn runtime_bundle_resume_matches_uninterrupted_training() {
+        let make_trainer =
+            || ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_realgrad(0.02);
+        let gradient = vec![0.8, -0.4, 0.6, -0.2];
+
+        let mut uninterrupted_trainer = make_trainer();
+        let mut uninterrupted_module = SpectralGradientModule::new(gradient.clone());
+        uninterrupted_trainer
+            .prepare(&mut uninterrupted_module)
+            .unwrap();
+        configure_checkpoint_momentum(&mut uninterrupted_module);
+        configure_checkpoint_phase_tracker(&mut uninterrupted_trainer);
+        run_checkpoint_steps(&mut uninterrupted_trainer, &mut uninterrupted_module, 5);
+
+        let mut interrupted_trainer = make_trainer();
+        let mut interrupted_module = SpectralGradientModule::new(gradient.clone());
+        interrupted_trainer
+            .prepare(&mut interrupted_module)
+            .unwrap();
+        configure_checkpoint_momentum(&mut interrupted_module);
+        configure_checkpoint_phase_tracker(&mut interrupted_trainer);
+        run_checkpoint_steps(&mut interrupted_trainer, &mut interrupted_module, 2);
+        let model_state = interrupted_module.state_dict().unwrap();
+        let bundle = interrupted_trainer
+            .runtime_checkpoint_bundle(&interrupted_module)
+            .unwrap();
+        let encoded = serde_json::to_string(&bundle).unwrap();
+        let bundle: TrainerRuntimeCheckpointBundle = serde_json::from_str(&encoded).unwrap();
+
+        let mut resumed_trainer = make_trainer();
+        let mut resumed_module = SpectralGradientModule::new(gradient);
+        resumed_module.load_state_dict(&model_state).unwrap();
+        resumed_trainer.prepare(&mut resumed_module).unwrap();
+        let receipt = resumed_trainer
+            .restore_runtime_checkpoint_bundle(&mut resumed_module, &bundle)
+            .unwrap();
+        assert!(receipt.deterministic_resume_ready);
+        assert_eq!(receipt.parameter_count, 1);
+        run_checkpoint_steps(&mut resumed_trainer, &mut resumed_module, 3);
+
+        assert_eq!(
+            resumed_module.weights().data(),
+            uninterrupted_module.weights().data()
+        );
+        assert_eq!(
+            resumed_trainer.optimizer_state(),
+            uninterrupted_trainer.optimizer_state()
+        );
+        assert_eq!(
+            resumed_module
+                .param
+                .hypergrad()
+                .unwrap()
+                .optimizer_momentum(),
+            uninterrupted_module
+                .param
+                .hypergrad()
+                .unwrap()
+                .optimizer_momentum()
+        );
+    }
+
+    #[test]
+    fn runtime_bundle_composes_roundtable_and_optimizer_readiness() {
+        let mut source_bridge = DesireRoundtableBridge::new();
+        source_bridge.set_blend(0.74);
+        source_bridge.set_drift_gain(0.58);
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_desire_roundtable_bridge(source_bridge);
+        let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let model_state = source_module.state_dict().unwrap();
+        let bundle = source_trainer
+            .runtime_checkpoint_bundle(&source_module)
+            .unwrap();
+        assert!(
+            !evaluate_trainer_optimizer_checkpoint(&bundle.optimizer)
+                .unwrap()
+                .deterministic_resume_ready
+        );
+
+        let mut target_bridge = DesireRoundtableBridge::new();
+        target_bridge.set_blend(0.12);
+        target_bridge.set_drift_gain(0.2);
+        let target_probe = target_bridge.clone();
+        let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target_trainer.enable_desire_roundtable_bridge(target_bridge);
+        let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_module.load_state_dict(&model_state).unwrap();
+        target_trainer.prepare(&mut target_module).unwrap();
+
+        let receipt = target_trainer
+            .restore_runtime_checkpoint_bundle(&mut target_module, &bundle)
+            .unwrap();
+
+        assert!(receipt.deterministic_resume_ready);
+        assert_eq!(receipt.captured_components, ["desire_roundtable_bridge"]);
+        assert_eq!(target_probe.blend(), 0.74);
+        assert_eq!(target_probe.drift_gain(), 0.58);
+    }
+
+    #[test]
+    fn runtime_bundle_model_mismatch_preserves_external_and_optimizer_state() {
+        let mut source_bridge = DesireRoundtableBridge::new();
+        source_bridge.set_blend(0.8);
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_desire_roundtable_bridge(source_bridge);
+        let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let bundle = source_trainer
+            .runtime_checkpoint_bundle(&source_module)
+            .unwrap();
+
+        let mut target_bridge = DesireRoundtableBridge::new();
+        target_bridge.set_blend(0.15);
+        let target_probe = target_bridge.clone();
+        let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target_trainer.enable_desire_roundtable_bridge(target_bridge);
+        let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_trainer.prepare(&mut target_module).unwrap();
+        target_module.param.value_mut().data_mut()[0] = 99.0;
+        let trainer_before = target_trainer.optimizer_state();
+        let parameter_before = target_module.param.optimizer_checkpoint_state();
+        let roundtable_before = target_probe.checkpoint().unwrap();
+
+        assert!(target_trainer
+            .restore_runtime_checkpoint_bundle(&mut target_module, &bundle)
+            .is_err());
+
+        assert_eq!(target_trainer.optimizer_state(), trainer_before);
+        assert_eq!(
+            target_module.param.optimizer_checkpoint_state(),
+            parameter_before
+        );
+        assert_eq!(target_probe.checkpoint().unwrap(), roundtable_before);
+    }
+
+    #[test]
+    fn runtime_bundle_refuses_unresolved_desire_queue() {
+        let mut source_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source_trainer.enable_desire_pipeline(DesireTrainerBridge::new());
+        let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let bundle = source_trainer
+            .runtime_checkpoint_bundle(&source_module)
+            .unwrap();
+        let portable = evaluate_trainer_runtime_checkpoint_bundle(&bundle).unwrap();
+        assert_eq!(portable.unresolved_components, ["desire_bridge"]);
+
+        let mut target_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        target_trainer.enable_desire_pipeline(DesireTrainerBridge::new());
+        let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_trainer.prepare(&mut target_module).unwrap();
+        let before = target_trainer.optimizer_state();
+
+        assert!(matches!(
+            target_trainer.restore_runtime_checkpoint_bundle(&mut target_module, &bundle),
+            Err(TrainerCheckpointError::RuntimeCheckpointNotReady { .. })
+        ));
+        assert_eq!(target_trainer.optimizer_state(), before);
+    }
+
+    #[test]
     fn optimizer_restore_rejects_wrong_model_without_partial_mutation() {
         let mut source_trainer =
             ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01).with_realgrad(0.02);
@@ -9916,6 +10259,46 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
+        assert_eq!(
+            target.psi.as_ref().unwrap().checkpoint().unwrap(),
+            source.psi.as_ref().unwrap().checkpoint().unwrap()
+        );
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn runtime_bundle_bootstraps_psi_before_projected_topology_commit() {
+        let mut config = PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS,
+            ema_alpha: 0.4,
+            sample_rate: 1,
+            ..PsiConfig::default()
+        };
+        config.weights.insert(PsiComponent::LOSS, 1.0);
+        let mut source = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        source.psi = Some(PsiMeter::new(config));
+        source.psi.as_mut().unwrap().update(&PsiInput {
+            loss: 1.25,
+            ..PsiInput::default()
+        });
+        let mut source_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        source.prepare(&mut source_module).unwrap();
+        let model_state = source_module.state_dict().unwrap();
+        let bundle = source.runtime_checkpoint_bundle(&source_module).unwrap();
+
+        let mut target = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        assert!(target.psi.is_none());
+        let mut target_module = SpectralGradientModule::new(vec![0.5, -0.25]);
+        target_module.load_state_dict(&model_state).unwrap();
+        target.prepare(&mut target_module).unwrap();
+
+        let receipt = target
+            .restore_runtime_checkpoint_bundle(&mut target_module, &bundle)
+            .unwrap();
+
+        assert!(receipt.deterministic_resume_ready);
+        assert_eq!(receipt.captured_components, [PSI_METER_COMPONENT]);
         assert_eq!(
             target.psi.as_ref().unwrap().checkpoint().unwrap(),
             source.psi.as_ref().unwrap().checkpoint().unwrap()

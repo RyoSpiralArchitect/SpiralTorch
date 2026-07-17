@@ -23,6 +23,7 @@ pub const TRAINER_OPTIMIZER_CHECKPOINT_CONTRACT_VERSION: &str =
 pub const TRAINER_OPTIMIZER_CHECKPOINT_KIND: &str = "spiraltorch.trainer_optimizer_checkpoint";
 pub const TRAINER_OPTIMIZER_CHECKPOINT_RESUME_SCOPE: &str =
     "trainer_optimizer_and_builtin_update_policy;parameter_values_external_and_fingerprint_guarded;external_runtime_components_reported";
+pub const TRAINER_OPTIMIZER_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
 pub enum TrainerOptimizerConfigError {
@@ -593,6 +594,7 @@ impl SpectralLrAdapterState {
                 "must be positive",
             ));
         }
+        validate_portable_usize("state.spectral_adapter.sheet_hint", self.sheet_hint)?;
         validate_range(
             "state.spectral_adapter.smoothing",
             self.smoothing,
@@ -862,6 +864,9 @@ impl TrainerSpectralPolicyState {
             0.0,
             1.0,
         )?;
+        if let Some(last_dominant) = self.last_dominant {
+            validate_portable_usize("state.spectral_policy.last_dominant", last_dominant)?;
+        }
         validate_positive("state.spectral_policy.min_lr_scale", self.min_lr_scale)?;
         validate_positive("state.spectral_policy.max_lr_scale", self.max_lr_scale)?;
         if self.max_lr_scale <= self.min_lr_scale {
@@ -985,6 +990,16 @@ impl TrainerExecutionTopology {
                 "must be allow or forbid",
             ));
         }
+        for (field, value) in [
+            (
+                "topology.tensor_util_wgpu_min_values",
+                self.tensor_util_wgpu_min_values,
+            ),
+            ("topology.training_rank", self.training_rank),
+            ("topology.training_world_size", self.training_world_size),
+        ] {
+            validate_portable_usize(field, value)?;
+        }
         if self.training_world_size == 0 || self.training_rank >= self.training_world_size {
             return Err(checkpoint_state_error(
                 "topology.training_world_size",
@@ -1031,6 +1046,8 @@ impl TrainerParameterOptimizerState {
                 "must not be empty",
             ));
         }
+        validate_portable_usize(&format!("parameters.{}.rows", self.name), self.rows)?;
+        validate_portable_usize(&format!("parameters.{}.cols", self.name), self.cols)?;
         let expected = self
             .rows
             .checked_mul(self.cols)
@@ -1070,6 +1087,14 @@ impl TrainerParameterOptimizerState {
                     "must match the parameter shape",
                 ));
             }
+            validate_portable_usize(
+                &format!("parameters.{}.hypergrad.topos.max_depth", self.name),
+                hypergrad.topos.max_depth,
+            )?;
+            validate_portable_usize(
+                &format!("parameters.{}.hypergrad.topos.max_volume", self.name),
+                hypergrad.topos.max_volume,
+            )?;
             AmegaHypergrad::from_checkpoint(hypergrad.clone()).map_err(|error| {
                 checkpoint_state_error(
                     &format!("parameters.{}.hypergrad", self.name),
@@ -1129,6 +1154,10 @@ impl TrainerOptimizerRuntimeState {
         &self,
         config: &TrainerOptimizerConfig,
     ) -> Result<(), TrainerOptimizerCheckpointError> {
+        validate_portable_u64("state.epoch", self.epoch)?;
+        if let Some(step) = self.meta_optimizer_step {
+            validate_portable_u64("state.meta_optimizer_step", step)?;
+        }
         validate_positive(
             "state.meta_learning_rate_scale",
             self.meta_learning_rate_scale,
@@ -1154,6 +1183,15 @@ impl TrainerOptimizerRuntimeState {
         }
         self.phase_tracker.validate()?;
         self.softlogic.validate()?;
+        self.backend_counters.validate()?;
+        validate_portable_u64(
+            "state.last_accumulator_sync_buffers",
+            self.last_accumulator_sync_buffers,
+        )?;
+        validate_portable_u64(
+            "state.last_accumulator_sync_values",
+            self.last_accumulator_sync_values,
+        )?;
         if self.backend_counters.epochs_recorded > self.epoch {
             return Err(checkpoint_state_error(
                 "state.backend_counters.epochs_recorded",
@@ -1165,6 +1203,37 @@ impl TrainerOptimizerRuntimeState {
                 "state.last_accumulator_sync_values",
                 "must be zero when no buffers were synchronized",
             ));
+        }
+        Ok(())
+    }
+}
+
+impl TrainerBackendCounters {
+    fn validate(&self) -> Result<(), TrainerOptimizerCheckpointError> {
+        for (field, value) in [
+            ("epochs_recorded", self.epochs_recorded),
+            ("ops_total", self.ops_total),
+            ("fallbacks", self.fallbacks),
+            ("backend_wgpu", self.backend_wgpu),
+            ("backend_cuda", self.backend_cuda),
+            ("backend_hip", self.backend_hip),
+            ("backend_cpu", self.backend_cpu),
+            ("backend_other", self.backend_other),
+            ("requested_wgpu_hits", self.requested_wgpu_hits),
+            (
+                "requested_wgpu_runtime_fallbacks",
+                self.requested_wgpu_runtime_fallbacks,
+            ),
+            (
+                "requested_wgpu_component_hits",
+                self.requested_wgpu_component_hits,
+            ),
+            (
+                "requested_wgpu_component_fallbacks",
+                self.requested_wgpu_component_fallbacks,
+            ),
+        ] {
+            validate_portable_u64(&format!("state.backend_counters.{field}"), value)?;
         }
         Ok(())
     }
@@ -1184,6 +1253,26 @@ fn validate_checkpoint_metadata(
             actual: actual.to_owned(),
         })
     }
+}
+
+fn validate_portable_u64(field: &str, value: u64) -> Result<(), TrainerOptimizerCheckpointError> {
+    if value <= TRAINER_OPTIMIZER_MAX_SAFE_INTEGER {
+        Ok(())
+    } else {
+        Err(checkpoint_state_error(
+            field,
+            "must not exceed JavaScript's exact integer limit",
+        ))
+    }
+}
+
+fn validate_portable_usize(
+    field: &str,
+    value: usize,
+) -> Result<(), TrainerOptimizerCheckpointError> {
+    u64::try_from(value)
+        .map_err(|_| checkpoint_state_error(field, "must fit the cross-runtime integer contract"))
+        .and_then(|value| validate_portable_u64(field, value))
 }
 
 fn checkpoint_state_error(field: &str, message: &str) -> TrainerOptimizerCheckpointError {
@@ -1528,6 +1617,40 @@ mod tests {
             evaluate_trainer_optimizer_checkpoint(&checkpoint),
             Err(TrainerOptimizerCheckpointError::DuplicateParameter { .. })
         ));
+    }
+
+    #[test]
+    fn checkpoint_rejects_integers_that_javascript_cannot_preserve() {
+        let mut checkpoint = valid_checkpoint();
+        checkpoint.state.epoch = TRAINER_OPTIMIZER_MAX_SAFE_INTEGER + 1;
+        let error = evaluate_trainer_optimizer_checkpoint(&checkpoint).unwrap_err();
+        assert!(matches!(
+            error,
+            TrainerOptimizerCheckpointError::InvalidState { ref field, .. }
+                if field == "state.epoch"
+        ));
+
+        let mut checkpoint = valid_checkpoint();
+        checkpoint.state.backend_counters.ops_total = TRAINER_OPTIMIZER_MAX_SAFE_INTEGER + 1;
+        let error = evaluate_trainer_optimizer_checkpoint(&checkpoint).unwrap_err();
+        assert!(matches!(
+            error,
+            TrainerOptimizerCheckpointError::InvalidState { ref field, .. }
+                if field == "state.backend_counters.ops_total"
+        ));
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            let mut checkpoint = valid_checkpoint();
+            checkpoint.state.spectral_adapter.sheet_hint =
+                usize::try_from(TRAINER_OPTIMIZER_MAX_SAFE_INTEGER + 1).unwrap();
+            let error = evaluate_trainer_optimizer_checkpoint(&checkpoint).unwrap_err();
+            assert!(matches!(
+                error,
+                TrainerOptimizerCheckpointError::InvalidState { ref field, .. }
+                    if field == "state.spectral_adapter.sheet_hint"
+            ));
+        }
     }
 
     #[test]

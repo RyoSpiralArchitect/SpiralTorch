@@ -110,7 +110,7 @@ mod tests {
     use st_core::runtime::trainer_optimizer::{
         build_trainer_optimizer_checkpoint, SpectralLrAdapterState, TrainerBackendCounters,
         TrainerExecutionTopology, TrainerOptimizerRuntimeState, TrainerParameterOptimizerState,
-        TrainerPhaseTrackerState, TrainerSoftLogicState,
+        TrainerPhaseTrackerState, TrainerSoftLogicState, TRAINER_OPTIMIZER_MAX_SAFE_INTEGER,
     };
     use st_tensor::AmegaHypergrad;
 
@@ -257,6 +257,16 @@ mod tests {
                 field: "semantic_backend",
                 ..
             })
+        ));
+
+        let mut imprecise = valid_checkpoint();
+        imprecise.state.meta_optimizer_step = Some(TRAINER_OPTIMIZER_MAX_SAFE_INTEGER + 1);
+        let error = trainer_optimizer_checkpoint_value(&imprecise)
+            .expect_err("WASM must reject integers that JavaScript cannot preserve");
+        assert!(matches!(
+            error,
+            TrainerOptimizerCheckpointError::InvalidState { ref field, .. }
+                if field == "state.meta_optimizer_step"
         ));
     }
 }
