@@ -34,6 +34,25 @@ pub const AMEBA_AUTOGRAD_REPLAY_SEMANTIC_BACKEND: &str = "rust";
 const STATE_DIGEST_DOMAIN: &[u8] = b"spiraltorch.ameba_autograd.state.v1\0";
 const RECEIPT_DIGEST_DOMAIN: &[u8] = b"spiraltorch.ameba_autograd.receipt.v1\0";
 
+mod canonical_u64 {
+    use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        super::parse_canonical_u64(&encoded).map_err(D::Error::custom)
+    }
+}
+
 /// Versioned, integrity-bound snapshot of the complete Ameba runtime state.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -51,6 +70,7 @@ pub struct AmebaAutogradCheckpoint {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AmebaAutogradCheckpointState {
+    #[serde(with = "canonical_u64")]
     pub max_hops: u64,
     pub tolerance: f32,
     pub agents: Vec<AmebaAutogradAgentCheckpoint>,
@@ -77,6 +97,7 @@ pub struct AmebaAutogradAgentCheckpoint {
 pub struct AmebaAutogradMessageCheckpoint {
     pub from: String,
     pub to: String,
+    #[serde(with = "canonical_u64")]
     pub hops: u64,
     pub payload: Vec<f32>,
 }
@@ -94,6 +115,7 @@ pub struct AmebaAutogradCheckpointValidation {
     pub edge_count: usize,
     pub pending_messages: usize,
     pub pending_values: usize,
+    #[serde(serialize_with = "canonical_u64::serialize")]
     pub max_hops: u64,
     pub tolerance: f32,
     pub canonical_agent_order: bool,
@@ -132,27 +154,43 @@ pub enum AmebaAutogradReplayOperation {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AmebaAutogradRoundReceipt {
+    #[serde(with = "canonical_u64")]
     pub round_index: u64,
+    #[serde(with = "canonical_u64")]
     pub pending_before: u64,
+    #[serde(with = "canonical_u64")]
     pub pending_after: u64,
+    #[serde(with = "canonical_u64")]
     pub pending_values_before: u64,
+    #[serde(with = "canonical_u64")]
     pub pending_values_after: u64,
+    #[serde(with = "canonical_u64")]
     pub processed: u64,
+    #[serde(with = "canonical_u64")]
     pub forwarded: u64,
+    #[serde(with = "canonical_u64")]
     pub absorbed_tolerance: u64,
+    #[serde(with = "canonical_u64")]
     pub stopped_max_hops: u64,
+    #[serde(with = "canonical_u64")]
     pub terminal_no_neighbor: u64,
+    #[serde(with = "canonical_u64")]
     pub unknown_targets: u64,
     pub signal_sum: f64,
     pub forwarded_signal_sum: f64,
+    #[serde(with = "canonical_u64")]
     pub forwarded_values: u64,
     pub weight_update_requested_backend: String,
     pub weight_update_selected_backend: String,
+    #[serde(with = "canonical_u64")]
     pub weight_update_operations: u64,
+    #[serde(with = "canonical_u64")]
     pub weight_update_values: u64,
     pub forwarding_requested_backend: String,
     pub forwarding_selected_backend: String,
+    #[serde(with = "canonical_u64")]
     pub forwarding_operations: u64,
+    #[serde(with = "canonical_u64")]
     pub forwarding_values: u64,
 }
 
@@ -167,6 +205,7 @@ pub struct AmebaAutogradReplayReceipt {
     pub operation: AmebaAutogradReplayOperation,
     pub before_state_sha256: String,
     pub after_state_sha256: String,
+    #[serde(with = "canonical_u64")]
     pub total_processed: u64,
     pub rounds: Vec<AmebaAutogradRoundReceipt>,
     pub receipt_sha256: String,
@@ -183,6 +222,7 @@ pub struct AmebaAutogradReplayValidation {
     pub before_state_sha256: String,
     pub after_state_sha256: String,
     pub receipt_sha256: String,
+    #[serde(serialize_with = "canonical_u64::serialize")]
     pub total_processed: u64,
     pub round_count: usize,
     pub receipt_valid: bool,
@@ -891,19 +931,18 @@ fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).expect("supported Rust targets have at most 64-bit usize")
 }
 
-fn parse_node_id(field: &str, value: &str) -> Result<NodeId, AmebaAutogradCheckpointError> {
+fn parse_canonical_u64(value: &str) -> Result<u64, &'static str> {
     if value.is_empty()
         || !value.bytes().all(|byte| byte.is_ascii_digit())
         || (value.len() > 1 && value.starts_with('0'))
     {
-        return Err(checkpoint_state_error(
-            field,
-            "must be a canonical unsigned decimal NodeId",
-        ));
+        return Err("must be a canonical unsigned decimal u64");
     }
-    value
-        .parse::<NodeId>()
-        .map_err(|_| checkpoint_state_error(field, "must fit the complete Rust NodeId u64 range"))
+    value.parse().map_err(|_| "must fit the complete u64 range")
+}
+
+fn parse_node_id(field: &str, value: &str) -> Result<NodeId, AmebaAutogradCheckpointError> {
+    parse_canonical_u64(value).map_err(|message| checkpoint_state_error(field, message))
 }
 
 fn validate_checkpoint_metadata(
@@ -1060,11 +1099,14 @@ mod tests {
         let mesh = mesh_with_pending_cascade();
         let checkpoint = mesh.checkpoint().unwrap();
         let encoded = serde_json::to_string(&checkpoint).unwrap();
+        let wire: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         let decoded: AmebaAutogradCheckpoint = serde_json::from_str(&encoded).unwrap();
         let validation = evaluate_ameba_autograd_checkpoint(&decoded).unwrap();
         let restored = AmebaAutograd::from_checkpoint(&decoded).unwrap();
 
         assert_eq!(checkpoint, decoded);
+        assert_eq!(wire["state"]["max_hops"], serde_json::json!("3"));
+        assert_eq!(wire["state"]["pending"][0]["hops"], serde_json::json!("0"));
         assert_eq!(checkpoint.state.agents[0].id, "1");
         assert_eq!(checkpoint.state.agents[1].id, "2");
         assert_eq!(checkpoint.state.agents[2].id, "3");
@@ -1074,6 +1116,10 @@ mod tests {
         assert_eq!(validation.agent_count, 3);
         assert_eq!(validation.edge_count, 4);
         assert!(validation.deterministic_resume_ready);
+        assert_eq!(
+            serde_json::to_value(&validation).unwrap()["max_hops"],
+            serde_json::json!("3")
+        );
         assert_eq!(restored.checkpoint().unwrap(), checkpoint);
     }
 
@@ -1091,6 +1137,40 @@ mod tests {
                 .unwrap(),
             checkpoint
         );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn checkpoint_wire_hop_fields_survive_the_javascript_integer_boundary() {
+        const BEYOND_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_993;
+
+        let mut mesh = mesh_with_pending_cascade();
+        mesh.max_hops = usize::try_from(BEYOND_JS_SAFE_INTEGER).unwrap();
+        let message = mesh.pending.front_mut().unwrap();
+        message.from = 1;
+        message.hops = usize::try_from(BEYOND_JS_SAFE_INTEGER).unwrap();
+        let checkpoint = mesh.checkpoint().unwrap();
+        let wire = serde_json::to_value(&checkpoint).unwrap();
+
+        assert_eq!(
+            wire["state"]["max_hops"],
+            serde_json::json!(BEYOND_JS_SAFE_INTEGER.to_string())
+        );
+        assert_eq!(
+            wire["state"]["pending"][0]["hops"],
+            serde_json::json!(BEYOND_JS_SAFE_INTEGER.to_string())
+        );
+        let decoded: AmebaAutogradCheckpoint = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(decoded, checkpoint);
+        evaluate_ameba_autograd_checkpoint(&decoded).unwrap();
+
+        let mut numeric = wire.clone();
+        numeric["state"]["max_hops"] = serde_json::json!(BEYOND_JS_SAFE_INTEGER);
+        assert!(serde_json::from_value::<AmebaAutogradCheckpoint>(numeric).is_err());
+
+        let mut noncanonical = wire;
+        noncanonical["state"]["pending"][0]["hops"] = serde_json::json!("09007199254740993");
+        assert!(serde_json::from_value::<AmebaAutogradCheckpoint>(noncanonical).is_err());
     }
 
     #[test]
@@ -1168,6 +1248,8 @@ mod tests {
         let before = source.checkpoint().unwrap();
         let receipt = source.drain_with_receipt().unwrap();
         let expected = source.checkpoint().unwrap();
+        let wire = serde_json::to_value(&receipt).unwrap();
+        let decoded: AmebaAutogradReplayReceipt = serde_json::from_value(wire.clone()).unwrap();
         let preflight = evaluate_ameba_autograd_replay_receipt(&receipt).unwrap();
         let (replayed, validation) = AmebaAutograd::replay_checkpoint(&before, &receipt).unwrap();
 
@@ -1181,11 +1263,19 @@ mod tests {
         );
         assert!(preflight.receipt_valid);
         assert!(!preflight.replay_matched);
+        assert_eq!(
+            serde_json::to_value(&preflight).unwrap()["total_processed"],
+            serde_json::json!("3")
+        );
         assert!(validation.replay_matched);
         assert_eq!(receipt.before_state_sha256, before.state_sha256);
         assert_eq!(receipt.after_state_sha256, expected.state_sha256);
         assert_eq!(receipt.total_processed, 3);
         assert_eq!(receipt.rounds.len(), 2);
+        assert_eq!(wire["total_processed"], serde_json::json!("3"));
+        assert_eq!(wire["rounds"][0]["round_index"], serde_json::json!("0"));
+        assert_eq!(wire["rounds"][0]["processed"], serde_json::json!("1"));
+        assert_eq!(decoded, receipt);
         assert_eq!(replayed.checkpoint().unwrap(), expected);
     }
 

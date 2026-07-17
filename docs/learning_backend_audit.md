@@ -3888,7 +3888,9 @@ the `VecDeque` message order remain explicit execution semantics. Node IDs are
 encoded as canonical decimal strings so the complete `u64` range survives JSON,
 Python, JavaScript, and WASM transports without precision loss. A domain-separated
 SHA-256 binds topology, learning controls, exact float bits, weights, hop state,
-and every queued payload. Restore rebuilds the candidate through the same
+and every queued payload. Stateful hop values and receipt counters use the same
+canonical decimal-string wire rule, so no `u64` evidence is rounded by a
+JavaScript or WASM JSON transport. Restore rebuilds the candidate through the same
 constructor/topology checks and commits only after queue provenance and integrity
 validation succeed, so malformed or tampered payloads cannot partially replace a
 live mesh.
