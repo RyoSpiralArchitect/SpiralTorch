@@ -17,6 +17,9 @@ def test_mps_probe_exposes_placeholder_surface() -> None:
 
     report = st.mps_probe()
     planner_report = st.planner.mps_probe()
+    assert report["kind"] == "spiraltorch.mps_probe"
+    assert report["semantic_owner"] == "st-core::backend::runtime_probe"
+    assert report["semantic_backend"] == "rust"
     assert report["backend"] == "mps"
     assert planner_report["backend"] == "mps"
     assert planner_report["planner_surrogate_backend"] == report["planner_surrogate_backend"]
@@ -52,6 +55,12 @@ def test_describe_device_accepts_mps_backend() -> None:
     st = require_native()
 
     report = st.describe_device("mps", workgroup=300, cols=4096)
+    assert report["kind"] == "spiraltorch.runtime_device_probe"
+    assert report["contract_version"] == "spiraltorch.runtime_device_probe.v1"
+    assert report["semantic_owner"] == "st-core::backend::runtime_probe"
+    assert report["execution_client"] == "python"
+    assert report["committed"] is True
+    assert report["contract"]["output_sha256"] == report["output_sha256"]
     assert report["backend"] == "mps"
     assert report["requested_backend"] == "mps"
     assert report["effective_backend"] in {"wgpu", "cpu"}
@@ -62,8 +71,17 @@ def test_describe_device_accepts_mps_backend() -> None:
         "placeholder",
     }
     assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
+    assert report["effective_backend_runtime_ready"] is True
+    assert report["route_evidence"]["requested_backend"] == "mps"
+    assert report["route_evidence"]["runtime_ready"] is True
+    route = st.evaluate_runtime_device_route(
+        [report],
+        requested_backends=["mps"],
+        required_ready_backends=["mps"],
+    )
+    assert route["evidence"] == [report["route_evidence"]]
     assert report["runtime_status"] == report["effective_backend_runtime_status"]
-    assert report["runtime_status"] in {"cpu", "kernel_wired", "feature_disabled"}
+    assert report["runtime_status"] in {"cpu", "ready"}
     assert isinstance(report["runtime_recommendation"], str)
     assert report["status"] in {
         "build-feature-disabled",
@@ -203,7 +221,9 @@ def test_public_mps_describe_device_requires_matching_native_extension(
         st.describe_device("mps")
 
 
-def test_plan_retains_legacy_mps_routing_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plan_rejects_python_reconstruction_without_native_mps_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     st = require_native()
     native_plan = st._native_plan
 
@@ -216,12 +236,11 @@ def test_plan_retains_legacy_mps_routing_fallback(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(st, "_native_plan", _patched_plan, raising=False)
     monkeypatch.setattr(st, "_native_mps_probe", None, raising=False)
 
-    plan = st.plan("topk", 16, 128, 8, backend="mps")
-    assert plan.requested_backend == "mps"
-    assert plan.effective_backend in {"wgpu", "cpu"}
+    with pytest.raises(RuntimeError, match="matching SpiralTorch native extension"):
+        st.plan("topk", 16, 128, 8, backend="mps")
 
 
-def test_session_retains_legacy_mps_runtime_entry_fallback(
+def test_session_rejects_python_reconstruction_without_native_mps_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     st = require_native()
@@ -236,7 +255,5 @@ def test_session_retains_legacy_mps_runtime_entry_fallback(
     monkeypatch.setattr(st, "_native_describe_device", _patched_describe_device, raising=False)
     monkeypatch.setattr(st, "_native_mps_probe", None, raising=False)
 
-    session = st.SpiralSession(backend="mps")
-    assert session.requested_backend == "mps"
-    assert session.effective_backend in {"wgpu", "cpu"}
-    assert session.device in {"metal-via-wgpu", "cpu-fallback"}
+    with pytest.raises(RuntimeError, match="matching SpiralTorch native extension"):
+        st.SpiralSession(backend="mps")

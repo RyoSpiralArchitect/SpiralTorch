@@ -31,14 +31,52 @@ def test_describe_device_explicit_wgpu_backend() -> None:
     st = require_native()
 
     report = st.describe_device("wgpu", workgroup=300, cols=4096)
+    assert report["kind"] == "spiraltorch.runtime_device_probe"
+    assert report["contract_version"] == "spiraltorch.runtime_device_probe.v1"
+    assert report["semantic_owner"] == "st-core::backend::runtime_probe"
+    assert report["semantic_backend"] == "rust"
+    assert report["execution_client"] == "python"
+    assert report["committed"] is True
+    assert len(report["request_sha256"]) == 64
+    assert len(report["output_sha256"]) == 64
+    assert report["contract"]["output_sha256"] == report["output_sha256"]
+    assert "validate_runtime_device_probe_contract" in st.__all__
+    assert st.validate_runtime_device_probe_contract(report) == report["contract"]
+    assert (
+        st.validate_runtime_device_probe_contract(
+            report,
+            request=report["request"],
+        )
+        == report["contract"]
+    )
     assert report["backend"] == "wgpu"
     assert report["requested_backend"] == "wgpu"
     assert report["effective_backend"] == "wgpu"
     assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
     assert report["runtime_status"] == report["effective_backend_runtime_status"]
-    assert report["runtime_status"] in {"kernel_wired", "feature_disabled"}
+    assert report["runtime_status"] in {
+        "ready",
+        "initialization_failed",
+        "feature_disabled",
+    }
     assert report["requested_backend_runtime_status"] == report["runtime_status"]
     assert report["requested_backend_runtime_ready"] == report["runtime_ready"]
+    assert report["route_evidence"]["runtime_ready"] == report["runtime_ready"]
+    assert (
+        report["route_evidence"]["effective_backend_runtime_ready"]
+        == report["effective_backend_runtime_ready"]
+    )
+    assert report["request"]["caps"]["backend"] == "wgpu"
+    assert isinstance(report["effective_backend_integration_compiled"], bool)
+    assert isinstance(report["effective_backend_runtime_initialized"], bool)
+    if report["runtime_status"] == "initialization_failed":
+        assert report["runtime_ready"] is False
+        assert isinstance(report["effective_backend_runtime_error"], str)
+
+    tampered = json.loads(json.dumps(report["contract"]))
+    tampered["aligned_workgroup"] = 1
+    with pytest.raises(ValueError, match="runtime-device probe validation failed"):
+        st.validate_runtime_device_probe_contract(tampered)
     assert isinstance(report["runtime_recommendation"], str)
     assert isinstance(report["effective_backend_runtime_recommendation"], str)
     assert "lane_width" in report
@@ -60,7 +98,8 @@ def test_describe_device_auto_backend_uses_effective_wgpu_label() -> None:
     assert report["effective_backend"] == "wgpu"
     assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
     assert report["effective_backend_runtime_status"] in {
-        "kernel_wired",
+        "ready",
+        "initialization_failed",
         "feature_disabled",
     }
     assert "lane_width" in report

@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
@@ -29,7 +30,8 @@ pub enum DeviceCapsError {
 ///
 /// Validation lives here so language bindings never need to clamp or reinterpret
 /// capability values independently.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct DeviceCapsOverrides {
     pub lane_width: Option<u32>,
     pub subgroup: Option<bool>,
@@ -38,7 +40,8 @@ pub struct DeviceCapsOverrides {
 }
 
 /// Enumerates the backends that participate in the unified heuristic chooser.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BackendKind {
     /// WebGPU / WGPU backend.
     Wgpu,
@@ -88,7 +91,8 @@ impl FromStr for BackendKind {
 /// heuristic chooser.  Higher level backends can always extend this data via
 /// wrapper structs, but the unified heuristics only care about the fields that
 /// affect merge-kind decisions and tile sizing.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceCaps {
     /// Backend discriminator so we can inject backend-specific biases.
     pub backend: BackendKind,

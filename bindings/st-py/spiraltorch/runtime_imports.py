@@ -44,6 +44,7 @@ __all__ = [
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
     "evaluate_runtime_device_route",
+    "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source",
     "runtime_device_report_fields",
@@ -768,6 +769,14 @@ def _runtime_device_route_evidence(
     *,
     default_backend: object = None,
 ) -> dict[str, object]:
+    rust_evidence = row.get("route_evidence")
+    if rust_evidence is not None:
+        if not isinstance(rust_evidence, Mapping):
+            raise TypeError("report route_evidence must be a mapping")
+        return dict(rust_evidence)
+
+    # Compatibility path for external and pre-contract reports. Native
+    # SpiralTorch probes always carry the exact Rust-owned evidence above.
     evidence: dict[str, object] = {
         "requested_backend": _runtime_device_row_backend(row, default=default_backend),
     }
@@ -804,6 +813,49 @@ def _native_runtime_device_route_function(name: str):
             f"rebuild or reinstall SpiralTorch with {name}"
         )
     return function
+
+
+def _native_runtime_device_probe_function(name: str):
+    try:
+        import spiraltorch as st  # type: ignore
+    except Exception as exc:  # pragma: no cover - import failures vary by env.
+        raise RuntimeError(
+            "runtime-device probe semantics require the compiled Rust core"
+        ) from exc
+    native = getattr(st, "_rs", None)
+    function = getattr(native, name, None)
+    if not callable(function):
+        raise RuntimeError(
+            "runtime-device probe semantics require the compiled Rust core; "
+            f"rebuild or reinstall SpiralTorch with {name}"
+        )
+    return function
+
+
+def validate_runtime_device_probe_contract(
+    payload: Mapping[str, object],
+    *,
+    request: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate a committed device probe through its Rust semantic owner."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    function_name = (
+        "_runtime_device_probe_validate"
+        if request is None
+        else "_runtime_device_probe_validate_against"
+    )
+    validate = _native_runtime_device_probe_function(function_name)
+    if request is None:
+        validated = validate(dict(payload))
+    else:
+        if not isinstance(request, Mapping):
+            raise TypeError("request must be a mapping when provided")
+        validated = validate(dict(payload), dict(request))
+    if not isinstance(validated, Mapping):
+        raise RuntimeError("runtime-device probe validator returned a non-mapping payload")
+    return dict(validated)
 
 
 def _native_runtime_device_route_contract(

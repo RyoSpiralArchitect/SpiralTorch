@@ -443,112 +443,6 @@ def _matching_native_mps_error(api_name: str) -> RuntimeError:
     )
 
 
-def _legacy_mps_routing_report() -> _Dict[str, _Any]:
-    feature_enabled = False
-    wgpu_enabled = False
-    build_info_fn = _safe_getattr(_rs, "build_info", None)
-    if callable(build_info_fn):
-        with _contextlib.suppress(Exception):
-            build_info = build_info_fn()
-            features = build_info.get("features", {})
-            feature_enabled = bool(features.get("mps", False))
-            wgpu_enabled = bool(features.get("wgpu", False))
-
-    host_arch = ""
-    with _contextlib.suppress(Exception):
-        host_arch = _os.uname().machine
-    if not host_arch:
-        host_arch = _safe_getattr(_safe_getattr(_os, "environ", {}), "get", lambda *_: "")(
-            "PROCESSOR_ARCHITECTURE", ""
-        )
-    if not host_arch:
-        host_arch = _safe_getattr(_safe_getattr(_os, "environ", {}), "get", lambda *_: "")(
-            "HOSTTYPE", ""
-        )
-
-    platform_supported = sys.platform == "darwin"
-    if not platform_supported:
-        host_class = "non-mac-host"
-    elif host_arch in {"arm64", "aarch64"}:
-        host_class = "apple-silicon-mac"
-    else:
-        host_class = "intel-mac"
-
-    if not feature_enabled:
-        status = "build-feature-disabled"
-    elif not platform_supported:
-        status = "unsupported-host"
-    else:
-        status = "placeholder"
-
-    planner_surrogate_backend = "wgpu" if platform_supported and wgpu_enabled else "cpu"
-    planner_route = (
-        "metal-via-wgpu" if planner_surrogate_backend == "wgpu" else "cpu-fallback"
-    )
-    recommendation = (
-        "use backend='wgpu' today; native MPS kernels are not wired yet"
-        if planner_surrogate_backend == "wgpu"
-        else "use backend='cpu' today; enable the 'wgpu' feature to route Metal hosts through WGPU"
-    )
-    backend_wired = False
-    initialized = False
-    available = feature_enabled and platform_supported and backend_wired
-    if not feature_enabled:
-        error = "mps feature is not enabled in this build"
-    elif not platform_supported:
-        error = "mps backend requires a macOS host"
-    else:
-        error = "mps backend is a placeholder; kernels are not wired yet"
-
-    planner_caps: _Dict[str, _Any] = {}
-    describe_device_fn = _safe_getattr(_rs, "describe_device", None)
-    if callable(describe_device_fn):
-        with _contextlib.suppress(Exception):
-            described = describe_device_fn(planner_surrogate_backend)
-            if isinstance(described, dict):
-                planner_caps = described
-    else:
-        planner_caps = {}
-    if not planner_caps:
-        if planner_surrogate_backend == "wgpu":
-            planner_caps = {
-                "backend": "wgpu",
-                "subgroup": True,
-                "lane_width": 32,
-                "max_workgroup": 256,
-                "shared_mem_per_workgroup": None,
-            }
-        else:
-            planner_caps = {
-                "backend": "cpu",
-                "subgroup": False,
-                "lane_width": 1,
-                "max_workgroup": 128,
-                "shared_mem_per_workgroup": None,
-            }
-
-    return {
-        "backend": "mps",
-        "status": status,
-        "feature_enabled": feature_enabled,
-        "platform_supported": platform_supported,
-        "host_class": host_class,
-        "backend_wired": backend_wired,
-        "placeholder": not backend_wired,
-        "available": available,
-        "initialized": initialized,
-        "host_os": sys.platform,
-        "host_arch": host_arch or "unknown",
-        "planner_surrogate_backend": planner_surrogate_backend,
-        "planner_route": planner_route,
-        "planner_caps": planner_caps,
-        "recommended_backend": planner_surrogate_backend,
-        "recommendation": recommendation,
-        "devices": [],
-        "error": error,
-    }
-
-
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
     _spiral_rl = globals().get("spiral_rl")
@@ -778,6 +672,7 @@ from .runtime_imports import (
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
     evaluate_runtime_device_route,
+    validate_runtime_device_probe_contract,
     validate_runtime_device_route_contract,
     runtime_import_coimport_status,
     runtime_import_install_hint,
@@ -1368,6 +1263,7 @@ _EXTRAS = [
     "runtime_import_required_gate_fields","runtime_import_requirement_failures",
     "runtime_imports_from_args","runtime_imports_from_source",
     "evaluate_runtime_device_route",
+    "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source","runtime_device_report_fields",
     "runtime_device_requirement_failures",
@@ -8337,7 +8233,7 @@ def _coerce_report_dict(report: _Any) -> _Dict[str, _Any]:
 def _resolve_mps_routing_report() -> _Dict[str, _Any]:
     if callable(_native_mps_probe):
         return _coerce_report_dict(_native_mps_probe())
-    return _legacy_mps_routing_report()
+    raise _matching_native_mps_error("MPS runtime routing")
 
 
 def mps_probe() -> _Dict[str, _Any]:
