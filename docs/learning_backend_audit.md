@@ -1987,18 +1987,16 @@ Residual summaries classify these distributed trainer, Autograd, TopK, and
 engine hook events as `cpu_control_*` rather than `cpu_debt_*`, so they remain
 visible without being mistaken for routeable tensor kernels.
 
-The older distributed TopK and lane-consensus pieces are now safer to reuse in
-that path. `merge_two_shards_f32` no longer panics on NaN/Inf values during
-TopK shard merge; it drops non-finite candidates, orders finite values with
-`total_cmp`, and emits `distributed_topk_merge` metadata with dropped counts,
-shape mismatch counts, retained L1-energy ratio, selected top value/index, and
-output count. `consensus_lane_params` emits `distributed_lane_consensus`
-metadata with input/output lane and whether Redis or HIP-real consensus changed
-the result. It now clamps local, Redis, and HIP-real lane suggestions into the
-safe `1..=4096` range before aggregation and records `input_lane_sanitized`,
-`output_lane_sanitized`, and lane bounds in the same metadata. This exposes
-gradient-compression health and runtime lane policy instead of leaving them as
-silent, old backend helpers.
+The older distributed TopK and lane-consensus pieces now fail closed instead of
+repairing evidence. TopK merge rejects mismatched value/index lengths,
+non-finite values, negative or duplicate global indices, zero `k`, and requests
+larger than the candidate set. Lane selection rejects out-of-range lanes,
+non-positive or non-finite weights, duplicate support, and invalid probability
+mass rather than clamping them into a plausible result. Their successful
+reports expose exact counts, probability/energy diagnostics, canonical
+ordering, and ordered SHA-256 commitments. This makes gradient-compression and
+runtime lane policy replayable rather than merely observable after silent
+sanitization.
 
 The Z-space optimiser path now exposes local and global learning-rate decisions.
 `SpectralLrAdapter::scale_factor` emits `spectral_lr_scale` metadata with the
@@ -3582,9 +3580,10 @@ policy-routed Tensor reductions and updates; `AmebaAutograd` reports its
 `cpu_vecdeque` message queue and `cpu_hashmap` agent state separately from
 policy-routed Tensor weight updates and damping projections, while retaining the
 stateful graph/message-queue blocker;
-`distributed_topk_merge` reports host pair filtering, CPU sort/truncate mode,
-and sort item estimates; engine hook points report opaque registered host
-callbacks for one-bit allreduce and ZeRO partition hooks. Backend residuals now
+`distributed_topk_merge` reports strict host pair validation, exact CPU
+sort/truncate mode, and committed candidate counts; engine hook points report
+opaque registered host callbacks for one-bit allreduce and ZeRO partition
+hooks. Backend residuals now
 bucket these as `cpu_control_*`, keeping distributed learning control debt
 visible without pretending control-plane hooks are already tensor kernels. The
 remaining semantic/topos P2 entries are now framed
@@ -3924,6 +3923,67 @@ portable contract before it reaches a language binding. Speculative replay does
 not emit a normal round-commit event; only a successful live-state replacement
 emits `ameba_autograd_replay_commit` with the verified receipt and state hashes.
 
+### Probabilistic lane and exact TopK ownership
+
+`st-core::distributed::prob_params` once carried a probabilistic lane tuner but
+had contracted to a single integer that was silently clamped after optional
+Redis and HIP overrides. It now owns a real categorical contract again without
+restoring the old threshold sampler. `LaneDistribution` requires non-empty,
+unique support in `1..=4096`, canonicalizes support by ascending lane, normalizes
+finite positive weights through a max-scaled sum, canonicalizes imported mass
+within the declared tolerance, and rejects mass outside it. Shannon entropy,
+effective sample size, weighted mean, and lower weighted median are computed in
+Rust; mean resolution divides by the observed mass as a second guard against
+rounding-boundary drift. Sampling uses the named `splitmix64_u53_v1` mapping with
+fixed test vectors, so a seed has stable cross-runtime meaning rather than
+depending on the unspecified future algorithm behind `StdRng`.
+
+Every sample and consensus result carries a deny-unknown, versioned Rust report
+with canonical decimal-string `u64` fields and domain-separated SHA-256
+commitments. Validation against the originating distribution replays the RNG
+draw or the complete consensus decision; changing a valid lane, seed, draw,
+probability, policy, count, or digest fails. Runtime Redis and HIP providers are
+explicitly enabled adapters that contribute weighted votes only. Missing
+features, malformed payloads, invalid RCCL topology, copy/all-gather failures,
+and empty requested providers are errors rather than local-value fallbacks.
+Environment-derived configuration enables Redis only when both `kv-redis` and
+`REDIS_URL` are present, while HIP/RCCL requires the explicit
+`SPIRAL_UNISON_HIP=1` opt-in; a compiled accelerator is not itself a request.
+
+`st-core::distributed::topk_dist` now defines one exact merge for any number of
+candidate shards. It verifies complete value/index pairs before sorting, rejects
+ambiguous global indices, compares finite scores descending with an ascending
+index tie-break (including signed zero), and commits exactly `k` outputs. The
+report records exact string-encoded counts, CPU control/merge ownership,
+input/output L1 energy, retained ratio, boundary scores, and ordered input/output
+digests. An outcome verifier reconstructs the merge from the committed shards,
+so a syntactically valid report cannot bless a reordered or substituted output.
+
+`topk3_stage` is compiled and testable on every build rather than disappearing
+behind `hip-real`. Each rank first produces the exact local `k`; multi-rank runs
+use HIP/RCCL only to all-gather canonical packed float/index bits, decode them,
+and pass every rank shard to the same Rust exact merge. Single-rank runs report
+that no transport occurred even when HIP was requested. The old magic
+bitonic/shared/warp kernel IDs are rejected as uncertified: those kernels may be
+reintroduced only after their output is parity-certified against this Rust
+oracle. RCCL initialization, topology, allocation, copy, synchronization, and
+decode failures never duplicate a local shard as a fake remote rank. A stage
+outcome can replay against the original local candidates, then verify that the
+exact local result is this rank's gathered shard and reconstruct the global
+merge.
+
+The adjacent HIP rank-k executor now follows the same commit rule. Native HIP
+and software fallback execute into scratch output, and registered caller buffers
+are replaced only after one path succeeds. A failed native launch, strict
+fallback rejection, or failed software fallback therefore leaves caller state
+unchanged. The `kv-redis` feature also imports its shared FFT tile policy under
+the correct gate, restoring compilation of that adapter combination.
+
+Python and WASM do not yet expose these new reports, and they should not recreate
+their normalization, RNG, consensus, tie-break, transport-readiness, or digest
+rules when they do. Their future responsibility is to pass distributions and
+shards into Rust and transport the returned sample/stage reports unchanged.
+
 Next steps:
 
 1. Continue fusing learning-boundary tails rather than adding single-op
@@ -3957,6 +4017,9 @@ Next steps:
    Python/WASM adapters. Bindings should transport the Rust payload and validation
    reports rather than reimplement NodeId parsing, canonical hashing, topology
    preflight, route comparison, or commit rules.
+8. Expose lane sample/consensus and exact TopK reports through thin Python/WASM
+   adapters, then parity-certify any accelerated WGPU/HIP merge implementation
+   against the replayable Rust outcome before enabling it as a selected backend.
 
 ## Suggested PR Sequence
 
