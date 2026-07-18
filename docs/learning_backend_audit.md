@@ -3923,6 +3923,26 @@ portable contract before it reaches a language binding. Speculative replay does
 not emit a normal round-commit event; only a successful live-state replacement
 emits `ameba_autograd_replay_commit` with the verified receipt and state hashes.
 
+### Runtime-device route authority
+
+`st-core::backend::runtime_route` is the sole owner of runtime-device readiness
+and fallback semantics. Contract v4 canonicalizes every client observation,
+retains that evidence in the payload, and rejects labels or status tokens that
+could create ambiguous wire records. Direct/native and surrogate/effective
+readiness remain separate three-state values (`ready`, `not_ready`, `unknown`),
+while boolean execution projections fail closed. Reports that name the same
+effective backend must agree on its known readiness, so independently collected
+MPS-to-WGPU and direct-WGPU observations cannot silently command opposite routes.
+
+The canonical request and complete derived decision carry domain-separated
+SHA-256 commitments. `RuntimeDeviceRoutePayload::validate()` reconstructs every
+list, gate, status, route class, and failure from its embedded evidence;
+`validate_against()` additionally replays an externally supplied request. The
+optional `execution_client` is transport provenance and is deliberately excluded
+from the semantic digest. Python now delegates identity and artifact validation
+to these Rust methods rather than keeping contract-version and semantic-owner
+constants, while WASM exposes the same generate, validate, and replay entrypoints.
+
 ### Probabilistic lane and exact TopK ownership
 
 `st-core::distributed::prob_params` once carried a probabilistic lane tuner but

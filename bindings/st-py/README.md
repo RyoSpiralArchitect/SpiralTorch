@@ -76,11 +76,18 @@ PY
 readiness, surrogate readiness, fallback identity, and required-backend gates are owned by
 `st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly
 `native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
-`evaluate_runtime_device_route(...)` when another orchestrator already has device rows. The
-v3 contract also owns the payload-level `runtime_readiness` projection: explicit required
+`evaluate_runtime_device_route(...)` when another orchestrator already has device rows, and
+`validate_runtime_device_route_contract(...)` to validate a persisted payload or replay it
+against its original request. The v4 contract retains canonical evidence and commits both the
+request and Rust-derived output with SHA-256; reports that disagree about the same effective
+backend fail closed. It also owns the payload-level `runtime_readiness` projection: explicit required
 backends use an all-required gate, while an ungated request accepts any ready route. Missing
 evidence remains `native_readiness = "unknown"` or `route_readiness = "unknown"`, and the
 boolean `runtime_ready` projection remains fail-closed.
+
+`describe_runtime_devices(...)` also appends the complete source `reports` for diagnostics.
+Those rows are Python transport metadata and are not committed; the canonical Rust-owned
+`evidence` field is the replayable source for route decisions.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:

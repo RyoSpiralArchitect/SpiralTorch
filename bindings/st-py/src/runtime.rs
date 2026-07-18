@@ -2,7 +2,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
-use st_core::backend::runtime_route::{evaluate_runtime_device_route, RuntimeDeviceRouteRequest};
+use st_core::backend::runtime_route::{
+    evaluate_runtime_device_route, RuntimeDeviceRoutePayload, RuntimeDeviceRouteRequest,
+};
 use st_core::runtime::api_llm_route_policy::{
     evaluate_api_llm_route_policy, ApiLlmRoutePolicyEvaluationRequest,
 };
@@ -82,13 +84,48 @@ fn _runtime_device_route_evaluate(
     let request: RuntimeDeviceRouteRequest =
         request_from_py(request, "invalid runtime-device route request")?;
     let payload = evaluate_runtime_device_route(request)
+        .and_then(|payload| payload.with_execution_client("python"))
         .map_err(|error| json_error("runtime-device route evaluation failed", error))?;
+    payload_to_py(py, payload, "runtime-device route contract encoding failed")
+}
+
+#[pyfunction]
+fn _runtime_device_route_validate(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload: RuntimeDeviceRoutePayload =
+        request_from_py(payload, "invalid runtime-device route payload")?;
+    payload
+        .validate()
+        .map_err(|error| json_error("runtime-device route validation failed", error))?;
+    payload_to_py(py, payload, "runtime-device route contract encoding failed")
+}
+
+#[pyfunction]
+fn _runtime_device_route_validate_against(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload: RuntimeDeviceRoutePayload =
+        request_from_py(payload, "invalid runtime-device route payload")?;
+    let request: RuntimeDeviceRouteRequest =
+        request_from_py(request, "invalid runtime-device route replay request")?;
+    payload
+        .validate_against(request)
+        .map_err(|error| json_error("runtime-device route replay failed", error))?;
     payload_to_py(py, payload, "runtime-device route contract encoding failed")
 }
 
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_device_route_validate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_device_route_validate_against,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_rewards, parent)?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_resolve, parent)?)?;

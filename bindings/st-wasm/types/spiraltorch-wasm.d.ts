@@ -172,10 +172,12 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeDeviceRoute = {
         kind: "spiraltorch.runtime_device_route";
-        contract_version: "spiraltorch.runtime_device_route.v3";
+        contract_version: "spiraltorch.runtime_device_route.v4";
         semantic_owner: "st-core::backend::runtime_route";
         semantic_backend: "rust";
-        execution_client: "wasm";
+        execution_client?: string;
+        evidence: RuntimeDeviceRouteEvidence[];
+        requested_backends: string[];
         backends: string[];
         report_count: number;
         routes: RuntimeDeviceRouteRow[];
@@ -207,6 +209,9 @@ declare module "spiraltorch-wasm" {
         required_ready_backends_passed: boolean | null;
         failures: string[];
         passed: boolean;
+        request_sha256: string;
+        output_sha256: string;
+        committed: true;
     };
 
     /** Trainer optimizer controls validated by the Rust semantic core. */
@@ -2185,6 +2190,18 @@ declare module "spiraltorch-wasm" {
     ): ToposRuntimeRoute;
     export function runtimeDeviceRouteJson(requestJson: string): string;
     export function runtimeDeviceRouteObject(
+        request: RuntimeDeviceRouteRequest,
+    ): RuntimeDeviceRoute;
+    export function runtimeDeviceRouteValidateJson(payloadJson: string): string;
+    export function runtimeDeviceRouteValidateObject(
+        payload: RuntimeDeviceRoute,
+    ): RuntimeDeviceRoute;
+    export function runtimeDeviceRouteValidateAgainstJson(
+        payloadJson: string,
+        requestJson: string,
+    ): string;
+    export function runtimeDeviceRouteValidateAgainstObject(
+        payload: RuntimeDeviceRoute,
         request: RuntimeDeviceRouteRequest,
     ): RuntimeDeviceRoute;
     export function trainerOptimizerConfigJson(configJson: string): string;

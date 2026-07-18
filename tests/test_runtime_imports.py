@@ -432,13 +432,17 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertTrue(fields["runtime_device_report_requested"])
         self.assertEqual(
             fields["runtime_device_route_contract_version"],
-            "spiraltorch.runtime_device_route.v3",
+            "spiraltorch.runtime_device_route.v4",
         )
         self.assertEqual(
             fields["runtime_device_route_semantic_owner"],
             "st-core::backend::runtime_route",
         )
         self.assertEqual(fields["runtime_device_route_semantic_backend"], "rust")
+        contract = json.loads(fields["runtime_device_route_contract_json"])
+        self.assertTrue(contract["committed"])
+        self.assertEqual(len(contract["request_sha256"]), 64)
+        self.assertEqual(len(contract["output_sha256"]), 64)
         self.assertEqual(fields["runtime_device_report_backends"], "wgpu,cpu,mps")
         self.assertEqual(
             fields["runtime_device_report_available_backends"],

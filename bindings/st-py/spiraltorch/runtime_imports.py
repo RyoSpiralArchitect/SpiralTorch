@@ -44,16 +44,12 @@ __all__ = [
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
     "evaluate_runtime_device_route",
+    "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source",
     "runtime_device_report_fields",
     "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
 ]
-
-_RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION = "spiraltorch.runtime_device_route.v3"
-_RUNTIME_DEVICE_ROUTE_KIND = "spiraltorch.runtime_device_route"
-_RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER = "st-core::backend::runtime_route"
-_RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND = "rust"
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
     "transformers": ["transformers"],
@@ -793,9 +789,7 @@ def _runtime_device_route_evidence(
     return evidence
 
 
-def _native_runtime_device_route_contract(
-    request: Mapping[str, object],
-) -> dict[str, object]:
+def _native_runtime_device_route_function(name: str):
     try:
         import spiraltorch as st  # type: ignore
     except Exception as exc:  # pragma: no cover - import failures vary by env.
@@ -803,12 +797,21 @@ def _native_runtime_device_route_contract(
             "runtime-device route semantics require the compiled Rust core"
         ) from exc
     native = getattr(st, "_rs", None)
-    evaluate = getattr(native, "_runtime_device_route_evaluate", None)
-    if not callable(evaluate):
+    function = getattr(native, name, None)
+    if not callable(function):
         raise RuntimeError(
             "runtime-device route semantics require the compiled Rust core; "
-            "rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate"
+            f"rebuild or reinstall SpiralTorch with {name}"
         )
+    return function
+
+
+def _native_runtime_device_route_contract(
+    request: Mapping[str, object],
+) -> dict[str, object]:
+    evaluate = _native_runtime_device_route_function(
+        "_runtime_device_route_evaluate"
+    )
     payload = evaluate(dict(request))
     return _require_trusted_runtime_device_route_contract(payload)
 
@@ -816,21 +819,54 @@ def _native_runtime_device_route_contract(
 def _require_trusted_runtime_device_route_contract(
     payload: object,
 ) -> dict[str, object]:
-    """Validate transport identity without rebuilding Rust route semantics."""
+    """Delegate route-contract validation to the Rust semantic owner."""
 
     if not isinstance(payload, Mapping):
         raise RuntimeError("runtime-device route source returned a non-mapping payload")
-    contract = dict(payload)
-    if (
-        contract.get("kind") != _RUNTIME_DEVICE_ROUTE_KIND
-        or contract.get("contract_version") != _RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION
-        or contract.get("semantic_owner") != _RUNTIME_DEVICE_ROUTE_SEMANTIC_OWNER
-        or contract.get("semantic_backend") != _RUNTIME_DEVICE_ROUTE_SEMANTIC_BACKEND
-    ):
-        raise RuntimeError(
-            "runtime-device route source returned an untrusted route contract"
-        )
-    return contract
+    contract_payload = dict(payload)
+    transport_reports = contract_payload.pop("reports", None)
+    validate = _native_runtime_device_route_function(
+        "_runtime_device_route_validate"
+    )
+    contract = validate(contract_payload)
+    if not isinstance(contract, Mapping):
+        raise RuntimeError("runtime-device route validator returned a non-mapping payload")
+    trusted = dict(contract)
+    if "reports" in payload:
+        trusted["reports"] = transport_reports
+    return trusted
+
+
+def validate_runtime_device_route_contract(
+    payload: Mapping[str, object],
+    *,
+    request: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate a route artifact, optionally replaying its canonical request in Rust.
+
+    ``describe_runtime_devices`` may append full source ``reports`` for display.
+    Those transport rows are preserved but are not part of the Rust commitment;
+    use the validated ``evidence`` field for semantic decisions.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    if request is None:
+        return _require_trusted_runtime_device_route_contract(payload)
+    if not isinstance(request, Mapping):
+        raise TypeError("request must be a mapping when provided")
+    validate = _native_runtime_device_route_function(
+        "_runtime_device_route_validate_against"
+    )
+    contract_payload = dict(payload)
+    transport_reports = contract_payload.pop("reports", None)
+    contract = validate(contract_payload, dict(request))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError("runtime-device route validator returned a non-mapping payload")
+    trusted = dict(contract)
+    if "reports" in payload:
+        trusted["reports"] = transport_reports
+    return trusted
 
 
 def evaluate_runtime_device_route(

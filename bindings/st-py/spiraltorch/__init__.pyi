@@ -449,6 +449,12 @@ def evaluate_runtime_device_route(
     required_ready_backends: object = ...,
 ) -> Dict[str, object]: ...
 
+def validate_runtime_device_route_contract(
+    payload: Mapping[str, object],
+    *,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
 def runtime_import_preflight_summary_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
