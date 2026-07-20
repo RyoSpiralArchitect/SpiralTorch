@@ -2,6 +2,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
+use st_core::backend::execution_plan::{
+    evaluate_runtime_execution_plan, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
+};
 use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
 use st_core::backend::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRoutePayload, RuntimeDeviceRouteRequest,
@@ -159,6 +162,60 @@ fn _runtime_device_probe_validate_against(
     payload_to_py(py, payload, "runtime-device probe contract encoding failed")
 }
 
+#[pyfunction]
+fn _runtime_execution_plan_evaluate(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request: RuntimeExecutionPlanRequest =
+        request_from_py(request, "invalid runtime execution-plan request")?;
+    let payload = evaluate_runtime_execution_plan(request)
+        .and_then(|payload| payload.with_execution_client("python"))
+        .map_err(|error| json_error("runtime execution-plan evaluation failed", error))?;
+    payload_to_py(
+        py,
+        payload,
+        "runtime execution-plan contract encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _runtime_execution_plan_validate(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload: RuntimeExecutionPlanPayload =
+        request_from_py(payload, "invalid runtime execution-plan payload")?;
+    payload
+        .validate()
+        .map_err(|error| json_error("runtime execution-plan validation failed", error))?;
+    payload_to_py(
+        py,
+        payload,
+        "runtime execution-plan contract encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _runtime_execution_plan_validate_against(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload: RuntimeExecutionPlanPayload =
+        request_from_py(payload, "invalid runtime execution-plan payload")?;
+    let request: RuntimeExecutionPlanRequest =
+        request_from_py(request, "invalid runtime execution-plan replay request")?;
+    payload
+        .validate_against(request)
+        .map_err(|error| json_error("runtime execution-plan replay failed", error))?;
+    payload_to_py(
+        py,
+        payload,
+        "runtime execution-plan contract encoding failed",
+    )
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
@@ -170,6 +227,12 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
     parent.add_function(wrap_pyfunction!(_runtime_device_route_validate, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_device_route_validate_against,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_execution_plan_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_execution_plan_validate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_execution_plan_validate_against,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;

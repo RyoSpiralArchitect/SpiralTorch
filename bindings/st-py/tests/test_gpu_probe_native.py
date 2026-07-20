@@ -307,6 +307,105 @@ def test_runtime_device_route_contract_validation_is_rust_owned() -> None:
         st.validate_runtime_device_route_contract(tampered)
 
 
+def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
+    st = require_native()
+    probe = st.describe_device("cpu")
+
+    plan = st.evaluate_runtime_execution_plan(
+        probe,
+        accelerator_fallback="allow",
+        tensor_util_values=2048,
+        required_native_components=["softmax", "dense_matmul", "dense_matmul"],
+    )
+
+    assert "evaluate_runtime_execution_plan" in st.__all__
+    assert "validate_runtime_execution_plan_contract" in st.__all__
+    assert plan["kind"] == "spiraltorch.runtime_execution_plan"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v1"
+    assert plan["semantic_owner"] == "st-core::backend::execution_plan"
+    assert plan["semantic_backend"] == "rust"
+    assert plan["execution_client"] == "python"
+    assert plan["committed"] is True
+    assert len(plan["request_sha256"]) == 64
+    assert len(plan["output_sha256"]) == 64
+    assert plan["requested_backend"] == "cpu"
+    assert plan["effective_backend"] == "cpu"
+    assert plan["runtime_ready"] is True
+    assert plan["surrogate"] is False
+    assert plan["execution_allowed"] is True
+    assert plan["status"] == "ready"
+    assert plan["all_components_native"] is True
+    assert plan["automatic_components"] == []
+    assert plan["policy"]["dense_matmul"] == "faer"
+    assert plan["policy"]["softmax"] == "cpu"
+    assert plan["request"]["runtime_probe"].get("execution_client") is None
+    assert plan["runtime_route"].get("execution_client") is None
+    assert plan["request"]["required_native_components"] == [
+        "dense_matmul",
+        "softmax",
+    ]
+    assert (
+        plan["runtime_probe_output_sha256"]
+        == plan["request"]["runtime_probe"]["output_sha256"]
+    )
+    assert (
+        plan["runtime_route_output_sha256"]
+        == plan["runtime_route"]["output_sha256"]
+    )
+    assert st.validate_runtime_execution_plan_contract(plan) == plan
+    assert (
+        st.validate_runtime_execution_plan_contract(plan, request=plan["request"])
+        == plan
+    )
+
+    tampered = json.loads(json.dumps(plan))
+    tampered["component_routes"][0]["selected_backend"] = "auto"
+    with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
+        st.validate_runtime_execution_plan_contract(tampered)
+
+
+def test_runtime_execution_plan_exposes_threshold_and_strict_surrogate_gates() -> None:
+    st = require_native()
+    wgpu_probe = st.describe_device("wgpu")
+    thresholded = st.evaluate_runtime_execution_plan(
+        wgpu_probe,
+        tensor_util_wgpu_min_values=1024,
+        tensor_util_values=8,
+        required_native_components=["tensor_util"],
+    )
+    tensor_util = next(
+        row
+        for row in thresholded["component_routes"]
+        if row["component"] == "tensor_util"
+    )
+    assert tensor_util == {
+        "component": "tensor_util",
+        "requested_backend": "wgpu",
+        "selected_backend": "cpu",
+        "route": "cpu_threshold_fallback",
+        "native": False,
+        "fallback": True,
+        "values": 8,
+        "threshold": 1024,
+    }
+    assert thresholded["required_native_components_missing"] == ["tensor_util"]
+    assert thresholded["execution_allowed"] is False
+    assert "native_component_unavailable:tensor_util" in thresholded["blockers"]
+
+    mps_probe = st.describe_device("mps")
+    strict = st.evaluate_runtime_execution_plan(
+        mps_probe,
+        accelerator_fallback="forbid",
+    )
+    assert strict["surrogate"] is True
+    assert strict["execution_allowed"] is False
+    assert strict["status"] == "blocked"
+    assert any(
+        blocker.startswith("surrogate_forbidden:mps->")
+        for blocker in strict["blockers"]
+    )
+
+
 def test_plan_explicit_wgpu_backend() -> None:
     st = require_native()
 

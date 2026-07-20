@@ -1,5 +1,7 @@
 //! Shared execution-policy configuration for SpiralTorch runtimes.
 
+use serde::{Deserialize, Serialize};
+
 /// Environment variable that disables accelerator-to-CPU fallback when enabled.
 pub const STRICT_ACCELERATOR_ENV: &str = "SPIRALTORCH_STRICT_GPU";
 
@@ -10,7 +12,8 @@ pub const TENSOR_UTIL_WGPU_MIN_VALUES_ENV: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_
 pub const DEFAULT_TENSOR_UTIL_WGPU_MIN_VALUES: usize = 1024;
 
 /// Whether an accelerator execution failure may fall back to a software path.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AcceleratorFallback {
     /// Preserve availability by allowing a compatible software fallback.
     #[default]
@@ -54,7 +57,8 @@ impl AcceleratorFallback {
 }
 
 /// Process-level inputs used to build a deterministic execution plan.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
     pub accelerator_fallback: AcceleratorFallback,
     pub tensor_util_wgpu_min_values: usize,
