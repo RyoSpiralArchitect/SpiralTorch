@@ -12,7 +12,22 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::js_error;
 
-fn request_from_value(value: Value) -> Result<RuntimeExecutionPlanRequest, String> {
+fn request_from_value(mut value: Value) -> Result<RuntimeExecutionPlanRequest, String> {
+    if let Some(runtime_probe) = value
+        .as_object_mut()
+        .and_then(|request| request.get_mut("runtime_probe"))
+    {
+        if let Some(contract) = runtime_probe
+            .as_object()
+            .and_then(|transport| transport.get("contract"))
+            .cloned()
+        {
+            if !contract.is_object() {
+                return Err("runtime probe contract must be an object".to_owned());
+            }
+            *runtime_probe = contract;
+        }
+    }
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
@@ -132,8 +147,8 @@ mod tests {
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
     };
 
-    fn cpu_request() -> RuntimeExecutionPlanRequest {
-        let probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+    fn cpu_probe_request() -> RuntimeDeviceProbeRequest {
+        RuntimeDeviceProbeRequest {
             requested_backend: BackendKind::Cpu,
             caps: DeviceCaps::cpu(),
             mps_probe: None,
@@ -141,8 +156,11 @@ mod tests {
             cols: None,
             tile_hint: None,
             compaction_hint: None,
-        })
-        .expect("CPU probe");
+        }
+    }
+
+    fn cpu_request() -> RuntimeExecutionPlanRequest {
+        let probe = evaluate_runtime_device_probe(cpu_probe_request()).expect("CPU probe");
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
@@ -185,6 +203,34 @@ mod tests {
         assert_eq!(wasm_transport["committed"], true);
         assert_eq!(wasm_transport["request_sha256"].as_str().unwrap().len(), 64);
         assert_eq!(wasm_transport["output_sha256"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn wasm_execution_plan_accepts_the_runtime_probe_transport() {
+        let probe_transport = crate::runtime_probe::runtime_device_probe_value(cpu_probe_request())
+            .expect("WASM runtime probe transport");
+        let mut request_value =
+            serde_json::to_value(cpu_request()).expect("serializable execution-plan request");
+        request_value["runtime_probe"] = probe_transport;
+
+        let from_object = request_from_value(request_value.clone()).expect("object request");
+        let request_json = serde_json::to_string(&request_value).expect("request JSON");
+        let from_json = request_from_json(&request_json).expect("JSON request");
+        assert_eq!(from_object, from_json);
+
+        let payload =
+            runtime_execution_plan_value(from_object).expect("plan accepts probe transport");
+        assert_eq!(payload["execution_allowed"], true);
+        assert_eq!(
+            payload["request"]["runtime_probe"]["execution_client"],
+            Value::Null
+        );
+        assert_eq!(payload["runtime_route"]["execution_client"], Value::Null);
+
+        let mut malformed = request_value;
+        malformed["runtime_probe"]["contract"] = "not-an-object".into();
+        let error = request_from_value(malformed).expect_err("invalid contract must fail closed");
+        assert!(error.contains("runtime probe contract must be an object"));
     }
 
     #[test]
