@@ -2165,7 +2165,30 @@ impl Tensor {
             MatmulBackend::Auto => self.matmul_lhs_transpose_scaled_auto_into(
                 other, scale, dst_slice, rows, inner, cols,
             )?,
-            MatmulBackend::CpuSimd | MatmulBackend::CpuNaive | MatmulBackend::CpuFaer => {
+            MatmulBackend::CpuSimd => {
+                let mut lhs_transposed = aligned_zeroed(self.len());
+                for source_row in 0..inner {
+                    for source_col in 0..rows {
+                        lhs_transposed[source_col * inner + source_row] =
+                            self.data()[source_row * rows + source_col];
+                    }
+                }
+                cpu_dense::matmul_into(
+                    dst_slice,
+                    lhs_transposed.as_slice(),
+                    other.data(),
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                scale_inplace(dst_slice, scale);
+                "cpu_simd"
+            }
+            MatmulBackend::CpuNaive => {
                 matmul_lhs_transpose_scaled_naive_into(
                     dst_slice,
                     self.data(),
@@ -2176,6 +2199,24 @@ impl Tensor {
                     scale,
                 );
                 "naive"
+            }
+            MatmulBackend::CpuFaer => {
+                faer_dense::matmul_oriented_into(
+                    dst_slice,
+                    self.data(),
+                    faer_dense::DenseLayout::ColMajor,
+                    other.data(),
+                    other.layout.to_dense(inner, cols)?,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+                scale_inplace(dst_slice, scale);
+                "faer"
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -2746,6 +2787,24 @@ impl Tensor {
                     Err(_) => {}
                 }
             }
+        }
+
+        if faer_dense::is_available()
+            && faer_dense::should_use(rows, inner, cols)
+            && faer_dense::matmul_oriented_into(
+                dst,
+                self.data(),
+                faer_dense::DenseLayout::ColMajor,
+                other.data(),
+                other.layout.to_dense(inner, cols)?,
+                rows,
+                inner,
+                cols,
+            )
+            .is_ok()
+        {
+            scale_inplace(dst, scale);
+            return Ok("faer");
         }
 
         matmul_lhs_transpose_scaled_naive_into(
@@ -11349,7 +11408,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
     #[track_caller]
     fn assert_tensor_close(lhs: &Tensor, rhs: &Tensor, tolerance: f32) {
         assert_eq!(lhs.shape(), rhs.shape());
@@ -14428,6 +14486,55 @@ mod tests {
             MatmulBackend::CpuNaive,
         ));
         assert_eq!(standard, scaled);
+    }
+
+    #[test]
+    fn matmul_lhs_transpose_scaled_honors_explicit_cpu_backends() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let lhs = unwrap_ok(Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            4,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4, 0.2, -0.1, 0.9, -0.3, 0.7,
+            ],
+        ));
+        let expected = unwrap_ok(unwrap_ok(lhs.transpose().matmul(&rhs)).scale(0.25));
+
+        for backend in [
+            MatmulBackend::CpuNaive,
+            MatmulBackend::CpuSimd,
+            MatmulBackend::CpuFaer,
+        ] {
+            let actual =
+                unwrap_ok(lhs.matmul_lhs_transpose_scaled_with_backend(&rhs, 0.25, backend));
+            assert_tensor_close(&actual, &expected, 1.0e-5);
+        }
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for (requested, selected) in [("naive", "naive"), ("simd", "cpu_simd"), ("faer", "faer")] {
+            assert!(events.iter().any(|(op_name, data)| {
+                *op_name == "matmul_lhs_transpose_scaled"
+                    && data["requested_backend"] == requested
+                    && data["backend"] == selected
+            }));
+        }
     }
 
     #[test]

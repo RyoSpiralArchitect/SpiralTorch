@@ -12470,13 +12470,13 @@ mod tests {
         );
         assert_eq!(
             extra
-                .get("tensor_policy_matmul_auto")
+                .get("tensor_policy_matmul_faer")
                 .and_then(|value| value.as_f64()),
             Some(1.0)
         );
         assert_eq!(
             extra
-                .get("tensor_policy_prepacked_matmul_auto")
+                .get("tensor_policy_prepacked_matmul_faer")
                 .and_then(|value| value.as_f64()),
             Some(1.0)
         );
