@@ -449,6 +449,21 @@ def evaluate_runtime_device_route(
     required_ready_backends: object = ...,
 ) -> Dict[str, object]: ...
 
+def evaluate_runtime_execution_plan(
+    runtime_probe: Mapping[str, object],
+    *,
+    accelerator_fallback: str = ...,
+    tensor_util_wgpu_min_values: int = ...,
+    tensor_util_values: int | None = ...,
+    required_native_components: object = ...,
+) -> Dict[str, object]: ...
+
+def validate_runtime_execution_plan_contract(
+    payload: Mapping[str, object],
+    *,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
 def validate_runtime_device_probe_contract(
     payload: Mapping[str, object],
     *,

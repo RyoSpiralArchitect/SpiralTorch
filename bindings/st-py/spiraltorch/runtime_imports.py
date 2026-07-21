@@ -43,7 +43,9 @@ __all__ = [
     "runtime_imports_from_source",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
+    "evaluate_runtime_execution_plan",
     "evaluate_runtime_device_route",
+    "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source",
@@ -830,6 +832,99 @@ def _native_runtime_device_probe_function(name: str):
             f"rebuild or reinstall SpiralTorch with {name}"
         )
     return function
+
+
+def _native_runtime_execution_plan_function(name: str):
+    try:
+        import spiraltorch as st  # type: ignore
+    except Exception as exc:  # pragma: no cover - import failures vary by env.
+        raise RuntimeError(
+            "runtime execution-plan semantics require the compiled Rust core"
+        ) from exc
+    native = getattr(st, "_rs", None)
+    function = getattr(native, name, None)
+    if not callable(function):
+        raise RuntimeError(
+            "runtime execution-plan semantics require the compiled Rust core; "
+            f"rebuild or reinstall SpiralTorch with {name}"
+        )
+    return function
+
+
+def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    contract = payload.get("contract")
+    if contract is None:
+        return dict(payload)
+    if not isinstance(contract, Mapping):
+        raise TypeError("runtime probe contract must be a mapping")
+    return dict(contract)
+
+
+def evaluate_runtime_execution_plan(
+    runtime_probe: Mapping[str, object],
+    *,
+    accelerator_fallback: str = "allow",
+    tensor_util_wgpu_min_values: int = 1024,
+    tensor_util_values: int | None = None,
+    required_native_components: object = None,
+) -> dict[str, object]:
+    """Build a committed execution plan through the Rust semantic owner."""
+
+    if not isinstance(runtime_probe, Mapping):
+        raise TypeError("runtime_probe must be a mapping")
+    if required_native_components is None:
+        components: list[object] = []
+    elif isinstance(required_native_components, str):
+        components = [required_native_components]
+    else:
+        try:
+            components = list(required_native_components)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError(
+                "required_native_components must be an iterable"
+            ) from exc
+    request: dict[str, object] = {
+        "runtime_probe": _runtime_probe_contract_payload(runtime_probe),
+        "execution_config": {
+            "accelerator_fallback": accelerator_fallback,
+            "tensor_util_wgpu_min_values": tensor_util_wgpu_min_values,
+        },
+        "tensor_util_values": tensor_util_values,
+        "required_native_components": components,
+    }
+    evaluate = _native_runtime_execution_plan_function(
+        "_runtime_execution_plan_evaluate"
+    )
+    payload = evaluate(request)
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("runtime execution-plan evaluator returned a non-mapping payload")
+    return dict(payload)
+
+
+def validate_runtime_execution_plan_contract(
+    payload: Mapping[str, object],
+    *,
+    request: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate or replay a committed execution plan in Rust."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    function_name = (
+        "_runtime_execution_plan_validate"
+        if request is None
+        else "_runtime_execution_plan_validate_against"
+    )
+    validate = _native_runtime_execution_plan_function(function_name)
+    if request is None:
+        validated = validate(dict(payload))
+    else:
+        if not isinstance(request, Mapping):
+            raise TypeError("request must be a mapping when provided")
+        validated = validate(dict(payload), dict(request))
+    if not isinstance(validated, Mapping):
+        raise RuntimeError("runtime execution-plan validator returned a non-mapping payload")
+    return dict(validated)
 
 
 def validate_runtime_device_probe_contract(

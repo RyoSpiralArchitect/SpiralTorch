@@ -12,7 +12,11 @@ use st_tensor::{
 use std::cell::RefCell;
 
 pub use super::execution_plan::{
-    AcceleratorFallback, BackendPolicy, ExecutionConfig, TensorUtilRoute, TensorUtilRouteStatus,
+    evaluate_runtime_execution_plan, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+    RuntimeComponentRoute, RuntimeComponentRouteClass, RuntimeExecutionComponent,
+    RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
+    RuntimeExecutionPlanStatus, RuntimeTensorBackend, RuntimeTensorBackendPolicy, TensorUtilRoute,
+    TensorUtilRouteStatus,
 };
 
 thread_local! {
@@ -44,6 +48,14 @@ pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
         previous,
         _tensor_fallback_guard: tensor_fallback_guard,
     }
+}
+
+/// Validates and installs a committed Rust-owned runtime execution plan.
+pub fn push_runtime_execution_plan(
+    plan: &RuntimeExecutionPlanPayload,
+) -> Result<BackendPolicyGuard, RuntimeExecutionPlanError> {
+    let policy = BackendPolicy::try_from_runtime_plan(plan)?;
+    Ok(push_backend_policy(policy))
 }
 
 /// Returns the current thread-local backend policy, if any.
@@ -123,7 +135,7 @@ pub fn current_tensor_util_backend_for_values(values: usize) -> TensorUtilBacken
 
 fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
     st_tensor::emit_tensor_op_meta("tensor_util_route", || {
-        json!({
+        let mut payload = json!({
             "requested_backend": route.requested_backend_label(),
             "selected_backend": route.selected_backend_label(),
             "status": route.status.as_str(),
@@ -135,7 +147,12 @@ fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
                 .as_str(),
             "values": route.values,
             "threshold": route.threshold,
-        })
+        });
+        if let Some(commitment) = policy.runtime_plan_output_sha256_hex() {
+            payload["execution_plan_output_sha256"] = commitment.into();
+            payload["execution_plan_committed"] = true.into();
+        }
+        payload
     });
 }
 
@@ -143,6 +160,7 @@ fn emit_tensor_util_route(policy: BackendPolicy, route: TensorUtilRoute) {
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
+    use crate::backend::runtime_probe::{evaluate_runtime_device_probe, RuntimeDeviceProbeRequest};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -247,5 +265,36 @@ mod tests {
         assert_eq!(route.status, TensorUtilRouteStatus::Direct);
         assert_eq!(route.values, 37);
         assert_eq!(route.threshold, 0);
+    }
+
+    #[test]
+    fn committed_runtime_plan_is_the_executable_policy_entrypoint() {
+        let probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: crate::backend::device_caps::BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU probe");
+        let plan = evaluate_runtime_execution_plan(RuntimeExecutionPlanRequest {
+            runtime_probe: probe,
+            execution_config: ExecutionConfig::default(),
+            tensor_util_values: None,
+            required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
+        })
+        .expect("CPU execution plan");
+
+        let guard = push_runtime_execution_plan(&plan).expect("install committed plan");
+        let current = current_backend_policy().expect("active policy");
+        assert_eq!(current_matmul_backend(), MatmulBackend::CpuFaer);
+        assert_eq!(
+            current.runtime_plan_output_sha256_hex().as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+        drop(guard);
+        assert!(current_backend_policy().is_none());
     }
 }

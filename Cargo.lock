@@ -3231,6 +3231,7 @@ name = "spiral-config"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "serde",
  "thiserror 2.0.17",
  "tracing",
  "tracing-chrome",
