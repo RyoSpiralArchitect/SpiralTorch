@@ -10,7 +10,9 @@ use std::ffi::{c_char, c_void, CStr};
 use std::sync::{Mutex, OnceLock};
 
 pub type HipPtr = *mut c_void;
+#[allow(non_camel_case_types)]
 type hipError_t = i32;
+#[allow(non_camel_case_types)]
 pub type hipStream_t = *mut c_void;
 
 const HIP_SUCCESS: hipError_t = 0;
@@ -35,11 +37,9 @@ pub struct RcclUniqueId {
 #[repr(i32)]
 #[derive(Copy, Clone)]
 enum HipMemcpyKind {
-    HostToHost = 0,
     HostToDevice = 1,
     DeviceToHost = 2,
     DeviceToDevice = 3,
-    Default = 4,
 }
 
 extern "C" {
@@ -343,9 +343,25 @@ pub fn enumerate_devices() -> Result<Vec<DeviceInfo>, HipErr> {
     Ok(devices)
 }
 
+#[derive(Copy, Clone)]
+enum GemmMode {
+    Standard,
+    LhsTranspose,
+}
+
+#[derive(Copy, Clone)]
+struct GemmSpec {
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    mode: GemmMode,
+}
+
 mod rocblas {
     use super::{
-        hipStream_t, read_cstring, HipErr, HipPtr, HipStream, Library, Mutex, OnceLock, TryFrom,
+        hipStream_t, read_cstring, GemmMode, GemmSpec, HipErr, HipPtr, HipStream, Library, Mutex,
+        OnceLock, TryFrom,
     };
     use std::ffi::c_char;
     use std::ptr;
@@ -360,7 +376,6 @@ mod rocblas {
     enum Operation {
         None = 111,
         Transpose = 112,
-        ConjugateTranspose = 113,
     }
 
     struct Symbols {
@@ -521,38 +536,41 @@ mod rocblas {
         f(state.handle, symbols)
     }
 
-    pub fn sgemm(
+    pub(super) fn sgemm(
         stream: &HipStream,
-        m: usize,
-        n: usize,
-        k: usize,
+        spec: GemmSpec,
         lhs: HipPtr,
         rhs: HipPtr,
         out: HipPtr,
     ) -> Result<(), HipErr> {
-        let m_i32 =
-            i32::try_from(n).map_err(|_| HipErr::Other("rocBLAS: n dimension overflow".into()))?;
-        let n_i32 =
-            i32::try_from(m).map_err(|_| HipErr::Other("rocBLAS: m dimension overflow".into()))?;
-        let k_i32 =
-            i32::try_from(k).map_err(|_| HipErr::Other("rocBLAS: k dimension overflow".into()))?;
+        let m_i32 = i32::try_from(spec.n)
+            .map_err(|_| HipErr::Other("rocBLAS: n dimension overflow".into()))?;
+        let n_i32 = i32::try_from(spec.m)
+            .map_err(|_| HipErr::Other("rocBLAS: m dimension overflow".into()))?;
+        let k_i32 = i32::try_from(spec.k)
+            .map_err(|_| HipErr::Other("rocBLAS: k dimension overflow".into()))?;
+        // Row-major C is column-major C.T. Swapping operands gives the standard
+        // path; lhs.T additionally transposes lhs's column-major view in place.
         let lda = m_i32;
-        let ldb = k_i32;
+        let (lhs_operation, ldb) = if matches!(spec.mode, GemmMode::LhsTranspose) {
+            (Operation::Transpose, n_i32)
+        } else {
+            (Operation::None, k_i32)
+        };
         let ldc = m_i32;
 
         with_handle(stream, |handle, symbols| {
-            let alpha = 1.0f32;
             let beta = 0.0f32;
             rocblas_result(
                 unsafe {
                     (symbols.sgemm)(
                         handle,
                         Operation::None,
-                        Operation::None,
+                        lhs_operation,
                         m_i32,
                         n_i32,
                         k_i32,
-                        &alpha,
+                        &spec.scale,
                         rhs as *const f32,
                         lda,
                         lhs as *const f32,
@@ -587,10 +605,8 @@ impl Drop for DeviceBuffer {
     }
 }
 
-pub fn gemm_f32(
-    m: usize,
-    n: usize,
-    k: usize,
+fn gemm_scaled_impl(
+    spec: GemmSpec,
     lhs: &[f32],
     rhs: &[f32],
     out: &mut [f32],
@@ -630,9 +646,7 @@ pub fn gemm_f32(
 
     rocblas::sgemm(
         &stream,
-        m,
-        n,
-        k,
+        spec,
         lhs_dev.as_ptr(),
         rhs_dev.as_ptr(),
         out_dev.as_ptr(),
@@ -648,6 +662,63 @@ pub fn gemm_f32(
     }
     stream_synchronize(&stream)?;
     Ok(())
+}
+
+pub fn gemm_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    gemm_scaled_f32(m, n, k, 1.0, lhs, rhs, out)
+}
+
+pub fn gemm_scaled_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    gemm_scaled_impl(
+        GemmSpec {
+            m,
+            n,
+            k,
+            scale,
+            mode: GemmMode::Standard,
+        },
+        lhs,
+        rhs,
+        out,
+    )
+}
+
+pub fn gemm_lhs_transpose_scaled_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    gemm_scaled_impl(
+        GemmSpec {
+            m,
+            n,
+            k,
+            scale,
+            mode: GemmMode::LhsTranspose,
+        },
+        lhs,
+        rhs,
+        out,
+    )
 }
 
 pub fn pack_vals_idx_u64(

@@ -38,6 +38,7 @@ wgpu = ["wgpu_dense"]
 mps = []
 cuda = []
 hip = ["dep:st-backend-hip"]
+hip-real = ["hip", "st-backend-hip/hip-real"]
 
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.

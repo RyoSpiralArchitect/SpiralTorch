@@ -19,6 +19,14 @@ pub enum HipErr {
     Other(String),
 }
 
+/// Returns whether this build contains the real ROCm implementation.
+///
+/// The default CPU reference implementation remains useful for validating the
+/// public contract, but callers must not advertise it as HIP execution.
+pub const fn real_backend_compiled() -> bool {
+    cfg!(feature = "hip-real")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeviceInfo {
     pub id: u32,
@@ -411,8 +419,26 @@ fn validate_gemm_dimensions(
     Ok(())
 }
 
-fn gemm_stub(m: usize, n: usize, k: usize, lhs: &[f32], rhs: &[f32], out: &mut [f32]) {
-    out.fill(0.0);
+fn validate_gemm_scale(scale: f32) -> Result<(), HipErr> {
+    if scale.is_finite() {
+        Ok(())
+    } else {
+        Err(HipErr::Other(format!(
+            "gemm scale must be finite, received {scale}"
+        )))
+    }
+}
+
+#[cfg(not(feature = "hip-real"))]
+fn gemm_scaled_stub(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) {
     for row in 0..m {
         for col in 0..n {
             let mut acc = 0.0f32;
@@ -421,7 +447,30 @@ fn gemm_stub(m: usize, n: usize, k: usize, lhs: &[f32], rhs: &[f32], out: &mut [
                 let rhs_index = inner * n + col;
                 acc += lhs[lhs_index] * rhs[rhs_index];
             }
-            out[row * n + col] = acc;
+            out[row * n + col] = acc * scale;
+        }
+    }
+}
+
+#[cfg(not(feature = "hip-real"))]
+fn gemm_lhs_transpose_scaled_stub(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) {
+    for row in 0..m {
+        for col in 0..n {
+            let mut acc = 0.0f32;
+            for inner in 0..k {
+                let lhs_index = inner * m + row;
+                let rhs_index = inner * n + col;
+                acc += lhs[lhs_index] * rhs[rhs_index];
+            }
+            out[row * n + col] = acc * scale;
         }
     }
 }
@@ -434,33 +483,95 @@ pub fn gemm_f32(
     rhs: &[f32],
     out: &mut [f32],
 ) -> Result<(), HipErr> {
+    gemm_scaled_f32(m, n, k, 1.0, lhs, rhs, out)
+}
+
+/// Computes `out = (lhs @ rhs) * scale` for contiguous row-major buffers.
+pub fn gemm_scaled_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
     init()?;
     validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
-    gemm_backend(m, n, k, lhs, rhs, out)
+    validate_gemm_scale(scale)?;
+    gemm_scaled_backend(m, n, k, scale, lhs, rhs, out)
 }
 
 #[cfg(feature = "hip-real")]
-fn gemm_backend(
+fn gemm_scaled_backend(
     m: usize,
     n: usize,
     k: usize,
+    scale: f32,
     lhs: &[f32],
     rhs: &[f32],
     out: &mut [f32],
 ) -> Result<(), HipErr> {
-    crate::real::gemm_f32(m, n, k, lhs, rhs, out)
+    crate::real::gemm_scaled_f32(m, n, k, scale, lhs, rhs, out)
 }
 
 #[cfg(not(feature = "hip-real"))]
-fn gemm_backend(
+fn gemm_scaled_backend(
     m: usize,
     n: usize,
     k: usize,
+    scale: f32,
     lhs: &[f32],
     rhs: &[f32],
     out: &mut [f32],
 ) -> Result<(), HipErr> {
-    gemm_stub(m, n, k, lhs, rhs, out);
+    gemm_scaled_stub(m, n, k, scale, lhs, rhs, out);
+    Ok(())
+}
+
+/// Computes `out = (lhs.T @ rhs) * scale` without materializing `lhs.T`.
+///
+/// `lhs` has shape `k x m`, `rhs` has shape `k x n`, and `out` has shape
+/// `m x n`, all in contiguous row-major storage.
+pub fn gemm_lhs_transpose_scaled_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    init()?;
+    validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
+    validate_gemm_scale(scale)?;
+    gemm_lhs_transpose_scaled_backend(m, n, k, scale, lhs, rhs, out)
+}
+
+#[cfg(feature = "hip-real")]
+fn gemm_lhs_transpose_scaled_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    crate::real::gemm_lhs_transpose_scaled_f32(m, n, k, scale, lhs, rhs, out)
+}
+
+#[cfg(not(feature = "hip-real"))]
+fn gemm_lhs_transpose_scaled_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    scale: f32,
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    gemm_lhs_transpose_scaled_stub(m, n, k, scale, lhs, rhs, out);
     Ok(())
 }
 
@@ -764,6 +875,69 @@ mod tests {
         let expected = vec![58.0, 64.0, 139.0, 154.0];
         assert_eq!(out, expected);
 
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn real_backend_capability_matches_build_feature() {
+        assert_eq!(super::real_backend_compiled(), cfg!(feature = "hip-real"));
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn scaled_gemm_stub_fuses_scale_into_reference_result() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let mut out = vec![0.0; 4];
+        super::gemm_scaled_f32(2, 2, 3, 0.5, &lhs, &rhs, &mut out)
+            .expect("scaled GEMM stub should succeed");
+
+        assert_eq!(out, vec![29.0, 32.0, 69.5, 77.0]);
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn lhs_transpose_scaled_gemm_stub_matches_reference() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let mut out = vec![0.0; 4];
+        super::gemm_lhs_transpose_scaled_f32(2, 2, 3, 0.25, &lhs, &rhs, &mut out)
+            .expect("transpose-scaled GEMM stub should succeed");
+
+        assert_eq!(out, vec![22.25, 24.5, 29.0, 32.0]);
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn scaled_gemm_rejects_non_finite_scale_without_mutating_output() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0];
+        let rhs = vec![5.0, 6.0, 7.0, 8.0];
+        let mut out = vec![13.0; 4];
+        let error = super::gemm_scaled_f32(2, 2, 2, f32::INFINITY, &lhs, &rhs, &mut out)
+            .expect_err("non-finite scale must be rejected");
+
+        assert!(error.to_string().contains("scale must be finite"));
+        assert_eq!(out, vec![13.0; 4]);
         restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
         super::reset_runtime_for_tests();
     }

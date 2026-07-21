@@ -18,16 +18,34 @@ fn main() {
     for kernel in HIP_KERNELS {
         println!("cargo:rerun-if-changed={kernel}");
     }
-    for variable in ["HIPCC", "AR", "ROCM_PATH", "HIP_PATH"] {
+    for variable in [
+        "HIPCC",
+        "AR",
+        "ROCM_PATH",
+        "HIP_PATH",
+        "SPIRALTORCH_HIP_TYPECHECK_ONLY",
+    ] {
         println!("cargo:rerun-if-env-changed={variable}");
     }
 
     if std::env::var_os("CARGO_FEATURE_HIP_REAL").is_none() {
         return;
     }
+    if typecheck_only() {
+        println!(
+            "cargo:warning=hip-real type-check mode: skipping native kernel compilation and ROCm link directives"
+        );
+        return;
+    }
     if let Err(err) = build_real_backend() {
         panic!("hip-real native build failed: {err}");
     }
+}
+
+fn typecheck_only() -> bool {
+    std::env::var("SPIRALTORCH_HIP_TYPECHECK_ONLY")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
 }
 
 fn build_real_backend() -> Result<(), String> {

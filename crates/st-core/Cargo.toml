@@ -11,7 +11,7 @@ name = "st_core"
 path = "src/lib.rs"
 
 [features]
-hip-real = ["hip", "st-backend-hip/hip-real"]
+hip-real = ["hip", "st-backend-hip/hip-real", "st-tensor/hip-real"]
 default = []
 cpu      = ["st-tensor/cpu"]
 hip      = ["dep:st-backend-hip", "st-tensor/hip"]

@@ -678,17 +678,19 @@ Next steps:
 
 ### P1: Separate HIP planning from real HIP execution
 
-HIP has useful runtime probing and optional real kernels, but feature `hip`
-without `st-backend-hip/hip-real` can still look available from environment
-markers. That is helpful for planner experimentation but dangerous for learning
-benchmarks if reported as actual acceleration.
+HIP keeps useful runtime probing and a CPU reference contract under feature
+`hip`, but Tensor Auto/explicit execution and committed execution-plan replay
+now require `hip-real` before they can select or report `GpuHip`. Environment
+markers and `SPIRALTORCH_FORCE_HIP` can therefore exercise planner/reference
+logic without masquerading as learning acceleration.
 
 There is already a useful `SPIRALTORCH_STRICT_GPU` path for CUDA/HIP rank-k
-execution in `st-core::backend::{cuda_exec,hip_exec}`. Dense learning matmul
-now shares the same truthy environment contract for GPU-attempt failures in
-`matmul` and `matmul_prepacked`; fused matmul and non-matmul dense ops still
-need the same treatment. HIP rank-k strictness is also gated by `hip-real`,
-while non-real HIP rank-k remains a software path by construction.
+execution in `st-core::backend::{cuda_exec,hip_exec}`. Dense learning matmul,
+scaled matmul, and lhs-transpose-scaled matmul now use real HIP kernels
+(including rocBLAS alpha/transpose) only under `hip-real`. Fused matmul and
+non-matmul dense ops still need the same treatment. HIP rank-k strictness is
+also gated by `hip-real`, while non-real HIP rank-k remains a software path by
+construction.
 `st-core::backend::wgpu_exec` is now honest in the same direction: the executor
 is compiled under `wgpu-rt`, borrows registered host launch buffers, attempts
 real WGPU TopK/MidK/BottomK launches when a `WgpuCtx` is installed, and
