@@ -383,7 +383,9 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::note_only("`--features wgpu`"),
             CapabilityEntry::note_only("`--features mps`"),
             CapabilityEntry::note_only("`--features cuda`"),
-            CapabilityEntry::note_only("`--features \"hip,st-backend-hip/hip-real\"`"),
+            CapabilityEntry::note_only(
+                "`--features hip-real` (`hip` alone is planner/reference-only)",
+            ),
         ],
     },
     CapabilityRow {
@@ -411,7 +413,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             ),
             CapabilityEntry::with_state(
                 CapabilityState::Planned,
-                "Rank-k kernels wired with hip-real; broaden op parity",
+                "Dense, scaled, lhs-transpose-scaled GEMM + rank-k wired with hip-real; broaden op parity",
             ),
         ],
     },
@@ -559,7 +561,10 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Planned, "GPU CI planned"),
             CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
             CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
-            CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Stub contract tests + hip-real type-check; hardware CI pending",
+            ),
         ],
     },
 ];

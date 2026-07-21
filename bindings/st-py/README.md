@@ -466,13 +466,16 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,k
 # CPU-only (drop the default WGPU route but keep the standard Python surface)
 maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cpu
 
-# Add CUDA or HIP alongside the default WGPU-first wheel
+# Add CUDA or real HIP alongside the default WGPU-first wheel
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip-real,logic,kdsl
 
 # Backend-specific builds without the default WGPU route
 maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cuda,logic,kdsl
-maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip-real,logic,kdsl
+
+# Planner/reference-only HIP contract (contains no executable GPU kernels)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl

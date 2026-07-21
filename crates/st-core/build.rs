@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SPIRALTORCH_HIP_TYPECHECK_ONLY");
     emit_build_info();
     verify_wgpu_heuristics_generated();
     build_hip_rankk();
@@ -162,6 +163,12 @@ fn verify_wgpu_heuristics_generated() {
 
 fn build_hip_rankk() {
     if env::var("CARGO_FEATURE_HIP_REAL").is_err() {
+        return;
+    }
+    if env::var("SPIRALTORCH_HIP_TYPECHECK_ONLY")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
+    {
         return;
     }
 

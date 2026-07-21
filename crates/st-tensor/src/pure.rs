@@ -2015,93 +2015,100 @@ impl Tensor {
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
 
-        let backend_used =
-            match backend {
-                MatmulBackend::Auto => {
-                    self.matmul_scaled_auto_into(other, scale, dst_slice, rows, inner, cols)?
+        let backend_used = match backend {
+            MatmulBackend::Auto => {
+                self.matmul_scaled_auto_into(other, scale, dst_slice, rows, inner, cols)?
+            }
+            MatmulBackend::CpuSimd => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects row-major rhs",
+                    });
                 }
-                MatmulBackend::CpuSimd => {
-                    if !matches!(other.layout, Layout::RowMajor) {
-                        return Err(TensorError::UnsupportedLayout {
-                            label: "simd matmul expects row-major rhs",
-                        });
-                    }
-                    cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols)
-                        .map_err(|message| TensorError::BackendFailure {
-                            backend: "cpu_simd",
-                            message,
-                        })?;
-                    scale_inplace(dst_slice, scale);
-                    "cpu_simd"
-                }
-                MatmulBackend::CpuNaive => {
-                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                    matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
-                    scale_inplace(dst_slice, scale);
-                    "naive"
-                }
-                MatmulBackend::CpuFaer => {
-                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                    let lhs_layout = self.layout.to_dense(rows, inner)?;
-                    let rhs_layout = packed.layout().to_dense();
-                    faer_dense::matmul_oriented_into(
-                        dst_slice,
-                        lhs,
-                        lhs_layout,
-                        packed.as_slice(),
-                        rhs_layout,
-                        rows,
-                        inner,
-                        cols,
-                    )
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "faer",
+                cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
                         message,
-                    })?;
-                    scale_inplace(dst_slice, scale);
-                    "faer"
+                    },
+                )?;
+                scale_inplace(dst_slice, scale);
+                "cpu_simd"
+            }
+            MatmulBackend::CpuNaive => {
+                let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                scale_inplace(dst_slice, scale);
+                "naive"
+            }
+            MatmulBackend::CpuFaer => {
+                let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                let lhs_layout = self.layout.to_dense(rows, inner)?;
+                let rhs_layout = packed.layout().to_dense();
+                faer_dense::matmul_oriented_into(
+                    dst_slice,
+                    lhs,
+                    lhs_layout,
+                    packed.as_slice(),
+                    rhs_layout,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+                scale_inplace(dst_slice, scale);
+                "faer"
+            }
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "wgpu matmul expects row-major rhs",
+                    });
                 }
-                #[cfg(feature = "wgpu")]
-                MatmulBackend::GpuWgpu => {
-                    if !matches!(other.layout, Layout::RowMajor) {
-                        return Err(TensorError::UnsupportedLayout {
-                            label: "wgpu matmul expects row-major rhs",
-                        });
+                match matmul_scaled_wgpu(lhs, other.data(), rows, inner, cols, scale) {
+                    Ok(buffer) => {
+                        dst_slice.copy_from_slice(&buffer);
+                        "wgpu"
                     }
-                    match matmul_scaled_wgpu(lhs, other.data(), rows, inner, cols, scale) {
-                        Ok(buffer) => {
-                            dst_slice.copy_from_slice(&buffer);
-                            "wgpu"
-                        }
-                        Err(error)
-                            if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
-                        {
-                            let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                            matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
-                            scale_inplace(dst_slice, scale);
-                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                            fallback_message = Some(error.to_string());
-                            "naive"
-                        }
-                        Err(error) => return Err(error),
+                    Err(error)
+                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                    {
+                        let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                        matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                        scale_inplace(dst_slice, scale);
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(error.to_string());
+                        "naive"
                     }
+                    Err(error) => return Err(error),
                 }
-                #[cfg(feature = "hip")]
-                MatmulBackend::GpuHip => {
-                    if !matches!(other.layout, Layout::RowMajor) {
-                        return Err(TensorError::UnsupportedLayout {
-                            label: "hip matmul expects row-major rhs",
-                        });
-                    }
-                    hip_dense::matmul_into(lhs, other.data(), dst_slice, rows, inner, cols)
-                        .map_err(|message| TensorError::BackendFailure {
-                            backend: "hip",
-                            message,
-                        })?;
-                    scale_inplace(dst_slice, scale);
-                    "hip"
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                if !matches!(other.layout, Layout::RowMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "hip matmul expects row-major rhs",
+                    });
                 }
-            };
+                hip_dense::matmul_scaled_into(
+                    lhs,
+                    other.data(),
+                    dst_slice,
+                    rows,
+                    inner,
+                    cols,
+                    scale,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                "hip"
+            }
+        };
         Self::validate_finite_tensor_util_slice("matmul_scaled_output", dst_slice)?;
 
         crate::emit_tensor_op(
@@ -2253,16 +2260,20 @@ impl Tensor {
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                matmul_lhs_transpose_scaled_naive_into(
-                    dst_slice,
+                hip_dense::matmul_lhs_transpose_scaled_into(
                     self.data(),
                     other.data(),
-                    inner,
+                    dst_slice,
                     rows,
+                    inner,
                     cols,
                     scale,
-                );
-                "naive"
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                "hip"
             }
         };
         Self::validate_finite_tensor_util_slice("matmul_lhs_transpose_scaled_output", dst_slice)?;
@@ -2708,11 +2719,16 @@ impl Tensor {
                 && hip_dense::is_available()
                 && hip_dense::should_use(rows, inner, cols)
             {
-                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
-                    Ok(()) => {
-                        scale_inplace(dst, scale);
-                        return Ok("hip");
-                    }
+                match hip_dense::matmul_scaled_into(
+                    self.data(),
+                    other.data(),
+                    dst,
+                    rows,
+                    inner,
+                    cols,
+                    scale,
+                ) {
+                    Ok(()) => return Ok("hip"),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error("hip", "matmul_scaled", message));
                     }
@@ -2780,6 +2796,31 @@ impl Tensor {
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "wgpu",
+                            "matmul_lhs_transpose_scaled",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
+                match hip_dense::matmul_lhs_transpose_scaled_into(
+                    self.data(),
+                    other.data(),
+                    dst,
+                    rows,
+                    inner,
+                    cols,
+                    scale,
+                ) {
+                    Ok(()) => return Ok("hip"),
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "hip",
                             "matmul_lhs_transpose_scaled",
                             message,
                         ));
@@ -14535,6 +14576,76 @@ mod tests {
                     && data["backend"] == selected
             }));
         }
+    }
+
+    #[cfg(all(feature = "hip", not(feature = "hip-real")))]
+    #[test]
+    fn hip_stub_cannot_execute_explicit_gpu_matmul() {
+        let _lock = env_lock();
+        let _restore = EnvVarRestore::capture("SPIRALTORCH_FORCE_HIP");
+        unsafe { std::env::set_var("SPIRALTORCH_FORCE_HIP", "1") };
+
+        assert!(!hip_dense::is_available());
+        let lhs = unwrap_ok(Tensor::from_vec(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let rhs = unwrap_ok(Tensor::from_vec(2, 2, vec![7.0, 8.0, 9.0, 10.0]));
+        let transpose_rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            2,
+            vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+        ));
+        let errors = [
+            unwrap_err(lhs.matmul_with_backend(&rhs, MatmulBackend::GpuHip)),
+            unwrap_err(lhs.matmul_scaled_with_backend(&rhs, 0.5, MatmulBackend::GpuHip)),
+            unwrap_err(lhs.matmul_lhs_transpose_scaled_with_backend(
+                &transpose_rhs,
+                0.5,
+                MatmulBackend::GpuHip,
+            )),
+        ];
+
+        for error in errors {
+            assert!(matches!(
+                error,
+                TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                } if message.contains("hip-real") && message.contains("CPU contract reference")
+            ));
+        }
+    }
+
+    #[cfg(all(feature = "hip", not(feature = "hip-real")))]
+    #[test]
+    fn hip_stub_is_never_selected_by_auto_matmul() {
+        let _env_lock = env_lock();
+        let _observer_lock = observer_lock();
+        let _restore = EnvVarRestore::capture("SPIRALTORCH_FORCE_HIP");
+        unsafe { std::env::set_var("SPIRALTORCH_FORCE_HIP", "1") };
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let lhs = unwrap_ok(Tensor::from_vec(16, 16, vec![1.0; 256]));
+        let rhs = unwrap_ok(Tensor::from_vec(16, 16, vec![0.5; 256]));
+        let output = unwrap_ok(lhs.matmul_with_backend(&rhs, MatmulBackend::Auto));
+        crate::set_thread_meta_observer(previous);
+
+        assert!(output
+            .data()
+            .iter()
+            .all(|value| (*value - 8.0).abs() < 1.0e-5));
+        let events = events.lock().unwrap();
+        let event = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "matmul")
+            .expect("matmul metadata event");
+        assert_eq!(event.1["requested_backend"], "auto");
+        assert_ne!(event.1["backend"], "hip");
     }
 
     #[test]

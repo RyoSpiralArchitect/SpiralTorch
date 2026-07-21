@@ -1136,11 +1136,11 @@ fn wgpu_matmul_backend() -> MatmulBackend {
 }
 
 fn hip_matmul_backend() -> MatmulBackend {
-    #[cfg(feature = "hip")]
+    #[cfg(feature = "hip-real")]
     {
         MatmulBackend::GpuHip
     }
-    #[cfg(not(feature = "hip"))]
+    #[cfg(not(feature = "hip-real"))]
     {
         MatmulBackend::Auto
     }
@@ -1233,6 +1233,30 @@ mod tests {
         assert_eq!(policy.tensor_util_backend(), TensorUtilBackend::Cpu);
         assert_eq!(policy.device_backend_label(), "cpu");
         assert_eq!(policy.tensor_util_backend_label(), "cpu");
+    }
+
+    #[cfg(all(feature = "hip", not(feature = "hip-real")))]
+    #[test]
+    fn hip_stub_policy_does_not_claim_gpu_matmul() {
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::hip(64, 1024, None),
+            ExecutionConfig::default(),
+        );
+
+        assert_eq!(policy.matmul_backend(), MatmulBackend::Auto);
+        assert_eq!(policy.matmul_backend_label(), "auto");
+    }
+
+    #[cfg(feature = "hip-real")]
+    #[test]
+    fn hip_real_policy_commits_gpu_matmul() {
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::hip(64, 1024, None),
+            ExecutionConfig::default(),
+        );
+
+        assert_eq!(policy.matmul_backend(), MatmulBackend::GpuHip);
+        assert_eq!(policy.matmul_backend_label(), "hip");
     }
 
     #[test]

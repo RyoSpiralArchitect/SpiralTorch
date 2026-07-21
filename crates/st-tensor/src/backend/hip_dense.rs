@@ -12,10 +12,14 @@ use st_backend_hip as hip;
 static HIP_READY: AtomicBool = AtomicBool::new(false);
 
 fn ensure_runtime() -> Result<(), String> {
-    if HIP_READY.load(Ordering::Relaxed) {
-        if hip::runtime().is_some() {
-            return Ok(());
-        }
+    if !hip::real_backend_compiled() {
+        return Err(
+            "HIP execution requires the 'hip-real' feature; the default backend is a CPU contract reference"
+                .to_string(),
+        );
+    }
+    if HIP_READY.load(Ordering::Relaxed) && hip::runtime().is_some() {
+        return Ok(());
     }
 
     match hip::init() {
@@ -28,6 +32,9 @@ fn ensure_runtime() -> Result<(), String> {
 }
 
 pub fn is_available() -> bool {
+    if !hip::real_backend_compiled() {
+        return false;
+    }
     if HIP_READY.load(Ordering::Relaxed) && hip::runtime().is_some() {
         return true;
     }
@@ -54,6 +61,40 @@ pub fn matmul_into(
     cols: usize,
 ) -> Result<(), String> {
     ensure_runtime()?;
+    validate_output_len(out, rows, cols)?;
+    hip::gemm_f32(rows, cols, inner, lhs, rhs, out).map_err(|err| err.to_string())
+}
+
+pub fn matmul_scaled_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    scale: f32,
+) -> Result<(), String> {
+    ensure_runtime()?;
+    validate_output_len(out, rows, cols)?;
+    hip::gemm_scaled_f32(rows, cols, inner, scale, lhs, rhs, out).map_err(|err| err.to_string())
+}
+
+pub fn matmul_lhs_transpose_scaled_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    scale: f32,
+) -> Result<(), String> {
+    ensure_runtime()?;
+    validate_output_len(out, rows, cols)?;
+    hip::gemm_lhs_transpose_scaled_f32(rows, cols, inner, scale, lhs, rhs, out)
+        .map_err(|err| err.to_string())
+}
+
+fn validate_output_len(out: &[f32], rows: usize, cols: usize) -> Result<(), String> {
     let expected = rows
         .checked_mul(cols)
         .ok_or_else(|| "matmul rows*cols overflow".to_string())?;
@@ -64,7 +105,7 @@ pub fn matmul_into(
             expected
         ));
     }
-    hip::gemm_f32(rows, cols, inner, lhs, rhs, out).map_err(|err| err.to_string())
+    Ok(())
 }
 
 pub fn matmul(

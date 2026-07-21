@@ -710,7 +710,8 @@ cargo build -p st-vision      # vision kernels/pipelines
 - `cpu` — CPU fallback (on by default in many crates)
 - `wgpu` — Metal/Vulkan/DX12 backends via WGPU
 - `cuda` — CUDA kernels
-- `hip` — ROCm/HIP kernels
+- `hip` — HIP planner + CPU reference contract (no executable ROCm kernels)
+- `hip-real` — executable ROCm/HIP kernels
 
 ---
 
@@ -733,13 +734,16 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked --target universal
 # CPU-only (drop the default WGPU route but keep the standard Python surface)
 maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cpu
 
-# Add CUDA or HIP alongside the default WGPU-first wheel
+# Add CUDA or real HIP alongside the default WGPU-first wheel
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip-real,logic,kdsl
 
 # Backend-specific builds without the default WGPU route
 maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cuda,logic,kdsl
-maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip-real,logic,kdsl
+
+# Planner/reference-only HIP contract (contains no executable GPU kernels)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
@@ -1293,7 +1297,7 @@ print("sot:", plan.total_steps, plan.polyline()[:3])
 | **CPU** | `cargo build -p st-core --no-default-features --features cpu` | Portable, no GPU deps |
 | **Metal (macOS)** | `export WGPU_BACKEND=metal` then `cargo build -p st-core --features wgpu` | Apple GPUs via WGPU |
 | **CUDA (NVIDIA)** | `export CUDA_HOME=/usr/local/cuda` then `cargo build -p st-core --features cuda` | Ensure driver & toolkit |
-| **HIP/ROCm (AMD, Linux)** | `cargo build -p st-core --features hip` | Ensure ROCm installation |
+| **HIP/ROCm (AMD, Linux)** | `cargo build -p st-core --features hip-real` | Real dense/rank kernels; requires ROCm. `hip` alone is planner/reference-only |
 
 **Wheel builds** mirror these. The default Python wheel is WGPU-first; use
 `--no-default-features --features python-default,<backend>` for backend-specific
@@ -2710,7 +2714,7 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - `mps`: macOS Metal (MPS)
 - `cuda`: CUDA (NVRTC/PTX loader expected)
 - `hip`: ROCm HIP (stub-safe)
-- **`hip-real`**: ROCm HIP + RCCL “real” path (requires ROCm toolchain & linker; gated on top of `hip`)
+- **`hip-real`**: ROCm HIP + RCCL real path, including dense, scaled, and lhs-transpose-scaled GEMM (requires ROCm toolchain & linker; gated on top of `hip`)
 - HIP stub now probes `ROCM_PATH`/`HIP_PATH` and honours the
   `SPIRALTORCH_FORCE_HIP` override so simulated devices keep Z-space heuristics
   alive during CPU-only dev loops.

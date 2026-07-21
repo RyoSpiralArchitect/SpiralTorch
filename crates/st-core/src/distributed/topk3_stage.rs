@@ -728,6 +728,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(all(feature = "hip", feature = "hip-real")))]
     fn distributed_stage_never_duplicates_local_data_as_a_fallback() {
         let context = DistCtx {
             nranks: 2,
@@ -735,7 +736,6 @@ mod tests {
             use_hip: true,
             merge_kind: None,
         };
-        #[cfg(not(all(feature = "hip", feature = "hip-real")))]
         assert_eq!(
             run_topk3_stage(&context, shard(&[(1.0, 1)]), 1),
             Err(TopKStageError::HipUnavailable)

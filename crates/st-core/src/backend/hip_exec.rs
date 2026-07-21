@@ -133,9 +133,12 @@ fn commit_selection_output(buffers: &mut LaunchSlices<'_>, values: &[f32], indic
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
+    #[cfg(not(feature = "hip-real"))]
     use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
     use crate::backend::unison_heuristics::RankKind;
-    use crate::ops::rank_entry::{plan_rank, plan_rank_with_config};
+    use crate::ops::rank_entry::plan_rank;
+    #[cfg(not(feature = "hip-real"))]
+    use crate::ops::rank_entry::plan_rank_with_config;
 
     const ROWS: u32 = 2;
     const COLS: u32 = 5;
@@ -150,6 +153,7 @@ mod tests {
         )
     }
 
+    #[cfg(not(feature = "hip-real"))]
     fn strict_plan(kind: RankKind, k: u32) -> RankPlan {
         plan_rank_with_config(
             kind,
