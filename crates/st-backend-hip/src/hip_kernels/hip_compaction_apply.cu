@@ -1,4 +1,5 @@
 #include <hip/hip_runtime.h>
+#include <limits.h>
 #include <stdint.h>
 extern "C" __global__
 void hip_compaction_apply_kernel(const float* __restrict__ vin, const int* __restrict__ iin,
@@ -46,15 +47,15 @@ hipError_t st_compaction_apply(const float* vin,
     }
 
     if (tiles_per_row <= 0) {
-        tiles_per_row = (cols + 255) / 256;
+        tiles_per_row = 1 + (cols - 1) / 256;
     }
 
-    const int total_tiles = rows * tiles_per_row;
-    if (total_tiles <= 0) {
-        return hipSuccess;
+    const long long total_tiles = static_cast<long long>(rows) * tiles_per_row;
+    if (total_tiles <= 0 || total_tiles > UINT_MAX) {
+        return hipErrorInvalidValue;
     }
 
-    dim3 grid(total_tiles);
+    dim3 grid(static_cast<unsigned>(total_tiles));
     dim3 block(256);
     hipLaunchKernelGGL(hip_compaction_apply_kernel, grid, block, 0, stream,
                        vin, iin, rows, cols, low, high, flags, tilecnt, tiles_per_row, vout, iout);

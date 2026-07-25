@@ -69,6 +69,13 @@ hipError_t st_compaction_1ce(const float* vin,
                              int32_t* iout,
                              hipStream_t stream)
 {
+    if (rows <= 0 || cols <= 0) {
+        return hipSuccess;
+    }
+    if (cols > 256) {
+        return hipErrorInvalidValue;
+    }
+
     dim3 grid(rows);
     dim3 block(256);
     hipLaunchKernelGGL(hip_compaction_1ce_kernel, grid, block, 0, stream,

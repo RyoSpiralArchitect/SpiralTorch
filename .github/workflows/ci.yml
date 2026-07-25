@@ -69,6 +69,7 @@ jobs:
           SPIRALTORCH_HIP_TYPECHECK_ONLY: "1"
         run: |
           cargo test --locked -p st-backend-hip --no-default-features
+          cargo clippy --locked -p st-backend-hip --no-default-features --features hip-real --all-targets -- -D warnings
           cargo test --locked -p st-tensor --no-default-features --features cpu,faer,hip --lib hip_stub
           cargo test --locked -p st-core --no-default-features --features cpu,hip --lib hip_stub_policy
           cargo check --locked -p st-core --no-default-features --features cpu,hip-real --tests

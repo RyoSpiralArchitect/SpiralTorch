@@ -472,42 +472,6 @@ fn gather_topk_shards_hip(
     local: &TopKShard<f32>,
 ) -> Result<Vec<TopKShard<f32>>, TopKStageError> {
     use st_backend_hip::rccl_comm::init_rccl_from_env;
-    use st_backend_hip::real::{
-        allgather_u64_dev, free, malloc, memcpy_d2h_async, memcpy_h2d_async, stream_synchronize,
-        HipPtr, HipStream,
-    };
-
-    struct HipBuffer(HipPtr);
-
-    impl HipBuffer {
-        fn new(bytes: usize) -> Result<Self, TopKStageError> {
-            malloc(bytes)
-                .map(Self)
-                .map_err(|error| TopKStageError::HipFailure {
-                    message: error.to_string(),
-                })
-        }
-
-        fn as_ptr(&self) -> HipPtr {
-            self.0
-        }
-
-        fn release(mut self) -> Result<(), TopKStageError> {
-            free(self.0).map_err(|error| TopKStageError::HipFailure {
-                message: error.to_string(),
-            })?;
-            self.0 = std::ptr::null_mut();
-            Ok(())
-        }
-    }
-
-    impl Drop for HipBuffer {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                let _ = free(self.0);
-            }
-        }
-    }
 
     let comm = init_rccl_from_env().map_err(|error| TopKStageError::HipFailure {
         message: error.to_string(),
@@ -532,69 +496,26 @@ fn gather_topk_shards_hip(
         .zip(&local.idxs)
         .map(|(&value, &index)| (u64::from(value.to_bits()) << 32) | u64::from(index as u32))
         .collect::<Vec<_>>();
-    let element_bytes = std::mem::size_of::<u64>();
-    let send_bytes =
-        element_bytes
-            .checked_mul(local_packed.len())
-            .ok_or(TopKStageError::CountOverflow {
-                field: "hip_send_bytes",
+    let gathered =
+        comm.allgather_u64(&local_packed)
+            .map_err(|error| TopKStageError::HipFailure {
+                message: error.to_string(),
             })?;
-    let gathered_count =
+    let expected_count =
         local_packed
             .len()
             .checked_mul(ctx.nranks)
             .ok_or(TopKStageError::CountOverflow {
                 field: "hip_gathered_candidates",
             })?;
-    let receive_bytes =
-        element_bytes
-            .checked_mul(gathered_count)
-            .ok_or(TopKStageError::CountOverflow {
-                field: "hip_receive_bytes",
-            })?;
-    let stream = HipStream::create().map_err(|error| TopKStageError::HipFailure {
-        message: error.to_string(),
-    })?;
-    let send = HipBuffer::new(send_bytes)?;
-    let receive = HipBuffer::new(receive_bytes)?;
-    let mut gathered = vec![0u64; gathered_count];
-    unsafe {
-        memcpy_h2d_async(
-            send.as_ptr(),
-            local_packed.as_ptr().cast::<u8>(),
-            send_bytes,
-            &stream,
-        )
-        .map_err(|error| TopKStageError::HipFailure {
-            message: error.to_string(),
-        })?;
+    if gathered.len() != expected_count {
+        return Err(TopKStageError::HipFailure {
+            message: format!(
+                "RCCL all-gather returned {} candidates, expected {expected_count}",
+                gathered.len()
+            ),
+        });
     }
-    allgather_u64_dev(
-        comm.comm,
-        &stream,
-        send.as_ptr(),
-        receive.as_ptr(),
-        local_packed.len(),
-    )
-    .map_err(|error| TopKStageError::HipFailure {
-        message: error.to_string(),
-    })?;
-    unsafe {
-        memcpy_d2h_async(
-            gathered.as_mut_ptr().cast::<u8>(),
-            receive.as_ptr(),
-            receive_bytes,
-            &stream,
-        )
-        .map_err(|error| TopKStageError::HipFailure {
-            message: error.to_string(),
-        })?;
-    }
-    stream_synchronize(&stream).map_err(|error| TopKStageError::HipFailure {
-        message: error.to_string(),
-    })?;
-    send.release()?;
-    receive.release()?;
 
     gathered
         .chunks_exact(local.len())

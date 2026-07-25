@@ -34,14 +34,9 @@ void hip_compaction_scan_pass(const float* __restrict__ vin,
         if (c < cend) {
             if (keep) pos[row_off + c] = base + flags[tid]; else pos[row_off + c] = 0xffffffffu;
         }
-        if (tid==255){
-            // recompute last keep
-            unsigned last_keep = 0;
-            if (cend-1 >= c0){
-                float v = vin[row_off + (cend-1)];
-                last_keep = (v>=low && v<=high) ? 1u : 0u;
-            }
-            flags[255]+=last_keep;
+        const int active = cend - c0;
+        if (tid == active - 1) {
+            flags[255] = flags[tid] + keep;
         }
         __syncthreads();
         base += flags[255];
@@ -63,7 +58,7 @@ hipError_t st_compaction_scan_pass(const float* vin,
         return hipSuccess;
     }
 
-    if (tile <= 0) {
+    if (tile <= 0 || tile > 256) {
         tile = 256;
     }
 

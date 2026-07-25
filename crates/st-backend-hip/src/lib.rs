@@ -42,6 +42,53 @@ pub const fn real_backend_compiled() -> bool {
     cfg!(feature = "hip-real")
 }
 
+#[cfg(any(feature = "hip-real", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RcclAllGatherLayout {
+    pub receive_count: usize,
+    pub send_bytes: usize,
+    pub receive_bytes: usize,
+}
+
+#[cfg(any(feature = "hip-real", test))]
+pub(crate) fn validate_rccl_topology(world: i32, rank: i32) -> Result<usize, HipErr> {
+    if world <= 0 || rank < 0 || rank >= world {
+        return Err(HipErr::Other(format!(
+            "RCCL: invalid topology rank {rank} within world {world}"
+        )));
+    }
+    usize::try_from(world).map_err(|_| HipErr::Other("RCCL: world size does not fit usize".into()))
+}
+
+#[cfg(any(feature = "hip-real", test))]
+pub(crate) fn rccl_allgather_layout(
+    send_count: usize,
+    world_size: usize,
+) -> Result<RcclAllGatherLayout, HipErr> {
+    if world_size == 0 {
+        return Err(HipErr::Other(
+            "RCCL all-gather world size must be positive".into(),
+        ));
+    }
+    let receive_count = send_count
+        .checked_mul(world_size)
+        .ok_or_else(|| HipErr::Other("RCCL all-gather receive count overflow".into()))?;
+    let send_bytes = send_count
+        .checked_mul(std::mem::size_of::<u64>())
+        .ok_or_else(|| HipErr::Other("RCCL all-gather send byte length overflow".into()))?;
+    let receive_bytes = receive_count
+        .checked_mul(std::mem::size_of::<u64>())
+        .ok_or_else(|| HipErr::Other("RCCL all-gather receive byte length overflow".into()))?;
+    Ok(RcclAllGatherLayout {
+        receive_count,
+        send_bytes,
+        receive_bytes,
+    })
+}
+
+#[cfg(any(feature = "hip-real", test))]
+mod compaction_contract;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeviceInfo {
     pub id: u32,
@@ -798,6 +845,57 @@ mod tests {
             Some(value) => std::env::set_var(key, value),
             None => std::env::remove_var(key),
         }
+    }
+
+    #[test]
+    fn rccl_topology_contract_rejects_invalid_rank_domains() {
+        assert_eq!(validate_rccl_topology(4, 3).unwrap(), 4);
+        for (world, rank) in [(0, 0), (2, -1), (2, 2)] {
+            let error = validate_rccl_topology(world, rank).unwrap_err();
+            assert!(error.to_string().contains("invalid topology"));
+        }
+    }
+
+    #[test]
+    fn rccl_allgather_layout_uses_checked_counts_and_bytes() {
+        assert_eq!(
+            rccl_allgather_layout(3, 4).unwrap(),
+            RcclAllGatherLayout {
+                receive_count: 12,
+                send_bytes: 24,
+                receive_bytes: 96,
+            }
+        );
+        assert_eq!(
+            rccl_allgather_layout(0, 4).unwrap(),
+            RcclAllGatherLayout {
+                receive_count: 0,
+                send_bytes: 0,
+                receive_bytes: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn rccl_allgather_layout_rejects_zero_world_and_every_overflow_stage() {
+        assert!(rccl_allgather_layout(1, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("world size"));
+        assert!(rccl_allgather_layout(usize::MAX, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("receive count"));
+        assert!(
+            rccl_allgather_layout(usize::MAX / std::mem::size_of::<u64>() + 1, 1)
+                .unwrap_err()
+                .to_string()
+                .contains("send byte")
+        );
+        assert!(rccl_allgather_layout(usize::MAX / 16 + 1, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("receive byte"));
     }
 
     #[test]

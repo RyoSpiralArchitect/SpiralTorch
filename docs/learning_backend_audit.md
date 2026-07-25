@@ -696,6 +696,18 @@ Their tensor metadata records `matmul_backend`, `epilogue_backend`, and
 operation. Non-matmul dense ops still need the same treatment. HIP rank-k
 strictness is also gated by `hip-real`, while non-real HIP rank-k remains a
 software path by construction.
+
+The `hip-real` Rust boundary now owns RCCL host-to-device allocation,
+all-gather, device-to-host transfer, and stream completion behind
+`RcclCommGuard::allgather_u64()`. Upper crates no longer duplicate raw
+allocation/free logic. Low-level pointer-based launch functions are explicitly
+`unsafe` with buffer-layout and lifetime contracts, while safe GEMM/RCCL paths
+install completion guards so queued work finishes before host or device buffers
+can be dropped on an error path. Strict `hip-real` Clippy is part of the HIP CI
+contract. The compaction kernels also enforce the one-shot 256-column limit,
+use an overflow-safe tile count, and perform a complete Blelloch scan without
+double-counting partial-tile tails.
+
 `st-core::backend::wgpu_exec` is now honest in the same direction: the executor
 is compiled under `wgpu-rt`, borrows registered host launch buffers, attempts
 real WGPU TopK/MidK/BottomK launches when a `WgpuCtx` is installed, and

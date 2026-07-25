@@ -1,4 +1,6 @@
 #include <hip/hip_runtime.h>
+#include <limits.h>
+
 extern "C" __global__
 void hip_compaction_scan_kernel(const float* __restrict__ vin, int rows, int cols, float low, float high,
                                 unsigned* __restrict__ flags, unsigned* __restrict__ tilecnt, int tiles_per_row)
@@ -19,20 +21,23 @@ void hip_compaction_scan_kernel(const float* __restrict__ vin, int rows, int col
     s[tid] = f;
     __syncthreads();
     // Blelloch exclusive scan
+    unsigned offset = 1;
     for (int d = 128; d>0; d >>= 1) {
         if (tid < d) {
-            int ai = (2*tid+1)-1;
-            int bi = (2*tid+2)-1;
+            int ai = offset * (2*tid+1) - 1;
+            int bi = offset * (2*tid+2) - 1;
             s[bi] += s[ai];
         }
+        offset <<= 1;
         __syncthreads();
     }
     if (tid == 255) s[255] = 0;
     __syncthreads();
     for (int d = 1; d < 256; d <<= 1) {
+        offset >>= 1;
         if (tid < d) {
-            int ai = (2*tid+1)-1;
-            int bi = (2*tid+2)-1;
+            int ai = offset * (2*tid+1) - 1;
+            int bi = offset * (2*tid+2) - 1;
             unsigned t = s[ai];
             s[ai] = s[bi];
             s[bi] += t;
@@ -59,15 +64,15 @@ hipError_t st_compaction_scan(const float* vin,
     }
 
     if (tiles_per_row <= 0) {
-        tiles_per_row = (cols + 255) / 256;
+        tiles_per_row = 1 + (cols - 1) / 256;
     }
 
-    const int total_tiles = rows * tiles_per_row;
-    if (total_tiles <= 0) {
-        return hipSuccess;
+    const long long total_tiles = static_cast<long long>(rows) * tiles_per_row;
+    if (total_tiles <= 0 || total_tiles > UINT_MAX) {
+        return hipErrorInvalidValue;
     }
 
-    dim3 grid(total_tiles);
+    dim3 grid(static_cast<unsigned>(total_tiles));
     dim3 block(256);
     hipLaunchKernelGGL(hip_compaction_scan_kernel, grid, block, 0, stream,
                        vin, rows, cols, low, high, flags, tilecnt, tiles_per_row);
