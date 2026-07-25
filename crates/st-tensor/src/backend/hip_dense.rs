@@ -94,6 +94,118 @@ pub fn matmul_lhs_transpose_scaled_into(
         .map_err(|err| err.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn matmul_bias_activation_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    activation: hip::GemmActivation,
+) -> Result<(), String> {
+    ensure_runtime()?;
+    validate_output_len(out, rows, cols)?;
+    hip::gemm_bias_activation_f32(rows, cols, inner, activation, lhs, rhs, bias, residual, out)
+        .map_err(|err| err.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn matmul_bias_relu_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    matmul_bias_activation_into(
+        lhs,
+        rhs,
+        bias,
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        hip::GemmActivation::Relu,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn matmul_bias_gelu_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    matmul_bias_activation_into(
+        lhs,
+        rhs,
+        bias,
+        None,
+        out,
+        rows,
+        inner,
+        cols,
+        hip::GemmActivation::Gelu,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn matmul_bias_add_relu_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    matmul_bias_activation_into(
+        lhs,
+        rhs,
+        bias,
+        Some(residual),
+        out,
+        rows,
+        inner,
+        cols,
+        hip::GemmActivation::Relu,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn matmul_bias_add_gelu_into(
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: &[f32],
+    out: &mut [f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<(), String> {
+    matmul_bias_activation_into(
+        lhs,
+        rhs,
+        bias,
+        Some(residual),
+        out,
+        rows,
+        inner,
+        cols,
+        hip::GemmActivation::Gelu,
+    )
+}
+
 fn validate_output_len(out: &[f32], rows: usize, cols: usize) -> Result<(), String> {
     let expected = rows
         .checked_mul(cols)

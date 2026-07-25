@@ -368,6 +368,45 @@ impl fmt::Display for MatmulBackend {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FusedMatmulExecution {
+    backend: &'static str,
+    matmul_backend: &'static str,
+    epilogue_backend: &'static str,
+    fusion: &'static str,
+}
+
+impl FusedMatmulExecution {
+    const fn host(matmul_backend: &'static str) -> Self {
+        Self {
+            backend: matmul_backend,
+            matmul_backend,
+            epilogue_backend: "cpu_scalar",
+            fusion: "host_pipeline",
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    const fn wgpu() -> Self {
+        Self {
+            backend: "wgpu",
+            matmul_backend: "wgpu",
+            epilogue_backend: "wgpu",
+            fusion: "single_dispatch",
+        }
+    }
+
+    #[cfg(feature = "hip")]
+    const fn hip() -> Self {
+        Self {
+            backend: "hip",
+            matmul_backend: "hip",
+            epilogue_backend: "hip",
+            fusion: "single_stream",
+        }
+    }
+}
+
 #[cfg(any(feature = "wgpu", feature = "hip", test))]
 fn strict_gpu_path() -> bool {
     crate::execution::current_accelerator_fallback().is_strict()
@@ -3974,7 +4013,7 @@ impl Tensor {
         op_name: &'static str,
         other: &Tensor,
         requested_backend: MatmulBackend,
-        backend_used: &'static str,
+        execution: FusedMatmulExecution,
         rows: usize,
         inner: usize,
         cols: usize,
@@ -3986,8 +4025,11 @@ impl Tensor {
         );
         crate::emit_tensor_op_meta(op_name, || {
             serde_json::json!({
-                "backend": backend_used,
+                "backend": execution.backend,
                 "requested_backend": requested_backend.label(),
+                "matmul_backend": execution.matmul_backend,
+                "epilogue_backend": execution.epilogue_backend,
+                "fusion": execution.fusion,
                 "rows": rows,
                 "inner": inner,
                 "cols": cols,
@@ -4078,12 +4120,12 @@ impl Tensor {
                         message,
                     })?;
                 add_bias_relu_inplace(work_slice, rows, cols, bias);
-                "cpu_simd"
+                FusedMatmulExecution::host("cpu_simd")
             }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(work_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_relu_inplace(work_slice, rows, cols, bias);
-                "naive"
+                FusedMatmulExecution::host("naive")
             }
             MatmulBackend::CpuFaer => {
                 faer_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
@@ -4092,7 +4134,7 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_relu_inplace(work_slice, rows, cols, bias);
-                "faer"
+                FusedMatmulExecution::host("faer")
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -4109,17 +4151,24 @@ impl Tensor {
                     message,
                 })?;
                 work_slice.copy_from_slice(&data);
-                "wgpu"
+                FusedMatmulExecution::wgpu()
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                hip_dense::matmul_into(self.data(), other.data(), work_slice, rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "hip",
-                        message,
-                    })?;
-                add_bias_relu_inplace(work_slice, rows, cols, bias);
-                "hip"
+                hip_dense::matmul_bias_relu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    work_slice,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                FusedMatmulExecution::hip()
             }
         };
         Self::validate_finite_tensor_util_slice("matmul_bias_relu_output", scratch.as_slice())?;
@@ -4145,7 +4194,7 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<&'static str> {
+    ) -> PureResult<FusedMatmulExecution> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
@@ -4159,7 +4208,7 @@ impl Tensor {
                 ) {
                     Ok(buffer) => {
                         dst.copy_from_slice(&buffer);
-                        return Ok("wgpu");
+                        return Ok(FusedMatmulExecution::wgpu());
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
@@ -4176,11 +4225,16 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
-                    Ok(()) => {
-                        add_bias_relu_inplace(dst, rows, cols, bias);
-                        return Ok("hip");
-                    }
+                match hip_dense::matmul_bias_relu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    dst,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(()) => return Ok(FusedMatmulExecution::hip()),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "hip",
@@ -4198,7 +4252,7 @@ impl Tensor {
                 cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_relu_inplace(dst, rows, cols, bias);
-                return Ok("cpu_simd");
+                return Ok(FusedMatmulExecution::host("cpu_simd"));
             }
         }
 
@@ -4207,13 +4261,13 @@ impl Tensor {
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_relu_inplace(dst, rows, cols, bias);
-                return Ok("faer");
+                return Ok(FusedMatmulExecution::host("faer"));
             }
         }
 
         matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
         add_bias_relu_inplace(dst, rows, cols, bias);
-        Ok("naive")
+        Ok(FusedMatmulExecution::host("naive"))
     }
 
     /// Matrix multiply followed by bias addition and GELU activation.
@@ -4256,12 +4310,12 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                (buffer, "cpu_simd")
+                (buffer, FusedMatmulExecution::host("cpu_simd"))
             }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                (buffer, "naive")
+                (buffer, FusedMatmulExecution::host("naive"))
             }
             MatmulBackend::CpuFaer => {
                 let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
@@ -4270,7 +4324,7 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                (buffer, "faer")
+                (buffer, FusedMatmulExecution::host("faer"))
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -4286,17 +4340,25 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                (buffer, "wgpu")
+                (buffer, FusedMatmulExecution::wgpu())
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "hip",
-                        message,
-                    })?;
-                add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                (buffer, "hip")
+                let mut buffer = vec![0.0; rows * cols];
+                hip_dense::matmul_bias_gelu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    &mut buffer,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                (buffer, FusedMatmulExecution::hip())
             }
         };
 
@@ -4321,7 +4383,7 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<(Vec<f32>, &'static str)> {
+    ) -> PureResult<(Vec<f32>, FusedMatmulExecution)> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
@@ -4333,7 +4395,7 @@ impl Tensor {
                     inner,
                     cols,
                 ) {
-                    Ok(buffer) => return Ok((buffer, "wgpu")),
+                    Ok(buffer) => return Ok((buffer, FusedMatmulExecution::wgpu())),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "wgpu",
@@ -4349,11 +4411,17 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                match hip_dense::matmul(self.data(), other.data(), rows, inner, cols) {
-                    Ok(mut buffer) => {
-                        add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                        return Ok((buffer, "hip"));
-                    }
+                let mut buffer = vec![0.0; rows * cols];
+                match hip_dense::matmul_bias_gelu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    &mut buffer,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(()) => return Ok((buffer, FusedMatmulExecution::hip())),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "hip",
@@ -4372,7 +4440,7 @@ impl Tensor {
                 .is_ok()
             {
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                return Ok((buffer, "cpu_simd"));
+                return Ok((buffer, FusedMatmulExecution::host("cpu_simd")));
             }
         }
 
@@ -4380,13 +4448,13 @@ impl Tensor {
             if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                return Ok((buffer, "faer"));
+                return Ok((buffer, FusedMatmulExecution::host("faer")));
             }
         }
 
         let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
         add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-        Ok((buffer, "naive"))
+        Ok((buffer, FusedMatmulExecution::host("naive")))
     }
 
     /// Matrix multiply with bias, residual addition, and ReLU activation.
@@ -4493,12 +4561,12 @@ impl Tensor {
                         message,
                     })?;
                 add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
-                "cpu_simd"
+                FusedMatmulExecution::host("cpu_simd")
             }
             MatmulBackend::CpuNaive => {
                 matmul_naive_into(work_slice, self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
-                "naive"
+                FusedMatmulExecution::host("naive")
             }
             MatmulBackend::CpuFaer => {
                 faer_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
@@ -4507,7 +4575,7 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
-                "faer"
+                FusedMatmulExecution::host("faer")
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -4525,17 +4593,25 @@ impl Tensor {
                     message,
                 })?;
                 work_slice.copy_from_slice(&data);
-                "wgpu"
+                FusedMatmulExecution::wgpu()
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                hip_dense::matmul_into(self.data(), other.data(), work_slice, rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "hip",
-                        message,
-                    })?;
-                add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
-                "hip"
+                hip_dense::matmul_bias_add_relu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    work_slice,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                FusedMatmulExecution::hip()
             }
         };
         Self::validate_finite_tensor_util_slice("matmul_bias_add_relu_output", scratch.as_slice())?;
@@ -4563,7 +4639,7 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<&'static str> {
+    ) -> PureResult<FusedMatmulExecution> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
@@ -4578,7 +4654,7 @@ impl Tensor {
                 ) {
                     Ok(buffer) => {
                         dst.copy_from_slice(&buffer);
-                        return Ok("wgpu");
+                        return Ok(FusedMatmulExecution::wgpu());
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
@@ -4595,11 +4671,17 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
-                    Ok(()) => {
-                        add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                        return Ok("hip");
-                    }
+                match hip_dense::matmul_bias_add_relu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    dst,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(()) => return Ok(FusedMatmulExecution::hip()),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "hip",
@@ -4617,7 +4699,7 @@ impl Tensor {
                 cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                return Ok("cpu_simd");
+                return Ok(FusedMatmulExecution::host("cpu_simd"));
             }
         }
 
@@ -4626,13 +4708,13 @@ impl Tensor {
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                return Ok("faer");
+                return Ok(FusedMatmulExecution::host("faer"));
             }
         }
 
         matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
         add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-        Ok("naive")
+        Ok(FusedMatmulExecution::host("naive"))
     }
 
     /// Matrix multiply with bias, residual addition, and GELU activation.
@@ -4690,12 +4772,12 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                (buffer, "cpu_simd")
+                (buffer, FusedMatmulExecution::host("cpu_simd"))
             }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                (buffer, "naive")
+                (buffer, FusedMatmulExecution::host("naive"))
             }
             MatmulBackend::CpuFaer => {
                 let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
@@ -4704,7 +4786,7 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                (buffer, "faer")
+                (buffer, FusedMatmulExecution::host("faer"))
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -4721,17 +4803,26 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                (buffer, "wgpu")
+                (buffer, FusedMatmulExecution::wgpu())
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "hip",
-                        message,
-                    })?;
-                add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                (buffer, "hip")
+                let mut buffer = vec![0.0; rows * cols];
+                hip_dense::matmul_bias_add_gelu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    &mut buffer,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "hip",
+                    message,
+                })?;
+                (buffer, FusedMatmulExecution::hip())
             }
         };
 
@@ -4757,7 +4848,7 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<(Vec<f32>, &'static str)> {
+    ) -> PureResult<(Vec<f32>, FusedMatmulExecution)> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
@@ -4770,7 +4861,7 @@ impl Tensor {
                     inner,
                     cols,
                 ) {
-                    Ok(buffer) => return Ok((buffer, "wgpu")),
+                    Ok(buffer) => return Ok((buffer, FusedMatmulExecution::wgpu())),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "wgpu",
@@ -4786,17 +4877,18 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                match hip_dense::matmul(self.data(), other.data(), rows, inner, cols) {
-                    Ok(mut buffer) => {
-                        add_bias_residual_gelu_inplace(
-                            &mut buffer,
-                            rows,
-                            cols,
-                            bias,
-                            residual.data(),
-                        );
-                        return Ok((buffer, "hip"));
-                    }
+                let mut buffer = vec![0.0; rows * cols];
+                match hip_dense::matmul_bias_add_gelu_into(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    &mut buffer,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(()) => return Ok((buffer, FusedMatmulExecution::hip())),
                     Err(message) if strict_gpu_path() => {
                         return Err(strict_gpu_fallback_error(
                             "hip",
@@ -4815,7 +4907,7 @@ impl Tensor {
                 .is_ok()
             {
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                return Ok((buffer, "cpu_simd"));
+                return Ok((buffer, FusedMatmulExecution::host("cpu_simd")));
             }
         }
 
@@ -4823,13 +4915,13 @@ impl Tensor {
             if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                return Ok((buffer, "faer"));
+                return Ok((buffer, FusedMatmulExecution::host("faer")));
             }
         }
 
         let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
         add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-        Ok((buffer, "naive"))
+        Ok((buffer, FusedMatmulExecution::host("naive")))
     }
 
     /// Element-wise addition.
@@ -14593,12 +14685,28 @@ mod tests {
             2,
             vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
         ));
+        let bias = vec![0.25, -0.5];
+        let residual = unwrap_ok(Tensor::from_vec(3, 2, vec![0.1; 6]));
         let errors = [
             unwrap_err(lhs.matmul_with_backend(&rhs, MatmulBackend::GpuHip)),
             unwrap_err(lhs.matmul_scaled_with_backend(&rhs, 0.5, MatmulBackend::GpuHip)),
             unwrap_err(lhs.matmul_lhs_transpose_scaled_with_backend(
                 &transpose_rhs,
                 0.5,
+                MatmulBackend::GpuHip,
+            )),
+            unwrap_err(lhs.matmul_bias_relu_with_backend(&rhs, &bias, MatmulBackend::GpuHip)),
+            unwrap_err(lhs.matmul_bias_gelu_with_backend(&rhs, &bias, MatmulBackend::GpuHip)),
+            unwrap_err(lhs.matmul_bias_add_relu_with_backend(
+                &rhs,
+                &bias,
+                &residual,
+                MatmulBackend::GpuHip,
+            )),
+            unwrap_err(lhs.matmul_bias_add_gelu_with_backend(
+                &rhs,
+                &bias,
+                &residual,
                 MatmulBackend::GpuHip,
             )),
         ];
@@ -14633,12 +14741,18 @@ mod tests {
         let lhs = unwrap_ok(Tensor::from_vec(16, 16, vec![1.0; 256]));
         let rhs = unwrap_ok(Tensor::from_vec(16, 16, vec![0.5; 256]));
         let output = unwrap_ok(lhs.matmul_with_backend(&rhs, MatmulBackend::Auto));
+        let fused =
+            unwrap_ok(lhs.matmul_bias_relu_with_backend(&rhs, &[0.25; 16], MatmulBackend::Auto));
         crate::set_thread_meta_observer(previous);
 
         assert!(output
             .data()
             .iter()
             .all(|value| (*value - 8.0).abs() < 1.0e-5));
+        assert!(fused
+            .data()
+            .iter()
+            .all(|value| (*value - 8.25).abs() < 1.0e-5));
         let events = events.lock().unwrap();
         let event = events
             .iter()
@@ -14646,6 +14760,13 @@ mod tests {
             .expect("matmul metadata event");
         assert_eq!(event.1["requested_backend"], "auto");
         assert_ne!(event.1["backend"], "hip");
+        let fused_event = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "matmul_bias_relu")
+            .expect("fused matmul metadata event");
+        assert_eq!(fused_event.1["requested_backend"], "auto");
+        assert_ne!(fused_event.1["backend"], "hip");
+        assert_ne!(fused_event.1["epilogue_backend"], "hip");
     }
 
     #[test]
@@ -15165,6 +15286,9 @@ mod tests {
             .expect("fused matmul metadata event");
         assert_eq!(fused.1["backend"], "naive");
         assert_eq!(fused.1["requested_backend"], "naive");
+        assert_eq!(fused.1["matmul_backend"], "naive");
+        assert_eq!(fused.1["epilogue_backend"], "cpu_scalar");
+        assert_eq!(fused.1["fusion"], "host_pipeline");
     }
 
     #[test]

@@ -19,6 +19,21 @@ pub enum HipErr {
     Other(String),
 }
 
+/// Activation applied by the device-resident GEMM epilogue.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GemmActivation {
+    Relu = 1,
+    Gelu = 2,
+}
+
+impl GemmActivation {
+    #[cfg(feature = "hip-real")]
+    pub(crate) const fn hip_code(self) -> i32 {
+        self as i32
+    }
+}
+
 /// Returns whether this build contains the real ROCm implementation.
 ///
 /// The default CPU reference implementation remains useful for validating the
@@ -429,6 +444,32 @@ fn validate_gemm_scale(scale: f32) -> Result<(), HipErr> {
     }
 }
 
+fn validate_gemm_epilogue(
+    m: usize,
+    n: usize,
+    bias: &[f32],
+    residual: Option<&[f32]>,
+) -> Result<(), HipErr> {
+    if bias.len() != n {
+        return Err(HipErr::Other(format!(
+            "bias buffer length {} does not match n={n}",
+            bias.len()
+        )));
+    }
+    if let Some(residual) = residual {
+        let expected = m.checked_mul(n).ok_or_else(|| {
+            HipErr::Other("gemm dimensions overflow while validating residual".into())
+        })?;
+        if residual.len() != expected {
+            return Err(HipErr::Other(format!(
+                "residual buffer length {} does not match m*n={expected}",
+                residual.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(not(feature = "hip-real"))]
 fn gemm_scaled_stub(
     m: usize,
@@ -471,6 +512,42 @@ fn gemm_lhs_transpose_scaled_stub(
                 acc += lhs[lhs_index] * rhs[rhs_index];
             }
             out[row * n + col] = acc * scale;
+        }
+    }
+}
+
+#[cfg(not(feature = "hip-real"))]
+fn apply_gemm_epilogue_stub(
+    m: usize,
+    n: usize,
+    activation: GemmActivation,
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+) {
+    const GELU_COEFF: f32 = 0.044_715;
+    const SQRT_2_OVER_PI: f32 = 0.797_884_6;
+
+    for row in 0..m {
+        for (col, &bias_value) in bias.iter().enumerate() {
+            let index = row * n + col;
+            let mut value = out[index] + bias_value;
+            if let Some(residual) = residual {
+                value += residual[index];
+            }
+            out[index] = match activation {
+                GemmActivation::Relu => {
+                    if value > 0.0 {
+                        value
+                    } else {
+                        0.0
+                    }
+                }
+                GemmActivation::Gelu => {
+                    let cubed = value * value * value;
+                    0.5 * value * (1.0 + (SQRT_2_OVER_PI * (value + GELU_COEFF * cubed)).tanh())
+                }
+            };
         }
     }
 }
@@ -546,6 +623,62 @@ pub fn gemm_lhs_transpose_scaled_f32(
     validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
     validate_gemm_scale(scale)?;
     gemm_lhs_transpose_scaled_backend(m, n, k, scale, lhs, rhs, out)
+}
+
+/// Computes a row-major GEMM followed by bias, optional residual, and activation.
+///
+/// Real HIP builds keep the GEMM output on-device, execute the epilogue on the
+/// same stream, and copy only the final result back to the host.
+#[allow(clippy::too_many_arguments)]
+pub fn gemm_bias_activation_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    activation: GemmActivation,
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    init()?;
+    validate_gemm_dimensions(m, n, k, lhs, rhs, out)?;
+    validate_gemm_epilogue(m, n, bias, residual)?;
+    gemm_bias_activation_backend(m, n, k, activation, lhs, rhs, bias, residual, out)
+}
+
+#[cfg(feature = "hip-real")]
+#[allow(clippy::too_many_arguments)]
+fn gemm_bias_activation_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    activation: GemmActivation,
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    crate::real::gemm_bias_activation_f32(m, n, k, activation, lhs, rhs, bias, residual, out)
+}
+
+#[cfg(not(feature = "hip-real"))]
+#[allow(clippy::too_many_arguments)]
+fn gemm_bias_activation_backend(
+    m: usize,
+    n: usize,
+    k: usize,
+    activation: GemmActivation,
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    gemm_scaled_stub(m, n, k, 1.0, lhs, rhs, out);
+    apply_gemm_epilogue_stub(m, n, activation, bias, residual, out);
+    Ok(())
 }
 
 #[cfg(feature = "hip-real")]
@@ -918,6 +1051,153 @@ mod tests {
             .expect("transpose-scaled GEMM stub should succeed");
 
         assert_eq!(out, vec![22.25, 24.5, 29.0, 32.0]);
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn fused_gemm_epilogue_stub_matches_all_activation_and_residual_modes() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let bias = vec![-60.0, 1.0];
+        let residual = vec![3.0, -70.0, -140.0, 2.0];
+
+        let mut relu = vec![0.0; 4];
+        super::gemm_bias_activation_f32(
+            2,
+            2,
+            3,
+            GemmActivation::Relu,
+            &lhs,
+            &rhs,
+            &bias,
+            None,
+            &mut relu,
+        )
+        .expect("bias+ReLU stub should succeed");
+        assert_eq!(relu, vec![0.0, 65.0, 79.0, 155.0]);
+
+        let mut residual_relu = vec![0.0; 4];
+        super::gemm_bias_activation_f32(
+            2,
+            2,
+            3,
+            GemmActivation::Relu,
+            &lhs,
+            &rhs,
+            &bias,
+            Some(&residual),
+            &mut residual_relu,
+        )
+        .expect("bias+residual+ReLU stub should succeed");
+        assert_eq!(residual_relu, vec![1.0, 0.0, 0.0, 157.0]);
+
+        let gelu = |value: f32| {
+            let cubed = value * value * value;
+            0.5 * value * (1.0 + (0.797_884_6 * (value + 0.044_715 * cubed)).tanh())
+        };
+        for (residual, pre_activation) in [
+            (None, vec![-2.0, 65.0, 79.0, 155.0]),
+            (Some(residual.as_slice()), vec![1.0, -5.0, -61.0, 157.0]),
+        ] {
+            let mut actual = vec![0.0; 4];
+            super::gemm_bias_activation_f32(
+                2,
+                2,
+                3,
+                GemmActivation::Gelu,
+                &lhs,
+                &rhs,
+                &bias,
+                residual,
+                &mut actual,
+            )
+            .expect("GELU epilogue stub should succeed");
+            for (actual, expected) in actual.iter().zip(pre_activation.into_iter().map(gelu)) {
+                assert!((actual - expected).abs() <= 1e-6);
+            }
+        }
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn fused_gemm_epilogue_validates_inputs_before_mutating_output() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0];
+        let rhs = vec![5.0, 6.0, 7.0, 8.0];
+        let mut out = vec![13.0; 4];
+        let bad_bias = super::gemm_bias_activation_f32(
+            2,
+            2,
+            2,
+            GemmActivation::Relu,
+            &lhs,
+            &rhs,
+            &[1.0],
+            None,
+            &mut out,
+        )
+        .expect_err("wrong bias length must be rejected");
+        assert!(bad_bias.to_string().contains("bias buffer length"));
+        assert_eq!(out, vec![13.0; 4]);
+
+        let bad_residual = super::gemm_bias_activation_f32(
+            2,
+            2,
+            2,
+            GemmActivation::Gelu,
+            &lhs,
+            &rhs,
+            &[1.0, 2.0],
+            Some(&[3.0]),
+            &mut out,
+        )
+        .expect_err("wrong residual length must be rejected");
+        assert!(bad_residual.to_string().contains("residual buffer length"));
+        assert_eq!(out, vec![13.0; 4]);
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[cfg(not(feature = "hip-real"))]
+    #[test]
+    fn fused_gemm_epilogue_preserves_zero_inner_semantics() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let bias = vec![-1.0, 2.0];
+        let residual = vec![0.5, -3.0, 4.0, 5.0];
+        let mut out = vec![99.0; 4];
+        super::gemm_bias_activation_f32(
+            2,
+            2,
+            0,
+            GemmActivation::Relu,
+            &[],
+            &[],
+            &bias,
+            Some(&residual),
+            &mut out,
+        )
+        .expect("zero-inner fused GEMM should run its epilogue");
+
+        assert_eq!(out, vec![0.0, 0.0, 3.0, 7.0]);
         restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
         super::reset_runtime_for_tests();
     }

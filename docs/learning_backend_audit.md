@@ -687,10 +687,15 @@ logic without masquerading as learning acceleration.
 There is already a useful `SPIRALTORCH_STRICT_GPU` path for CUDA/HIP rank-k
 execution in `st-core::backend::{cuda_exec,hip_exec}`. Dense learning matmul,
 scaled matmul, and lhs-transpose-scaled matmul now use real HIP kernels
-(including rocBLAS alpha/transpose) only under `hip-real`. Fused matmul and
-non-matmul dense ops still need the same treatment. HIP rank-k strictness is
-also gated by `hip-real`, while non-real HIP rank-k remains a software path by
-construction.
+(including rocBLAS alpha/transpose) only under `hip-real`. The fused
+`matmul_bias_{relu,gelu}` and `matmul_bias_add_{relu,gelu}` routes now keep
+rocBLAS output resident, apply bias/residual/activation with a HIP kernel on
+the same stream, and copy only the completed output back to the host.
+Their tensor metadata records `matmul_backend`, `epilogue_backend`, and
+`fusion`, so a future host-side split cannot masquerade as a fully HIP
+operation. Non-matmul dense ops still need the same treatment. HIP rank-k
+strictness is also gated by `hip-real`, while non-real HIP rank-k remains a
+software path by construction.
 `st-core::backend::wgpu_exec` is now honest in the same direction: the executor
 is compiled under `wgpu-rt`, borrows registered host launch buffers, attempts
 real WGPU TopK/MidK/BottomK launches when a `WgpuCtx` is installed, and
