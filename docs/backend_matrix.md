@@ -7,7 +7,7 @@ SpiralTorch targets a unified runtime that can dispatch to multiple accelerators
 | --- | --- | --- | --- | --- | --- |
 | Build flag | _none_ | `--features wgpu` | `--features mps` | `--features cuda` | `--features hip-real` (`hip` alone is planner/reference-only) |
 | Min toolchain | Stable Rust | Stable Rust + system WebGPU drivers | Stable Rust + macOS 14 SDK | Stable Rust + CUDA 12 Toolkit & NVRTC | Stable Rust + ROCm 6 toolchain |
-| Tensor ops | ✅ Full (cpu/faer) | ✅ WGPU dense + frac kernels | ❌ Feature placeholder (no kernels wired) | ⚠️ Rank-k kernels wired (TopK/MidK/BottomK); broaden op parity | ⚠️ Dense, scaled, lhs-transpose-scaled GEMM + rank-k wired with hip-real; broaden op parity |
+| Tensor ops | ✅ Full (cpu/faer) | ✅ WGPU dense + frac kernels | ❌ Feature placeholder (no kernels wired) | ⚠️ Rank-k kernels wired (TopK/MidK/BottomK); broaden op parity | ⚠️ Dense, scaled, lhs-transpose-scaled, fused bias/residual activation GEMM + rank-k wired with hip-real; broaden op parity |
 | Autodiff / hypergrad | ✅ Ready | ⚠️ Validate tapes with WGPU execution | ❌ Backend placeholder | ⚠️ Validate tapes with CUDA execution | ⚠️ Validate tapes with HIP execution |
 | Planner & scheduler | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) |
 | Telemetry | ✅ Tracing + structured logging | ⚠️ GPU timing hooks planned | ❌ Backend placeholder | ⚠️ CUPTI hooks not wired | ⚠️ ROCm counters pending |

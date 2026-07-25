@@ -642,6 +642,8 @@ METADATA_ONLY_BACKENDS = {
 }
 
 TENSOR_META_SUB_BACKEND_FIELD_SPECS = (
+    ("matmul_backend", False),
+    ("epilogue_backend", False),
     ("input_gradient_backend", True),
     ("input_gradient_reduction_backend", True),
     ("gradient_reduction_backend", True),

@@ -9,6 +9,7 @@ mod build_support;
 use std::ffi::OsString;
 
 use build_support::{archive_kernels_with, compile_kernels_with, CommandReport, HIP_KERNELS};
+use st_backend_hip::GemmActivation;
 use tempfile::tempdir;
 
 fn success() -> CommandReport {
@@ -34,6 +35,34 @@ fn configured_kernels_have_unique_object_names() {
 
     assert!(!HIP_KERNELS.is_empty());
     assert_eq!(stems.len(), HIP_KERNELS.len());
+}
+
+#[test]
+fn every_configured_kernel_exists_in_the_crate() {
+    let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for source in HIP_KERNELS {
+        assert!(
+            crate_root.join(source).is_file(),
+            "configured HIP kernel is missing: {source}"
+        );
+    }
+}
+
+#[test]
+fn fused_gemm_epilogue_is_part_of_the_native_archive() {
+    assert!(HIP_KERNELS.contains(&"src/hip_kernels/hip_gemm_epilogue.cu"));
+}
+
+#[test]
+fn fused_activation_wire_codes_match_the_native_kernel() {
+    let source_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/hip_kernels/hip_gemm_epilogue.cu");
+    let source = std::fs::read_to_string(source_path).expect("read fused epilogue kernel");
+
+    assert_eq!(GemmActivation::Relu as i32, 1);
+    assert_eq!(GemmActivation::Gelu as i32, 2);
+    assert!(source.contains("kRelu = 1"));
+    assert!(source.contains("kGelu = 2"));
 }
 
 #[test]

@@ -413,7 +413,7 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             ),
             CapabilityEntry::with_state(
                 CapabilityState::Planned,
-                "Dense, scaled, lhs-transpose-scaled GEMM + rank-k wired with hip-real; broaden op parity",
+                "Dense, scaled, lhs-transpose-scaled, fused bias/residual activation GEMM + rank-k wired with hip-real; broaden op parity",
             ),
         ],
     },

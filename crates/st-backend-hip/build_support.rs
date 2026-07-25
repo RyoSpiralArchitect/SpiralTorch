@@ -7,6 +7,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 pub const HIP_KERNELS: &[&str] = &[
+    "src/hip_kernels/hip_gemm_epilogue.cu",
     "src/hip_kernels/topk_pass1.cu",
     "src/hip_kernels/hip_kway_merge_bitonic_f32.cu",
     "src/hip_kernels/hip_kway_merge_bitonic_u64.cu",

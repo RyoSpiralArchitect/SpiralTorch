@@ -1699,6 +1699,49 @@ def test_summarize_trainer_trace_events_recovers_runtime_component_backends(
     ]["last"] == pytest.approx(1.0)
 
 
+def test_summarize_trainer_trace_events_recovers_fused_matmul_components(
+    tmp_path,
+) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_trace.jsonl"
+    records = [
+        {
+            "idx": 1,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "matmul_bias_add_gelu",
+                        "data": {
+                            "backend": "hip",
+                            "requested_backend": "hip",
+                            "matmul_backend": "hip",
+                            "epilogue_backend": "hip",
+                            "fusion": "single_stream",
+                        },
+                    },
+                },
+            },
+        }
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    metrics = st.summarize_trainer_trace_events(trace_path)["metrics"]
+    assert metrics["tensor_op_backend_matmul_bias_add_gelu_matmul_hip"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_matmul_bias_add_gelu_epilogue_hip"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_backend_fallbacks"]["last"] == pytest.approx(0.0)
+
+
 def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")

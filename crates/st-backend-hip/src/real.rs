@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::{DeviceInfo, HipErr};
+use crate::{DeviceInfo, GemmActivation, HipErr};
 use libloading::Library;
 use std::convert::TryFrom;
 use std::ffi::{c_char, c_void, CStr};
@@ -142,6 +142,16 @@ extern "C" {
         k: i32,
         out_vals: *mut f32,
         out_idx: *mut i32,
+        stream: hipStream_t,
+    ) -> hipError_t;
+    fn st_gemm_epilogue_f32(
+        output: *mut f32,
+        bias: *const f32,
+        residual: *const f32,
+        total: i32,
+        cols: i32,
+        activation: i32,
+        has_residual: i32,
         stream: hipStream_t,
     ) -> hipError_t;
 }
@@ -719,6 +729,148 @@ pub fn gemm_lhs_transpose_scaled_f32(
         rhs,
         out,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn gemm_bias_activation_f32(
+    m: usize,
+    n: usize,
+    k: usize,
+    activation: GemmActivation,
+    lhs: &[f32],
+    rhs: &[f32],
+    bias: &[f32],
+    residual: Option<&[f32]>,
+    out: &mut [f32],
+) -> Result<(), HipErr> {
+    if out.is_empty() {
+        return Ok(());
+    }
+
+    let lhs_bytes = lhs
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("lhs buffer byte length overflow".into()))?;
+    let rhs_bytes = rhs
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("rhs buffer byte length overflow".into()))?;
+    let bias_bytes = bias
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("bias buffer byte length overflow".into()))?;
+    let out_bytes = out
+        .len()
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| HipErr::Other("output buffer byte length overflow".into()))?;
+    let total = i32::try_from(out.len())
+        .map_err(|_| HipErr::Other("GEMM epilogue element count exceeds i32".into()))?;
+    let cols = i32::try_from(n)
+        .map_err(|_| HipErr::Other("GEMM epilogue column count exceeds i32".into()))?;
+
+    let stream = HipStream::create()?;
+    let out_dev = DeviceBuffer::new(out_bytes)?;
+
+    let lhs_dev = (k != 0).then(|| DeviceBuffer::new(lhs_bytes)).transpose()?;
+    let rhs_dev = (k != 0).then(|| DeviceBuffer::new(rhs_bytes)).transpose()?;
+
+    if k == 0 {
+        unsafe { memset_async(out_dev.as_ptr(), 0, out_bytes, &stream)? };
+    } else {
+        let lhs_dev = lhs_dev
+            .as_ref()
+            .ok_or_else(|| HipErr::Other("missing GEMM lhs device buffer".into()))?;
+        let rhs_dev = rhs_dev
+            .as_ref()
+            .ok_or_else(|| HipErr::Other("missing GEMM rhs device buffer".into()))?;
+        unsafe {
+            memcpy_h2d_async(
+                lhs_dev.as_ptr(),
+                lhs.as_ptr() as *const u8,
+                lhs_bytes,
+                &stream,
+            )?;
+            memcpy_h2d_async(
+                rhs_dev.as_ptr(),
+                rhs.as_ptr() as *const u8,
+                rhs_bytes,
+                &stream,
+            )?;
+        }
+        rocblas::sgemm(
+            &stream,
+            GemmSpec {
+                m,
+                n,
+                k,
+                scale: 1.0,
+                mode: GemmMode::Standard,
+            },
+            lhs_dev.as_ptr(),
+            rhs_dev.as_ptr(),
+            out_dev.as_ptr(),
+        )?;
+    }
+
+    let bias_dev = DeviceBuffer::new(bias_bytes)?;
+    unsafe {
+        memcpy_h2d_async(
+            bias_dev.as_ptr(),
+            bias.as_ptr() as *const u8,
+            bias_bytes,
+            &stream,
+        )?;
+    }
+
+    let residual_dev = if let Some(residual) = residual {
+        let bytes = residual
+            .len()
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| HipErr::Other("residual buffer byte length overflow".into()))?;
+        let device = DeviceBuffer::new(bytes)?;
+        unsafe {
+            memcpy_h2d_async(
+                device.as_ptr(),
+                residual.as_ptr() as *const u8,
+                bytes,
+                &stream,
+            )?;
+        }
+        Some(device)
+    } else {
+        None
+    };
+
+    let residual_ptr = residual_dev
+        .as_ref()
+        .map(DeviceBuffer::as_ptr)
+        .unwrap_or(std::ptr::null_mut());
+    hip_result(
+        unsafe {
+            st_gemm_epilogue_f32(
+                out_dev.as_ptr() as *mut f32,
+                bias_dev.as_ptr() as *const f32,
+                residual_ptr as *const f32,
+                total,
+                cols,
+                activation.hip_code(),
+                i32::from(residual_dev.is_some()),
+                stream.raw(),
+            )
+        },
+        "st_gemm_epilogue_f32",
+    )?;
+
+    unsafe {
+        memcpy_d2h_async(
+            out.as_mut_ptr() as *mut u8,
+            out_dev.as_ptr(),
+            out_bytes,
+            &stream,
+        )?;
+    }
+    stream_synchronize(&stream)?;
+    Ok(())
 }
 
 pub fn pack_vals_idx_u64(
