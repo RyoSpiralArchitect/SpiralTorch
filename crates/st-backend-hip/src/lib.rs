@@ -86,8 +86,7 @@ pub(crate) fn rccl_allgather_layout(
     })
 }
 
-#[cfg(any(feature = "hip-real", test))]
-mod compaction_contract;
+pub mod compaction_contract;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeviceInfo {

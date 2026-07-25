@@ -708,6 +708,14 @@ contract. The compaction kernels also enforce the one-shot 256-column limit,
 use an overflow-safe tile count, and perform a complete Blelloch scan without
 double-counting partial-tile tails.
 
+Row compaction now has a public Rust semantic contract independent of native
+linkage: stable per-row input order, inclusive finite bounds, non-finite input
+exclusion, explicit row counts, and deterministic zero padding. The
+`hip-real` `compact_rows_f32()` entrypoint owns scan/apply workspaces and
+returns the same `CompactionOutputF32` shape as
+`compact_rows_reference_f32()`, leaving raw pointer launchers as an explicitly
+unsafe lower layer rather than the normal caller surface.
+
 `st-core::backend::wgpu_exec` is now honest in the same direction: the executor
 is compiled under `wgpu-rt`, borrows registered host launch buffers, attempts
 real WGPU TopK/MidK/BottomK launches when a `WgpuCtx` is installed, and

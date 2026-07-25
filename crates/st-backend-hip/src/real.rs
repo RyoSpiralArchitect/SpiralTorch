@@ -646,14 +646,14 @@ mod rocblas {
     }
 }
 
-struct DeviceBuffer(HipPtr);
+pub(crate) struct DeviceBuffer(HipPtr);
 
 impl DeviceBuffer {
-    fn new(size: usize) -> Result<Self, HipErr> {
+    pub(crate) fn new(size: usize) -> Result<Self, HipErr> {
         Ok(Self(malloc(size)?))
     }
 
-    fn as_ptr(&self) -> HipPtr {
+    pub(crate) fn as_ptr(&self) -> HipPtr {
         self.0
     }
 }
@@ -666,20 +666,20 @@ impl Drop for DeviceBuffer {
     }
 }
 
-struct StreamCompletionGuard<'a> {
+pub(crate) struct StreamCompletionGuard<'a> {
     stream: &'a HipStream,
     armed: bool,
 }
 
 impl<'a> StreamCompletionGuard<'a> {
-    fn new(stream: &'a HipStream) -> Self {
+    pub(crate) fn new(stream: &'a HipStream) -> Self {
         Self {
             stream,
             armed: true,
         }
     }
 
-    fn finish(mut self) -> Result<(), HipErr> {
+    pub(crate) fn finish(mut self) -> Result<(), HipErr> {
         let result = stream_synchronize(self.stream);
         if result.is_ok() {
             self.armed = false;

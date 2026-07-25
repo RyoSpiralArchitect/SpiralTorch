@@ -3,10 +3,17 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::real::{hip_result, HipStream};
+use crate::compaction_contract::validate_compaction_inputs;
+use crate::real::{
+    hip_result, memcpy_d2h_async, memcpy_h2d_async, memset_async, DeviceBuffer, HipStream,
+    StreamCompletionGuard,
+};
 use crate::HipErr;
 
-pub use crate::compaction_contract::{tiles_per_row, CompactionShape, COMPACTION_TILE};
+pub use crate::compaction_contract::{
+    compact_rows_reference_f32, tiles_per_row, CompactionOutputF32, CompactionShape,
+    COMPACTION_TILE,
+};
 
 extern "C" {
     fn st_compaction_1ce(
@@ -67,6 +74,123 @@ extern "C" {
         iout: *mut i32,
         stream: crate::real::hipStream_t,
     ) -> i32;
+}
+
+fn byte_len<T>(elements: usize, field: &str) -> Result<usize, HipErr> {
+    elements
+        .checked_mul(std::mem::size_of::<T>())
+        .ok_or_else(|| HipErr::Other(format!("{field} byte length overflow")))
+}
+
+/// Compacts each row on HIP while preserving the shared Rust output contract.
+///
+/// Device allocations, kernel ordering, transfers, synchronization, and
+/// failure-path cleanup are owned by this call. The returned fixed-width rows
+/// contain stable compacted prefixes followed by deterministic zero padding.
+pub fn compact_rows_f32(
+    values: &[f32],
+    indices: &[i32],
+    shape: CompactionShape,
+) -> Result<CompactionOutputF32, HipErr> {
+    let layout = shape.layout()?;
+    validate_compaction_inputs(values, indices, layout)?;
+    let mut output = CompactionOutputF32::zeroed(layout);
+    if layout.is_empty() {
+        return Ok(output);
+    }
+
+    let value_bytes = byte_len::<f32>(layout.element_count(), "compaction value")?;
+    let index_bytes = byte_len::<i32>(layout.element_count(), "compaction index")?;
+    let flag_bytes = byte_len::<u32>(layout.element_count(), "compaction flag")?;
+    let tile_count_bytes = byte_len::<u32>(layout.tile_count(), "compaction tile count")?;
+
+    let values_in = DeviceBuffer::new(value_bytes)?;
+    let indices_in = DeviceBuffer::new(index_bytes)?;
+    let flags = DeviceBuffer::new(flag_bytes)?;
+    let tile_counts_dev = DeviceBuffer::new(tile_count_bytes)?;
+    let values_out = DeviceBuffer::new(value_bytes)?;
+    let indices_out = DeviceBuffer::new(index_bytes)?;
+    let stream = HipStream::create()?;
+    let mut tile_counts = vec![0u32; layout.tile_count()];
+    let completion = StreamCompletionGuard::new(&stream);
+
+    unsafe {
+        memcpy_h2d_async(
+            values_in.as_ptr(),
+            values.as_ptr().cast::<u8>(),
+            value_bytes,
+            &stream,
+        )?;
+        memcpy_h2d_async(
+            indices_in.as_ptr(),
+            indices.as_ptr().cast::<u8>(),
+            index_bytes,
+            &stream,
+        )?;
+        memset_async(values_out.as_ptr(), 0, value_bytes, &stream)?;
+        memset_async(indices_out.as_ptr(), 0, index_bytes, &stream)?;
+        compaction_scan(
+            &stream,
+            CompactionScanArgs {
+                values_in: values_in.as_ptr().cast::<f32>(),
+                flags: flags.as_ptr().cast::<u32>(),
+                tile_counts: tile_counts_dev.as_ptr().cast::<u32>(),
+                shape,
+            },
+        )?;
+        compaction_apply(
+            &stream,
+            CompactionApplyArgs {
+                values_in: values_in.as_ptr().cast::<f32>(),
+                indices_in: indices_in.as_ptr().cast::<i32>(),
+                flags: flags.as_ptr().cast::<u32>(),
+                tile_counts: tile_counts_dev.as_ptr().cast::<u32>(),
+                values_out: values_out.as_ptr().cast::<f32>(),
+                indices_out: indices_out.as_ptr().cast::<i32>(),
+                shape,
+            },
+        )?;
+        memcpy_d2h_async(
+            tile_counts.as_mut_ptr().cast::<u8>(),
+            tile_counts_dev.as_ptr(),
+            tile_count_bytes,
+            &stream,
+        )?;
+        memcpy_d2h_async(
+            output.values_mut_ptr().cast::<u8>(),
+            values_out.as_ptr(),
+            value_bytes,
+            &stream,
+        )?;
+        memcpy_d2h_async(
+            output.indices_mut_ptr().cast::<u8>(),
+            indices_out.as_ptr(),
+            index_bytes,
+            &stream,
+        )?;
+    }
+    completion.finish()?;
+
+    let row_counts = tile_counts
+        .chunks_exact(layout.tiles_per_row())
+        .enumerate()
+        .map(|(row, counts)| {
+            let count = counts.iter().try_fold(0u32, |total, &count| {
+                total
+                    .checked_add(count)
+                    .ok_or_else(|| HipErr::Other(format!("compaction row {row} count overflow")))
+            })?;
+            if usize::try_from(count).unwrap_or(usize::MAX) > layout.cols() {
+                return Err(HipErr::Other(format!(
+                    "compaction row {row} count {count} exceeds width {}",
+                    layout.cols()
+                )));
+            }
+            Ok(count)
+        })
+        .collect::<Result<Vec<_>, HipErr>>()?;
+    output.set_row_counts(row_counts)?;
+    Ok(output)
 }
 
 /// Raw device buffers for one-block-per-row compaction.
