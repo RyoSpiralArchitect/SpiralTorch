@@ -3,8 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::real::{RcclComm, RcclUniqueId};
-use crate::HipErr;
+use super::real::{allgather_u64_host, RcclComm, RcclUniqueId};
+use crate::{validate_rccl_topology, HipErr};
 use base64::{engine::general_purpose, Engine as _};
 use std::{
     fs,
@@ -20,14 +20,28 @@ extern "C" {
 }
 
 pub struct RcclCommGuard {
-    pub comm: RcclComm,
+    comm: RcclComm,
     pub world: i32,
     pub rank: i32,
 }
+
+impl RcclCommGuard {
+    /// Gathers an equally sized local `u64` slice from every RCCL rank.
+    ///
+    /// Device allocations, asynchronous transfers, stream completion, and
+    /// failure-path cleanup are owned by the HIP backend.
+    pub fn allgather_u64(&self, local: &[u64]) -> Result<Vec<u64>, HipErr> {
+        let world_size = validate_rccl_topology(self.world, self.rank)?;
+        allgather_u64_host(self.comm, local, world_size)
+    }
+}
+
 impl Drop for RcclCommGuard {
     fn drop(&mut self) {
-        unsafe {
-            let _ = rcclCommDestroy(self.comm);
+        if !self.comm.internal.is_null() {
+            unsafe {
+                let _ = rcclCommDestroy(self.comm);
+            }
         }
     }
 }
@@ -64,6 +78,7 @@ fn read_file_with_ttl(path: &str, ttl_ms: u64, retry_ms: u64) -> Option<Vec<u8>>
 pub fn init_rccl_from_env() -> Result<RcclCommGuard, HipErr> {
     let (world_sz, rank) =
         read_env_rank().ok_or_else(|| HipErr::Other("RCCL: WORLD_SIZE/RANK missing".into()))?;
+    validate_rccl_topology(world_sz, rank)?;
     let ttl_ms: u64 = std::env::var("RCCL_UID_TTL_MS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -107,7 +122,7 @@ pub fn init_rccl_from_env() -> Result<RcclCommGuard, HipErr> {
                     return Err(HipErr::Other("rcclGetUniqueId".into()));
                 }
             }
-            let b64 = general_purpose::STANDARD.encode(&id.internal);
+            let b64 = general_purpose::STANDARD.encode(id.internal);
             eprintln!("[rccl] export RCCL_UNIQUE_ID_B64='{}'", b64);
         } else {
             return Err(HipErr::Other(

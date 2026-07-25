@@ -885,44 +885,6 @@ fn gather_hip_lane_votes(
     local: LaneParams,
 ) -> Result<Vec<(LaneParams, f64)>, LaneProbabilityError> {
     use st_backend_hip::rccl_comm::init_rccl_from_env;
-    use st_backend_hip::real::{
-        allgather_u64_dev, free, malloc, memcpy_d2h_async, memcpy_h2d_async, stream_synchronize,
-        HipPtr, HipStream,
-    };
-
-    struct HipBuffer(HipPtr);
-
-    impl HipBuffer {
-        fn new(bytes: usize) -> Result<Self, LaneProbabilityError> {
-            malloc(bytes)
-                .map(Self)
-                .map_err(|error| LaneProbabilityError::ProviderFailure {
-                    provider: "hip_rccl",
-                    message: error.to_string(),
-                })
-        }
-
-        fn as_ptr(&self) -> HipPtr {
-            self.0
-        }
-
-        fn release(mut self) -> Result<(), LaneProbabilityError> {
-            free(self.0).map_err(|error| LaneProbabilityError::ProviderFailure {
-                provider: "hip_rccl",
-                message: error.to_string(),
-            })?;
-            self.0 = std::ptr::null_mut();
-            Ok(())
-        }
-    }
-
-    impl Drop for HipBuffer {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                let _ = free(self.0);
-            }
-        }
-    }
 
     let comm = init_rccl_from_env().map_err(|error| LaneProbabilityError::ProviderFailure {
         provider: "hip_rccl",
@@ -940,59 +902,23 @@ fn gather_hip_lane_votes(
     let world = usize::try_from(comm.world).map_err(|_| LaneProbabilityError::CountOverflow {
         field: "hip_world_size",
     })?;
-    let element_bytes = std::mem::size_of::<u64>();
-    let receive_bytes =
-        element_bytes
-            .checked_mul(world)
-            .ok_or(LaneProbabilityError::CountOverflow {
-                field: "hip_receive_bytes",
-            })?;
-    let stream = HipStream::create().map_err(|error| LaneProbabilityError::ProviderFailure {
-        provider: "hip_rccl",
-        message: error.to_string(),
-    })?;
-    let send = HipBuffer::new(element_bytes)?;
-    let receive = HipBuffer::new(receive_bytes)?;
     let lane = u64::try_from(local.lane)
         .map_err(|_| LaneProbabilityError::LaneOutOfRange { lane: local.lane })?;
-    let mut gathered = vec![0u64; world];
-
-    unsafe {
-        memcpy_h2d_async(
-            send.as_ptr(),
-            (&lane as *const u64).cast::<u8>(),
-            element_bytes,
-            &stream,
-        )
-        .map_err(|error| LaneProbabilityError::ProviderFailure {
+    let gathered =
+        comm.allgather_u64(&[lane])
+            .map_err(|error| LaneProbabilityError::ProviderFailure {
+                provider: "hip_rccl",
+                message: error.to_string(),
+            })?;
+    if gathered.len() != world {
+        return Err(LaneProbabilityError::ProviderFailure {
             provider: "hip_rccl",
-            message: error.to_string(),
-        })?;
+            message: format!(
+                "RCCL all-gather returned {} lane votes, expected {world}",
+                gathered.len()
+            ),
+        });
     }
-    allgather_u64_dev(comm.comm, &stream, send.as_ptr(), receive.as_ptr(), 1).map_err(|error| {
-        LaneProbabilityError::ProviderFailure {
-            provider: "hip_rccl",
-            message: error.to_string(),
-        }
-    })?;
-    unsafe {
-        memcpy_d2h_async(
-            gathered.as_mut_ptr().cast::<u8>(),
-            receive.as_ptr(),
-            receive_bytes,
-            &stream,
-        )
-        .map_err(|error| LaneProbabilityError::ProviderFailure {
-            provider: "hip_rccl",
-            message: error.to_string(),
-        })?;
-    }
-    stream_synchronize(&stream).map_err(|error| LaneProbabilityError::ProviderFailure {
-        provider: "hip_rccl",
-        message: error.to_string(),
-    })?;
-    send.release()?;
-    receive.release()?;
 
     gathered
         .into_iter()
