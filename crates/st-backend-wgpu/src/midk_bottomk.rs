@@ -6,7 +6,6 @@
 //! Pipeline assembly helpers for MidK/BottomK compaction kernels.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -15,16 +14,16 @@ use wgpu::{
     ComputePassDescriptor, ComputePipeline, Device, Queue,
 };
 
-use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
+use crate::{runtime::Shared, util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Debug)]
 pub struct Pipelines {
-    pub scan_tiles: Arc<ComputePipeline>,
-    pub row_prefix: Arc<ComputePipeline>,
-    pub apply_fallback: Arc<ComputePipeline>,
-    pub apply_subgroup: Option<Arc<ComputePipeline>>,
-    pub apply_subgroup_v2: Option<Arc<ComputePipeline>>,
-    pub middlemax: Arc<ComputePipeline>,
+    pub scan_tiles: Shared<ComputePipeline>,
+    pub row_prefix: Shared<ComputePipeline>,
+    pub apply_fallback: Shared<ComputePipeline>,
+    pub apply_subgroup: Option<Shared<ComputePipeline>>,
+    pub apply_subgroup_v2: Option<Shared<ComputePipeline>>,
+    pub middlemax: Shared<ComputePipeline>,
 }
 
 impl Pipelines {

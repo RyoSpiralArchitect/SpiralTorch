@@ -5,6 +5,6 @@
 mod temporal;
 
 pub use temporal::{
-    TemporalRenderOutput, TemporalRenderSlice, TemporalRenderer, TemporalRendererConfig,
-    TemporalVolumeLike,
+    TemporalRenderError, TemporalRenderOutput, TemporalRenderResult, TemporalRenderSlice,
+    TemporalRenderer, TemporalRendererConfig, TemporalVolumeLike, TemporalVolumeView,
 };

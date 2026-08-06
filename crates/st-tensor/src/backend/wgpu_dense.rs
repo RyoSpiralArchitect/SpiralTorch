@@ -41,16 +41,12 @@ const LAYER_NORM_WGSL: &str = include_str!("../wgpu_shaders/layer_norm.wgsl");
 const TENSOR_UTILS_WGSL: &str = include_str!("../wgpu_shaders/tensor_utils.wgsl");
 const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
 const LSTM_BACKWARD_SCAN_WGSL: &str = include_str!("../wgpu_shaders/lstm_backward_scan.wgsl");
-const ROW_SOFTMAX_WGSL: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
-const ROW_SOFTMAX_SUBGROUP_WGSL: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/softmax_subgroup.wgsl");
-const SOFTMAX_ZSPACE_WGSL: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/softmax_zspace_projection.wgsl");
-const SOFTMAX_SPIRAL_WGSL: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/softmax_spiral_consensus.wgsl");
+const ROW_SOFTMAX_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_WORKGROUP_WGSL;
+const ROW_SOFTMAX_SUBGROUP_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_SUBGROUP_WGSL;
+const SOFTMAX_ZSPACE_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_ZSPACE_PROJECTION_WGSL;
+const SOFTMAX_SPIRAL_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_SPIRAL_CONSENSUS_WGSL;
 const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
-    include_str!("../../../st-backend-wgpu/src/shaders/fused_attention_online.wgsl");
+    st_backend_wgpu::shader_sources::FUSED_ATTENTION_ONLINE_WGSL;
 
 const FUSED_ATTENTION_WORKGROUP: u32 = 128;
 const FUSED_ATTENTION_MAX_HEAD_DIM: u32 = 256;

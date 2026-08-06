@@ -44,6 +44,15 @@ fn apply_hue(rgb: vec3<f32>, radians: f32) -> vec3<f32> {
     );
 }
 
+fn brightness_contrast(channel: u32, value: f32) -> f32 {
+    let bright = value * params.factors.x;
+    if params.factors.y == 1.0 {
+        return bright;
+    }
+    let mean = params.means[min(channel, 3u)];
+    return (bright - mean) * params.factors.y + mean;
+}
+
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let height = params.dims.x;
@@ -53,30 +62,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var pixel: array<f32, 8>;
-    for (var c: u32 = 0u; c < channels; c = c + 1u) {
-        let idx = index(c, gid.y, gid.x, width, height);
-        pixel[c] = input_image[idx] * params.factors.x;
-    }
-
-    if params.factors.y != 1.0 {
-        for (var c: u32 = 0u; c < channels; c = c + 1u) {
-            let mean = params.means[min(c, 3u)];
-            pixel[c] = (pixel[c] - mean) * params.factors.y + mean;
-        }
-    }
-
-    if channels >= 3u {
-        var rgb = vec3<f32>(pixel[0], pixel[1], pixel[2]);
+    let channel = gid.z;
+    let output_idx = index(channel, gid.y, gid.x, width, height);
+    var value = brightness_contrast(channel, input_image[output_idx]);
+    if channels >= 3u && channel < 3u {
+        var rgb = vec3<f32>(
+            brightness_contrast(0u, input_image[index(0u, gid.y, gid.x, width, height)]),
+            brightness_contrast(1u, input_image[index(1u, gid.y, gid.x, width, height)]),
+            brightness_contrast(2u, input_image[index(2u, gid.y, gid.x, width, height)]),
+        );
         rgb = apply_saturation(rgb, params.factors.z);
         rgb = apply_hue(rgb, params.factors.w);
-        pixel[0] = rgb.x;
-        pixel[1] = rgb.y;
-        pixel[2] = rgb.z;
+        value = rgb[channel];
     }
-
-    for (var c: u32 = 0u; c < channels; c = c + 1u) {
-        let idx = index(c, gid.y, gid.x, width, height);
-        output_image[idx] = pixel[c];
-    }
+    output_image[output_idx] = value;
 }

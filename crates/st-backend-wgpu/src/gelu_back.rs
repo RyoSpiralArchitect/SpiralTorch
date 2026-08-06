@@ -11,7 +11,6 @@
 
 use std::cmp;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
@@ -19,7 +18,7 @@ use wgpu::{
     BufferUsages, ComputePipeline, Device, PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{runtime::Shared, ShaderCache, ShaderLoadError};
 
 /// Default workgroup geometry matching the WGSL overrides.
 pub const DEFAULT_WG_ROWS: u32 = 16;
@@ -220,8 +219,8 @@ impl ReduceUniforms {
 pub struct Pipelines {
     pub fused_bind_layout: BindGroupLayout,
     pub reduce_bind_layout: BindGroupLayout,
-    pub fused: Arc<ComputePipeline>,
-    pub reduce: Arc<ComputePipeline>,
+    pub fused: Shared<ComputePipeline>,
+    pub reduce: Shared<ComputePipeline>,
     pub geometry: Geometry,
 }
 

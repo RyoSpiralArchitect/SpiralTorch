@@ -17,12 +17,27 @@ const SOFTMAX_BINDINGS: &[&str] = &[
     "mask:write_storage",
 ];
 const TOPK_BINDINGS: &[&str] = &["values:read_storage", "out_values:write_storage"];
-const COMPACTION_BINDINGS: &[&str] = &[
+const MIDK_BOTTOMK_BINDINGS: &[&str] = &[
     "values:read_storage",
     "mask:read_storage",
     "out_positions:write_storage",
     "out_values:write_storage",
     "prefix:scratch_storage",
+];
+const COMPACTION_SCAN_BINDINGS: &[&str] = &[
+    "values:read_storage",
+    "flags:write_storage",
+    "tile_counts:write_storage",
+    "params:uniform",
+];
+const COMPACTION_APPLY_BINDINGS: &[&str] = &[
+    "values:read_storage",
+    "indices:read_storage",
+    "flags:read_storage",
+    "tile_counts:read_storage",
+    "out_values:write_storage",
+    "out_indices:write_storage",
+    "params:uniform",
 ];
 const EXACT_RANK_2CE_BINDINGS: &[&str] = &[
     "values:read_storage",
@@ -55,7 +70,6 @@ const STAGE_SOFTMAX: &[&str] = &["reduce_and_normalize"];
 const STAGE_TOPK: &[&str] = &["keepk"];
 const STAGE_MIDK: &[&str] = &["scan_tiles", "row_prefix", "apply", "middlemax_optional"];
 const STAGE_RANK_EXACT_2CE: &[&str] = &["tile_sort", "row_merge"];
-const STAGE_COMPACTION_1CE: &[&str] = &["compact"];
 const STAGE_COMPACTION_2CE: &[&str] = &["scan", "apply"];
 const STAGE_ATTENTION: &[&str] = &["qk", "bias", "online_softmax", "value_mix"];
 const STAGE_GELU_BACK: &[&str] = &["fused_backward", "reduce"];
@@ -330,7 +344,7 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: false,
         portable: true,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "tile scan stage for MidK/BottomK compaction",
     },
     KernelDescriptor {
@@ -344,7 +358,7 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: false,
         portable: true,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "row prefix stage for MidK/BottomK compaction",
     },
     KernelDescriptor {
@@ -358,7 +372,7 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: false,
         portable: true,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "portable apply stage for MidK/BottomK compaction",
     },
     KernelDescriptor {
@@ -372,7 +386,7 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: true,
         portable: false,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "legacy subgroup apply stage for MidK/BottomK compaction",
     },
     KernelDescriptor {
@@ -386,7 +400,7 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: true,
         portable: false,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "enhanced subgroup apply stage for MidK/BottomK compaction",
     },
     KernelDescriptor {
@@ -400,50 +414,36 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         subgroup: false,
         portable: true,
         stages: STAGE_MIDK,
-        bindings: COMPACTION_BINDINGS,
+        bindings: MIDK_BOTTOMK_BINDINGS,
         notes: "optional middle-band maximum reduction",
     },
     KernelDescriptor {
-        name: "wgpu_compaction_1ce",
+        name: "wgpu_compaction_scan",
         family: "compaction",
         operation: "compact",
-        shader: "wgpu_compaction_1ce.wgsl",
+        shader: "wgpu_compaction_scan.wgsl",
         entry_point: "main_cs",
-        pipeline_label: "compaction_1ce",
-        variant: "1ce",
-        subgroup: false,
-        portable: true,
-        stages: STAGE_COMPACTION_1CE,
-        bindings: COMPACTION_BINDINGS,
-        notes: "single-command encoder compaction helper",
-    },
-    KernelDescriptor {
-        name: "wgpu_compaction_scan_pass",
-        family: "compaction",
-        operation: "compact",
-        shader: "wgpu_compaction_scan_pass.wgsl",
-        entry_point: "main_cs",
-        pipeline_label: "compaction_scan_pass",
-        variant: "2ce_scan",
+        pipeline_label: "st.compaction.scan.pipeline",
+        variant: "contract_scan",
         subgroup: false,
         portable: true,
         stages: STAGE_COMPACTION_2CE,
-        bindings: COMPACTION_BINDINGS,
-        notes: "two-command encoder compaction scan pass",
+        bindings: COMPACTION_SCAN_BINDINGS,
+        notes: "canonical stable compaction tile scan",
     },
     KernelDescriptor {
-        name: "wgpu_compaction_apply_pass",
+        name: "wgpu_compaction_apply",
         family: "compaction",
         operation: "compact",
-        shader: "wgpu_compaction_apply_pass.wgsl",
+        shader: "wgpu_compaction_apply.wgsl",
         entry_point: "main_cs",
-        pipeline_label: "compaction_apply_pass",
-        variant: "2ce_apply",
+        pipeline_label: "st.compaction.apply.pipeline",
+        variant: "contract_apply",
         subgroup: false,
         portable: true,
         stages: STAGE_COMPACTION_2CE,
-        bindings: COMPACTION_BINDINGS,
-        notes: "two-command encoder compaction apply pass",
+        bindings: COMPACTION_APPLY_BINDINGS,
+        notes: "canonical stable compaction scatter",
     },
     KernelDescriptor {
         name: "fused_attention_online",
@@ -748,6 +748,8 @@ mod tests {
         assert!(names.contains(&"softmax_workgroup"));
         assert!(names.contains(&"topk_keepk_workgroup"));
         assert!(names.contains(&"midk_bottomk_apply_subgroup_v2"));
+        assert!(names.contains(&"wgpu_compaction_scan"));
+        assert!(names.contains(&"wgpu_compaction_apply"));
         assert!(names.contains(&"fused_attention_online"));
     }
 
@@ -781,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn rank_catalog_entry_points_exist_in_owned_wgsl() {
+    fn catalog_entry_points_exist_in_owned_wgsl() {
         for (shader, source) in [
             (
                 "midk_bottomk_compaction.wgsl",
@@ -790,6 +792,14 @@ mod tests {
             (
                 "rankk_exact_2ce.wgsl",
                 include_str!("shaders/rankk_exact_2ce.wgsl"),
+            ),
+            (
+                "wgpu_compaction_scan.wgsl",
+                include_str!("shaders/wgpu_compaction_scan.wgsl"),
+            ),
+            (
+                "wgpu_compaction_apply.wgsl",
+                include_str!("shaders/wgpu_compaction_apply.wgsl"),
             ),
         ] {
             let module = naga::front::wgsl::parse_str(source)
