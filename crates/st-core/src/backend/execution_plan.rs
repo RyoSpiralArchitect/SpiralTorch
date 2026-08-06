@@ -955,6 +955,24 @@ fn evaluate_canonical_runtime_execution_plan(
             effective_backend.as_str()
         ));
     }
+    // `allow` permits an explicit software route; it must not turn evidence that
+    // the selected kernel is unusable into a successful preflight.
+    blockers.extend(
+        component_routes
+            .iter()
+            .filter(|route| {
+                route.route == RuntimeComponentRouteClass::Direct
+                    && tensor_backend_is_native(route.selected_backend, effective_backend)
+                    && route.capability_state.is_known_unready()
+            })
+            .map(|route| {
+                format!(
+                    "component_capability_unready:{}:{}",
+                    route.component.as_str(),
+                    route.capability_state.as_str()
+                )
+            }),
+    );
     if request.execution_config.accelerator_fallback.is_strict() {
         blockers.extend(
             component_routes
@@ -993,6 +1011,7 @@ fn evaluate_canonical_runtime_execution_plan(
                     route.route == RuntimeComponentRouteClass::Direct
                         && tensor_backend_is_native(route.selected_backend, effective_backend)
                         && !route.capability_state.is_ready()
+                        && !route.capability_state.is_known_unready()
                 })
                 .map(|route| {
                     format!(
@@ -1741,6 +1760,7 @@ mod tests {
             assert!(!route.native);
         }
         assert!(!payload.all_components_native);
+        assert!(payload.execution_allowed);
     }
 
     #[test]
@@ -1828,6 +1848,37 @@ mod tests {
         observed
             .validate_against(observed_request)
             .expect("capability evidence replays without a live device query");
+    }
+
+    #[test]
+    fn known_unready_accelerator_evidence_blocks_even_when_fallback_is_allowed() {
+        for status in [
+            RuntimeComponentCapabilityStatus::Unavailable,
+            RuntimeComponentCapabilityStatus::NotBuilt,
+            RuntimeComponentCapabilityStatus::Unsupported,
+        ] {
+            let workload = RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 };
+            let mut request =
+                execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
+            request.component_workloads = vec![workload.clone()];
+            request.component_capabilities = vec![RuntimeComponentCapabilityEvidence {
+                workload,
+                backend: RuntimeTensorBackend::Wgpu,
+                status,
+            }];
+
+            let payload =
+                evaluate_runtime_execution_plan(request).expect("plan remains inspectable");
+            assert!(!payload.execution_allowed, "status {status:?} must block");
+            assert!(payload.blockers.contains(&format!(
+                "component_capability_unready:softmax:{}",
+                status.as_str()
+            )));
+            assert!(matches!(
+                BackendPolicy::try_from_runtime_plan(&payload),
+                Err(RuntimeExecutionPlanError::ExecutionBlocked { .. })
+            ));
+        }
     }
 
     #[test]
@@ -1966,6 +2017,10 @@ mod tests {
             RuntimeComponentCapabilityState::NotBuilt
         );
         assert!(!softmax.native);
+        assert!(!plan.execution_allowed);
+        assert!(plan
+            .blockers
+            .contains(&"component_capability_unready:softmax:not_built".to_owned()));
     }
 
     #[test]

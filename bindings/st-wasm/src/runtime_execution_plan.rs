@@ -294,6 +294,43 @@ mod tests {
     }
 
     #[test]
+    fn shipped_types_cover_the_runtime_probe_and_execution_plan_surface() {
+        let declarations = include_str!("../types/spiraltorch-wasm.d.ts");
+        for symbol in [
+            "runtimeDeviceProbeJson",
+            "runtimeDeviceProbeObject",
+            "runtimeDeviceProbeValidateJson",
+            "runtimeDeviceProbeValidateObject",
+            "runtimeDeviceProbeValidateAgainstJson",
+            "runtimeDeviceProbeValidateAgainstObject",
+            "runtimeExecutionPlanJson",
+            "runtimeExecutionPlanObject",
+            "runtimeExecutionPlanObserveCapabilitiesJson",
+            "runtimeExecutionPlanObserveCapabilitiesObject",
+            "runtimeExecutionPlanValidateJson",
+            "runtimeExecutionPlanValidateObject",
+            "runtimeExecutionPlanValidateAgainstJson",
+            "runtimeExecutionPlanValidateAgainstObject",
+        ] {
+            assert!(
+                declarations.contains(&format!("export function {symbol}(")),
+                "missing TypeScript declaration for {symbol}"
+            );
+        }
+        for type_name in [
+            "RuntimeDeviceProbe",
+            "RuntimeExecutionPlanRequestInput",
+            "RuntimeExecutionPlanRequest",
+            "RuntimeExecutionPlan",
+        ] {
+            assert!(
+                declarations.contains(&format!("export type {type_name} =")),
+                "missing TypeScript type {type_name}"
+            );
+        }
+    }
+
+    #[test]
     fn wasm_execution_plan_accepts_the_runtime_probe_transport() {
         let probe_transport = crate::runtime_probe::runtime_device_probe_value(cpu_probe_request())
             .expect("WASM runtime probe transport");

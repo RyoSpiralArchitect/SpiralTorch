@@ -232,6 +232,12 @@ impl RuntimeComponentCapabilityState {
     pub const fn is_ready(self) -> bool {
         matches!(self, Self::Static | Self::Ready)
     }
+
+    /// Returns true when observation proved that the selected implementation
+    /// cannot execute the committed workload.
+    pub const fn is_known_unready(self) -> bool {
+        matches!(self, Self::Unavailable | Self::NotBuilt | Self::Unsupported)
+    }
 }
 
 impl From<RuntimeComponentCapabilityStatus> for RuntimeComponentCapabilityState {
