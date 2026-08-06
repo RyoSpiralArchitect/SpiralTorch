@@ -348,16 +348,24 @@ pub enum MatmulBackend {
 }
 
 impl MatmulBackend {
-    fn label(self) -> &'static str {
+    /// Stable identifier used by Rust-owned execution-plan contracts.
+    pub const fn execution_id(self) -> &'static str {
         match self {
             MatmulBackend::Auto => "auto",
             MatmulBackend::CpuFaer => "faer",
-            MatmulBackend::CpuSimd => "simd",
+            MatmulBackend::CpuSimd => "cpu_simd",
             MatmulBackend::CpuNaive => "naive",
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => "wgpu",
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => "hip",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            MatmulBackend::CpuSimd => "simd",
+            _ => self.execution_id(),
         }
     }
 }
@@ -472,13 +480,18 @@ pub enum SoftmaxBackend {
 }
 
 impl SoftmaxBackend {
-    fn label(self) -> &'static str {
+    /// Stable identifier used by Rust-owned execution-plan contracts.
+    pub const fn execution_id(self) -> &'static str {
         match self {
             SoftmaxBackend::Auto => "auto",
             SoftmaxBackend::Cpu => "cpu",
             #[cfg(feature = "wgpu")]
             SoftmaxBackend::GpuWgpu => "wgpu",
         }
+    }
+
+    fn label(self) -> &'static str {
+        self.execution_id()
     }
 }
 
@@ -702,12 +715,17 @@ pub enum AttentionBackend {
 }
 
 impl AttentionBackend {
-    fn label(self) -> &'static str {
+    /// Stable identifier used by Rust-owned execution-plan contracts.
+    pub const fn execution_id(self) -> &'static str {
         match self {
             AttentionBackend::Auto => "auto",
             AttentionBackend::Cpu => "cpu",
             AttentionBackend::GpuWgpu => "wgpu",
         }
+    }
+
+    fn label(self) -> &'static str {
+        self.execution_id()
     }
 }
 
@@ -729,12 +747,17 @@ pub enum LayerNormBackend {
 }
 
 impl LayerNormBackend {
-    fn label(self) -> &'static str {
+    /// Stable identifier used by Rust-owned execution-plan contracts.
+    pub const fn execution_id(self) -> &'static str {
         match self {
             LayerNormBackend::Auto => "auto",
             LayerNormBackend::Cpu => "cpu",
             LayerNormBackend::GpuWgpu => "wgpu",
         }
+    }
+
+    fn label(self) -> &'static str {
+        self.execution_id()
     }
 }
 
@@ -756,12 +779,17 @@ pub enum TensorUtilBackend {
 }
 
 impl TensorUtilBackend {
-    fn label(self) -> &'static str {
+    /// Stable identifier used by Rust-owned execution-plan contracts.
+    pub const fn execution_id(self) -> &'static str {
         match self {
             TensorUtilBackend::Auto => "auto",
             TensorUtilBackend::Cpu => "cpu",
             TensorUtilBackend::GpuWgpu => "wgpu",
         }
+    }
+
+    fn label(self) -> &'static str {
+        self.execution_id()
     }
 }
 
@@ -11579,6 +11607,22 @@ mod tests {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         }
+    }
+
+    #[test]
+    fn backend_execution_ids_use_the_canonical_contract_vocabulary() {
+        assert_eq!(MatmulBackend::Auto.execution_id(), "auto");
+        assert_eq!(MatmulBackend::CpuFaer.execution_id(), "faer");
+        assert_eq!(MatmulBackend::CpuSimd.execution_id(), "cpu_simd");
+        assert_eq!(MatmulBackend::CpuSimd.to_string(), "simd");
+        assert_eq!(MatmulBackend::CpuNaive.execution_id(), "naive");
+        assert_eq!(LayerNormBackend::Cpu.execution_id(), "cpu");
+        assert_eq!(AttentionBackend::GpuWgpu.execution_id(), "wgpu");
+        assert_eq!(TensorUtilBackend::GpuWgpu.execution_id(), "wgpu");
+        #[cfg(feature = "wgpu")]
+        assert_eq!(SoftmaxBackend::GpuWgpu.execution_id(), "wgpu");
+        #[cfg(feature = "hip")]
+        assert_eq!(MatmulBackend::GpuHip.execution_id(), "hip");
     }
 
     struct EnvVarRestore {

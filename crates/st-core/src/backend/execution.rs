@@ -215,6 +215,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "wgpu")]
     #[test]
     fn tensor_utility_threshold_route_emits_the_core_decision() {
         let _lock = crate::telemetry::tensor_observer_lock();
@@ -252,6 +253,38 @@ mod tests {
         assert_eq!(data["values"], 8);
         assert_eq!(data["threshold"], 1024);
         assert!(data.get("backend").is_none());
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn tensor_utility_route_does_not_claim_wgpu_when_the_feature_is_disabled() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous_observer = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        );
+        let guard = push_backend_policy(policy);
+        let route = current_tensor_util_route(8);
+        drop(guard);
+        st_tensor::set_thread_meta_observer(previous_observer);
+
+        assert_eq!(route.requested_backend, TensorUtilBackend::Auto);
+        assert_eq!(route.selected_backend, TensorUtilBackend::Auto);
+        assert_eq!(route.status, TensorUtilRouteStatus::Direct);
+        assert!(!events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(op_name, _)| *op_name == "tensor_util_route"));
     }
 
     #[test]
