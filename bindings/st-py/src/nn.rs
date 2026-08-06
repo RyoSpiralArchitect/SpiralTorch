@@ -90,13 +90,14 @@ use st_nn::{
     LoraLinear as RustLoraLinear, MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
     ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
     RoundtableBandSignal, RoundtableConfig as RustRoundtableConfig, RoundtableGnnBridge,
-    RoundtableSchedule as RustRoundtableSchedule, SemanticBridge, Sequential, SparseKernel,
-    SymbolGeometry, TemperatureController, TextInfusionEvery, TextInfusionMode,
-    TrainingRunConfig as RustTrainingRunConfig, TrainingRunReport as RustTrainingRunReport,
-    WaveGate, WaveRnn, ZRelativityModule, ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer,
-    ZSpaceLayerNorm, ZSpaceMixer, ZSpaceParameterControlReceipt,
-    ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
-    ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState, ZSpaceVaeStats,
+    RoundtableSchedule as RustRoundtableSchedule, RuntimeExecutionPlanPayload, SemanticBridge,
+    Sequential, SparseKernel, SymbolGeometry, TemperatureController, TextInfusionEvery,
+    TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
+    TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
+    ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer,
+    ZSpaceParameterControlReceipt, ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState,
+    ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
@@ -5874,6 +5875,40 @@ impl PyNnModuleTrainer {
     #[getter]
     pub fn effective_backend(&self) -> &str {
         self.effective_backend.as_str()
+    }
+
+    /// Binds a canonical Rust execution plan without reconstructing its semantics in Python.
+    pub fn bind_runtime_execution_plan(&mut self, plan: &Bound<'_, PyAny>) -> PyResult<()> {
+        let value = crate::json::py_to_json(plan)?;
+        let plan: RuntimeExecutionPlanPayload = serde_json::from_value(value).map_err(|error| {
+            PyValueError::new_err(format!("invalid runtime execution-plan payload: {error}"))
+        })?;
+        self.inner
+            .bind_runtime_execution_plan(&plan)
+            .map_err(|error| {
+                PyValueError::new_err(format!("runtime execution-plan binding failed: {error}"))
+            })?;
+        self.requested_backend = plan.requested_backend.as_str().to_owned();
+        self.effective_backend = plan.effective_backend.as_str().to_owned();
+        Ok(())
+    }
+
+    #[getter]
+    pub fn runtime_execution_plan_output_sha256(&self) -> Option<String> {
+        self.inner.runtime_execution_plan_output_sha256()
+    }
+
+    #[getter]
+    pub fn runtime_execution_plan(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let Some(plan) = self.inner.runtime_execution_plan() else {
+            return Ok(None);
+        };
+        let value = serde_json::to_value(plan).map_err(|error| {
+            PyValueError::new_err(format!(
+                "runtime execution-plan contract encoding failed: {error}"
+            ))
+        })?;
+        json_to_py(py, &value).map(Some)
     }
 
     #[getter]

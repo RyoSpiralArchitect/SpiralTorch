@@ -26,7 +26,10 @@ pub mod selfsup;
 
 use crate::cloud::CloudTargetSummary;
 use crate::dataset::DataLoader;
-use crate::execution::{push_backend_policy, BackendPolicy};
+use crate::execution::{
+    push_backend_policy, BackendPolicy, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
+    TrainerExecutionContext,
+};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
@@ -2667,6 +2670,14 @@ impl GradientHealth {
 
 fn write_backend_policy_extra(policy: BackendPolicy, extra: &mut HashMap<String, f64>) {
     extra.insert(
+        "tensor_policy_runtime_plan_committed".to_string(),
+        if policy.runtime_plan_output_sha256().is_some() {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    extra.insert(
         format!(
             "tensor_policy_device_{}",
             metric_fragment(policy.device_backend_label())
@@ -2926,7 +2937,7 @@ fn strict_expected_tensor_backend(
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
     epoch: usize,
-    planner: RankPlanner,
+    execution_context: TrainerExecutionContext,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -5354,9 +5365,11 @@ impl ModuleTrainer {
             .map(|value| value.max(0.0))
             .unwrap_or(0.6);
 
+        let execution_context =
+            TrainerExecutionContext::from_device_caps_with_config(caps, execution_config);
         Ok(Self {
             epoch: 0,
-            planner: RankPlanner::with_execution_config(caps, execution_config),
+            execution_context,
             curvature: optimizer_config.curvature,
             hyper_learning_rate: optimizer_config.hyper_learning_rate,
             fallback_learning_rate: optimizer_config.fallback_learning_rate,
@@ -5925,7 +5938,38 @@ impl ModuleTrainer {
 
     /// Returns the underlying planner.
     pub fn planner(&self) -> &RankPlanner {
-        &self.planner
+        self.execution_context.planner()
+    }
+
+    /// Returns the single execution context used by planning and tensor kernels.
+    pub fn execution_context(&self) -> &TrainerExecutionContext {
+        &self.execution_context
+    }
+
+    /// Returns the executable tensor policy currently bound to this trainer.
+    pub fn backend_policy(&self) -> BackendPolicy {
+        self.execution_context.backend_policy()
+    }
+
+    /// Returns the canonical plan retained by a plan-bound trainer.
+    pub fn runtime_execution_plan(&self) -> Option<&RuntimeExecutionPlanPayload> {
+        self.execution_context.runtime_execution_plan()
+    }
+
+    /// Returns the commitment identifying the bound canonical execution plan.
+    pub fn runtime_execution_plan_output_sha256(&self) -> Option<String> {
+        self.execution_context
+            .runtime_execution_plan_output_sha256()
+    }
+
+    /// Atomically binds a validated canonical execution plan to this trainer.
+    pub fn bind_runtime_execution_plan(
+        &mut self,
+        plan: &RuntimeExecutionPlanPayload,
+    ) -> Result<(), RuntimeExecutionPlanError> {
+        let execution_context = TrainerExecutionContext::try_from_runtime_plan(plan)?;
+        self.execution_context = execution_context;
+        Ok(())
     }
 
     /// Produces the static baseline schedule for the provided output dimensions.
@@ -5940,7 +5984,7 @@ impl ModuleTrainer {
         cols: u32,
         config: RoundtableConfig,
     ) -> RoundtableSchedule {
-        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        let schedule = RoundtableSchedule::new(self.planner(), rows, cols, config);
         let bus = global_registry().event_bus();
         if bus.has_listeners("RoundtablePlanned") {
             let encode_plan = |plan: &RankPlan| {
@@ -6288,8 +6332,8 @@ impl ModuleTrainer {
     }
 
     fn optimizer_execution_topology(&self) -> TrainerExecutionTopology {
-        let caps = self.planner.device_caps();
-        let execution = self.planner.execution_config();
+        let caps = self.planner().device_caps();
+        let execution = self.planner().execution_config();
         let (training_device_enabled, training_rank, training_world_size) =
             self.accumulator_synchronizer_snapshot();
         TrainerExecutionTopology {
@@ -6300,6 +6344,7 @@ impl ModuleTrainer {
             shared_mem_per_workgroup: caps.shared_mem_per_workgroup,
             accelerator_fallback: execution.accelerator_fallback.as_str().to_owned(),
             tensor_util_wgpu_min_values: execution.tensor_util_wgpu_min_values,
+            runtime_execution_plan_output_sha256: self.runtime_execution_plan_output_sha256(),
             training_device_enabled,
             training_rank,
             training_world_size,
@@ -7120,10 +7165,7 @@ impl ModuleTrainer {
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
     pub fn step<M: Module + ?Sized>(&mut self, module: &mut M) -> PureResult<()> {
-        let backend_policy = BackendPolicy::from_device_caps_with_config(
-            self.planner.device_caps(),
-            self.planner.execution_config(),
-        );
+        let backend_policy = self.backend_policy();
         let _backend_policy_guard = push_backend_policy(backend_policy);
         self.synchronize_parameter_accumulators(module)?;
         if let Some(limit) = self.grad_clip_max_norm {
@@ -7183,6 +7225,13 @@ impl ModuleTrainer {
         I: IntoIterator,
         I::Item: IntoBatch,
     {
+        let backend_policy = self.backend_policy();
+        schedule
+            .validate_execution_context(
+                backend_policy.device_caps(),
+                backend_policy.execution_config(),
+            )
+            .map_err(|error| TensorError::Generic(error.to_string()))?;
         self.epoch = self.epoch.saturating_add(1);
         let epoch = self.epoch;
         global_registry()
@@ -7225,13 +7274,9 @@ impl ModuleTrainer {
         self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
-        let backend_policy = BackendPolicy::from_device_caps_with_config(
-            self.planner.device_caps(),
-            self.planner.execution_config(),
-        );
         let strict_expected_backend = strict_expected_tensor_backend(
-            self.planner.device_caps(),
-            self.planner.execution_config().accelerator_fallback,
+            backend_policy.device_caps(),
+            backend_policy.execution_config().accelerator_fallback,
         );
         let trace_trainer_steps = global_registry().event_bus().has_listeners("TrainerStep");
         let trace_parameter_updates = trace_trainer_steps;
@@ -8362,6 +8407,7 @@ impl ModuleTrainer {
                     },
                     "free_energy": free_energy_report.as_ref(),
                     "heuristic_adoption": heuristic_adoption_report.as_ref(),
+                    "runtime_execution_plan_output_sha256": backend_policy.runtime_plan_output_sha256_hex(),
                     "autopilot": autopilot_picks.as_ref().map(|picks| serde_json::json!({
                         "picks": picks,
                         "selection": autopilot_selection_witness.as_ref(),
@@ -8448,10 +8494,7 @@ impl ModuleTrainer {
         let result = (|| {
             let mut total_loss = 0.0f32;
             let mut steps = 0usize;
-            let backend_policy = BackendPolicy::from_device_caps_with_config(
-                self.planner.device_caps(),
-                self.planner.execution_config(),
-            );
+            let backend_policy = self.backend_policy();
             for batch in batches.into_iter() {
                 let (input, target) = batch.into_batch()?;
                 validate_trainer_tensor("trainer_eval_input", &input)?;
@@ -8642,7 +8685,7 @@ impl ModuleTrainer {
     }
 
     fn estimate_device_load(&self) -> f64 {
-        let caps = self.planner.device_caps();
+        let caps = self.planner().device_caps();
         caps.occupancy_score(caps.max_workgroup) as f64
     }
 
@@ -9361,6 +9404,14 @@ mod tests {
     };
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
+    use st_core::backend::execution_plan::{
+        evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+        RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeExecutionPlanRequest,
+        RuntimeTensorUtilOperation,
+    };
+    use st_core::backend::runtime_probe::{
+        evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
+    };
     use st_core::inference::zspace_coherence::{
         build_zspace_coherence_distribution_witness, summarize_zspace_coherence_distribution,
     };
@@ -9382,6 +9433,56 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
+
+    fn committed_cpu_execution_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
+        let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU runtime probe");
+        let request = RuntimeExecutionPlanRequest {
+            runtime_probe,
+            execution_config: config,
+            component_workloads: vec![
+                RuntimeComponentWorkload::DenseMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::PrepackedMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                    bias: true,
+                },
+                RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
+                RuntimeComponentWorkload::Attention {
+                    contexts: 1,
+                    sequence: 2,
+                    head_dim: 4,
+                    z_bias: true,
+                    attn_bias: true,
+                },
+                RuntimeComponentWorkload::Softmax { rows: 2, cols: 8 },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::Scale,
+                    rows: 32,
+                    cols: 64,
+                },
+            ],
+            component_capabilities: Vec::new(),
+            tensor_util_values: None,
+            required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
+        };
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("CPU dense-matmul capability observation");
+        evaluate_runtime_execution_plan(request).expect("committed CPU execution plan")
+    }
 
     fn parameter_control_report(
         state: ZSpaceMetaOptimizerState,
@@ -9557,6 +9658,46 @@ mod tests {
 
     impl Module for IdentityModule {
         fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+    }
+
+    struct PolicyCaptureModule {
+        commitments: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    impl PolicyCaptureModule {
+        fn new(commitments: Arc<Mutex<Vec<Option<String>>>>) -> Self {
+            Self { commitments }
+        }
+    }
+
+    impl Module for PolicyCaptureModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            let commitment = st_core::backend::execution::current_backend_policy()
+                .and_then(BackendPolicy::runtime_plan_output_sha256_hex);
+            self.commitments
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(commitment);
             Ok(input.clone())
         }
 
@@ -9811,6 +9952,7 @@ mod tests {
         factor: f32,
         calls: Arc<Mutex<usize>>,
         policy_requests: Option<Arc<Mutex<Vec<&'static str>>>>,
+        policy_commitments: Option<Arc<Mutex<Vec<Option<String>>>>>,
         rank: usize,
         world_size: usize,
     }
@@ -9821,6 +9963,7 @@ mod tests {
                 factor,
                 calls,
                 policy_requests: None,
+                policy_commitments: None,
                 rank: 1,
                 world_size: 2,
             }
@@ -9828,6 +9971,14 @@ mod tests {
 
         fn with_policy_capture(mut self, capture: Arc<Mutex<Vec<&'static str>>>) -> Self {
             self.policy_requests = Some(capture);
+            self
+        }
+
+        fn with_policy_commitment_capture(
+            mut self,
+            capture: Arc<Mutex<Vec<Option<String>>>>,
+        ) -> Self {
+            self.policy_commitments = Some(capture);
             self
         }
     }
@@ -9857,6 +10008,14 @@ mod tests {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .push(requested_backend);
+            }
+            if let Some(capture) = &self.policy_commitments {
+                let commitment = st_core::backend::execution::current_backend_policy()
+                    .and_then(BackendPolicy::runtime_plan_output_sha256_hex);
+                capture
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(commitment);
             }
             for value in gradients {
                 *value *= self.factor;
@@ -11200,10 +11359,181 @@ mod tests {
     }
 
     #[test]
+    fn trainer_binds_committed_execution_plan_transactionally() {
+        let initial_config = ExecutionConfig::new(AcceleratorFallback::Allow, 1024);
+        let mut trainer = ModuleTrainer::new_with_execution_config(
+            DeviceCaps::wgpu(32, true, 256),
+            initial_config,
+            -1.0,
+            0.05,
+            0.01,
+        );
+        let committed_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
+        let plan = committed_cpu_execution_plan(committed_config);
+
+        trainer
+            .bind_runtime_execution_plan(&plan)
+            .expect("committed plan binds");
+
+        assert_eq!(trainer.planner().device_caps(), DeviceCaps::cpu());
+        assert_eq!(trainer.planner().execution_config(), committed_config);
+        assert_eq!(trainer.backend_policy().device_caps(), DeviceCaps::cpu());
+        assert_eq!(
+            trainer.backend_policy().execution_config(),
+            committed_config
+        );
+        assert_eq!(trainer.runtime_execution_plan(), Some(&plan));
+        assert_eq!(
+            trainer.runtime_execution_plan_output_sha256().as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+
+        let mut tampered = plan.clone();
+        tampered.output_sha256 = "0".repeat(64);
+        trainer
+            .bind_runtime_execution_plan(&tampered)
+            .expect_err("tampered plan must not bind");
+
+        assert_eq!(trainer.runtime_execution_plan(), Some(&plan));
+        assert_eq!(trainer.planner().device_caps(), DeviceCaps::cpu());
+        assert_eq!(trainer.planner().execution_config(), committed_config);
+    }
+
+    #[test]
+    fn committed_execution_plan_scopes_step_train_and_evaluate() {
+        assert!(st_core::backend::execution::current_backend_policy().is_none());
+        let plan =
+            committed_cpu_execution_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
+        let expected_commitment = Some(plan.output_sha256.clone());
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        trainer
+            .bind_runtime_execution_plan(&plan)
+            .expect("committed plan binds");
+
+        let calls = Arc::new(Mutex::new(0usize));
+        let step_commitments = Arc::new(Mutex::new(Vec::new()));
+        trainer.set_training_device(
+            ScalingTrainingDevice::new(1.0, Arc::clone(&calls))
+                .with_policy_commitment_capture(Arc::clone(&step_commitments)),
+        );
+        let mut step_module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        step_module.accumulate();
+        trainer.step(&mut step_module).unwrap();
+
+        assert_eq!(
+            *step_commitments
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            vec![expected_commitment.clone()]
+        );
+
+        let forward_commitments = Arc::new(Mutex::new(Vec::new()));
+        let mut module = PolicyCaptureModule::new(Arc::clone(&forward_commitments));
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batch = (
+            Tensor::from_vec(1, 1, vec![0.25]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        );
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut module, &mut loss, vec![batch.clone()], &schedule)
+            .unwrap();
+        trainer
+            .evaluate_epoch(&mut module, &mut loss, vec![batch])
+            .unwrap();
+
+        assert_eq!(
+            *forward_commitments
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            vec![expected_commitment.clone(), expected_commitment]
+        );
+        assert!(st_core::backend::execution::current_backend_policy().is_none());
+    }
+
+    #[test]
+    fn plan_bound_checkpoint_requires_the_same_execution_plan_on_restore() {
+        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
+        let plan = committed_cpu_execution_plan(config);
+        let mut source_trainer =
+            ModuleTrainer::new_with_execution_config(DeviceCaps::cpu(), config, -1.0, 0.05, 0.01);
+        source_trainer
+            .bind_runtime_execution_plan(&plan)
+            .expect("source plan binds");
+        let mut source_module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        source_trainer.prepare(&mut source_module).unwrap();
+        let checkpoint = source_trainer.optimizer_checkpoint(&source_module).unwrap();
+
+        assert_eq!(
+            checkpoint
+                .topology
+                .runtime_execution_plan_output_sha256
+                .as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+
+        let mut target_trainer =
+            ModuleTrainer::new_with_execution_config(DeviceCaps::cpu(), config, -1.0, 0.05, 0.01);
+        let mut target_module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        target_trainer.prepare(&mut target_module).unwrap();
+        let trainer_before = target_trainer.optimizer_state();
+        let parameter_before = target_module.param.optimizer_checkpoint_state();
+
+        assert!(matches!(
+            target_trainer.restore_optimizer_checkpoint(&mut target_module, &checkpoint),
+            Err(TrainerCheckpointError::TopologyMismatch)
+        ));
+        assert_eq!(target_trainer.optimizer_state(), trainer_before);
+        assert_eq!(
+            target_module.param.optimizer_checkpoint_state(),
+            parameter_before
+        );
+
+        target_trainer
+            .bind_runtime_execution_plan(&plan)
+            .expect("target plan binds");
+        target_trainer
+            .restore_optimizer_checkpoint(&mut target_module, &checkpoint)
+            .expect("matching plan restores");
+    }
+
+    #[test]
+    fn trainer_rejects_schedule_from_a_different_execution_context_before_epoch_start() {
+        let mut trainer = ModuleTrainer::new_with_execution_config(
+            DeviceCaps::cpu(),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 37),
+            -1.0,
+            0.05,
+            0.01,
+        );
+        let foreign_planner = RankPlanner::with_execution_config(
+            DeviceCaps::cpu(),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        );
+        let schedule = RoundtableSchedule::new(&foreign_planner, 1, 1, RoundtableConfig::default());
+        let mut module = IdentityModule;
+        let mut loss = MeanSquaredError::new();
+        let batch = (
+            Tensor::from_vec(1, 1, vec![0.25]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        );
+
+        let error = trainer
+            .train_epoch(&mut module, &mut loss, vec![batch], &schedule)
+            .expect_err("foreign schedule must be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("execution config differs from the trainer execution context"));
+        assert_eq!(trainer.epoch, 0);
+    }
+
+    #[test]
     fn trainer_step_scopes_core_backend_policy_over_accumulator_sync() {
         assert!(st_core::backend::execution::current_backend_policy().is_none());
         let caps = DeviceCaps::wgpu(32, true, 256);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let expected_backend = trainer.backend_policy().tensor_util_backend_label();
         let calls = Arc::new(Mutex::new(0usize));
         let policy_requests = Arc::new(Mutex::new(Vec::new()));
         trainer.set_training_device(
@@ -11219,7 +11549,7 @@ mod tests {
             *policy_requests
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
-            vec!["wgpu"]
+            vec![expected_backend]
         );
         assert!(st_core::backend::execution::current_backend_policy().is_none());
     }

@@ -338,6 +338,7 @@ mod tests {
                 shared_mem_per_workgroup: None,
                 accelerator_fallback: "allow".to_owned(),
                 tensor_util_wgpu_min_values: 1024,
+                runtime_execution_plan_output_sha256: None,
                 training_device_enabled: false,
                 training_rank: 0,
                 training_world_size: 1,

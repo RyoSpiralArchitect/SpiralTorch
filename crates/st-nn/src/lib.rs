@@ -50,6 +50,7 @@ pub use execution::{
     current_layer_norm_backend, current_matmul_backend, current_prepacked_matmul_backend,
     current_softmax_backend, current_tensor_util_backend, current_tensor_util_backend_for_values,
     push_backend_policy, AcceleratorFallback, BackendPolicy, BackendPolicyGuard, ExecutionConfig,
+    RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, TrainerExecutionContext,
 };
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
@@ -126,7 +127,10 @@ pub use roundtable::{
     GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
     OutcomeBand, RoundtableGnnBridge, RoundtableNode,
 };
-pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
+pub use schedule::{
+    BandEnergy, GradientBands, RoundtableConfig, RoundtableExecutionContextError,
+    RoundtableSchedule,
+};
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };

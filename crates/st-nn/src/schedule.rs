@@ -6,6 +6,8 @@
 use crate::execution::current_tensor_util_backend_for_values;
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
+use st_core::backend::device_caps::DeviceCaps;
+use st_core::backend::execution_plan::ExecutionConfig;
 use st_core::backend::unison_heuristics::Choice;
 use st_core::heur::free_energy::{BandEnergy as CoreBandEnergy, FreeEnergyError};
 use st_core::ops::rank_entry::{RankPlan, RankPlanError};
@@ -32,6 +34,27 @@ pub enum KnobOverrideError {
         band: &'static str,
         #[source]
         source: RankPlanError,
+    },
+}
+
+/// Failure to use a schedule under a different execution contract.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum RoundtableExecutionContextError {
+    #[error(
+        "roundtable {band} device capabilities differ from the trainer execution context: expected {expected:?}, got {actual:?}"
+    )]
+    DeviceCapsMismatch {
+        band: &'static str,
+        expected: DeviceCaps,
+        actual: DeviceCaps,
+    },
+    #[error(
+        "roundtable {band} execution config differs from the trainer execution context: expected {expected:?}, got {actual:?}"
+    )]
+    ExecutionConfigMismatch {
+        band: &'static str,
+        expected: ExecutionConfig,
+        actual: ExecutionConfig,
     },
 }
 
@@ -172,6 +195,35 @@ impl RoundtableSchedule {
             #[cfg(feature = "collapse")]
             collapse_enabled: config.collapse_enabled && config.psi_enabled,
         }
+    }
+
+    /// Verifies that every band was planned for the trainer's execution context.
+    pub fn validate_execution_context(
+        &self,
+        expected_caps: DeviceCaps,
+        expected_config: ExecutionConfig,
+    ) -> Result<(), RoundtableExecutionContextError> {
+        for (band, plan) in [
+            ("above", &self.above),
+            ("here", &self.here),
+            ("beneath", &self.beneath),
+        ] {
+            if plan.device_caps != expected_caps {
+                return Err(RoundtableExecutionContextError::DeviceCapsMismatch {
+                    band,
+                    expected: expected_caps,
+                    actual: plan.device_caps,
+                });
+            }
+            if plan.execution_config != expected_config {
+                return Err(RoundtableExecutionContextError::ExecutionConfigMismatch {
+                    band,
+                    expected: expected_config,
+                    actual: plan.execution_config,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Applies knob overrides produced by the Autopilot runtime.

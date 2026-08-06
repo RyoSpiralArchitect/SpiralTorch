@@ -8333,6 +8333,14 @@ class _NnModuleTrainer:
     @property
     def effective_backend(self) -> str: ...
 
+    def bind_runtime_execution_plan(self, plan: Mapping[str, Any]) -> None: ...
+
+    @property
+    def runtime_execution_plan_output_sha256(self) -> str | None: ...
+
+    @property
+    def runtime_execution_plan(self) -> Dict[str, Any] | None: ...
+
     def roundtable(
         self,
         rows: int,
