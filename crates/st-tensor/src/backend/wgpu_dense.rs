@@ -291,6 +291,14 @@ struct LazyComputePipeline {
     pipeline: OnceLock<PipelineCacheEntry>,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LazyPipelineState {
+    Uninitialized,
+    Ready,
+    Unavailable,
+}
+
 impl LazyComputePipeline {
     #[cfg(not(target_arch = "wasm32"))]
     fn new(
@@ -309,7 +317,7 @@ impl LazyComputePipeline {
     }
 
     fn get(&self, device: &Device) -> Result<Arc<ComputePipeline>, String> {
-        match self.pipeline.get_or_init(|| {
+        self.get_or_init_with(|| {
             let shader = create_wgsl_module(device, self.label, self.source.as_ref())
                 .map_err(|error| error.to_string())?;
             create_compute_pipeline(
@@ -321,15 +329,31 @@ impl LazyComputePipeline {
             )
             .map(Arc::new)
             .map_err(|error| error.to_string())
-        }) {
+        })
+    }
+
+    fn get_or_init_with(
+        &self,
+        initialize: impl FnOnce() -> PipelineCacheEntry,
+    ) -> Result<Arc<ComputePipeline>, String> {
+        match self.pipeline.get_or_init(initialize) {
             Ok(pipeline) => Ok(Arc::clone(pipeline)),
             Err(error) => Err(error.clone()),
         }
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn state(&self) -> LazyPipelineState {
+        match self.pipeline.get() {
+            None => LazyPipelineState::Uninitialized,
+            Some(Ok(_)) => LazyPipelineState::Ready,
+            Some(Err(_)) => LazyPipelineState::Unavailable,
+        }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     fn is_compiled(&self) -> bool {
-        matches!(self.pipeline.get(), Some(Ok(_)))
+        self.state() == LazyPipelineState::Ready
     }
 }
 
@@ -668,16 +692,16 @@ struct GpuContext {
     supports_subgroup: bool,
     adapter_info: AdapterInfo,
     softmax_layout: BindGroupLayout,
-    softmax_workgroup_pipeline: Option<Arc<ComputePipeline>>,
-    softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
-    softmax_zspace_layout: Option<BindGroupLayout>,
-    softmax_zspace_pipeline: Option<Arc<ComputePipeline>>,
-    softmax_spiral_layout: Option<BindGroupLayout>,
-    softmax_spiral_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_workgroup_pipeline: LazyComputePipeline,
+    softmax_subgroup_pipeline: Option<LazyComputePipeline>,
+    softmax_zspace_layout: BindGroupLayout,
+    softmax_zspace_pipeline: LazyComputePipeline,
+    softmax_spiral_layout: BindGroupLayout,
+    softmax_spiral_pipeline: LazyComputePipeline,
     softmax_variants: Mutex<HashMap<String, SoftmaxVariant>>,
     softmax_history: Mutex<Vec<SoftmaxSelectionRecord>>,
     softmax_telemetry_keys: Mutex<HashMap<String, AutotuneKey>>,
-    fused_attention: Option<FusedAttentionKernel>,
+    fused_attention: FusedAttentionKernel,
     fused_gelu_back_layout: BindGroupLayout,
     fused_gelu_back_pipeline: LazyComputePipeline,
     reduce_db_layout: BindGroupLayout,
@@ -699,7 +723,7 @@ struct GpuContext {
 
 struct FusedAttentionKernel {
     layout: BindGroupLayout,
-    pipeline: Arc<ComputePipeline>,
+    pipeline: LazyComputePipeline,
     max_head_dim: u32,
 }
 
@@ -867,47 +891,28 @@ impl GpuContext {
             ],
         });
 
-        let softmax_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let softmax_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.softmax.pipeline_layout"),
                 bind_group_layouts: &[&softmax_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
-        let softmax_workgroup_pipeline = create_wgsl_module(
-            device.as_ref(),
+        let softmax_workgroup_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.softmax",
             ROW_SOFTMAX_WGSL,
-        )
-        .and_then(|shader| {
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.softmax",
-                Some(&softmax_pipeline_layout),
-                &shader,
-                "main_cs",
-            )
-            .map(Arc::new)
-        })
-        .ok();
+            "main_cs",
+            Arc::clone(&softmax_pipeline_layout),
+        );
 
         let softmax_subgroup_pipeline = if supports_subgroup {
-            create_wgsl_module(
-                device.as_ref(),
+            Some(LazyComputePipeline::new(
                 "st.tensor.wgpu_dense.softmax.subgroup",
                 ROW_SOFTMAX_SUBGROUP_WGSL,
-            )
-            .and_then(|shader| {
-                create_compute_pipeline(
-                    device.as_ref(),
-                    "st.tensor.wgpu_dense.softmax.subgroup",
-                    Some(&softmax_pipeline_layout),
-                    &shader,
-                    "main_cs",
-                )
-                .map(Arc::new)
-            })
-            .ok()
+                "main_cs",
+                softmax_pipeline_layout,
+            ))
         } else {
             None
         };
@@ -949,29 +954,20 @@ impl GpuContext {
                 ],
             });
 
-        let softmax_zspace_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let softmax_zspace_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.softmax_zspace.pipeline_layout"),
                 bind_group_layouts: &[&softmax_zspace_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
-        let softmax_zspace_pipeline = create_wgsl_module(
-            device.as_ref(),
+        let softmax_zspace_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.softmax_zspace",
             SOFTMAX_ZSPACE_WGSL,
-        )
-        .and_then(|shader| {
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.softmax_zspace",
-                Some(&softmax_zspace_pipeline_layout),
-                &shader,
-                "main",
-            )
-            .map(Arc::new)
-        })
-        .ok();
+            "main",
+            softmax_zspace_pipeline_layout,
+        );
 
         let softmax_spiral_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1030,29 +1026,20 @@ impl GpuContext {
                 ],
             });
 
-        let softmax_spiral_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let softmax_spiral_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.softmax_spiral.pipeline_layout"),
                 bind_group_layouts: &[&softmax_spiral_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
-        let softmax_spiral_pipeline = create_wgsl_module(
-            device.as_ref(),
+        let softmax_spiral_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.softmax_spiral",
             SOFTMAX_SPIRAL_WGSL,
-        )
-        .and_then(|shader| {
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.softmax_spiral",
-                Some(&softmax_spiral_pipeline_layout),
-                &shader,
-                "main",
-            )
-            .map(Arc::new)
-        })
-        .ok();
+            "main",
+            softmax_spiral_pipeline_layout,
+        );
 
         let fused_gelu_back_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1334,112 +1321,101 @@ impl GpuContext {
         let tensor_util_pipelines =
             TensorUtilPipelineCache::new(device.clone(), tensor_util_pipeline_layout);
 
-        let fused_attention = {
-            let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
-                .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
-                .replace("{MAX_HEAD_DIM}", &FUSED_ATTENTION_MAX_HEAD_DIM.to_string());
-            create_wgsl_module(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.fused_attention.shader",
-                shader_source.as_str(),
-            )
-            .and_then(|shader| {
-                let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("st.tensor.wgpu_dense.fused_attention.layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+        let fused_attention_shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
+            .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
+            .replace("{MAX_HEAD_DIM}", &FUSED_ATTENTION_MAX_HEAD_DIM.to_string());
+        let fused_attention_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_attention.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 4,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 5,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 6,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
-                    ],
-                });
-                let pipeline_layout =
-                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("st.tensor.wgpu_dense.fused_attention.pipeline_layout"),
-                        bind_group_layouts: &[&layout],
-                        push_constant_ranges: &[],
-                    });
-                create_compute_pipeline(
-                    device.as_ref(),
-                    "st.tensor.wgpu_dense.fused_attention",
-                    Some(&pipeline_layout),
-                    &shader,
-                    "main",
-                )
-                .map(Arc::new)
-                .map(|pipeline| FusedAttentionKernel {
-                    layout,
-                    pipeline,
-                    max_head_dim: FUSED_ATTENTION_MAX_HEAD_DIM,
-                })
-            })
-            .ok()
+                        count: None,
+                    },
+                ],
+            });
+        let fused_attention_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_attention.pipeline_layout"),
+                bind_group_layouts: &[&fused_attention_layout],
+                push_constant_ranges: &[],
+            },
+        ));
+        let fused_attention = FusedAttentionKernel {
+            layout: fused_attention_layout,
+            pipeline: LazyComputePipeline::new(
+                "st.tensor.wgpu_dense.fused_attention",
+                fused_attention_shader_source,
+                "main",
+                fused_attention_pipeline_layout,
+            ),
+            max_head_dim: FUSED_ATTENTION_MAX_HEAD_DIM,
         };
 
         let fused_conv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1626,13 +1602,9 @@ impl GpuContext {
             ramanujan_layout,
             ramanujan_pipeline_layout,
             ramanujan_pipeline: OnceLock::new(),
-            softmax_zspace_layout: softmax_zspace_pipeline
-                .as_ref()
-                .map(|_| softmax_zspace_layout),
+            softmax_zspace_layout,
             softmax_zspace_pipeline,
-            softmax_spiral_layout: softmax_spiral_pipeline
-                .as_ref()
-                .map(|_| softmax_spiral_layout),
+            softmax_spiral_layout,
             softmax_spiral_pipeline,
         })
     }
@@ -1654,8 +1626,12 @@ impl GpuContext {
 
     fn softmax_pipeline_variant(&self, variant: SoftmaxVariant) -> Option<Arc<ComputePipeline>> {
         match variant {
-            SoftmaxVariant::Workgroup => self.softmax_workgroup_pipeline.as_ref().map(Arc::clone),
-            SoftmaxVariant::Subgroup => self.softmax_subgroup_pipeline.as_ref().map(Arc::clone),
+            SoftmaxVariant::Workgroup => self.softmax_workgroup_pipeline.get(self.device()).ok(),
+            SoftmaxVariant::Subgroup => self
+                .softmax_subgroup_pipeline
+                .as_ref()?
+                .get(self.device())
+                .ok(),
         }
     }
 
@@ -2068,7 +2044,7 @@ impl GpuContext {
     }
 
     fn supports_softmax(&self) -> bool {
-        self.softmax_workgroup_pipeline.is_some()
+        self.softmax_workgroup_pipeline.get(self.device()).is_ok()
     }
 
     fn select_tile_config(&self, rows: usize, inner: usize, cols: usize) -> TileConfig {
@@ -2143,8 +2119,9 @@ impl GpuContext {
         Ok(prepared)
     }
 
-    fn fused_attention_kernel(&self) -> Option<&FusedAttentionKernel> {
-        self.fused_attention.as_ref()
+    fn fused_attention_kernel(&self) -> Option<(&FusedAttentionKernel, Arc<ComputePipeline>)> {
+        let pipeline = self.fused_attention.pipeline.get(self.device()).ok()?;
+        Some((&self.fused_attention, pipeline))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2234,7 +2211,7 @@ impl GpuContext {
         metrics: &Buffer,
         params: &Buffer,
     ) -> Option<BindGroup> {
-        let layout = self.softmax_zspace_layout.as_ref()?;
+        let layout = &self.softmax_zspace_layout;
         let descriptor = wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax_zspace.bind_group"),
             layout,
@@ -2264,7 +2241,7 @@ impl GpuContext {
         metrics: &Buffer,
         params: &Buffer,
     ) -> Option<BindGroup> {
-        let layout = self.softmax_spiral_layout.as_ref()?;
+        let layout = &self.softmax_spiral_layout;
         let descriptor = wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax_spiral.bind_group"),
             layout,
@@ -2301,7 +2278,7 @@ impl GpuContext {
         layout: &SoftmaxLayoutDesc,
         output: &Buffer,
     ) -> Option<SoftmaxZProjectMetrics> {
-        let pipeline = self.softmax_zspace_pipeline.as_ref()?;
+        let pipeline = self.softmax_zspace_pipeline.get(self.device()).ok()?;
         if rows == 0 || cols == 0 {
             return None;
         }
@@ -2426,7 +2403,7 @@ impl GpuContext {
         softmax: &Buffer,
         mask: &Buffer,
     ) -> Option<SpiralConsensusResources> {
-        let pipeline = self.softmax_spiral_pipeline.as_ref()?;
+        let pipeline = self.softmax_spiral_pipeline.get(self.device()).ok()?;
         if rows == 0 || cols == 0 {
             return None;
         }
@@ -2497,7 +2474,7 @@ impl GpuContext {
         Some(SpiralConsensusResources {
             rows: rows_u32,
             bind_group,
-            pipeline: Arc::clone(pipeline),
+            pipeline,
             spiral_buffer,
             metrics_buffer,
             _params_buffer: params_buffer,
@@ -4325,6 +4302,15 @@ mod tests {
     }
 
     #[test]
+    fn fused_attention_template_limit_rejects_without_runtime() {
+        assert!(!supports_fused_attention(
+            1,
+            1,
+            FUSED_ATTENTION_MAX_HEAD_DIM as usize + 1
+        ));
+    }
+
+    #[test]
     fn softmax_subgroup_shader_wgsl_is_valid() {
         assert_parses("row softmax subgroup", ROW_SOFTMAX_SUBGROUP_WGSL);
     }
@@ -4412,6 +4398,157 @@ mod tests {
             .expect("layer norm pipeline should compile");
         assert!(ctx.reduce_db_pipeline.is_compiled());
         assert!(ctx.layer_norm_pipeline.is_compiled());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn capability_pipelines_preserve_lazy_three_state_semantics() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!("skipping runtime WGPU cache test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1");
+            return;
+        }
+
+        let ctx = GpuContext::new().expect("WGPU context should initialize");
+        assert_eq!(
+            ctx.softmax_workgroup_pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+        assert_eq!(
+            ctx.softmax_zspace_pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+        assert_eq!(
+            ctx.softmax_spiral_pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+        assert_eq!(
+            ctx.fused_attention.pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+
+        assert!(ctx.supports_softmax());
+        assert_eq!(
+            ctx.softmax_workgroup_pipeline.state(),
+            LazyPipelineState::Ready
+        );
+        assert_eq!(
+            ctx.softmax_zspace_pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+        assert_eq!(
+            ctx.softmax_spiral_pipeline.state(),
+            LazyPipelineState::Uninitialized
+        );
+
+        if let Some(subgroup) = ctx.softmax_subgroup_pipeline.as_ref() {
+            let selected = ctx.softmax_pipeline_variant(SoftmaxVariant::Subgroup);
+            let expected = if selected.is_some() {
+                LazyPipelineState::Ready
+            } else {
+                LazyPipelineState::Unavailable
+            };
+            assert_eq!(subgroup.state(), expected);
+        }
+
+        ctx.softmax_zspace_pipeline
+            .get(ctx.device())
+            .expect("Z-space softmax probe should compile");
+        ctx.softmax_spiral_pipeline
+            .get(ctx.device())
+            .expect("spiral softmax probe should compile");
+        ctx.fused_attention_kernel()
+            .expect("fused attention capability should compile");
+        assert_eq!(
+            ctx.softmax_zspace_pipeline.state(),
+            LazyPipelineState::Ready
+        );
+        assert_eq!(
+            ctx.softmax_spiral_pipeline.state(),
+            LazyPipelineState::Ready
+        );
+        assert_eq!(
+            ctx.fused_attention.pipeline.state(),
+            LazyPipelineState::Ready
+        );
+
+        let unavailable = LazyComputePipeline::new(
+            "st.tensor.wgpu_dense.unavailable_test_pipeline",
+            LAYER_NORM_WGSL,
+            "main",
+            Arc::clone(&ctx.layer_norm_pipeline.layout),
+        );
+        assert_eq!(unavailable.state(), LazyPipelineState::Uninitialized);
+        let first_error = unavailable
+            .get_or_init_with(|| Err("synthetic capability failure".to_string()))
+            .expect_err("failed compilation must make the capability unavailable");
+        assert_eq!(unavailable.state(), LazyPipelineState::Unavailable);
+        let cached_error = unavailable
+            .get_or_init_with(|| panic!("unavailable capability must not be recompiled"))
+            .expect_err("an unavailable capability must preserve its first error");
+        assert_eq!(cached_error, first_error);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn lazy_capability_pipelines_preserve_softmax_and_attention_results() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!(
+                "skipping runtime WGPU result test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1"
+            );
+            return;
+        }
+
+        let logits = vec![-1.5, 0.0, 0.75, 2.0, 4.0, -0.5, 1.25, 0.25];
+        let softmax = row_softmax(&logits, 2, 4, Layout::RowMajor)
+            .expect("lazy softmax pipeline should execute");
+        for (input_row, output_row) in logits.chunks_exact(4).zip(softmax.chunks_exact(4)) {
+            let max = input_row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let denominator = input_row
+                .iter()
+                .map(|value| (*value - max).exp())
+                .sum::<f32>();
+            for (&input, &actual) in input_row.iter().zip(output_row) {
+                let expected = (input - max).exp() / denominator;
+                assert!((actual - expected).abs() < 1e-5);
+            }
+        }
+
+        let contexts = 1;
+        let sequence = 3;
+        let head_dim = 2;
+        let scale = 0.5;
+        let queries = vec![0.2, -0.4, 0.7, 0.1, -0.3, 0.8];
+        let keys = vec![0.5, 0.25, -0.2, 0.9, 0.6, -0.7];
+        let values = vec![1.0, -0.5, 0.25, 0.75, -0.8, 0.4];
+        let attention = fused_attention(
+            &queries, &keys, &values, contexts, sequence, head_dim, scale, None, None,
+        )
+        .expect("lazy fused-attention pipeline should execute");
+
+        for query_index in 0..sequence {
+            let mut logits = Vec::with_capacity(sequence);
+            for key_index in 0..sequence {
+                let dot = (0..head_dim)
+                    .map(|dim| {
+                        queries[query_index * head_dim + dim] * keys[key_index * head_dim + dim]
+                    })
+                    .sum::<f32>();
+                logits.push(dot * scale);
+            }
+            let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let denominator = logits.iter().map(|value| (*value - max).exp()).sum::<f32>();
+            for dim in 0..head_dim {
+                let expected = logits
+                    .iter()
+                    .enumerate()
+                    .map(|(key_index, logit)| {
+                        ((*logit - max).exp() / denominator) * values[key_index * head_dim + dim]
+                    })
+                    .sum::<f32>();
+                let actual = attention[query_index * head_dim + dim];
+                assert!((actual - expected).abs() < 1e-5);
+            }
+        }
     }
 
     #[test]
@@ -9925,7 +10062,9 @@ pub fn supports_layer_norm(rows: usize, cols: usize) -> bool {
     if rows > u32::MAX as usize || cols > u32::MAX as usize {
         return false;
     }
-    dense_context().is_ok()
+    dense_context()
+        .map(|ctx| ctx.layer_norm_pipeline.get(ctx.device()).is_ok())
+        .unwrap_or(false)
 }
 
 pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
@@ -10044,18 +10183,16 @@ pub fn fused_attention(
     {
         return Err("attention dimensions exceed u32 dispatch range".into());
     }
-
-    let ctx = dense_context()?;
-    let kernel = ctx
-        .fused_attention_kernel()
-        .ok_or_else(|| "fused attention kernel unavailable on this device".to_string())?;
-
-    if (head_dim as u32) > kernel.max_head_dim {
+    if head_dim > FUSED_ATTENTION_MAX_HEAD_DIM as usize {
         return Err(format!(
-            "head dimension {} exceeds templated maximum {}",
-            head_dim, kernel.max_head_dim
+            "head dimension {head_dim} exceeds templated maximum {FUSED_ATTENTION_MAX_HEAD_DIM}"
         ));
     }
+
+    let ctx = dense_context()?;
+    let (kernel, pipeline) = ctx
+        .fused_attention_kernel()
+        .ok_or_else(|| "fused attention kernel unavailable on this device".to_string())?;
 
     let device = ctx.device();
     let queue = ctx.queue();
@@ -10139,7 +10276,7 @@ pub fn fused_attention(
             label: Some("st.tensor.wgpu_dense.attn.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(kernel.pipeline.as_ref());
+        pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(sequence as u32, contexts as u32, 1);
     }
@@ -10156,10 +10293,11 @@ pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usiz
     {
         return false;
     }
+    if head_dim > FUSED_ATTENTION_MAX_HEAD_DIM as usize {
+        return false;
+    }
     if let Ok(ctx) = dense_context() {
-        ctx.fused_attention_kernel()
-            .filter(|kernel| (head_dim as u32) <= kernel.max_head_dim)
-            .is_some()
+        ctx.fused_attention_kernel().is_some()
     } else {
         false
     }
