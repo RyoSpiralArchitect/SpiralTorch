@@ -58,6 +58,13 @@ pub enum RuntimeExecutionPlanError {
         planned: String,
         local: String,
     },
+    #[error(
+        "local tensor backend for component '{component}' emitted unsupported execution id '{backend}'"
+    )]
+    UnsupportedLocalBackend {
+        component: &'static str,
+        backend: String,
+    },
 }
 
 /// Tensor components whose backend choices are owned by the execution plan.
@@ -287,15 +294,24 @@ impl BackendPolicy {
 
     /// Builds a deterministic policy from explicit device capabilities and configuration.
     pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+        let runtime_policy = runtime_tensor_policy_for(caps.backend);
+        Self::from_runtime_tensor_policy(caps, config, &runtime_policy)
+    }
+
+    fn from_runtime_tensor_policy(
+        caps: DeviceCaps,
+        config: ExecutionConfig,
+        runtime_policy: &RuntimeTensorBackendPolicy,
+    ) -> Self {
         Self {
             caps,
             config,
-            matmul_backend: matmul_backend_for(caps.backend),
-            prepacked_matmul_backend: prepacked_matmul_backend_for(caps.backend),
-            layer_norm_backend: layer_norm_backend_for(caps.backend),
-            attention_backend: attention_backend_for(caps.backend),
-            softmax_backend: softmax_backend_for(caps.backend),
-            tensor_util_backend: tensor_util_backend_for(caps.backend),
+            matmul_backend: matmul_backend_for(runtime_policy.dense_matmul),
+            prepacked_matmul_backend: prepacked_matmul_backend_for(runtime_policy.prepacked_matmul),
+            layer_norm_backend: layer_norm_backend_for(runtime_policy.layer_norm),
+            attention_backend: attention_backend_for(runtime_policy.attention),
+            softmax_backend: softmax_backend_for(runtime_policy.softmax),
+            tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
             runtime_plan_output_sha256: None,
         }
     }
@@ -331,6 +347,7 @@ impl BackendPolicy {
         attention_backend: AttentionBackend,
         softmax_backend: SoftmaxBackend,
     ) -> Self {
+        let runtime_policy = runtime_tensor_policy_for(caps.backend);
         Self {
             caps,
             config,
@@ -339,7 +356,7 @@ impl BackendPolicy {
             layer_norm_backend,
             attention_backend,
             softmax_backend,
-            tensor_util_backend: tensor_util_backend_for(caps.backend),
+            tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
             runtime_plan_output_sha256: None,
         }
     }
@@ -358,47 +375,20 @@ impl BackendPolicy {
                 blockers: plan.blockers.clone(),
             });
         }
-        let mut policy = Self::from_device_caps_with_config(
+        let mut policy = Self::from_runtime_tensor_policy(
             plan.request.runtime_probe.caps(),
             plan.request.execution_config,
+            &plan.policy,
         );
-        for (component, planned, local) in [
-            (
-                RuntimeExecutionComponent::DenseMatmul,
-                plan.policy.dense_matmul.as_str(),
-                policy.matmul_backend_label(),
-            ),
-            (
-                RuntimeExecutionComponent::PrepackedMatmul,
-                plan.policy.prepacked_matmul.as_str(),
-                policy.prepacked_matmul_backend_label(),
-            ),
-            (
-                RuntimeExecutionComponent::LayerNorm,
-                plan.policy.layer_norm.as_str(),
-                policy.layer_norm_backend_label(),
-            ),
-            (
-                RuntimeExecutionComponent::Attention,
-                plan.policy.attention.as_str(),
-                policy.attention_backend_label(),
-            ),
-            (
-                RuntimeExecutionComponent::Softmax,
-                plan.policy.softmax.as_str(),
-                policy.softmax_backend_label(),
-            ),
-            (
-                RuntimeExecutionComponent::TensorUtil,
-                plan.policy.tensor_util.as_str(),
-                policy.tensor_util_backend_label(),
-            ),
-        ] {
+        let local_policy = policy.runtime_tensor_policy()?;
+        for component in RuntimeExecutionComponent::ALL {
+            let planned = plan.policy.backend_for(component);
+            let local = local_policy.backend_for(component);
             if planned != local {
                 return Err(RuntimeExecutionPlanError::LocalBackendMismatch {
                     component: component.as_str(),
-                    planned: planned.to_owned(),
-                    local: local.to_owned(),
+                    planned: planned.as_str().to_owned(),
+                    local: local.as_str().to_owned(),
                 });
             }
         }
@@ -438,6 +428,38 @@ impl BackendPolicy {
         self.tensor_util_backend
     }
 
+    /// Typed wire projection of the locally executable backend policy.
+    pub fn runtime_tensor_policy(
+        self,
+    ) -> Result<RuntimeTensorBackendPolicy, RuntimeExecutionPlanError> {
+        Ok(RuntimeTensorBackendPolicy {
+            dense_matmul: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::DenseMatmul,
+                self.matmul_backend.execution_id(),
+            )?,
+            prepacked_matmul: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::PrepackedMatmul,
+                self.prepacked_matmul_backend.execution_id(),
+            )?,
+            layer_norm: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::LayerNorm,
+                self.layer_norm_backend.execution_id(),
+            )?,
+            attention: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::Attention,
+                self.attention_backend.execution_id(),
+            )?,
+            softmax: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::Softmax,
+                self.softmax_backend.execution_id(),
+            )?,
+            tensor_util: runtime_backend_for_execution_id(
+                RuntimeExecutionComponent::TensorUtil,
+                self.tensor_util_backend.execution_id(),
+            )?,
+        })
+    }
+
     /// Commitment of the canonical runtime plan that produced this policy.
     pub const fn runtime_plan_output_sha256(self) -> Option<[u8; 32]> {
         self.runtime_plan_output_sha256
@@ -452,27 +474,27 @@ impl BackendPolicy {
     }
 
     pub fn matmul_backend_label(self) -> &'static str {
-        matmul_backend_label(self.matmul_backend)
+        self.matmul_backend.execution_id()
     }
 
     pub fn prepacked_matmul_backend_label(self) -> &'static str {
-        matmul_backend_label(self.prepacked_matmul_backend)
+        self.prepacked_matmul_backend.execution_id()
     }
 
     pub fn layer_norm_backend_label(self) -> &'static str {
-        layer_norm_backend_label(self.layer_norm_backend)
+        self.layer_norm_backend.execution_id()
     }
 
     pub fn attention_backend_label(self) -> &'static str {
-        attention_backend_label(self.attention_backend)
+        self.attention_backend.execution_id()
     }
 
     pub fn softmax_backend_label(self) -> &'static str {
-        softmax_backend_label(self.softmax_backend)
+        self.softmax_backend.execution_id()
     }
 
     pub fn tensor_util_backend_label(self) -> &'static str {
-        tensor_util_backend_label(self.tensor_util_backend)
+        self.tensor_util_backend.execution_id()
     }
 
     /// Resolves the utility-kernel route without consulting mutable global state.
@@ -510,11 +532,11 @@ pub struct TensorUtilRoute {
 
 impl TensorUtilRoute {
     pub fn requested_backend_label(self) -> &'static str {
-        tensor_util_backend_label(self.requested_backend)
+        self.requested_backend.execution_id()
     }
 
     pub fn selected_backend_label(self) -> &'static str {
-        tensor_util_backend_label(self.selected_backend)
+        self.selected_backend.execution_id()
     }
 
     pub const fn records_threshold_decision(self) -> bool {
@@ -1025,103 +1047,95 @@ fn sha256_hex(bytes: [u8; 32]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn matmul_backend_for(kind: BackendKind) -> MatmulBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_matmul_backend(),
-        BackendKind::Hip => hip_matmul_backend(),
-        BackendKind::Cpu => MatmulBackend::CpuFaer,
-        BackendKind::Cuda | BackendKind::Mps => MatmulBackend::Auto,
-    }
-}
-
-fn prepacked_matmul_backend_for(kind: BackendKind) -> MatmulBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_matmul_backend(),
-        BackendKind::Cpu => MatmulBackend::CpuFaer,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => MatmulBackend::Auto,
-    }
-}
-
-fn layer_norm_backend_for(kind: BackendKind) -> LayerNormBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_layer_norm_backend(),
-        BackendKind::Cpu => LayerNormBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => LayerNormBackend::Auto,
-    }
-}
-
-fn attention_backend_for(kind: BackendKind) -> AttentionBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_attention_backend(),
-        BackendKind::Cpu => AttentionBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => AttentionBackend::Auto,
-    }
-}
-
-fn softmax_backend_for(kind: BackendKind) -> SoftmaxBackend {
-    match kind {
-        BackendKind::Wgpu => wgpu_softmax_backend(),
-        BackendKind::Cpu => SoftmaxBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => SoftmaxBackend::Auto,
-    }
-}
-
-fn tensor_util_backend_for(kind: BackendKind) -> TensorUtilBackend {
-    match kind {
-        BackendKind::Wgpu => TensorUtilBackend::GpuWgpu,
-        BackendKind::Cpu => TensorUtilBackend::Cpu,
-        BackendKind::Cuda | BackendKind::Hip | BackendKind::Mps => TensorUtilBackend::Auto,
-    }
-}
-
-fn matmul_backend_label(backend: MatmulBackend) -> &'static str {
+fn matmul_backend_for(backend: RuntimeTensorBackend) -> MatmulBackend {
     match backend {
-        MatmulBackend::Auto => "auto",
-        MatmulBackend::CpuFaer => "faer",
-        MatmulBackend::CpuSimd => "cpu_simd",
-        MatmulBackend::CpuNaive => "naive",
-        #[cfg(feature = "wgpu")]
-        MatmulBackend::GpuWgpu => "wgpu",
-        #[cfg(feature = "hip")]
-        MatmulBackend::GpuHip => "hip",
-        #[allow(unreachable_patterns)]
-        _ => "gpu",
+        RuntimeTensorBackend::Auto => MatmulBackend::Auto,
+        RuntimeTensorBackend::Cpu | RuntimeTensorBackend::Faer => MatmulBackend::CpuFaer,
+        RuntimeTensorBackend::CpuSimd => MatmulBackend::CpuSimd,
+        RuntimeTensorBackend::Naive => MatmulBackend::CpuNaive,
+        RuntimeTensorBackend::Wgpu => wgpu_matmul_backend(),
+        RuntimeTensorBackend::Hip => hip_matmul_backend(),
     }
 }
 
-fn layer_norm_backend_label(backend: LayerNormBackend) -> &'static str {
+fn prepacked_matmul_backend_for(backend: RuntimeTensorBackend) -> MatmulBackend {
     match backend {
-        LayerNormBackend::Auto => "auto",
-        LayerNormBackend::Cpu => "cpu",
-        LayerNormBackend::GpuWgpu => "wgpu",
+        RuntimeTensorBackend::Auto | RuntimeTensorBackend::Hip => MatmulBackend::Auto,
+        RuntimeTensorBackend::Cpu | RuntimeTensorBackend::Faer => MatmulBackend::CpuFaer,
+        RuntimeTensorBackend::CpuSimd => MatmulBackend::CpuSimd,
+        RuntimeTensorBackend::Naive => MatmulBackend::CpuNaive,
+        RuntimeTensorBackend::Wgpu => wgpu_matmul_backend(),
     }
 }
 
-fn attention_backend_label(backend: AttentionBackend) -> &'static str {
+fn layer_norm_backend_for(backend: RuntimeTensorBackend) -> LayerNormBackend {
     match backend {
-        AttentionBackend::Auto => "auto",
-        AttentionBackend::Cpu => "cpu",
-        AttentionBackend::GpuWgpu => "wgpu",
+        RuntimeTensorBackend::Cpu => LayerNormBackend::Cpu,
+        RuntimeTensorBackend::Wgpu => wgpu_layer_norm_backend(),
+        RuntimeTensorBackend::Auto
+        | RuntimeTensorBackend::Faer
+        | RuntimeTensorBackend::CpuSimd
+        | RuntimeTensorBackend::Naive
+        | RuntimeTensorBackend::Hip => LayerNormBackend::Auto,
     }
 }
 
-fn softmax_backend_label(backend: SoftmaxBackend) -> &'static str {
+fn attention_backend_for(backend: RuntimeTensorBackend) -> AttentionBackend {
     match backend {
-        SoftmaxBackend::Auto => "auto",
-        SoftmaxBackend::Cpu => "cpu",
-        #[cfg(feature = "wgpu")]
-        SoftmaxBackend::GpuWgpu => "wgpu",
-        #[allow(unreachable_patterns)]
-        _ => "gpu",
+        RuntimeTensorBackend::Cpu => AttentionBackend::Cpu,
+        RuntimeTensorBackend::Wgpu => wgpu_attention_backend(),
+        RuntimeTensorBackend::Auto
+        | RuntimeTensorBackend::Faer
+        | RuntimeTensorBackend::CpuSimd
+        | RuntimeTensorBackend::Naive
+        | RuntimeTensorBackend::Hip => AttentionBackend::Auto,
     }
 }
 
-fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+fn softmax_backend_for(backend: RuntimeTensorBackend) -> SoftmaxBackend {
     match backend {
-        TensorUtilBackend::Auto => "auto",
-        TensorUtilBackend::Cpu => "cpu",
-        TensorUtilBackend::GpuWgpu => "wgpu",
+        RuntimeTensorBackend::Cpu => SoftmaxBackend::Cpu,
+        RuntimeTensorBackend::Wgpu => wgpu_softmax_backend(),
+        RuntimeTensorBackend::Auto
+        | RuntimeTensorBackend::Faer
+        | RuntimeTensorBackend::CpuSimd
+        | RuntimeTensorBackend::Naive
+        | RuntimeTensorBackend::Hip => SoftmaxBackend::Auto,
     }
+}
+
+fn tensor_util_backend_for(backend: RuntimeTensorBackend) -> TensorUtilBackend {
+    match backend {
+        RuntimeTensorBackend::Cpu => TensorUtilBackend::Cpu,
+        RuntimeTensorBackend::Wgpu => wgpu_tensor_util_backend(),
+        RuntimeTensorBackend::Auto
+        | RuntimeTensorBackend::Faer
+        | RuntimeTensorBackend::CpuSimd
+        | RuntimeTensorBackend::Naive
+        | RuntimeTensorBackend::Hip => TensorUtilBackend::Auto,
+    }
+}
+
+fn runtime_backend_for_execution_id(
+    component: RuntimeExecutionComponent,
+    execution_id: &str,
+) -> Result<RuntimeTensorBackend, RuntimeExecutionPlanError> {
+    let backend = match execution_id {
+        "auto" => RuntimeTensorBackend::Auto,
+        "cpu" => RuntimeTensorBackend::Cpu,
+        "faer" => RuntimeTensorBackend::Faer,
+        "cpu_simd" => RuntimeTensorBackend::CpuSimd,
+        "naive" => RuntimeTensorBackend::Naive,
+        "wgpu" => RuntimeTensorBackend::Wgpu,
+        "hip" => RuntimeTensorBackend::Hip,
+        unknown => {
+            return Err(RuntimeExecutionPlanError::UnsupportedLocalBackend {
+                component: component.as_str(),
+                backend: unknown.to_owned(),
+            });
+        }
+    };
+    Ok(backend)
 }
 
 fn wgpu_matmul_backend() -> MatmulBackend {
@@ -1179,6 +1193,17 @@ fn wgpu_softmax_backend() -> SoftmaxBackend {
     }
 }
 
+fn wgpu_tensor_util_backend() -> TensorUtilBackend {
+    #[cfg(feature = "wgpu")]
+    {
+        TensorUtilBackend::GpuWgpu
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        TensorUtilBackend::Auto
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1233,6 +1258,58 @@ mod tests {
         assert_eq!(policy.tensor_util_backend(), TensorUtilBackend::Cpu);
         assert_eq!(policy.device_backend_label(), "cpu");
         assert_eq!(policy.tensor_util_backend_label(), "cpu");
+        assert_eq!(
+            policy
+                .runtime_tensor_policy()
+                .expect("CPU policy has canonical execution IDs"),
+            runtime_tensor_policy_for(BackendKind::Cpu)
+        );
+    }
+
+    #[test]
+    fn explicit_local_policy_projects_to_typed_wire_ids() {
+        let policy = BackendPolicy::explicit_with_config(
+            DeviceCaps::cpu(),
+            ExecutionConfig::default(),
+            MatmulBackend::CpuSimd,
+            MatmulBackend::CpuNaive,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        );
+
+        assert_eq!(policy.matmul_backend_label(), "cpu_simd");
+        assert_eq!(policy.prepacked_matmul_backend_label(), "naive");
+        assert_eq!(
+            policy
+                .runtime_tensor_policy()
+                .expect("explicit policy has canonical execution IDs"),
+            RuntimeTensorBackendPolicy {
+                dense_matmul: RuntimeTensorBackend::CpuSimd,
+                prepacked_matmul: RuntimeTensorBackend::Naive,
+                layer_norm: RuntimeTensorBackend::Cpu,
+                attention: RuntimeTensorBackend::Cpu,
+                softmax: RuntimeTensorBackend::Cpu,
+                tensor_util: RuntimeTensorBackend::Cpu,
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_local_execution_id_fails_closed_with_component_identity() {
+        let error = runtime_backend_for_execution_id(
+            RuntimeExecutionComponent::Attention,
+            "future_accelerator",
+        )
+        .expect_err("unknown local backend IDs must not enter the wire contract");
+
+        assert_eq!(
+            error,
+            RuntimeExecutionPlanError::UnsupportedLocalBackend {
+                component: "attention",
+                backend: "future_accelerator".to_owned(),
+            }
+        );
     }
 
     #[cfg(all(feature = "hip", not(feature = "hip-real")))]
@@ -1259,6 +1336,7 @@ mod tests {
         assert_eq!(policy.matmul_backend_label(), "hip");
     }
 
+    #[cfg(feature = "wgpu")]
     #[test]
     fn tensor_utility_threshold_is_part_of_the_captured_plan() {
         let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
@@ -1277,6 +1355,28 @@ mod tests {
         assert_eq!(
             policy.execution_config().accelerator_fallback,
             AcceleratorFallback::Forbid
+        );
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn feature_disabled_policy_does_not_claim_wgpu_tensor_util_execution() {
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::default(),
+        );
+
+        assert_eq!(
+            runtime_tensor_policy_for(BackendKind::Wgpu).tensor_util,
+            RuntimeTensorBackend::Wgpu
+        );
+        assert_eq!(policy.tensor_util_backend(), TensorUtilBackend::Auto);
+        assert_eq!(
+            policy
+                .runtime_tensor_policy()
+                .expect("feature-disabled policy has canonical execution IDs")
+                .tensor_util,
+            RuntimeTensorBackend::Auto
         );
     }
 
