@@ -1602,7 +1602,7 @@ mod tests {
         assert_eq!(meta.1["ts"], 128);
         assert_eq!(meta.1["source"], "graph");
         assert!(meta.1["has_beta"].as_bool().unwrap_or(false));
-        assert!(meta.1["causal_class"].as_str().unwrap_or("").len() > 0);
+        assert!(!meta.1["causal_class"].as_str().unwrap_or("").is_empty());
         assert!(meta.1["tempo"].as_f64().unwrap_or(0.0) > 0.0);
         assert!(meta.1["band_total"].as_f64().unwrap_or(0.0) > 0.0);
         assert!(meta.1["support"].as_f64().unwrap_or(0.0) > 0.0);

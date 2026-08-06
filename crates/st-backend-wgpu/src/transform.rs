@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::ensure_default_runtime_blocking;
 use crate::{
     runtime::{
         empty_buffer, ensure_blocking_readback_supported, read_buffer, upload_slice, Shared,
@@ -20,15 +22,11 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-#[cfg(any(test, not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 const TRANSFORM_SHADER_DIR: &str = "shaders/transforms";
 
 #[derive(Debug, Error)]
 pub enum TransformDispatchError {
-    #[error("wgpu adapter unavailable")]
-    NoAdapter,
-    #[error("wgpu device request failed: {0}")]
-    Device(String),
     #[error(transparent)]
     Shader(#[from] ShaderLoadError),
     #[error("invalid transform geometry: {0}")]
@@ -307,36 +305,13 @@ impl TransformDispatcher {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new_default_gpu() -> Result<Self, TransformDispatchError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(async {
-            instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: None,
-                    force_fallback_adapter: false,
-                })
-                .await
-        })
-        .ok_or(TransformDispatchError::NoAdapter)?;
-
-        let (device, queue) = pollster::block_on(async {
-            adapter
-                .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("st.backend.transform.device"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: adapter.limits(),
-                    },
-                    None,
-                )
-                .await
-        })
-        .map_err(|err| TransformDispatchError::Device(err.to_string()))?;
-
-        let device = Shared::new(device);
-        let queue = Shared::new(queue);
+        let (runtime, _) = ensure_default_runtime_blocking("st.backend.transform.device")?;
         let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR);
-        Self::with_gpu(device, queue, shader_dir)
+        Self::with_gpu(
+            runtime.context().shared_device(),
+            runtime.context().shared_queue(),
+            shader_dir,
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1253,14 +1228,14 @@ mod tests {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
         }
-        let Some((device, queue)) = test_device() else {
-            eprintln!("skipping transform runtime test: no WGPU adapter");
-            return;
+        let gpu = match TransformDispatcher::new_default_gpu() {
+            Ok(dispatcher) => dispatcher,
+            Err(TransformDispatchError::Runtime(WgpuRuntimeError::NoAdapter)) => {
+                eprintln!("skipping transform runtime test: no WGPU adapter");
+                return;
+            }
+            Err(error) => panic!("failed to create transform dispatcher: {error}"),
         };
-        let device = Shared::new(device);
-        let queue = Shared::new(queue);
-        let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR);
-        let gpu = TransformDispatcher::with_gpu(device, queue, shader_dir).unwrap();
         let cpu = TransformDispatcher::cpu();
         let config = ColorJitterConfig {
             channels: 9,
@@ -1282,23 +1257,5 @@ mod tests {
                 "color jitter mismatch at {index}: actual={actual} expected={expected}"
             );
         }
-    }
-
-    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))?;
-        pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("st.transform.test_device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-            },
-            None,
-        ))
-        .ok()
     }
 }

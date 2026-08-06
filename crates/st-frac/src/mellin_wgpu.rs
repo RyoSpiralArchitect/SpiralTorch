@@ -10,13 +10,16 @@
 )]
 
 use std::any::Any;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::time::{Duration, Instant};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
 
 use bytemuck::{cast_slice, try_cast_slice, Pod, Zeroable};
-use pollster::block_on;
+use st_backend_wgpu::runtime::Shared;
 use thiserror::Error;
 
 use crate::mellin_types::{ComplexScalar, Scalar};
@@ -29,16 +32,10 @@ pub enum MellinGpuError {
     EmptyBatch,
     #[error("unsupported scalar width for GPU evaluation")]
     UnsupportedScalar,
-    #[error("no compatible WGPU adapter was found")]
-    NoAdapter,
-    #[error("failed to acquire WGPU device: {0}")]
-    RequestDevice(String),
+    #[error(transparent)]
+    Runtime(#[from] st_backend_wgpu::runtime::WgpuRuntimeError),
     #[error("failed to compile Mellin WGSL shader: {0}")]
     Shader(String),
-    #[error("failed to map GPU buffer for readback")]
-    Map,
-    #[error("timed out waiting for GPU buffer readback")]
-    MapTimeout,
     #[error("{kind}[{index}] is not finite: re={re}, im={im}")]
     NonFiniteInput {
         kind: &'static str,
@@ -104,7 +101,6 @@ struct ParamsPod {
 
 const WORKGROUP_SIZE: u32 = 64;
 const MAP_TIMEOUT: Duration = Duration::from_secs(30);
-const MAP_POLL_INTERVAL: Duration = Duration::from_millis(2);
 
 #[derive(Clone, Copy, Debug)]
 struct GpuDispatch {
@@ -161,14 +157,20 @@ impl BufferKind {
 }
 
 struct MellinGpuExecutor {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: st_backend_wgpu::runtime::Shared<wgpu::Device>,
+    queue: st_backend_wgpu::runtime::Shared<wgpu::Queue>,
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     buffers: Mutex<MellinGpuBuffers>,
 }
 
-static EXECUTOR: OnceLock<Result<MellinGpuExecutor, MellinGpuError>> = OnceLock::new();
+#[cfg(not(target_arch = "wasm32"))]
+static EXECUTOR: OnceLock<Mutex<Option<Shared<MellinGpuExecutor>>>> = OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static EXECUTOR: RefCell<Option<Shared<MellinGpuExecutor>>> = const { RefCell::new(None) };
+}
 
 pub fn evaluate_weighted_series_many_gpu(
     weighted: &[ComplexScalar],
@@ -185,14 +187,34 @@ pub fn evaluate_weighted_series_many_gpu(
     validate_finite_input(weighted, "weighted coefficient")?;
     validate_finite_input(z_values, "z value")?;
 
-    let executor =
-        match EXECUTOR.get_or_init(|| guard_wgpu_panic("initialization", MellinGpuExecutor::new)) {
-            Ok(exec) => exec,
-            Err(err) => return Err(err.clone()),
-        };
+    let executor = mellin_executor()?;
     guard_wgpu_panic("evaluation", || {
         executor.evaluate(weighted, z_values, dispatch)
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn mellin_executor() -> Result<Shared<MellinGpuExecutor>, MellinGpuError> {
+    let slot = EXECUTOR.get_or_init(|| Mutex::new(None));
+    let mut slot = lock_recover(slot);
+    if let Some(executor) = slot.as_ref() {
+        return Ok(executor.clone());
+    }
+    let executor = Shared::new(guard_wgpu_panic("initialization", MellinGpuExecutor::new)?);
+    *slot = Some(executor.clone());
+    Ok(executor)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mellin_executor() -> Result<Shared<MellinGpuExecutor>, MellinGpuError> {
+    if let Some(executor) = EXECUTOR.with(|slot| slot.borrow().clone()) {
+        return Ok(executor);
+    }
+    let executor = Shared::new(guard_wgpu_panic("initialization", MellinGpuExecutor::new)?);
+    Ok(EXECUTOR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.get_or_insert(executor).clone()
+    }))
 }
 
 fn guard_wgpu_panic<T, F>(stage: &'static str, operation: F) -> Result<T, MellinGpuError>
@@ -241,13 +263,20 @@ fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl MellinGpuExecutor {
     fn new() -> Result<Self, MellinGpuError> {
-        let instance = wgpu::Instance::default();
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok_or(MellinGpuError::NoAdapter)?;
-
-        let (device, queue) =
-            block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
-                .map_err(|err| MellinGpuError::RequestDevice(err.to_string()))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let runtime = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "st.frac.mellin.wgpu.device",
+        )?
+        .0;
+        #[cfg(target_arch = "wasm32")]
+        let runtime = st_backend_wgpu::runtime::default_runtime().ok_or(
+            st_backend_wgpu::runtime::WgpuRuntimeError::UnsupportedTarget {
+                operation: "Mellin GPU evaluation before async runtime installation",
+                target: "wasm32",
+            },
+        )?;
+        let device = runtime.context().shared_device();
+        let queue = runtime.context().shared_queue();
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.mellin.gpu.layout"),
@@ -359,7 +388,7 @@ impl MellinGpuExecutor {
             storage_limit,
         )?;
         let params_buffer = buffers.ensure_params(&self.device)?;
-        let staging_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+        let staging_buffer = Shared::new(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("st.mellin.gpu.staging"),
             size: dispatch.z_bytes,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -425,33 +454,14 @@ impl MellinGpuExecutor {
         );
         self.queue.submit(Some(encoder.finish()));
 
-        let slice = staging_buffer.slice(0..dispatch.z_bytes);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = sender.send(res);
-        });
-        let started = Instant::now();
-        let mapped = loop {
-            self.device.poll(wgpu::Maintain::Poll);
-            let remaining = MAP_TIMEOUT.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
-                return Err(MellinGpuError::MapTimeout);
-            }
-            match receiver.recv_timeout(remaining.min(MAP_POLL_INTERVAL)) {
-                Ok(mapped) => break mapped,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => return Err(MellinGpuError::Map),
-            }
-        };
-        match mapped {
-            Ok(()) => {}
-            Err(_) => return Err(MellinGpuError::Map),
-        }
-        let result = {
-            let data = slice.get_mapped_range();
-            readback_complex(&data, z_values.len())
-        };
-        staging_buffer.unmap();
+        let data = st_backend_wgpu::runtime::map_read_bytes_with_timeout(
+            &self.device,
+            staging_buffer.as_ref(),
+            0..dispatch.z_bytes,
+            MAP_TIMEOUT,
+            "st.frac.mellin.readback",
+        )?;
+        let result = readback_complex(&data, z_values.len());
         drop(buffers);
         result
     }
@@ -544,12 +554,12 @@ struct MellinGpuBuffers {
     coeffs: Option<CachedBuffer>,
     zs: Option<CachedBuffer>,
     output: Option<CachedBuffer>,
-    params: Option<Arc<wgpu::Buffer>>,
+    params: Option<Shared<wgpu::Buffer>>,
 }
 
 #[derive(Clone)]
 struct CachedBuffer {
-    buffer: Arc<wgpu::Buffer>,
+    buffer: Shared<wgpu::Buffer>,
     bytes: u64,
 }
 
@@ -561,7 +571,7 @@ impl MellinGpuBuffers {
         bytes: u64,
         usage: wgpu::BufferUsages,
         limit: u64,
-    ) -> Result<Arc<wgpu::Buffer>, MellinGpuError> {
+    ) -> Result<Shared<wgpu::Buffer>, MellinGpuError> {
         validate_buffer_limit(kind.name(), bytes.max(4), limit)?;
         let slot = match kind {
             BufferKind::Coefficients => &mut self.coeffs,
@@ -579,7 +589,7 @@ impl MellinGpuBuffers {
                 mapped_at_creation: false,
             });
             *slot = Some(CachedBuffer {
-                buffer: Arc::new(buffer),
+                buffer: Shared::new(buffer),
                 bytes: padded,
             });
         }
@@ -593,7 +603,7 @@ impl MellinGpuBuffers {
     fn ensure_params(
         &mut self,
         device: &wgpu::Device,
-    ) -> Result<Arc<wgpu::Buffer>, MellinGpuError> {
+    ) -> Result<Shared<wgpu::Buffer>, MellinGpuError> {
         if let Some(buf) = &self.params {
             return Ok(buf.clone());
         }
@@ -603,7 +613,7 @@ impl MellinGpuBuffers {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let buf = Arc::new(buffer);
+        let buf = Shared::new(buffer);
         self.params = Some(buf.clone());
         Ok(buf)
     }
@@ -698,9 +708,11 @@ mod tests {
     fn gpu_is_unavailable(error: &MellinGpuError) -> bool {
         matches!(
             error,
-            MellinGpuError::NoAdapter
-                | MellinGpuError::RequestDevice(_)
-                | MellinGpuError::Shader(_)
+            MellinGpuError::Runtime(
+                st_backend_wgpu::runtime::WgpuRuntimeError::NoAdapter
+                    | st_backend_wgpu::runtime::WgpuRuntimeError::DeviceRequest { .. }
+                    | st_backend_wgpu::runtime::WgpuRuntimeError::UnsupportedTarget { .. }
+            ) | MellinGpuError::Shader(_)
                 | MellinGpuError::RuntimePanic {
                     stage: "initialization",
                     ..
