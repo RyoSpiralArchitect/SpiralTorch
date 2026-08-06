@@ -1,6 +1,11 @@
 //! Typed tensor execution plans shared by Rust trainers and language bindings.
 
 use super::device_caps::{BackendKind, DeviceCaps};
+use super::execution_capability::observe_component_capability;
+pub use super::execution_capability::{
+    RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityState,
+    RuntimeComponentCapabilityStatus, RuntimeComponentWorkload, RuntimeTensorUtilOperation,
+};
 use super::runtime_probe::{RuntimeDeviceProbeError, RuntimeDeviceProbePayload};
 use super::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
@@ -15,7 +20,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v1";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v2";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -24,9 +29,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v1\0";
+    b"spiraltorch.runtime_execution_plan.request.v2\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v1\0";
+    b"spiraltorch.runtime_execution_plan.output.v2\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -171,7 +176,12 @@ pub struct RuntimeComponentRoute {
     pub requested_backend: RuntimeTensorBackend,
     pub selected_backend: RuntimeTensorBackend,
     pub route: RuntimeComponentRouteClass,
-    /// True only when this operation is concretely committed to the effective runtime backend.
+    /// Workload whose mutable accelerator capability was observed, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<RuntimeComponentWorkload>,
+    /// Whether the selected implementation is static, observed, or unavailable.
+    pub capability_state: RuntimeComponentCapabilityState,
+    /// True only when this workload is concretely ready on the effective runtime backend.
     pub native: bool,
     pub fallback: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,9 +196,14 @@ pub struct RuntimeComponentRoute {
 pub struct RuntimeExecutionPlanRequest {
     pub runtime_probe: RuntimeDeviceProbePayload,
     pub execution_config: ExecutionConfig,
-    /// Representative utility-operation size used to report the threshold route.
-    /// The installed policy may serve other sizes, so strict WGPU plans also
-    /// require a zero threshold before they can be committed.
+    /// Concrete operation shapes whose native accelerator kernels should be observed.
+    #[serde(default)]
+    pub component_workloads: Vec<RuntimeComponentWorkload>,
+    /// Rust-observed capability evidence committed for deterministic replay.
+    #[serde(default)]
+    pub component_capabilities: Vec<RuntimeComponentCapabilityEvidence>,
+    /// Utility-operation size used to resolve the threshold route.
+    /// A tensor-util workload supplies this value canonically from `rows * cols`.
     #[serde(default)]
     pub tensor_util_values: Option<usize>,
     /// Components the caller requires to resolve directly on the effective backend.
@@ -200,6 +215,10 @@ impl RuntimeExecutionPlanRequest {
     fn canonicalized(mut self) -> Result<Self, RuntimeExecutionPlanError> {
         self.runtime_probe.validate()?;
         self.runtime_probe.execution_client = None;
+        canonicalize_component_workloads(&mut self.component_workloads)?;
+        canonicalize_tensor_util_values(&mut self)?;
+        canonicalize_component_capabilities(&mut self.component_capabilities)?;
+        validate_component_capability_evidence(&self)?;
         if self.required_native_components.len() > RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT {
             return Err(RuntimeExecutionPlanError::InvalidRequest {
                 field: "required_native_components",
@@ -227,6 +246,164 @@ impl RuntimeExecutionPlanRequest {
         }
         Ok(())
     }
+}
+
+fn canonicalize_tensor_util_values(
+    request: &mut RuntimeExecutionPlanRequest,
+) -> Result<(), RuntimeExecutionPlanError> {
+    let Some(RuntimeComponentWorkload::TensorUtil { rows, cols, .. }) = request
+        .component_workloads
+        .iter()
+        .find(|workload| workload.component() == RuntimeExecutionComponent::TensorUtil)
+    else {
+        return Ok(());
+    };
+    let values_u64 = rows.checked_mul(*cols).ok_or_else(|| {
+        invalid_request(
+            "component_workloads",
+            "tensor_util workload volume exceeds u64 range",
+        )
+    })?;
+    let values = usize::try_from(values_u64).map_err(|_| {
+        invalid_request(
+            "component_workloads",
+            "tensor_util workload volume exceeds this target's usize range",
+        )
+    })?;
+    match request.tensor_util_values {
+        None => request.tensor_util_values = Some(values),
+        Some(actual) if actual == values => {}
+        Some(actual) => {
+            return Err(invalid_request(
+                "tensor_util_values",
+                format!("must match the tensor_util workload volume {values}, got {actual}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn canonicalize_component_workloads(
+    workloads: &mut [RuntimeComponentWorkload],
+) -> Result<(), RuntimeExecutionPlanError> {
+    if workloads.len() > RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT {
+        return Err(invalid_request(
+            "component_workloads",
+            format!(
+                "contains {} entries, exceeding the {} canonical components",
+                workloads.len(),
+                RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT
+            ),
+        ));
+    }
+    for workload in workloads.iter() {
+        workload
+            .validate()
+            .map_err(|message| invalid_request("component_workloads", message))?;
+    }
+    workloads.sort_by_key(RuntimeComponentWorkload::component);
+    if let Some(duplicate) = workloads
+        .windows(2)
+        .find(|pair| pair[0].component() == pair[1].component())
+    {
+        return Err(invalid_request(
+            "component_workloads",
+            format!(
+                "contains duplicate '{}' workloads",
+                duplicate[0].component().as_str()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn canonicalize_component_capabilities(
+    capabilities: &mut [RuntimeComponentCapabilityEvidence],
+) -> Result<(), RuntimeExecutionPlanError> {
+    if capabilities.len() > RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT {
+        return Err(invalid_request(
+            "component_capabilities",
+            format!(
+                "contains {} entries, exceeding the {} canonical components",
+                capabilities.len(),
+                RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT
+            ),
+        ));
+    }
+    for evidence in capabilities.iter() {
+        evidence
+            .validate()
+            .map_err(|message| invalid_request("component_capabilities", message))?;
+    }
+    capabilities.sort_by_key(RuntimeComponentCapabilityEvidence::component);
+    if let Some(duplicate) = capabilities
+        .windows(2)
+        .find(|pair| pair[0].component() == pair[1].component())
+    {
+        return Err(invalid_request(
+            "component_capabilities",
+            format!(
+                "contains duplicate '{}' observations",
+                duplicate[0].component().as_str()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_component_capability_evidence(
+    request: &RuntimeExecutionPlanRequest,
+) -> Result<(), RuntimeExecutionPlanError> {
+    let policy = runtime_tensor_policy_for(request.runtime_probe.effective_backend());
+    for evidence in &request.component_capabilities {
+        let component = evidence.component();
+        let workload = request
+            .component_workloads
+            .iter()
+            .find(|workload| workload.component() == component)
+            .ok_or_else(|| {
+                invalid_request(
+                    "component_capabilities",
+                    format!(
+                        "observation for '{}' has no matching workload",
+                        component.as_str()
+                    ),
+                )
+            })?;
+        if workload != &evidence.workload {
+            return Err(invalid_request(
+                "component_capabilities",
+                format!(
+                    "observation for '{}' does not match its canonical workload",
+                    component.as_str()
+                ),
+            ));
+        }
+        let expected_backend = policy.backend_for(component);
+        if evidence.backend != expected_backend {
+            return Err(invalid_request(
+                "component_capabilities",
+                format!(
+                    "observation for '{}' uses backend '{}', expected '{}'",
+                    component.as_str(),
+                    evidence.backend.as_str(),
+                    expected_backend.as_str()
+                ),
+            ));
+        }
+        if expected_backend == RuntimeTensorBackend::Auto
+            && evidence.status != RuntimeComponentCapabilityStatus::Unsupported
+        {
+            return Err(invalid_request(
+                "component_capabilities",
+                format!(
+                    "automatic route observation for '{}' must be unsupported",
+                    component.as_str()
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Readiness state for the complete execution plan.
@@ -664,6 +841,29 @@ impl RuntimeExecutionPlanPayload {
     }
 }
 
+/// Observe local component kernels once and return the enriched replay request.
+///
+/// The returned evidence is ordinary committed input to
+/// [`evaluate_runtime_execution_plan`]. Validation never calls this function,
+/// so a persisted plan remains deterministic when replayed on another device.
+pub fn observe_runtime_execution_plan_capabilities(
+    mut request: RuntimeExecutionPlanRequest,
+) -> Result<RuntimeExecutionPlanRequest, RuntimeExecutionPlanError> {
+    request.component_capabilities.clear();
+    let mut request = request.canonicalized()?;
+    let policy = runtime_tensor_policy_for(request.runtime_probe.effective_backend());
+    request.component_capabilities = request
+        .component_workloads
+        .iter()
+        .cloned()
+        .map(|workload| {
+            let backend = policy.backend_for(workload.component());
+            observe_component_capability(backend, workload)
+        })
+        .collect();
+    request.canonicalized()
+}
+
 /// Derive a committed tensor execution plan from one committed runtime probe.
 ///
 /// The runtime route is rebuilt inside Rust from the probe's exact route
@@ -756,14 +956,6 @@ fn evaluate_canonical_runtime_execution_plan(
         ));
     }
     if request.execution_config.accelerator_fallback.is_strict() {
-        if policy.tensor_util == RuntimeTensorBackend::Wgpu
-            && request.execution_config.tensor_util_wgpu_min_values > 0
-        {
-            blockers.push(format!(
-                "conditional_policy_forbidden:tensor_util_threshold:{}",
-                request.execution_config.tensor_util_wgpu_min_values
-            ));
-        }
         blockers.extend(
             component_routes
                 .iter()
@@ -791,6 +983,22 @@ fn evaluate_canonical_runtime_execution_plan(
                     format!(
                         "conditional_component_unresolved:{}",
                         route.component.as_str()
+                    )
+                }),
+        );
+        blockers.extend(
+            component_routes
+                .iter()
+                .filter(|route| {
+                    route.route == RuntimeComponentRouteClass::Direct
+                        && tensor_backend_is_native(route.selected_backend, effective_backend)
+                        && !route.capability_state.is_ready()
+                })
+                .map(|route| {
+                    format!(
+                        "component_capability_unready:{}:{}",
+                        route.component.as_str(),
+                        route.capability_state.as_str()
                     )
                 }),
         );
@@ -928,19 +1136,66 @@ fn component_route(
             None,
         )
     };
+    let workload = request
+        .component_workloads
+        .iter()
+        .find(|workload| workload.component() == component)
+        .cloned();
+    let capability_state = component_capability_state(
+        request,
+        component,
+        selected_backend,
+        effective_backend,
+        route,
+    );
     let native = route == RuntimeComponentRouteClass::Direct
-        && tensor_backend_is_native(selected_backend, effective_backend);
+        && tensor_backend_is_native(selected_backend, effective_backend)
+        && capability_state.is_ready();
     let fallback = route == RuntimeComponentRouteClass::CpuThresholdFallback;
     RuntimeComponentRoute {
         component,
         requested_backend,
         selected_backend,
         route,
+        workload,
+        capability_state,
         native,
         fallback,
         values,
         threshold,
     }
+}
+
+fn component_capability_state(
+    request: &RuntimeExecutionPlanRequest,
+    component: RuntimeExecutionComponent,
+    selected_backend: RuntimeTensorBackend,
+    effective_backend: BackendKind,
+    route: RuntimeComponentRouteClass,
+) -> RuntimeComponentCapabilityState {
+    if route != RuntimeComponentRouteClass::Direct
+        || !tensor_backend_is_native(selected_backend, effective_backend)
+    {
+        return RuntimeComponentCapabilityState::NotApplicable;
+    }
+    let workload = request
+        .component_workloads
+        .iter()
+        .find(|workload| workload.component() == component);
+    if workload.is_none()
+        && matches!(
+            selected_backend,
+            RuntimeTensorBackend::Cpu | RuntimeTensorBackend::CpuSimd | RuntimeTensorBackend::Naive
+        )
+    {
+        return RuntimeComponentCapabilityState::Static;
+    }
+    request
+        .component_capabilities
+        .iter()
+        .find(|evidence| evidence.component() == component && evidence.backend == selected_backend)
+        .map(|evidence| evidence.status.into())
+        .unwrap_or(RuntimeComponentCapabilityState::Unobserved)
 }
 
 fn tensor_backend_is_native(backend: RuntimeTensorBackend, effective: BackendKind) -> bool {
@@ -982,6 +1237,13 @@ fn normalized_execution_client(value: &str) -> Result<String, RuntimeExecutionPl
         ));
     }
     Ok(normalized)
+}
+
+fn invalid_request(field: &'static str, message: impl Into<String>) -> RuntimeExecutionPlanError {
+    RuntimeExecutionPlanError::InvalidRequest {
+        field,
+        message: message.into(),
+    }
 }
 
 fn invalid_payload(field: &'static str, message: impl Into<String>) -> RuntimeExecutionPlanError {
@@ -1050,7 +1312,11 @@ fn sha256_hex(bytes: [u8; 32]) -> String {
 fn matmul_backend_for(backend: RuntimeTensorBackend) -> MatmulBackend {
     match backend {
         RuntimeTensorBackend::Auto => MatmulBackend::Auto,
-        RuntimeTensorBackend::Cpu | RuntimeTensorBackend::Faer => MatmulBackend::CpuFaer,
+        RuntimeTensorBackend::Cpu => MatmulBackend::CpuNaive,
+        RuntimeTensorBackend::Faer if st_tensor::faer_dense::is_available() => {
+            MatmulBackend::CpuFaer
+        }
+        RuntimeTensorBackend::Faer => MatmulBackend::CpuNaive,
         RuntimeTensorBackend::CpuSimd => MatmulBackend::CpuSimd,
         RuntimeTensorBackend::Naive => MatmulBackend::CpuNaive,
         RuntimeTensorBackend::Wgpu => wgpu_matmul_backend(),
@@ -1061,7 +1327,11 @@ fn matmul_backend_for(backend: RuntimeTensorBackend) -> MatmulBackend {
 fn prepacked_matmul_backend_for(backend: RuntimeTensorBackend) -> MatmulBackend {
     match backend {
         RuntimeTensorBackend::Auto | RuntimeTensorBackend::Hip => MatmulBackend::Auto,
-        RuntimeTensorBackend::Cpu | RuntimeTensorBackend::Faer => MatmulBackend::CpuFaer,
+        RuntimeTensorBackend::Cpu => MatmulBackend::CpuNaive,
+        RuntimeTensorBackend::Faer if st_tensor::faer_dense::is_available() => {
+            MatmulBackend::CpuFaer
+        }
+        RuntimeTensorBackend::Faer => MatmulBackend::CpuNaive,
         RuntimeTensorBackend::CpuSimd => MatmulBackend::CpuSimd,
         RuntimeTensorBackend::Naive => MatmulBackend::CpuNaive,
         RuntimeTensorBackend::Wgpu => wgpu_matmul_backend(),
@@ -1239,6 +1509,8 @@ mod tests {
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(fallback, 1024),
+            component_workloads: Vec::new(),
+            component_capabilities: Vec::new(),
             tensor_util_values: Some(2048),
             required_native_components: Vec::new(),
         }
@@ -1384,11 +1656,14 @@ mod tests {
     fn cpu_runtime_plan_is_committed_replayable_and_executable() {
         let mut request =
             execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        request.component_workloads = representative_component_workloads();
         request.required_native_components = vec![
             RuntimeExecutionComponent::Softmax,
             RuntimeExecutionComponent::DenseMatmul,
             RuntimeExecutionComponent::DenseMatmul,
         ];
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("CPU component capabilities are observable");
 
         let payload =
             evaluate_runtime_execution_plan(request.clone()).expect("CPU execution plan evaluates");
@@ -1446,6 +1721,29 @@ mod tests {
     }
 
     #[test]
+    fn optional_cpu_accelerators_are_unobserved_without_workload_evidence() {
+        let request = execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        let payload = evaluate_runtime_execution_plan(request).expect("CPU plan evaluates");
+
+        for component in [
+            RuntimeExecutionComponent::DenseMatmul,
+            RuntimeExecutionComponent::PrepackedMatmul,
+        ] {
+            let route = payload
+                .component_routes
+                .iter()
+                .find(|route| route.component == component)
+                .expect("CPU matmul route");
+            assert_eq!(
+                route.capability_state,
+                RuntimeComponentCapabilityState::Unobserved
+            );
+            assert!(!route.native);
+        }
+        assert!(!payload.all_components_native);
+    }
+
+    #[test]
     fn nested_probe_transport_provenance_is_canonicalized_out() {
         let probe = probe_for(BackendKind::Cpu)
             .with_execution_client("wasm")
@@ -1493,6 +1791,184 @@ mod tests {
     }
 
     #[test]
+    fn accelerator_routes_require_committed_workload_capabilities_to_be_native() {
+        let request = execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
+        let unobserved =
+            evaluate_runtime_execution_plan(request.clone()).expect("unobserved plan evaluates");
+
+        assert!(!unobserved.all_components_native);
+        assert!(unobserved.native_components.is_empty());
+        assert!(unobserved.component_routes.iter().all(|route| {
+            route.capability_state == RuntimeComponentCapabilityState::Unobserved
+        }));
+
+        let workloads = representative_component_workloads();
+        let mut observed_request = request;
+        observed_request.component_workloads = workloads.clone();
+        observed_request.component_capabilities = workloads
+            .into_iter()
+            .map(|workload| RuntimeComponentCapabilityEvidence {
+                workload,
+                backend: RuntimeTensorBackend::Wgpu,
+                status: RuntimeComponentCapabilityStatus::Ready,
+            })
+            .collect();
+        let observed = evaluate_runtime_execution_plan(observed_request.clone())
+            .expect("observed plan evaluates");
+
+        assert!(observed.all_components_native);
+        assert_eq!(
+            observed.native_components,
+            RuntimeExecutionComponent::ALL.to_vec()
+        );
+        assert!(observed.component_routes.iter().all(|route| {
+            route.capability_state == RuntimeComponentCapabilityState::Ready
+                && route.workload.is_some()
+        }));
+        observed
+            .validate_against(observed_request)
+            .expect("capability evidence replays without a live device query");
+    }
+
+    #[test]
+    fn component_capability_evidence_must_match_its_workload_and_backend() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
+        request.component_workloads = vec![RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 }];
+        request.component_capabilities = vec![RuntimeComponentCapabilityEvidence {
+            workload: RuntimeComponentWorkload::Softmax { rows: 3, cols: 4 },
+            backend: RuntimeTensorBackend::Wgpu,
+            status: RuntimeComponentCapabilityStatus::Ready,
+        }];
+
+        let error = evaluate_runtime_execution_plan(request)
+            .expect_err("mismatched evidence must fail before planning");
+        assert!(matches!(
+            error,
+            RuntimeExecutionPlanError::InvalidRequest {
+                field: "component_capabilities",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn tensor_util_workload_owns_the_threshold_volume() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
+        request.component_workloads = vec![RuntimeComponentWorkload::TensorUtil {
+            operation: RuntimeTensorUtilOperation::Scale,
+            rows: 2,
+            cols: 4,
+        }];
+        let error = evaluate_runtime_execution_plan(request.clone())
+            .expect_err("a contradictory representative value must fail closed");
+        assert!(matches!(
+            error,
+            RuntimeExecutionPlanError::InvalidRequest {
+                field: "tensor_util_values",
+                ..
+            }
+        ));
+
+        request.tensor_util_values = None;
+        let payload = evaluate_runtime_execution_plan(request)
+            .expect("the workload volume is canonical when the alias is omitted");
+        assert_eq!(payload.request.tensor_util_values, Some(8));
+        let route = payload
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor util route");
+        assert_eq!(route.values, Some(8));
+        assert_eq!(
+            route.route,
+            RuntimeComponentRouteClass::CpuThresholdFallback
+        );
+    }
+
+    fn representative_component_workloads() -> Vec<RuntimeComponentWorkload> {
+        vec![
+            RuntimeComponentWorkload::DenseMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+            },
+            RuntimeComponentWorkload::PrepackedMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+                bias: true,
+            },
+            RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
+            RuntimeComponentWorkload::Attention {
+                contexts: 1,
+                sequence: 2,
+                head_dim: 4,
+                z_bias: true,
+                attn_bias: true,
+            },
+            RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::Scale,
+                rows: 32,
+                cols: 64,
+            },
+        ]
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn local_wgpu_observer_commits_ready_kernel_evidence() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!("skipping runtime WGPU plan test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1");
+            return;
+        }
+
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
+        request.component_workloads = representative_component_workloads();
+        let observed = observe_runtime_execution_plan_capabilities(request)
+            .expect("local WGPU capabilities are observable");
+        assert!(observed
+            .component_capabilities
+            .iter()
+            .all(|evidence| evidence.status == RuntimeComponentCapabilityStatus::Ready));
+
+        let plan = evaluate_runtime_execution_plan(observed).expect("observed plan evaluates");
+        assert!(plan.all_components_native);
+        assert!(plan.execution_allowed, "plan blockers: {:?}", plan.blockers);
+        plan.validate()
+            .expect("plan replay uses committed evidence instead of the live device");
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn feature_disabled_observer_commits_not_built_instead_of_native() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
+        request.component_workloads = vec![RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 }];
+        let observed = observe_runtime_execution_plan_capabilities(request)
+            .expect("feature-disabled observation remains inspectable");
+        assert_eq!(
+            observed.component_capabilities[0].status,
+            RuntimeComponentCapabilityStatus::NotBuilt
+        );
+
+        let plan = evaluate_runtime_execution_plan(observed).expect("plan evaluates");
+        let softmax = plan
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::Softmax)
+            .expect("softmax route");
+        assert_eq!(
+            softmax.capability_state,
+            RuntimeComponentCapabilityState::NotBuilt
+        );
+        assert!(!softmax.native);
+    }
+
+    #[test]
     fn strict_execution_blocks_threshold_fallback_without_an_extra_native_gate() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
@@ -1503,37 +1979,52 @@ mod tests {
         assert!(payload
             .blockers
             .contains(&"component_fallback_forbidden:tensor_util:wgpu->cpu".to_owned()));
-        assert!(payload
-            .blockers
-            .contains(&"conditional_policy_forbidden:tensor_util_threshold:1024".to_owned()));
     }
 
     #[test]
-    fn strict_wgpu_policy_requires_a_zero_tensor_util_threshold() {
+    fn strict_wgpu_policy_resolves_a_ready_tensor_util_route() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
-        request.tensor_util_values = Some(2048);
-        let blocked = evaluate_runtime_execution_plan(request.clone()).expect("plan evaluates");
+        let workloads = representative_component_workloads();
+        request.component_workloads = workloads.clone();
+        request.component_capabilities = workloads
+            .into_iter()
+            .map(|workload| RuntimeComponentCapabilityEvidence {
+                workload,
+                backend: RuntimeTensorBackend::Wgpu,
+                status: RuntimeComponentCapabilityStatus::Ready,
+            })
+            .collect();
+        let ready = evaluate_runtime_execution_plan(request).expect("plan evaluates");
 
-        assert!(
-            blocked
-                .component_routes
-                .iter()
-                .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
-                .expect("tensor util route")
-                .native
+        let tensor_util = ready
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor util route");
+        assert!(tensor_util.native);
+        assert_eq!(
+            tensor_util.capability_state,
+            RuntimeComponentCapabilityState::Ready
         );
+        assert!(ready.all_components_native);
+        assert!(!ready
+            .blockers
+            .iter()
+            .any(|blocker| blocker.starts_with("conditional_")));
+    }
+
+    #[test]
+    fn strict_wgpu_policy_blocks_an_unresolved_tensor_util_route() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
+        request.tensor_util_values = None;
+        let blocked = evaluate_runtime_execution_plan(request).expect("plan evaluates");
+
         assert!(!blocked.execution_allowed);
         assert!(blocked
             .blockers
-            .contains(&"conditional_policy_forbidden:tensor_util_threshold:1024".to_owned()));
-
-        request.execution_config.tensor_util_wgpu_min_values = 0;
-        let threshold_free =
-            evaluate_runtime_execution_plan(request).expect("threshold-free plan evaluates");
-        assert!(!threshold_free.blockers.iter().any(|blocker| {
-            blocker.starts_with("conditional_policy_forbidden:tensor_util_threshold:")
-        }));
+            .contains(&"conditional_component_unresolved:tensor_util".to_owned()));
     }
 
     #[test]

@@ -315,13 +315,45 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         probe,
         accelerator_fallback="allow",
         tensor_util_values=2048,
+        component_workloads=[
+            {
+                "component": "dense_matmul",
+                "rows": 2,
+                "inner": 3,
+                "cols": 4,
+            },
+            {
+                "component": "prepacked_matmul",
+                "rows": 2,
+                "inner": 3,
+                "cols": 4,
+                "bias": True,
+            },
+            {"component": "layer_norm", "rows": 2, "cols": 4},
+            {
+                "component": "attention",
+                "contexts": 1,
+                "sequence": 2,
+                "head_dim": 4,
+                "z_bias": True,
+                "attn_bias": True,
+            },
+            {"component": "softmax", "rows": 2, "cols": 8},
+            {
+                "component": "tensor_util",
+                "operation": "scale",
+                "rows": 32,
+                "cols": 64,
+            },
+        ],
         required_native_components=["softmax", "dense_matmul", "dense_matmul"],
     )
 
     assert "evaluate_runtime_execution_plan" in st.__all__
+    assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v1"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v2"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
     assert plan["execution_client"] == "python"
@@ -344,6 +376,15 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         "dense_matmul",
         "softmax",
     ]
+    assert [
+        evidence["status"]
+        for evidence in plan["request"]["component_capabilities"]
+    ] == ["ready"] * 6
+    assert [
+        route["capability_state"]
+        for route in plan["component_routes"]
+        if route["component"] in {"dense_matmul", "softmax"}
+    ] == ["ready", "ready"]
     assert (
         plan["runtime_probe_output_sha256"]
         == plan["request"]["runtime_probe"]["output_sha256"]
@@ -383,6 +424,7 @@ def test_runtime_execution_plan_exposes_threshold_and_strict_surrogate_gates() -
         "requested_backend": "wgpu",
         "selected_backend": "cpu",
         "route": "cpu_threshold_fallback",
+        "capability_state": "not_applicable",
         "native": False,
         "fallback": True,
         "values": 8,

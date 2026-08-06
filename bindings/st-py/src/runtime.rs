@@ -3,7 +3,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::backend::execution_plan::{
-    evaluate_runtime_execution_plan, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
+    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+    RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
 };
 use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
 use st_core::backend::runtime_route::{
@@ -163,6 +164,24 @@ fn _runtime_device_probe_validate_against(
 }
 
 #[pyfunction]
+fn _runtime_execution_plan_observe_capabilities(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request: RuntimeExecutionPlanRequest = request_from_py(
+        request,
+        "invalid runtime execution-plan observation request",
+    )?;
+    let request = observe_runtime_execution_plan_capabilities(request)
+        .map_err(|error| json_error("runtime component capability observation failed", error))?;
+    payload_to_py(
+        py,
+        request,
+        "runtime component capability contract encoding failed",
+    )
+}
+
+#[pyfunction]
 fn _runtime_execution_plan_evaluate(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
@@ -230,6 +249,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_runtime_execution_plan_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_execution_plan_observe_capabilities,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(_runtime_execution_plan_validate, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_execution_plan_validate_against,

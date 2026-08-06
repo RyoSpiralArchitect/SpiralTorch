@@ -52,6 +52,31 @@ pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
     volume >= 256 && inner >= 16
 }
 
+fn matmul_shape_supported(rows: usize, inner: usize, cols: usize) -> bool {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return false;
+    }
+    if rows > i32::MAX as usize || inner > i32::MAX as usize || cols > i32::MAX as usize {
+        return false;
+    }
+    [
+        rows.checked_mul(inner),
+        inner.checked_mul(cols),
+        rows.checked_mul(cols),
+    ]
+    .into_iter()
+    .all(|values| {
+        values
+            .and_then(|values| values.checked_mul(std::mem::size_of::<f32>()))
+            .is_some()
+    })
+}
+
+/// Preflight the static rocBLAS shape contract and local HIP runtime.
+pub fn supports_matmul(rows: usize, inner: usize, cols: usize) -> bool {
+    matmul_shape_supported(rows, inner, cols) && is_available()
+}
+
 pub fn matmul_into(
     lhs: &[f32],
     rhs: &[f32],
@@ -227,7 +252,23 @@ pub fn matmul(
     inner: usize,
     cols: usize,
 ) -> Result<Vec<f32>, String> {
-    let mut out = vec![0.0f32; rows * cols];
+    let output_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| "matmul rows*cols overflow".to_owned())?;
+    let mut out = vec![0.0f32; output_len];
     matmul_into(lhs, rhs, &mut out, rows, inner, cols)?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matmul_shape_supported;
+
+    #[test]
+    fn matmul_preflight_rejects_invalid_rocblas_shapes_without_initializing_hip() {
+        assert!(matmul_shape_supported(2, 3, 4));
+        assert!(!matmul_shape_supported(0, 3, 4));
+        assert!(!matmul_shape_supported(i32::MAX as usize + 1, 1, 1));
+        assert!(!matmul_shape_supported(usize::MAX, 2, 2));
+    }
 }

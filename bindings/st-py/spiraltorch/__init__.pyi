@@ -455,7 +455,12 @@ def evaluate_runtime_execution_plan(
     accelerator_fallback: str = ...,
     tensor_util_wgpu_min_values: int = ...,
     tensor_util_values: int | None = ...,
+    component_workloads: object = ...,
     required_native_components: object = ...,
+) -> Dict[str, object]: ...
+
+def observe_runtime_execution_plan_capabilities(
+    request: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
 def validate_runtime_execution_plan_contract(

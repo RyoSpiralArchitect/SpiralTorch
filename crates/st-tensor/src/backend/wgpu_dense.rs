@@ -3530,6 +3530,42 @@ mod tests {
         assert_eq!(cached_error, first_error);
     }
 
+    #[test]
+    fn component_preflights_reject_invalid_shapes_before_runtime_initialization() {
+        assert_eq!(selected_matmul_scalar_type(63, 64), ScalarType::F32);
+        assert_eq!(selected_matmul_scalar_type(64, 64), ScalarType::QuantizedI8);
+        assert!(!supports_matmul(0, 4, 4));
+        assert!(!supports_prepacked_matmul(4, 0, 4, false));
+        assert!(!supports_layer_norm(4, 0));
+        assert!(!supports_row_softmax(0, 4));
+        assert!(!supports_tensor_util_scale(4, 0));
+        assert!(!supports_fused_attention(
+            1,
+            1,
+            FUSED_ATTENTION_MAX_HEAD_DIM as usize + 1
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn component_preflights_compile_the_selected_lazy_pipelines() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!(
+                "skipping runtime WGPU preflight test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1"
+            );
+            return;
+        }
+
+        assert!(supports_matmul(2, 3, 4));
+        assert!(supports_matmul(2, 64, 64));
+        assert!(supports_prepacked_matmul(2, 3, 4, true));
+        assert!(supports_layer_norm(2, 4));
+        assert!(supports_row_softmax(2, 4));
+        assert!(supports_tensor_util_scale(2, 4));
+        assert!(supports_fused_attention(1, 2, 4));
+        assert!(supports_fused_attention_workload(1, 2, 4, true, true));
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lazy_capability_pipelines_preserve_softmax_and_attention_results() {
@@ -9097,30 +9133,152 @@ pub fn is_available() -> bool {
     dense_context().is_ok()
 }
 
+fn storage_values_fit(device: &Device, values: usize) -> bool {
+    let Some(bytes) = values.checked_mul(std::mem::size_of::<f32>()) else {
+        return false;
+    };
+    let Ok(bytes_u64) = u64::try_from(bytes) else {
+        return false;
+    };
+    let limits = device.limits();
+    bytes_u64 <= limits.max_buffer_size
+        && bytes_u64 <= u64::from(limits.max_storage_buffer_binding_size)
+}
+
+fn matrix_values(rows: usize, cols: usize) -> Option<usize> {
+    if rows == 0 || cols == 0 || rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return None;
+    }
+    rows.checked_mul(cols)
+}
+
+fn dispatch_1d_fits(device: &Device, items: usize, workgroup: u32) -> bool {
+    let Ok(items) = u32::try_from(items) else {
+        return false;
+    };
+    items.div_ceil(workgroup) <= device.limits().max_compute_workgroups_per_dimension
+}
+
+fn selected_matmul_scalar_type(inner: usize, cols: usize) -> ScalarType {
+    if should_quantize(inner, cols) {
+        ScalarType::QuantizedI8
+    } else {
+        ScalarType::F32
+    }
+}
+
+fn matmul_shape_fits(ctx: &GpuContext, rows: usize, inner: usize, cols: usize) -> bool {
+    let Some(lhs_values) = matrix_values(rows, inner) else {
+        return false;
+    };
+    let Some(rhs_values) = matrix_values(inner, cols) else {
+        return false;
+    };
+    let Some(output_values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    storage_values_fit(ctx.device(), lhs_values)
+        && storage_values_fit(ctx.device(), rhs_values)
+        && storage_values_fit(ctx.device(), output_values)
+}
+
+fn supports_matmul_pipeline(
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    dtype: ScalarType,
+    use_bias: bool,
+) -> bool {
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    if !matmul_shape_fits(&ctx, rows, inner, cols) {
+        return false;
+    }
+    if use_bias && !storage_values_fit(ctx.device(), cols) {
+        return false;
+    }
+    let tile = ctx.select_tile_config(rows, inner, cols);
+    let limits = ctx.device().limits();
+    let groups_x = (cols as u32).div_ceil(tile.tile_n());
+    let groups_y = (rows as u32).div_ceil(tile.tile_m());
+    if groups_x > limits.max_compute_workgroups_per_dimension
+        || groups_y > limits.max_compute_workgroups_per_dimension
+    {
+        return false;
+    }
+    let key = PipelineKey::new(
+        dtype,
+        tile,
+        ctx.supports_subgroup,
+        ctx.shader_f16,
+        use_bias,
+        0,
+    );
+    ctx.pipeline_cache
+        .pipeline(key, ctx.pipeline_layout())
+        .is_ok()
+}
+
+/// Preflight the exact lazy WGPU pipeline selected for a dense matmul shape.
+pub fn supports_matmul(rows: usize, inner: usize, cols: usize) -> bool {
+    supports_matmul_pipeline(
+        rows,
+        inner,
+        cols,
+        selected_matmul_scalar_type(inner, cols),
+        false,
+    )
+}
+
+/// Preflight the lazy WGPU pipeline selected for a prepacked matmul workload.
+pub fn supports_prepacked_matmul(rows: usize, inner: usize, cols: usize, use_bias: bool) -> bool {
+    supports_matmul_pipeline(
+        rows,
+        inner,
+        cols,
+        selected_matmul_scalar_type(inner, cols),
+        use_bias,
+    )
+}
+
 pub fn supports_layer_norm(rows: usize, cols: usize) -> bool {
-    if rows == 0 || cols == 0 {
+    let Some(values) = matrix_values(rows, cols) else {
         return false;
-    }
-    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+    };
+    let Ok(ctx) = dense_context() else {
         return false;
-    }
-    dense_context()
-        .map(|ctx| ctx.layer_norm_pipeline.get(ctx.device()).is_ok())
-        .unwrap_or(false)
+    };
+    dispatch_1d_fits(ctx.device(), rows, 1)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx.layer_norm_pipeline.get(ctx.device()).is_ok()
 }
 
 pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
-    if rows == 0 || cols == 0 {
+    let Some(values) = matrix_values(rows, cols) else {
         return false;
-    }
-    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+    };
+    let Ok(ctx) = dense_context() else {
         return false;
-    }
-    if let Ok(ctx) = dense_context() {
-        ctx.supports_softmax()
-    } else {
-        false
-    }
+    };
+    let limits = ctx.device().limits();
+    rows <= limits.max_compute_workgroups_per_dimension as usize
+        && storage_values_fit(ctx.device(), values)
+        && ctx.supports_softmax()
+}
+
+/// Preflight the scale entry point in the lazy tensor-utility pipeline cache.
+pub fn supports_tensor_util_scale(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), values, TENSOR_UTIL_WORKGROUP)
+        && storage_values_fit(ctx.device(), values)
+        && ctx.tensor_util_pipeline(TensorUtilKernel::Scale).is_ok()
 }
 
 pub fn supports_row_softmax_hardmax(rows: usize, cols: usize) -> bool {
@@ -9328,6 +9486,17 @@ pub fn fused_attention(
 }
 
 pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usize) -> bool {
+    supports_fused_attention_workload(contexts, sequence, head_dim, false, false)
+}
+
+/// Preflight fused attention, including the optional bias buffer bindings.
+pub fn supports_fused_attention_workload(
+    contexts: usize,
+    sequence: usize,
+    head_dim: usize,
+    z_bias: bool,
+    attn_bias: bool,
+) -> bool {
     if contexts == 0 || sequence == 0 || head_dim == 0 {
         return false;
     }
@@ -9338,11 +9507,31 @@ pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usiz
     if head_dim > FUSED_ATTENTION_MAX_HEAD_DIM as usize {
         return false;
     }
-    if let Ok(ctx) = dense_context() {
-        ctx.fused_attention_kernel().is_some()
-    } else {
-        false
-    }
+    let Some(volume) = contexts
+        .checked_mul(sequence)
+        .and_then(|value| value.checked_mul(head_dim))
+    else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    let limits = ctx.device().limits();
+    let z_bias_fits = !z_bias
+        || contexts
+            .checked_mul(sequence)
+            .is_some_and(|values| storage_values_fit(ctx.device(), values));
+    let attn_bias_fits = !attn_bias
+        || contexts
+            .checked_mul(sequence)
+            .and_then(|values| values.checked_mul(sequence))
+            .is_some_and(|values| storage_values_fit(ctx.device(), values));
+    contexts <= limits.max_compute_workgroups_per_dimension as usize
+        && sequence <= limits.max_compute_workgroups_per_dimension as usize
+        && storage_values_fit(ctx.device(), volume)
+        && z_bias_fits
+        && attn_bias_fits
+        && ctx.fused_attention_kernel().is_some()
 }
 
 #[allow(clippy::too_many_arguments)]

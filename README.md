@@ -627,6 +627,15 @@ print("session backend:", session.backend)
 print("effective backend:", getattr(session, "effective_backend", session.backend))
 ```
 
+Runtime route readiness and workload-kernel readiness are deliberately separate.
+The v2 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
+exact declared component shapes, bias bindings, device limits, and lazy pipelines,
+then commits that evidence for deterministic replay. Passing `component_workloads=`
+to `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer
+automatically; WASM exposes the same observer as JSON/Object transport instead of
+rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
+not cryptographic hardware attestation, and undeclared workloads remain unobserved.
+
 Then pick the path that matches the job:
 
 - **Native learning loop:** use `st.Tensor`, `st.nn`, `st.optim`, and
@@ -2710,8 +2719,9 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 
 ### Features (opt-in)
 
-- `wgpu` / `wgpu-rt`: WebGPU backends + runtime wiring
-- `mps`: macOS Metal (MPS)
+- `wgpu`: shared WebGPU runtime plus tensor execution kernels
+- `wgpu-rt`: additional rank/linear runtime primitives on the same WGPU context
+- `mps`: honest macOS placeholder with Rust-selected WGPU/CPU surrogate routing
 - `cuda`: CUDA (NVRTC/PTX loader expected)
 - `hip`: ROCm HIP (stub-safe)
 - **`hip-real`**: ROCm HIP + RCCL real path, including dense, scaled, lhs-transpose-scaled, device-resident fused bias/residual activation GEMM, owning `RcclCommGuard::allgather_u64()`, and safe row compaction through `compact_rows_f32()` (requires ROCm toolchain & linker; gated on top of `hip`). The backend-neutral shape, output, validation, and CPU oracle live in `st-kernel-contracts`; `st_tensor::compaction` exposes explicit CPU and HIP entrypoints without making a runtime routing decision.
