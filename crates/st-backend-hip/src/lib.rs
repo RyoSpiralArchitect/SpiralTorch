@@ -19,6 +19,12 @@ pub enum HipErr {
     Other(String),
 }
 
+impl From<st_kernel_contracts::compaction::CompactionError> for HipErr {
+    fn from(error: st_kernel_contracts::compaction::CompactionError) -> Self {
+        Self::Other(format!("compaction contract: {error}"))
+    }
+}
+
 /// Activation applied by the device-resident GEMM epilogue.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,6 +3,7 @@ members = [
   "crates/st-core",
   "crates/st-backend-hip",
   "crates/st-backend-wgpu",
+  "crates/st-kernel-contracts",
   "crates/st-kdsl",
   "crates/st-logic",
   "crates/st-kv",
@@ -38,6 +39,7 @@ members = [
 default-members = [
   "crates/st-core",
   "crates/st-backend-hip",
+  "crates/st-kernel-contracts",
   "crates/st-kdsl",
   "crates/st-logic",
   "crates/st-kv",

@@ -1,0 +1,13 @@
+[package]
+name = "st-kernel-contracts"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo SpiralArchitect <kishkavsesvit@icloud.com>"]
+license = "AGPL-3.0-or-later"
+description = "Pure cross-backend kernel semantics and reference contracts for SpiralTorch"
+
+[dependencies]
+thiserror = "2"
+
+[package.metadata.spiraltorch]
+copyright = "Copyright 2025 Ryo SpiralArchitect - All rights reserved"

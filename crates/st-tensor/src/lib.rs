@@ -9,6 +9,7 @@ pub mod fractional;
 
 pub mod autograd;
 pub mod backend;
+pub mod compaction;
 pub mod dlpack;
 pub mod execution;
 mod hardmax;

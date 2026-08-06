@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::compaction_contract::validate_compaction_inputs;
+use crate::compaction_contract::{compaction_active, validate_compaction_inputs};
 use crate::real::{
     hip_result, memcpy_d2h_async, memcpy_h2d_async, memset_async, DeviceBuffer, HipStream,
     StreamCompletionGuard,
@@ -76,12 +76,6 @@ extern "C" {
     ) -> i32;
 }
 
-fn byte_len<T>(elements: usize, field: &str) -> Result<usize, HipErr> {
-    elements
-        .checked_mul(std::mem::size_of::<T>())
-        .ok_or_else(|| HipErr::Other(format!("{field} byte length overflow")))
-}
-
 /// Compacts each row on HIP while preserving the shared Rust output contract.
 ///
 /// Device allocations, kernel ordering, transfers, synchronization, and
@@ -92,17 +86,16 @@ pub fn compact_rows_f32(
     indices: &[i32],
     shape: CompactionShape,
 ) -> Result<CompactionOutputF32, HipErr> {
-    let layout = shape.layout()?;
+    let layout = shape.layout().map_err(HipErr::from)?;
     validate_compaction_inputs(values, indices, layout)?;
-    let mut output = CompactionOutputF32::zeroed(layout);
     if layout.is_empty() {
-        return Ok(output);
+        return Ok(CompactionOutputF32::zeroed(layout));
     }
 
-    let value_bytes = byte_len::<f32>(layout.element_count(), "compaction value")?;
-    let index_bytes = byte_len::<i32>(layout.element_count(), "compaction index")?;
-    let flag_bytes = byte_len::<u32>(layout.element_count(), "compaction flag")?;
-    let tile_count_bytes = byte_len::<u32>(layout.tile_count(), "compaction tile count")?;
+    let value_bytes = layout.value_storage_bytes();
+    let index_bytes = layout.index_storage_bytes();
+    let flag_bytes = layout.flag_storage_bytes();
+    let tile_count_bytes = layout.tile_count_storage_bytes();
 
     let values_in = DeviceBuffer::new(value_bytes)?;
     let indices_in = DeviceBuffer::new(index_bytes)?;
@@ -111,6 +104,8 @@ pub fn compact_rows_f32(
     let values_out = DeviceBuffer::new(value_bytes)?;
     let indices_out = DeviceBuffer::new(index_bytes)?;
     let stream = HipStream::create()?;
+    let mut values_host = vec![0.0f32; layout.element_count()];
+    let mut indices_host = vec![0i32; layout.element_count()];
     let mut tile_counts = vec![0u32; layout.tile_count()];
     let completion = StreamCompletionGuard::new(&stream);
 
@@ -157,13 +152,13 @@ pub fn compact_rows_f32(
             &stream,
         )?;
         memcpy_d2h_async(
-            output.values_mut_ptr().cast::<u8>(),
+            values_host.as_mut_ptr().cast::<u8>(),
             values_out.as_ptr(),
             value_bytes,
             &stream,
         )?;
         memcpy_d2h_async(
-            output.indices_mut_ptr().cast::<u8>(),
+            indices_host.as_mut_ptr().cast::<u8>(),
             indices_out.as_ptr(),
             index_bytes,
             &stream,
@@ -189,8 +184,8 @@ pub fn compact_rows_f32(
             Ok(count)
         })
         .collect::<Result<Vec<_>, HipErr>>()?;
-    output.set_row_counts(row_counts)?;
-    Ok(output)
+    CompactionOutputF32::from_parts(layout, values_host, indices_host, row_counts)
+        .map_err(HipErr::from)
 }
 
 /// Raw device buffers for one-block-per-row compaction.
@@ -213,7 +208,7 @@ pub unsafe fn compaction_1ce(
     stream: &HipStream,
     args: CompactionOneShotArgs,
 ) -> Result<(), HipErr> {
-    if !args.shape.active()? {
+    if !compaction_active(args.shape)? {
         return Ok(());
     }
     if args.shape.cols > COMPACTION_TILE {
@@ -255,7 +250,7 @@ pub struct CompactionScanArgs {
 /// must remain valid until `stream` completes and writable outputs must not
 /// overlap the input.
 pub unsafe fn compaction_scan(stream: &HipStream, args: CompactionScanArgs) -> Result<(), HipErr> {
-    if !args.shape.active()? {
+    if !compaction_active(args.shape)? {
         return Ok(());
     }
     let tile_count = tiles_per_row(args.shape.cols);
@@ -298,7 +293,7 @@ pub unsafe fn compaction_apply(
     stream: &HipStream,
     args: CompactionApplyArgs,
 ) -> Result<(), HipErr> {
-    if !args.shape.active()? {
+    if !compaction_active(args.shape)? {
         return Ok(());
     }
     let tile_count = tiles_per_row(args.shape.cols);
@@ -339,7 +334,7 @@ pub unsafe fn compaction_scan_pass(
     stream: &HipStream,
     args: CompactionScanPassArgs,
 ) -> Result<(), HipErr> {
-    if !args.shape.active()? {
+    if !compaction_active(args.shape)? {
         return Ok(());
     }
     let tile = if args.tile > 0 {
@@ -388,7 +383,7 @@ pub unsafe fn compaction_apply_pass(
     stream: &HipStream,
     args: CompactionApplyPassArgs,
 ) -> Result<(), HipErr> {
-    if !args.shape.active()? {
+    if !compaction_active(args.shape)? {
         return Ok(());
     }
     hip_result(
