@@ -74,6 +74,44 @@ def test_module_trainer_optimizer_contract_is_rust_owned_and_fail_closed() -> No
     assert trainer.grad_clip_max_norm == pytest.approx(1.5)
 
 
+def test_module_trainer_binds_rust_execution_plan_without_python_reinterpretation() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    trainer = st.nn.ModuleTrainer(backend="wgpu")
+    assert trainer.runtime_execution_plan is None
+    assert trainer.runtime_execution_plan_output_sha256 is None
+    plan = st.evaluate_runtime_execution_plan(
+        st.describe_device("cpu"),
+        accelerator_fallback="allow",
+        tensor_util_wgpu_min_values=37,
+    )
+
+    trainer.bind_runtime_execution_plan(plan)
+
+    assert trainer.requested_backend == plan["requested_backend"] == "cpu"
+    assert trainer.effective_backend == plan["effective_backend"] == "cpu"
+    assert trainer.runtime_execution_plan == plan
+    assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("execution_plan_checkpoint", 2, 1))
+    trainer.prepare(model)
+    checkpoint = trainer.optimizer_checkpoint(model)
+    assert (
+        checkpoint["topology"]["runtime_execution_plan_output_sha256"]
+        == plan["output_sha256"]
+    )
+
+    tampered = json.loads(json.dumps(plan))
+    tampered["output_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="runtime execution-plan binding failed"):
+        trainer.bind_runtime_execution_plan(tampered)
+
+    assert trainer.runtime_execution_plan == plan
+    assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
+
+
 def test_module_trainer_optimizer_checkpoint_resumes_through_rust() -> None:
     st = _load_native()
     if st is None:

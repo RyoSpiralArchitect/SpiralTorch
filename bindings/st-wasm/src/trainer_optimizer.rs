@@ -136,6 +136,7 @@ mod tests {
                 shared_mem_per_workgroup: None,
                 accelerator_fallback: "allow".to_owned(),
                 tensor_util_wgpu_min_values: 1024,
+                runtime_execution_plan_output_sha256: None,
                 training_device_enabled: false,
                 training_rank: 0,
                 training_world_size: 1,
@@ -235,6 +236,27 @@ mod tests {
         assert_eq!(wasm["semantic_backend"], "rust");
         assert_eq!(wasm["deterministic_resume_ready"], true);
         assert_eq!(wasm["parameter_count"], 1);
+    }
+
+    #[test]
+    fn wasm_checkpoint_preflight_accepts_plan_bound_topology() {
+        let mut checkpoint = valid_checkpoint();
+        checkpoint.topology.runtime_execution_plan_output_sha256 = Some("a".repeat(64));
+        let checkpoint = checkpoint_from_json(&serde_json::to_string(&checkpoint).unwrap())
+            .expect("plan-bound checkpoint JSON ingress");
+
+        assert_eq!(
+            checkpoint
+                .topology
+                .runtime_execution_plan_output_sha256
+                .as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(
+            trainer_optimizer_checkpoint_value(&checkpoint)
+                .expect("plan-bound WASM checkpoint preflight")["deterministic_resume_ready"],
+            true
+        );
     }
 
     #[test]

@@ -415,6 +415,9 @@ pub struct TrainerExecutionTopology {
     pub shared_mem_per_workgroup: Option<u32>,
     pub accelerator_fallback: String,
     pub tensor_util_wgpu_min_values: usize,
+    /// Canonical execution-plan identity, when training was plan-bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_execution_plan_output_sha256: Option<String>,
     pub training_device_enabled: bool,
     pub training_rank: usize,
     pub training_world_size: usize,
@@ -990,6 +993,16 @@ impl TrainerExecutionTopology {
                 "must be allow or forbid",
             ));
         }
+        if self
+            .runtime_execution_plan_output_sha256
+            .as_deref()
+            .is_some_and(|value| !is_lowercase_sha256(value))
+        {
+            return Err(checkpoint_state_error(
+                "topology.runtime_execution_plan_output_sha256",
+                "must be a lowercase SHA-256 value when present",
+            ));
+        }
         for (field, value) in [
             (
                 "topology.tensor_util_wgpu_min_values",
@@ -1033,6 +1046,13 @@ impl TrainerExecutionTopology {
         }
         Ok(())
     }
+}
+
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 impl TrainerParameterOptimizerState {
@@ -1422,6 +1442,7 @@ mod tests {
                 shared_mem_per_workgroup: None,
                 accelerator_fallback: "allow".to_owned(),
                 tensor_util_wgpu_min_values: 1024,
+                runtime_execution_plan_output_sha256: None,
                 training_device_enabled: false,
                 training_rank: 0,
                 training_world_size: 1,
@@ -1609,6 +1630,14 @@ mod tests {
         assert!(matches!(
             evaluate_trainer_optimizer_checkpoint(&checkpoint),
             Err(TrainerOptimizerCheckpointError::InvalidState { .. })
+        ));
+
+        let mut checkpoint = valid_checkpoint();
+        checkpoint.topology.runtime_execution_plan_output_sha256 = Some("A".repeat(64));
+        assert!(matches!(
+            evaluate_trainer_optimizer_checkpoint(&checkpoint),
+            Err(TrainerOptimizerCheckpointError::InvalidState { ref field, .. })
+                if field == "topology.runtime_execution_plan_output_sha256"
         ));
 
         let mut checkpoint = valid_checkpoint();

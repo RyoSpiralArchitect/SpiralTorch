@@ -636,6 +636,27 @@ automatically; WASM exposes the same observer as JSON/Object transport instead o
 rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
 not cryptographic hardware attestation, and undeclared workloads remain unobserved.
 
+Bind that committed plan before creating a training schedule so rank planning and
+every tensor kernel share one Rust-owned execution context:
+
+```python
+import spiraltorch as st
+
+plan = st.evaluate_runtime_execution_plan(
+    st.describe_device("cpu"),
+    accelerator_fallback="allow",
+)
+trainer = st.nn.ModuleTrainer(backend="cpu")
+trainer.bind_runtime_execution_plan(plan)
+schedule = trainer.roundtable(rows=8, cols=64)
+
+assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
+```
+
+Plans are validated and materialized in Rust. A tampered, blocked, or locally
+unavailable plan leaves the trainer unchanged, while a schedule created under a
+different device/config contract is rejected before the epoch starts.
+
 Then pick the path that matches the job:
 
 - **Native learning loop:** use `st.Tensor`, `st.nn`, `st.optim`, and
