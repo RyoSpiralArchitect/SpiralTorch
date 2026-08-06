@@ -18,11 +18,11 @@ resonance decay parameters. The additions allow SpiralTorch to replay a
 
 * `st_backend_wgpu::render::TemporalRenderer` evaluates the harmonic series for
   each voxel across time, producing `[frames, depth, height, width]` sequences.
-* The `visualize_z_volume` utility (built into `st-backend-wgpu`) generates a
-  textual dump. Run it with:
+* The workspace `visualize-z-volume` client consumes the backend rendering
+  contract and generates a textual dump. Run it with:
 
 ```bash
-cargo run -p st-backend-wgpu --bin visualize_z_volume -- --depth=4 --height=4 --width=4 --frames=32 --output=temporal.csv
+cargo run -p visualize-z-volume -- --depth=4 --height=4 --width=4 --frames=32 --output=temporal.csv
 ```
 
 The CSV contains per-frame amplitudes that can be plotted to create animations

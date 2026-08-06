@@ -12,16 +12,15 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::{self, TryRecvError};
-use std::time::{Duration, Instant};
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+use crate::runtime::{ensure_blocking_readback_supported, read_buffer, WgpuRuntimeError};
+
 const WORKGROUP_SIZE: u32 = 256;
 const STORAGE_BINDINGS: u32 = 7;
-const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
 
 /// Exact rank family selected by the two-command dispatcher.
@@ -282,6 +281,7 @@ pub struct Pipelines {
 
 impl Pipelines {
     pub fn new(device: &wgpu::Device) -> Result<Self, DispatchError> {
+        #[cfg(not(target_arch = "wasm32"))]
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let built = catch_unwind(AssertUnwindSafe(|| {
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -326,14 +326,23 @@ impl Pipelines {
                 row_merge,
             }
         }));
+        #[cfg(not(target_arch = "wasm32"))]
         let validation = pollster::block_on(device.pop_error_scope());
 
+        #[cfg(not(target_arch = "wasm32"))]
         match (built, validation) {
             (Err(payload), _) => Err(DispatchError::PipelineBuild(panic_payload_to_string(
                 payload,
             ))),
             (_, Some(error)) => Err(DispatchError::PipelineBuild(error.to_string())),
             (Ok(pipelines), None) => Ok(pipelines),
+        }
+        #[cfg(target_arch = "wasm32")]
+        match built {
+            Err(payload) => Err(DispatchError::PipelineBuild(panic_payload_to_string(
+                payload,
+            ))),
+            Ok(pipelines) => Ok(pipelines),
         }
     }
 }
@@ -392,6 +401,7 @@ pub fn dispatch_host(
             indices: Vec::new(),
         });
     }
+    ensure_blocking_readback_supported("host-visible exact rank-k")?;
     plan.validate_device(device)?;
 
     let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -469,10 +479,6 @@ pub fn dispatch_host(
     }
     queue.submit(Some(first.finish()));
 
-    let output_bytes = u64::from(plan.output_elements) * 4;
-    let values_staging = staging_buffer(device, "st.rankk.exact_2ce.values_staging", output_bytes);
-    let indices_staging =
-        staging_buffer(device, "st.rankk.exact_2ce.indices_staging", output_bytes);
     let mut second = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.rankk.exact_2ce.command.row_merge"),
     });
@@ -485,20 +491,23 @@ pub fn dispatch_host(
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(plan.rows, 1, 1);
     }
-    second.copy_buffer_to_buffer(&output_values, 0, &values_staging, 0, output_bytes);
-    second.copy_buffer_to_buffer(&output_indices, 0, &indices_staging, 0, output_bytes);
     queue.submit(Some(second.finish()));
 
-    let value_bytes = map_read(device, &values_staging, output_bytes)?;
-    let index_bytes = map_read(device, &indices_staging, output_bytes)?;
-    let values = value_bytes
-        .chunks_exact(4)
-        .map(|bytes| f32::from_ne_bytes(bytes.try_into().expect("four-byte f32 chunk")))
-        .collect();
-    let indices = index_bytes
-        .chunks_exact(4)
-        .map(|bytes| u32::from_ne_bytes(bytes.try_into().expect("four-byte u32 chunk")) as i32)
-        .collect();
+    let elements = plan.output_elements as usize;
+    let values = read_buffer::<f32>(
+        device,
+        queue,
+        &output_values,
+        elements,
+        "st.rankk.exact_2ce.output_values.readback",
+    )?;
+    let indices = read_buffer::<i32>(
+        device,
+        queue,
+        &output_indices,
+        elements,
+        "st.rankk.exact_2ce.output_indices.readback",
+    )?;
     Ok(Output { values, indices })
 }
 
@@ -520,56 +529,11 @@ fn storage_buffer(
     })
 }
 
-fn staging_buffer(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size: bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    })
-}
-
 fn binding(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
     wgpu::BindGroupEntry {
         binding,
         resource: buffer.as_entire_binding(),
     }
-}
-
-fn map_read(
-    device: &wgpu::Device,
-    buffer: &wgpu::Buffer,
-    bytes: u64,
-) -> Result<Vec<u8>, DispatchError> {
-    let slice = buffer.slice(0..bytes);
-    let (tx, rx) = mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = tx.send(result);
-    });
-    let started = Instant::now();
-    loop {
-        device.poll(wgpu::Maintain::Poll);
-        match rx.try_recv() {
-            Ok(result) => {
-                result.map_err(|error| DispatchError::Map(error.to_string()))?;
-                break;
-            }
-            Err(TryRecvError::Empty) if started.elapsed() < READBACK_TIMEOUT => {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Err(TryRecvError::Empty) => return Err(DispatchError::ReadbackTimeout),
-            Err(TryRecvError::Disconnected) => {
-                return Err(DispatchError::Map(
-                    "WGPU map callback disconnected".to_string(),
-                ));
-            }
-        }
-    }
-    let view = slice.get_mapped_range();
-    let data = view.to_vec();
-    drop(view);
-    buffer.unmap();
-    Ok(data)
 }
 
 fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
@@ -596,10 +560,8 @@ pub enum DispatchError {
     },
     #[error("failed to build exact rank-k two-command pipelines: {0}")]
     PipelineBuild(String),
-    #[error("failed to map exact rank-k output: {0}")]
-    Map(String),
-    #[error("exact rank-k WGPU readback timed out after 30 seconds")]
-    ReadbackTimeout,
+    #[error(transparent)]
+    Runtime(#[from] WgpuRuntimeError),
 }
 
 #[cfg(test)]

@@ -1,6 +1,40 @@
 use std::f32::consts::TAU;
 
-use st_tensor::{PureResult, TensorError};
+use thiserror::Error;
+
+pub type TemporalRenderResult<T> = Result<T, TemporalRenderError>;
+
+/// Shape and configuration failures emitted by temporal rendering.
+#[non_exhaustive]
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum TemporalRenderError {
+    #[error("temporal volume dimensions must be positive, got {depth}x{height}x{width}")]
+    InvalidDimensions {
+        depth: usize,
+        height: usize,
+        width: usize,
+    },
+    #[error("temporal volume element count overflowed for {depth}x{height}x{width}")]
+    VoxelCountOverflow {
+        depth: usize,
+        height: usize,
+        width: usize,
+    },
+    #[error("temporal volume {field} length mismatch: expected {expected}, got {actual}")]
+    BufferLength {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "temporal harmonic element count overflowed: voxels={voxel_count} channels={channels}"
+    )]
+    HarmonicCountOverflow { voxel_count: usize, channels: usize },
+    #[error("temporal renderer requires at least one frame")]
+    ZeroFrames,
+    #[error("temporal sample rate must be finite and positive, got {sample_rate_hz}")]
+    InvalidSampleRate { sample_rate_hz: f32 },
+}
 
 /// Trait describing the data required to render a temporal Z-space volume.
 pub trait TemporalVolumeLike {
@@ -20,10 +54,22 @@ pub trait TemporalVolumeLike {
     fn resonance_decay(&self) -> &[f32];
 
     /// Total number of voxels contained in the volume.
-    fn voxel_count(&self) -> usize {
+    fn voxel_count(&self) -> TemporalRenderResult<usize> {
+        if self.depth() == 0 || self.height() == 0 || self.width() == 0 {
+            return Err(TemporalRenderError::InvalidDimensions {
+                depth: self.depth(),
+                height: self.height(),
+                width: self.width(),
+            });
+        }
         self.depth()
-            .saturating_mul(self.height())
-            .saturating_mul(self.width())
+            .checked_mul(self.height())
+            .and_then(|count| count.checked_mul(self.width()))
+            .ok_or(TemporalRenderError::VoxelCountOverflow {
+                depth: self.depth(),
+                height: self.height(),
+                width: self.width(),
+            })
     }
 }
 
@@ -52,44 +98,55 @@ impl<'a> TemporalVolumeView<'a> {
         voxels: &'a [f32],
         temporal_harmonics: &'a [f32],
         resonance_decay: &'a [f32],
-    ) -> PureResult<Self> {
+    ) -> TemporalRenderResult<Self> {
         if depth == 0 || height == 0 || width == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: depth,
-                cols: height.saturating_mul(width),
+            return Err(TemporalRenderError::InvalidDimensions {
+                depth,
+                height,
+                width,
             });
         }
         let voxel_count = depth
             .checked_mul(height)
             .and_then(|v| v.checked_mul(width))
-            .ok_or(TensorError::InvalidDimensions {
-                rows: depth,
-                cols: height.saturating_mul(width),
+            .ok_or(TemporalRenderError::VoxelCountOverflow {
+                depth,
+                height,
+                width,
             })?;
         if voxels.len() != voxel_count {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "voxels",
                 expected: voxel_count,
-                got: voxels.len(),
+                actual: voxels.len(),
             });
         }
         if resonance_decay.len() != voxel_count {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "resonance_decay",
                 expected: voxel_count,
-                got: resonance_decay.len(),
+                actual: resonance_decay.len(),
             });
         }
-        let harmonic_expected = voxel_count.saturating_mul(harmonic_channels);
+        let harmonic_expected = voxel_count.checked_mul(harmonic_channels).ok_or(
+            TemporalRenderError::HarmonicCountOverflow {
+                voxel_count,
+                channels: harmonic_channels,
+            },
+        )?;
         if harmonic_channels == 0 {
             if !temporal_harmonics.is_empty() {
-                return Err(TensorError::DataLength {
+                return Err(TemporalRenderError::BufferLength {
+                    field: "temporal_harmonics",
                     expected: 0,
-                    got: temporal_harmonics.len(),
+                    actual: temporal_harmonics.len(),
                 });
             }
         } else if temporal_harmonics.len() != harmonic_expected {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "temporal_harmonics",
                 expected: harmonic_expected,
-                got: temporal_harmonics.len(),
+                actual: temporal_harmonics.len(),
             });
         }
         Ok(Self {
@@ -184,8 +241,8 @@ impl TemporalRenderOutput {
     /// Returns the flat buffer for a given frame if it exists.
     pub fn frame(&self, index: usize) -> Option<&[f32]> {
         self.slices
-            .iter()
-            .find(|slice| slice.frame_index == index)
+            .get(index)
+            .filter(|slice| slice.frame_index == index)
             .map(|slice| slice.data.as_slice())
     }
 }
@@ -201,66 +258,63 @@ impl TemporalRenderer {
         Self { config }
     }
 
-    pub fn render<V>(&self, volume: &V) -> PureResult<TemporalRenderOutput>
+    pub fn render<V>(&self, volume: &V) -> TemporalRenderResult<TemporalRenderOutput>
     where
         V: TemporalVolumeLike + ?Sized,
     {
         if self.config.frames == 0 {
-            return Err(TensorError::InvalidValue {
-                label: "temporal_frames",
-            });
+            return Err(TemporalRenderError::ZeroFrames);
         }
         if !self.config.sample_rate_hz.is_finite() || self.config.sample_rate_hz <= 0.0 {
-            return Err(TensorError::InvalidValue {
-                label: "temporal_sample_rate",
+            return Err(TemporalRenderError::InvalidSampleRate {
+                sample_rate_hz: self.config.sample_rate_hz,
             });
         }
 
         let depth = volume.depth();
         let height = volume.height();
         let width = volume.width();
-        let voxel_count = volume.voxel_count();
-
-        if voxel_count == 0 {
-            return Ok(TemporalRenderOutput {
-                frames: 0,
-                depth,
-                height,
-                width,
-                slices: Vec::new(),
-            });
-        }
+        let voxel_count = volume.voxel_count()?;
 
         let voxels = volume.voxels();
         if voxels.len() != voxel_count {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "voxels",
                 expected: voxel_count,
-                got: voxels.len(),
+                actual: voxels.len(),
             });
         }
 
         let decay = volume.resonance_decay();
         if decay.len() != voxel_count {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "resonance_decay",
                 expected: voxel_count,
-                got: decay.len(),
+                actual: decay.len(),
             });
         }
 
         let harmonic_channels = volume.harmonic_channels();
         let harmonics = volume.temporal_harmonics();
-        let harmonic_expected = voxel_count.saturating_mul(harmonic_channels);
+        let harmonic_expected = voxel_count.checked_mul(harmonic_channels).ok_or(
+            TemporalRenderError::HarmonicCountOverflow {
+                voxel_count,
+                channels: harmonic_channels,
+            },
+        )?;
         if harmonic_channels == 0 {
             if !harmonics.is_empty() {
-                return Err(TensorError::DataLength {
+                return Err(TemporalRenderError::BufferLength {
+                    field: "temporal_harmonics",
                     expected: 0,
-                    got: harmonics.len(),
+                    actual: harmonics.len(),
                 });
             }
         } else if harmonics.len() != harmonic_expected {
-            return Err(TensorError::DataLength {
+            return Err(TemporalRenderError::BufferLength {
+                field: "temporal_harmonics",
                 expected: harmonic_expected,
-                got: harmonics.len(),
+                actual: harmonics.len(),
             });
         }
 
@@ -376,6 +430,23 @@ mod tests {
         let harmonics = [0.0f32; 3];
         let decay = [1.0f32, 1.0];
         let result = TemporalVolumeView::new(1, 1, 2, 2, &voxels, &harmonics, &decay);
-        assert!(matches!(result, Err(TensorError::DataLength { .. })));
+        assert!(matches!(
+            result,
+            Err(TemporalRenderError::BufferLength {
+                field: "temporal_harmonics",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_overflowing_harmonic_shape_without_saturation() {
+        let voxels = [0.0f32; 2];
+        let decay = [1.0f32; 2];
+        let result = TemporalVolumeView::new(1, 1, 2, usize::MAX, &voxels, &[], &decay);
+        assert!(matches!(
+            result,
+            Err(TemporalRenderError::HarmonicCountOverflow { .. })
+        ));
     }
 }

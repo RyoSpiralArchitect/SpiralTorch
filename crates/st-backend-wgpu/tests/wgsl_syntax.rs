@@ -2,24 +2,12 @@ use naga::front::wgsl::parse_str;
 
 const SHADERS: &[(&str, &str)] = &[
     (
-        "wgpu_compaction_1ce",
-        include_str!("../src/shaders/wgpu_compaction_1ce.wgsl"),
-    ),
-    (
         "wgpu_compaction_apply",
         include_str!("../src/shaders/wgpu_compaction_apply.wgsl"),
     ),
     (
-        "wgpu_compaction_apply_pass",
-        include_str!("../src/shaders/wgpu_compaction_apply_pass.wgsl"),
-    ),
-    (
         "wgpu_compaction_scan",
         include_str!("../src/shaders/wgpu_compaction_scan.wgsl"),
-    ),
-    (
-        "wgpu_compaction_scan_pass",
-        include_str!("../src/shaders/wgpu_compaction_scan_pass.wgsl"),
     ),
     (
         "midk_bottomk_compaction",
@@ -107,10 +95,6 @@ const SKIP: &[&str] = &[
     "nerf_raymarch",
     "nerf_volume_utils",
     "nd_indexer",
-    "transforms_horizontal_flip",
-    "transforms_resize",
-    "transforms_center_crop",
-    "transforms_color_jitter",
 ];
 
 #[test]

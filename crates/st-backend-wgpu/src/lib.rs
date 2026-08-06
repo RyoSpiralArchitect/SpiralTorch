@@ -1,12 +1,13 @@
-//! Lightweight wrappers around WGPU compute pipelines used by SpiralTorch.
-//! The module exposes helper routines to load WGSL shaders from disk and
-//! construct the compute pipelines that power higher level tensor operators.
+//! WGPU execution worker for SpiralTorch's Rust semantic contracts.
+//!
+//! This crate owns WGSL sources, checked device/buffer primitives, pipeline
+//! construction, and explicit dispatch. It does not choose runtime routes or
+//! redefine tensor semantics; higher layers select it and consume the shared
+//! contract outputs.
 
 pub mod attention;
 pub mod catalog;
 pub mod compaction;
-pub mod compaction2ce;
-pub mod compaction_2ce;
 pub mod gelu_back;
 pub mod hardmax;
 pub mod middlemax;
@@ -15,6 +16,8 @@ pub mod nd_indexer;
 pub mod nerf;
 pub mod rankk_exact_2ce;
 pub mod render;
+pub mod runtime;
+pub mod shader_sources;
 pub mod softmax;
 pub mod topk_keepk;
 pub mod transform;
@@ -63,6 +66,12 @@ pub use attention::{
     fused_attention, AccumulatorPrecision as FusedAttentionAccumulatorPrecision,
     Kernel as FusedAttentionKernel, Params as FusedAttentionParams, Plan as FusedAttentionPlan,
     PlanError as FusedAttentionPlanError, FLAG_USE_ATTN_BIAS, FLAG_USE_Z_BIAS,
+};
+
+pub use compaction::{
+    compact_rows_f32, dispatch_host as dispatch_compaction_host,
+    CompactionDispatchError as WgpuCompactionDispatchError,
+    CompactionPipelines as WgpuCompactionPipelines,
 };
 
 pub use catalog::{

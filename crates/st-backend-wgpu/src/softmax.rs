@@ -6,7 +6,6 @@
 //! WGPU softmax kernels with optional subgroup acceleration.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
@@ -16,7 +15,7 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
+use crate::{runtime::Shared, util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -40,8 +39,8 @@ impl Params {
 #[derive(Debug)]
 pub struct Pipelines {
     pub bind_layout: BindGroupLayout,
-    pub workgroup: Arc<ComputePipeline>,
-    pub subgroup: Option<Arc<ComputePipeline>>,
+    pub workgroup: Shared<ComputePipeline>,
+    pub subgroup: Option<Shared<ComputePipeline>>,
 }
 
 impl Pipelines {

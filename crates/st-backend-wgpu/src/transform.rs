@@ -3,11 +3,15 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{
+    runtime::{
+        empty_buffer, ensure_blocking_readback_supported, read_buffer, upload_slice, Shared,
+        WgpuContext, WgpuRuntimeError,
+    },
+    ShaderCache, ShaderLoadError,
+};
 use bytemuck::{Pod, Zeroable};
-use st_tensor::backend::wgpu_util::{empty_buffer, read_buffer, upload_slice, WgpuContext};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 use wgpu::{
@@ -16,6 +20,7 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
+#[cfg(any(test, not(target_arch = "wasm32")))]
 const TRANSFORM_SHADER_DIR: &str = "shaders/transforms";
 
 #[derive(Debug, Error)]
@@ -28,8 +33,8 @@ pub enum TransformDispatchError {
     Shader(#[from] ShaderLoadError),
     #[error("invalid transform geometry: {0}")]
     InvalidGeometry(String),
-    #[error("wgpu buffer readback failed: {0}")]
-    Readback(String),
+    #[error(transparent)]
+    Runtime(#[from] WgpuRuntimeError),
 }
 
 #[repr(C)]
@@ -114,10 +119,10 @@ pub struct ColorJitterConfig {
 
 struct Pipelines {
     bind_layout: BindGroupLayout,
-    resize: Arc<ComputePipeline>,
-    center_crop: Arc<ComputePipeline>,
-    horizontal_flip: Arc<ComputePipeline>,
-    color_jitter: Arc<ComputePipeline>,
+    resize: Shared<ComputePipeline>,
+    center_crop: Shared<ComputePipeline>,
+    horizontal_flip: Shared<ComputePipeline>,
+    color_jitter: Shared<ComputePipeline>,
 }
 
 impl Pipelines {
@@ -220,11 +225,16 @@ pub struct ImageGeometry {
 }
 
 impl ImageGeometry {
-    pub fn element_count(&self) -> usize {
+    pub fn element_count(&self) -> Result<usize, TransformDispatchError> {
         self.channels
             .checked_mul(self.height)
             .and_then(|v| v.checked_mul(self.width))
-            .expect("image geometry overflow")
+            .ok_or_else(|| {
+                TransformDispatchError::InvalidGeometry(format!(
+                    "image volume overflow for {}x{}x{}",
+                    self.channels, self.height, self.width
+                ))
+            })
     }
 }
 
@@ -282,8 +292,8 @@ impl TransformDispatcher {
     }
 
     pub fn with_gpu(
-        device: Arc<Device>,
-        queue: Arc<Queue>,
+        device: Shared<Device>,
+        queue: Shared<Queue>,
         shader_dir: impl Into<PathBuf>,
     ) -> Result<Self, TransformDispatchError> {
         let pipelines = Pipelines::new(device.as_ref(), shader_dir.into())?;
@@ -295,6 +305,7 @@ impl TransformDispatcher {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_default_gpu() -> Result<Self, TransformDispatchError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(async {
@@ -322,22 +333,54 @@ impl TransformDispatcher {
         })
         .map_err(|err| TransformDispatchError::Device(err.to_string()))?;
 
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
+        let device = Shared::new(device);
+        let queue = Shared::new(queue);
         let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR);
         Self::with_gpu(device, queue, shader_dir)
     }
 
-    fn ensure_geometry(
-        src_h: usize,
-        src_w: usize,
-        dst_h: usize,
-        dst_w: usize,
-    ) -> Result<(), TransformDispatchError> {
-        if src_h == 0 || src_w == 0 || dst_h == 0 || dst_w == 0 {
-            return Err(TransformDispatchError::InvalidGeometry(
-                "spatial dimensions must be positive".into(),
-            ));
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_default_gpu() -> Result<Self, TransformDispatchError> {
+        Err(WgpuRuntimeError::UnsupportedTarget {
+            operation: "synchronous adapter acquisition",
+            target: "wasm32",
+        }
+        .into())
+    }
+
+    fn validate_volume(
+        label: &str,
+        channels: usize,
+        height: usize,
+        width: usize,
+    ) -> Result<usize, TransformDispatchError> {
+        if channels == 0 || height == 0 || width == 0 {
+            return Err(TransformDispatchError::InvalidGeometry(format!(
+                "{label} dimensions must be positive, got {channels}x{height}x{width}"
+            )));
+        }
+        for (field, value) in [("channels", channels), ("height", height), ("width", width)] {
+            u32::try_from(value).map_err(|_| {
+                TransformDispatchError::InvalidGeometry(format!(
+                    "{label} {field} {value} exceeds the WGSL u32 range"
+                ))
+            })?;
+        }
+        channels
+            .checked_mul(height)
+            .and_then(|count| count.checked_mul(width))
+            .ok_or_else(|| {
+                TransformDispatchError::InvalidGeometry(format!(
+                    "{label} volume overflow for {channels}x{height}x{width}"
+                ))
+            })
+    }
+
+    fn validate_finite(label: &str, value: f32) -> Result<(), TransformDispatchError> {
+        if !value.is_finite() {
+            return Err(TransformDispatchError::InvalidGeometry(format!(
+                "{label} must be finite, got {value}"
+            )));
         }
         Ok(())
     }
@@ -347,19 +390,18 @@ impl TransformDispatcher {
         input: &[f32],
         config: ResizeConfig,
     ) -> Result<Vec<f32>, TransformDispatchError> {
-        Self::ensure_geometry(
+        let expected = Self::validate_volume(
+            "resize source",
+            config.channels,
             config.src_height,
             config.src_width,
+        )?;
+        Self::validate_volume(
+            "resize destination",
+            config.channels,
             config.dst_height,
             config.dst_width,
         )?;
-        let channels = config.channels;
-        let expected = channels
-            .checked_mul(config.src_height)
-            .and_then(|v| v.checked_mul(config.src_width))
-            .ok_or_else(|| {
-                TransformDispatchError::InvalidGeometry("source volume overflow".into())
-            })?;
         if input.len() != expected {
             return Err(TransformDispatchError::InvalidGeometry(format!(
                 "input length {} does not match {}x{}x{}",
@@ -380,9 +422,15 @@ impl TransformDispatcher {
         input: &[f32],
         config: CenterCropConfig,
     ) -> Result<Vec<f32>, TransformDispatchError> {
-        Self::ensure_geometry(
+        let expected = Self::validate_volume(
+            "center crop source",
+            config.channels,
             config.src_height,
             config.src_width,
+        )?;
+        Self::validate_volume(
+            "center crop destination",
+            config.channels,
             config.crop_height,
             config.crop_width,
         )?;
@@ -391,13 +439,6 @@ impl TransformDispatcher {
                 "crop must fit inside source".into(),
             ));
         }
-        let expected = config
-            .channels
-            .checked_mul(config.src_height)
-            .and_then(|v| v.checked_mul(config.src_width))
-            .ok_or_else(|| {
-                TransformDispatchError::InvalidGeometry("source volume overflow".into())
-            })?;
         if input.len() != expected {
             return Err(TransformDispatchError::InvalidGeometry(format!(
                 "input length {} does not match {}x{}x{}",
@@ -418,14 +459,12 @@ impl TransformDispatcher {
         input: &[f32],
         config: HorizontalFlipConfig,
     ) -> Result<Vec<f32>, TransformDispatchError> {
-        Self::ensure_geometry(config.height, config.width, config.height, config.width)?;
-        let expected = config
-            .channels
-            .checked_mul(config.height)
-            .and_then(|v| v.checked_mul(config.width))
-            .ok_or_else(|| {
-                TransformDispatchError::InvalidGeometry("source volume overflow".into())
-            })?;
+        let expected = Self::validate_volume(
+            "horizontal flip",
+            config.channels,
+            config.height,
+            config.width,
+        )?;
         if input.len() != expected {
             return Err(TransformDispatchError::InvalidGeometry(format!(
                 "input length {} does not match {}x{}x{}",
@@ -446,14 +485,16 @@ impl TransformDispatcher {
         input: &[f32],
         config: ColorJitterConfig,
     ) -> Result<Vec<f32>, TransformDispatchError> {
-        Self::ensure_geometry(config.height, config.width, config.height, config.width)?;
-        let expected = config
-            .channels
-            .checked_mul(config.height)
-            .and_then(|v| v.checked_mul(config.width))
-            .ok_or_else(|| {
-                TransformDispatchError::InvalidGeometry("source volume overflow".into())
-            })?;
+        let expected =
+            Self::validate_volume("color jitter", config.channels, config.height, config.width)?;
+        for (label, value) in [
+            ("brightness", config.brightness),
+            ("contrast", config.contrast),
+            ("saturation", config.saturation),
+            ("hue", config.hue),
+        ] {
+            Self::validate_finite(label, value)?;
+        }
         if input.len() != expected {
             return Err(TransformDispatchError::InvalidGeometry(format!(
                 "input length {} does not match {}x{}x{}",
@@ -485,10 +526,13 @@ impl TransformDispatcher {
         initial: ImageGeometry,
         commands: &[GeometryCommand],
     ) -> Result<(Vec<f32>, ImageGeometry), TransformDispatchError> {
-        if commands.is_empty() {
-            return Ok((input.to_vec(), initial));
-        }
-        let expected = initial.element_count();
+        Self::validate_volume(
+            "initial image",
+            initial.channels,
+            initial.height,
+            initial.width,
+        )?;
+        let expected = initial.element_count()?;
         if input.len() != expected {
             return Err(TransformDispatchError::InvalidGeometry(format!(
                 "input length {} does not match geometry {}x{}x{}",
@@ -497,6 +541,9 @@ impl TransformDispatcher {
                 initial.height,
                 initial.width
             )));
+        }
+        if commands.is_empty() {
+            return Ok((input.to_vec(), initial));
         }
 
         let mut geometries = Vec::with_capacity(commands.len());
@@ -517,12 +564,13 @@ impl TransformDispatcher {
                             cpu_horizontal_flip(&data, config)
                         }
                     };
-                    debug_assert_eq!(data.len(), geometry.element_count());
+                    debug_assert_eq!(data.len(), geometry.element_count()?);
                 }
                 let final_geometry = *geometries.last().unwrap_or(&initial);
                 Ok((data, final_geometry))
             }
             Backend::Gpu(ctx) => {
+                ensure_blocking_readback_supported("host-visible transform sequence")?;
                 let device = ctx.context.device();
                 let queue = ctx.context.queue();
                 let mut current_buffer = upload_slice(
@@ -530,7 +578,7 @@ impl TransformDispatcher {
                     "st.backend.transform.sequence.input",
                     input,
                     BufferUsages::STORAGE,
-                );
+                )?;
                 for (command, _geometry) in commands.iter().zip(&geometries) {
                     let next_buffer = match *command {
                         GeometryCommand::Resize(config) => {
@@ -543,7 +591,6 @@ impl TransformDispatcher {
                             dispatch_horizontal_flip_buffer(ctx, &current_buffer, config)?
                         }
                     };
-                    device.poll(wgpu::Maintain::Wait);
                     current_buffer = next_buffer;
                 }
                 let final_geometry = *geometries.last().unwrap();
@@ -551,9 +598,9 @@ impl TransformDispatcher {
                     device,
                     queue,
                     &current_buffer,
-                    final_geometry.element_count(),
-                )
-                .map_err(TransformDispatchError::Readback)?;
+                    final_geometry.element_count()?,
+                    "st.backend.transform.sequence.readback",
+                )?;
                 Ok((output, final_geometry))
             }
         }
@@ -561,17 +608,35 @@ impl TransformDispatcher {
 }
 
 fn workgroup_dims(
+    device: &Device,
     width: usize,
     height: usize,
     depth: usize,
     x: u32,
     y: u32,
     z: u32,
-) -> (u32, u32, u32) {
-    let gx = (width as u32).div_ceil(x);
-    let gy = (height as u32).div_ceil(y);
-    let gz = (depth as u32).div_ceil(z);
-    (gx, gy, gz)
+) -> Result<(u32, u32, u32), TransformDispatchError> {
+    let width = shader_dimension("width", width)?;
+    let height = shader_dimension("height", height)?;
+    let depth = shader_dimension("channels", depth)?;
+    let geometry = (width.div_ceil(x), height.div_ceil(y), depth.div_ceil(z));
+    let available = device.limits().max_compute_workgroups_per_dimension;
+    for (axis, required) in [("x", geometry.0), ("y", geometry.1), ("z", geometry.2)] {
+        if required > available {
+            return Err(TransformDispatchError::InvalidGeometry(format!(
+                "transform dispatch axis {axis} requires {required} workgroups, device provides {available}"
+            )));
+        }
+    }
+    Ok(geometry)
+}
+
+fn shader_dimension(field: &str, value: usize) -> Result<u32, TransformDispatchError> {
+    u32::try_from(value).map_err(|_| {
+        TransformDispatchError::InvalidGeometry(format!(
+            "transform {field} {value} exceeds the WGSL u32 range"
+        ))
+    })
 }
 
 fn cpu_resize(input: &[f32], config: ResizeConfig) -> Vec<f32> {
@@ -720,6 +785,7 @@ fn gpu_resize(
     input: &[f32],
     config: ResizeConfig,
 ) -> Result<Vec<f32>, TransformDispatchError> {
+    ensure_blocking_readback_supported("host-visible resize")?;
     let device = ctx.context.device();
     let queue = ctx.context.queue();
     let in_buffer = upload_slice(
@@ -727,11 +793,22 @@ fn gpu_resize(
         "st.backend.transform.resize.input",
         input,
         BufferUsages::STORAGE,
-    );
-    let out_elements = config.channels * config.dst_height * config.dst_width;
+    )?;
+    let out_elements = TransformDispatcher::validate_volume(
+        "resize destination",
+        config.channels,
+        config.dst_height,
+        config.dst_width,
+    )?;
     let out_buffer = dispatch_resize_buffer(ctx, &in_buffer, config)?;
-    device.poll(wgpu::Maintain::Wait);
-    read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
+    read_buffer(
+        device,
+        queue,
+        &out_buffer,
+        out_elements,
+        "st.backend.transform.resize.readback",
+    )
+    .map_err(TransformDispatchError::from)
 }
 
 fn gpu_center_crop(
@@ -739,6 +816,7 @@ fn gpu_center_crop(
     input: &[f32],
     config: CenterCropConfig,
 ) -> Result<Vec<f32>, TransformDispatchError> {
+    ensure_blocking_readback_supported("host-visible center crop")?;
     let device = ctx.context.device();
     let queue = ctx.context.queue();
     let in_buffer = upload_slice(
@@ -746,11 +824,22 @@ fn gpu_center_crop(
         "st.backend.transform.crop.input",
         input,
         BufferUsages::STORAGE,
-    );
-    let out_elements = config.channels * config.crop_height * config.crop_width;
+    )?;
+    let out_elements = TransformDispatcher::validate_volume(
+        "center crop destination",
+        config.channels,
+        config.crop_height,
+        config.crop_width,
+    )?;
     let out_buffer = dispatch_center_crop_buffer(ctx, &in_buffer, config)?;
-    device.poll(wgpu::Maintain::Wait);
-    read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
+    read_buffer(
+        device,
+        queue,
+        &out_buffer,
+        out_elements,
+        "st.backend.transform.crop.readback",
+    )
+    .map_err(TransformDispatchError::from)
 }
 
 fn gpu_horizontal_flip(
@@ -758,6 +847,7 @@ fn gpu_horizontal_flip(
     input: &[f32],
     config: HorizontalFlipConfig,
 ) -> Result<Vec<f32>, TransformDispatchError> {
+    ensure_blocking_readback_supported("host-visible horizontal flip")?;
     let device = ctx.context.device();
     let queue = ctx.context.queue();
     let in_buffer = upload_slice(
@@ -765,11 +855,22 @@ fn gpu_horizontal_flip(
         "st.backend.transform.flip.input",
         input,
         BufferUsages::STORAGE,
-    );
-    let out_elements = config.channels * config.height * config.width;
+    )?;
+    let out_elements = TransformDispatcher::validate_volume(
+        "horizontal flip",
+        config.channels,
+        config.height,
+        config.width,
+    )?;
     let out_buffer = dispatch_horizontal_flip_buffer(ctx, &in_buffer, config)?;
-    device.poll(wgpu::Maintain::Wait);
-    read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
+    read_buffer(
+        device,
+        queue,
+        &out_buffer,
+        out_elements,
+        "st.backend.transform.flip.readback",
+    )
+    .map_err(TransformDispatchError::from)
 }
 
 fn gpu_color_jitter(
@@ -778,6 +879,7 @@ fn gpu_color_jitter(
     config: ColorJitterConfig,
     means: [f32; 4],
 ) -> Result<Vec<f32>, TransformDispatchError> {
+    ensure_blocking_readback_supported("host-visible color jitter")?;
     let device = ctx.context.device();
     let queue = ctx.context.queue();
     let in_buffer = upload_slice(
@@ -785,19 +887,24 @@ fn gpu_color_jitter(
         "st.backend.transform.jitter.input",
         input,
         BufferUsages::STORAGE,
-    );
-    let out_elements = config.channels * config.height * config.width;
-    let out_buffer = empty_buffer(
+    )?;
+    let out_elements = TransformDispatcher::validate_volume(
+        "color jitter",
+        config.channels,
+        config.height,
+        config.width,
+    )?;
+    let out_buffer = empty_buffer::<f32>(
         device,
         "st.backend.transform.jitter.output",
         out_elements,
         BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
+    )?;
     let params = ColorJitterParams {
         dims: [
-            config.height as u32,
-            config.width as u32,
-            config.channels as u32,
+            shader_dimension("height", config.height)?,
+            shader_dimension("width", config.width)?,
+            shader_dimension("channels", config.channels)?,
             0,
         ],
         factors: [
@@ -824,11 +931,26 @@ fn gpu_color_jitter(
         });
         pass.set_pipeline(ctx.pipelines.color_jitter.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
+        let (gx, gy, gz) = workgroup_dims(
+            device,
+            config.width,
+            config.height,
+            config.channels,
+            16,
+            16,
+            1,
+        )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
     queue.submit(std::iter::once(encoder.finish()));
-    read_buffer(device, queue, &out_buffer, out_elements).map_err(TransformDispatchError::Readback)
+    read_buffer(
+        device,
+        queue,
+        &out_buffer,
+        out_elements,
+        "st.backend.transform.jitter.readback",
+    )
+    .map_err(TransformDispatchError::from)
 }
 
 fn dispatch_resize_buffer(
@@ -838,19 +960,24 @@ fn dispatch_resize_buffer(
 ) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
     let queue = ctx.context.queue();
-    let out_elements = config.channels * config.dst_height * config.dst_width;
-    let out_buffer = empty_buffer(
+    let out_elements = TransformDispatcher::validate_volume(
+        "resize destination",
+        config.channels,
+        config.dst_height,
+        config.dst_width,
+    )?;
+    let out_buffer = empty_buffer::<f32>(
         device,
         "st.backend.transform.resize.seq.output",
         out_elements,
         BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
+    )?;
     let params = ResizeParams {
-        src_height: config.src_height as u32,
-        src_width: config.src_width as u32,
-        dst_height: config.dst_height as u32,
-        dst_width: config.dst_width as u32,
-        channels: config.channels as u32,
+        src_height: shader_dimension("source height", config.src_height)?,
+        src_width: shader_dimension("source width", config.src_width)?,
+        dst_height: shader_dimension("destination height", config.dst_height)?,
+        dst_width: shader_dimension("destination width", config.dst_width)?,
+        channels: shader_dimension("channels", config.channels)?,
         _pad0: 0,
         _pad1: 0,
         _pad2: 0,
@@ -872,13 +999,14 @@ fn dispatch_resize_buffer(
         pass.set_pipeline(ctx.pipelines.resize.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(
+            device,
             config.dst_width,
             config.dst_height,
             config.channels,
             8,
             8,
             1,
-        );
+        )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
     queue.submit(std::iter::once(encoder.finish()));
@@ -892,21 +1020,26 @@ fn dispatch_center_crop_buffer(
 ) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
     let queue = ctx.context.queue();
-    let out_elements = config.channels * config.crop_height * config.crop_width;
-    let out_buffer = empty_buffer(
+    let out_elements = TransformDispatcher::validate_volume(
+        "center crop destination",
+        config.channels,
+        config.crop_height,
+        config.crop_width,
+    )?;
+    let out_buffer = empty_buffer::<f32>(
         device,
         "st.backend.transform.crop.seq.output",
         out_elements,
         BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
+    )?;
     let params = CropParams {
-        src_height: config.src_height as u32,
-        src_width: config.src_width as u32,
-        dst_height: config.crop_height as u32,
-        dst_width: config.crop_width as u32,
-        top: ((config.src_height - config.crop_height) / 2) as u32,
-        left: ((config.src_width - config.crop_width) / 2) as u32,
-        channels: config.channels as u32,
+        src_height: shader_dimension("source height", config.src_height)?,
+        src_width: shader_dimension("source width", config.src_width)?,
+        dst_height: shader_dimension("crop height", config.crop_height)?,
+        dst_width: shader_dimension("crop width", config.crop_width)?,
+        top: shader_dimension("crop top", (config.src_height - config.crop_height) / 2)?,
+        left: shader_dimension("crop left", (config.src_width - config.crop_width) / 2)?,
+        channels: shader_dimension("channels", config.channels)?,
         _pad: 0,
     };
     let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -926,13 +1059,14 @@ fn dispatch_center_crop_buffer(
         pass.set_pipeline(ctx.pipelines.center_crop.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(
+            device,
             config.crop_width,
             config.crop_height,
             config.channels,
             8,
             8,
             1,
-        );
+        )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
     queue.submit(std::iter::once(encoder.finish()));
@@ -946,17 +1080,22 @@ fn dispatch_horizontal_flip_buffer(
 ) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
     let queue = ctx.context.queue();
-    let out_elements = config.channels * config.height * config.width;
-    let out_buffer = empty_buffer(
+    let out_elements = TransformDispatcher::validate_volume(
+        "horizontal flip",
+        config.channels,
+        config.height,
+        config.width,
+    )?;
+    let out_buffer = empty_buffer::<f32>(
         device,
         "st.backend.transform.flip.seq.output",
         out_elements,
         BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    );
+    )?;
     let params = FlipParams {
-        height: config.height as u32,
-        width: config.width as u32,
-        channels: config.channels as u32,
+        height: shader_dimension("height", config.height)?,
+        width: shader_dimension("width", config.width)?,
+        channels: shader_dimension("channels", config.channels)?,
         apply: config.apply as u32,
     };
     let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -975,7 +1114,15 @@ fn dispatch_horizontal_flip_buffer(
         });
         pass.set_pipeline(ctx.pipelines.horizontal_flip.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
+        let (gx, gy, gz) = workgroup_dims(
+            device,
+            config.width,
+            config.height,
+            config.channels,
+            16,
+            16,
+            1,
+        )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
     queue.submit(std::iter::once(encoder.finish()));
@@ -996,9 +1143,15 @@ fn validate_geometry_transition(
                     "resize config incompatible with input geometry".into(),
                 ));
             }
-            TransformDispatcher::ensure_geometry(
+            TransformDispatcher::validate_volume(
+                "resize source",
+                config.channels,
                 config.src_height,
                 config.src_width,
+            )?;
+            TransformDispatcher::validate_volume(
+                "resize destination",
+                config.channels,
                 config.dst_height,
                 config.dst_width,
             )?;
@@ -1017,9 +1170,15 @@ fn validate_geometry_transition(
                     "center crop config incompatible with input geometry".into(),
                 ));
             }
-            TransformDispatcher::ensure_geometry(
+            TransformDispatcher::validate_volume(
+                "center crop source",
+                config.channels,
                 config.src_height,
                 config.src_width,
+            )?;
+            TransformDispatcher::validate_volume(
+                "center crop destination",
+                config.channels,
                 config.crop_height,
                 config.crop_width,
             )?;
@@ -1043,13 +1202,103 @@ fn validate_geometry_transition(
                     "horizontal flip config incompatible with input geometry".into(),
                 ));
             }
-            TransformDispatcher::ensure_geometry(
-                config.height,
-                config.width,
+            TransformDispatcher::validate_volume(
+                "horizontal flip",
+                config.channels,
                 config.height,
                 config.width,
             )?;
             Ok(current)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_geometry_reports_overflow_instead_of_panicking() {
+        let geometry = ImageGeometry {
+            channels: usize::MAX,
+            height: 2,
+            width: 1,
+        };
+        assert!(matches!(
+            geometry.element_count(),
+            Err(TransformDispatchError::InvalidGeometry(_))
+        ));
+    }
+
+    #[test]
+    fn empty_sequence_still_validates_input_contract() {
+        let dispatcher = TransformDispatcher::cpu();
+        let result = dispatcher.run_geometry_sequence(
+            &[],
+            ImageGeometry {
+                channels: 1,
+                height: 1,
+                width: 1,
+            },
+            &[],
+        );
+        assert!(matches!(
+            result,
+            Err(TransformDispatchError::InvalidGeometry(_))
+        ));
+    }
+
+    #[test]
+    fn color_jitter_gpu_matches_cpu_for_more_than_eight_channels_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipping transform runtime test: no WGPU adapter");
+            return;
+        };
+        let device = Shared::new(device);
+        let queue = Shared::new(queue);
+        let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR);
+        let gpu = TransformDispatcher::with_gpu(device, queue, shader_dir).unwrap();
+        let cpu = TransformDispatcher::cpu();
+        let config = ColorJitterConfig {
+            channels: 9,
+            height: 2,
+            width: 3,
+            brightness: 1.1,
+            contrast: 0.8,
+            saturation: 0.7,
+            hue: 0.17,
+        };
+        let input = (0..config.channels * config.height * config.width)
+            .map(|index| (index as f32 - 17.0) / 13.0)
+            .collect::<Vec<_>>();
+        let expected = cpu.color_jitter(&input, config).unwrap();
+        let actual = gpu.color_jitter(&input, config).unwrap();
+        for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+            assert!(
+                (actual - expected).abs() <= 1e-5,
+                "color jitter mismatch at {index}: actual={actual} expected={expected}"
+            );
+        }
+    }
+
+    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
+        pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("st.transform.test_device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+            },
+            None,
+        ))
+        .ok()
     }
 }

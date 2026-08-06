@@ -7,11 +7,10 @@
 //! This is a scaffold; integrate with your existing WGPU backend device/queue management.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use wgpu::{ComputePipeline, Device};
 
-use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
+use crate::{runtime::Shared, util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MergeKind {
@@ -22,10 +21,10 @@ pub enum MergeKind {
 
 #[derive(Debug)]
 pub struct Pipelines {
-    pub keepk_subgroup: Option<Arc<ComputePipeline>>,
-    pub keepk_workgroup: Arc<ComputePipeline>,
-    pub keepk_subgroup_1ce: Option<Arc<ComputePipeline>>,
-    pub keepk_subgroup_1ce_large: Option<Arc<ComputePipeline>>,
+    pub keepk_subgroup: Option<Shared<ComputePipeline>>,
+    pub keepk_workgroup: Shared<ComputePipeline>,
+    pub keepk_subgroup_1ce: Option<Shared<ComputePipeline>>,
+    pub keepk_subgroup_1ce_large: Option<Shared<ComputePipeline>>,
 }
 
 impl Pipelines {

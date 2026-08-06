@@ -10,13 +10,10 @@ description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
 wgpu = { version = "0.20", features = ["wgsl"] }
 thiserror = "2"
 bytemuck = { version = "1", features = ["derive"] }
-rand = "0.8"
-st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "wgpu"] }
+st-kernel-contracts = { path = "../st-kernel-contracts" }
 pollster = "0.3"
-once_cell = "1"
 
 [dev-dependencies]
-st-vision = { path = "../st-vision", features = ["wgpu"] }
 naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
 
 [package.metadata.spiraltorch]
