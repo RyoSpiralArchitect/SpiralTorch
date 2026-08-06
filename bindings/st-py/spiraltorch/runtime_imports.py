@@ -44,6 +44,7 @@ __all__ = [
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
     "evaluate_runtime_execution_plan",
+    "observe_runtime_execution_plan_capabilities",
     "evaluate_runtime_device_route",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
@@ -866,12 +867,22 @@ def evaluate_runtime_execution_plan(
     accelerator_fallback: str = "allow",
     tensor_util_wgpu_min_values: int = 1024,
     tensor_util_values: int | None = None,
+    component_workloads: object = None,
     required_native_components: object = None,
 ) -> dict[str, object]:
     """Build a committed execution plan through the Rust semantic owner."""
 
     if not isinstance(runtime_probe, Mapping):
         raise TypeError("runtime_probe must be a mapping")
+    if component_workloads is None:
+        workloads: list[object] = []
+    elif isinstance(component_workloads, Mapping):
+        workloads = [dict(component_workloads)]
+    else:
+        try:
+            workloads = list(component_workloads)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("component_workloads must be an iterable") from exc
     if required_native_components is None:
         components: list[object] = []
     elif isinstance(required_native_components, str):
@@ -889,9 +900,13 @@ def evaluate_runtime_execution_plan(
             "accelerator_fallback": accelerator_fallback,
             "tensor_util_wgpu_min_values": tensor_util_wgpu_min_values,
         },
+        "component_workloads": workloads,
+        "component_capabilities": [],
         "tensor_util_values": tensor_util_values,
         "required_native_components": components,
     }
+    if workloads:
+        request = observe_runtime_execution_plan_capabilities(request)
     evaluate = _native_runtime_execution_plan_function(
         "_runtime_execution_plan_evaluate"
     )
@@ -899,6 +914,22 @@ def evaluate_runtime_execution_plan(
     if not isinstance(payload, Mapping):
         raise RuntimeError("runtime execution-plan evaluator returned a non-mapping payload")
     return dict(payload)
+
+
+def observe_runtime_execution_plan_capabilities(
+    request: Mapping[str, object],
+) -> dict[str, object]:
+    """Enrich an execution-plan request with Rust-observed local capabilities."""
+
+    if not isinstance(request, Mapping):
+        raise TypeError("request must be a mapping")
+    observe = _native_runtime_execution_plan_function(
+        "_runtime_execution_plan_observe_capabilities"
+    )
+    observed = observe(dict(request))
+    if not isinstance(observed, Mapping):
+        raise RuntimeError("runtime capability observer returned a non-mapping request")
+    return dict(observed)
 
 
 def validate_runtime_execution_plan_contract(

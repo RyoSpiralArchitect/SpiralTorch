@@ -110,8 +110,7 @@ impl MpsProbeStatus {
 /// Native MPS observations plus the Rust-selected execution surrogate.
 ///
 /// Native MPS remains an honest placeholder. A WGPU surrogate is selected only
-/// when `wgpu-rt` is compiled and therefore runtime-ready; merely compiling the
-/// planner-side `wgpu` integration is not sufficient.
+/// when the backend-owned shared runtime initializes successfully.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MpsProbeReport {
@@ -160,7 +159,7 @@ impl MpsProbeReport {
                 "use backend='wgpu' today; native MPS kernels are not wired yet"
             }
             _ => {
-                "use backend='cpu' today; enable the 'wgpu-rt' feature to route Metal hosts through the WGPU runtime"
+                "use backend='cpu' today; enable the 'wgpu' feature to route Metal hosts through the shared WGPU runtime"
             }
         }
     }
@@ -347,10 +346,10 @@ impl BackendRuntimeState {
                 "cannot be true while the executable runtime feature is disabled",
             ));
         }
-        if self.backend != BackendKind::Wgpu && self.integration_compiled != self.feature_enabled {
+        if self.integration_compiled != self.feature_enabled {
             return Err(invalid_payload(
                 "integration_compiled",
-                "must match feature_enabled for every backend except the two-stage WGPU integration",
+                "must match the executable backend feature",
             ));
         }
         if self.placeholder != (self.backend == BackendKind::Mps) {
@@ -961,7 +960,7 @@ pub const fn backend_integration_compiled(kind: BackendKind) -> bool {
 pub const fn backend_feature_enabled(kind: BackendKind) -> bool {
     match kind {
         BackendKind::Cpu => true,
-        BackendKind::Wgpu => cfg!(feature = "wgpu-rt"),
+        BackendKind::Wgpu => cfg!(feature = "wgpu"),
         BackendKind::Mps => cfg!(feature = "mps"),
         BackendKind::Cuda => cfg!(feature = "cuda"),
         BackendKind::Hip => cfg!(feature = "hip"),
@@ -971,7 +970,7 @@ pub const fn backend_feature_enabled(kind: BackendKind) -> bool {
 pub const fn backend_real_kernels_compiled(kind: BackendKind) -> bool {
     match kind {
         BackendKind::Cpu => true,
-        BackendKind::Wgpu => cfg!(feature = "wgpu-rt"),
+        BackendKind::Wgpu => cfg!(feature = "wgpu"),
         BackendKind::Mps => false,
         BackendKind::Cuda => cfg!(feature = "cuda"),
         BackendKind::Hip => cfg!(all(feature = "hip", feature = "hip-real")),
@@ -1047,20 +1046,24 @@ fn probe_backend_initialization(
 }
 
 fn probe_wgpu_runtime() -> Result<(), String> {
-    #[cfg(all(feature = "wgpu-rt", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     {
-        crate::backend::wgpu_rt::ensure_default_ctx().map(|_| ())
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "st.core.runtime_probe.wgpu.device",
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
     }
-    #[cfg(all(feature = "wgpu-rt", target_arch = "wasm32"))]
+    #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
     {
-        crate::backend::wgpu_rt::installed_ctx()
+        st_backend_wgpu::runtime::default_runtime()
             .is_some()
             .then_some(())
-            .ok_or_else(|| "WGPU context is not installed in this WASM runtime".to_owned())
+            .ok_or_else(|| "WGPU runtime is not installed in this browser thread".to_owned())
     }
-    #[cfg(not(feature = "wgpu-rt"))]
+    #[cfg(not(feature = "wgpu"))]
     {
-        Err("WGPU runtime feature is not compiled".to_owned())
+        Err("WGPU execution feature is not compiled".to_owned())
     }
 }
 
@@ -1117,9 +1120,9 @@ const fn backend_runtime_recommendation_for_state(
         BackendKind::Cpu => "cpu backend is available",
         BackendKind::Wgpu => {
             if feature_enabled {
-                "wgpu rank runtime can be initialized by the training entrypoint"
+                "the shared WGPU execution runtime can be initialized by Rust entrypoints"
             } else {
-                "rebuild with the 'wgpu-rt' feature to enable WGPU training kernels"
+                "rebuild with the 'wgpu' feature to enable WGPU execution kernels"
             }
         }
         BackendKind::Mps => {
@@ -1563,16 +1566,16 @@ mod tests {
         let state = BackendRuntimeState::observe(BackendKind::Wgpu);
         state.validate().unwrap();
         assert_eq!(state.integration_compiled, cfg!(feature = "wgpu"));
-        assert_eq!(state.feature_enabled, cfg!(feature = "wgpu-rt"));
+        assert_eq!(state.feature_enabled, cfg!(feature = "wgpu"));
         assert_eq!(
             state.kernel_status,
-            if cfg!(feature = "wgpu-rt") {
+            if cfg!(feature = "wgpu") {
                 BackendKernelStatus::KernelWired
             } else {
                 BackendKernelStatus::FeatureDisabled
             }
         );
-        if cfg!(feature = "wgpu-rt") {
+        if cfg!(feature = "wgpu") {
             assert!(state.runtime_probe_attempted);
             assert_eq!(state.runtime_ready, state.runtime_initialized);
             assert_eq!(

@@ -1,7 +1,7 @@
 use serde_json::Value;
 use st_core::backend::execution_plan::{
-    evaluate_runtime_execution_plan, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
-    RuntimeExecutionPlanRequest,
+    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+    RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -60,6 +60,14 @@ pub fn runtime_execution_plan_value(
     Ok(serde_json::to_value(payload).expect("runtime execution-plan payload is serializable"))
 }
 
+/// Observe local kernels through Rust and return a canonical replay request.
+pub fn observe_runtime_execution_plan_capabilities_value(
+    request: RuntimeExecutionPlanRequest,
+) -> Result<Value, RuntimeExecutionPlanError> {
+    let request = observe_runtime_execution_plan_capabilities(request)?;
+    Ok(serde_json::to_value(request).expect("runtime capability request is serializable"))
+}
+
 /// Validate a persisted execution-plan contract through the same Rust semantic owner.
 pub fn validate_runtime_execution_plan_value(
     payload: RuntimeExecutionPlanPayload,
@@ -88,6 +96,27 @@ pub fn runtime_execution_plan_object(request: &JsValue) -> Result<JsValue, JsVal
     let request = request_from_value(request).map_err(js_error)?;
     let payload = runtime_execution_plan_value(request).map_err(js_error)?;
     to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeExecutionPlanObserveCapabilitiesJson)]
+pub fn runtime_execution_plan_observe_capabilities_json(
+    request_json: &str,
+) -> Result<String, JsValue> {
+    let request = request_from_json(request_json).map_err(js_error)?;
+    let request = observe_runtime_execution_plan_capabilities_value(request).map_err(js_error)?;
+    serde_json::to_string(&request).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeExecutionPlanObserveCapabilitiesObject)]
+pub fn runtime_execution_plan_observe_capabilities_object(
+    request: &JsValue,
+) -> Result<JsValue, JsValue> {
+    let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = request_from_value(request).map_err(js_error)?;
+    let request = observe_runtime_execution_plan_capabilities_value(request).map_err(js_error)?;
+    to_json_compatible_js(&request)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -141,7 +170,8 @@ mod tests {
     use serde_json::json;
     use st_core::backend::device_caps::{BackendKind, DeviceCaps};
     use st_core::backend::execution_plan::{
-        AcceleratorFallback, ExecutionConfig, RuntimeExecutionComponent,
+        AcceleratorFallback, ExecutionConfig, RuntimeComponentCapabilityStatus,
+        RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeTensorUtilOperation,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -159,14 +189,48 @@ mod tests {
         }
     }
 
-    fn cpu_request() -> RuntimeExecutionPlanRequest {
+    fn cpu_request_unobserved() -> RuntimeExecutionPlanRequest {
         let probe = evaluate_runtime_device_probe(cpu_probe_request()).expect("CPU probe");
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+            component_workloads: Vec::new(),
+            component_capabilities: Vec::new(),
             tensor_util_values: Some(2048),
             required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
         }
+    }
+
+    fn cpu_request() -> RuntimeExecutionPlanRequest {
+        let mut request = cpu_request_unobserved();
+        request.component_workloads = vec![
+            RuntimeComponentWorkload::DenseMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+            },
+            RuntimeComponentWorkload::PrepackedMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+                bias: true,
+            },
+            RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
+            RuntimeComponentWorkload::Attention {
+                contexts: 1,
+                sequence: 2,
+                head_dim: 4,
+                z_bias: true,
+                attn_bias: true,
+            },
+            RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::Scale,
+                rows: 32,
+                cols: 64,
+            },
+        ];
+        observe_runtime_execution_plan_capabilities(request).expect("CPU capability observation")
     }
 
     fn without_client(mut payload: Value) -> Value {
@@ -191,7 +255,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v1"
+            "spiraltorch.runtime_execution_plan.v2"
         );
         assert_eq!(wasm_transport["execution_allowed"], true);
         assert_eq!(wasm_transport["all_components_native"], true);
@@ -203,6 +267,67 @@ mod tests {
         assert_eq!(wasm_transport["committed"], true);
         assert_eq!(wasm_transport["request_sha256"].as_str().unwrap().len(), 64);
         assert_eq!(wasm_transport["output_sha256"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn wasm_capability_observer_uses_the_rust_contract() {
+        let mut request = cpu_request_unobserved();
+        request.component_workloads = vec![RuntimeComponentWorkload::DenseMatmul {
+            rows: 2,
+            inner: 3,
+            cols: 4,
+        }];
+
+        let observed = observe_runtime_execution_plan_capabilities_value(request)
+            .expect("WASM capability observation");
+        let observed: RuntimeExecutionPlanRequest =
+            serde_json::from_value(observed).expect("typed observed request");
+        assert_eq!(observed.component_capabilities.len(), 1);
+        assert_eq!(
+            observed.component_capabilities[0].status,
+            RuntimeComponentCapabilityStatus::Ready
+        );
+
+        let payload = runtime_execution_plan_value(observed).expect("observed plan");
+        assert_eq!(payload["component_routes"][0]["capability_state"], "ready");
+        assert_eq!(payload["component_routes"][0]["native"], true);
+    }
+
+    #[test]
+    fn shipped_types_cover_the_runtime_probe_and_execution_plan_surface() {
+        let declarations = include_str!("../types/spiraltorch-wasm.d.ts");
+        for symbol in [
+            "runtimeDeviceProbeJson",
+            "runtimeDeviceProbeObject",
+            "runtimeDeviceProbeValidateJson",
+            "runtimeDeviceProbeValidateObject",
+            "runtimeDeviceProbeValidateAgainstJson",
+            "runtimeDeviceProbeValidateAgainstObject",
+            "runtimeExecutionPlanJson",
+            "runtimeExecutionPlanObject",
+            "runtimeExecutionPlanObserveCapabilitiesJson",
+            "runtimeExecutionPlanObserveCapabilitiesObject",
+            "runtimeExecutionPlanValidateJson",
+            "runtimeExecutionPlanValidateObject",
+            "runtimeExecutionPlanValidateAgainstJson",
+            "runtimeExecutionPlanValidateAgainstObject",
+        ] {
+            assert!(
+                declarations.contains(&format!("export function {symbol}(")),
+                "missing TypeScript declaration for {symbol}"
+            );
+        }
+        for type_name in [
+            "RuntimeDeviceProbe",
+            "RuntimeExecutionPlanRequestInput",
+            "RuntimeExecutionPlanRequest",
+            "RuntimeExecutionPlan",
+        ] {
+            assert!(
+                declarations.contains(&format!("export type {type_name} =")),
+                "missing TypeScript type {type_name}"
+            );
+        }
     }
 
     #[test]

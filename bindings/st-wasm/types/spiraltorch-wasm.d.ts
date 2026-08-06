@@ -214,6 +214,218 @@ declare module "spiraltorch-wasm" {
         committed: true;
     };
 
+    export type RuntimeBackendKind = "wgpu" | "mps" | "cuda" | "hip" | "cpu";
+
+    export type RuntimeDeviceCaps = {
+        backend: RuntimeBackendKind;
+        subgroup: boolean;
+        lane_width: number;
+        max_workgroup: number;
+        shared_mem_per_workgroup: number | null;
+    };
+
+    export type RuntimeMpsProbeReport = {
+        feature_enabled: boolean;
+        platform_supported: boolean;
+        host_class: "non-mac-host" | "apple-silicon-mac" | "intel-mac";
+        backend_wired: boolean;
+        initialized: boolean;
+        planner_surrogate_backend: RuntimeBackendKind;
+        planner_caps: RuntimeDeviceCaps;
+    };
+
+    export type RuntimeDeviceProbeRequest = {
+        requested_backend: RuntimeBackendKind;
+        caps: RuntimeDeviceCaps;
+        mps_probe?: RuntimeMpsProbeReport;
+        requested_workgroup?: number;
+        cols?: number;
+        tile_hint?: number;
+        compaction_hint?: number;
+    };
+
+    export type RuntimeBackendState = {
+        backend: RuntimeBackendKind;
+        integration_compiled: boolean;
+        feature_enabled: boolean;
+        real_kernels_compiled: boolean;
+        placeholder: boolean;
+        kernel_status:
+            | "feature_disabled"
+            | "cpu"
+            | "kernel_wired"
+            | "placeholder"
+            | "stub_without_hip_real";
+        runtime_probe_attempted: boolean;
+        runtime_initialized: boolean;
+        runtime_status:
+            | "feature_disabled"
+            | "cpu"
+            | "ready"
+            | "initialization_failed"
+            | "placeholder"
+            | "stub_without_hip_real";
+        runtime_ready: boolean;
+        runtime_error?: string;
+        recommendation: string;
+    };
+
+    export type RuntimeDeviceProbe = {
+        kind: "spiraltorch.runtime_device_probe";
+        contract_version: "spiraltorch.runtime_device_probe.v1";
+        semantic_owner: "st-core::backend::runtime_probe";
+        semantic_backend: "rust";
+        execution_client?: string;
+        request: RuntimeDeviceProbeRequest;
+        requested_runtime: RuntimeBackendState;
+        effective_runtime: RuntimeBackendState;
+        aligned_workgroup: number | null;
+        occupancy_score: number | null;
+        preferred_tile: number | null;
+        preferred_compaction_tile: number | null;
+        route_evidence: RuntimeDeviceRouteEvidence;
+        request_sha256: string;
+        output_sha256: string;
+        committed: true;
+    };
+
+    export type RuntimeExecutionComponent =
+        | "dense_matmul"
+        | "prepacked_matmul"
+        | "layer_norm"
+        | "attention"
+        | "softmax"
+        | "tensor_util";
+
+    export type RuntimeTensorBackend =
+        | "auto"
+        | "cpu"
+        | "faer"
+        | "cpu_simd"
+        | "naive"
+        | "wgpu"
+        | "hip";
+
+    export type RuntimeComponentWorkload =
+        | { component: "dense_matmul"; rows: number; inner: number; cols: number }
+        | {
+              component: "prepacked_matmul";
+              rows: number;
+              inner: number;
+              cols: number;
+              bias?: boolean;
+          }
+        | { component: "layer_norm"; rows: number; cols: number }
+        | {
+              component: "attention";
+              contexts: number;
+              sequence: number;
+              head_dim: number;
+              z_bias?: boolean;
+              attn_bias?: boolean;
+          }
+        | { component: "softmax"; rows: number; cols: number }
+        | {
+              component: "tensor_util";
+              operation: "scale";
+              rows: number;
+              cols: number;
+          };
+
+    export type RuntimeComponentCapabilityStatus =
+        | "ready"
+        | "unavailable"
+        | "not_built"
+        | "unsupported";
+
+    export type RuntimeComponentCapabilityEvidence = {
+        workload: RuntimeComponentWorkload;
+        backend: RuntimeTensorBackend;
+        status: RuntimeComponentCapabilityStatus;
+    };
+
+    export type RuntimeExecutionConfig = {
+        accelerator_fallback: "allow" | "forbid";
+        tensor_util_wgpu_min_values: number;
+    };
+
+    export type RuntimeExecutionPlanRequestInput = {
+        runtime_probe: RuntimeDeviceProbe;
+        execution_config: RuntimeExecutionConfig;
+        component_workloads?: RuntimeComponentWorkload[];
+        component_capabilities?: RuntimeComponentCapabilityEvidence[];
+        tensor_util_values?: number | null;
+        required_native_components?: RuntimeExecutionComponent[];
+    };
+
+    export type RuntimeExecutionPlanRequest = {
+        runtime_probe: RuntimeDeviceProbe;
+        execution_config: RuntimeExecutionConfig;
+        component_workloads: RuntimeComponentWorkload[];
+        component_capabilities: RuntimeComponentCapabilityEvidence[];
+        tensor_util_values: number | null;
+        required_native_components: RuntimeExecutionComponent[];
+    };
+
+    export type RuntimeTensorBackendPolicy = {
+        dense_matmul: RuntimeTensorBackend;
+        prepacked_matmul: RuntimeTensorBackend;
+        layer_norm: RuntimeTensorBackend;
+        attention: RuntimeTensorBackend;
+        softmax: RuntimeTensorBackend;
+        tensor_util: RuntimeTensorBackend;
+    };
+
+    export type RuntimeComponentRoute = {
+        component: RuntimeExecutionComponent;
+        requested_backend: RuntimeTensorBackend;
+        selected_backend: RuntimeTensorBackend;
+        route: "direct" | "automatic" | "conditional" | "cpu_threshold_fallback";
+        workload?: RuntimeComponentWorkload;
+        capability_state:
+            | "static"
+            | "ready"
+            | "unobserved"
+            | "unavailable"
+            | "not_built"
+            | "unsupported"
+            | "not_applicable";
+        native: boolean;
+        fallback: boolean;
+        values?: number;
+        threshold?: number;
+    };
+
+    export type RuntimeExecutionPlan = {
+        kind: "spiraltorch.runtime_execution_plan";
+        contract_version: "spiraltorch.runtime_execution_plan.v2";
+        semantic_owner: "st-core::backend::execution_plan";
+        semantic_backend: "rust";
+        execution_client?: string;
+        request: RuntimeExecutionPlanRequest;
+        requested_backend: RuntimeBackendKind;
+        effective_backend: RuntimeBackendKind;
+        runtime_probe_output_sha256: string;
+        runtime_route: RuntimeDeviceRoute;
+        runtime_route_output_sha256: string;
+        policy: RuntimeTensorBackendPolicy;
+        component_routes: RuntimeComponentRoute[];
+        native_components: RuntimeExecutionComponent[];
+        automatic_components: RuntimeExecutionComponent[];
+        conditional_components: RuntimeExecutionComponent[];
+        fallback_components: RuntimeExecutionComponent[];
+        required_native_components_missing: RuntimeExecutionComponent[];
+        all_components_native: boolean;
+        runtime_ready: boolean;
+        surrogate: boolean;
+        execution_allowed: boolean;
+        status: "ready" | "blocked";
+        blockers: string[];
+        request_sha256: string;
+        output_sha256: string;
+        committed: true;
+    };
+
     /** Trainer optimizer controls validated by the Rust semantic core. */
     export type TrainerOptimizerConfig = {
         curvature: number;
@@ -2188,6 +2400,22 @@ declare module "spiraltorch-wasm" {
     export function toposRuntimeRouteObject(
         profile: ToposRuntimeProfileInput,
     ): ToposRuntimeRoute;
+    export function runtimeDeviceProbeJson(requestJson: string): string;
+    export function runtimeDeviceProbeObject(
+        request: RuntimeDeviceProbeRequest,
+    ): RuntimeDeviceProbe;
+    export function runtimeDeviceProbeValidateJson(payloadJson: string): string;
+    export function runtimeDeviceProbeValidateObject(
+        payload: RuntimeDeviceProbe,
+    ): RuntimeDeviceProbe;
+    export function runtimeDeviceProbeValidateAgainstJson(
+        payloadJson: string,
+        requestJson: string,
+    ): string;
+    export function runtimeDeviceProbeValidateAgainstObject(
+        payload: RuntimeDeviceProbe,
+        request: RuntimeDeviceProbeRequest,
+    ): RuntimeDeviceProbe;
     export function runtimeDeviceRouteJson(requestJson: string): string;
     export function runtimeDeviceRouteObject(
         request: RuntimeDeviceRouteRequest,
@@ -2204,6 +2432,26 @@ declare module "spiraltorch-wasm" {
         payload: RuntimeDeviceRoute,
         request: RuntimeDeviceRouteRequest,
     ): RuntimeDeviceRoute;
+    export function runtimeExecutionPlanJson(requestJson: string): string;
+    export function runtimeExecutionPlanObject(
+        request: RuntimeExecutionPlanRequestInput,
+    ): RuntimeExecutionPlan;
+    export function runtimeExecutionPlanObserveCapabilitiesJson(requestJson: string): string;
+    export function runtimeExecutionPlanObserveCapabilitiesObject(
+        request: RuntimeExecutionPlanRequestInput,
+    ): RuntimeExecutionPlanRequest;
+    export function runtimeExecutionPlanValidateJson(payloadJson: string): string;
+    export function runtimeExecutionPlanValidateObject(
+        payload: RuntimeExecutionPlan,
+    ): RuntimeExecutionPlan;
+    export function runtimeExecutionPlanValidateAgainstJson(
+        payloadJson: string,
+        requestJson: string,
+    ): string;
+    export function runtimeExecutionPlanValidateAgainstObject(
+        payload: RuntimeExecutionPlan,
+        request: RuntimeExecutionPlanRequestInput,
+    ): RuntimeExecutionPlan;
     export function trainerOptimizerConfigJson(configJson: string): string;
     export function trainerOptimizerConfigObject(
         config: TrainerOptimizerConfig,

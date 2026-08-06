@@ -12,11 +12,13 @@ use st_tensor::{
 use std::cell::RefCell;
 
 pub use super::execution_plan::{
-    evaluate_runtime_execution_plan, AcceleratorFallback, BackendPolicy, ExecutionConfig,
-    RuntimeComponentRoute, RuntimeComponentRouteClass, RuntimeExecutionComponent,
+    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeComponentCapabilityEvidence,
+    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentRoute,
+    RuntimeComponentRouteClass, RuntimeComponentWorkload, RuntimeExecutionComponent,
     RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
-    RuntimeExecutionPlanStatus, RuntimeTensorBackend, RuntimeTensorBackendPolicy, TensorUtilRoute,
-    TensorUtilRouteStatus,
+    RuntimeExecutionPlanStatus, RuntimeTensorBackend, RuntimeTensorBackendPolicy,
+    RuntimeTensorUtilOperation, TensorUtilRoute, TensorUtilRouteStatus,
 };
 
 thread_local! {
@@ -312,13 +314,20 @@ mod tests {
             compaction_hint: None,
         })
         .expect("CPU probe");
-        let plan = evaluate_runtime_execution_plan(RuntimeExecutionPlanRequest {
+        let request = observe_runtime_execution_plan_capabilities(RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::default(),
+            component_workloads: vec![RuntimeComponentWorkload::DenseMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+            }],
+            component_capabilities: Vec::new(),
             tensor_util_values: None,
             required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
         })
-        .expect("CPU execution plan");
+        .expect("observe CPU dense capability");
+        let plan = evaluate_runtime_execution_plan(request).expect("CPU execution plan");
 
         let guard = push_runtime_execution_plan(&plan).expect("install committed plan");
         let current = current_backend_policy().expect("active policy");
