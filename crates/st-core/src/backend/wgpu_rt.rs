@@ -4,21 +4,25 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 // crates/st-core/src/backend/wgpu_rt.rs  (v1.9.0) — TopK + linear primitives
-#![allow(unused)]
 use once_cell::sync::OnceCell;
+use st_backend_wgpu::runtime::Shared;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::{
     any::Any,
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::Arc,
 };
 
-// ===== SpiralTorch: WGPU runtime hardening additions (non-breaking) =====
-#[derive(Debug, thiserror::Error)]
-pub enum WgpuRtError {
-    #[error("queue submit timed out after {0:?}")]
-    SubmitTimeout(std::time::Duration),
-    #[error("buffer map failed: {0}")]
-    MapFailed(String),
+pub use st_backend_wgpu::runtime::WgpuRuntimeError as WgpuRtError;
+
+#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+pub enum WgpuContextInstallError {
+    #[error("the backend-owned default WGPU runtime is not installed")]
+    DefaultRuntimeMissing,
+    #[error("the st-core context does not share the backend-owned runtime handles")]
+    RuntimeMismatch,
+    #[error("the st-core WGPU context is already installed")]
+    AlreadyInstalled,
 }
 
 /// Submit command buffers and actively poll until completion or timeout.
@@ -30,22 +34,13 @@ pub fn st_submit_with_timeout(
     cmd_bufs: impl IntoIterator<Item = wgpu::CommandBuffer>,
     timeout: std::time::Duration,
 ) -> Result<(), WgpuRtError> {
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
-    queue.submit(cmd_bufs);
-    queue.on_submitted_work_done(move || {
-        let _ = tx.send(());
-    });
-
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        device.poll(wgpu::Maintain::Poll);
-        if rx.try_recv().is_ok() {
-            return Ok(());
-        }
-        std::thread::yield_now();
-    }
-    Err(WgpuRtError::SubmitTimeout(timeout))
+    st_backend_wgpu::runtime::submit_with_timeout(
+        device,
+        queue,
+        cmd_bufs,
+        timeout,
+        "st-core queue submission",
+    )
 }
 
 /// MAP_READ バッファを安全に読み出す（タイムアウト付き）
@@ -56,36 +51,19 @@ pub fn st_map_read_with_timeout(
     range: std::ops::Range<u64>,
     timeout: std::time::Duration,
 ) -> Result<Vec<u8>, WgpuRtError> {
-    use std::sync::mpsc::channel;
-    let (tx, rx) = channel();
-    buffer
-        .slice(range.clone())
-        .map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-    let start = std::time::Instant::now();
-    loop {
-        device.poll(wgpu::Maintain::Poll);
-        if let Ok(res) = rx.try_recv() {
-            res.map_err(|e| WgpuRtError::MapFailed(format!("{e:?}")))?;
-            let view = buffer.slice(range.clone()).get_mapped_range();
-            let data = view.to_vec();
-            drop(view);
-            buffer.unmap();
-            return Ok(data);
-        }
-        if start.elapsed() >= timeout {
-            return Err(WgpuRtError::SubmitTimeout(timeout));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    st_backend_wgpu::runtime::map_read_bytes_with_timeout(
+        device,
+        buffer,
+        range,
+        timeout,
+        "st-core mapped readback",
+    )
 }
-// ===== end additions =====
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 pub struct WgpuCtx {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub device: st_backend_wgpu::runtime::Shared<wgpu::Device>,
+    pub queue: st_backend_wgpu::runtime::Shared<wgpu::Queue>,
     // RankK/TopK pipelines
     topk_heap_pl: OnceCell<wgpu::ComputePipeline>,
     topk_heap_sgintrin_pl: OnceCell<wgpu::ComputePipeline>,
@@ -108,7 +86,30 @@ pub struct WgpuCtx {
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 impl WgpuCtx {
+    #[deprecated(note = "construct WgpuRuntime and use WgpuCtx::from_runtime")]
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        Self::from_shared(
+            st_backend_wgpu::runtime::Shared::new(device),
+            st_backend_wgpu::runtime::Shared::new(queue),
+        )
+    }
+
+    pub fn from_runtime(runtime: &st_backend_wgpu::runtime::WgpuRuntime) -> Self {
+        Self::from_shared(
+            runtime.context().shared_device(),
+            runtime.context().shared_queue(),
+        )
+    }
+
+    pub fn shares_runtime_handles(&self, runtime: &st_backend_wgpu::runtime::WgpuRuntime) -> bool {
+        Shared::ptr_eq(&self.device, &runtime.context().shared_device())
+            && Shared::ptr_eq(&self.queue, &runtime.context().shared_queue())
+    }
+
+    fn from_shared(
+        device: st_backend_wgpu::runtime::Shared<wgpu::Device>,
+        queue: st_backend_wgpu::runtime::Shared<wgpu::Queue>,
+    ) -> Self {
         Self {
             device,
             queue,
@@ -152,66 +153,71 @@ struct LinParams {
     scalars: [f32; 4],
 }
 
-static CTX: OnceCell<Arc<WgpuCtx>> = OnceCell::new();
-pub fn install_ctx(ctx: Arc<WgpuCtx>) {
-    let _ = CTX.set(ctx);
+#[cfg(not(target_arch = "wasm32"))]
+static CTX: OnceCell<Shared<WgpuCtx>> = OnceCell::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static CTX: RefCell<Option<Shared<WgpuCtx>>> = const { RefCell::new(None) };
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_ctx(ctx: Shared<WgpuCtx>) -> Result<(), WgpuContextInstallError> {
+    validate_ctx_runtime(&ctx)?;
+    CTX.set(ctx)
+        .map_err(|_| WgpuContextInstallError::AlreadyInstalled)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn install_ctx(ctx: Shared<WgpuCtx>) -> Result<(), WgpuContextInstallError> {
+    validate_ctx_runtime(&ctx)?;
+    CTX.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_some() {
+            return Err(WgpuContextInstallError::AlreadyInstalled);
+        }
+        *slot = Some(ctx);
+        Ok(())
+    })
+}
+
+fn validate_ctx_runtime(ctx: &WgpuCtx) -> Result<(), WgpuContextInstallError> {
+    let runtime = st_backend_wgpu::runtime::default_runtime()
+        .ok_or(WgpuContextInstallError::DefaultRuntimeMissing)?;
+    if !ctx.shares_runtime_handles(&runtime) {
+        return Err(WgpuContextInstallError::RuntimeMismatch);
+    }
+    Ok(())
+}
+
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
-pub fn installed_ctx() -> Option<Arc<WgpuCtx>> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn installed_ctx() -> Option<Shared<WgpuCtx>> {
     CTX.get().cloned()
 }
+
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+#[cfg(target_arch = "wasm32")]
+pub fn installed_ctx() -> Option<Shared<WgpuCtx>> {
+    CTX.with(|slot| slot.borrow().clone())
+}
+
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 pub fn ensure_default_ctx() -> Result<bool, String> {
     if installed_ctx().is_some() {
         return Ok(false);
     }
-
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(async {
-        for power_preference in [
-            wgpu::PowerPreference::HighPerformance,
-            wgpu::PowerPreference::LowPower,
-        ] {
-            let options = wgpu::RequestAdapterOptions {
-                power_preference,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            };
-            if let Some(adapter) = instance.request_adapter(&options).await {
-                return Some(adapter);
-            }
-        }
-        instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-    })
-    .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
-
-    let adapter_features = adapter.features();
-    let mut requested_features = wgpu::Features::empty();
-    if adapter_features.contains(wgpu::Features::SUBGROUP) {
-        requested_features |= wgpu::Features::SUBGROUP;
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("st.core.default.wgpu.device")
+            .map_err(|error| error.to_string())?;
+    match install_ctx(Shared::new(WgpuCtx::from_runtime(&runtime))) {
+        Ok(()) => Ok(true),
+        Err(WgpuContextInstallError::AlreadyInstalled) => Ok(false),
+        Err(error) => Err(error.to_string()),
     }
-
-    let (device, queue) = pollster::block_on(async {
-        adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("st.core.default.wgpu.device"),
-                    required_features: requested_features,
-                    required_limits: adapter.limits(),
-                },
-                None,
-            )
-            .await
-    })
-    .map_err(|err| err.to_string())?;
-
-    install_ctx(Arc::new(WgpuCtx::new(device, queue)));
-    Ok(true)
 }
-fn ctx() -> Result<Arc<WgpuCtx>, String> {
-    CTX.get().cloned().ok_or("WGPU ctx not installed".into())
+fn ctx() -> Result<Shared<WgpuCtx>, String> {
+    installed_ctx().ok_or("WGPU ctx not installed".into())
 }
 
 const WGSL_RANKK: &str = include_str!("wgpu_kernels_rankk.wgsl");

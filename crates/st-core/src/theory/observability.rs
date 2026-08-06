@@ -381,7 +381,7 @@ fn emit_observability_assessment_meta(
     let overflow_observed = observed_final > expected_final && expected_final > 0;
     let (efficiency_min, efficiency_max, efficiency_mean, efficiency_final) =
         efficiency_stats(&assessment.efficiency);
-    let expected_saturated = assessment.expected.iter().any(|value| *value == u128::MAX);
+    let expected_saturated = assessment.expected.contains(&u128::MAX);
 
     let (
         color_configured,

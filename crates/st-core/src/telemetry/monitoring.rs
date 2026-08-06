@@ -781,10 +781,12 @@ mod tests {
 
         let mut hub = MonitoringHub::new(2.5, 2, 2);
         for idx in 0..4 {
-            let mut metrics = StepMetrics::default();
-            metrics.step_time_ms = 12.0 + idx as f64;
-            metrics.mem_peak_mb = 128.0;
-            metrics.retry_rate = 0.0;
+            let mut metrics = StepMetrics {
+                step_time_ms: 12.0 + idx as f64,
+                mem_peak_mb: 128.0,
+                retry_rate: 0.0,
+                ..StepMetrics::default()
+            };
             metrics
                 .extra
                 .insert("band_here".into(), if idx < 2 { 0.5 } else { 5.0 });

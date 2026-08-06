@@ -43,7 +43,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
             file.write_all(bytes)?;
             file.flush()?;
             file.sync_all()?;
-            drop(file);
+            close_before_replace(file);
             atomic_replace(&temporary, path)?;
             #[cfg(unix)]
             File::open(parent)?.sync_all()?;
@@ -61,6 +61,13 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
             "could not reserve an atomic runtime-state file",
         )
     }))
+}
+
+fn close_before_replace(file: fs::File) {
+    #[cfg(not(target_arch = "wasm32"))]
+    drop(file);
+    #[cfg(target_arch = "wasm32")]
+    let _ = file;
 }
 
 #[cfg(not(windows))]

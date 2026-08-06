@@ -905,6 +905,7 @@ fn z_source_label(source: &ZSource) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_zpulse_conductor_step_meta(
     cfg: &ZConductorCfg,
     freq: Option<ZFrequencyConfig>,

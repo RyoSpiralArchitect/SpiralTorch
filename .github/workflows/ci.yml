@@ -81,7 +81,9 @@ jobs:
         run: |
           cargo test --locked -p st-backend-wgpu
           cargo clippy --locked -p st-backend-wgpu --all-targets -- -D warnings
-          cargo check --locked -p st-tensor --no-default-features --features cpu,wgpu
+          cargo clippy --locked -p st-frac --all-targets --features wgpu -- -D warnings
+          cargo clippy --locked -p st-tensor --all-targets --no-default-features --features cpu,wgpu -- -D warnings
+          cargo clippy --locked -p st-core --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
       - name: Python text feature isolation
         if: matrix.run_lints
         run: cargo check --locked -p spiraltorch-py --no-default-features --features extension-module,text
@@ -153,8 +155,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Rust WASM contract isolation
         run: |
-          cargo clippy --locked -p st-backend-wgpu --target wasm32-unknown-unknown -- -D warnings
-          cargo check --locked -p st-tensor --target wasm32-unknown-unknown --no-default-features --features cpu
+          cargo clippy --locked -p st-backend-wgpu --target wasm32-unknown-unknown --all-targets -- -D warnings
+          cargo clippy --locked -p st-frac --target wasm32-unknown-unknown --all-targets --features wgpu -- -D warnings
+          cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu -- -D warnings
+          cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
       - name: build (wasm32)
         run: cargo build -p spiraltorch-wasm --target wasm32-unknown-unknown --release
 

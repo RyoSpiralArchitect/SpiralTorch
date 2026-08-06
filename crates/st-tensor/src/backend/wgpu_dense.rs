@@ -10,11 +10,14 @@ use crate::pure::{
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
+use st_backend_wgpu::runtime::{Shared as Arc, WeakShared as Weak};
 use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best};
 use st_kdsl::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetrySample, TelemetrySummary,
 };
 use std::any::Any;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -22,7 +25,7 @@ use std::env;
 use std::f32::consts::PI;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
 use wgpu::{
@@ -35,20 +38,30 @@ const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wg
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const LAYER_NORM_WGSL: &str = include_str!("../wgpu_shaders/layer_norm.wgsl");
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const TENSOR_UTILS_WGSL: &str = include_str!("../wgpu_shaders/tensor_utils.wgsl");
 const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
 const LSTM_BACKWARD_SCAN_WGSL: &str = include_str!("../wgpu_shaders/lstm_backward_scan.wgsl");
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const ROW_SOFTMAX_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_WORKGROUP_WGSL;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const ROW_SOFTMAX_SUBGROUP_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_SUBGROUP_WGSL;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const SOFTMAX_ZSPACE_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_ZSPACE_PROJECTION_WGSL;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const SOFTMAX_SPIRAL_WGSL: &str = st_backend_wgpu::shader_sources::SOFTMAX_SPIRAL_CONSENSUS_WGSL;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
     st_backend_wgpu::shader_sources::FUSED_ATTENTION_ONLINE_WGSL;
 
 const FUSED_ATTENTION_WORKGROUP: u32 = 128;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const FUSED_ATTENTION_MAX_HEAD_DIM: u32 = 256;
 const FUSED_GELU_BACK_WG_ROWS: u32 = 16;
 const FUSED_GELU_BACK_WG_COLS: u32 = 16;
@@ -207,6 +220,7 @@ struct PipelineCache {
 }
 
 impl PipelineCache {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn new(device: Arc<Device>) -> Self {
         Self {
             device,
@@ -467,38 +481,25 @@ struct FusedAttentionKernel {
 }
 
 impl GpuContext {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new() -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(async {
-            let opts = wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            };
-            if let Some(adapter) = instance.request_adapter(&opts).await {
-                return Some(adapter);
-            }
+        let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "st.tensor.wgpu_dense.device",
+        )
+        .map_err(|error| error.to_string())?;
+        Self::from_runtime(runtime)
+    }
 
-            let opts = wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            };
-            if let Some(adapter) = instance.request_adapter(&opts).await {
-                return Some(adapter);
-            }
+    #[cfg(target_arch = "wasm32")]
+    fn new() -> Result<Self, String> {
+        Err("synchronous WGPU dense context initialization is unavailable on wasm32".to_owned())
+    }
 
-            let opts = wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: true,
-            };
-            instance.request_adapter(&opts).await
-        })
-        .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
-
-        let adapter_info = adapter.get_info();
-        let adapter_features = adapter.features();
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_runtime(runtime: st_backend_wgpu::runtime::WgpuRuntime) -> Result<Self, String> {
+        let adapter_info = runtime.adapter_info().clone();
+        let device = runtime.context().shared_device();
+        let adapter_features = device.features();
         let mut requested_features = wgpu::Features::empty();
         let want_f16 = cfg!(feature = "wgpu_f16");
         let shader_f16 = want_f16 && adapter_features.contains(wgpu::Features::SHADER_F16);
@@ -509,23 +510,7 @@ impl GpuContext {
         if supports_subgroup {
             requested_features |= wgpu::Features::SUBGROUP;
         }
-
-        let (device, queue) = pollster::block_on(async {
-            adapter
-                .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("st.tensor.wgpu_dense.device"),
-                        required_features: requested_features,
-                        required_limits: adapter.limits(),
-                    },
-                    None,
-                )
-                .await
-        })
-        .map_err(|err| err.to_string())?;
-
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
+        debug_assert_eq!(adapter_features & requested_features, requested_features);
 
         let bind_layout = Arc::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
@@ -1489,7 +1474,7 @@ impl GpuContext {
             });
 
         Ok(Self {
-            context: WgpuContext::new(device.clone(), queue.clone()),
+            context: runtime.context().clone(),
             pipeline_cache: PipelineCache::new(device.clone()),
             weights_cache: Mutex::new(HashMap::new()),
             autotune_cache: Mutex::new(HashMap::new()),
@@ -4313,6 +4298,7 @@ mod tests {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn instantiate_fused_gelu_back_template(template: &str, wg_rows: u32, wg_cols: u32) -> String {
     template
         .replace("{WG_ROWS}", &wg_rows.to_string())
@@ -4320,21 +4306,45 @@ fn instantiate_fused_gelu_back_template(template: &str, wg_rows: u32, wg_cols: u
         .replace("{WG_TILE}", &wg_rows.saturating_mul(wg_cols).to_string())
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn instantiate_reduce_db_template(template: &str, wg_cols: u32, reduce_wg: u32) -> String {
     template
         .replace("{WG_COLS}", &wg_cols.to_string())
         .replace("{REDUCE_WG}", &reduce_wg.to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static CONTEXT: OnceLock<Arc<GpuContext>> = OnceLock::new();
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static CONTEXT: RefCell<Option<Arc<GpuContext>>> = const { RefCell::new(None) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn dense_context() -> Result<Arc<GpuContext>, String> {
     if let Some(ctx) = CONTEXT.get() {
         return Ok(ctx.clone());
     }
     let ctx = Arc::new(GpuContext::new()?);
-    let _ = CONTEXT.set(ctx.clone());
-    Ok(ctx)
+    match CONTEXT.set(ctx) {
+        Ok(()) => CONTEXT
+            .get()
+            .cloned()
+            .ok_or_else(|| "WGPU dense context installation was lost".to_owned()),
+        Err(_) => CONTEXT
+            .get()
+            .cloned()
+            .ok_or_else(|| "WGPU dense context initialization raced without a winner".to_owned()),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dense_context() -> Result<Arc<GpuContext>, String> {
+    if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
+        return Ok(context);
+    }
+    GpuContext::new().map(Arc::new)
 }
 
 #[repr(C, align(16))]

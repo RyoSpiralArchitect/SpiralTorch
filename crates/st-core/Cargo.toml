@@ -15,7 +15,7 @@ hip-real = ["hip", "st-backend-hip/hip-real", "st-tensor/hip-real"]
 default = []
 cpu      = ["st-tensor/cpu"]
 hip      = ["dep:st-backend-hip", "st-tensor/hip"]
-wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell", "dep:st-backend-wgpu", "st-frac/wgpu", "st-tensor/wgpu"]
+wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:once_cell", "dep:st-backend-wgpu", "st-frac/wgpu", "st-tensor/wgpu"]
 wgpu-rt  = ["wgpu"]
 mps      = ["st-tensor/mps"]
 cuda     = ["dep:cudarc", "st-tensor/cuda"]
@@ -53,7 +53,6 @@ sha2        = "0.10"
 
 once_cell   = { version = "1.21", optional = true }
 bytemuck    = { version = "1.25", optional = true, features = ["derive"] }
-pollster    = { version = "0.3",  optional = true }
 wgpu        = { version = "0.20", optional = true, features = ["wgsl"] }
 bitflags    = { version = "2.12", optional = true }
 parking_lot = { version = "0.12", optional = true }
@@ -87,6 +86,7 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage
 approx = "0.5"
 tempfile = "3"
 naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
+pollster = "0.3"
 
 [build-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -2,8 +2,10 @@ use criterion::AxisScale;
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, Criterion, PlotConfiguration,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use plotters::prelude::*;
 use st_tensor::Tensor;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[track_caller]
@@ -14,6 +16,7 @@ fn unwrap_ok<T, E: core::fmt::Debug>(context: &str, result: Result<T, E>) -> T {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn render_histogram(samples: &[f32]) {
     let path = Path::new("target/criterion/random_init/histogram.png");
     if let Some(parent) = path.parent() {
@@ -64,6 +67,9 @@ fn render_histogram(samples: &[f32]) {
     );
     unwrap_ok("failed to flush histogram", root.present());
 }
+
+#[cfg(target_arch = "wasm32")]
+fn render_histogram(_samples: &[f32]) {}
 
 fn bench_random_initialisers(c: &mut Criterion) {
     let mut group = c.benchmark_group("tensor_random_init");

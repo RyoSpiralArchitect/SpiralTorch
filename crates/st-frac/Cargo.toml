@@ -9,7 +9,7 @@ description = "SpiralTorch fractional calculus (Grünwald–Letnikov) operators 
 
 [features]
 default = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+wgpu = ["dep:wgpu", "dep:bytemuck", "dep:st-backend-wgpu"]
 
 [dependencies]
 ndarray = "0.15"
@@ -18,8 +18,11 @@ num-complex = "0.4"
 libm = "0.2"
 rand = "0.8"
 bytemuck = { version = "1", optional = true, features = ["derive"] }
-pollster = { version = "0.3", optional = true }
 wgpu = { version = "0.20", optional = true, features = ["wgsl"] }
+st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 approx = "0.5"

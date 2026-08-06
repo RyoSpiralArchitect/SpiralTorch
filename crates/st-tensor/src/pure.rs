@@ -11567,18 +11567,18 @@ mod tests {
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock available")
+        match ENV_LOCK.get_or_init(|| Mutex::new(())).lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        match OBSERVER_LOCK.get_or_init(|| Mutex::new(())).lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     struct EnvVarRestore {
@@ -14649,19 +14649,21 @@ mod tests {
         ));
         let expected = unwrap_ok(unwrap_ok(lhs.transpose().matmul(&rhs)).scale(0.25));
 
-        for backend in [
-            MatmulBackend::CpuNaive,
-            MatmulBackend::CpuSimd,
-            MatmulBackend::CpuFaer,
-        ] {
+        let backends = vec![
+            (MatmulBackend::CpuNaive, "naive", "naive"),
+            (MatmulBackend::CpuSimd, "simd", "cpu_simd"),
+            #[cfg(feature = "faer")]
+            (MatmulBackend::CpuFaer, "faer", "faer"),
+        ];
+        for (backend, _, _) in &backends {
             let actual =
-                unwrap_ok(lhs.matmul_lhs_transpose_scaled_with_backend(&rhs, 0.25, backend));
+                unwrap_ok(lhs.matmul_lhs_transpose_scaled_with_backend(&rhs, 0.25, *backend));
             assert_tensor_close(&actual, &expected, 1.0e-5);
         }
         crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
-        for (requested, selected) in [("naive", "naive"), ("simd", "cpu_simd"), ("faer", "faer")] {
+        for (_, requested, selected) in backends {
             assert!(events.iter().any(|(op_name, data)| {
                 *op_name == "matmul_lhs_transpose_scaled"
                     && data["requested_backend"] == requested

@@ -3416,11 +3416,12 @@ version = "0.1.1"
 dependencies = [
  "approx",
  "bytemuck",
+ "getrandom 0.2.17",
  "libm",
  "ndarray",
  "num-complex",
- "pollster",
  "rand",
+ "st-backend-wgpu",
  "thiserror 1.0.69",
  "wgpu",
 ]

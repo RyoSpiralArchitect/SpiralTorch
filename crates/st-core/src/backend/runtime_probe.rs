@@ -1049,14 +1049,14 @@ fn probe_backend_initialization(
 fn probe_wgpu_runtime() -> Result<(), String> {
     #[cfg(all(feature = "wgpu-rt", not(target_arch = "wasm32")))]
     {
-        return crate::backend::wgpu_rt::ensure_default_ctx().map(|_| ());
+        crate::backend::wgpu_rt::ensure_default_ctx().map(|_| ())
     }
     #[cfg(all(feature = "wgpu-rt", target_arch = "wasm32"))]
     {
-        return crate::backend::wgpu_rt::installed_ctx()
+        crate::backend::wgpu_rt::installed_ctx()
             .is_some()
             .then_some(())
-            .ok_or_else(|| "WGPU context is not installed in this WASM runtime".to_owned());
+            .ok_or_else(|| "WGPU context is not installed in this WASM runtime".to_owned())
     }
     #[cfg(not(feature = "wgpu-rt"))]
     {
