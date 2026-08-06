@@ -63,11 +63,13 @@ jobs:
       - name: CPU feature isolation
         if: matrix.run_lints
         run: bash scripts/check_cpu_feature_isolation.sh
-      - name: HIP backend contract isolation
+      - name: Kernel and HIP contract isolation
         if: matrix.run_lints
         env:
           SPIRALTORCH_HIP_TYPECHECK_ONLY: "1"
         run: |
+          cargo test --locked -p st-kernel-contracts
+          cargo clippy --locked -p st-kernel-contracts --all-targets -- -D warnings
           cargo test --locked -p st-backend-hip --no-default-features
           cargo clippy --locked -p st-backend-hip --no-default-features --features hip-real --all-targets -- -D warnings
           cargo test --locked -p st-tensor --no-default-features --features cpu,faer,hip --lib hip_stub

@@ -11,7 +11,7 @@ use st_backend_hip as hip;
 
 static HIP_READY: AtomicBool = AtomicBool::new(false);
 
-fn ensure_runtime() -> Result<(), String> {
+pub(crate) fn ensure_runtime() -> Result<(), String> {
     if !hip::real_backend_compiled() {
         return Err(
             "HIP execution requires the 'hip-real' feature; the default backend is a CPU contract reference"

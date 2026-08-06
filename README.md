@@ -2714,7 +2714,7 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
 - `mps`: macOS Metal (MPS)
 - `cuda`: CUDA (NVRTC/PTX loader expected)
 - `hip`: ROCm HIP (stub-safe)
-- **`hip-real`**: ROCm HIP + RCCL real path, including dense, scaled, lhs-transpose-scaled, device-resident fused bias/residual activation GEMM, owning `RcclCommGuard::allgather_u64()`, and safe row compaction through `compact_rows_f32()` with a backend-independent `compact_rows_reference_f32()` parity contract (requires ROCm toolchain & linker; gated on top of `hip`)
+- **`hip-real`**: ROCm HIP + RCCL real path, including dense, scaled, lhs-transpose-scaled, device-resident fused bias/residual activation GEMM, owning `RcclCommGuard::allgather_u64()`, and safe row compaction through `compact_rows_f32()` (requires ROCm toolchain & linker; gated on top of `hip`). The backend-neutral shape, output, validation, and CPU oracle live in `st-kernel-contracts`; `st_tensor::compaction` exposes explicit CPU and HIP entrypoints without making a runtime routing decision.
 - HIP stub now probes `ROCM_PATH`/`HIP_PATH` and honours the
   `SPIRALTORCH_FORCE_HIP` override so simulated devices keep Z-space heuristics
   alive during CPU-only dev loops.
