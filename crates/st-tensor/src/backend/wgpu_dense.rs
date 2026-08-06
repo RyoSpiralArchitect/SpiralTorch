@@ -16,6 +16,7 @@ use st_kdsl::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetrySample, TelemetrySummary,
 };
 use std::any::Any;
+use std::borrow::Cow;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -279,6 +280,56 @@ impl PipelineCache {
             Ok(pipeline) => Ok(Arc::clone(pipeline)),
             Err(err) => Err(anyhow!(err.clone())),
         }
+    }
+}
+
+struct LazyComputePipeline {
+    label: &'static str,
+    source: Cow<'static, str>,
+    entry_point: &'static str,
+    layout: Arc<PipelineLayout>,
+    pipeline: OnceLock<PipelineCacheEntry>,
+}
+
+impl LazyComputePipeline {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(
+        label: &'static str,
+        source: impl Into<Cow<'static, str>>,
+        entry_point: &'static str,
+        layout: Arc<PipelineLayout>,
+    ) -> Self {
+        Self {
+            label,
+            source: source.into(),
+            entry_point,
+            layout,
+            pipeline: OnceLock::new(),
+        }
+    }
+
+    fn get(&self, device: &Device) -> Result<Arc<ComputePipeline>, String> {
+        match self.pipeline.get_or_init(|| {
+            let shader = create_wgsl_module(device, self.label, self.source.as_ref())
+                .map_err(|error| error.to_string())?;
+            create_compute_pipeline(
+                device,
+                self.label,
+                Some(self.layout.as_ref()),
+                &shader,
+                self.entry_point,
+            )
+            .map(Arc::new)
+            .map_err(|error| error.to_string())
+        }) {
+            Ok(pipeline) => Ok(Arc::clone(pipeline)),
+            Err(error) => Err(error.clone()),
+        }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn is_compiled(&self) -> bool {
+        matches!(self.pipeline.get(), Some(Ok(_)))
     }
 }
 
@@ -628,11 +679,11 @@ struct GpuContext {
     softmax_telemetry_keys: Mutex<HashMap<String, AutotuneKey>>,
     fused_attention: Option<FusedAttentionKernel>,
     fused_gelu_back_layout: BindGroupLayout,
-    fused_gelu_back_pipeline: Arc<ComputePipeline>,
+    fused_gelu_back_pipeline: LazyComputePipeline,
     reduce_db_layout: BindGroupLayout,
-    reduce_db_pipeline: Arc<ComputePipeline>,
+    reduce_db_pipeline: LazyComputePipeline,
     layer_norm_layout: BindGroupLayout,
-    layer_norm_pipeline: Arc<ComputePipeline>,
+    layer_norm_pipeline: LazyComputePipeline,
     tensor_util_layout: BindGroupLayout,
     tensor_util_pipelines: TensorUtilPipelineCache,
     fused_conv_layout: BindGroupLayout,
@@ -1070,33 +1121,24 @@ impl GpuContext {
                 ],
             });
 
-        let fused_gelu_back_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let fused_gelu_back_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.fused_gelu_back.pipeline_layout"),
                 bind_group_layouts: &[&fused_gelu_back_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
         let fused_gelu_back_shader_source = instantiate_fused_gelu_back_template(
             FUSED_GELU_BACK_WGSL_TEMPLATE,
             FUSED_GELU_BACK_WG_ROWS,
             FUSED_GELU_BACK_WG_COLS,
         );
-        let fused_gelu_back_shader = create_wgsl_module(
-            device.as_ref(),
+        let fused_gelu_back_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.fused_gelu_back",
-            fused_gelu_back_shader_source.as_str(),
-        )
-        .map_err(|err| err.to_string())?;
-        let fused_gelu_back_pipeline = Arc::new(
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.fused_gelu_back",
-                Some(&fused_gelu_back_pipeline_layout),
-                &fused_gelu_back_shader,
-                "main",
-            )
-            .map_err(|err| err.to_string())?,
+            fused_gelu_back_shader_source,
+            "main",
+            fused_gelu_back_pipeline_layout,
         );
 
         let reduce_db_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1135,33 +1177,24 @@ impl GpuContext {
             ],
         });
 
-        let reduce_db_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let reduce_db_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.reduce_db.pipeline_layout"),
                 bind_group_layouts: &[&reduce_db_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
         let reduce_db_shader_source = instantiate_reduce_db_template(
             REDUCE_DB_WGSL_TEMPLATE,
             FUSED_GELU_BACK_WG_COLS,
             REDUCE_DB_WORKGROUP,
         );
-        let reduce_db_shader = create_wgsl_module(
-            device.as_ref(),
+        let reduce_db_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.reduce_db",
-            reduce_db_shader_source.as_str(),
-        )
-        .map_err(|err| err.to_string())?;
-        let reduce_db_pipeline = Arc::new(
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.reduce_db",
-                Some(&reduce_db_pipeline_layout),
-                &reduce_db_shader,
-                "reduce",
-            )
-            .map_err(|err| err.to_string())?,
+            reduce_db_shader_source,
+            "reduce",
+            reduce_db_pipeline_layout,
         );
 
         let layer_norm_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1230,28 +1263,19 @@ impl GpuContext {
             ],
         });
 
-        let layer_norm_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let layer_norm_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.layer_norm.pipeline_layout"),
                 bind_group_layouts: &[&layer_norm_layout],
                 push_constant_ranges: &[],
-            });
+            },
+        ));
 
-        let layer_norm_shader = create_wgsl_module(
-            device.as_ref(),
+        let layer_norm_pipeline = LazyComputePipeline::new(
             "st.tensor.wgpu_dense.layer_norm",
             LAYER_NORM_WGSL,
-        )
-        .map_err(|err| err.to_string())?;
-        let layer_norm_pipeline = Arc::new(
-            create_compute_pipeline(
-                device.as_ref(),
-                "st.tensor.wgpu_dense.layer_norm",
-                Some(&layer_norm_pipeline_layout),
-                &layer_norm_shader,
-                "main",
-            )
-            .map_err(|err| err.to_string())?,
+            "main",
+            layer_norm_pipeline_layout,
         );
 
         let tensor_util_layout =
@@ -4352,6 +4376,42 @@ mod tests {
         ctx.tensor_util_pipeline(TensorUtilKernel::Add)
             .expect("add pipeline should compile independently");
         assert_eq!(ctx.tensor_util_pipelines.compiled_pipeline_count(), 2);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn core_compute_pipelines_compile_only_on_first_use() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!("skipping runtime WGPU cache test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1");
+            return;
+        }
+
+        let ctx = GpuContext::new().expect("WGPU context should initialize");
+        assert!(!ctx.fused_gelu_back_pipeline.is_compiled());
+        assert!(!ctx.reduce_db_pipeline.is_compiled());
+        assert!(!ctx.layer_norm_pipeline.is_compiled());
+
+        let fused = ctx
+            .fused_gelu_back_pipeline
+            .get(ctx.device())
+            .expect("fused GELU backward pipeline should compile");
+        let fused_again = ctx
+            .fused_gelu_back_pipeline
+            .get(ctx.device())
+            .expect("fused GELU backward pipeline should be cached");
+        assert!(Arc::ptr_eq(&fused, &fused_again));
+        assert!(ctx.fused_gelu_back_pipeline.is_compiled());
+        assert!(!ctx.reduce_db_pipeline.is_compiled());
+        assert!(!ctx.layer_norm_pipeline.is_compiled());
+
+        ctx.reduce_db_pipeline
+            .get(ctx.device())
+            .expect("bias reduction pipeline should compile");
+        ctx.layer_norm_pipeline
+            .get(ctx.device())
+            .expect("layer norm pipeline should compile");
+        assert!(ctx.reduce_db_pipeline.is_compiled());
+        assert!(ctx.layer_norm_pipeline.is_compiled());
     }
 
     #[test]
@@ -9186,8 +9246,8 @@ pub fn fused_gelu_backward(
     );
     let reduce_bind_group = ctx.reduce_db_bind_group(&partials_buf, &db_buf, &reduce_uniform_buf);
 
-    let fused_pipeline = ctx.fused_gelu_back_pipeline.clone();
-    let reduce_pipeline = ctx.reduce_db_pipeline.clone();
+    let fused_pipeline = ctx.fused_gelu_back_pipeline.get(device)?;
+    let reduce_pipeline = ctx.reduce_db_pipeline.get(device)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.gelu_back.encoder"),
@@ -9404,7 +9464,7 @@ fn layer_norm_internal(
         ],
     });
 
-    let pipeline = ctx.layer_norm_pipeline.clone();
+    let pipeline = ctx.layer_norm_pipeline.get(device)?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.layer_norm.encoder"),
     });
