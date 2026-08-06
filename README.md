@@ -640,6 +640,8 @@ Bind that committed plan before creating a training schedule so rank planning an
 every tensor kernel share one Rust-owned execution context:
 
 ```python
+import spiraltorch as st
+
 plan = st.evaluate_runtime_execution_plan(
     st.describe_device("cpu"),
     accelerator_fallback="allow",
