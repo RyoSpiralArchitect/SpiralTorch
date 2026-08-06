@@ -282,6 +282,222 @@ impl PipelineCache {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum TensorUtilKernel {
+    Scale,
+    Add,
+    Hadamard,
+    MulRow,
+    RowAffine,
+    ToposResonatorForward,
+    ToposResonatorBackward,
+    DynamicKleinGordonForward,
+    DynamicKleinGordonBackward,
+    DynamicHamiltonJacobiForward,
+    DynamicHamiltonJacobiBackward,
+    DynamicSchrodingerForward,
+    DynamicSchrodingerBackward,
+    SequenceLastStepGather,
+    SequenceLastStepScatter,
+    ZspaceCoherenceScanForward,
+    ZspaceCoherenceScanBackward,
+    AddScaled,
+    Sub,
+    Transpose,
+    EmbeddingGather,
+    EmbeddingScatterAdd,
+    HypergradAccumulateWave,
+    Relu,
+    ReluBackward,
+    LstmForwardGateStep,
+    MaxPool2dForward,
+    MaxPool2dBackward,
+    AvgPool2dForward,
+    AvgPool2dBackward,
+    SumSquares,
+    SumAbs,
+    MseLossForward,
+    MseLossBackward,
+    CategoricalCrossEntropyForward,
+    CategoricalCrossEntropyBackward,
+    HyperbolicCrossEntropyForward,
+    HyperbolicCrossEntropyBackward,
+    ZspaceSoftmaxBackwardFixed,
+    AddRow,
+    SumAxis0,
+    SumAxis0Scaled,
+    ProjectToPoincare,
+    WaveGateProject,
+    WaveGateBackward,
+}
+
+impl TensorUtilKernel {
+    #[cfg(test)]
+    const ALL: [Self; 45] = [
+        Self::Scale,
+        Self::Add,
+        Self::Hadamard,
+        Self::MulRow,
+        Self::RowAffine,
+        Self::ToposResonatorForward,
+        Self::ToposResonatorBackward,
+        Self::DynamicKleinGordonForward,
+        Self::DynamicKleinGordonBackward,
+        Self::DynamicHamiltonJacobiForward,
+        Self::DynamicHamiltonJacobiBackward,
+        Self::DynamicSchrodingerForward,
+        Self::DynamicSchrodingerBackward,
+        Self::SequenceLastStepGather,
+        Self::SequenceLastStepScatter,
+        Self::ZspaceCoherenceScanForward,
+        Self::ZspaceCoherenceScanBackward,
+        Self::AddScaled,
+        Self::Sub,
+        Self::Transpose,
+        Self::EmbeddingGather,
+        Self::EmbeddingScatterAdd,
+        Self::HypergradAccumulateWave,
+        Self::Relu,
+        Self::ReluBackward,
+        Self::LstmForwardGateStep,
+        Self::MaxPool2dForward,
+        Self::MaxPool2dBackward,
+        Self::AvgPool2dForward,
+        Self::AvgPool2dBackward,
+        Self::SumSquares,
+        Self::SumAbs,
+        Self::MseLossForward,
+        Self::MseLossBackward,
+        Self::CategoricalCrossEntropyForward,
+        Self::CategoricalCrossEntropyBackward,
+        Self::HyperbolicCrossEntropyForward,
+        Self::HyperbolicCrossEntropyBackward,
+        Self::ZspaceSoftmaxBackwardFixed,
+        Self::AddRow,
+        Self::SumAxis0,
+        Self::SumAxis0Scaled,
+        Self::ProjectToPoincare,
+        Self::WaveGateProject,
+        Self::WaveGateBackward,
+    ];
+
+    const fn entry_point(self) -> &'static str {
+        match self {
+            Self::Scale => "scale",
+            Self::Add => "add",
+            Self::Hadamard => "hadamard",
+            Self::MulRow => "mul_row",
+            Self::RowAffine => "row_affine",
+            Self::ToposResonatorForward => "topos_resonator_forward",
+            Self::ToposResonatorBackward => "topos_resonator_backward",
+            Self::DynamicKleinGordonForward => "dynamic_klein_gordon_forward",
+            Self::DynamicKleinGordonBackward => "dynamic_klein_gordon_backward",
+            Self::DynamicHamiltonJacobiForward => "dynamic_hamilton_jacobi_forward",
+            Self::DynamicHamiltonJacobiBackward => "dynamic_hamilton_jacobi_backward",
+            Self::DynamicSchrodingerForward => "dynamic_schrodinger_forward",
+            Self::DynamicSchrodingerBackward => "dynamic_schrodinger_backward",
+            Self::SequenceLastStepGather => "sequence_last_step_gather",
+            Self::SequenceLastStepScatter => "sequence_last_step_scatter",
+            Self::ZspaceCoherenceScanForward => "zspace_coherence_scan_forward",
+            Self::ZspaceCoherenceScanBackward => "zspace_coherence_scan_backward",
+            Self::AddScaled => "add_scaled",
+            Self::Sub => "sub",
+            Self::Transpose => "transpose",
+            Self::EmbeddingGather => "embedding_gather",
+            Self::EmbeddingScatterAdd => "embedding_scatter_add",
+            Self::HypergradAccumulateWave => "hypergrad_accumulate_wave",
+            Self::Relu => "relu",
+            Self::ReluBackward => "relu_backward",
+            Self::LstmForwardGateStep => "lstm_forward_gate_step",
+            Self::MaxPool2dForward => "max_pool2d_forward",
+            Self::MaxPool2dBackward => "max_pool2d_backward",
+            Self::AvgPool2dForward => "avg_pool2d_forward",
+            Self::AvgPool2dBackward => "avg_pool2d_backward",
+            Self::SumSquares => "sum_squares",
+            Self::SumAbs => "sum_abs",
+            Self::MseLossForward => "mse_loss_forward",
+            Self::MseLossBackward => "mse_loss_backward",
+            Self::CategoricalCrossEntropyForward => "categorical_cross_entropy_forward",
+            Self::CategoricalCrossEntropyBackward => "categorical_cross_entropy_backward",
+            Self::HyperbolicCrossEntropyForward => "hyperbolic_cross_entropy_forward",
+            Self::HyperbolicCrossEntropyBackward => "hyperbolic_cross_entropy_backward",
+            Self::ZspaceSoftmaxBackwardFixed => "zspace_softmax_backward_fixed",
+            Self::AddRow => "add_row",
+            Self::SumAxis0 => "sum_axis0",
+            Self::SumAxis0Scaled => "sum_axis0_scaled",
+            Self::ProjectToPoincare => "project_to_poincare",
+            Self::WaveGateProject => "wave_gate_project",
+            Self::WaveGateBackward => "wave_gate_backward",
+        }
+    }
+}
+
+struct TensorUtilPipelineCache {
+    device: Arc<Device>,
+    layout: Arc<PipelineLayout>,
+    shader: OnceLock<ShaderCacheEntry>,
+    pipelines: Mutex<HashMap<TensorUtilKernel, Arc<OnceLock<PipelineCacheEntry>>>>,
+}
+
+impl TensorUtilPipelineCache {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(device: Arc<Device>, layout: Arc<PipelineLayout>) -> Self {
+        Self {
+            device,
+            layout,
+            shader: OnceLock::new(),
+            pipelines: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn pipeline(&self, kernel: TensorUtilKernel) -> Result<Arc<ComputePipeline>, String> {
+        let entry = {
+            let mut pipelines = lock_recover(&self.pipelines);
+            pipelines
+                .entry(kernel)
+                .or_insert_with(|| Arc::new(OnceLock::new()))
+                .clone()
+        };
+
+        let shader = match self.shader.get_or_init(|| {
+            create_wgsl_module(
+                self.device.as_ref(),
+                "st.tensor.wgpu_dense.tensor_util",
+                TENSOR_UTILS_WGSL,
+            )
+            .map(Arc::new)
+            .map_err(|error| error.to_string())
+        }) {
+            Ok(shader) => Arc::clone(shader),
+            Err(error) => return Err(error.clone()),
+        };
+
+        match entry.get_or_init(|| {
+            let entry_point = kernel.entry_point();
+            create_compute_pipeline(
+                self.device.as_ref(),
+                &format!("st.tensor.wgpu_dense.tensor_util.{entry_point}"),
+                Some(self.layout.as_ref()),
+                shader.as_ref(),
+                entry_point,
+            )
+            .map(Arc::new)
+            .map_err(|error| error.to_string())
+        }) {
+            Ok(pipeline) => Ok(Arc::clone(pipeline)),
+            Err(error) => Err(error.clone()),
+        }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn compiled_pipeline_count(&self) -> usize {
+        lock_recover(&self.pipelines)
+            .values()
+            .filter(|entry| matches!(entry.get(), Some(Ok(_))))
+            .count()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct TileConfig {
     tile_m: u32,
@@ -418,51 +634,7 @@ struct GpuContext {
     layer_norm_layout: BindGroupLayout,
     layer_norm_pipeline: Arc<ComputePipeline>,
     tensor_util_layout: BindGroupLayout,
-    tensor_util_scale_pipeline: Arc<ComputePipeline>,
-    tensor_util_add_pipeline: Arc<ComputePipeline>,
-    tensor_util_hadamard_pipeline: Arc<ComputePipeline>,
-    tensor_util_mul_row_pipeline: Arc<ComputePipeline>,
-    tensor_util_row_affine_pipeline: Arc<ComputePipeline>,
-    tensor_util_topos_resonator_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_topos_resonator_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_klein_gordon_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_klein_gordon_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_hamilton_jacobi_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_hamilton_jacobi_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_schrodinger_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_dynamic_schrodinger_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_sequence_last_step_gather_pipeline: Arc<ComputePipeline>,
-    tensor_util_sequence_last_step_scatter_pipeline: Arc<ComputePipeline>,
-    tensor_util_zspace_coherence_scan_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_zspace_coherence_scan_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_add_scaled_pipeline: Arc<ComputePipeline>,
-    tensor_util_sub_pipeline: Arc<ComputePipeline>,
-    tensor_util_transpose_pipeline: Arc<ComputePipeline>,
-    tensor_util_embedding_gather_pipeline: Arc<ComputePipeline>,
-    tensor_util_embedding_scatter_add_pipeline: Arc<ComputePipeline>,
-    tensor_util_hypergrad_accumulate_wave_pipeline: Arc<ComputePipeline>,
-    tensor_util_relu_pipeline: Arc<ComputePipeline>,
-    tensor_util_relu_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_lstm_forward_gate_step_pipeline: Arc<ComputePipeline>,
-    tensor_util_max_pool2d_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_max_pool2d_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_avg_pool2d_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_avg_pool2d_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_sum_squares_pipeline: Arc<ComputePipeline>,
-    tensor_util_sum_abs_pipeline: Arc<ComputePipeline>,
-    tensor_util_mse_loss_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_mse_loss_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_categorical_cross_entropy_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_categorical_cross_entropy_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_hyperbolic_cross_entropy_forward_pipeline: Arc<ComputePipeline>,
-    tensor_util_hyperbolic_cross_entropy_backward_pipeline: Arc<ComputePipeline>,
-    tensor_util_zspace_softmax_backward_fixed_pipeline: Arc<ComputePipeline>,
-    tensor_util_add_row_pipeline: Arc<ComputePipeline>,
-    tensor_util_sum_axis0_pipeline: Arc<ComputePipeline>,
-    tensor_util_sum_axis0_scaled_pipeline: Arc<ComputePipeline>,
-    tensor_util_project_to_poincare_pipeline: Arc<ComputePipeline>,
-    tensor_util_wave_gate_project_pipeline: Arc<ComputePipeline>,
-    tensor_util_wave_gate_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_pipelines: TensorUtilPipelineCache,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -1128,94 +1300,15 @@ impl GpuContext {
                     },
                 ],
             });
-        let tensor_util_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let tensor_util_pipeline_layout = Arc::new(device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
                 label: Some("st.tensor.wgpu_dense.tensor_util.pipeline_layout"),
                 bind_group_layouts: &[&tensor_util_layout],
                 push_constant_ranges: &[],
-            });
-        let tensor_util_shader = create_wgsl_module(
-            device.as_ref(),
-            "st.tensor.wgpu_dense.tensor_util",
-            TENSOR_UTILS_WGSL,
-        )
-        .map_err(|err| err.to_string())?;
-        let tensor_util_pipeline = |entry_point: &str| -> Result<Arc<ComputePipeline>, String> {
-            create_compute_pipeline(
-                device.as_ref(),
-                &format!("st.tensor.wgpu_dense.tensor_util.{entry_point}"),
-                Some(&tensor_util_pipeline_layout),
-                &tensor_util_shader,
-                entry_point,
-            )
-            .map(Arc::new)
-            .map_err(|err| err.to_string())
-        };
-        let tensor_util_scale_pipeline = tensor_util_pipeline("scale")?;
-        let tensor_util_add_pipeline = tensor_util_pipeline("add")?;
-        let tensor_util_hadamard_pipeline = tensor_util_pipeline("hadamard")?;
-        let tensor_util_mul_row_pipeline = tensor_util_pipeline("mul_row")?;
-        let tensor_util_row_affine_pipeline = tensor_util_pipeline("row_affine")?;
-        let tensor_util_topos_resonator_forward_pipeline =
-            tensor_util_pipeline("topos_resonator_forward")?;
-        let tensor_util_topos_resonator_backward_pipeline =
-            tensor_util_pipeline("topos_resonator_backward")?;
-        let tensor_util_dynamic_klein_gordon_forward_pipeline =
-            tensor_util_pipeline("dynamic_klein_gordon_forward")?;
-        let tensor_util_dynamic_klein_gordon_backward_pipeline =
-            tensor_util_pipeline("dynamic_klein_gordon_backward")?;
-        let tensor_util_dynamic_hamilton_jacobi_forward_pipeline =
-            tensor_util_pipeline("dynamic_hamilton_jacobi_forward")?;
-        let tensor_util_dynamic_hamilton_jacobi_backward_pipeline =
-            tensor_util_pipeline("dynamic_hamilton_jacobi_backward")?;
-        let tensor_util_dynamic_schrodinger_forward_pipeline =
-            tensor_util_pipeline("dynamic_schrodinger_forward")?;
-        let tensor_util_dynamic_schrodinger_backward_pipeline =
-            tensor_util_pipeline("dynamic_schrodinger_backward")?;
-        let tensor_util_sequence_last_step_gather_pipeline =
-            tensor_util_pipeline("sequence_last_step_gather")?;
-        let tensor_util_sequence_last_step_scatter_pipeline =
-            tensor_util_pipeline("sequence_last_step_scatter")?;
-        let tensor_util_zspace_coherence_scan_forward_pipeline =
-            tensor_util_pipeline("zspace_coherence_scan_forward")?;
-        let tensor_util_zspace_coherence_scan_backward_pipeline =
-            tensor_util_pipeline("zspace_coherence_scan_backward")?;
-        let tensor_util_add_scaled_pipeline = tensor_util_pipeline("add_scaled")?;
-        let tensor_util_sub_pipeline = tensor_util_pipeline("sub")?;
-        let tensor_util_transpose_pipeline = tensor_util_pipeline("transpose")?;
-        let tensor_util_embedding_gather_pipeline = tensor_util_pipeline("embedding_gather")?;
-        let tensor_util_embedding_scatter_add_pipeline =
-            tensor_util_pipeline("embedding_scatter_add")?;
-        let tensor_util_hypergrad_accumulate_wave_pipeline =
-            tensor_util_pipeline("hypergrad_accumulate_wave")?;
-        let tensor_util_relu_pipeline = tensor_util_pipeline("relu")?;
-        let tensor_util_relu_backward_pipeline = tensor_util_pipeline("relu_backward")?;
-        let tensor_util_lstm_forward_gate_step_pipeline =
-            tensor_util_pipeline("lstm_forward_gate_step")?;
-        let tensor_util_max_pool2d_forward_pipeline = tensor_util_pipeline("max_pool2d_forward")?;
-        let tensor_util_max_pool2d_backward_pipeline = tensor_util_pipeline("max_pool2d_backward")?;
-        let tensor_util_avg_pool2d_forward_pipeline = tensor_util_pipeline("avg_pool2d_forward")?;
-        let tensor_util_avg_pool2d_backward_pipeline = tensor_util_pipeline("avg_pool2d_backward")?;
-        let tensor_util_sum_squares_pipeline = tensor_util_pipeline("sum_squares")?;
-        let tensor_util_sum_abs_pipeline = tensor_util_pipeline("sum_abs")?;
-        let tensor_util_mse_loss_forward_pipeline = tensor_util_pipeline("mse_loss_forward")?;
-        let tensor_util_mse_loss_backward_pipeline = tensor_util_pipeline("mse_loss_backward")?;
-        let tensor_util_categorical_cross_entropy_forward_pipeline =
-            tensor_util_pipeline("categorical_cross_entropy_forward")?;
-        let tensor_util_categorical_cross_entropy_backward_pipeline =
-            tensor_util_pipeline("categorical_cross_entropy_backward")?;
-        let tensor_util_hyperbolic_cross_entropy_forward_pipeline =
-            tensor_util_pipeline("hyperbolic_cross_entropy_forward")?;
-        let tensor_util_hyperbolic_cross_entropy_backward_pipeline =
-            tensor_util_pipeline("hyperbolic_cross_entropy_backward")?;
-        let tensor_util_zspace_softmax_backward_fixed_pipeline =
-            tensor_util_pipeline("zspace_softmax_backward_fixed")?;
-        let tensor_util_add_row_pipeline = tensor_util_pipeline("add_row")?;
-        let tensor_util_sum_axis0_pipeline = tensor_util_pipeline("sum_axis0")?;
-        let tensor_util_sum_axis0_scaled_pipeline = tensor_util_pipeline("sum_axis0_scaled")?;
-        let tensor_util_project_to_poincare_pipeline = tensor_util_pipeline("project_to_poincare")?;
-        let tensor_util_wave_gate_project_pipeline = tensor_util_pipeline("wave_gate_project")?;
-        let tensor_util_wave_gate_backward_pipeline = tensor_util_pipeline("wave_gate_backward")?;
+            },
+        ));
+        let tensor_util_pipelines =
+            TensorUtilPipelineCache::new(device.clone(), tensor_util_pipeline_layout);
 
         let fused_attention = {
             let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
@@ -1499,51 +1592,7 @@ impl GpuContext {
             layer_norm_layout,
             layer_norm_pipeline,
             tensor_util_layout,
-            tensor_util_scale_pipeline,
-            tensor_util_add_pipeline,
-            tensor_util_hadamard_pipeline,
-            tensor_util_mul_row_pipeline,
-            tensor_util_row_affine_pipeline,
-            tensor_util_topos_resonator_forward_pipeline,
-            tensor_util_topos_resonator_backward_pipeline,
-            tensor_util_dynamic_klein_gordon_forward_pipeline,
-            tensor_util_dynamic_klein_gordon_backward_pipeline,
-            tensor_util_dynamic_hamilton_jacobi_forward_pipeline,
-            tensor_util_dynamic_hamilton_jacobi_backward_pipeline,
-            tensor_util_dynamic_schrodinger_forward_pipeline,
-            tensor_util_dynamic_schrodinger_backward_pipeline,
-            tensor_util_sequence_last_step_gather_pipeline,
-            tensor_util_sequence_last_step_scatter_pipeline,
-            tensor_util_zspace_coherence_scan_forward_pipeline,
-            tensor_util_zspace_coherence_scan_backward_pipeline,
-            tensor_util_add_scaled_pipeline,
-            tensor_util_sub_pipeline,
-            tensor_util_transpose_pipeline,
-            tensor_util_embedding_gather_pipeline,
-            tensor_util_embedding_scatter_add_pipeline,
-            tensor_util_hypergrad_accumulate_wave_pipeline,
-            tensor_util_relu_pipeline,
-            tensor_util_relu_backward_pipeline,
-            tensor_util_lstm_forward_gate_step_pipeline,
-            tensor_util_max_pool2d_forward_pipeline,
-            tensor_util_max_pool2d_backward_pipeline,
-            tensor_util_avg_pool2d_forward_pipeline,
-            tensor_util_avg_pool2d_backward_pipeline,
-            tensor_util_sum_squares_pipeline,
-            tensor_util_sum_abs_pipeline,
-            tensor_util_mse_loss_forward_pipeline,
-            tensor_util_mse_loss_backward_pipeline,
-            tensor_util_categorical_cross_entropy_forward_pipeline,
-            tensor_util_categorical_cross_entropy_backward_pipeline,
-            tensor_util_hyperbolic_cross_entropy_forward_pipeline,
-            tensor_util_hyperbolic_cross_entropy_backward_pipeline,
-            tensor_util_zspace_softmax_backward_fixed_pipeline,
-            tensor_util_add_row_pipeline,
-            tensor_util_sum_axis0_pipeline,
-            tensor_util_sum_axis0_scaled_pipeline,
-            tensor_util_project_to_poincare_pipeline,
-            tensor_util_wave_gate_project_pipeline,
-            tensor_util_wave_gate_backward_pipeline,
+            tensor_util_pipelines,
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
@@ -1570,6 +1619,13 @@ impl GpuContext {
 
     fn queue(&self) -> &Queue {
         self.context.queue()
+    }
+
+    fn tensor_util_pipeline(
+        &self,
+        kernel: TensorUtilKernel,
+    ) -> Result<Arc<ComputePipeline>, String> {
+        self.tensor_util_pipelines.pipeline(kernel)
     }
 
     fn softmax_pipeline_variant(&self, variant: SoftmaxVariant) -> Option<Arc<ComputePipeline>> {
@@ -3998,6 +4054,7 @@ mod tests {
     use super::*;
     use crate::{Tensor, Tile};
     use naga::front::wgsl::parse_str;
+    use std::collections::HashSet;
 
     fn assert_parses(label: &str, source: &str) {
         parse_str(source).unwrap_or_else(|err| panic!("{label} failed: {err}"));
@@ -4255,7 +4312,46 @@ mod tests {
 
     #[test]
     fn tensor_utils_shader_wgsl_is_valid() {
-        assert_parses("tensor utils", TENSOR_UTILS_WGSL);
+        let module = parse_str(TENSOR_UTILS_WGSL)
+            .unwrap_or_else(|error| panic!("tensor utils failed: {error}"));
+        let actual = module
+            .entry_points
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<HashSet<_>>();
+        let expected = TensorUtilKernel::ALL
+            .iter()
+            .map(|kernel| kernel.entry_point())
+            .collect::<HashSet<_>>();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn tensor_util_pipeline_cache_is_lazy_and_per_entry_point() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            eprintln!("skipping runtime WGPU cache test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1");
+            return;
+        }
+
+        let ctx = GpuContext::new().expect("WGPU context should initialize");
+        assert_eq!(ctx.tensor_util_pipelines.compiled_pipeline_count(), 0);
+
+        let scale = ctx
+            .tensor_util_pipeline(TensorUtilKernel::Scale)
+            .expect("scale pipeline should compile");
+        assert_eq!(ctx.tensor_util_pipelines.compiled_pipeline_count(), 1);
+
+        let scale_again = ctx
+            .tensor_util_pipeline(TensorUtilKernel::Scale)
+            .expect("scale pipeline should be cached");
+        assert!(Arc::ptr_eq(&scale, &scale_again));
+        assert_eq!(ctx.tensor_util_pipelines.compiled_pipeline_count(), 1);
+
+        ctx.tensor_util_pipeline(TensorUtilKernel::Add)
+            .expect("add pipeline should compile independently");
+        assert_eq!(ctx.tensor_util_pipelines.compiled_pipeline_count(), 2);
     }
 
     #[test]
@@ -6278,6 +6374,7 @@ pub fn zspace_coherence_scan_forward(
         "zspace_coherence_scan_forward output volume exceeds usize range".to_string()
     })?;
     let ctx = dense_context()?;
+    let pipeline = ctx.tensor_util_pipeline(TensorUtilKernel::ZspaceCoherenceScanForward)?;
     let packed = zspace_coherence_scan_forward_internal(
         input,
         batch,
@@ -6289,8 +6386,7 @@ pub fn zspace_coherence_scan_forward(
         temperature,
         self_score_scale,
         query_residual_scale,
-        ctx.tensor_util_zspace_coherence_scan_forward_pipeline
-            .clone(),
+        pipeline,
     )?;
     Ok((
         packed[..context_values].to_vec(),
@@ -6374,6 +6470,7 @@ pub fn zspace_coherence_scan_backward(
     aux.extend_from_slice(weights);
 
     let ctx = dense_context()?;
+    let pipeline = ctx.tensor_util_pipeline(TensorUtilKernel::ZspaceCoherenceScanBackward)?;
     let device = ctx.device();
     let queue = ctx.queue();
     let input_buf = upload_lhs(
@@ -6436,10 +6533,7 @@ pub fn zspace_coherence_scan_backward(
             label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_backward.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(
-            ctx.tensor_util_zspace_coherence_scan_backward_pipeline
-                .as_ref(),
-        );
+        pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(output_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
     }
@@ -6477,7 +6571,7 @@ pub fn sequence_last_step_gather(
         features,
         output_values,
         output_values,
-        ctx.tensor_util_sequence_last_step_gather_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SequenceLastStepGather)?,
         "sequence_last_step_gather",
     )
 }
@@ -6514,7 +6608,7 @@ pub fn sequence_last_step_scatter(
         features,
         output_values,
         output_values,
-        ctx.tensor_util_sequence_last_step_scatter_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SequenceLastStepScatter)?,
         "sequence_last_step_scatter",
     )
 }
@@ -6534,7 +6628,7 @@ pub fn scale(input: &[f32], rows: usize, cols: usize, value: f32) -> Result<Vec<
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_scale_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Scale)?,
         workgroups,
         "scale",
     )
@@ -6562,7 +6656,7 @@ pub fn add(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Vec<f32
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_add_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Add)?,
         workgroups,
         "add",
     )
@@ -6590,7 +6684,7 @@ pub fn hadamard(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Ve
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_hadamard_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Hadamard)?,
         workgroups,
         "hadamard",
     )
@@ -6617,7 +6711,7 @@ pub fn mul_row(input: &[f32], row: &[f32], rows: usize, cols: usize) -> Result<V
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_mul_row_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::MulRow)?,
         workgroups,
         "mul_row",
     )
@@ -6659,7 +6753,7 @@ pub fn row_affine(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_row_affine_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::RowAffine)?,
         workgroups,
         "row_affine",
     )
@@ -6737,7 +6831,7 @@ pub fn topos_resonator_forward(
         saturation,
         porosity,
         iterations as f32,
-        ctx.tensor_util_topos_resonator_forward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::ToposResonatorForward)?,
         workgroups,
         "topos_resonator_forward",
     )?;
@@ -6809,7 +6903,7 @@ pub fn topos_resonator_backward(
         saturation,
         porosity,
         iterations as f32,
-        ctx.tensor_util_topos_resonator_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::ToposResonatorBackward)?,
         workgroups,
         "topos_resonator_backward",
     )?;
@@ -6893,8 +6987,7 @@ pub fn dynamic_klein_gordon_forward(
         damping_half_factor,
         laplacian_scale,
         self_coupling,
-        ctx.tensor_util_dynamic_klein_gordon_forward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicKleinGordonForward)?,
         workgroups,
         "dynamic_klein_gordon_forward",
     )?;
@@ -7009,8 +7102,7 @@ pub fn dynamic_klein_gordon_backward(
         damping_half_factor,
         laplacian_scale,
         self_coupling,
-        ctx.tensor_util_dynamic_klein_gordon_backward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicKleinGordonBackward)?,
         workgroups,
         "dynamic_klein_gordon_backward",
     )?;
@@ -7071,8 +7163,7 @@ pub fn dynamic_hamilton_jacobi_forward(
         central_gradient_scale,
         inverse_mass,
         diffusion_step_coefficient,
-        ctx.tensor_util_dynamic_hamilton_jacobi_forward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicHamiltonJacobiForward)?,
         workgroups,
         "dynamic_hamilton_jacobi_forward",
     )?;
@@ -7142,8 +7233,7 @@ pub fn dynamic_hamilton_jacobi_backward(
         central_gradient_scale,
         inverse_mass,
         diffusion_step_coefficient,
-        ctx.tensor_util_dynamic_hamilton_jacobi_backward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicHamiltonJacobiBackward)?,
         workgroups,
         "dynamic_hamilton_jacobi_backward",
     )?;
@@ -7233,7 +7323,7 @@ pub fn dynamic_schrodinger_forward(
         hopping_rate,
         loss_rate,
         noise_scale,
-        ctx.tensor_util_dynamic_schrodinger_forward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicSchrodingerForward)?,
         workgroups,
         "dynamic_schrodinger_forward",
     )?;
@@ -7310,8 +7400,7 @@ pub fn dynamic_schrodinger_backward(
         hopping_rate,
         loss_rate,
         0.0,
-        ctx.tensor_util_dynamic_schrodinger_backward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::DynamicSchrodingerBackward)?,
         workgroups,
         "dynamic_schrodinger_backward",
     )?;
@@ -7351,7 +7440,7 @@ pub fn add_scaled(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_add_scaled_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::AddScaled)?,
         workgroups,
         "add_scaled",
     )
@@ -7379,7 +7468,7 @@ pub fn sub(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Vec<f32
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_sub_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Sub)?,
         workgroups,
         "sub",
     )
@@ -7400,7 +7489,7 @@ pub fn transpose(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, St
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_transpose_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Transpose)?,
         workgroups,
         "transpose",
     )
@@ -7424,7 +7513,7 @@ pub fn embedding_gather(
         embed_dim,
         vocab_size,
         tokens.saturating_mul(embed_dim),
-        ctx.tensor_util_embedding_gather_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::EmbeddingGather)?,
         "embedding_gather",
     )
 }
@@ -7459,7 +7548,7 @@ pub fn embedding_scatter_add(
         embed_dim,
         vocab_size,
         output_elements,
-        ctx.tensor_util_embedding_scatter_add_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::EmbeddingScatterAdd)?,
         "embedding_scatter_add",
     )
 }
@@ -7508,7 +7597,7 @@ pub fn hypergrad_accumulate_wave(
         saturation,
         porosity,
         tolerance,
-        ctx.tensor_util_hypergrad_accumulate_wave_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::HypergradAccumulateWave)?,
         workgroups,
         "hypergrad_accumulate_wave",
     )
@@ -7529,7 +7618,7 @@ pub fn relu(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String>
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_relu_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::Relu)?,
         workgroups,
         "relu",
     )
@@ -7562,7 +7651,7 @@ pub fn relu_backward(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_relu_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::ReluBackward)?,
         workgroups,
         "relu_backward",
     )
@@ -7608,7 +7697,7 @@ pub fn lstm_forward_gate_step(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_lstm_forward_gate_step_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::LstmForwardGateStep)?,
         workgroups,
         "lstm_forward_gate_step",
     )
@@ -7712,7 +7801,7 @@ pub fn max_pool2d_forward(
         input_cols,
         output_values,
         output_values.saturating_mul(2),
-        ctx.tensor_util_max_pool2d_forward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::MaxPool2dForward)?,
         "max_pool2d_forward",
     )?;
     let (values, raw_indices) = packed.split_at(output_values);
@@ -7785,7 +7874,7 @@ pub fn max_pool2d_backward(
         input_cols,
         input_values,
         input_values,
-        ctx.tensor_util_max_pool2d_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::MaxPool2dBackward)?,
         "max_pool2d_backward",
     )
 }
@@ -7838,7 +7927,7 @@ pub fn avg_pool2d_forward(
         input_cols,
         output_values,
         output_values,
-        ctx.tensor_util_avg_pool2d_forward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::AvgPool2dForward)?,
         "avg_pool2d_forward",
     )
 }
@@ -7902,7 +7991,7 @@ pub fn avg_pool2d_backward(
         input_cols,
         input_values,
         input_values,
-        ctx.tensor_util_avg_pool2d_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::AvgPool2dBackward)?,
         "avg_pool2d_backward",
     )
 }
@@ -7921,7 +8010,7 @@ pub fn sum_squares(input: &[f32], rows: usize, cols: usize) -> Result<f32, Strin
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_sum_squares_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SumSquares)?,
         1,
         "sum_squares",
     )?;
@@ -7946,7 +8035,7 @@ pub fn sum_abs(input: &[f32], rows: usize, cols: usize) -> Result<f32, String> {
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_sum_abs_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SumAbs)?,
         1,
         "sum_abs",
     )?;
@@ -7982,7 +8071,7 @@ pub fn mse_loss_forward(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_mse_loss_forward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::MseLossForward)?,
         1,
         "mse_loss_forward",
     )?;
@@ -8019,7 +8108,7 @@ pub fn mse_loss_backward(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_mse_loss_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::MseLossBackward)?,
         workgroups,
         "mse_loss_backward",
     )
@@ -8054,8 +8143,7 @@ pub fn categorical_cross_entropy_forward(
         1.0 / rows as f32,
         0.0,
         0.0,
-        ctx.tensor_util_categorical_cross_entropy_forward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::CategoricalCrossEntropyForward)?,
         1,
         "categorical_cross_entropy_forward",
     )?;
@@ -8098,8 +8186,7 @@ pub fn categorical_cross_entropy_backward(
         1.0 / rows as f32,
         0.0,
         0.0,
-        ctx.tensor_util_categorical_cross_entropy_backward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::CategoricalCrossEntropyBackward)?,
         workgroups,
         "categorical_cross_entropy_backward",
     )
@@ -8140,8 +8227,7 @@ pub fn hyperbolic_cross_entropy_forward(
         epsilon,
         1.0 / prediction.len() as f32,
         0.0,
-        ctx.tensor_util_hyperbolic_cross_entropy_forward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::HyperbolicCrossEntropyForward)?,
         1,
         "hyperbolic_cross_entropy_forward",
     )?;
@@ -8188,8 +8274,7 @@ pub fn hyperbolic_cross_entropy_backward(
         epsilon,
         1.0 / prediction.len() as f32,
         0.0,
-        ctx.tensor_util_hyperbolic_cross_entropy_backward_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::HyperbolicCrossEntropyBackward)?,
         workgroups,
         "hyperbolic_cross_entropy_backward",
     )
@@ -8225,8 +8310,7 @@ pub fn zspace_softmax_backward_fixed(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_zspace_softmax_backward_fixed_pipeline
-            .clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::ZspaceSoftmaxBackwardFixed)?,
         rows_u32,
         "zspace_softmax_backward_fixed",
     )
@@ -8253,7 +8337,7 @@ pub fn add_row(input: &[f32], bias: &[f32], rows: usize, cols: usize) -> Result<
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_add_row_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::AddRow)?,
         workgroups,
         "add_row",
     )
@@ -8273,7 +8357,7 @@ pub fn sum_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, St
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_sum_axis0_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SumAxis0)?,
         cols_u32,
         "sum_axis0",
     )
@@ -8299,7 +8383,7 @@ pub fn sum_axis0_scaled(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_sum_axis0_scaled_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::SumAxis0Scaled)?,
         cols_u32,
         "sum_axis0_scaled",
     )
@@ -8328,7 +8412,7 @@ pub fn project_to_poincare(
         0.0,
         0.0,
         0.0,
-        ctx.tensor_util_project_to_poincare_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::ProjectToPoincare)?,
         rows_u32,
         "project_to_poincare",
     )
@@ -8377,7 +8461,7 @@ pub fn wave_gate_project(
         saturation,
         porosity,
         0.0,
-        ctx.tensor_util_wave_gate_project_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::WaveGateProject)?,
         rows_u32,
         "wave_gate_project",
     )
@@ -8437,7 +8521,7 @@ pub fn wave_gate_backward(
         saturation,
         porosity,
         f32::EPSILON,
-        ctx.tensor_util_wave_gate_backward_pipeline.clone(),
+        ctx.tensor_util_pipeline(TensorUtilKernel::WaveGateBackward)?,
         rows_u32,
         "wave_gate_backward",
     )?;
