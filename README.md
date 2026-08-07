@@ -665,8 +665,10 @@ assert replayed.runtime_execution_plan_output_sha256 == session.runtime_executio
 The returned `runtime_execution_plan` is an isolated copy. Supplying a committed
 plan together with backend, capability, or execution-config overrides fails closed,
 and executable materialization rechecks the receiving Rust build and local runtime.
-`backend="auto"` is only orchestration order: Python asks Rust for an executable
-WGPU plan first and tries CPU only when the captured fallback policy allows it.
+`backend="auto"` is only orchestration order: Python asks Rust for WGPU readiness
+first and tries CPU only when Rust returns an explicit unavailable signal and the
+captured fallback policy allows it. Plan validation, transport, and configuration
+errors remain visible instead of silently changing the backend.
 `SPIRALTORCH_STRICT_GPU=1` is captured by Rust and forbids that CPU retry; it also
 keeps small tensor-utility operations on WGPU instead of applying the performance
 threshold as an implicit fallback. `st.resolve_runtime_execution_config()` exposes

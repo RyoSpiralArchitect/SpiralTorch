@@ -6945,6 +6945,10 @@ else:  # pragma: no cover - defensive
     _DATASET_NATIVE_AVAILABLE = False
 
 
+class _RuntimeBackendUnavailableError(RuntimeError):
+    """Internal control flow for an explicit native backend-readiness miss."""
+
+
 class SpiralSession:
     """Python orchestration bound to one Rust-owned execution plan."""
 
@@ -7012,7 +7016,7 @@ class SpiralSession:
                     accelerator_fallback=fallback,
                     tensor_util_wgpu_min_values=min_values,
                 )
-            except (RuntimeError, ValueError):
+            except _RuntimeBackendUnavailableError:
                 if fallback == "forbid":
                     raise
                 executable, report = self._build_runtime_execution_plan(
@@ -7035,7 +7039,11 @@ class SpiralSession:
         accelerator_fallback: str,
         tensor_util_wgpu_min_values: int,
     ) -> tuple[_Dict[str, _Any], _Dict[str, _Any]]:
-        init_backend(backend)
+        initialized = init_backend(backend)
+        if backend == "wgpu" and not initialized:
+            raise _RuntimeBackendUnavailableError(
+                "the Rust runtime reports that WGPU is unavailable"
+            )
         _effective_backend, _device, report = _resolve_runtime_entry(backend)
         candidate = evaluate_runtime_execution_plan(
             report,

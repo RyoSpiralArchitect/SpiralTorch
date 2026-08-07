@@ -1484,6 +1484,8 @@ fn init_backend(label: &str) -> PyResult<bool> {
         "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
         #[cfg(feature = "wgpu")]
         "wgpu" => Ok(backend_runtime_ready(BackendKind::Wgpu)),
+        #[cfg(not(feature = "wgpu"))]
+        "wgpu" => Ok(false),
         other => Err(PyValueError::new_err(format!(
             "unknown backend label '{other}'"
         ))),
@@ -1815,5 +1817,11 @@ mod tests {
     #[test]
     fn init_backend_reports_mps_surrogate_readiness() {
         assert!(init_backend("mps").unwrap());
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn init_backend_reports_wgpu_unavailable_without_feature() {
+        assert!(!init_backend("wgpu").unwrap());
     }
 }

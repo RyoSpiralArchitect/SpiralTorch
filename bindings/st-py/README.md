@@ -2737,9 +2737,10 @@ assert replayed.runtime_execution_plan_output_sha256 == session.runtime_executio
 `runtime_execution_plan` returns a defensive copy. Replay validates commitments,
 the receiving Rust build, and current backend readiness. A supplied plan cannot be
 combined with backend/capability/config overrides. For `backend="auto"`, Python
-tries Rust-materialized WGPU first and falls back to CPU only for an expected
-runtime or configuration rejection when the captured policy permits fallback;
-unrelated Python plumbing errors propagate. Rust captures
+asks Rust for WGPU readiness first, materializes that plan when ready, and falls
+back to CPU only when Rust returns its explicit unavailable signal and the captured
+policy permits fallback. Plan validation, transport, configuration, and unrelated
+Python errors propagate. Rust captures
 `SPIRALTORCH_STRICT_GPU` and `SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES` once.
 Under strict policy, `auto` does not retry CPU and small tensor utilities stay on
 WGPU rather than crossing the threshold route. Inspect the captured values with

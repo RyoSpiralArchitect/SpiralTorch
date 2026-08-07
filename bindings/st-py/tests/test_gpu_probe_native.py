@@ -702,7 +702,7 @@ def test_session_auto_prefers_wgpu_backend_by_default(
     assert calls == ["wgpu"]
 
 
-def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
+def test_session_auto_falls_back_to_cpu_when_rust_reports_wgpu_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     st = require_native()
@@ -712,7 +712,7 @@ def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
         raw = str(backend)
         calls.append(raw)
         if raw == "wgpu":
-            raise RuntimeError("wgpu unavailable")
+            return False
         return True
 
     def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
@@ -730,6 +730,41 @@ def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
     assert session.device == "cpu"
     assert session.device_preflight["backend"] == "cpu"
     assert calls == ["wgpu", "cpu"]
+
+
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+def test_session_auto_does_not_hide_execution_plan_validation_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(backend: str) -> bool:
+        calls.append(str(backend))
+        return True
+
+    def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
+        return {"backend": str(backend), "lane_width": 32}
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+    monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+    _install_fake_session_execution_plan_runtime(monkeypatch, st)
+
+    def _reject_plan(_payload: object) -> dict[str, object]:
+        raise error_type("runtime execution-plan validation failed")
+
+    monkeypatch.setattr(
+        st,
+        "require_executable_runtime_execution_plan",
+        _reject_plan,
+        raising=False,
+    )
+
+    with pytest.raises(error_type, match="runtime execution-plan validation failed"):
+        st.SpiralSession()
+
+    assert calls == ["wgpu"]
 
 
 def test_session_auto_does_not_fall_back_to_cpu_under_strict_policy(
