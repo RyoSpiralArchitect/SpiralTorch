@@ -1,3 +1,5 @@
+import builtins
+import contextlib
 import importlib.util
 import pathlib
 import sys
@@ -9,21 +11,32 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture
-def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
-    module_names = (
-        "spiraltorch",
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    )
-    for name in module_names:
-        monkeypatch.delitem(sys.modules, name, raising=False)
+@contextlib.contextmanager
+def _stub_spiraltorch_context(*, allow_numpy: bool):
+    def tracked_module(name: str) -> bool:
+        return (
+            name == "spiraltorch"
+            or name.startswith("spiraltorch.")
+            or name == "spiraltorch_native"
+            or name == "spiral_rl"
+            or name.startswith("spiral_rl.")
+            or name == "rl"
+        )
+
+    saved_module_graph = {
+        name: module
+        for name, module in sys.modules.items()
+        if tracked_module(name)
+    }
+    torch_saved = sys.modules.get("torch")
+    for name in tuple(sys.modules):
+        if tracked_module(name):
+            sys.modules.pop(name, None)
 
     if "torch" not in sys.modules:
         torch_stub = types.ModuleType("torch")
         torch_stub.autograd = types.SimpleNamespace(Function=object)
-        monkeypatch.setitem(sys.modules, "torch", torch_stub)
+        sys.modules["torch"] = torch_stub
 
     stub_path = REPO_ROOT / "spiraltorch" / "__init__.py"
     source = stub_path.read_text()
@@ -37,26 +50,37 @@ def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
         str(REPO_ROOT / "bindings" / "st-py" / "spiraltorch"),
     ]
     module.__spec__ = importlib.util.spec_from_loader("spiraltorch", loader=None)
-    monkeypatch.setitem(sys.modules, "spiraltorch", module)
+    sys.modules["spiraltorch"] = module
     exec(compile(prefix, str(stub_path), "exec"), module.__dict__)
     if hasattr(module, "_install_stub_bindings"):
         real_find_spec = module.importlib.util.find_spec
+        real_import = builtins.__import__
 
         def stub_find_spec(name, *args, **kwargs):
             if name == "numpy":
                 return None
             return real_find_spec(name, *args, **kwargs)
 
-        module.importlib.util.find_spec = stub_find_spec
+        def stub_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "numpy":
+                raise ModuleNotFoundError("No module named 'numpy'", name="numpy")
+            if level == 1 and (name == "_blas" or "_blas" in fromlist):
+                raise ImportError("SpiralTorch BLAS stub disabled for this fixture")
+            return real_import(name, globals, locals, fromlist, level)
+
+        if not allow_numpy:
+            module.importlib.util.find_spec = stub_find_spec
+            builtins.__import__ = stub_import
         try:
             module._install_stub_bindings(
                 module, ModuleNotFoundError("spiraltorch", name="spiraltorch")
             )
         finally:
             module.importlib.util.find_spec = real_find_spec
+            builtins.__import__ = real_import
         compat = types.ModuleType("spiraltorch.compat")
         module.compat = compat
-        monkeypatch.setitem(sys.modules, "spiraltorch.compat", compat)
+        sys.modules["spiraltorch.compat"] = compat
 
         def stub_runtime_error(feature: str) -> RuntimeError:
             return RuntimeError(
@@ -78,8 +102,30 @@ def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
         module.SpiralSession = SpiralSession
         module.plan_topk = plan_topk
         module.planner = planner
-        monkeypatch.setitem(sys.modules, "spiraltorch.planner", planner)
-    return module
+        sys.modules["spiraltorch.planner"] = planner
+    try:
+        yield module
+    finally:
+        for name in tuple(sys.modules):
+            if tracked_module(name):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved_module_graph)
+        if torch_saved is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = torch_saved
+
+
+@pytest.fixture
+def stub_spiraltorch():
+    with _stub_spiraltorch_context(allow_numpy=False) as module:
+        yield module
+
+
+@pytest.fixture
+def stub_spiraltorch_with_numpy():
+    with _stub_spiraltorch_context(allow_numpy=True) as module:
+        yield module
 
 
 @pytest.fixture

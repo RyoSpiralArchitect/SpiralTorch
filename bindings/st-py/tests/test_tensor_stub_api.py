@@ -1,29 +1,8 @@
 from __future__ import annotations
 
 import math
-import pathlib
-import sys
-import types
 
 import pytest
-
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def spiraltorch_stub(monkeypatch: pytest.MonkeyPatch):
-    """Materialize the pure-Python SpiralTorch stub bindings for testing."""
-
-    stub_path = REPO_ROOT / "spiraltorch" / "__init__.py"
-    source = stub_path.read_text()
-    prefix, _, _ = source.partition("\n_load_native_package()")
-
-    module = types.ModuleType("spiraltorch_stub_test")
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    exec(compile(prefix, str(stub_path), "exec"), module.__dict__)
-    module._install_stub_bindings(module, ModuleNotFoundError("spiraltorch"))
-    return module
 
 
 def _reference_attention(

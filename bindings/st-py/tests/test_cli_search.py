@@ -103,7 +103,7 @@ def test_cli_surfaces_resource_errors(tmp_path: Path) -> None:
     config_path = write_config(tmp_path, config)
     checkpoint = tmp_path / "ckpt.json"
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError, match="max_concurrent must be positive"):
         cli_main([
             "search",
             "--config",

@@ -1,50 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
-import pathlib
-import sys
-import types
-
 import pytest
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
-    module_names = (
-        "spiraltorch",
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    )
-    for name in module_names:
-        monkeypatch.delitem(sys.modules, name, raising=False)
-
-    if "torch" not in sys.modules:
-        torch_stub = types.ModuleType("torch")
-        torch_stub.autograd = types.SimpleNamespace(Function=object)
-        monkeypatch.setitem(sys.modules, "torch", torch_stub)
-
-    spec = importlib.util.spec_from_file_location(
-        "spiraltorch", REPO_ROOT / "spiraltorch" / "__init__.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    monkeypatch.setitem(sys.modules, "spiraltorch", module)
-    spec.loader.exec_module(module)
-    if hasattr(module, "_install_stub_bindings"):
-        module._install_stub_bindings(module, ModuleNotFoundError("spiraltorch"))
-    return module
-
-
-def test_tensor_dlpack_roundtrip(stub_spiraltorch) -> None:
+def test_tensor_dlpack_roundtrip(stub_spiraltorch_with_numpy) -> None:
     np = pytest.importorskip("numpy")
     if not hasattr(np, "from_dlpack") or not hasattr(np.ndarray, "__dlpack__"):
         pytest.skip("NumPy lacks DLPack support")
 
-    Tensor = stub_spiraltorch.Tensor
+    Tensor = stub_spiraltorch_with_numpy.Tensor
     source = Tensor(shape=(2, 3), data=[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
 
     capsule = source.to_dlpack()
@@ -70,8 +34,8 @@ def test_tensor_dlpack_roundtrip(stub_spiraltorch) -> None:
     assert array_from_dlpack.tolist() == source.tolist()
 
 
-def test_tensor_dlpack_unavailable(stub_spiraltorch, monkeypatch: pytest.MonkeyPatch) -> None:
-    Tensor = stub_spiraltorch.Tensor
+def test_tensor_dlpack_unavailable(stub_spiraltorch_with_numpy) -> None:
+    Tensor = stub_spiraltorch_with_numpy.Tensor
     message = Tensor.DLPACK_UNAVAILABLE_MESSAGE
 
     original_cells: list[tuple[object, object]] = []
