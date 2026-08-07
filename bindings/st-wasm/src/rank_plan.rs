@@ -2,11 +2,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use st_core::backend::device_caps::{BackendKind, DeviceCapsOverrides};
 use st_core::backend::execution_plan::{
-    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
+    AcceleratorFallback, ExecutionConfig, RuntimeExecutionPlanPayload,
 };
 use st_core::backend::runtime_probe::resolve_backend;
 use st_core::backend::unison::RankKind;
-use st_core::ops::rank_entry::{try_plan_rank_with_config, try_plan_rank_with_policy};
+use st_core::ops::rank_entry::{try_plan_rank_with_config, try_plan_rank_with_planning_context};
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -105,10 +105,17 @@ fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
                     .to_owned(),
             );
         }
-        let policy = BackendPolicy::try_from_runtime_plan(&runtime_execution_plan)
+        let planning_context = runtime_execution_plan
+            .try_planning_context()
             .map_err(|error| error.to_string())?;
-        let plan = try_plan_rank_with_policy(kind, request.rows, request.cols, request.k, policy)
-            .map_err(|error| error.to_string())?;
+        let plan = try_plan_rank_with_planning_context(
+            kind,
+            request.rows,
+            request.cols,
+            request.k,
+            &planning_context,
+        )
+        .map_err(|error| error.to_string())?;
         let mut payload =
             serde_json::to_value(plan.snapshot()).expect("rank-plan snapshot is serializable");
         add_client_fields(

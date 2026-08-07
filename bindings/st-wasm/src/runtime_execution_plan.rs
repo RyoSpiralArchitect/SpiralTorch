@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v2"
+            "spiraltorch.runtime_execution_plan.v3"
         );
         assert_eq!(wasm_transport["execution_allowed"], true);
         assert_eq!(wasm_transport["all_components_native"], true);

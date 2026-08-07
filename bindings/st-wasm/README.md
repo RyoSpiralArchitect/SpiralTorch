@@ -552,7 +552,8 @@ The browser owns no fallback table or capability clamp. The returned
 `spiraltorch.rank_plan.v2` payload is the same audit snapshot available from Python via
 `RankPlan.contract()`, with only client provenance added by each binding. A browser
 worker can instead pass a previously committed `runtime_execution_plan`; Rust validates
-and materializes it, and the rank result carries the same parent commitment:
+its commitment and planning provenance, and the rank result carries the same parent
+commitment:
 
 ```ts
 const replayedRank = rankPlanObject({
@@ -567,7 +568,10 @@ console.log(replayedRank.runtime_execution_plan_output_sha256);
 ```
 
 `runtime_execution_plan` is mutually exclusive with backend, capability, and execution
-overrides. Browser-side code cannot reinterpret a blocked or locally unavailable plan.
+overrides. Browser-side code cannot reinterpret a blocked plan. Rank replay is
+planning-only, so it does not require Faer or WGPU kernels in the browser and does not
+claim that the browser can execute the committed tensor policy; a session or trainer
+must still materialize that policy against its local runtime before executing kernels.
 The parent plan also records Rust's component-resolution contract. Concrete workload
 preflight must carry capability evidence; a session-level `deferred` plan may postpone
 unobserved shape checks without claiming those components are native. Strict fallback,

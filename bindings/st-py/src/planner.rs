@@ -10,7 +10,7 @@ use st_core::backend::device_caps::{
     BackendKind, DeviceCaps, DeviceCapsError, DeviceCapsOverrides,
 };
 use st_core::backend::execution_plan::{
-    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
+    AcceleratorFallback, ExecutionConfig, RuntimeExecutionPlanPayload,
 };
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
@@ -32,7 +32,7 @@ use crate::json::json_to_py;
 #[cfg(feature = "kdsl")]
 use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
 use st_core::ops::rank_entry::{
-    try_plan_rank, try_plan_rank_with_config, try_plan_rank_with_policy, RankPlan,
+    try_plan_rank, try_plan_rank_with_config, try_plan_rank_with_planning_context, RankPlan,
 };
 
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
@@ -576,13 +576,14 @@ fn plan_impl(
                     "invalid runtime execution-plan payload: {error}"
                 ))
             })?;
-        let policy =
-            BackendPolicy::try_from_runtime_plan(&runtime_execution_plan).map_err(|error| {
+        let planning_context = runtime_execution_plan
+            .try_planning_context()
+            .map_err(|error| {
                 pyo3::exceptions::PyValueError::new_err(format!(
                     "runtime execution-plan binding failed: {error}"
                 ))
             })?;
-        let plan = try_plan_rank_with_policy(kind, rows, cols, k, policy)
+        let plan = try_plan_rank_with_planning_context(kind, rows, cols, k, &planning_context)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         return Ok(PyRankPlan::from_plan_with_metadata(
             plan,

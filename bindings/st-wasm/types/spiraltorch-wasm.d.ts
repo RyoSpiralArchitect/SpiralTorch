@@ -402,7 +402,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v2";
+        contract_version: "spiraltorch.runtime_execution_plan.v3";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;

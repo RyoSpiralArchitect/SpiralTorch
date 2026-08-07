@@ -22,7 +22,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v2";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v3";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -31,9 +31,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v2\0";
+    b"spiraltorch.runtime_execution_plan.request.v3\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v2\0";
+    b"spiraltorch.runtime_execution_plan.output.v3\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -473,6 +473,31 @@ pub struct RuntimeExecutionPlanPayload {
     pub committed: bool,
 }
 
+/// Validated execution-plan provenance for planning without a local tensor executor.
+///
+/// This context can derive audit plans, but it cannot authorize tensor execution.
+/// Executing clients must materialize a [`BackendPolicy`] instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeExecutionPlanningContext {
+    device_caps: DeviceCaps,
+    execution_config: ExecutionConfig,
+    runtime_execution_plan_output_sha256: String,
+}
+
+impl RuntimeExecutionPlanningContext {
+    pub const fn device_caps(&self) -> DeviceCaps {
+        self.device_caps
+    }
+
+    pub const fn execution_config(&self) -> ExecutionConfig {
+        self.execution_config
+    }
+
+    pub fn runtime_execution_plan_output_sha256(&self) -> &str {
+        &self.runtime_execution_plan_output_sha256
+    }
+}
+
 /// Tensor backend policy derived from device capabilities and captured runtime configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackendPolicy {
@@ -882,6 +907,28 @@ impl RuntimeExecutionPlanPayload {
             ));
         }
         self.validate()
+    }
+
+    /// Bind a committed plan to planning-only consumers.
+    ///
+    /// This validates the complete Rust-owned commitment and rejects blocked
+    /// plans, but deliberately does not inspect the receiving process's tensor
+    /// features or runtime. Use [`BackendPolicy::try_from_runtime_plan`] before
+    /// executing kernels locally.
+    pub fn try_planning_context(
+        &self,
+    ) -> Result<RuntimeExecutionPlanningContext, RuntimeExecutionPlanError> {
+        self.validate()?;
+        if !self.execution_allowed {
+            return Err(RuntimeExecutionPlanError::ExecutionBlocked {
+                blockers: self.blockers.clone(),
+            });
+        }
+        Ok(RuntimeExecutionPlanningContext {
+            device_caps: self.request.runtime_probe.caps(),
+            execution_config: self.request.execution_config,
+            runtime_execution_plan_output_sha256: self.output_sha256.clone(),
+        })
     }
 }
 
@@ -1833,6 +1880,69 @@ mod tests {
             policy.runtime_plan_output_sha256_hex().as_deref(),
             Some(payload.output_sha256.as_str())
         );
+    }
+
+    #[test]
+    fn planning_context_preserves_provenance_without_materializing_tensor_backends() {
+        let payload = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Cpu),
+            AcceleratorFallback::Allow,
+        ))
+        .expect("CPU execution plan evaluates");
+
+        let context = payload
+            .try_planning_context()
+            .expect("ready plan binds to planning provenance");
+
+        assert_eq!(context.device_caps(), payload.request.runtime_probe.caps());
+        assert_eq!(context.execution_config(), payload.request.execution_config);
+        assert_eq!(
+            context.runtime_execution_plan_output_sha256(),
+            payload.output_sha256
+        );
+        let rank = crate::ops::rank_entry::try_plan_rank_with_planning_context(
+            crate::backend::unison::RankKind::TopK,
+            4,
+            128,
+            8,
+            &context,
+        )
+        .expect("Rust rank planning accepts validated provenance");
+        assert_eq!(
+            rank.runtime_execution_plan_output_sha256(),
+            Some(payload.output_sha256.as_str())
+        );
+
+        let blocked = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Wgpu),
+            AcceleratorFallback::Forbid,
+        ))
+        .expect("blocked WGPU plan remains inspectable");
+        assert!(matches!(
+            blocked.try_planning_context(),
+            Err(RuntimeExecutionPlanError::ExecutionBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_v2_payload_is_rejected_at_the_contract_boundary() {
+        let mut payload = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Cpu),
+            AcceleratorFallback::Allow,
+        ))
+        .expect("current execution plan evaluates");
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v2".to_owned();
+
+        let error = payload
+            .validate()
+            .expect_err("v2 and v3 commitments must not share a digest domain");
+        assert!(matches!(
+            error,
+            RuntimeExecutionPlanError::InvalidPayload {
+                field: "contract_version",
+                ..
+            }
+        ));
     }
 
     #[test]

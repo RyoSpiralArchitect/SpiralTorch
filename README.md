@@ -628,7 +628,7 @@ print("effective backend:", getattr(session, "effective_backend", session.backen
 ```
 
 Runtime route readiness and workload-kernel readiness are deliberately separate.
-The v2 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
+The v3 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
 exact declared component shapes, bias bindings, device limits, and lazy pipelines,
 then commits that evidence for deterministic replay. Passing `component_workloads=`
 to `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer
@@ -692,6 +692,11 @@ assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
 Plans are validated and materialized in Rust. A tampered, blocked, or locally
 unavailable plan leaves the trainer unchanged, while a schedule created under a
 different device/config contract is rejected before the epoch starts.
+
+Rank planning is intentionally narrower than execution. Python and WASM can validate
+a committed plan and reuse its capabilities, configuration, and parent SHA without
+claiming that their local process has the corresponding tensor executor. Sessions and
+trainers still cross the stricter `BackendPolicy` boundary before running any kernel.
 
 Then pick the path that matches the job:
 

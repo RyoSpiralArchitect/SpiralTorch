@@ -390,7 +390,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v2"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v3"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
     assert plan["execution_client"] == "python"
@@ -441,6 +441,11 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     tampered["component_routes"][0]["selected_backend"] = "auto"
     with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
         st.validate_runtime_execution_plan_contract(tampered)
+
+    legacy = json.loads(json.dumps(plan))
+    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v2"
+    with pytest.raises(ValueError, match="contract_version"):
+        st.validate_runtime_execution_plan_contract(legacy)
 
 
 def test_runtime_execution_config_defaults_are_captured_by_rust(

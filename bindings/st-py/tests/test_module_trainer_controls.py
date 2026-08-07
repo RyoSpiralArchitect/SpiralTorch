@@ -127,6 +127,12 @@ def test_spiral_session_binds_rank_trainer_checkpoint_and_replay_to_one_plan(
     monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "9999")
 
     rank = session.plan_topk(4, 128, 8)
+    direct_rank = st.plan_topk(
+        4,
+        128,
+        8,
+        runtime_execution_plan=session.runtime_execution_plan,
+    )
     trainer = session.trainer()
     model = st.nn.Sequential()
     model.add(st.nn.Linear("session_execution_context", 2, 1))
@@ -134,6 +140,7 @@ def test_spiral_session_binds_rank_trainer_checkpoint_and_replay_to_one_plan(
     checkpoint = trainer.optimizer_checkpoint(model)
 
     assert rank.runtime_execution_plan_output_sha256 == commitment
+    assert direct_rank.runtime_execution_plan_output_sha256 == commitment
     assert rank.tensor_util_wgpu_min_values == 37
     assert rank.contract()["runtime_execution_plan_output_sha256"] == commitment
     assert trainer.runtime_execution_plan_output_sha256 == commitment

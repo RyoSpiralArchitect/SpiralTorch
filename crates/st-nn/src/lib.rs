@@ -17,7 +17,7 @@ pub(crate) fn test_global_state_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wgpu"))]
 pub(crate) fn test_backend_policy(
     caps: st_core::backend::device_caps::DeviceCaps,
     tensor_util_wgpu_min_values: usize,

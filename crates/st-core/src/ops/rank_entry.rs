@@ -10,7 +10,9 @@
 //!   let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
 //!   execute_rank(&plan, backend_impl, tensors);
 use crate::backend::device_caps::{DeviceCaps, DeviceCapsError};
-use crate::backend::execution_plan::{AcceleratorFallback, BackendPolicy, ExecutionConfig};
+use crate::backend::execution_plan::{
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanningContext,
+};
 use crate::backend::rank_directives::RankDirectiveError;
 #[cfg(feature = "kdsl")]
 use crate::backend::rank_directives::RankDirectives;
@@ -479,6 +481,30 @@ pub fn try_plan_rank_with_policy(
         policy.execution_config(),
     )?;
     plan.runtime_execution_plan_output_sha256 = policy.runtime_plan_output_sha256_hex();
+    Ok(plan)
+}
+
+/// Validates and plans rank-k from committed planning provenance.
+///
+/// Unlike [`try_plan_rank_with_policy`], this path does not claim that the
+/// receiving process can execute the committed tensor backends.
+pub fn try_plan_rank_with_planning_context(
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    context: &RuntimeExecutionPlanningContext,
+) -> Result<RankPlan, RankPlanError> {
+    let mut plan = try_plan_rank_with_config(
+        kind,
+        rows,
+        cols,
+        k,
+        context.device_caps(),
+        context.execution_config(),
+    )?;
+    plan.runtime_execution_plan_output_sha256 =
+        Some(context.runtime_execution_plan_output_sha256().to_owned());
     Ok(plan)
 }
 
