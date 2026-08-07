@@ -2713,6 +2713,9 @@ print("top-k:", rec.recommend_top_k(0, 3))
 Rust captures one executable runtime plan and owns its semantics. Rank planning,
 native trainers, schedules, checkpoints, and replay all inherit that exact plan;
 they do not independently re-read backend heuristics or environment overrides.
+The session plan uses Rust's `deferred` component resolution: unobserved dynamic
+shapes are not called native, but the committed policy is enforced when each
+operation runs. Standalone workload preflight remains `concrete` and fail-closed.
 
 ```python
 from spiraltorch import SpiralSession
@@ -2735,4 +2738,9 @@ assert replayed.runtime_execution_plan_output_sha256 == session.runtime_executio
 the receiving Rust build, and current backend readiness. A supplied plan cannot be
 combined with backend/capability/config overrides. For `backend="auto"`, Python
 tries Rust-materialized WGPU first and falls back to CPU only for an expected
-runtime or configuration rejection; unrelated Python plumbing errors propagate.
+runtime or configuration rejection when the captured policy permits fallback;
+unrelated Python plumbing errors propagate. Rust captures
+`SPIRALTORCH_STRICT_GPU` and `SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES` once.
+Under strict policy, `auto` does not retry CPU and small tensor utilities stay on
+WGPU rather than crossing the threshold route. Inspect the captured values with
+`spiraltorch.resolve_runtime_execution_config()`.

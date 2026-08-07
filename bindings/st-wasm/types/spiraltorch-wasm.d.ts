@@ -349,9 +349,12 @@ declare module "spiraltorch-wasm" {
         tensor_util_wgpu_min_values: number;
     };
 
+    export type RuntimeComponentResolution = "concrete" | "deferred";
+
     export type RuntimeExecutionPlanRequestInput = {
         runtime_probe: RuntimeDeviceProbe;
         execution_config: RuntimeExecutionConfig;
+        component_resolution?: RuntimeComponentResolution;
         component_workloads?: RuntimeComponentWorkload[];
         component_capabilities?: RuntimeComponentCapabilityEvidence[];
         tensor_util_values?: number | null;
@@ -361,6 +364,7 @@ declare module "spiraltorch-wasm" {
     export type RuntimeExecutionPlanRequest = {
         runtime_probe: RuntimeDeviceProbe;
         execution_config: RuntimeExecutionConfig;
+        component_resolution: RuntimeComponentResolution;
         component_workloads: RuntimeComponentWorkload[];
         component_capabilities: RuntimeComponentCapabilityEvidence[];
         tensor_util_values: number | null;

@@ -673,6 +673,7 @@ from .runtime_imports import (
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
     evaluate_runtime_execution_plan,
+    resolve_runtime_execution_config,
     require_executable_runtime_execution_plan,
     observe_runtime_execution_plan_capabilities,
     evaluate_runtime_device_route,
@@ -1269,6 +1270,7 @@ _EXTRAS = [
     "runtime_import_required_gate_fields","runtime_import_requirement_failures",
     "runtime_imports_from_args","runtime_imports_from_source",
     "evaluate_runtime_execution_plan",
+    "resolve_runtime_execution_config",
     "require_executable_runtime_execution_plan",
     "observe_runtime_execution_plan_capabilities",
     "evaluate_runtime_device_route",
@@ -6997,12 +6999,12 @@ class SpiralSession:
             self._install_runtime_execution_plan(executable, report)
             return
 
-        fallback = "allow" if accelerator_fallback is None else str(accelerator_fallback)
-        min_values = (
-            1024
-            if tensor_util_wgpu_min_values is None
-            else int(tensor_util_wgpu_min_values)
+        execution_config = resolve_runtime_execution_config(
+            accelerator_fallback=accelerator_fallback,
+            tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
         )
+        fallback = str(execution_config["accelerator_fallback"])
+        min_values = int(execution_config["tensor_util_wgpu_min_values"])
         if backend_label in {"", "auto"}:
             try:
                 executable, report = self._build_runtime_execution_plan(
@@ -7011,6 +7013,8 @@ class SpiralSession:
                     tensor_util_wgpu_min_values=min_values,
                 )
             except (RuntimeError, ValueError):
+                if fallback == "forbid":
+                    raise
                 executable, report = self._build_runtime_execution_plan(
                     "cpu",
                     accelerator_fallback=fallback,
@@ -7037,6 +7041,7 @@ class SpiralSession:
             report,
             accelerator_fallback=accelerator_fallback,
             tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+            component_resolution="deferred",
         )
         executable = require_executable_runtime_execution_plan(candidate)
         return executable, report

@@ -14,11 +14,11 @@ use std::cell::RefCell;
 pub use super::execution_plan::{
     evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
     AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeComponentCapabilityEvidence,
-    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentRoute,
-    RuntimeComponentRouteClass, RuntimeComponentWorkload, RuntimeExecutionComponent,
-    RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
-    RuntimeExecutionPlanStatus, RuntimeTensorBackend, RuntimeTensorBackendPolicy,
-    RuntimeTensorUtilOperation, TensorUtilRoute, TensorUtilRouteStatus,
+    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentResolution,
+    RuntimeComponentRoute, RuntimeComponentRouteClass, RuntimeComponentWorkload,
+    RuntimeExecutionComponent, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
+    RuntimeExecutionPlanRequest, RuntimeExecutionPlanStatus, RuntimeTensorBackend,
+    RuntimeTensorBackendPolicy, RuntimeTensorUtilOperation, TensorUtilRoute, TensorUtilRouteStatus,
 };
 
 thread_local! {
@@ -317,6 +317,7 @@ mod tests {
         let request = observe_runtime_execution_plan_capabilities(RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::default(),
+            component_resolution: Default::default(),
             component_workloads: vec![RuntimeComponentWorkload::DenseMatmul {
                 rows: 2,
                 inner: 3,

@@ -635,11 +635,15 @@ to `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer
 automatically; WASM exposes the same observer as JSON/Object transport instead of
 rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
 not cryptographic hardware attestation, and undeclared workloads remain unobserved.
+Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
+unobserved accelerator capabilities rather than guessing that a workload is ready.
 
 For ordinary training, let `SpiralSession` capture that contract once. Rank plans,
 trainers, schedules, optimizer checkpoints, and replayed sessions then inherit the
 same Rust-owned commitment instead of reading mutable environment configuration
-again:
+again. A session records `component_resolution="deferred"`: this does not label
+unobserved kernels native; it commits the Rust policy and leaves shape-specific
+capability checks to each operation:
 
 ```python
 import spiraltorch as st
@@ -662,7 +666,11 @@ The returned `runtime_execution_plan` is an isolated copy. Supplying a committed
 plan together with backend, capability, or execution-config overrides fails closed,
 and executable materialization rechecks the receiving Rust build and local runtime.
 `backend="auto"` is only orchestration order: Python asks Rust for an executable
-WGPU plan first and tries CPU only after an expected runtime/configuration rejection.
+WGPU plan first and tries CPU only when the captured fallback policy allows it.
+`SPIRALTORCH_STRICT_GPU=1` is captured by Rust and forbids that CPU retry; it also
+keeps small tensor-utility operations on WGPU instead of applying the performance
+threshold as an implicit fallback. `st.resolve_runtime_execution_config()` exposes
+the exact Rust-captured policy for inspection.
 
 When a plan is built separately, bind it before creating a training schedule so
 rank planning and every tensor kernel share that same context:

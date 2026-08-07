@@ -171,7 +171,8 @@ mod tests {
     use st_core::backend::device_caps::{BackendKind, DeviceCaps};
     use st_core::backend::execution_plan::{
         AcceleratorFallback, ExecutionConfig, RuntimeComponentCapabilityStatus,
-        RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeTensorUtilOperation,
+        RuntimeComponentResolution, RuntimeComponentWorkload, RuntimeExecutionComponent,
+        RuntimeTensorUtilOperation,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -194,6 +195,7 @@ mod tests {
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+            component_resolution: Default::default(),
             component_workloads: Vec::new(),
             component_capabilities: Vec::new(),
             tensor_util_values: Some(2048),
@@ -261,12 +263,30 @@ mod tests {
         assert_eq!(wasm_transport["all_components_native"], true);
         assert_eq!(wasm_transport["policy"]["dense_matmul"], "faer");
         assert_eq!(
+            wasm_transport["request"]["component_resolution"],
+            "concrete"
+        );
+        assert_eq!(
             wasm_transport["runtime_route"]["execution_client"],
             Value::Null
         );
         assert_eq!(wasm_transport["committed"], true);
         assert_eq!(wasm_transport["request_sha256"].as_str().unwrap().len(), 64);
         assert_eq!(wasm_transport["output_sha256"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn wasm_transports_deferred_component_resolution_through_rust() {
+        let mut request = cpu_request_unobserved();
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+
+        let payload = runtime_execution_plan_value(request).expect("deferred execution plan");
+
+        assert_eq!(payload["request"]["component_resolution"], "deferred");
+        assert_eq!(
+            payload["semantic_owner"],
+            "st-core::backend::execution_plan"
+        );
     }
 
     #[test]
@@ -319,6 +339,7 @@ mod tests {
         }
         for type_name in [
             "RuntimeDeviceProbe",
+            "RuntimeComponentResolution",
             "RuntimeExecutionPlanRequestInput",
             "RuntimeExecutionPlanRequest",
             "RuntimeExecutionPlan",

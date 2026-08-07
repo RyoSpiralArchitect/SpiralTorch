@@ -452,11 +452,18 @@ def evaluate_runtime_device_route(
 def evaluate_runtime_execution_plan(
     runtime_probe: Mapping[str, object],
     *,
-    accelerator_fallback: str = ...,
-    tensor_util_wgpu_min_values: int = ...,
+    accelerator_fallback: Literal["allow", "forbid"] | None = ...,
+    tensor_util_wgpu_min_values: int | None = ...,
+    component_resolution: Literal["concrete", "deferred"] = ...,
     tensor_util_values: int | None = ...,
     component_workloads: object = ...,
     required_native_components: object = ...,
+) -> Dict[str, object]: ...
+
+def resolve_runtime_execution_config(
+    *,
+    accelerator_fallback: Literal["allow", "forbid"] | None = ...,
+    tensor_util_wgpu_min_values: int | None = ...,
 ) -> Dict[str, object]: ...
 
 def require_executable_runtime_execution_plan(
@@ -5271,7 +5278,7 @@ class SpiralSession:
         seed: int | None = ...,
         *,
         runtime_execution_plan: Mapping[str, Any] | None = ...,
-        accelerator_fallback: str | None = ...,
+        accelerator_fallback: Literal["allow", "forbid"] | None = ...,
         tensor_util_wgpu_min_values: int | None = ...,
     ) -> None: ...
 

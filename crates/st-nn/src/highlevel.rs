@@ -1188,6 +1188,7 @@ mod tests {
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: config,
+            component_resolution: Default::default(),
             component_workloads: vec![
                 RuntimeComponentWorkload::DenseMatmul {
                     rows: 2,

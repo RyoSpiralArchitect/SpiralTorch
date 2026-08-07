@@ -24,7 +24,10 @@ def _install_fake_session_execution_plan_runtime(monkeypatch, st) -> None:
                     "tensor_util_wgpu_min_values": kwargs.get(
                         "tensor_util_wgpu_min_values", 1024
                     ),
-                }
+                },
+                "component_resolution": kwargs.get(
+                    "component_resolution", "concrete"
+                ),
             },
         }
 
@@ -405,6 +408,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert plan["policy"]["dense_matmul"] == "faer"
     assert plan["policy"]["softmax"] == "cpu"
     assert plan["request"]["runtime_probe"].get("execution_client") is None
+    assert plan["request"]["component_resolution"] == "concrete"
     assert plan["runtime_route"].get("execution_client") is None
     assert plan["request"]["required_native_components"] == [
         "dense_matmul",
@@ -437,6 +441,46 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     tampered["component_routes"][0]["selected_backend"] = "auto"
     with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
         st.validate_runtime_execution_plan_contract(tampered)
+
+
+def test_runtime_execution_config_defaults_are_captured_by_rust(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "1")
+    monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "37")
+
+    captured = st.resolve_runtime_execution_config()
+    overridden = st.resolve_runtime_execution_config(
+        accelerator_fallback="allow",
+        tensor_util_wgpu_min_values=91,
+    )
+
+    assert captured == {
+        "accelerator_fallback": "forbid",
+        "tensor_util_wgpu_min_values": 37,
+    }
+    assert overridden == {
+        "accelerator_fallback": "allow",
+        "tensor_util_wgpu_min_values": 91,
+    }
+    with pytest.raises(ValueError, match="invalid accelerator fallback override"):
+        st.resolve_runtime_execution_config(accelerator_fallback="sometimes")
+
+
+def test_session_captures_the_rust_environment_execution_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "1")
+    monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "37")
+
+    session = st.SpiralSession(backend="cpu")
+
+    assert session.runtime_execution_plan["request"]["execution_config"] == {
+        "accelerator_fallback": "forbid",
+        "tensor_util_wgpu_min_values": 37,
+    }
 
 
 def test_runtime_execution_plan_exposes_threshold_and_strict_surrogate_gates() -> None:
@@ -602,6 +646,30 @@ def test_init_backend_and_session_explicit_wgpu_backend_when_runtime_is_enabled(
     assert "lane_width" in session.device_preflight
 
 
+def test_strict_wgpu_session_commits_a_deferred_rust_plan() -> None:
+    st = require_native()
+    require_wgpu_runtime(st)
+
+    session = st.SpiralSession(
+        backend="wgpu",
+        accelerator_fallback="forbid",
+        tensor_util_wgpu_min_values=37,
+    )
+    plan = session.runtime_execution_plan
+
+    assert plan["request"]["execution_config"] == {
+        "accelerator_fallback": "forbid",
+        "tensor_util_wgpu_min_values": 37,
+    }
+    assert plan["request"]["component_resolution"] == "deferred"
+    assert plan["execution_allowed"] is True
+    assert plan["status"] == "ready"
+    assert plan["blockers"] == []
+    assert plan["all_components_native"] is False
+    assert plan["native_components"] == []
+    assert plan["conditional_components"] == []
+
+
 def test_session_auto_prefers_wgpu_backend_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -657,6 +725,25 @@ def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
     assert session.device == "cpu"
     assert session.device_preflight["backend"] == "cpu"
     assert calls == ["wgpu", "cpu"]
+
+
+def test_session_auto_does_not_fall_back_to_cpu_under_strict_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "1")
+
+    def _patched_init_backend(backend: str) -> bool:
+        calls.append(str(backend))
+        raise RuntimeError("wgpu unavailable")
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+
+    with pytest.raises(RuntimeError, match="wgpu unavailable"):
+        st.SpiralSession()
+
+    assert calls == ["wgpu"]
 
 
 def test_session_auto_does_not_hide_python_plumbing_errors(

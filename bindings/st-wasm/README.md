@@ -568,6 +568,11 @@ console.log(replayedRank.runtime_execution_plan_output_sha256);
 
 `runtime_execution_plan` is mutually exclusive with backend, capability, and execution
 overrides. Browser-side code cannot reinterpret a blocked or locally unavailable plan.
+The parent plan also records Rust's component-resolution contract. Concrete workload
+preflight must carry capability evidence; a session-level `deferred` plan may postpone
+unobserved shape checks without claiming those components are native. Strict fallback,
+runtime readiness, and tensor-utility threshold behavior remain Rust decisions in both
+cases, so JavaScript only transports the same contract used by Python.
 
 ## High-level Canvas utilities
 

@@ -153,6 +153,17 @@ pub enum RuntimeComponentRouteClass {
     CpuThresholdFallback,
 }
 
+/// Whether a plan must prove concrete component capabilities before materialization.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeComponentResolution {
+    /// Require workload-specific capability evidence for strict accelerator plans.
+    #[default]
+    Concrete,
+    /// Commit the backend policy now and enforce unobserved capabilities at operation time.
+    Deferred,
+}
+
 /// Stable policy choices before operation-specific threshold routing.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +217,9 @@ pub struct RuntimeComponentRoute {
 pub struct RuntimeExecutionPlanRequest {
     pub runtime_probe: RuntimeDeviceProbePayload,
     pub execution_config: ExecutionConfig,
+    /// Controls whether unobserved direct component routes may be resolved at operation time.
+    #[serde(default)]
+    pub component_resolution: RuntimeComponentResolution,
     /// Concrete operation shapes whose native accelerator kernels should be observed.
     #[serde(default)]
     pub component_workloads: Vec<RuntimeComponentWorkload>,
@@ -689,14 +703,17 @@ impl BackendPolicy {
     pub fn tensor_util_route(self, values: usize) -> TensorUtilRoute {
         let requested_backend = self.tensor_util_backend;
         let threshold = self.config.tensor_util_wgpu_min_values;
-        let (selected_backend, status) =
-            if matches!(requested_backend, TensorUtilBackend::GpuWgpu) && values < threshold {
-                (TensorUtilBackend::Cpu, TensorUtilRouteStatus::CpuThreshold)
-            } else if matches!(requested_backend, TensorUtilBackend::GpuWgpu) {
-                (requested_backend, TensorUtilRouteStatus::Wgpu)
-            } else {
-                (requested_backend, TensorUtilRouteStatus::Direct)
-            };
+        // The threshold is a performance hint, never permission to violate strict execution.
+        let (selected_backend, status) = if matches!(requested_backend, TensorUtilBackend::GpuWgpu)
+            && values < threshold
+            && self.config.accelerator_fallback.allows_fallback()
+        {
+            (TensorUtilBackend::Cpu, TensorUtilRouteStatus::CpuThreshold)
+        } else if matches!(requested_backend, TensorUtilBackend::GpuWgpu) {
+            (requested_backend, TensorUtilRouteStatus::Wgpu)
+        } else {
+            (requested_backend, TensorUtilRouteStatus::Direct)
+        };
 
         TensorUtilRoute {
             requested_backend,
@@ -1039,6 +1056,8 @@ fn evaluate_canonical_runtime_execution_plan(
                         && tensor_backend_is_native(route.selected_backend, effective_backend)
                         && !route.capability_state.is_ready()
                         && !route.capability_state.is_known_unready()
+                        && (request.component_resolution == RuntimeComponentResolution::Concrete
+                            || route.workload.is_some())
                 })
                 .map(|route| {
                     format!(
@@ -1147,17 +1166,32 @@ fn component_route(
         && requested_backend == RuntimeTensorBackend::Wgpu
     {
         let threshold = request.execution_config.tensor_util_wgpu_min_values;
+        // Strict execution keeps WGPU direct even when the workload is below or lacks a threshold.
         match request.tensor_util_values {
-            Some(values) if values < threshold => (
-                RuntimeTensorBackend::Cpu,
-                RuntimeComponentRouteClass::CpuThresholdFallback,
-                Some(values),
-                Some(threshold),
-            ),
+            Some(values)
+                if values < threshold
+                    && request
+                        .execution_config
+                        .accelerator_fallback
+                        .allows_fallback() =>
+            {
+                (
+                    RuntimeTensorBackend::Cpu,
+                    RuntimeComponentRouteClass::CpuThresholdFallback,
+                    Some(values),
+                    Some(threshold),
+                )
+            }
             Some(values) => (
                 RuntimeTensorBackend::Wgpu,
                 RuntimeComponentRouteClass::Direct,
                 Some(values),
+                Some(threshold),
+            ),
+            None if request.execution_config.accelerator_fallback.is_strict() => (
+                RuntimeTensorBackend::Wgpu,
+                RuntimeComponentRouteClass::Direct,
+                None,
                 Some(threshold),
             ),
             None => (
@@ -1556,6 +1590,7 @@ mod tests {
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(fallback, 1024),
+            component_resolution: RuntimeComponentResolution::Concrete,
             component_workloads: Vec::new(),
             component_capabilities: Vec::new(),
             tensor_util_values: Some(2048),
@@ -1676,7 +1711,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn tensor_utility_threshold_is_part_of_the_captured_plan() {
-        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
+        let config = ExecutionConfig::new(AcceleratorFallback::Allow, 1024);
         let policy =
             BackendPolicy::from_device_caps_with_config(DeviceCaps::wgpu(32, true, 256), config);
 
@@ -1691,8 +1726,23 @@ mod tests {
         assert_eq!(large.status, TensorUtilRouteStatus::Wgpu);
         assert_eq!(
             policy.execution_config().accelerator_fallback,
-            AcceleratorFallback::Forbid
+            AcceleratorFallback::Allow
         );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn strict_tensor_utility_route_does_not_fall_back_below_the_threshold() {
+        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
+        let policy =
+            BackendPolicy::from_device_caps_with_config(DeviceCaps::wgpu(32, true, 256), config);
+
+        let small = policy.tensor_util_route(8);
+
+        assert_eq!(small.requested_backend, TensorUtilBackend::GpuWgpu);
+        assert_eq!(small.selected_backend, TensorUtilBackend::GpuWgpu);
+        assert_eq!(small.status, TensorUtilRouteStatus::Wgpu);
+        assert_eq!(small.threshold, 1024);
     }
 
     #[cfg(not(feature = "wgpu"))]
@@ -2070,16 +2120,25 @@ mod tests {
     }
 
     #[test]
-    fn strict_execution_blocks_threshold_fallback_without_an_extra_native_gate() {
+    fn strict_execution_never_commits_a_tensor_util_threshold_fallback() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
         request.tensor_util_values = Some(8);
         let payload = evaluate_runtime_execution_plan(request).expect("plan evaluates");
 
+        let tensor_util = payload
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor util route");
+
         assert!(!payload.execution_allowed);
+        assert_eq!(tensor_util.selected_backend, RuntimeTensorBackend::Wgpu);
+        assert_eq!(tensor_util.route, RuntimeComponentRouteClass::Direct);
+        assert!(!tensor_util.fallback);
         assert!(payload
             .blockers
-            .contains(&"component_fallback_forbidden:tensor_util:wgpu->cpu".to_owned()));
+            .contains(&"component_capability_unready:tensor_util:unobserved".to_owned()));
     }
 
     #[test]
@@ -2116,7 +2175,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_wgpu_policy_blocks_an_unresolved_tensor_util_route() {
+    fn strict_wgpu_concrete_plan_blocks_unobserved_tensor_util_capability() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
         request.tensor_util_values = None;
@@ -2125,7 +2184,40 @@ mod tests {
         assert!(!blocked.execution_allowed);
         assert!(blocked
             .blockers
-            .contains(&"conditional_component_unresolved:tensor_util".to_owned()));
+            .contains(&"component_capability_unready:tensor_util:unobserved".to_owned()));
+        assert!(!blocked
+            .blockers
+            .iter()
+            .any(|blocker| blocker.starts_with("conditional_component_unresolved:")));
+    }
+
+    #[test]
+    fn strict_wgpu_deferred_plan_only_retains_runtime_blockers() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
+        request.tensor_util_values = None;
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+
+        let deferred = evaluate_runtime_execution_plan(request).expect("plan evaluates");
+
+        assert!(!deferred.all_components_native);
+        assert!(deferred.native_components.is_empty());
+        assert!(deferred.component_routes.iter().all(|route| {
+            route.route == RuntimeComponentRouteClass::Direct
+                && route.capability_state == RuntimeComponentCapabilityState::Unobserved
+        }));
+        assert!(deferred.blockers.iter().all(|blocker| {
+            blocker.starts_with("runtime_route:") || blocker.starts_with("runtime_route_not_ready:")
+        }));
+        if deferred.runtime_ready {
+            assert!(deferred.execution_allowed);
+            assert_eq!(deferred.status, RuntimeExecutionPlanStatus::Ready);
+            assert!(deferred.blockers.is_empty());
+        } else {
+            assert!(!deferred.execution_allowed);
+            assert_eq!(deferred.status, RuntimeExecutionPlanStatus::Blocked);
+            assert!(!deferred.blockers.is_empty());
+        }
     }
 
     #[test]

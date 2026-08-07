@@ -863,11 +863,33 @@ def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, 
     return dict(contract)
 
 
+def resolve_runtime_execution_config(
+    *,
+    accelerator_fallback: str | None = None,
+    tensor_util_wgpu_min_values: int | None = None,
+) -> dict[str, object]:
+    """Capture process defaults and explicit overrides through the Rust owner."""
+
+    resolve = _native_runtime_execution_plan_function(
+        "_runtime_execution_config_resolve"
+    )
+    payload = resolve(
+        accelerator_fallback=accelerator_fallback,
+        tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+    )
+    if not isinstance(payload, Mapping):
+        raise RuntimeError(
+            "runtime execution-config resolver returned a non-mapping payload"
+        )
+    return dict(payload)
+
+
 def evaluate_runtime_execution_plan(
     runtime_probe: Mapping[str, object],
     *,
-    accelerator_fallback: str = "allow",
-    tensor_util_wgpu_min_values: int = 1024,
+    accelerator_fallback: str | None = None,
+    tensor_util_wgpu_min_values: int | None = None,
+    component_resolution: str = "concrete",
     tensor_util_values: int | None = None,
     component_workloads: object = None,
     required_native_components: object = None,
@@ -896,12 +918,14 @@ def evaluate_runtime_execution_plan(
             raise TypeError(
                 "required_native_components must be an iterable"
             ) from exc
+    execution_config = resolve_runtime_execution_config(
+        accelerator_fallback=accelerator_fallback,
+        tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+    )
     request: dict[str, object] = {
         "runtime_probe": _runtime_probe_contract_payload(runtime_probe),
-        "execution_config": {
-            "accelerator_fallback": accelerator_fallback,
-            "tensor_util_wgpu_min_values": tensor_util_wgpu_min_values,
-        },
+        "execution_config": execution_config,
+        "component_resolution": component_resolution,
         "component_workloads": workloads,
         "component_capabilities": [],
         "tensor_util_values": tensor_util_values,

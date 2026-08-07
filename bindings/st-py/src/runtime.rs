@@ -3,8 +3,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::backend::execution_plan::{
-    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities, BackendPolicy,
-    RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
+    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
+    RuntimeExecutionPlanRequest,
 };
 use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
 use st_core::backend::runtime_route::{
@@ -194,6 +195,29 @@ fn _runtime_execution_plan_observe_capabilities(
 }
 
 #[pyfunction]
+#[pyo3(signature = (*, accelerator_fallback=None, tensor_util_wgpu_min_values=None))]
+fn _runtime_execution_config_resolve(
+    py: Python<'_>,
+    accelerator_fallback: Option<String>,
+    tensor_util_wgpu_min_values: Option<usize>,
+) -> PyResult<PyObject> {
+    let mut config = ExecutionConfig::from_env();
+    if let Some(value) = accelerator_fallback {
+        config.accelerator_fallback =
+            serde_json::from_value::<AcceleratorFallback>(serde_json::Value::String(value))
+                .map_err(|error| json_error("invalid accelerator fallback override", error))?;
+    }
+    if let Some(value) = tensor_util_wgpu_min_values {
+        config.tensor_util_wgpu_min_values = value;
+    }
+    payload_to_py(
+        py,
+        config,
+        "runtime execution configuration encoding failed",
+    )
+}
+
+#[pyfunction]
 fn _runtime_execution_plan_evaluate(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
@@ -277,6 +301,7 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
         _runtime_device_route_validate_against,
         parent
     )?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_execution_config_resolve, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_execution_plan_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_execution_plan_observe_capabilities,

@@ -203,6 +203,7 @@ mod tests {
         evaluate_runtime_execution_plan(RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 37),
+            component_resolution: Default::default(),
             component_workloads: Vec::new(),
             component_capabilities: Vec::new(),
             tensor_util_values: None,

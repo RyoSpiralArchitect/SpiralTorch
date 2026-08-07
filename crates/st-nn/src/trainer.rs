@@ -9479,6 +9479,7 @@ mod tests {
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: config,
+            component_resolution: Default::default(),
             component_workloads: vec![
                 RuntimeComponentWorkload::DenseMatmul {
                     rows: 2,
@@ -14842,7 +14843,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_gpu_trainer_rejects_cpu_tensor_backend_fallback() {
+    fn strict_gpu_trainer_keeps_small_tensor_routes_on_wgpu() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
         let mut trainer =
@@ -14856,23 +14857,18 @@ mod tests {
             Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
         )];
         let mut loss = MeanSquaredError::new();
-        let err = trainer
+        let stats = trainer
             .train_epoch(&mut model, &mut loss, dataset, &schedule)
-            .expect_err("strict GPU trainer should reject non-GPU tensor backend");
+            .expect("strict GPU trainer should keep thresholded operations on WGPU");
 
-        match err {
-            TensorError::BackendFailure { backend, message } => {
-                assert_eq!(backend, "wgpu");
-                assert!(
-                    message.contains("SPIRALTORCH_STRICT_GPU")
-                        || message.contains("wgpu")
-                        || message.contains("WGPU"),
-                    "unexpected strict GPU message: {message}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-        assert_eq!(*model.weight().value(), before);
+        assert_eq!(stats.batches, 1);
+        assert_eq!(stats.tensor_backend.fallbacks, 0);
+        assert_eq!(stats.tensor_backend.backend_cpu, 0);
+        assert_eq!(
+            stats.tensor_backend.backend_wgpu,
+            stats.tensor_backend.ops_total
+        );
+        assert_ne!(*model.weight().value(), before);
     }
 
     #[test]
