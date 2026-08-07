@@ -2792,7 +2792,7 @@ impl Module for ZSpaceCoherenceSequencer {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     use crate::language::{MaxwellDesireBridge, SemanticBridge, SparseKernel};
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
@@ -2887,16 +2887,6 @@ mod tests {
         assert_eq!(projection.partial["coherence_discarded"], 1.0);
     }
 
-    #[cfg(feature = "wgpu")]
-    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        if let Some(value) = previous {
-            std::env::set_var(KEY, value);
-        } else {
-            std::env::remove_var(KEY);
-        }
-    }
-
     #[test]
     fn semantic_window_emits_backend_meta() {
         let _lock = observer_lock();
@@ -2948,9 +2938,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -2960,7 +2947,7 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
         let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
         let aggregated = Tensor::from_vec(
@@ -2974,8 +2961,6 @@ mod tests {
             seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 3)
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert!(!window.is_empty());
         let events = events.lock().unwrap();
         let meta = events
@@ -3140,9 +3125,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -3152,14 +3134,12 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let fused = {
             let _guard = push_backend_policy(policy);
             ZSpaceCoherenceSequencer::fuse_distributions(&[0.7, 0.3], &[0.2, 0.8])
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert_eq!(fused.len(), 2);
         let events = events.lock().unwrap();
         let meta = events

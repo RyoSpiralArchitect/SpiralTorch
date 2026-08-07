@@ -428,7 +428,7 @@ mod tests {
     use super::super::temperature::TemperatureController;
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
@@ -438,16 +438,6 @@ mod tests {
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
-    }
-
-    #[cfg(feature = "wgpu")]
-    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        if let Some(value) = previous {
-            std::env::set_var(KEY, value);
-        } else {
-            std::env::remove_var(KEY);
-        }
     }
 
     fn build_geometry() -> SymbolGeometry {
@@ -561,9 +551,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -573,15 +560,13 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let mut vector = vec![0.25, 0.75, -0.5];
         {
             let _guard = push_backend_policy(policy);
             DesireAutomation::normalise(&mut vector);
         }
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert!((vector.iter().sum::<f32>() - 1.0).abs() < 1e-6);
         assert_eq!(vector[2], 0.0);
         let events = events.lock().unwrap();

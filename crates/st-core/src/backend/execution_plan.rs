@@ -6,7 +6,9 @@ pub use super::execution_capability::{
     RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityState,
     RuntimeComponentCapabilityStatus, RuntimeComponentWorkload, RuntimeTensorUtilOperation,
 };
-use super::runtime_probe::{RuntimeDeviceProbeError, RuntimeDeviceProbePayload};
+use super::runtime_probe::{
+    BackendRuntimeState, RuntimeDeviceProbeError, RuntimeDeviceProbePayload,
+};
 use super::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
     RuntimeDeviceRouteRequest,
@@ -20,7 +22,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v2";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v3";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -29,9 +31,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v2\0";
+    b"spiraltorch.runtime_execution_plan.request.v3\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v2\0";
+    b"spiraltorch.runtime_execution_plan.output.v3\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -62,6 +64,14 @@ pub enum RuntimeExecutionPlanError {
         component: &'static str,
         planned: String,
         local: String,
+    },
+    #[error(
+        "local runtime for committed backend '{backend}' is not ready ({status}): {diagnostic}"
+    )]
+    LocalRuntimeUnavailable {
+        backend: String,
+        status: String,
+        diagnostic: String,
     },
     #[error(
         "local tensor backend for component '{component}' emitted unsupported execution id '{backend}'"
@@ -143,6 +153,17 @@ pub enum RuntimeComponentRouteClass {
     CpuThresholdFallback,
 }
 
+/// Whether a plan must prove concrete component capabilities before materialization.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeComponentResolution {
+    /// Require workload-specific capability evidence for strict accelerator plans.
+    #[default]
+    Concrete,
+    /// Commit the backend policy now and enforce unobserved capabilities at operation time.
+    Deferred,
+}
+
 /// Stable policy choices before operation-specific threshold routing.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -196,6 +217,9 @@ pub struct RuntimeComponentRoute {
 pub struct RuntimeExecutionPlanRequest {
     pub runtime_probe: RuntimeDeviceProbePayload,
     pub execution_config: ExecutionConfig,
+    /// Controls whether unobserved direct component routes may be resolved at operation time.
+    #[serde(default)]
+    pub component_resolution: RuntimeComponentResolution,
     /// Concrete operation shapes whose native accelerator kernels should be observed.
     #[serde(default)]
     pub component_workloads: Vec<RuntimeComponentWorkload>,
@@ -449,6 +473,31 @@ pub struct RuntimeExecutionPlanPayload {
     pub committed: bool,
 }
 
+/// Validated execution-plan provenance for planning without a local tensor executor.
+///
+/// This context can derive audit plans, but it cannot authorize tensor execution.
+/// Executing clients must materialize a [`BackendPolicy`] instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeExecutionPlanningContext {
+    device_caps: DeviceCaps,
+    execution_config: ExecutionConfig,
+    runtime_execution_plan_output_sha256: String,
+}
+
+impl RuntimeExecutionPlanningContext {
+    pub const fn device_caps(&self) -> DeviceCaps {
+        self.device_caps
+    }
+
+    pub const fn execution_config(&self) -> ExecutionConfig {
+        self.execution_config
+    }
+
+    pub fn runtime_execution_plan_output_sha256(&self) -> &str {
+        &self.runtime_execution_plan_output_sha256
+    }
+}
+
 /// Tensor backend policy derived from device capabilities and captured runtime configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackendPolicy {
@@ -540,9 +589,9 @@ impl BackendPolicy {
 
     /// Materializes an executable local policy from a validated committed plan.
     ///
-    /// Cross-build replay remains valid even when the receiving build lacks a
-    /// planned backend. Conversion is the explicit boundary that rejects such
-    /// a local feature mismatch instead of silently changing the plan.
+    /// Artifact validation remains deterministic across builds. Conversion is
+    /// the explicit boundary that rejects a local feature or runtime mismatch
+    /// instead of silently changing the committed plan.
     pub fn try_from_runtime_plan(
         plan: &RuntimeExecutionPlanPayload,
     ) -> Result<Self, RuntimeExecutionPlanError> {
@@ -552,6 +601,7 @@ impl BackendPolicy {
                 blockers: plan.blockers.clone(),
             });
         }
+        ensure_local_runtime_ready(&BackendRuntimeState::observe(plan.effective_backend))?;
         let mut policy = Self::from_runtime_tensor_policy(
             plan.request.runtime_probe.caps(),
             plan.request.execution_config,
@@ -678,14 +728,17 @@ impl BackendPolicy {
     pub fn tensor_util_route(self, values: usize) -> TensorUtilRoute {
         let requested_backend = self.tensor_util_backend;
         let threshold = self.config.tensor_util_wgpu_min_values;
-        let (selected_backend, status) =
-            if matches!(requested_backend, TensorUtilBackend::GpuWgpu) && values < threshold {
-                (TensorUtilBackend::Cpu, TensorUtilRouteStatus::CpuThreshold)
-            } else if matches!(requested_backend, TensorUtilBackend::GpuWgpu) {
-                (requested_backend, TensorUtilRouteStatus::Wgpu)
-            } else {
-                (requested_backend, TensorUtilRouteStatus::Direct)
-            };
+        // The threshold is a performance hint, never permission to violate strict execution.
+        let (selected_backend, status) = if matches!(requested_backend, TensorUtilBackend::GpuWgpu)
+            && values < threshold
+            && self.config.accelerator_fallback.allows_fallback()
+        {
+            (TensorUtilBackend::Cpu, TensorUtilRouteStatus::CpuThreshold)
+        } else if matches!(requested_backend, TensorUtilBackend::GpuWgpu) {
+            (requested_backend, TensorUtilRouteStatus::Wgpu)
+        } else {
+            (requested_backend, TensorUtilRouteStatus::Direct)
+        };
 
         TensorUtilRoute {
             requested_backend,
@@ -695,6 +748,22 @@ impl BackendPolicy {
             status,
         }
     }
+}
+
+fn ensure_local_runtime_ready(
+    state: &BackendRuntimeState,
+) -> Result<(), RuntimeExecutionPlanError> {
+    if state.runtime_ready {
+        return Ok(());
+    }
+    Err(RuntimeExecutionPlanError::LocalRuntimeUnavailable {
+        backend: state.backend.as_str().to_owned(),
+        status: state.runtime_status.as_str().to_owned(),
+        diagnostic: state
+            .runtime_error
+            .clone()
+            .unwrap_or_else(|| state.recommendation.clone()),
+    })
 }
 
 /// Result of applying the typed utility-kernel threshold to one tensor operation.
@@ -838,6 +907,28 @@ impl RuntimeExecutionPlanPayload {
             ));
         }
         self.validate()
+    }
+
+    /// Bind a committed plan to planning-only consumers.
+    ///
+    /// This validates the complete Rust-owned commitment and rejects blocked
+    /// plans, but deliberately does not inspect the receiving process's tensor
+    /// features or runtime. Use [`BackendPolicy::try_from_runtime_plan`] before
+    /// executing kernels locally.
+    pub fn try_planning_context(
+        &self,
+    ) -> Result<RuntimeExecutionPlanningContext, RuntimeExecutionPlanError> {
+        self.validate()?;
+        if !self.execution_allowed {
+            return Err(RuntimeExecutionPlanError::ExecutionBlocked {
+                blockers: self.blockers.clone(),
+            });
+        }
+        Ok(RuntimeExecutionPlanningContext {
+            device_caps: self.request.runtime_probe.caps(),
+            execution_config: self.request.execution_config,
+            runtime_execution_plan_output_sha256: self.output_sha256.clone(),
+        })
     }
 }
 
@@ -1012,6 +1103,8 @@ fn evaluate_canonical_runtime_execution_plan(
                         && tensor_backend_is_native(route.selected_backend, effective_backend)
                         && !route.capability_state.is_ready()
                         && !route.capability_state.is_known_unready()
+                        && (request.component_resolution == RuntimeComponentResolution::Concrete
+                            || route.workload.is_some())
                 })
                 .map(|route| {
                     format!(
@@ -1120,17 +1213,32 @@ fn component_route(
         && requested_backend == RuntimeTensorBackend::Wgpu
     {
         let threshold = request.execution_config.tensor_util_wgpu_min_values;
+        // Strict execution keeps WGPU direct even when the workload is below or lacks a threshold.
         match request.tensor_util_values {
-            Some(values) if values < threshold => (
-                RuntimeTensorBackend::Cpu,
-                RuntimeComponentRouteClass::CpuThresholdFallback,
-                Some(values),
-                Some(threshold),
-            ),
+            Some(values)
+                if values < threshold
+                    && request
+                        .execution_config
+                        .accelerator_fallback
+                        .allows_fallback() =>
+            {
+                (
+                    RuntimeTensorBackend::Cpu,
+                    RuntimeComponentRouteClass::CpuThresholdFallback,
+                    Some(values),
+                    Some(threshold),
+                )
+            }
             Some(values) => (
                 RuntimeTensorBackend::Wgpu,
                 RuntimeComponentRouteClass::Direct,
                 Some(values),
+                Some(threshold),
+            ),
+            None if request.execution_config.accelerator_fallback.is_strict() => (
+                RuntimeTensorBackend::Wgpu,
+                RuntimeComponentRouteClass::Direct,
+                None,
                 Some(threshold),
             ),
             None => (
@@ -1497,7 +1605,8 @@ fn wgpu_tensor_util_backend() -> TensorUtilBackend {
 mod tests {
     use super::*;
     use crate::backend::runtime_probe::{
-        evaluate_runtime_device_probe, resolve_backend, RuntimeDeviceProbeRequest,
+        evaluate_runtime_device_probe, resolve_backend, BackendRuntimeStatus,
+        RuntimeDeviceProbeRequest,
     };
     use spiral_config::execution::{AcceleratorFallback, ExecutionConfig};
 
@@ -1528,6 +1637,7 @@ mod tests {
         RuntimeExecutionPlanRequest {
             runtime_probe: probe,
             execution_config: ExecutionConfig::new(fallback, 1024),
+            component_resolution: RuntimeComponentResolution::Concrete,
             component_workloads: Vec::new(),
             component_capabilities: Vec::new(),
             tensor_util_values: Some(2048),
@@ -1603,6 +1713,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn executable_plan_materialization_rejects_an_unavailable_local_runtime() {
+        let mut unavailable = BackendRuntimeState::observe(BackendKind::Cpu);
+        unavailable.backend = BackendKind::Wgpu;
+        unavailable.runtime_ready = false;
+        unavailable.runtime_status = BackendRuntimeStatus::InitializationFailed;
+        unavailable.runtime_error = Some("test adapter is unavailable".to_owned());
+
+        assert_eq!(
+            ensure_local_runtime_ready(&unavailable),
+            Err(RuntimeExecutionPlanError::LocalRuntimeUnavailable {
+                backend: "wgpu".to_owned(),
+                status: "initialization_failed".to_owned(),
+                diagnostic: "test adapter is unavailable".to_owned(),
+            })
+        );
+    }
+
     #[cfg(all(feature = "hip", not(feature = "hip-real")))]
     #[test]
     fn hip_stub_policy_does_not_claim_gpu_matmul() {
@@ -1630,7 +1758,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn tensor_utility_threshold_is_part_of_the_captured_plan() {
-        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
+        let config = ExecutionConfig::new(AcceleratorFallback::Allow, 1024);
         let policy =
             BackendPolicy::from_device_caps_with_config(DeviceCaps::wgpu(32, true, 256), config);
 
@@ -1645,8 +1773,23 @@ mod tests {
         assert_eq!(large.status, TensorUtilRouteStatus::Wgpu);
         assert_eq!(
             policy.execution_config().accelerator_fallback,
-            AcceleratorFallback::Forbid
+            AcceleratorFallback::Allow
         );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn strict_tensor_utility_route_does_not_fall_back_below_the_threshold() {
+        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
+        let policy =
+            BackendPolicy::from_device_caps_with_config(DeviceCaps::wgpu(32, true, 256), config);
+
+        let small = policy.tensor_util_route(8);
+
+        assert_eq!(small.requested_backend, TensorUtilBackend::GpuWgpu);
+        assert_eq!(small.selected_backend, TensorUtilBackend::GpuWgpu);
+        assert_eq!(small.status, TensorUtilRouteStatus::Wgpu);
+        assert_eq!(small.threshold, 1024);
     }
 
     #[cfg(not(feature = "wgpu"))]
@@ -1737,6 +1880,69 @@ mod tests {
             policy.runtime_plan_output_sha256_hex().as_deref(),
             Some(payload.output_sha256.as_str())
         );
+    }
+
+    #[test]
+    fn planning_context_preserves_provenance_without_materializing_tensor_backends() {
+        let payload = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Cpu),
+            AcceleratorFallback::Allow,
+        ))
+        .expect("CPU execution plan evaluates");
+
+        let context = payload
+            .try_planning_context()
+            .expect("ready plan binds to planning provenance");
+
+        assert_eq!(context.device_caps(), payload.request.runtime_probe.caps());
+        assert_eq!(context.execution_config(), payload.request.execution_config);
+        assert_eq!(
+            context.runtime_execution_plan_output_sha256(),
+            payload.output_sha256
+        );
+        let rank = crate::ops::rank_entry::try_plan_rank_with_planning_context(
+            crate::backend::unison::RankKind::TopK,
+            4,
+            128,
+            8,
+            &context,
+        )
+        .expect("Rust rank planning accepts validated provenance");
+        assert_eq!(
+            rank.runtime_execution_plan_output_sha256(),
+            Some(payload.output_sha256.as_str())
+        );
+
+        let blocked = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Wgpu),
+            AcceleratorFallback::Forbid,
+        ))
+        .expect("blocked WGPU plan remains inspectable");
+        assert!(matches!(
+            blocked.try_planning_context(),
+            Err(RuntimeExecutionPlanError::ExecutionBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_v2_payload_is_rejected_at_the_contract_boundary() {
+        let mut payload = evaluate_runtime_execution_plan(execution_request(
+            probe_for(BackendKind::Cpu),
+            AcceleratorFallback::Allow,
+        ))
+        .expect("current execution plan evaluates");
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v2".to_owned();
+
+        let error = payload
+            .validate()
+            .expect_err("v2 and v3 commitments must not share a digest domain");
+        assert!(matches!(
+            error,
+            RuntimeExecutionPlanError::InvalidPayload {
+                field: "contract_version",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2024,16 +2230,25 @@ mod tests {
     }
 
     #[test]
-    fn strict_execution_blocks_threshold_fallback_without_an_extra_native_gate() {
+    fn strict_execution_never_commits_a_tensor_util_threshold_fallback() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
         request.tensor_util_values = Some(8);
         let payload = evaluate_runtime_execution_plan(request).expect("plan evaluates");
 
+        let tensor_util = payload
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor util route");
+
         assert!(!payload.execution_allowed);
+        assert_eq!(tensor_util.selected_backend, RuntimeTensorBackend::Wgpu);
+        assert_eq!(tensor_util.route, RuntimeComponentRouteClass::Direct);
+        assert!(!tensor_util.fallback);
         assert!(payload
             .blockers
-            .contains(&"component_fallback_forbidden:tensor_util:wgpu->cpu".to_owned()));
+            .contains(&"component_capability_unready:tensor_util:unobserved".to_owned()));
     }
 
     #[test]
@@ -2070,7 +2285,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_wgpu_policy_blocks_an_unresolved_tensor_util_route() {
+    fn strict_wgpu_concrete_plan_blocks_unobserved_tensor_util_capability() {
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
         request.tensor_util_values = None;
@@ -2079,7 +2294,40 @@ mod tests {
         assert!(!blocked.execution_allowed);
         assert!(blocked
             .blockers
-            .contains(&"conditional_component_unresolved:tensor_util".to_owned()));
+            .contains(&"component_capability_unready:tensor_util:unobserved".to_owned()));
+        assert!(!blocked
+            .blockers
+            .iter()
+            .any(|blocker| blocker.starts_with("conditional_component_unresolved:")));
+    }
+
+    #[test]
+    fn strict_wgpu_deferred_plan_only_retains_runtime_blockers() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Forbid);
+        request.tensor_util_values = None;
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+
+        let deferred = evaluate_runtime_execution_plan(request).expect("plan evaluates");
+
+        assert!(!deferred.all_components_native);
+        assert!(deferred.native_components.is_empty());
+        assert!(deferred.component_routes.iter().all(|route| {
+            route.route == RuntimeComponentRouteClass::Direct
+                && route.capability_state == RuntimeComponentCapabilityState::Unobserved
+        }));
+        assert!(deferred.blockers.iter().all(|blocker| {
+            blocker.starts_with("runtime_route:") || blocker.starts_with("runtime_route_not_ready:")
+        }));
+        if deferred.runtime_ready {
+            assert!(deferred.execution_allowed);
+            assert_eq!(deferred.status, RuntimeExecutionPlanStatus::Ready);
+            assert!(deferred.blockers.is_empty());
+        } else {
+            assert!(!deferred.execution_allowed);
+            assert_eq!(deferred.status, RuntimeExecutionPlanStatus::Blocked);
+            assert!(!deferred.blockers.is_empty());
+        }
     }
 
     #[test]

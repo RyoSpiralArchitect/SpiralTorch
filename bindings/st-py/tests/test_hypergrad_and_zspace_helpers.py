@@ -21,7 +21,7 @@ def test_hypergrad_helper_accepts_tuple_shape() -> None:
     _require_native()
     tape = st.hypergrad((1, 4))
     assert tape.shape() == (1, 4)
-    assert tape.curvature() == -1.0
+    assert tape.curvature() == pytest.approx(-1.0)
 
 
 def test_hypergrad_helper_accepts_tensor_shape() -> None:
@@ -29,7 +29,7 @@ def test_hypergrad_helper_accepts_tensor_shape() -> None:
     tensor = st.Tensor((2, 3))
     tape = st.hypergrad(tensor, learning_rate=0.01)
     assert tape.shape() == tensor.shape()
-    assert tape.learning_rate() == 0.01
+    assert tape.learning_rate() == pytest.approx(0.01)
 
 
 def test_hypergrad_scale_gradient_tracks_summary() -> None:
@@ -77,7 +77,7 @@ def test_hypergrad_helper_accepts_mapping_topos() -> None:
         },
     )
     guard = tape.topos()
-    assert guard.curvature() == -0.9
+    assert guard.curvature() == pytest.approx(-0.9)
     assert guard.max_depth() == 4
     assert guard.max_volume() == 16
 
@@ -93,8 +93,8 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     assert tape.non_finite_count() == 0
     assert not tape.has_non_finite()
     assert abs(tape.non_finite_ratio()) < 1e-6
-    assert telemetry.curvature() == -0.95
-    assert telemetry.learning_rate() == 0.04
+    assert telemetry.curvature() == pytest.approx(-0.95)
+    assert telemetry.learning_rate() == pytest.approx(0.04)
     summary = telemetry.summary()
     assert summary.count() == 3
     assert telemetry.finite_count() == summary.count()
@@ -179,8 +179,8 @@ def test_hypergrad_topos_factory_returns_guard() -> None:
         max_depth=8,
         max_volume=32,
     )
-    assert guard.curvature() == -0.8
-    assert guard.tolerance() == 5e-4
+    assert guard.curvature() == pytest.approx(-0.8)
+    assert guard.tolerance() == pytest.approx(5e-4)
     assert guard.max_depth() == 8
     assert guard.max_volume() == 32
 
@@ -189,20 +189,20 @@ def test_hypergrad_notation_square_brackets() -> None:
     _require_native()
     tape = st.hg[2, 3](learning_rate=0.03)
     assert tape.shape() == (2, 3)
-    assert tape.learning_rate() == 0.03
+    assert tape.learning_rate() == pytest.approx(0.03)
 
 
 def test_hypergrad_notation_slice_bindings() -> None:
     _require_native()
     tape = st.hg[1:4](curvature=-0.75)
     assert tape.shape() == (1, 4)
-    assert tape.curvature() == -0.75
+    assert tape.curvature() == pytest.approx(-0.75)
 
 
 def test_hypergrad_notation_topos_alias() -> None:
     _require_native()
     guard = st.hg.topos(curvature=-0.82, tolerance=2e-3, saturation=0.65, max_depth=6, max_volume=24)
-    assert guard.curvature() == -0.82
+    assert guard.curvature() == pytest.approx(-0.82)
     assert guard.max_depth() == 6
 
 
@@ -212,7 +212,7 @@ def test_hypergrad_partial_with_inline_topos() -> None:
     tape = st.hg[weights].with_topos(curvature=-0.88, tolerance=1.5e-3, saturation=0.7, max_depth=5, max_volume=20)
     assert tape.shape() == weights.shape()
     guard = tape.topos()
-    assert guard.curvature() == -0.88
+    assert guard.curvature() == pytest.approx(-0.88)
     assert guard.max_volume() == 20
 
 

@@ -11,12 +11,45 @@ import types
 import unittest
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
 
 
+def require_real_torch(test_case):
+    try:
+        import torch
+    except ImportError:
+        test_case.skipTest("PyTorch is not installed")
+    required = ("save", "tensor", "zeros", "ones")
+    if not all(callable(getattr(torch, name, None)) for name in required):
+        test_case.skipTest("real PyTorch is not installed")
+    return torch
+
+
+@pytest.fixture(autouse=True)
+def isolate_spiraltorch_module_graph():
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "spiraltorch" or name.startswith("spiraltorch.")
+    }
+    try:
+        yield
+    finally:
+        for name in tuple(sys.modules):
+            if name == "spiraltorch" or name.startswith("spiraltorch."):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
 def install_spiraltorch_stub():
+    for name in tuple(sys.modules):
+        if name == "spiraltorch" or name.startswith("spiraltorch."):
+            sys.modules.pop(name, None)
+
     spiraltorch = types.ModuleType("spiraltorch")
     spiraltorch.__path__ = [str(ROOT / "spiraltorch")]
     spiraltorch.dataset = types.SimpleNamespace(BYTE_LM_VOCAB=256)
@@ -972,10 +1005,7 @@ assert delta["accuracy_delta"] == 0.25, delta
         self.assertIn("passed=False", output.getvalue())
 
     def test_mlp_lora_adapter_imports_external_hf_state_dict_source(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         helper = load_checkpoint_helper()
         module = load_example("byte_lm_mlp_lora_adapter")
         with tempfile.TemporaryDirectory() as tmp:
@@ -1060,10 +1090,7 @@ assert delta["accuracy_delta"] == 0.25, delta
         )
 
     def test_mlp_lora_adapter_allows_explicit_external_overlap_resize(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         module = load_example("byte_lm_mlp_lora_adapter")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -1112,10 +1139,7 @@ assert delta["accuracy_delta"] == 0.25, delta
         )
 
     def test_mlp_lora_adapter_auto_detects_external_hf_state_dict_preset(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         module = load_example("byte_lm_mlp_lora_adapter")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -1159,10 +1183,7 @@ assert delta["accuracy_delta"] == 0.25, delta
         )
 
     def test_mlp_lora_sweep_imports_external_hf_state_dict_source(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         module = load_example("byte_lm_mlp_lora_sweep")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -1207,10 +1228,7 @@ assert delta["accuracy_delta"] == 0.25, delta
         )
 
     def test_mlp_lora_sweep_auto_detects_external_hf_state_dict_preset(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         module = load_example("byte_lm_mlp_lora_sweep")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -11335,10 +11353,7 @@ assert delta["accuracy_delta"] == 0.25, delta
             )
 
     def test_checkpoint_preflight_loads_local_hf_torch_state_dict_subset(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         helper = load_checkpoint_helper()
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -11387,10 +11402,7 @@ assert delta["accuracy_delta"] == 0.25, delta
             self.assertEqual(rules["model.embed_tokens.weight"], "embed::weight")
 
     def test_checkpoint_preflight_loads_local_hf_torch_state_dict_shapes(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         helper = load_checkpoint_helper()
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pytorch_model.bin"
@@ -11424,8 +11436,8 @@ assert delta["accuracy_delta"] == 0.25, delta
             )
 
     def test_checkpoint_preflight_loads_safetensors_state_dict_shapes(self):
+        torch = require_real_torch(self)
         try:
-            import torch
             from safetensors.torch import save_file
         except ImportError:
             self.skipTest("PyTorch or safetensors is not installed")
@@ -11459,8 +11471,8 @@ assert delta["accuracy_delta"] == 0.25, delta
             )
 
     def test_checkpoint_preflight_loads_safetensors_state_dict_with_bounds(self):
+        torch = require_real_torch(self)
         try:
-            import torch
             from safetensors.torch import save_file
         except ImportError:
             self.skipTest("PyTorch or safetensors is not installed")
@@ -11520,10 +11532,7 @@ assert delta["accuracy_delta"] == 0.25, delta
             self.assertEqual(head_bias.data(), [0.0, 1.0, 2.0, 3.0])
 
     def test_checkpoint_preflight_loads_indexed_hf_state_dict_shards(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("PyTorch is not installed")
+        torch = require_real_torch(self)
         helper = load_checkpoint_helper()
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -11579,8 +11588,8 @@ assert delta["accuracy_delta"] == 0.25, delta
             )
 
     def test_checkpoint_preflight_shape_audit_auto_loads_indexed_safetensors(self):
+        torch = require_real_torch(self)
         try:
-            import torch
             from safetensors.torch import save_file
         except ImportError:
             self.skipTest("PyTorch or safetensors is not installed")

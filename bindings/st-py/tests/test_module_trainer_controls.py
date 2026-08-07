@@ -112,6 +112,71 @@ def test_module_trainer_binds_rust_execution_plan_without_python_reinterpretatio
     assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
 
 
+def test_spiral_session_binds_rank_trainer_checkpoint_and_replay_to_one_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    session = st.SpiralSession(
+        backend="cpu",
+        tensor_util_wgpu_min_values=37,
+    )
+    commitment = session.runtime_execution_plan_output_sha256
+    monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "9999")
+
+    rank = session.plan_topk(4, 128, 8)
+    direct_rank = st.plan_topk(
+        4,
+        128,
+        8,
+        runtime_execution_plan=session.runtime_execution_plan,
+    )
+    trainer = session.trainer()
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("session_execution_context", 2, 1))
+    trainer.prepare(model)
+    checkpoint = trainer.optimizer_checkpoint(model)
+
+    assert rank.runtime_execution_plan_output_sha256 == commitment
+    assert direct_rank.runtime_execution_plan_output_sha256 == commitment
+    assert rank.tensor_util_wgpu_min_values == 37
+    assert rank.contract()["runtime_execution_plan_output_sha256"] == commitment
+    assert trainer.runtime_execution_plan_output_sha256 == commitment
+    assert (
+        checkpoint["topology"]["runtime_execution_plan_output_sha256"]
+        == commitment
+    )
+
+    external = session.runtime_execution_plan
+    external["output_sha256"] = "0" * 64
+    assert session.runtime_execution_plan["output_sha256"] == commitment
+
+    replayed = st.SpiralSession.from_runtime_execution_plan(
+        session.runtime_execution_plan
+    )
+    assert replayed.runtime_execution_plan_output_sha256 == commitment
+    assert (
+        replayed.plan("midk", 2, 16, 3).runtime_execution_plan_output_sha256
+        == commitment
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined"):
+        st.plan_topk(
+            2,
+            16,
+            3,
+            backend="cpu",
+            runtime_execution_plan=session.runtime_execution_plan,
+        )
+
+    tampered = session.runtime_execution_plan
+    tampered["output_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="materialization failed"):
+        st.SpiralSession.from_runtime_execution_plan(tampered)
+
+
 def test_module_trainer_optimizer_checkpoint_resumes_through_rust() -> None:
     st = _load_native()
     if st is None:

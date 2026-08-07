@@ -628,16 +628,54 @@ print("effective backend:", getattr(session, "effective_backend", session.backen
 ```
 
 Runtime route readiness and workload-kernel readiness are deliberately separate.
-The v2 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
+The v3 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
 exact declared component shapes, bias bindings, device limits, and lazy pipelines,
 then commits that evidence for deterministic replay. Passing `component_workloads=`
 to `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer
 automatically; WASM exposes the same observer as JSON/Object transport instead of
 rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
 not cryptographic hardware attestation, and undeclared workloads remain unobserved.
+Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
+unobserved accelerator capabilities rather than guessing that a workload is ready.
 
-Bind that committed plan before creating a training schedule so rank planning and
-every tensor kernel share one Rust-owned execution context:
+For ordinary training, let `SpiralSession` capture that contract once. Rank plans,
+trainers, schedules, optimizer checkpoints, and replayed sessions then inherit the
+same Rust-owned commitment instead of reading mutable environment configuration
+again. A session records `component_resolution="deferred"`: this does not label
+unobserved kernels native; it commits the Rust policy and leaves shape-specific
+capability checks to each operation:
+
+```python
+import spiraltorch as st
+
+session = st.SpiralSession(
+    backend="cpu",
+    tensor_util_wgpu_min_values=37,
+)
+rank = session.plan_topk(rows=8, cols=64, k=4)
+trainer = session.trainer()
+
+assert rank.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+assert trainer.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+
+replayed = st.SpiralSession.from_runtime_execution_plan(session.runtime_execution_plan)
+assert replayed.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+```
+
+The returned `runtime_execution_plan` is an isolated copy. Supplying a committed
+plan together with backend, capability, or execution-config overrides fails closed,
+and executable materialization rechecks the receiving Rust build and local runtime.
+`backend="auto"` is only orchestration order: Python asks Rust for WGPU readiness
+first and tries CPU only when Rust returns an explicit unavailable signal and the
+captured fallback policy allows it. Plan validation, transport, and configuration
+errors remain visible instead of silently changing the backend.
+`SPIRALTORCH_STRICT_GPU=1` is captured by Rust and forbids that CPU retry; it also
+keeps small tensor-utility operations on WGPU instead of applying the performance
+threshold as an implicit fallback. `st.resolve_runtime_execution_config()` exposes
+the exact Rust-captured policy for inspection.
+
+When a plan is built separately, bind it before creating a training schedule so
+rank planning and every tensor kernel share that same context:
 
 ```python
 import spiraltorch as st
@@ -656,6 +694,11 @@ assert trainer.runtime_execution_plan_output_sha256 == plan["output_sha256"]
 Plans are validated and materialized in Rust. A tampered, blocked, or locally
 unavailable plan leaves the trainer unchanged, while a schedule created under a
 different device/config contract is rejected before the epoch starts.
+
+Rank planning is intentionally narrower than execution. Python and WASM can validate
+a committed plan and reuse its capabilities, configuration, and parent SHA without
+claiming that their local process has the corresponding tensor executor. Sessions and
+trainers still cross the stricter `BackendPolicy` boundary before running any kernel.
 
 Then pick the path that matches the job:
 
@@ -1021,6 +1064,8 @@ overrides, or `(key, value)` tweaks inline. `st.z.metrics(...)` canonicalises th
 wheel’s metric aliases, `st.z.partial(...)` captures telemetry/weights in a
 `ZSpacePartialBundle`, and `st.z.bundle(...)` (alias `st.z.blend`) merges those
 partials before handing them to `ZSpaceTrainer`.
+Use `st.z.clear()` at run boundaries when process-global softlogic feedback must
+not leak into the next experiment; it returns whether Rust actually removed a value.
 
 Open-topos pressure can now be projected into named learning and inference
 hints. The same signal can damp a local Z-space trainer and tune hosted-model

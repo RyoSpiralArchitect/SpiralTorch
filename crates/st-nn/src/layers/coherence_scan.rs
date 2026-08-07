@@ -794,7 +794,7 @@ impl Module for ZSpaceCoherenceScan {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     use std::sync::{Arc, Mutex};
@@ -917,9 +917,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -938,7 +935,7 @@ mod tests {
         })
         .unwrap();
 
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_scan =
             ZSpaceCoherenceScan::with_output_scales(3, 4, 3, -1.0, 1.0, 0.25, 0.5).unwrap();
         let cpu_forward = {
@@ -950,7 +947,7 @@ mod tests {
             cpu_scan.backward(&input, &grad_out).unwrap()
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_scan =
             ZSpaceCoherenceScan::with_output_scales(3, 4, 3, -1.0, 1.0, 0.25, 0.5).unwrap();
         let (wgpu_forward, wgpu_grad_input) = {
@@ -962,11 +959,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         approx_eq(cpu_forward.data(), wgpu_forward.data(), 1.0e-3);
         approx_eq(cpu_grad_input.data(), wgpu_grad_input.data(), 2.0e-3);
 

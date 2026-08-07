@@ -892,7 +892,7 @@ impl ConceptHint {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
@@ -901,16 +901,6 @@ mod tests {
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
-    }
-
-    #[cfg(feature = "wgpu")]
-    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        if let Some(value) = previous {
-            std::env::set_var(KEY, value);
-        } else {
-            std::env::remove_var(KEY);
-        }
     }
 
     fn sample_kernel() -> SparseKernel {
@@ -973,9 +963,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -985,14 +972,12 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let kernel = {
             let _guard = push_backend_policy(policy);
             SparseKernel::from_rows(vec![vec![(0, 2.0), (1, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap()
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert_eq!(kernel.vocab_size(), 2);
         let events = events.lock().unwrap();
         let row = events
@@ -1141,9 +1126,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -1160,14 +1142,12 @@ mod tests {
             sample_kernel(),
         )
         .unwrap();
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let distribution = {
             let _guard = push_backend_policy(policy);
             ConceptHint::Distribution(vec![0.6, -0.1, 0.4]).as_distribution(&bridge)
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert_eq!(distribution.len(), bridge.concept_count());
         let events = events.lock().unwrap();
         let hint = events
@@ -1194,9 +1174,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -1214,14 +1191,12 @@ mod tests {
             concept_kernel,
         )
         .unwrap();
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let distribution = {
             let _guard = push_backend_policy(policy);
             bridge.infer_from_window(&[(0, 0.8), (1, 0.4)], 1e-6)
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert_eq!(distribution.len(), bridge.concept_count());
         let events = events.lock().unwrap();
         let window_distribution = events

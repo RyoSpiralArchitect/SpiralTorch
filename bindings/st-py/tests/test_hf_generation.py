@@ -1886,7 +1886,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(preflight["status"], "error")
         self.assertFalse(preflight["runtime_ready"])
-        self.assertIn("untrusted route contract", preflight["error"])
+        self.assertIn("invalid runtime-device route payload", preflight["error"])
 
     def test_inference_distortion_runtime_preflight_handles_missing_reporter(self) -> None:
         preflight = zspace_inference_distortion_runtime_preflight(

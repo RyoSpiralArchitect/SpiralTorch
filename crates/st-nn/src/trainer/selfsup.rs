@@ -820,7 +820,7 @@ impl TensorShapeExt for Tensor {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     use crate::trainer::tensor_meta_observer_test_lock;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
@@ -1072,10 +1072,7 @@ mod tests {
         }
         let (prediction, _, _) = sample_pairs();
         let target = Tensor::zeros(1, 1).unwrap();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let (cpu_output, cpu_grad) = {
             let _guard = push_backend_policy(cpu_policy);
             let mut loss = InfoNCELoss::new(0.5, true);
@@ -1094,7 +1091,7 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let (wgpu_output, wgpu_grad) = {
             let _guard = push_backend_policy(wgpu_policy);
             let mut loss = InfoNCELoss::new(0.5, true);
@@ -1103,11 +1100,6 @@ mod tests {
             (output, grad)
         };
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         for (idx, (expected, actual)) in cpu_output
             .data()
             .iter()

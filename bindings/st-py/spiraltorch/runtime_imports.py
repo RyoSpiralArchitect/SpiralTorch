@@ -44,8 +44,10 @@ __all__ = [
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
     "evaluate_runtime_execution_plan",
+    "require_executable_runtime_execution_plan",
     "observe_runtime_execution_plan_capabilities",
     "evaluate_runtime_device_route",
+    "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
@@ -861,11 +863,33 @@ def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, 
     return dict(contract)
 
 
+def resolve_runtime_execution_config(
+    *,
+    accelerator_fallback: str | None = None,
+    tensor_util_wgpu_min_values: int | None = None,
+) -> dict[str, object]:
+    """Capture process defaults and explicit overrides through the Rust owner."""
+
+    resolve = _native_runtime_execution_plan_function(
+        "_runtime_execution_config_resolve"
+    )
+    payload = resolve(
+        accelerator_fallback=accelerator_fallback,
+        tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+    )
+    if not isinstance(payload, Mapping):
+        raise RuntimeError(
+            "runtime execution-config resolver returned a non-mapping payload"
+        )
+    return dict(payload)
+
+
 def evaluate_runtime_execution_plan(
     runtime_probe: Mapping[str, object],
     *,
-    accelerator_fallback: str = "allow",
-    tensor_util_wgpu_min_values: int = 1024,
+    accelerator_fallback: str | None = None,
+    tensor_util_wgpu_min_values: int | None = None,
+    component_resolution: str = "concrete",
     tensor_util_values: int | None = None,
     component_workloads: object = None,
     required_native_components: object = None,
@@ -894,12 +918,14 @@ def evaluate_runtime_execution_plan(
             raise TypeError(
                 "required_native_components must be an iterable"
             ) from exc
+    execution_config = resolve_runtime_execution_config(
+        accelerator_fallback=accelerator_fallback,
+        tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+    )
     request: dict[str, object] = {
         "runtime_probe": _runtime_probe_contract_payload(runtime_probe),
-        "execution_config": {
-            "accelerator_fallback": accelerator_fallback,
-            "tensor_util_wgpu_min_values": tensor_util_wgpu_min_values,
-        },
+        "execution_config": execution_config,
+        "component_resolution": component_resolution,
         "component_workloads": workloads,
         "component_capabilities": [],
         "tensor_util_values": tensor_util_values,
@@ -958,6 +984,24 @@ def validate_runtime_execution_plan_contract(
     return dict(validated)
 
 
+def require_executable_runtime_execution_plan(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate and materialize a committed plan through the Rust backend policy."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    require = _native_runtime_execution_plan_function(
+        "_runtime_execution_plan_require_executable"
+    )
+    executable = require(dict(payload))
+    if not isinstance(executable, Mapping):
+        raise RuntimeError(
+            "runtime execution-plan materializer returned a non-mapping payload"
+        )
+    return dict(executable)
+
+
 def validate_runtime_device_probe_contract(
     payload: Mapping[str, object],
     *,
@@ -982,6 +1026,20 @@ def validate_runtime_device_probe_contract(
     if not isinstance(validated, Mapping):
         raise RuntimeError("runtime-device probe validator returned a non-mapping payload")
     return dict(validated)
+
+
+def project_runtime_device_probe_contract(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Project a canonical Rust probe into its compatibility-rich client view."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    project = _native_runtime_device_probe_function("_runtime_device_probe_transport")
+    projected = project(dict(payload))
+    if not isinstance(projected, Mapping):
+        raise RuntimeError("runtime-device probe projector returned a non-mapping payload")
+    return dict(projected)
 
 
 def _native_runtime_device_route_contract(

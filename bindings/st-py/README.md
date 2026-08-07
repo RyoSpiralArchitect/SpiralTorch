@@ -2709,18 +2709,39 @@ print("top-k:", rec.recommend_top_k(0, 3))
 
 ### SpiralSession backend planning
 
-`SpiralSession` is intentionally small: it records the requested backend,
-captures device preflight evidence, and exposes planner helpers that match the
-Rust runtime. Use it as the first runtime object before deciding whether a run
-should stay on CPU, ask for WGPU, or escalate into a heavier training recipe.
+`SpiralSession` is intentionally small: Python chooses orchestration order while
+Rust captures one executable runtime plan and owns its semantics. Rank planning,
+native trainers, schedules, checkpoints, and replay all inherit that exact plan;
+they do not independently re-read backend heuristics or environment overrides.
+The session plan uses Rust's `deferred` component resolution: unobserved dynamic
+shapes are not called native, but the committed policy is enforced when each
+operation runs. Standalone workload preflight remains `concrete` and fail-closed.
 
 ```python
 from spiraltorch import SpiralSession
 
-session = SpiralSession(backend="wgpu")
+session = SpiralSession(backend="wgpu", tensor_util_wgpu_min_values=37)
 print(session.requested_backend, "->", session.effective_backend)
 print("runtime:", session.device_preflight["runtime_status"])
 
-plan = session.plan_topk(rows=8, cols=64, k=4)
-print(plan.kind, plan.effective_backend, plan.tile)
+rank = session.plan_topk(rows=8, cols=64, k=4)
+trainer = session.trainer()
+print(rank.kind, rank.effective_backend, rank.tile)
+assert rank.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+assert trainer.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+
+replayed = SpiralSession.from_runtime_execution_plan(session.runtime_execution_plan)
+assert replayed.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
 ```
+
+`runtime_execution_plan` returns a defensive copy. Replay validates commitments,
+the receiving Rust build, and current backend readiness. A supplied plan cannot be
+combined with backend/capability/config overrides. For `backend="auto"`, Python
+asks Rust for WGPU readiness first, materializes that plan when ready, and falls
+back to CPU only when Rust returns its explicit unavailable signal and the captured
+policy permits fallback. Plan validation, transport, configuration, and unrelated
+Python errors propagate. Rust captures
+`SPIRALTORCH_STRICT_GPU` and `SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES` once.
+Under strict policy, `auto` does not retry CPU and small tensor utilities stay on
+WGPU rather than crossing the threshold route. Inspect the captured values with
+`spiraltorch.resolve_runtime_execution_config()`.

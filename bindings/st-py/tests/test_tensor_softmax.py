@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import math
 
-from .test_tensor_stub_api import spiraltorch_stub
-
 
 def test_row_softmax_rows_sum_to_one(spiraltorch_stub) -> None:
     st = spiraltorch_stub

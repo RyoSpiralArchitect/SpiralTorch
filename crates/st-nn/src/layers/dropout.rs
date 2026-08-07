@@ -294,7 +294,7 @@ impl Module for Dropout {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -500,9 +500,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -520,7 +517,7 @@ mod tests {
             ((row * 7 + col * 11) % 19) as f32 * 0.033 - 0.15
         })
         .unwrap();
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_layer = Dropout::with_seed(0.35, Some(123)).unwrap();
         let cpu_forward = {
             let _guard = push_backend_policy(cpu_policy);
@@ -531,7 +528,7 @@ mod tests {
             cpu_layer.backward(&input, &grad_output).unwrap()
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_layer = Dropout::with_seed(0.35, Some(123)).unwrap();
         let (wgpu_forward, wgpu_grad_input) = {
             let _guard = push_backend_policy(wgpu_policy);
@@ -542,11 +539,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         assert_eq!(cpu_forward.shape(), wgpu_forward.shape());
         for (idx, (&cpu, &wgpu)) in cpu_forward
             .data()

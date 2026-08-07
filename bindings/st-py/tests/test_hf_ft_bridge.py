@@ -8163,11 +8163,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(jsonl_path),
             ]
             args = module.parse_args(argv)
-            status = module.summarize_run(args)
-            lines = module.status_lines(status, tail_evals=1)
-            stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                self.assertEqual(hf_cli.finetune_run_status_main(argv), 0)
+            fixed_disk = types.SimpleNamespace(
+                total=100 * 1024**3,
+                used=25 * 1024**3,
+                free=75 * 1024**3,
+            )
+            with mock.patch.object(
+                module._legacy.shutil,
+                "disk_usage",
+                return_value=fixed_disk,
+            ):
+                status = module.summarize_run(args)
+                lines = module.status_lines(status, tail_evals=1)
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    self.assertEqual(hf_cli.finetune_run_status_main(argv), 0)
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
             written_jsonl = [

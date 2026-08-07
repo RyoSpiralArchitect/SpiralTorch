@@ -7,7 +7,7 @@ import types
 
 def _reset_spiral_modules() -> None:
     for key in list(sys.modules):
-        if key in {"spiral", "spiraltorch"} or key.startswith("spiral.") or key.startswith("_spiral_py_bridge"):
+        if key == "spiral" or key.startswith("spiral.") or key.startswith("_spiral_py_bridge"):
             sys.modules.pop(key, None)
 
 
@@ -62,4 +62,3 @@ def test_spiral_bridge_merges_pure_python_helpers(monkeypatch) -> None:
     assert hasattr(module, "data")
     assert hasattr(module, "hypergrad")
     assert "augment" in module.__all__
-

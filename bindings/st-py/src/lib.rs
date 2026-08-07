@@ -466,6 +466,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "zspace_eval",
         "zspace_snapshot",
         "softlogic_feedback",
+        "clear_zspace_feedback",
         "describe_zspace",
         "softlogic_signal",
         "SpiralKFftPlan",

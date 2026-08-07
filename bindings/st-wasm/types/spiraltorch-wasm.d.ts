@@ -349,9 +349,12 @@ declare module "spiraltorch-wasm" {
         tensor_util_wgpu_min_values: number;
     };
 
+    export type RuntimeComponentResolution = "concrete" | "deferred";
+
     export type RuntimeExecutionPlanRequestInput = {
         runtime_probe: RuntimeDeviceProbe;
         execution_config: RuntimeExecutionConfig;
+        component_resolution?: RuntimeComponentResolution;
         component_workloads?: RuntimeComponentWorkload[];
         component_capabilities?: RuntimeComponentCapabilityEvidence[];
         tensor_util_values?: number | null;
@@ -361,6 +364,7 @@ declare module "spiraltorch-wasm" {
     export type RuntimeExecutionPlanRequest = {
         runtime_probe: RuntimeDeviceProbe;
         execution_config: RuntimeExecutionConfig;
+        component_resolution: RuntimeComponentResolution;
         component_workloads: RuntimeComponentWorkload[];
         component_capabilities: RuntimeComponentCapabilityEvidence[];
         tensor_util_values: number | null;
@@ -398,7 +402,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v2";
+        contract_version: "spiraltorch.runtime_execution_plan.v3";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;
@@ -959,6 +963,7 @@ declare module "spiraltorch-wasm" {
         shared_mem_per_workgroup?: number;
         strict_accelerator?: boolean;
         tensor_util_wgpu_min_values?: number;
+        runtime_execution_plan?: RuntimeExecutionPlan;
     };
 
     export type RankPlanLatencyWindow = {
@@ -973,7 +978,8 @@ declare module "spiraltorch-wasm" {
 
     export type RankPlanContract = {
         kind: "spiraltorch.rank_plan";
-        contract_version: "spiraltorch.rank_plan.v1";
+        contract_version: "spiraltorch.rank_plan.v2";
+        runtime_execution_plan_output_sha256?: string;
         semantic_owner: "st-core::ops::rank_entry";
         semantic_backend: "rust";
         execution_client: "wasm";

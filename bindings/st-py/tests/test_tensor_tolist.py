@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import importlib
-import pathlib
 import sys
 import types
-import warnings
 from typing import Optional
 
 import pytest
@@ -18,29 +16,6 @@ def _ensure_torch_stub() -> None:
     sys.modules["torch"] = torch_stub
 
 
-def _load_stub_module() -> types.ModuleType:
-    root = pathlib.Path(__file__).resolve().parents[3]
-    source_path = root / "spiraltorch" / "__init__.py"
-    source = source_path.read_text()
-
-    for marker in ("\n_load_native_package()", "\ndel _load_native_package"):
-        head, sep, _ = source.rpartition(marker)
-        if sep:
-            source = head
-
-    module = types.ModuleType("_spiraltorch_stub_for_tests")
-    module.__file__ = str(source_path)
-    module.__package__ = "spiraltorch"
-    exec(compile(source, str(source_path), "exec"), module.__dict__)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        module._install_stub_bindings(  # type: ignore[attr-defined]
-            module,
-            ModuleNotFoundError("spiraltorch", name="spiraltorch.spiraltorch"),
-        )
-    return module
-
-
 def _load_native_module() -> Optional[types.ModuleType]:
     _ensure_torch_stub()
     try:
@@ -48,6 +23,9 @@ def _load_native_module() -> Optional[types.ModuleType]:
     except ModuleNotFoundError:
         return None
     return native if hasattr(native, "Tensor") else None
+
+
+_NATIVE_MODULE = _load_native_module()
 
 
 def _expected_matrix(rows: int, cols: int) -> list[list[float]]:
@@ -71,8 +49,10 @@ def _expected_range_matrix() -> list[list[float]]:
         (2, 3),
     ],
 )
-def test_stub_tensor_tolist_matches_expected(rows: int, cols: int) -> None:
-    module = _load_stub_module()
+def test_stub_tensor_tolist_matches_expected(
+    rows: int, cols: int, stub_spiraltorch
+) -> None:
+    module = stub_spiraltorch
     payload = [float(index + 1) for index in range(rows * cols)]
     tensor = module.Tensor(rows, cols, payload, backend="python")  # type: ignore[attr-defined]
     assert tensor.tolist() == _expected_matrix(rows, cols)
@@ -82,8 +62,8 @@ def test_stub_tensor_tolist_matches_expected(rows: int, cols: int) -> None:
         assert tensor_np.tolist() == _expected_matrix(rows, cols)
 
 
-def test_stub_tensor_tolist_from_range_is_nested() -> None:
-    module = _load_stub_module()
+def test_stub_tensor_tolist_from_range_is_nested(stub_spiraltorch) -> None:
+    module = stub_spiraltorch
     expected = _expected_range_matrix()
 
     tensor_default = module.Tensor(2, 3, range(6))  # type: ignore[attr-defined]
@@ -99,8 +79,8 @@ def test_stub_tensor_tolist_from_range_is_nested() -> None:
         assert tensor_numpy.tolist() == tensor_default.tolist()
 
 
-def test_stub_tensor_tolist_range_backend_parity() -> None:
-    module = _load_stub_module()
+def test_stub_tensor_tolist_range_backend_parity(stub_spiraltorch) -> None:
+    module = stub_spiraltorch
     expected = [
         [0.0, 1.0, 2.0],
         [3.0, 4.0, 5.0],
@@ -119,8 +99,8 @@ def test_stub_tensor_tolist_range_backend_parity() -> None:
         assert all(isinstance(row, list) for row in matrix)
 
 
-def test_stub_tensor_tolist_uses_python_scalars() -> None:
-    module = _load_stub_module()
+def test_stub_tensor_tolist_uses_python_scalars(stub_spiraltorch) -> None:
+    module = stub_spiraltorch
 
     tensor_python = module.Tensor(1, 3, [1, 2, 3], backend="python")  # type: ignore[attr-defined]
     python_result = tensor_python.tolist()
@@ -145,12 +125,14 @@ def test_stub_tensor_tolist_uses_python_scalars() -> None:
         (2, 3),
     ],
 )
-def test_stub_and_native_tolist_agree(rows: int, cols: int) -> None:
-    native = _load_native_module()
+def test_stub_and_native_tolist_agree(
+    rows: int, cols: int, stub_spiraltorch
+) -> None:
+    native = _NATIVE_MODULE
     if native is None:
         pytest.skip("Native SpiralTorch extension is unavailable")
 
-    module = _load_stub_module()
+    module = stub_spiraltorch
     payload = [float(index + 1) for index in range(rows * cols)]
 
     stub_tensor = module.Tensor(rows, cols, payload, backend="python")  # type: ignore[attr-defined]

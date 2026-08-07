@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import builtins
-import importlib
+import importlib.util
 import pathlib
 import sys
+import types
 
 import pytest
 
@@ -12,18 +13,13 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+ELLIPTIC_PATH = pathlib.Path(__file__).resolve().parents[1] / "spiraltorch" / "elliptic.py"
+
 
 def test_elliptic_autograd_requires_torch_when_unavailable() -> None:
-    module_names = (
-        "spiraltorch",
-        "spiraltorch.elliptic",
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    )
-    saved_modules = {name: sys.modules.get(name) for name in module_names}
+    package_name = "_spiraltorch_elliptic_stub_test"
+    module_name = f"{package_name}.elliptic"
     torch_saved = sys.modules.get("torch")
-    preexisting = set(sys.modules)
 
     real_import = builtins.__import__
 
@@ -34,12 +30,17 @@ def test_elliptic_autograd_requires_torch_when_unavailable() -> None:
 
     try:
         builtins.__import__ = fake_import
-        for name in module_names:
-            sys.modules.pop(name, None)
         sys.modules.pop("torch", None)
 
-        importlib.invalidate_caches()
-        elliptic = importlib.import_module("spiraltorch.elliptic")
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(ELLIPTIC_PATH.parent)]  # type: ignore[attr-defined]
+        sys.modules[package_name] = package
+
+        spec = importlib.util.spec_from_file_location(module_name, ELLIPTIC_PATH)
+        assert spec is not None and spec.loader is not None
+        elliptic = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = elliptic
+        spec.loader.exec_module(elliptic)
         assert hasattr(elliptic, "EllipticWarpFunction")
 
         with pytest.raises(RuntimeError, match="PyTorch is required"):
@@ -49,16 +50,8 @@ def test_elliptic_autograd_requires_torch_when_unavailable() -> None:
             elliptic.elliptic_warp_partial(None, None)  # type: ignore[arg-type]
     finally:
         builtins.__import__ = real_import
-
-        for name in list(sys.modules):
-            if name not in preexisting and name.startswith("spiraltorch"):
-                sys.modules.pop(name, None)
-
-        for name, module in saved_modules.items():
-            if module is not None:
-                sys.modules[name] = module
-            else:
-                sys.modules.pop(name, None)
+        sys.modules.pop(module_name, None)
+        sys.modules.pop(package_name, None)
 
         if torch_saved is not None:
             sys.modules["torch"] = torch_saved

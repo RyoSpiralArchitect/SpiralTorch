@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib as _contextlib
+import copy as _copy
 import json as _json
 import math as _math
 import os as _os
@@ -672,8 +673,11 @@ from .runtime_imports import (
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
     evaluate_runtime_execution_plan,
+    resolve_runtime_execution_config,
+    require_executable_runtime_execution_plan,
     observe_runtime_execution_plan_capabilities,
     evaluate_runtime_device_route,
+    project_runtime_device_probe_contract,
     validate_runtime_execution_plan_contract,
     validate_runtime_device_probe_contract,
     validate_runtime_device_route_contract,
@@ -1266,8 +1270,11 @@ _EXTRAS = [
     "runtime_import_required_gate_fields","runtime_import_requirement_failures",
     "runtime_imports_from_args","runtime_imports_from_source",
     "evaluate_runtime_execution_plan",
+    "resolve_runtime_execution_config",
+    "require_executable_runtime_execution_plan",
     "observe_runtime_execution_plan_capabilities",
     "evaluate_runtime_device_route",
+    "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
@@ -2636,6 +2643,15 @@ class _ZSpaceNotation:
             raise RuntimeError("z.feedback() is unavailable in this build")
         return feedback()
 
+    def clear(self) -> bool:
+        module = self._module()
+        clear = _safe_getattr(module, "clear") or _safe_getattr(
+            module, "clear_zspace_feedback"
+        )
+        if clear is None:
+            raise RuntimeError("z.clear() is unavailable in this build")
+        return bool(clear())
+
     def snapshot(self) -> _Any:
         module = self._module()
         snapshot = _safe_getattr(module, "snapshot") or _safe_getattr(module, "zspace_snapshot")
@@ -2880,6 +2896,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "SoftlogicZFeedback": ("SoftlogicZFeedback",),
         "snapshot": ("snapshot", "zspace_snapshot"),
         "feedback": ("feedback", "softlogic_feedback"),
+        "clear": ("clear", "clear_zspace_feedback"),
         "describe": ("describe", "describe_zspace"),
         "softlogic_signal": ("softlogic_signal",),
     },
@@ -6928,8 +6945,12 @@ else:  # pragma: no cover - defensive
     _DATASET_NATIVE_AVAILABLE = False
 
 
+class _RuntimeBackendUnavailableError(RuntimeError):
+    """Internal control flow for an explicit native backend-readiness miss."""
+
+
 class SpiralSession:
-    """Lightweight execution context for quick experimentation."""
+    """Python orchestration bound to one Rust-owned execution plan."""
 
     backend: str
     requested_backend: str
@@ -6937,45 +6958,138 @@ class SpiralSession:
     seed: int | None
     device: str
     device_preflight: _Dict[str, _Any]
+    runtime_execution_plan_output_sha256: str
 
-    def __init__(self, backend: str = "auto", seed: int | None = None) -> None:
-        self.backend = backend
-        self.requested_backend = str(backend)
+    def __init__(
+        self,
+        backend: str = "auto",
+        seed: int | None = None,
+        *,
+        runtime_execution_plan: _Mapping[str, _Any] | None = None,
+        accelerator_fallback: str | None = None,
+        tensor_util_wgpu_min_values: int | None = None,
+    ) -> None:
+        self.backend = str(backend)
         self.seed = seed
         backend_label = str(backend).strip().lower()
+        normalized_backend = (
+            "cpu"
+            if backend_label in {"faer", "simd", "cpu-simd", "naive"}
+            else backend_label
+        )
+
+        if runtime_execution_plan is not None:
+            if accelerator_fallback is not None or tensor_util_wgpu_min_values is not None:
+                raise ValueError(
+                    "runtime_execution_plan cannot be combined with execution-config overrides"
+                )
+            executable = require_executable_runtime_execution_plan(
+                runtime_execution_plan
+            )
+            requested = str(executable["requested_backend"]).strip().lower()
+            if normalized_backend not in {"", "auto", requested}:
+                raise ValueError(
+                    "backend does not match runtime_execution_plan.requested_backend: "
+                    f"{normalized_backend!r} != {requested!r}"
+                )
+            init_backend(requested)
+            request = executable.get("request")
+            if not isinstance(request, _Mapping):
+                raise RuntimeError("Rust execution plan omitted its canonical request")
+            runtime_probe = request.get("runtime_probe")
+            if not isinstance(runtime_probe, _Mapping):
+                raise RuntimeError("Rust execution plan omitted its runtime probe")
+            report = project_runtime_device_probe_contract(runtime_probe)
+            self._install_runtime_execution_plan(executable, report)
+            return
+
+        execution_config = resolve_runtime_execution_config(
+            accelerator_fallback=accelerator_fallback,
+            tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+        )
+        fallback = str(execution_config["accelerator_fallback"])
+        min_values = int(execution_config["tensor_util_wgpu_min_values"])
         if backend_label in {"", "auto"}:
             try:
-                init_backend("wgpu")
-            except Exception:
-                init_backend("cpu")
-                self.effective_backend = "cpu"
-                self.device = "cpu"
-                self.device_preflight = dict(describe_device("cpu"))
-            else:
-                self.effective_backend = "wgpu"
-                self.device = "wgpu"
-                self.device_preflight = dict(describe_device("wgpu"))
-        elif backend_label == "mps":
-            init_backend("mps")
-            effective_backend, device, report = _resolve_runtime_entry("mps")
-            self.effective_backend = effective_backend
-            self.device = device
-            self.device_preflight = report
-        elif backend_label == "hip":
-            init_backend("hip")
-            self.effective_backend = "hip"
-            self.device = "hip"
-            self.device_preflight = dict(hip_probe())
-        elif backend_label == "wgpu":
-            init_backend("wgpu")
-            self.effective_backend = "wgpu"
-            self.device = "wgpu"
-            self.device_preflight = dict(describe_device("wgpu"))
+                executable, report = self._build_runtime_execution_plan(
+                    "wgpu",
+                    accelerator_fallback=fallback,
+                    tensor_util_wgpu_min_values=min_values,
+                )
+            except _RuntimeBackendUnavailableError:
+                if fallback == "forbid":
+                    raise
+                executable, report = self._build_runtime_execution_plan(
+                    "cpu",
+                    accelerator_fallback=fallback,
+                    tensor_util_wgpu_min_values=min_values,
+                )
         else:
-            init_backend(backend_label)
-            self.effective_backend = "cpu"
-            self.device = "cpu"
-            self.device_preflight = dict(describe_device("cpu"))
+            executable, report = self._build_runtime_execution_plan(
+                normalized_backend,
+                accelerator_fallback=fallback,
+                tensor_util_wgpu_min_values=min_values,
+            )
+        self._install_runtime_execution_plan(executable, report)
+
+    @staticmethod
+    def _build_runtime_execution_plan(
+        backend: str,
+        *,
+        accelerator_fallback: str,
+        tensor_util_wgpu_min_values: int,
+    ) -> tuple[_Dict[str, _Any], _Dict[str, _Any]]:
+        initialized = init_backend(backend)
+        if backend == "wgpu" and not initialized:
+            raise _RuntimeBackendUnavailableError(
+                "the Rust runtime reports that WGPU is unavailable"
+            )
+        _effective_backend, _device, report = _resolve_runtime_entry(backend)
+        candidate = evaluate_runtime_execution_plan(
+            report,
+            accelerator_fallback=accelerator_fallback,
+            tensor_util_wgpu_min_values=tensor_util_wgpu_min_values,
+            component_resolution="deferred",
+        )
+        executable = require_executable_runtime_execution_plan(candidate)
+        return executable, report
+
+    def _install_runtime_execution_plan(
+        self,
+        plan_payload: _Mapping[str, _Any],
+        report: _Mapping[str, _Any],
+    ) -> None:
+        plan = _copy.deepcopy(dict(plan_payload))
+        preflight = _copy.deepcopy(dict(report))
+        self._runtime_execution_plan = plan
+        self.runtime_execution_plan_output_sha256 = str(plan["output_sha256"])
+        self.requested_backend = str(plan["requested_backend"])
+        self.effective_backend = str(plan["effective_backend"])
+        self.device_preflight = preflight
+        self.device = str(
+            preflight.get("planner_route")
+            or preflight.get("effective_backend")
+            or self.effective_backend
+        )
+
+    @property
+    def runtime_execution_plan(self) -> _Dict[str, _Any]:
+        """Return an isolated copy of the committed Rust execution plan."""
+
+        return _copy.deepcopy(self._runtime_execution_plan)
+
+    @classmethod
+    def from_runtime_execution_plan(
+        cls,
+        runtime_execution_plan: _Mapping[str, _Any],
+        *,
+        seed: int | None = None,
+    ) -> "SpiralSession":
+        return cls(
+            backend="auto",
+            seed=seed,
+            runtime_execution_plan=runtime_execution_plan,
+        )
 
     def dataset(self, samples: _Optional[_Iterable[_Tuple[_Any, _Any]]] = None):
         """Build a :mod:`spiraltorch.dataset` payload from in-memory samples.
@@ -7094,8 +7208,48 @@ class SpiralSession:
 
         return loader
 
+    def plan(self, kind: str, rows: int, cols: int, k: int):
+        return plan(
+            kind,
+            rows,
+            cols,
+            k,
+            runtime_execution_plan=self._runtime_execution_plan,
+        )
+
     def plan_topk(self, rows: int, cols: int, k: int):
-        return plan_topk(rows, cols, k, backend=self.backend)
+        return plan_topk(
+            rows,
+            cols,
+            k,
+            runtime_execution_plan=self._runtime_execution_plan,
+        )
+
+    def trainer(
+        self,
+        *,
+        curvature: float = -1.0,
+        hyper_learning_rate: float = 1e-2,
+        fallback_learning_rate: float = 1e-2,
+    ):
+        """Create a native trainer bound to this session's exact plan."""
+
+        nn_module = globals().get("nn")
+        trainer_type = getattr(nn_module, "ModuleTrainer", None)
+        if not callable(trainer_type):
+            trainer_type = globals().get("ModuleTrainer")
+        if not callable(trainer_type):
+            raise RuntimeError("SpiralSession.trainer() requires the native nn extension")
+        trainer = trainer_type(
+            backend=self.effective_backend,
+            curvature=float(curvature),
+            hyper_learning_rate=float(hyper_learning_rate),
+            fallback_learning_rate=float(fallback_learning_rate),
+        )
+        trainer.bind_runtime_execution_plan(self._runtime_execution_plan)
+        return trainer
+
+    module_trainer = trainer
 
     def close(self) -> None:
         """Release any session-scoped resources (currently a no-op)."""
@@ -8370,6 +8524,15 @@ if callable(_native_plan):
         backend: str | None = None,
         **kwargs: _Any,
     ):
+        if kwargs.get("runtime_execution_plan") is not None:
+            return _native_plan(
+                kind,
+                rows,
+                cols,
+                k,
+                backend=_planner_backend_argument(backend),
+                **dict(kwargs),
+            )
         plan_obj, effective_backend = _call_planner_native(
             _native_plan,
             backend=backend,
@@ -8392,6 +8555,14 @@ if callable(_native_plan_topk):
         backend: str | None = None,
         **kwargs: _Any,
     ):
+        if kwargs.get("runtime_execution_plan") is not None:
+            return _native_plan_topk(
+                rows,
+                cols,
+                k,
+                backend=_planner_backend_argument(backend),
+                **dict(kwargs),
+            )
         plan_obj, effective_backend = _call_planner_native(
             _native_plan_topk,
             backend=backend,
@@ -8507,14 +8678,11 @@ def _resolve_runtime_entry(backend: str) -> tuple[str, str, _Dict[str, _Any]]:
         effective_backend = str(report.get("planner_surrogate_backend", "cpu"))
         device = str(report.get("planner_route", "cpu-fallback"))
         return effective_backend, device, report
-    if raw == "hip":
-        report = dict(hip_probe())
-        return "hip", "hip", report
-    if raw == "wgpu":
-        report = dict(describe_device("wgpu"))
-        return "wgpu", "wgpu", report
-    report = dict(describe_device("cpu"))
-    return "cpu", "cpu", report
+    if raw in {"cpu", "hip", "wgpu"}:
+        report = dict(describe_device(raw))
+        effective = str(report.get("effective_backend", raw)).strip().lower() or raw
+        return effective, effective, report
+    raise ValueError(f"unknown SpiralSession backend label {backend!r}")
 
 
 def trace_wgpu_first_runtime(
@@ -8582,7 +8750,7 @@ def trace_wgpu_first_runtime(
         }
 
         try:
-            plan_obj = plan_topk(rows=rows, cols=cols, k=k, backend=effective_backend)
+            plan_obj = session.plan_topk(rows=rows, cols=cols, k=k)
             report["planner"] = {
                 "kind": getattr(plan_obj, "kind", "topk"),
                 "requested_backend": getattr(
@@ -8600,6 +8768,11 @@ def trace_wgpu_first_runtime(
                 "k": int(getattr(plan_obj, "k", k)),
                 "workgroup": int(getattr(plan_obj, "workgroup", 0)),
                 "lanes": int(getattr(plan_obj, "lanes", 0)),
+                "runtime_execution_plan_output_sha256": getattr(
+                    plan_obj,
+                    "runtime_execution_plan_output_sha256",
+                    None,
+                ),
             }
         except Exception as exc:
             report["planner"] = {"error": str(exc)}

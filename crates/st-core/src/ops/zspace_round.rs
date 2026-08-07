@@ -533,6 +533,7 @@ mod tests {
                 latency_window: None,
             },
             execution_config: ExecutionConfig::default(),
+            runtime_execution_plan_output_sha256: None,
         }
     }
 

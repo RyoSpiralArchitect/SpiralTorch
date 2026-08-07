@@ -732,7 +732,7 @@ impl Module for ToposResonator {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     use st_core::backend::device_caps::DeviceCaps;
     use std::sync::{Arc, Mutex};
 
@@ -915,8 +915,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -945,7 +943,7 @@ mod tests {
             ToposResonator::with_config_and_topos(name, rows, cols, config, topos).unwrap()
         };
 
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_layer = make_layer("cpu");
         let (cpu_output, cpu_grad_input) = {
             let _guard = push_backend_policy(cpu_policy);
@@ -955,7 +953,7 @@ mod tests {
             )
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_layer = make_layer("wgpu");
         let (wgpu_output, wgpu_grad_input) = {
             let _guard = push_backend_policy(wgpu_policy);
@@ -966,11 +964,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         for (cpu, wgpu) in cpu_output.data().iter().zip(wgpu_output.data()) {
             assert!((cpu - wgpu).abs() < 1e-5);
         }

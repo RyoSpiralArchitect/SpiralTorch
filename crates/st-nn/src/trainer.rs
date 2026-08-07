@@ -27,8 +27,8 @@ pub mod selfsup;
 use crate::cloud::CloudTargetSummary;
 use crate::dataset::DataLoader;
 use crate::execution::{
-    push_backend_policy, BackendPolicy, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
-    TrainerExecutionContext,
+    push_backend_policy, BackendPolicy, RuntimeExecutionContext, RuntimeExecutionPlanError,
+    RuntimeExecutionPlanPayload,
 };
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::gnn::RoundtableBandSignal;
@@ -2937,7 +2937,7 @@ fn strict_expected_tensor_backend(
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
     epoch: usize,
-    execution_context: TrainerExecutionContext,
+    execution_context: RuntimeExecutionContext,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -5330,6 +5330,42 @@ impl ModuleTrainer {
         hyper_learning_rate: f32,
         fallback_learning_rate: f32,
     ) -> Result<Self, TrainerOptimizerConfigError> {
+        Self::try_new_with_execution_context(
+            RuntimeExecutionContext::from_device_caps_with_config(caps, execution_config),
+            curvature,
+            hyper_learning_rate,
+            fallback_learning_rate,
+        )
+    }
+
+    /// Creates a trainer from an already materialized Rust execution context.
+    ///
+    /// # Panics
+    ///
+    /// Panics when optimizer controls violate the Rust contract. Use
+    /// [`Self::try_new_with_execution_context`] for untrusted controls.
+    pub fn new_with_execution_context(
+        execution_context: RuntimeExecutionContext,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Self {
+        Self::try_new_with_execution_context(
+            execution_context,
+            curvature,
+            hyper_learning_rate,
+            fallback_learning_rate,
+        )
+        .expect("invalid ModuleTrainer optimizer configuration")
+    }
+
+    /// Tries to create a trainer without rebuilding its execution semantics.
+    pub fn try_new_with_execution_context(
+        execution_context: RuntimeExecutionContext,
+        curvature: f32,
+        hyper_learning_rate: f32,
+        fallback_learning_rate: f32,
+    ) -> Result<Self, TrainerOptimizerConfigError> {
         let optimizer_config = TrainerOptimizerConfig::try_new(
             curvature,
             hyper_learning_rate,
@@ -5365,8 +5401,6 @@ impl ModuleTrainer {
             .map(|value| value.max(0.0))
             .unwrap_or(0.6);
 
-        let execution_context =
-            TrainerExecutionContext::from_device_caps_with_config(caps, execution_config);
         Ok(Self {
             epoch: 0,
             execution_context,
@@ -5942,7 +5976,7 @@ impl ModuleTrainer {
     }
 
     /// Returns the single execution context used by planning and tensor kernels.
-    pub fn execution_context(&self) -> &TrainerExecutionContext {
+    pub fn execution_context(&self) -> &RuntimeExecutionContext {
         &self.execution_context
     }
 
@@ -5967,7 +6001,7 @@ impl ModuleTrainer {
         &mut self,
         plan: &RuntimeExecutionPlanPayload,
     ) -> Result<(), RuntimeExecutionPlanError> {
-        let execution_context = TrainerExecutionContext::try_from_runtime_plan(plan)?;
+        let execution_context = RuntimeExecutionContext::try_from_runtime_plan(plan)?;
         self.execution_context = execution_context;
         Ok(())
     }
@@ -7227,10 +7261,7 @@ impl ModuleTrainer {
     {
         let backend_policy = self.backend_policy();
         schedule
-            .validate_execution_context(
-                backend_policy.device_caps(),
-                backend_policy.execution_config(),
-            )
+            .validate_execution_policy(backend_policy)
             .map_err(|error| TensorError::Generic(error.to_string()))?;
         self.epoch = self.epoch.saturating_add(1);
         let epoch = self.epoch;
@@ -9448,6 +9479,7 @@ mod tests {
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: config,
+            component_resolution: Default::default(),
             component_workloads: vec![
                 RuntimeComponentWorkload::DenseMatmul {
                     rows: 2,
@@ -11525,6 +11557,35 @@ mod tests {
         assert!(error
             .to_string()
             .contains("execution config differs from the trainer execution context"));
+        assert_eq!(trainer.epoch, 0);
+    }
+
+    #[test]
+    fn plan_bound_trainer_rejects_uncommitted_schedule_with_matching_config() {
+        let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
+        let plan = committed_cpu_execution_plan(config);
+        let mut trainer =
+            ModuleTrainer::new_with_execution_config(DeviceCaps::cpu(), config, -1.0, 0.05, 0.01);
+        trainer
+            .bind_runtime_execution_plan(&plan)
+            .expect("runtime plan binds");
+        let uncommitted_planner = RankPlanner::with_execution_config(DeviceCaps::cpu(), config);
+        let schedule =
+            RoundtableSchedule::new(&uncommitted_planner, 1, 1, RoundtableConfig::default());
+        let mut module = IdentityModule;
+        let mut loss = MeanSquaredError::new();
+        let batch = (
+            Tensor::from_vec(1, 1, vec![0.25]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        );
+
+        let error = trainer
+            .train_epoch(&mut module, &mut loss, vec![batch], &schedule)
+            .expect_err("a schedule without the parent commitment must be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("runtime-plan commitment differs"));
         assert_eq!(trainer.epoch, 0);
     }
 
@@ -14781,8 +14842,9 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
     #[test]
-    fn strict_gpu_trainer_rejects_cpu_tensor_backend_fallback() {
+    fn strict_gpu_trainer_keeps_small_tensor_routes_on_wgpu() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 1024);
         let mut trainer =
@@ -14796,23 +14858,18 @@ mod tests {
             Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
         )];
         let mut loss = MeanSquaredError::new();
-        let err = trainer
+        let stats = trainer
             .train_epoch(&mut model, &mut loss, dataset, &schedule)
-            .expect_err("strict GPU trainer should reject non-GPU tensor backend");
+            .expect("strict GPU trainer should keep thresholded operations on WGPU");
 
-        match err {
-            TensorError::BackendFailure { backend, message } => {
-                assert_eq!(backend, "wgpu");
-                assert!(
-                    message.contains("SPIRALTORCH_STRICT_GPU")
-                        || message.contains("wgpu")
-                        || message.contains("WGPU"),
-                    "unexpected strict GPU message: {message}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-        assert_eq!(*model.weight().value(), before);
+        assert_eq!(stats.batches, 1);
+        assert_eq!(stats.tensor_backend.fallbacks, 0);
+        assert_eq!(stats.tensor_backend.backend_cpu, 0);
+        assert_eq!(
+            stats.tensor_backend.backend_wgpu,
+            stats.tensor_backend.ops_total
+        );
+        assert_ne!(*model.weight().value(), before);
     }
 
     #[test]
