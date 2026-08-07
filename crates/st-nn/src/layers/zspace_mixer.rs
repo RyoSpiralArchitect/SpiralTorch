@@ -358,7 +358,7 @@ mod st_mixer_tests {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
@@ -466,9 +466,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -486,7 +483,7 @@ mod tests {
             ((row * 23 + col * 11) % 13) as f32 * 0.027 - 0.16
         })
         .unwrap();
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_mixer = ZSpaceMixer::new("mixer_cpu", 4).unwrap();
         for (idx, value) in cpu_mixer
             .gate_mut()
@@ -506,7 +503,7 @@ mod tests {
             cpu_mixer.backward(&input, &grad_output).unwrap()
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_mixer = ZSpaceMixer::new("mixer_wgpu", 4).unwrap();
         for (idx, value) in wgpu_mixer
             .gate_mut()
@@ -526,11 +523,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         assert_eq!(cpu_forward.shape(), wgpu_forward.shape());
         for (idx, (&cpu, &wgpu)) in cpu_forward
             .data()

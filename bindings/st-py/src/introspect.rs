@@ -553,6 +553,11 @@ pub(crate) fn softlogic_feedback(py: Python<'_>) -> PyResult<Option<Py<PySoftlog
 }
 
 #[pyfunction]
+pub(crate) fn clear_zspace_feedback() -> bool {
+    hub::clear_softlogic_z()
+}
+
+#[pyfunction]
 #[pyo3(signature = (*, latest=true, feedback=false))]
 pub(crate) fn describe_zspace(
     py: Python<'_>,
@@ -615,6 +620,7 @@ pub(crate) fn softlogic_signal(py: Python<'_>) -> PyResult<Option<PyObject>> {
 pub(crate) fn register_top_level(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(zspace_snapshot, module)?)?;
     module.add_function(wrap_pyfunction!(softlogic_feedback, module)?)?;
+    module.add_function(wrap_pyfunction!(clear_zspace_feedback, module)?)?;
     module.add_function(wrap_pyfunction!(describe_zspace, module)?)?;
     module.add_function(wrap_pyfunction!(softlogic_signal, module)?)?;
     let _ = py;
@@ -631,12 +637,15 @@ pub(crate) fn register_submodule(_py: Python<'_>, module: &Bound<PyModule>) -> P
     module.add_class::<PySoftlogicZFeedback>()?;
     module.add_function(wrap_pyfunction!(zspace_snapshot, module)?)?;
     module.add_function(wrap_pyfunction!(softlogic_feedback, module)?)?;
+    module.add_function(wrap_pyfunction!(clear_zspace_feedback, module)?)?;
     module.add_function(wrap_pyfunction!(describe_zspace, module)?)?;
     module.add_function(wrap_pyfunction!(softlogic_signal, module)?)?;
     let snapshot = module.getattr("zspace_snapshot")?;
     module.add("snapshot", snapshot)?;
     let feedback = module.getattr("softlogic_feedback")?;
     module.add("feedback", feedback)?;
+    let clear = module.getattr("clear_zspace_feedback")?;
+    module.add("clear", clear)?;
     let describe = module.getattr("describe_zspace")?;
     module.add("describe", describe)?;
     module.add(
@@ -650,9 +659,11 @@ pub(crate) fn register_submodule(_py: Python<'_>, module: &Bound<PyModule>) -> P
             "SoftlogicZFeedback",
             "zspace_snapshot",
             "softlogic_feedback",
+            "clear_zspace_feedback",
             "describe_zspace",
             "snapshot",
             "feedback",
+            "clear",
             "describe",
             "softlogic_signal",
         ],

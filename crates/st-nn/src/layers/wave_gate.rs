@@ -678,7 +678,9 @@ impl Module for WaveGate {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::{
+        push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+    };
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::{BackendKind, DeviceCaps};
     #[cfg(feature = "wgpu")]
@@ -703,9 +705,10 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
-    fn cpu_policy() -> BackendPolicy {
-        BackendPolicy::explicit(
+    fn cpu_policy(tensor_util_wgpu_min_values: usize) -> BackendPolicy {
+        BackendPolicy::explicit_with_config(
             DeviceCaps::cpu(),
+            ExecutionConfig::new(AcceleratorFallback::Allow, tensor_util_wgpu_min_values),
             MatmulBackend::CpuNaive,
             MatmulBackend::CpuNaive,
             LayerNormBackend::Cpu,
@@ -715,9 +718,10 @@ mod tests {
     }
 
     #[cfg(feature = "wgpu")]
-    fn wgpu_policy() -> BackendPolicy {
-        BackendPolicy::explicit(
+    fn wgpu_policy(tensor_util_wgpu_min_values: usize) -> BackendPolicy {
+        BackendPolicy::explicit_with_config(
             BackendKind::Wgpu.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Allow, tensor_util_wgpu_min_values),
             MatmulBackend::GpuWgpu,
             MatmulBackend::GpuWgpu,
             LayerNormBackend::Cpu,
@@ -850,9 +854,6 @@ mod tests {
     #[test]
     fn wave_gate_forward_wgpu_policy_reports_threshold_cpu_route() {
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1024");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -865,16 +866,11 @@ mod tests {
         let gate = WaveGate::new("wg", 4, -1.0, 0.5).unwrap();
         let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
         {
-            let _guard = push_backend_policy(wgpu_policy());
+            let _guard = push_backend_policy(wgpu_policy(1024));
             let _ = gate.forward(&input).unwrap();
         }
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         let events = events.lock().unwrap();
         let (_, route) = events
             .iter()
@@ -1117,11 +1113,11 @@ mod tests {
         .unwrap();
 
         let cpu = {
-            let _guard = push_backend_policy(cpu_policy());
+            let _guard = push_backend_policy(cpu_policy(1));
             cpu_gate.forward(&input).unwrap()
         };
         let wgpu = {
-            let _guard = push_backend_policy(wgpu_policy());
+            let _guard = push_backend_policy(wgpu_policy(1));
             wgpu_gate.forward(&input).unwrap()
         };
         st_tensor::set_thread_meta_observer(previous);
@@ -1177,11 +1173,11 @@ mod tests {
         .unwrap();
 
         let cpu_grad_input = {
-            let _guard = push_backend_policy(cpu_policy());
+            let _guard = push_backend_policy(cpu_policy(1));
             cpu_gate.backward(&input, &grad_output).unwrap()
         };
         let wgpu_grad_input = {
-            let _guard = push_backend_policy(wgpu_policy());
+            let _guard = push_backend_policy(wgpu_policy(1));
             wgpu_gate.backward(&input, &grad_output).unwrap()
         };
 

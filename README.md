@@ -636,8 +636,36 @@ automatically; WASM exposes the same observer as JSON/Object transport instead o
 rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
 not cryptographic hardware attestation, and undeclared workloads remain unobserved.
 
-Bind that committed plan before creating a training schedule so rank planning and
-every tensor kernel share one Rust-owned execution context:
+For ordinary training, let `SpiralSession` capture that contract once. Rank plans,
+trainers, schedules, optimizer checkpoints, and replayed sessions then inherit the
+same Rust-owned commitment instead of reading mutable environment configuration
+again:
+
+```python
+import spiraltorch as st
+
+session = st.SpiralSession(
+    backend="cpu",
+    tensor_util_wgpu_min_values=37,
+)
+rank = session.plan_topk(rows=8, cols=64, k=4)
+trainer = session.trainer()
+
+assert rank.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+assert trainer.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+
+replayed = st.SpiralSession.from_runtime_execution_plan(session.runtime_execution_plan)
+assert replayed.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+```
+
+The returned `runtime_execution_plan` is an isolated copy. Supplying a committed
+plan together with backend, capability, or execution-config overrides fails closed,
+and executable materialization rechecks the receiving Rust build and local runtime.
+`backend="auto"` is only orchestration order: Python asks Rust for an executable
+WGPU plan first and tries CPU only after an expected runtime/configuration rejection.
+
+When a plan is built separately, bind it before creating a training schedule so
+rank planning and every tensor kernel share that same context:
 
 ```python
 import spiraltorch as st
@@ -1021,6 +1049,8 @@ overrides, or `(key, value)` tweaks inline. `st.z.metrics(...)` canonicalises th
 wheel’s metric aliases, `st.z.partial(...)` captures telemetry/weights in a
 `ZSpacePartialBundle`, and `st.z.bundle(...)` (alias `st.z.blend`) merges those
 partials before handing them to `ZSpaceTrainer`.
+Use `st.z.clear()` at run boundaries when process-global softlogic feedback must
+not leak into the next experiment; it returns whether Rust actually removed a value.
 
 Open-topos pressure can now be projected into named learning and inference
 hints. The same signal can damp a local Z-space trainer and tune hosted-model

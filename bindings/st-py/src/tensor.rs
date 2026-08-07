@@ -9,6 +9,8 @@ use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
 use st_core::backend::device_caps::BackendKind;
+#[cfg(feature = "wgpu")]
+use st_core::backend::runtime_probe::backend_runtime_ready;
 use st_core::backend::runtime_probe::resolve_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{
@@ -1481,7 +1483,7 @@ fn init_backend(label: &str) -> PyResult<bool> {
         )),
         "auto" | "cpu" | "faer" | "simd" | "cpu-simd" | "naive" => Ok(true),
         #[cfg(feature = "wgpu")]
-        "wgpu" => Ok(true),
+        "wgpu" => Ok(backend_runtime_ready(BackendKind::Wgpu)),
         other => Err(PyValueError::new_err(format!(
             "unknown backend label '{other}'"
         ))),

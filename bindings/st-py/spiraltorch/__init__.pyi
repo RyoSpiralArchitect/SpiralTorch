@@ -459,8 +459,16 @@ def evaluate_runtime_execution_plan(
     required_native_components: object = ...,
 ) -> Dict[str, object]: ...
 
+def require_executable_runtime_execution_plan(
+    payload: Mapping[str, object],
+) -> Dict[str, object]: ...
+
 def observe_runtime_execution_plan_capabilities(
     request: Mapping[str, object],
+) -> Dict[str, object]: ...
+
+def project_runtime_device_probe_contract(
+    payload: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
 def validate_runtime_execution_plan_contract(
@@ -5170,6 +5178,7 @@ class RankPlan:
     effective_backend: Optional[str]
     accelerator_fallback: Literal["allow", "forbid"]
     tensor_util_wgpu_min_values: int
+    runtime_execution_plan_output_sha256: str | None
     rows: int
     cols: int
     k: int
@@ -5231,6 +5240,7 @@ def plan(
     subgroup: Optional[bool] = ...,
     max_workgroup: Optional[int] = ...,
     shared_mem_per_workgroup: Optional[int] = ...,
+    runtime_execution_plan: Mapping[str, Any] | None = ...,
 ) -> RankPlan: ...
 
 def plan_topk(
@@ -5243,6 +5253,7 @@ def plan_topk(
     subgroup: Optional[bool] = ...,
     max_workgroup: Optional[int] = ...,
     shared_mem_per_workgroup: Optional[int] = ...,
+    runtime_execution_plan: Mapping[str, Any] | None = ...,
 ) -> RankPlan: ...
 
 class SpiralSession:
@@ -5252,8 +5263,28 @@ class SpiralSession:
     seed: int | None
     device: str
     device_preflight: Dict[str, object]
+    runtime_execution_plan_output_sha256: str
 
-    def __init__(self, backend: str = ..., seed: int | None = ...) -> None: ...
+    def __init__(
+        self,
+        backend: str = ...,
+        seed: int | None = ...,
+        *,
+        runtime_execution_plan: Mapping[str, Any] | None = ...,
+        accelerator_fallback: str | None = ...,
+        tensor_util_wgpu_min_values: int | None = ...,
+    ) -> None: ...
+
+    @property
+    def runtime_execution_plan(self) -> Dict[str, Any]: ...
+
+    @classmethod
+    def from_runtime_execution_plan(
+        cls,
+        runtime_execution_plan: Mapping[str, Any],
+        *,
+        seed: int | None = ...,
+    ) -> "SpiralSession": ...
 
     def dataset(
         self,
@@ -5271,7 +5302,31 @@ class SpiralSession:
         max_rows: Optional[int] = ...,
     ) -> "dataset.DataLoader": ...
 
+    def plan(
+        self,
+        kind: Literal["topk", "midk", "bottomk", "fft"],
+        rows: int,
+        cols: int,
+        k: int,
+    ) -> RankPlan: ...
+
     def plan_topk(self, rows: int, cols: int, k: int) -> RankPlan: ...
+
+    def trainer(
+        self,
+        *,
+        curvature: float = ...,
+        hyper_learning_rate: float = ...,
+        fallback_learning_rate: float = ...,
+    ) -> "_NnModuleTrainer": ...
+
+    def module_trainer(
+        self,
+        *,
+        curvature: float = ...,
+        hyper_learning_rate: float = ...,
+        fallback_learning_rate: float = ...,
+    ) -> "_NnModuleTrainer": ...
 
     def close(self) -> None: ...
 
@@ -11043,6 +11098,7 @@ class SpectralLearningRatePolicy:
 
 def zspace_snapshot() -> Optional[ZSpaceRegionDescriptor]: ...
 def softlogic_feedback() -> Optional[SoftlogicZFeedback]: ...
+def clear_zspace_feedback() -> bool: ...
 def describe_zspace(*, latest: bool = ..., feedback: bool = ...) -> Optional[object]: ...
 def softlogic_signal() -> Optional[dict[str, object]]: ...
 
@@ -11626,6 +11682,7 @@ __all__ = [
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",
+    "clear_zspace_feedback",
     "describe_zspace",
     "softlogic_signal",
     "QueryPlan",

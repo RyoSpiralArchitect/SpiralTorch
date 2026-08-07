@@ -4,13 +4,16 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::dataset::{DataLoader, Dataset};
+use crate::execution::{
+    RuntimeExecutionContext, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
+};
 use crate::module::Module;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedule};
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::execution_plan::ExecutionConfig;
 use st_core::backend::unison_heuristics::RankKind;
-use st_core::ops::rank_entry::{plan_rank_with_config, RankPlan};
+use st_core::ops::rank_entry::RankPlan;
 use st_core::runtime::trainer_optimizer::TrainerOptimizerConfig;
 use st_core::telemetry::atlas::{
     AtlasFragment, AtlasFrame, AtlasPerspective, AtlasRoute, AtlasRouteSummary,
@@ -76,8 +79,7 @@ impl BarycenterConfig {
 /// Builder for [`SpiralSession`].
 #[derive(Debug, Clone)]
 pub struct SpiralSessionBuilder {
-    caps: DeviceCaps,
-    execution_config: ExecutionConfig,
+    execution_context: RuntimeExecutionContext,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -90,9 +92,16 @@ pub struct SpiralSessionBuilder {
 impl SpiralSessionBuilder {
     /// Creates a new builder with heuristic defaults for entropy weights and learning rates.
     pub fn new(caps: DeviceCaps) -> Self {
-        Self {
+        let execution_context = RuntimeExecutionContext::from_device_caps_with_config(
             caps,
-            execution_config: ExecutionConfig::from_env(),
+            ExecutionConfig::from_env(),
+        );
+        Self::from_execution_context(execution_context)
+    }
+
+    fn from_execution_context(execution_context: RuntimeExecutionContext) -> Self {
+        Self {
+            execution_context,
             curvature: -1.0,
             hyper_learning_rate: 0.05,
             fallback_learning_rate: 0.01,
@@ -108,20 +117,58 @@ impl SpiralSessionBuilder {
         Self::new(backend.default_caps())
     }
 
-    /// Binds the session to an explicit backend execution contract.
+    /// Creates a builder from a validated committed runtime plan.
+    pub fn try_from_runtime_execution_plan(
+        plan: &RuntimeExecutionPlanPayload,
+    ) -> Result<Self, RuntimeExecutionPlanError> {
+        RuntimeExecutionContext::try_from_runtime_plan(plan).map(Self::from_execution_context)
+    }
+
+    /// Binds the session to an explicit uncommitted execution contract.
+    ///
+    /// Replacing the config deliberately clears any previously committed plan.
     pub fn with_execution_config(mut self, execution_config: ExecutionConfig) -> Self {
-        self.execution_config = execution_config;
+        self.set_execution_config(execution_config);
         self
     }
 
-    /// Updates the backend execution contract in-place.
+    /// Updates the uncommitted backend execution contract in-place.
+    ///
+    /// Replacing the config deliberately clears any previously committed plan.
     pub fn set_execution_config(&mut self, execution_config: ExecutionConfig) {
-        self.execution_config = execution_config;
+        self.execution_context = RuntimeExecutionContext::from_device_caps_with_config(
+            self.execution_context.planner().device_caps(),
+            execution_config,
+        );
     }
 
     /// Returns the execution contract that will be inherited by the session.
     pub const fn execution_config(&self) -> ExecutionConfig {
-        self.execution_config
+        self.execution_context.backend_policy().execution_config()
+    }
+
+    /// Returns the complete Rust-owned execution context inherited by the session.
+    pub const fn execution_context(&self) -> &RuntimeExecutionContext {
+        &self.execution_context
+    }
+
+    /// Atomically replaces the builder context with a validated committed plan.
+    pub fn bind_runtime_execution_plan(
+        &mut self,
+        plan: &RuntimeExecutionPlanPayload,
+    ) -> Result<(), RuntimeExecutionPlanError> {
+        let execution_context = RuntimeExecutionContext::try_from_runtime_plan(plan)?;
+        self.execution_context = execution_context;
+        Ok(())
+    }
+
+    /// Builder-style committed-plan binding.
+    pub fn with_runtime_execution_plan(
+        mut self,
+        plan: &RuntimeExecutionPlanPayload,
+    ) -> Result<Self, RuntimeExecutionPlanError> {
+        self.bind_runtime_execution_plan(plan)?;
+        Ok(self)
     }
 
     /// Sets the hyperbolic curvature enforced by the session.
@@ -285,8 +332,7 @@ impl SpiralSessionBuilder {
         self.validate()?;
         let maintainer = self.maintainer.clone().sanitise();
         Ok(SpiralSession {
-            caps: self.caps,
-            execution_config: self.execution_config,
+            execution_context: self.execution_context,
             curvature: self.curvature,
             hyper_learning_rate: self.hyper_learning_rate,
             fallback_learning_rate: self.fallback_learning_rate,
@@ -304,8 +350,7 @@ impl SpiralSessionBuilder {
 /// and rank planning into a single intuitive surface.
 #[derive(Debug, Clone)]
 pub struct SpiralSession {
-    caps: DeviceCaps,
-    execution_config: ExecutionConfig,
+    execution_context: RuntimeExecutionContext,
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
@@ -551,8 +596,8 @@ impl SpiralSession {
 
     /// Reconstructs a builder seeded from this session.
     pub fn to_builder(&self) -> SpiralSessionBuilder {
-        let mut builder = SpiralSessionBuilder::new(self.caps);
-        builder.set_execution_config(self.execution_config);
+        let mut builder =
+            SpiralSessionBuilder::from_execution_context(self.execution_context.clone());
         builder.set_curvature(self.curvature);
         builder.set_hyper_learning_rate(self.hyper_learning_rate);
         builder.set_fallback_learning_rate(self.fallback_learning_rate);
@@ -567,12 +612,28 @@ impl SpiralSession {
 
     /// Returns the backend capabilities baked into the session.
     pub fn device_caps(&self) -> DeviceCaps {
-        self.caps
+        self.execution_context.planner().device_caps()
     }
 
     /// Returns the stable execution contract shared by this session's plans and trainers.
     pub const fn execution_config(&self) -> ExecutionConfig {
-        self.execution_config
+        self.execution_context.backend_policy().execution_config()
+    }
+
+    /// Returns the complete Rust-owned context shared by plans and trainers.
+    pub const fn execution_context(&self) -> &RuntimeExecutionContext {
+        &self.execution_context
+    }
+
+    /// Returns the canonical plan retained by a plan-bound session.
+    pub fn runtime_execution_plan(&self) -> Option<&RuntimeExecutionPlanPayload> {
+        self.execution_context.runtime_execution_plan()
+    }
+
+    /// Returns the commitment identifying the session's canonical execution plan.
+    pub fn runtime_execution_plan_output_sha256(&self) -> Option<String> {
+        self.execution_context
+            .runtime_execution_plan_output_sha256()
     }
 
     /// Returns the configured capacity of the temporal resonance timeline.
@@ -919,9 +980,8 @@ impl SpiralSession {
 
     /// Builds a module trainer preloaded with the session learning rates.
     pub fn trainer(&self) -> ModuleTrainer {
-        ModuleTrainer::new_with_execution_config(
-            self.caps,
-            self.execution_config,
+        ModuleTrainer::new_with_execution_context(
+            self.execution_context.clone(),
             self.curvature,
             self.hyper_learning_rate,
             self.fallback_learning_rate,
@@ -943,7 +1003,7 @@ impl SpiralSession {
 
     /// Computes the rank plan for the requested selection.
     pub fn plan_rank(&self, kind: RankKind, rows: u32, cols: u32, k: u32) -> RankPlan {
-        plan_rank_with_config(kind, rows, cols, k, self.caps, self.execution_config)
+        self.execution_context.planner().plan(kind, rows, cols, k)
     }
 
     /// Produces a barycenter using the session defaults.
@@ -1098,13 +1158,70 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
-    use st_core::backend::execution_plan::AcceleratorFallback;
+    use st_core::backend::execution_plan::{
+        evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+        AcceleratorFallback, RuntimeComponentWorkload, RuntimeExecutionComponent,
+        RuntimeExecutionPlanRequest, RuntimeTensorUtilOperation,
+    };
+    use st_core::backend::runtime_probe::{
+        evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
+    };
     use st_core::telemetry::hub;
     use st_core::telemetry::maintainer::MaintainerStatus;
     use st_tensor::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
         Tensor::from_vec(1, a.len(), a.to_vec()).unwrap()
+    }
+
+    fn committed_cpu_execution_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
+        let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU runtime probe");
+        let request = RuntimeExecutionPlanRequest {
+            runtime_probe,
+            execution_config: config,
+            component_workloads: vec![
+                RuntimeComponentWorkload::DenseMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::PrepackedMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                    bias: true,
+                },
+                RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
+                RuntimeComponentWorkload::Attention {
+                    contexts: 1,
+                    sequence: 2,
+                    head_dim: 4,
+                    z_bias: true,
+                    attn_bias: true,
+                },
+                RuntimeComponentWorkload::Softmax { rows: 2, cols: 8 },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::Scale,
+                    rows: 32,
+                    cols: 64,
+                },
+            ],
+            component_capabilities: Vec::new(),
+            tensor_util_values: None,
+            required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
+        };
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("CPU component capability observation");
+        evaluate_runtime_execution_plan(request).expect("committed CPU execution plan")
     }
 
     #[test]
@@ -1144,6 +1261,94 @@ mod tests {
             session.to_builder().build().unwrap().execution_config(),
             execution_config
         );
+    }
+
+    #[test]
+    fn session_retains_committed_plan_across_rank_trainer_checkpoint_and_rebuild() {
+        let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
+        let plan = committed_cpu_execution_plan(execution_config);
+        let session = SpiralSessionBuilder::try_from_runtime_execution_plan(&plan)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert_eq!(session.device_caps(), DeviceCaps::cpu());
+        assert_eq!(session.execution_config(), execution_config);
+        assert_eq!(session.runtime_execution_plan(), Some(&plan));
+        assert_eq!(
+            session.runtime_execution_plan_output_sha256().as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+        let rank_plan = session.plan_rank(RankKind::TopK, 4, 128, 8);
+        assert_eq!(rank_plan.execution_config, execution_config);
+        assert_eq!(
+            rank_plan.runtime_execution_plan_output_sha256(),
+            Some(plan.output_sha256.as_str())
+        );
+        let schedule = session.roundtable(1, 1, RoundtableConfig::default());
+        schedule
+            .validate_execution_policy(session.execution_context().backend_policy())
+            .unwrap();
+
+        let mut module = Linear::new("plan_bound_session", 1, 1).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let trainer = session.trainer();
+        assert_eq!(trainer.runtime_execution_plan(), Some(&plan));
+        let checkpoint = trainer.optimizer_checkpoint(&module).unwrap();
+        assert_eq!(
+            checkpoint
+                .topology
+                .runtime_execution_plan_output_sha256
+                .as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+
+        let rebuilt = session.to_builder().build().unwrap();
+        assert_eq!(rebuilt.runtime_execution_plan(), Some(&plan));
+        assert_eq!(
+            rebuilt.runtime_execution_plan_output_sha256(),
+            session.runtime_execution_plan_output_sha256()
+        );
+    }
+
+    #[test]
+    fn session_builder_plan_binding_is_atomic_and_explicit_config_clears_commitment() {
+        let initial_config = ExecutionConfig::new(AcceleratorFallback::Allow, 1024);
+        let mut builder = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_execution_config(initial_config);
+        let plan =
+            committed_cpu_execution_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
+        let mut tampered = plan.clone();
+        tampered.output_sha256 = "0".repeat(64);
+
+        builder
+            .bind_runtime_execution_plan(&tampered)
+            .expect_err("tampered plan must not replace the builder context");
+        assert_eq!(
+            builder.execution_context().planner().device_caps(),
+            DeviceCaps::wgpu(32, true, 256)
+        );
+        assert_eq!(builder.execution_config(), initial_config);
+        assert!(builder
+            .execution_context()
+            .runtime_execution_plan()
+            .is_none());
+
+        builder.bind_runtime_execution_plan(&plan).unwrap();
+        assert_eq!(
+            builder
+                .execution_context()
+                .runtime_execution_plan_output_sha256()
+                .as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+
+        builder.set_execution_config(initial_config);
+        assert_eq!(builder.execution_config(), initial_config);
+        assert!(builder
+            .execution_context()
+            .runtime_execution_plan()
+            .is_none());
     }
 
     #[test]

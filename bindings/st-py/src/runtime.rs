@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::backend::execution_plan::{
-    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+    evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities, BackendPolicy,
     RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
 };
 use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
@@ -164,6 +164,18 @@ fn _runtime_device_probe_validate_against(
 }
 
 #[pyfunction]
+fn _runtime_device_probe_transport(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload = runtime_device_probe_payload_from_py(payload)?;
+    payload
+        .validate()
+        .map_err(|error| json_error("runtime-device probe validation failed", error))?;
+    crate::json::json_to_py(py, &payload.to_transport_value())
+}
+
+#[pyfunction]
 fn _runtime_execution_plan_observe_capabilities(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
@@ -216,6 +228,22 @@ fn _runtime_execution_plan_validate(
 }
 
 #[pyfunction]
+fn _runtime_execution_plan_require_executable(
+    py: Python<'_>,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let payload: RuntimeExecutionPlanPayload =
+        request_from_py(payload, "invalid runtime execution-plan payload")?;
+    BackendPolicy::try_from_runtime_plan(&payload)
+        .map_err(|error| json_error("runtime execution-plan materialization failed", error))?;
+    payload_to_py(
+        py,
+        payload,
+        "runtime execution-plan contract encoding failed",
+    )
+}
+
+#[pyfunction]
 fn _runtime_execution_plan_validate_against(
     py: Python<'_>,
     payload: &Bound<'_, PyAny>,
@@ -239,6 +267,7 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_validate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_device_probe_transport, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_device_probe_validate_against,
         parent
@@ -254,6 +283,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_runtime_execution_plan_validate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_execution_plan_require_executable,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_execution_plan_validate_against,
         parent

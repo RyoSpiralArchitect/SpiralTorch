@@ -1,6 +1,15 @@
 """Smoke tests for the newly exposed Z-space introspection helpers."""
 
+import pytest
+
 import spiraltorch as st
+
+
+@pytest.fixture(autouse=True)
+def reset_zspace_feedback():
+    st.z.clear()
+    yield
+    st.z.clear()
 
 
 def test_zspace_describe_returns_none_when_feedback_unset() -> None:
@@ -16,6 +25,10 @@ def test_telemetry_current_is_none_without_feedback() -> None:
 
 def test_nn_softlogic_signal_forwarding() -> None:
     assert st.nn.softlogic_signal() is None
+
+
+def test_zspace_clear_reports_an_empty_feedback_slot() -> None:
+    assert st.z.clear() is False
 
 
 def test_curvature_scheduler_configuration_roundtrip() -> None:

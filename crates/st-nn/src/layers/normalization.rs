@@ -2097,7 +2097,7 @@ impl Module for LayerNorm {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
@@ -2365,9 +2365,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -2377,7 +2374,7 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut layer = LayerNorm::new("demo", 3, -1.0, 1e-5).unwrap();
         let input = demo_input();
         let grad_output = Tensor::from_vec(2, 3, vec![0.1, -0.2, 0.3, -0.1, 0.2, -0.3]).unwrap();
@@ -2388,11 +2385,6 @@ mod tests {
         }
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         let events = events.lock().unwrap();
         let meta = events
             .iter()

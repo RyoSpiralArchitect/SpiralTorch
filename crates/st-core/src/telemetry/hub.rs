@@ -1123,13 +1123,13 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
     result
 }
 
-#[cfg(feature = "psi")]
-pub fn clear_softlogic_z() {
+pub fn clear_softlogic_z() -> bool {
     let previous = {
-        let _guard = psi_lock().lock();
+        #[cfg(feature = "psi")]
+        let _psi_guard = psi_lock().lock();
         write_recover(softlogic_z_cell()).take()
     };
-    drop(previous);
+    previous.is_some()
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.
@@ -2378,6 +2378,9 @@ mod tests {
             .notes
             .iter()
             .any(|note| note.contains("softlogic.event")));
+        assert!(clear_softlogic_z());
+        assert!(get_softlogic_z().is_none());
+        assert!(!clear_softlogic_z());
     }
 
     #[test]

@@ -2709,18 +2709,30 @@ print("top-k:", rec.recommend_top_k(0, 3))
 
 ### SpiralSession backend planning
 
-`SpiralSession` is intentionally small: it records the requested backend,
-captures device preflight evidence, and exposes planner helpers that match the
-Rust runtime. Use it as the first runtime object before deciding whether a run
-should stay on CPU, ask for WGPU, or escalate into a heavier training recipe.
+`SpiralSession` is intentionally small: Python chooses orchestration order while
+Rust captures one executable runtime plan and owns its semantics. Rank planning,
+native trainers, schedules, checkpoints, and replay all inherit that exact plan;
+they do not independently re-read backend heuristics or environment overrides.
 
 ```python
 from spiraltorch import SpiralSession
 
-session = SpiralSession(backend="wgpu")
+session = SpiralSession(backend="wgpu", tensor_util_wgpu_min_values=37)
 print(session.requested_backend, "->", session.effective_backend)
 print("runtime:", session.device_preflight["runtime_status"])
 
-plan = session.plan_topk(rows=8, cols=64, k=4)
-print(plan.kind, plan.effective_backend, plan.tile)
+rank = session.plan_topk(rows=8, cols=64, k=4)
+trainer = session.trainer()
+print(rank.kind, rank.effective_backend, rank.tile)
+assert rank.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+assert trainer.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
+
+replayed = SpiralSession.from_runtime_execution_plan(session.runtime_execution_plan)
+assert replayed.runtime_execution_plan_output_sha256 == session.runtime_execution_plan_output_sha256
 ```
+
+`runtime_execution_plan` returns a defensive copy. Replay validates commitments,
+the receiving Rust build, and current backend readiness. A supplied plan cannot be
+combined with backend/capability/config overrides. For `backend="auto"`, Python
+tries Rust-materialized WGPU first and falls back to CPU only for an expected
+runtime or configuration rejection; unrelated Python plumbing errors propagate.

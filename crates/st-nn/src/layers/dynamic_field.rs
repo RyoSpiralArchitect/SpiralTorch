@@ -2271,7 +2271,7 @@ impl Module for StochasticSchrodingerLayer {
 mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::execution::{push_backend_policy, BackendPolicy};
+    use crate::execution::push_backend_policy;
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
     use std::sync::{Arc, Mutex};
@@ -2765,9 +2765,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -2793,7 +2790,7 @@ mod tests {
             ((row * 13 + col * 2) % 17) as f32 * 0.013 - 0.09
         })
         .unwrap();
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_layer = KleinGordonPropagation::new("kg_cpu", 5, 0.12, 0.1)
             .unwrap()
             .with_wave_speed(0.8)
@@ -2811,7 +2808,7 @@ mod tests {
                 .unwrap()
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_layer = KleinGordonPropagation::new("kg_wgpu", 5, 0.12, 0.1)
             .unwrap()
             .with_wave_speed(0.8)
@@ -2829,11 +2826,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         approx_eq(cpu_step.field.data(), wgpu_step.field.data());
         approx_eq(cpu_step.momentum.data(), wgpu_step.momentum.data());
         approx_eq(
@@ -2878,9 +2870,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -2898,7 +2887,7 @@ mod tests {
             ((row * 5 + col * 11) % 17) as f32 * 0.023 - 0.15
         })
         .unwrap();
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_layer = HamiltonJacobiFlow::new("hj_cpu", 5, 0.1)
             .unwrap()
             .with_mass(1.2)
@@ -2918,7 +2907,7 @@ mod tests {
             cpu_layer.backward(&input, &grad).unwrap()
         };
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_layer = HamiltonJacobiFlow::new("hj_wgpu", 5, 0.1)
             .unwrap()
             .with_mass(1.2)
@@ -2938,11 +2927,6 @@ mod tests {
         };
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         approx_eq(cpu_forward.data(), wgpu_forward.data());
         approx_eq(cpu_grad_input.data(), wgpu_grad_input.data());
         approx_eq(
@@ -2979,9 +2963,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
-        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
-
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -2999,7 +2980,7 @@ mod tests {
             ((row * 7 + col * 13) % 19) as f32 * 0.021 - 0.16
         })
         .unwrap();
-        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let cpu_policy = crate::test_backend_policy(DeviceCaps::cpu(), 1);
         let mut cpu_layer =
             StochasticSchrodingerLayer::with_seed("qs_cpu", 3, 0.4, 0.05, Some(11)).unwrap();
         let cpu_forward = {
@@ -3019,7 +3000,7 @@ mod tests {
             .latest_backward_audit()
             .expect("CPU backward audit");
 
-        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let wgpu_policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 1);
         let mut wgpu_layer =
             StochasticSchrodingerLayer::with_seed("qs_wgpu", 3, 0.4, 0.05, Some(11)).unwrap();
         let (wgpu_forward, wgpu_grad_input) = {
@@ -3039,11 +3020,6 @@ mod tests {
             .expect("WGPU backward audit");
 
         st_tensor::set_thread_meta_observer(previous);
-        match previous_threshold {
-            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
-            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
-        }
-
         approx_eq(cpu_forward.data(), wgpu_forward.data());
         approx_eq(cpu_imaginary.data(), wgpu_imaginary.data());
         approx_eq(cpu_phase.data(), wgpu_phase.data());

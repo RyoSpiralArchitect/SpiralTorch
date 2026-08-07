@@ -959,6 +959,7 @@ declare module "spiraltorch-wasm" {
         shared_mem_per_workgroup?: number;
         strict_accelerator?: boolean;
         tensor_util_wgpu_min_values?: number;
+        runtime_execution_plan?: RuntimeExecutionPlan;
     };
 
     export type RankPlanLatencyWindow = {
@@ -973,7 +974,8 @@ declare module "spiraltorch-wasm" {
 
     export type RankPlanContract = {
         kind: "spiraltorch.rank_plan";
-        contract_version: "spiraltorch.rank_plan.v1";
+        contract_version: "spiraltorch.rank_plan.v2";
+        runtime_execution_plan_output_sha256?: string;
         semantic_owner: "st-core::ops::rank_entry";
         semantic_backend: "rust";
         execution_client: "wasm";

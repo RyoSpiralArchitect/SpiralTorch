@@ -17,6 +17,19 @@ pub(crate) fn test_global_state_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(test)]
+pub(crate) fn test_backend_policy(
+    caps: st_core::backend::device_caps::DeviceCaps,
+    tensor_util_wgpu_min_values: usize,
+) -> st_core::backend::execution_plan::BackendPolicy {
+    use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
+
+    st_core::backend::execution_plan::BackendPolicy::from_device_caps_with_config(
+        caps,
+        ExecutionConfig::new(AcceleratorFallback::Allow, tensor_util_wgpu_min_values),
+    )
+}
+
 pub mod cloud;
 pub mod dataset;
 pub mod discovery;
@@ -50,7 +63,8 @@ pub use execution::{
     current_layer_norm_backend, current_matmul_backend, current_prepacked_matmul_backend,
     current_softmax_backend, current_tensor_util_backend, current_tensor_util_backend_for_values,
     push_backend_policy, AcceleratorFallback, BackendPolicy, BackendPolicyGuard, ExecutionConfig,
-    RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, TrainerExecutionContext,
+    RuntimeExecutionContext, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
+    TrainerExecutionContext,
 };
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,

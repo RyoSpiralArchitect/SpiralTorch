@@ -7,7 +7,7 @@ use crate::execution::current_tensor_util_backend_for_values;
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
-use st_core::backend::execution_plan::ExecutionConfig;
+use st_core::backend::execution_plan::{BackendPolicy, ExecutionConfig};
 use st_core::backend::unison_heuristics::Choice;
 use st_core::heur::free_energy::{BandEnergy as CoreBandEnergy, FreeEnergyError};
 use st_core::ops::rank_entry::{RankPlan, RankPlanError};
@@ -55,6 +55,14 @@ pub enum RoundtableExecutionContextError {
         band: &'static str,
         expected: ExecutionConfig,
         actual: ExecutionConfig,
+    },
+    #[error(
+        "roundtable {band} runtime-plan commitment differs from the trainer execution context: expected {expected:?}, got {actual:?}"
+    )]
+    RuntimePlanCommitmentMismatch {
+        band: &'static str,
+        expected: Option<String>,
+        actual: Option<String>,
     },
 }
 
@@ -221,6 +229,35 @@ impl RoundtableSchedule {
                     expected: expected_config,
                     actual: plan.execution_config,
                 });
+            }
+        }
+        Ok(())
+    }
+
+    /// Verifies capabilities, configuration, and parent runtime-plan identity.
+    pub fn validate_execution_policy(
+        &self,
+        expected_policy: BackendPolicy,
+    ) -> Result<(), RoundtableExecutionContextError> {
+        self.validate_execution_context(
+            expected_policy.device_caps(),
+            expected_policy.execution_config(),
+        )?;
+        let expected = expected_policy.runtime_plan_output_sha256_hex();
+        for (band, plan) in [
+            ("above", &self.above),
+            ("here", &self.here),
+            ("beneath", &self.beneath),
+        ] {
+            let actual = plan.runtime_execution_plan_output_sha256();
+            if actual != expected.as_deref() {
+                return Err(
+                    RoundtableExecutionContextError::RuntimePlanCommitmentMismatch {
+                        band,
+                        expected: expected.clone(),
+                        actual: actual.map(str::to_owned),
+                    },
+                );
             }
         }
         Ok(())

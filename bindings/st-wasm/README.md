@@ -549,8 +549,25 @@ console.log(plan.choice.compaction_tile, plan.device_caps, plan.semantic_owner);
 ```
 
 The browser owns no fallback table or capability clamp. The returned
-`spiraltorch.rank_plan.v1` payload is the same audit snapshot available from Python via
-`RankPlan.contract()`, with only client provenance added by each binding.
+`spiraltorch.rank_plan.v2` payload is the same audit snapshot available from Python via
+`RankPlan.contract()`, with only client provenance added by each binding. A browser
+worker can instead pass a previously committed `runtime_execution_plan`; Rust validates
+and materializes it, and the rank result carries the same parent commitment:
+
+```ts
+const replayedRank = rankPlanObject({
+    kind: "topk",
+    rows: 4,
+    cols: 128,
+    k: 8,
+    runtime_execution_plan: persistedRuntimePlan,
+});
+
+console.log(replayedRank.runtime_execution_plan_output_sha256);
+```
+
+`runtime_execution_plan` is mutually exclusive with backend, capability, and execution
+overrides. Browser-side code cannot reinterpret a blocked or locally unavailable plan.
 
 ## High-level Canvas utilities
 

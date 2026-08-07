@@ -872,16 +872,6 @@ mod tests {
         crate::test_global_state_lock()
     }
 
-    #[cfg(feature = "wgpu")]
-    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        if let Some(value) = previous {
-            std::env::set_var(KEY, value);
-        } else {
-            std::env::remove_var(KEY);
-        }
-    }
-
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
             vec![vec![(0, 0.6), (1, 0.4)], vec![(0, 0.5), (1, 0.5)]],
@@ -1051,9 +1041,6 @@ mod tests {
             return;
         }
         let _lock = observer_lock();
-        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
-        let previous_min = std::env::var(KEY).ok();
-        std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
@@ -1063,14 +1050,12 @@ mod tests {
                 .push((event.op_name, event.data.clone()));
         })));
 
-        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let policy = crate::test_backend_policy(DeviceCaps::wgpu(32, true, 256), 0);
         let bias = {
             let _guard = push_backend_policy(policy);
             normalise(&[0.0, 2.0, -1.0])
         };
         st_tensor::set_thread_meta_observer(previous);
-        restore_tensor_util_wgpu_min_values(previous_min);
-
         assert!((bias.iter().sum::<f32>() - 1.0).abs() < 1e-6);
         let events = events.lock().unwrap();
         let normalise = events

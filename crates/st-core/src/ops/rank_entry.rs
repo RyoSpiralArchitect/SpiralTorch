@@ -10,7 +10,7 @@
 //!   let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
 //!   execute_rank(&plan, backend_impl, tensors);
 use crate::backend::device_caps::{DeviceCaps, DeviceCapsError};
-use crate::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
+use crate::backend::execution_plan::{AcceleratorFallback, BackendPolicy, ExecutionConfig};
 use crate::backend::rank_directives::RankDirectiveError;
 #[cfg(feature = "kdsl")]
 use crate::backend::rank_directives::RankDirectives;
@@ -19,7 +19,7 @@ use crate::backend::unison::{self, Choice, RankKind};
 use serde::Serialize;
 use thiserror::Error;
 
-pub const RANK_PLAN_CONTRACT_VERSION: &str = "spiraltorch.rank_plan.v1";
+pub const RANK_PLAN_CONTRACT_VERSION: &str = "spiraltorch.rank_plan.v2";
 pub const RANK_PLAN_KIND: &str = "spiraltorch.rank_plan";
 pub const RANK_PLAN_SEMANTIC_OWNER: &str = "st-core::ops::rank_entry";
 pub const RANK_PLAN_SEMANTIC_BACKEND: &str = "rust";
@@ -185,7 +185,7 @@ pub struct RankPlanExecutionSnapshot {
     pub tensor_util_wgpu_min_values: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RankPlanSnapshot {
     pub kind: &'static str,
     pub contract_version: &'static str,
@@ -200,6 +200,8 @@ pub struct RankPlanSnapshot {
     pub device_caps: RankPlanDeviceCapsSnapshot,
     pub choice: RankPlanChoiceSnapshot,
     pub execution: RankPlanExecutionSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_execution_plan_output_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -211,6 +213,7 @@ pub struct RankPlan {
     pub device_caps: DeviceCaps,
     pub choice: Choice,
     pub execution_config: ExecutionConfig,
+    pub(crate) runtime_execution_plan_output_sha256: Option<String>,
 }
 
 impl RankPlan {
@@ -384,6 +387,7 @@ impl RankPlan {
                 accelerator_fallback: self.execution_config.accelerator_fallback.as_str(),
                 tensor_util_wgpu_min_values: self.execution_config.tensor_util_wgpu_min_values,
             },
+            runtime_execution_plan_output_sha256: self.runtime_execution_plan_output_sha256.clone(),
         }
     }
 
@@ -411,6 +415,11 @@ impl RankPlan {
     /// Returns the fallback contract captured when this plan was created.
     pub const fn accelerator_fallback(&self) -> AcceleratorFallback {
         self.execution_config.accelerator_fallback
+    }
+
+    /// Returns the committed runtime plan that authorized this rank plan.
+    pub fn runtime_execution_plan_output_sha256(&self) -> Option<&str> {
+        self.runtime_execution_plan_output_sha256.as_deref()
     }
 }
 
@@ -442,6 +451,37 @@ pub fn plan_rank_with_config(
         .expect("rank-plan request must be valid")
 }
 
+/// Plans rank-k from one complete backend policy, retaining its commitment.
+pub fn plan_rank_with_policy(
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    policy: BackendPolicy,
+) -> RankPlan {
+    try_plan_rank_with_policy(kind, rows, cols, k, policy).expect("rank-plan request must be valid")
+}
+
+/// Validates and plans rank-k from one complete backend policy.
+pub fn try_plan_rank_with_policy(
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    policy: BackendPolicy,
+) -> Result<RankPlan, RankPlanError> {
+    let mut plan = try_plan_rank_with_config(
+        kind,
+        rows,
+        cols,
+        k,
+        policy.device_caps(),
+        policy.execution_config(),
+    )?;
+    plan.runtime_execution_plan_output_sha256 = policy.runtime_plan_output_sha256_hex();
+    Ok(plan)
+}
+
 /// Plans rank-k only after validating shape and device capability invariants.
 pub fn try_plan_rank_with_config(
     kind: RankKind,
@@ -461,6 +501,7 @@ pub fn try_plan_rank_with_config(
         device_caps: caps,
         choice,
         execution_config,
+        runtime_execution_plan_output_sha256: None,
     };
     plan.validate()?;
     Ok(plan)
@@ -791,6 +832,7 @@ mod tests {
         assert_eq!(snapshot.device_caps.backend, "wgpu");
         assert_eq!(snapshot.execution.accelerator_fallback, "forbid");
         assert_eq!(snapshot.execution.tensor_util_wgpu_min_values, 4_096);
+        assert!(snapshot.runtime_execution_plan_output_sha256.is_none());
         assert!(snapshot.choice.workgroup > 0);
         assert!(snapshot.choice.latency_window.is_some());
         plan.validate().expect("captured plan remains valid");

@@ -6,7 +6,9 @@ pub use super::execution_capability::{
     RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityState,
     RuntimeComponentCapabilityStatus, RuntimeComponentWorkload, RuntimeTensorUtilOperation,
 };
-use super::runtime_probe::{RuntimeDeviceProbeError, RuntimeDeviceProbePayload};
+use super::runtime_probe::{
+    BackendRuntimeState, RuntimeDeviceProbeError, RuntimeDeviceProbePayload,
+};
 use super::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
     RuntimeDeviceRouteRequest,
@@ -62,6 +64,14 @@ pub enum RuntimeExecutionPlanError {
         component: &'static str,
         planned: String,
         local: String,
+    },
+    #[error(
+        "local runtime for committed backend '{backend}' is not ready ({status}): {diagnostic}"
+    )]
+    LocalRuntimeUnavailable {
+        backend: String,
+        status: String,
+        diagnostic: String,
     },
     #[error(
         "local tensor backend for component '{component}' emitted unsupported execution id '{backend}'"
@@ -540,9 +550,9 @@ impl BackendPolicy {
 
     /// Materializes an executable local policy from a validated committed plan.
     ///
-    /// Cross-build replay remains valid even when the receiving build lacks a
-    /// planned backend. Conversion is the explicit boundary that rejects such
-    /// a local feature mismatch instead of silently changing the plan.
+    /// Artifact validation remains deterministic across builds. Conversion is
+    /// the explicit boundary that rejects a local feature or runtime mismatch
+    /// instead of silently changing the committed plan.
     pub fn try_from_runtime_plan(
         plan: &RuntimeExecutionPlanPayload,
     ) -> Result<Self, RuntimeExecutionPlanError> {
@@ -552,6 +562,7 @@ impl BackendPolicy {
                 blockers: plan.blockers.clone(),
             });
         }
+        ensure_local_runtime_ready(&BackendRuntimeState::observe(plan.effective_backend))?;
         let mut policy = Self::from_runtime_tensor_policy(
             plan.request.runtime_probe.caps(),
             plan.request.execution_config,
@@ -695,6 +706,22 @@ impl BackendPolicy {
             status,
         }
     }
+}
+
+fn ensure_local_runtime_ready(
+    state: &BackendRuntimeState,
+) -> Result<(), RuntimeExecutionPlanError> {
+    if state.runtime_ready {
+        return Ok(());
+    }
+    Err(RuntimeExecutionPlanError::LocalRuntimeUnavailable {
+        backend: state.backend.as_str().to_owned(),
+        status: state.runtime_status.as_str().to_owned(),
+        diagnostic: state
+            .runtime_error
+            .clone()
+            .unwrap_or_else(|| state.recommendation.clone()),
+    })
 }
 
 /// Result of applying the typed utility-kernel threshold to one tensor operation.
@@ -1497,7 +1524,8 @@ fn wgpu_tensor_util_backend() -> TensorUtilBackend {
 mod tests {
     use super::*;
     use crate::backend::runtime_probe::{
-        evaluate_runtime_device_probe, resolve_backend, RuntimeDeviceProbeRequest,
+        evaluate_runtime_device_probe, resolve_backend, BackendRuntimeStatus,
+        RuntimeDeviceProbeRequest,
     };
     use spiral_config::execution::{AcceleratorFallback, ExecutionConfig};
 
@@ -1600,6 +1628,24 @@ mod tests {
                 component: "attention",
                 backend: "future_accelerator".to_owned(),
             }
+        );
+    }
+
+    #[test]
+    fn executable_plan_materialization_rejects_an_unavailable_local_runtime() {
+        let mut unavailable = BackendRuntimeState::observe(BackendKind::Cpu);
+        unavailable.backend = BackendKind::Wgpu;
+        unavailable.runtime_ready = false;
+        unavailable.runtime_status = BackendRuntimeStatus::InitializationFailed;
+        unavailable.runtime_error = Some("test adapter is unavailable".to_owned());
+
+        assert_eq!(
+            ensure_local_runtime_ready(&unavailable),
+            Err(RuntimeExecutionPlanError::LocalRuntimeUnavailable {
+                backend: "wgpu".to_owned(),
+                status: "initialization_failed".to_owned(),
+                diagnostic: "test adapter is unavailable".to_owned(),
+            })
         );
     }
 

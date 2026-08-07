@@ -8,6 +8,40 @@ import pytest
 from ._native_loader import require_native, require_wgpu_runtime
 
 
+def _install_fake_session_execution_plan_runtime(monkeypatch, st) -> None:
+    def _evaluate(report, **kwargs):
+        backend = str(report["backend"])
+        marker = "a" if backend == "wgpu" else "b"
+        return {
+            "requested_backend": backend,
+            "effective_backend": backend,
+            "output_sha256": marker * 64,
+            "request": {
+                "execution_config": {
+                    "accelerator_fallback": kwargs.get(
+                        "accelerator_fallback", "allow"
+                    ),
+                    "tensor_util_wgpu_min_values": kwargs.get(
+                        "tensor_util_wgpu_min_values", 1024
+                    ),
+                }
+            },
+        }
+
+    monkeypatch.setattr(
+        st,
+        "evaluate_runtime_execution_plan",
+        _evaluate,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        st,
+        "require_executable_runtime_execution_plan",
+        lambda payload: dict(payload),
+        raising=False,
+    )
+
+
 def test_probe_gpu_path_exposes_runtime_route_visibility() -> None:
     st = require_native()
 
@@ -469,7 +503,7 @@ def test_rank_plan_exposes_the_rust_owned_audit_contract() -> None:
     contract = plan.contract()
 
     assert contract["kind"] == "spiraltorch.rank_plan"
-    assert contract["contract_version"] == "spiraltorch.rank_plan.v1"
+    assert contract["contract_version"] == "spiraltorch.rank_plan.v2"
     assert contract["semantic_owner"] == "st-core::ops::rank_entry"
     assert contract["semantic_backend"] == "rust"
     assert contract["execution_client"] == "python"
@@ -583,11 +617,12 @@ def test_session_auto_prefers_wgpu_backend_by_default(
 
     monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
     monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+    _install_fake_session_execution_plan_runtime(monkeypatch, st)
 
     session = st.SpiralSession()
 
     assert session.backend == "auto"
-    assert session.requested_backend == "auto"
+    assert session.requested_backend == "wgpu"
     assert session.effective_backend == "wgpu"
     assert session.device == "wgpu"
     assert session.device_preflight["backend"] == "wgpu"
@@ -612,15 +647,34 @@ def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
 
     monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
     monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+    _install_fake_session_execution_plan_runtime(monkeypatch, st)
 
     session = st.SpiralSession()
 
     assert session.backend == "auto"
-    assert session.requested_backend == "auto"
+    assert session.requested_backend == "cpu"
     assert session.effective_backend == "cpu"
     assert session.device == "cpu"
     assert session.device_preflight["backend"] == "cpu"
     assert calls == ["wgpu", "cpu"]
+
+
+def test_session_auto_does_not_hide_python_plumbing_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(backend: str) -> bool:
+        calls.append(str(backend))
+        raise AttributeError("broken Python adapter")
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+
+    with pytest.raises(AttributeError, match="broken Python adapter"):
+        st.SpiralSession()
+
+    assert calls == ["wgpu"]
 
 
 def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
@@ -636,7 +690,14 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
     def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
         return {"backend": str(backend), "lane_width": 32}
 
-    def _patched_plan_topk(*, rows: int, cols: int, k: int, backend: str):
+    def _patched_plan_topk(
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        runtime_execution_plan,
+    ):
+        backend = str(runtime_execution_plan["effective_backend"])
         return SimpleNamespace(
             kind="topk",
             requested_backend=backend,
@@ -646,6 +707,9 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
             k=k,
             workgroup=128,
             lanes=32,
+            runtime_execution_plan_output_sha256=runtime_execution_plan[
+                "output_sha256"
+            ],
         )
 
     class _FakeTensor:
@@ -687,6 +751,7 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
     monkeypatch.delattr(st, "build_info", raising=False)
     monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
     monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+    _install_fake_session_execution_plan_runtime(monkeypatch, st)
     monkeypatch.setattr(st, "plan_topk", _patched_plan_topk, raising=False)
     monkeypatch.setattr(st, "Tensor", _FakeTensor, raising=False)
     monkeypatch.setattr(st, "_resolve_rs_attr", _patched_resolve_rs_attr, raising=False)
@@ -705,6 +770,7 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
     assert report["device_preflight"]["backend"] == "wgpu"
     assert report["planner"]["k"] == 4
     assert report["planner"]["effective_backend"] == "wgpu"
+    assert report["planner"]["runtime_execution_plan_output_sha256"] == "a" * 64
     assert report["tensor_operation"]["requested_backend"] == "wgpu"
     assert report["tensor_operation"]["ok"] is True
     assert report["tensor_operation"]["row_sums"] == pytest.approx([1.0, 1.0])

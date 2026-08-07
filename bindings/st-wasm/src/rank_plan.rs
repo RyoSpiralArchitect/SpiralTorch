@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use serde_json::Value;
 use st_core::backend::device_caps::{BackendKind, DeviceCapsOverrides};
-use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
+use st_core::backend::execution_plan::{
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
+};
 use st_core::backend::runtime_probe::resolve_backend;
 use st_core::backend::unison::RankKind;
-use st_core::ops::rank_entry::try_plan_rank_with_config;
+use st_core::ops::rank_entry::{try_plan_rank_with_config, try_plan_rank_with_policy};
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -21,8 +23,8 @@ struct RankPlanRequest {
     rows: u32,
     cols: u32,
     k: u32,
-    #[serde(default = "default_backend")]
-    backend: String,
+    #[serde(default)]
+    backend: Option<String>,
     #[serde(default)]
     lane_width: Option<u32>,
     #[serde(default)]
@@ -32,13 +34,11 @@ struct RankPlanRequest {
     #[serde(default)]
     shared_mem_per_workgroup: Option<u32>,
     #[serde(default)]
-    strict_accelerator: bool,
+    strict_accelerator: Option<bool>,
     #[serde(default)]
     tensor_util_wgpu_min_values: Option<usize>,
-}
-
-fn default_backend() -> String {
-    "wgpu".to_owned()
+    #[serde(default)]
+    runtime_execution_plan: Option<RuntimeExecutionPlanPayload>,
 }
 
 fn request_from_value(value: Value) -> Result<RankPlanRequest, String> {
@@ -91,7 +91,35 @@ fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
         .kind
         .parse::<RankKind>()
         .map_err(|error| error.to_string())?;
-    let requested_backend = requested_backend(&request.backend)?;
+    if let Some(runtime_execution_plan) = request.runtime_execution_plan {
+        if request.backend.is_some()
+            || request.lane_width.is_some()
+            || request.subgroup.is_some()
+            || request.max_workgroup.is_some()
+            || request.shared_mem_per_workgroup.is_some()
+            || request.strict_accelerator.is_some()
+            || request.tensor_util_wgpu_min_values.is_some()
+        {
+            return Err(
+                "runtime_execution_plan cannot be combined with backend, device-capability, or execution-config overrides"
+                    .to_owned(),
+            );
+        }
+        let policy = BackendPolicy::try_from_runtime_plan(&runtime_execution_plan)
+            .map_err(|error| error.to_string())?;
+        let plan = try_plan_rank_with_policy(kind, request.rows, request.cols, request.k, policy)
+            .map_err(|error| error.to_string())?;
+        let mut payload =
+            serde_json::to_value(plan.snapshot()).expect("rank-plan snapshot is serializable");
+        add_client_fields(
+            &mut payload,
+            runtime_execution_plan.requested_backend,
+            runtime_execution_plan.effective_backend,
+        );
+        return Ok(payload);
+    }
+
+    let requested_backend = requested_backend(request.backend.as_deref().unwrap_or("wgpu"))?;
     let backend_resolution = resolve_backend(requested_backend);
     let effective_backend = backend_resolution.effective_backend;
     let caps = effective_backend
@@ -105,7 +133,7 @@ fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
         .map_err(|error| error.to_string())?;
     let default_execution = ExecutionConfig::default();
     let execution_config = ExecutionConfig::new(
-        if request.strict_accelerator {
+        if request.strict_accelerator.unwrap_or(false) {
             AcceleratorFallback::Forbid
         } else {
             AcceleratorFallback::Allow
@@ -150,10 +178,38 @@ pub fn rank_plan_object(request: &JsValue) -> Result<JsValue, JsValue> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use st_core::backend::device_caps::DeviceCaps;
+    use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+    use st_core::backend::execution_plan::{
+        evaluate_runtime_execution_plan, RuntimeExecutionPlanRequest,
+    };
+    use st_core::backend::runtime_probe::{
+        evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
+    };
     use st_core::ops::rank_entry::{
         try_plan_rank_with_config, RANK_PLAN_CONTRACT_VERSION, RANK_PLAN_SEMANTIC_OWNER,
     };
+
+    fn committed_cpu_execution_plan() -> RuntimeExecutionPlanPayload {
+        let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU runtime probe");
+        evaluate_runtime_execution_plan(RuntimeExecutionPlanRequest {
+            runtime_probe,
+            execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 37),
+            component_workloads: Vec::new(),
+            component_capabilities: Vec::new(),
+            tensor_util_values: None,
+            required_native_components: Vec::new(),
+        })
+        .expect("committed CPU execution plan")
+    }
 
     #[test]
     fn wasm_rank_plan_uses_the_rust_owned_contract() {
@@ -215,6 +271,59 @@ mod tests {
         let rust = serde_json::to_value(rust.snapshot()).expect("serializable Rust snapshot");
 
         assert_eq!(wasm, rust);
+    }
+
+    #[test]
+    fn wasm_rank_plan_reuses_one_committed_runtime_plan() {
+        let runtime_plan = committed_cpu_execution_plan();
+        let commitment = runtime_plan.output_sha256.clone();
+        let request = request_from_value(json!({
+            "kind": "topk",
+            "rows": 4,
+            "cols": 128,
+            "k": 8,
+            "runtime_execution_plan": runtime_plan,
+        }))
+        .expect("committed plan request");
+        let payload = rank_plan_value(request).expect("plan-bound WASM rank plan");
+
+        assert_eq!(payload["requested_backend"], "cpu");
+        assert_eq!(payload["effective_backend"], "cpu");
+        assert_eq!(payload["execution"]["tensor_util_wgpu_min_values"], 37);
+        assert_eq!(payload["runtime_execution_plan_output_sha256"], commitment);
+    }
+
+    #[test]
+    fn wasm_rank_plan_rejects_runtime_plan_overrides_and_tampering() {
+        let runtime_plan = committed_cpu_execution_plan();
+        let mixed = request_from_value(json!({
+            "kind": "topk",
+            "rows": 2,
+            "cols": 8,
+            "k": 2,
+            "backend": "cpu",
+            "runtime_execution_plan": runtime_plan,
+        }))
+        .expect("mixed request reaches semantic guard");
+        assert!(rank_plan_value(mixed)
+            .expect_err("runtime-plan overrides must fail")
+            .contains("cannot be combined"));
+
+        let mut tampered = committed_cpu_execution_plan();
+        tampered.output_sha256 = "0".repeat(64);
+        let request = request_from_value(json!({
+            "kind": "topk",
+            "rows": 2,
+            "cols": 8,
+            "k": 2,
+            "runtime_execution_plan": tampered,
+        }))
+        .expect("tampered request reaches Rust validation");
+        let error = rank_plan_value(request).expect_err("tampered runtime plan must fail");
+        assert!(
+            error.contains("output_sha256") || error.contains("commitment"),
+            "unexpected tamper error: {error}"
+        );
     }
 
     #[test]

@@ -44,8 +44,10 @@ __all__ = [
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
     "evaluate_runtime_execution_plan",
+    "require_executable_runtime_execution_plan",
     "observe_runtime_execution_plan_capabilities",
     "evaluate_runtime_device_route",
+    "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
@@ -958,6 +960,24 @@ def validate_runtime_execution_plan_contract(
     return dict(validated)
 
 
+def require_executable_runtime_execution_plan(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate and materialize a committed plan through the Rust backend policy."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    require = _native_runtime_execution_plan_function(
+        "_runtime_execution_plan_require_executable"
+    )
+    executable = require(dict(payload))
+    if not isinstance(executable, Mapping):
+        raise RuntimeError(
+            "runtime execution-plan materializer returned a non-mapping payload"
+        )
+    return dict(executable)
+
+
 def validate_runtime_device_probe_contract(
     payload: Mapping[str, object],
     *,
@@ -982,6 +1002,20 @@ def validate_runtime_device_probe_contract(
     if not isinstance(validated, Mapping):
         raise RuntimeError("runtime-device probe validator returned a non-mapping payload")
     return dict(validated)
+
+
+def project_runtime_device_probe_contract(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Project a canonical Rust probe into its compatibility-rich client view."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    project = _native_runtime_device_probe_function("_runtime_device_probe_transport")
+    projected = project(dict(payload))
+    if not isinstance(projected, Mapping):
+        raise RuntimeError("runtime-device probe projector returned a non-mapping payload")
+    return dict(projected)
 
 
 def _native_runtime_device_route_contract(

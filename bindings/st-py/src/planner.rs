@@ -9,7 +9,9 @@ use st_core::backend::cuda_exec::CudaExecutor;
 use st_core::backend::device_caps::{
     BackendKind, DeviceCaps, DeviceCapsError, DeviceCapsOverrides,
 };
-use st_core::backend::execution_plan::{AcceleratorFallback, ExecutionConfig};
+use st_core::backend::execution_plan::{
+    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
+};
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
 #[cfg(feature = "cuda")]
@@ -29,7 +31,9 @@ use st_core::ops::rank_entry::execute_rank;
 use crate::json::json_to_py;
 #[cfg(feature = "kdsl")]
 use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
-use st_core::ops::rank_entry::{try_plan_rank, try_plan_rank_with_config, RankPlan};
+use st_core::ops::rank_entry::{
+    try_plan_rank, try_plan_rank_with_config, try_plan_rank_with_policy, RankPlan,
+};
 
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
 pub(crate) struct PyRankPlan {
@@ -124,6 +128,13 @@ impl PyRankPlan {
     #[getter]
     fn tensor_util_wgpu_min_values(&self) -> usize {
         self.inner.execution_config.tensor_util_wgpu_min_values
+    }
+
+    #[getter]
+    fn runtime_execution_plan_output_sha256(&self) -> Option<String> {
+        self.inner
+            .runtime_execution_plan_output_sha256()
+            .map(str::to_owned)
     }
 
     #[getter]
@@ -544,8 +555,43 @@ fn plan_impl(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    runtime_execution_plan: Option<&Bound<'_, PyAny>>,
     kind_override: Option<&'static str>,
 ) -> PyResult<PyRankPlan> {
+    if let Some(runtime_execution_plan) = runtime_execution_plan {
+        if backend.is_some()
+            || lane_width.is_some()
+            || subgroup.is_some()
+            || max_workgroup.is_some()
+            || shared_mem_per_workgroup.is_some()
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "runtime_execution_plan cannot be combined with backend or device-capability overrides",
+            ));
+        }
+        let value = crate::json::py_to_json(runtime_execution_plan)?;
+        let runtime_execution_plan: RuntimeExecutionPlanPayload = serde_json::from_value(value)
+            .map_err(|error| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "invalid runtime execution-plan payload: {error}"
+                ))
+            })?;
+        let policy =
+            BackendPolicy::try_from_runtime_plan(&runtime_execution_plan).map_err(|error| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "runtime execution-plan binding failed: {error}"
+                ))
+            })?;
+        let plan = try_plan_rank_with_policy(kind, rows, cols, k, policy)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        return Ok(PyRankPlan::from_plan_with_metadata(
+            plan,
+            kind_override,
+            Some(backend_label(runtime_execution_plan.requested_backend)),
+            Some(backend_label(runtime_execution_plan.effective_backend)),
+        ));
+    }
+
     let backend_resolution = parse_backend_for_planner(backend)?;
     let backend_kind = backend_resolution.effective_backend;
     let caps = build_caps(
@@ -567,7 +613,7 @@ fn plan_impl(
 }
 
 #[pyfunction]
-#[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+#[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, runtime_execution_plan=None))]
 #[allow(clippy::too_many_arguments)]
 fn plan(
     kind: &str,
@@ -579,6 +625,7 @@ fn plan(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    runtime_execution_plan: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyRankPlan> {
     let (rank_kind, kind_override) = if kind.eq_ignore_ascii_case("fft") {
         (RankKind::TopK, Some("fft"))
@@ -595,12 +642,13 @@ fn plan(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        runtime_execution_plan,
         kind_override,
     )
 }
 
 #[pyfunction]
-#[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+#[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, runtime_execution_plan=None))]
 #[allow(clippy::too_many_arguments)]
 fn plan_topk(
     rows: u32,
@@ -611,6 +659,7 @@ fn plan_topk(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    runtime_execution_plan: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyRankPlan> {
     plan_impl(
         RankKind::TopK,
@@ -622,6 +671,7 @@ fn plan_topk(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        runtime_execution_plan,
         None,
     )
 }
