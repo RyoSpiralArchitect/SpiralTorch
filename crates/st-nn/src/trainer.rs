@@ -14842,6 +14842,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
     #[test]
     fn strict_gpu_trainer_keeps_small_tensor_routes_on_wgpu() {
         let caps = DeviceCaps::wgpu(32, true, 256);
