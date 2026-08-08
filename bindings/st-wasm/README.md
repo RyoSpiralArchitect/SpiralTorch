@@ -433,13 +433,14 @@ const runtime = runtimeDeviceRouteObject({
     required_ready_backends: ["mps"],
 });
 
-console.log(runtime.routes[0].native_ready, runtime.routes[0].route_ready);
+console.log(runtime.routes[0].native_ready, runtime.selection?.effective_backend);
 ```
 
-This reports native MPS honestly as unavailable while preserving a ready WGPU surrogate.
+This reports native MPS honestly as unavailable while selecting its ready WGPU surrogate.
 The browser binding adds only `execution_client: "wasm"`; it owns no readiness precedence
-or fallback heuristic. Contract v4 preserves absent evidence as `unknown`, retains the
-canonical observations, binds the request and output with SHA-256, and rejects conflicting
+or fallback heuristic. Contract v5 separates probe success, native availability, and route
+readiness; preserves absent evidence as `unknown`; commits ordered selection candidates and
+the first ready route; binds the request and output with SHA-256; and rejects conflicting
 claims about one effective backend. `runtimeDeviceRouteValidateObject` and
 `runtimeDeviceRouteValidateAgainstObject` call the same Rust self-validation and replay path;
 unknown routes remain fail-closed for execution.

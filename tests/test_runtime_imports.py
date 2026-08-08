@@ -432,7 +432,7 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertTrue(fields["runtime_device_report_requested"])
         self.assertEqual(
             fields["runtime_device_route_contract_version"],
-            "spiraltorch.runtime_device_route.v4",
+            "spiraltorch.runtime_device_route.v5",
         )
         self.assertEqual(
             fields["runtime_device_route_semantic_owner"],
@@ -446,7 +446,7 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         self.assertEqual(fields["runtime_device_report_backends"], "wgpu,cpu,mps")
         self.assertEqual(
             fields["runtime_device_report_available_backends"],
-            "wgpu,cpu",
+            "wgpu",
         )
         self.assertEqual(fields["runtime_device_report_ready_backends"], "wgpu")
         self.assertEqual(fields["runtime_device_report_error_backends"], "mps")
@@ -454,11 +454,11 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
             fields["runtime_device_report_statuses"],
             "wgpu=kernel_wired,cpu=cpu,mps=error",
         )
-        self.assertTrue(fields["required_runtime_device_backends_passed"])
+        self.assertFalse(fields["required_runtime_device_backends_passed"])
         self.assertFalse(fields["required_runtime_device_ready_backends_passed"])
         self.assertEqual(
             module.runtime_device_requirement_failures(fields),
-            ["runtime_device_not_ready:mps"],
+            ["runtime_device_unavailable:cpu", "runtime_device_not_ready:mps"],
         )
 
     def test_runtime_device_report_keeps_ready_surrogate_diagnostic_available(
@@ -494,14 +494,17 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
             describe_runtime_devices=fake_describe,
         )
 
-        self.assertEqual(fields["runtime_device_report_available_backends"], "mps")
+        self.assertEqual(fields["runtime_device_report_available_backends"], "none")
         self.assertEqual(fields["runtime_device_report_ready_backends"], "mps")
         self.assertEqual(fields["runtime_device_report_error_backends"], "none")
         self.assertEqual(fields["runtime_device_route_fallback_backends"], "mps")
         self.assertEqual(fields["runtime_device_native_not_ready_backends"], "mps")
-        self.assertTrue(fields["required_runtime_device_backends_passed"])
+        self.assertFalse(fields["required_runtime_device_backends_passed"])
         self.assertTrue(fields["required_runtime_device_ready_backends_passed"])
-        self.assertEqual(module.runtime_device_requirement_failures(fields), [])
+        self.assertEqual(
+            module.runtime_device_requirement_failures(fields),
+            ["runtime_device_unavailable:mps"],
+        )
 
     def test_runtime_device_report_preserves_unknown_readiness(self) -> None:
         module = load_runtime_imports()

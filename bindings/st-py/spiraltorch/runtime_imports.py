@@ -170,6 +170,21 @@ def unique_stripped_values(value: object) -> list[str]:
     )
 
 
+def _runtime_device_route_values(value: object, *, field: str) -> list[object]:
+    """Shape route inputs without normalizing Rust-owned semantic labels."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return value.split(",")
+    if isinstance(value, (bytes, bytearray, Mapping)):
+        raise TypeError(f"{field} must be a string or iterable of strings")
+    try:
+        return list(value)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise TypeError(f"{field} must be a string or iterable of strings") from exc
+
+
 def _runtime_import_source_values(
     source: object,
     key: str | None,
@@ -734,7 +749,20 @@ def _default_describe_runtime_devices():
         **kwargs,
     ):
         rows = []
-        backend_labels = unique_stripped_values(backends)
+        canonical_request = evaluate_runtime_device_route(
+            [],
+            requested_backends=_runtime_device_route_values(
+                backends,
+                field="backends",
+            ),
+            required_available_backends=required_available_backends,
+            required_ready_backends=required_ready_backends,
+        )
+        backend_labels = list(canonical_request["requested_backends"])
+        required_available_labels = list(
+            canonical_request["required_available_backends"]
+        )
+        required_ready_labels = list(canonical_request["required_ready_backends"])
         for backend in backend_labels:
             try:
                 row = dict(describe_device(backend, **dict(kwargs)))
@@ -752,8 +780,8 @@ def _default_describe_runtime_devices():
         contract = evaluate_runtime_device_route(
             rows,
             requested_backends=backend_labels,
-            required_available_backends=required_available_backends,
-            required_ready_backends=required_ready_backends,
+            required_available_backends=required_available_labels,
+            required_ready_backends=required_ready_labels,
         )
         contract["reports"] = rows
         return contract
@@ -1123,7 +1151,10 @@ def evaluate_runtime_device_route(
             report_values = list(reports)  # type: ignore[arg-type]
         except TypeError as exc:
             raise TypeError("reports must be an iterable of mappings") from exc
-    requested = unique_stripped_values(requested_backends)
+    requested = _runtime_device_route_values(
+        requested_backends,
+        field="requested_backends",
+    )
     evidence = []
     for index, row in enumerate(report_values):
         if not isinstance(row, Mapping):
@@ -1136,10 +1167,14 @@ def evaluate_runtime_device_route(
         {
             "reports": evidence,
             "requested_backends": requested,
-            "required_available_backends": unique_stripped_values(
-                required_available_backends
+            "required_available_backends": _runtime_device_route_values(
+                required_available_backends,
+                field="required_available_backends",
             ),
-            "required_ready_backends": unique_stripped_values(required_ready_backends),
+            "required_ready_backends": _runtime_device_route_values(
+                required_ready_backends,
+                field="required_ready_backends",
+            ),
         }
     )
 
@@ -1176,6 +1211,7 @@ def runtime_device_report_fields(
         return {
             f"{field_prefix}runtime_device_report_requested": False,
             f"{field_prefix}runtime_device_report_backends": "none",
+            f"{field_prefix}runtime_device_report_successful_probe_backends": "none",
             f"{field_prefix}runtime_device_report_available_backends": "none",
             f"{field_prefix}runtime_device_report_ready_backends": "none",
             f"{field_prefix}runtime_device_report_not_ready_backends": "none",
@@ -1184,6 +1220,7 @@ def runtime_device_report_fields(
             f"{field_prefix}runtime_device_reports_json": "[]",
             f"{field_prefix}required_runtime_device_backends": csv_label(required),
             f"{field_prefix}required_runtime_device_backends_missing": "none",
+            f"{field_prefix}required_runtime_device_backends_unknown": "none",
             f"{field_prefix}required_runtime_device_backends_passed": (
                 None if not required else False
             ),
@@ -1226,6 +1263,7 @@ def runtime_device_report_fields(
         required_ready_backends=ready_required,
     )
     available = list(contract.get("available_backends", []))
+    successful_probes = list(contract.get("successful_probe_backends", []))
     ready = list(contract.get("ready_backends", []))
     not_ready = list(contract.get("not_ready_backends", []))
     error_backends = list(contract.get("error_backends", []))
@@ -1236,11 +1274,15 @@ def runtime_device_report_fields(
         f"{backend}={status_by_backend.get(backend, 'missing')}" for backend in backends
     ]
     missing_required = list(contract.get("required_available_backends_missing", []))
+    unknown_required = list(contract.get("required_available_backends_unknown", []))
     missing_ready_required = list(contract.get("required_ready_backends_missing", []))
     failures = list(contract.get("failures", []))
     return {
         f"{field_prefix}runtime_device_report_requested": True,
         f"{field_prefix}runtime_device_report_backends": csv_label(backends),
+        f"{field_prefix}runtime_device_report_successful_probe_backends": csv_label(
+            successful_probes
+        ),
         f"{field_prefix}runtime_device_report_available_backends": csv_label(available),
         f"{field_prefix}runtime_device_report_ready_backends": csv_label(ready),
         f"{field_prefix}runtime_device_report_not_ready_backends": csv_label(not_ready),
@@ -1290,6 +1332,9 @@ def runtime_device_report_fields(
         f"{field_prefix}required_runtime_device_backends_missing": (
             csv_label(missing_required) if required else "none"
         ),
+        f"{field_prefix}required_runtime_device_backends_unknown": (
+            csv_label(unknown_required) if required else "none"
+        ),
         f"{field_prefix}required_runtime_device_backends_passed": (
             contract.get("required_available_backends_passed")
         ),
@@ -1321,10 +1366,14 @@ def runtime_device_requirement_failures(
         return csv_values(row.get(contract_failures_key))
     failures = []
     if row.get(f"{field_prefix}required_runtime_device_backends_passed") is False:
+        unknown = set(
+            csv_values(row.get(f"{field_prefix}required_runtime_device_backends_unknown"))
+        )
         for backend in sorted(
             csv_values(row.get(f"{field_prefix}required_runtime_device_backends_missing"))
         ):
-            failures.append(f"{failure_prefix}_missing:{backend}")
+            status = "availability_unknown" if backend in unknown else "unavailable"
+            failures.append(f"{failure_prefix}_{status}:{backend}")
     if row.get(f"{field_prefix}required_runtime_device_ready_backends_passed") is False:
         for backend in sorted(
             csv_values(
@@ -1438,7 +1487,9 @@ def runtime_import_preflight_summary_lines(
         lines.append(
             "runtime_device_reports "
             f"backends={report.get('runtime_device_report_backends', 'none')} "
-            "available="
+            "probe_success="
+            f"{report.get('runtime_device_report_successful_probe_backends', 'none')} "
+            "native_available="
             f"{report.get('runtime_device_report_available_backends', 'none')} "
             f"ready={report.get('runtime_device_report_ready_backends', 'none')} "
             f"errors={report.get('runtime_device_report_error_backends', 'none')} "
@@ -1540,7 +1591,7 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "Fail unless a runtime device report is available for this backend. "
+            "Fail unless this native backend is known ready without a surrogate. "
             "May be repeated."
         ),
     )
@@ -1551,7 +1602,8 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "Fail unless this backend is reported runtime-ready. May be repeated."
+            "Fail unless this backend has a runtime-ready direct or surrogate route. "
+            "May be repeated."
         ),
     )
     parser.add_argument(

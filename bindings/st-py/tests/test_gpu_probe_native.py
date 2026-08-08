@@ -175,7 +175,7 @@ def test_describe_runtime_devices_collects_backend_readiness(
     assert st.planner.describe_runtime_devices is st.describe_runtime_devices
     assert summary["backends"] == ["wgpu", "cpu", "mps"]
     assert summary["kind"] == "spiraltorch.runtime_device_route"
-    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v4"
+    assert summary["contract_version"] == "spiraltorch.runtime_device_route.v5"
     assert summary["semantic_owner"] == "st-core::backend::runtime_route"
     assert summary["semantic_backend"] == "rust"
     assert summary["execution_client"] == "python"
@@ -238,6 +238,8 @@ def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> 
 
     assert "evaluate_runtime_device_route" in st.__all__
     assert contract["ready_backends"] == ["mps"]
+    assert contract["successful_probe_backends"] == ["mps"]
+    assert contract["available_backends"] == []
     assert contract["native_ready_backends"] == []
     assert contract["native_not_ready_backends"] == ["mps"]
     assert contract["fallback_backends"] == ["mps"]
@@ -248,7 +250,22 @@ def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> 
     assert contract["routes"][0]["diagnostic"] == "native MPS kernels are not wired"
     assert contract["execution_client"] == "python"
     assert contract["committed"] is True
-    assert contract["passed"] is True
+    assert contract["required_available_backends_passed"] is False
+    assert contract["runtime_readiness"] == "not_ready"
+    assert contract["runtime_ready"] is False
+    assert contract["runtime_ready_basis"] == "required_available_and_ready_backends"
+    assert contract["failures"] == ["runtime_device_unavailable:mps"]
+    assert contract["selection"] is None
+    assert contract["passed"] is False
+
+    route_only = st.evaluate_runtime_device_route(
+        contract["evidence"],
+        requested_backends=["mps"],
+        required_ready_backends=["mps"],
+    )
+    assert route_only["passed"] is True
+    assert route_only["selection"]["requested_backend"] == "mps"
+    assert route_only["selection"]["effective_backend"] == "wgpu"
 
 
 def test_runtime_device_route_preserves_unknown_readiness() -> None:
@@ -286,6 +303,37 @@ def test_runtime_device_route_rejects_conflicting_readiness() -> None:
                 }
             ]
         )
+
+
+def test_runtime_device_route_does_not_hide_duplicate_python_labels() -> None:
+    st = require_native()
+
+    with pytest.raises(ValueError, match="appears more than once"):
+        st.evaluate_runtime_device_route(
+            [{"requested_backend": "wgpu", "runtime_ready": True}],
+            requested_backends=[" WGPU ", "wgpu"],
+        )
+    with pytest.raises(ValueError, match="must not be empty"):
+        st.evaluate_runtime_device_route([], requested_backends="")
+
+
+def test_describe_runtime_devices_validates_labels_before_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _unexpected_probe(backend: str, **_kwargs: object):
+        calls.append(backend)
+        raise AssertionError("invalid labels must fail before probing")
+
+    monkeypatch.setattr(st, "describe_device", _unexpected_probe, raising=False)
+
+    with pytest.raises(ValueError, match="appears more than once"):
+        st.describe_runtime_devices([" WGPU ", "wgpu"])
+    with pytest.raises(ValueError, match="must not be empty"):
+        st.describe_runtime_devices("")
+    assert calls == []
 
 
 def test_runtime_device_route_rejects_cross_report_effective_backend_drift() -> None:
@@ -390,7 +438,8 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v3"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v4"
+    assert plan["runtime_route"]["contract_version"] == "spiraltorch.runtime_device_route.v5"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
     assert plan["execution_client"] == "python"
@@ -443,7 +492,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         st.validate_runtime_execution_plan_contract(tampered)
 
     legacy = json.loads(json.dumps(plan))
-    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v2"
+    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v3"
     with pytest.raises(ValueError, match="contract_version"):
         st.validate_runtime_execution_plan_contract(legacy)
 

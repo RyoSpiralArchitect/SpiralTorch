@@ -22,7 +22,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v3";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v4";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -31,9 +31,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v3\0";
+    b"spiraltorch.runtime_execution_plan.request.v4\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v3\0";
+    b"spiraltorch.runtime_execution_plan.output.v4\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -980,11 +980,7 @@ fn evaluate_canonical_runtime_execution_plan(
         required_available_backends: Vec::new(),
         required_ready_backends: vec![requested_label.clone()],
     })?;
-    let route_row = runtime_route
-        .routes
-        .iter()
-        .find(|row| row.requested_backend == requested_label)
-        .ok_or_else(|| invalid_payload("runtime_route", "missing requested backend route"))?;
+    let route_row = runtime_route.route_for(&requested_label)?;
     if route_row.effective_backend != effective_backend.as_str() {
         return Err(invalid_payload(
             "runtime_route.effective_backend",
@@ -1029,7 +1025,10 @@ fn evaluate_canonical_runtime_execution_plan(
         })
         .collect::<Vec<_>>();
 
-    let runtime_ready = route_row.route_ready && runtime_route.passed;
+    let runtime_ready = runtime_route
+        .selection
+        .as_ref()
+        .is_some_and(|selection| selection.requested_backend == requested_label);
     let surrogate = route_row.fallback;
     let mut blockers = runtime_route
         .failures
@@ -1834,6 +1833,10 @@ mod tests {
             payload.contract_version,
             RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION
         );
+        assert_eq!(
+            payload.runtime_route.contract_version,
+            super::super::runtime_route::RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION
+        );
         assert_eq!(payload.requested_backend, BackendKind::Cpu);
         assert_eq!(payload.effective_backend, BackendKind::Cpu);
         assert!(payload.runtime_ready);
@@ -1925,17 +1928,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v2_payload_is_rejected_at_the_contract_boundary() {
+    fn legacy_v3_payload_is_rejected_at_the_contract_boundary() {
         let mut payload = evaluate_runtime_execution_plan(execution_request(
             probe_for(BackendKind::Cpu),
             AcceleratorFallback::Allow,
         ))
         .expect("current execution plan evaluates");
-        payload.contract_version = "spiraltorch.runtime_execution_plan.v2".to_owned();
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v3".to_owned();
 
         let error = payload
             .validate()
-            .expect_err("v2 and v3 commitments must not share a digest domain");
+            .expect_err("v3 and v4 commitments must not share a digest domain");
         assert!(matches!(
             error,
             RuntimeExecutionPlanError::InvalidPayload {
