@@ -96,6 +96,9 @@ def _install_generic_bindings() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.validate_args_only:
+        print("hf_finetune_bridge_args_valid")
+        return 0
     _install_generic_bindings()
     remote_access_report = _legacy._hf_remote_access_report(args)
     with _legacy._hf_remote_access(args):

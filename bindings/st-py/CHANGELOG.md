@@ -8,7 +8,8 @@
   and loaded native binary, verifies per-update feedback lineage and measured
   dose, and reports bounded guarded-versus-unguarded contrasts without turning
   them into a general efficacy claim. The HF bridge also gains an explicit,
-  Transformers-version-aware CPU training route for exact matched recipes.
+  Transformers-version-aware CPU training route for exact matched recipes and
+  a side-effect-free argument-validation receipt used before plans are sealed.
 - Runtime execution plan v8 and capability observation v4: make row broadcast,
   axis-0 sum, and scaled axis-0 sum Rust-owned typed workloads alongside max
   readout. Mean/Sum GNN readouts now execute forward and backward under one

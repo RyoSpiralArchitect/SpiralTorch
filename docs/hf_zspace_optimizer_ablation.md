@@ -236,10 +236,10 @@ spiral-hf-zspace-optimizer-feedback-study \
   --model-name /path/to/local-model \
   --tokenizer-name /path/to/local-model \
   --train --train-file data/corpus.txt \
-  --validation-split 0.1 \
+  --validation-fraction 0.1 \
   --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
   --max-steps 64 --learning-rate 0.00005 \
-  --model-dtype float32 --training-use-cpu \
+  --model-train-dtype float32 --training-use-cpu \
   --eval-before-train --eval-after-train-policy always
 ```
 

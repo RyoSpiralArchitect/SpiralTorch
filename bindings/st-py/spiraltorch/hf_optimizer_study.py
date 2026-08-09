@@ -79,6 +79,7 @@ _MANAGED_BRIDGE_FLAGS = frozenset(
         "--zspace-optimizer-trajectory-json",
         "--zspace-optimizer-trajectory-out",
         "--min-free-disk-gb",
+        "--validate-args-only",
     }
 )
 _FEEDBACK_CONFIG_FLAGS = {
@@ -654,6 +655,62 @@ def _validate_feedback_base_args(arguments: Sequence[str]) -> int:
     return _validate_base_args(arguments)
 
 
+def _validate_feedback_bridge_arguments(
+    *,
+    bridge_script: Path,
+    python_executable: Path,
+    bridge_args: Sequence[str],
+    launch_cwd: Path,
+) -> dict[str, object]:
+    default_bridge = _default_bridge_script().expanduser().resolve()
+    if bridge_script != default_bridge:
+        return {
+            "status": "not_run_custom_bridge",
+            "ready": None,
+            "validator": None,
+            "validated_argument_count": 0,
+        }
+    command = [
+        str(python_executable),
+        str(bridge_script),
+        *bridge_args,
+        "--validate-args-only",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=launch_cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30.0,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HFZSpaceFactorizedStudyError(
+            "default HF bridge argument validation could not run"
+        ) from exc
+    if result.returncode != 0:
+        detail_lines = [
+            line.strip()
+            for line in (result.stderr or result.stdout).splitlines()
+            if line.strip()
+        ]
+        detail = detail_lines[-1] if detail_lines else f"exit {result.returncode}"
+        raise HFZSpaceFactorizedStudyError(
+            f"default HF bridge rejected study arguments: {detail}"
+        )
+    if "hf_finetune_bridge_args_valid" not in result.stdout.splitlines():
+        raise HFZSpaceFactorizedStudyError(
+            "default HF bridge argument validation returned no success receipt"
+        )
+    return {
+        "status": "ready",
+        "ready": True,
+        "validator": "default_bridge_parse_args",
+        "validated_argument_count": len(bridge_args),
+    }
+
+
 def _resolved_feedback_config(
     requested: Mapping[str, object] | None,
 ) -> dict[str, object]:
@@ -821,6 +878,12 @@ def build_hf_zspace_optimizer_feedback_study_plan(
         raise HFZSpaceFactorizedStudyError(
             "min_free_disk_gb must be finite and non-negative"
         )
+    bridge_argument_validation = _validate_feedback_bridge_arguments(
+        bridge_script=resolved_bridge,
+        python_executable=resolved_python,
+        bridge_args=normalized_args,
+        launch_cwd=resolved_cwd,
+    )
     resolved_feedback_config = _resolved_feedback_config(feedback_config)
     feedback_config_id = _sha256_id(resolved_feedback_config)
     runtime_source = _runtime_source_fingerprint()
@@ -835,6 +898,7 @@ def build_hf_zspace_optimizer_feedback_study_plan(
         "max_steps": max_steps,
         "logging_steps": 1,
         "bridge_args": list(normalized_args),
+        "bridge_argument_validation": bridge_argument_validation,
         "bridge_sha256": _sha256_file(resolved_bridge),
         "launch_cwd": str(resolved_cwd),
         "runtime_source_id": runtime_source["source_id"],

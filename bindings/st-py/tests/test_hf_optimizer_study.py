@@ -642,6 +642,9 @@ def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
     assert first["scientific_spec"]["seeds"] == [13, 23]
     assert first["scientific_spec"]["logging_steps"] == 1
     assert first["scientific_spec"]["feedback_config"] == _feedback_config()
+    assert first["scientific_spec"]["bridge_argument_validation"]["status"] == (
+        "not_run_custom_bridge"
+    )
     assert first["run_count"] == 6
     seed_runs = first["runs"][:3]
     assert [run["arm"] for run in seed_runs] == list(st.HF_ZSPACE_FEEDBACK_STUDY_ARMS)
@@ -658,6 +661,36 @@ def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
     ]
     assert "--zspace-optimizer-feedback-warmup-observations" in guarded["command"]
     assert "--zspace-optimizer-trajectory-json" in guarded["command"]
+
+
+def test_feedback_study_default_bridge_argument_validation_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default_bridge = tmp_path / "bridge.py"
+    default_bridge.write_text("print('bridge')\n", encoding="utf-8")
+    monkeypatch.setattr(study, "_default_bridge_script", lambda: default_bridge)
+    monkeypatch.setattr(
+        study.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=2,
+            stdout="",
+            stderr="bridge.py: error: unrecognized arguments: --stale-name\n",
+        ),
+    )
+
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="unrecognized arguments: --stale-name",
+    ):
+        study._validate_feedback_bridge_arguments(
+            bridge_script=default_bridge,
+            python_executable=Path(sys.executable),
+            bridge_args=["--stale-name"],
+            launch_cwd=tmp_path,
+        )
 
 
 def test_feedback_study_rejects_run_card_config_drift(
@@ -694,6 +727,7 @@ def test_feedback_study_rejects_run_card_config_drift(
         ["--logging-steps", "2"],
         ["--zspace-optimizer-feedback", "loss_guard"],
         ["--zspace-optimizer-feedback-maximum-gate", "0.5"],
+        ["--validate-args-only"],
     ],
 )
 def test_feedback_study_rejects_caller_owned_feedback_flags(

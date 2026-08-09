@@ -6318,6 +6318,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(current, {"output_dir": "runs/gpt2", "use_cpu": True})
         self.assertEqual(legacy, {"output_dir": "runs/gpt2", "no_cuda": True})
 
+    def test_example_validate_args_only_stops_before_runtime(self) -> None:
+        for module in (load_bridge_example(), load_generic_bridge_example()):
+            with mock.patch.object(
+                module,
+                "_hf_remote_access_report",
+                side_effect=AssertionError("runtime access must not start"),
+                create=True,
+            ), mock.patch.object(
+                module,
+                "_install_generic_bindings",
+                side_effect=AssertionError("runtime bindings must not install"),
+                create=True,
+            ):
+                status = module.main(["--validate-args-only"])
+
+            self.assertEqual(status, 0)
+
     def test_example_disk_report_records_free_space_and_threshold(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:

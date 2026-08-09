@@ -658,6 +658,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "with the observed recipe identity pinned."
         ),
     )
+    parser.add_argument(
+        "--validate-args-only",
+        action="store_true",
+        help=(
+            "Validate the complete CLI contract and exit before runtime, model, "
+            "dataset, or output initialization."
+        ),
+    )
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument(
@@ -4401,6 +4409,9 @@ def _print_trainer_trace_lineage(card: Mapping[str, Any]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.validate_args_only:
+        print("hf_finetune_bridge_args_valid")
+        return 0
     remote_access_report = _hf_remote_access_report(args)
     with _hf_remote_access(args):
         return _main_with_runtime_access(args, remote_access_report)
