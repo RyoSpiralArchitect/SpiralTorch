@@ -151,6 +151,48 @@ If a failed attempt left artifacts that cannot be verified, the study fails
 closed. `--retry-failed` preserves them under `quarantine/` before launching a
 new attempt; it never overwrites them in place.
 
+## Compare control gains
+
+Run otherwise identical studies with an explicit
+`--zspace-optimizer-control-gain`, then compare the completed study directories:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-gain-compare \
+  models/runs/zspace-factorized-gain-025 \
+  models/runs/zspace-factorized-gain-050 \
+  models/runs/zspace-factorized-gain-100 \
+  --out models/runs/zspace-factorized-gain-response.json
+```
+
+The gain comparator verifies each plan identity, hash-chained completion
+journal, factorized-report SHA-256, non-gain scientific arguments, seed set,
+execution/runtime/input anchor, and exact observe losses. It rejects fewer than
+three gains. The output reports per-contrast ordinary least-squares slope,
+intercept, and `R²`; this is a descriptive response curve, not a significance
+test.
+
+### Audited 64-step result (2026-08-09)
+
+The checked-in [gain-response artifact](benchmarks/hf_zspace_optimizer_gain_response_64step_20260809.json)
+records one local GPT-2 LoRA run family on
+`models/samples/spiral_corpus_en/06_spiral_longform.txt`: 64 optimizer updates,
+seeds 13/17/23, CPU float32, and gains 0.25/0.5/1.0. Observe before/after losses
+were exactly reproduced across all three studies.
+
+| Contrast (left minus right) | gain 0.25 | gain 0.5 | gain 1.0 | `R²` |
+| --- | ---: | ---: | ---: | ---: |
+| raw minus observe | +0.000943 | +0.001855 | +0.003599 | 0.99988 |
+| constant-dose minus observe | +0.000737 | +0.001457 | +0.002862 | 0.99996 |
+| dose-normalized minus observe | +0.000217 | +0.000442 | +0.000902 | 0.99998 |
+| raw minus constant-dose | +0.000206 | +0.000398 | +0.000737 | 0.99903 |
+
+Lower validation loss is better, so every positive value favors the right arm.
+For this single recipe the current progress-only, non-feedback control therefore
+produced gain-correlated loss degradation. This is useful actuator diagnosis,
+not evidence that Z-Space controls are generally harmful. It argues against
+making this open-loop policy a default and motivates a separately ablated,
+Rust-owned feedback gate before longer scale-up.
+
 The comparator fails closed unless each seed has exactly one arm of every
 kind and all four share:
 

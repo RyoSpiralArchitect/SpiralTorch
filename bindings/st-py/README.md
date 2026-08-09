@@ -754,12 +754,27 @@ The study ID binds the bridge arguments, bridge content, package Python sources,
 native extension, available Git head/status, seeds, and arm order. Generated
 study artifacts are excluded from that Git status when the study lives inside
 the repository, preventing the recovery anchor from invalidating itself.
-`study-events.jsonl` is
-append-only and fsynced; `study-summary.json` is refreshed after every verified
-run. A restart reuses a run only when its journal receipt, run-card SHA, complete
+`study-events.jsonl` is append-only and fsynced; `study-summary.json` is
+refreshed after every verified run. A restart reuses a run only when its journal
+receipt, run-card SHA, complete
 optimizer horizon, Rust trajectory, trainer/optimizer traces, execution/runtime
 identity, and training input still agree. Use `--retry-failed` only to move
 unverified prior artifacts into the study's quarantine before a fresh attempt.
+
+After completing three or more otherwise identical control-gain studies, build
+one receipt-checked response curve:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-gain-compare \
+  models/runs/zspace-factorized-gain-025 \
+  models/runs/zspace-factorized-gain-050 \
+  models/runs/zspace-factorized-gain-100 \
+  --out models/runs/zspace-factorized-gain-response.json
+```
+
+The comparator requires exact non-gain arguments, source evidence, seed set,
+identity anchors, and observe losses before reporting per-contrast gain slopes
+and `R²`. A ready response remains bounded single-recipe evidence.
 
 For an adapter run on Apple Silicon or a model that is too expensive to update
 fully, select one of the built-in LoRA profiles. `--mode auto` resolves these

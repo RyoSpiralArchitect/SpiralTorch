@@ -112,7 +112,9 @@ from .hf_optimizer_control import (
 )
 from .hf_optimizer_study import (
     HFZSpaceFactorizedStudyError,
+    compare_hf_zspace_optimizer_factorized_gain_studies,
     run_hf_zspace_optimizer_factorized_study,
+    write_hf_zspace_optimizer_factorized_gain_response_report,
 )
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -2178,6 +2180,55 @@ def zspace_optimizer_factorized_study_main(
                 f"sha256={summary.get('factorized_report_sha256')}"
             )
     return 0 if summary.get("status") in {"planned", "ready"} else 1
+
+
+def zspace_optimizer_factorized_gain_compare_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare three or more completed factorized studies whose only "
+            "scientific change is Z-Space optimizer control gain."
+        ),
+        allow_abbrev=False,
+    )
+    parser.add_argument("study_dirs", nargs="+", type=Path)
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = compare_hf_zspace_optimizer_factorized_gain_studies(
+            args.study_dirs
+        )
+        written = (
+            None
+            if args.out is None
+            else write_hf_zspace_optimizer_factorized_gain_response_report(
+                report,
+                args.out,
+            )
+        )
+    except HFZSpaceFactorizedStudyError as exc:
+        print(f"zspace_optimizer_factorized_gain_compare_error {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            "zspace_optimizer_factorized_gain_compare "
+            f"status={report.get('status')} "
+            f"gains={report.get('gains')} "
+            f"seeds={report.get('matched_seed_count')} "
+            "gain_correlated_loss_degradation="
+            f"{report.get('bounded_gain_correlated_loss_degradation_observed')}"
+        )
+        print(
+            "zspace_optimizer_factorized_gain_response_id "
+            f"{report.get('gain_response_id')}"
+        )
+        if written is not None:
+            print(f"zspace_optimizer_factorized_gain_compare_out {written}")
+    return 0 if report.get("status") == "ready" else 1
 
 
 def zspace_inference_distortion_probe_main(argv: Sequence[str] | None = None) -> int:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
 from .hf_optimizer_control import (
+    HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA,
     compare_hf_zspace_optimizer_factorized_run_cards,
     write_hf_zspace_optimizer_factorized_ablation_report,
 )
@@ -40,6 +41,10 @@ HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME = "study-plan.json"
 HF_ZSPACE_FACTORIZED_STUDY_EVENTS_FILENAME = "study-events.jsonl"
 HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_FILENAME = "study-summary.json"
 HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME = "factorized-report.json"
+HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA = (
+    "spiraltorch.hf_zspace_factorized_gain_response.v1"
+)
+HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME = "gain-response.json"
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
     {
@@ -65,6 +70,13 @@ _EVENT_RESERVED_FIELDS = frozenset(
         "previous_event_id",
         "event_id",
     }
+)
+_CONTROL_GAIN_FLAG = "--zspace-optimizer-control-gain"
+_GAIN_RESPONSE_CONTRASTS = (
+    "dose_effect",
+    "dose_normalized_shape_effect",
+    "raw_total_effect",
+    "shape_effect_at_raw_dose",
 )
 
 
@@ -1237,7 +1249,423 @@ def run_hf_zspace_optimizer_factorized_study(
             raise
 
 
+def _split_control_gain(arguments: Sequence[str]) -> tuple[float, list[str]]:
+    gains: list[float] = []
+    base_arguments: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = str(arguments[index])
+        if argument == _CONTROL_GAIN_FLAG:
+            if index + 1 >= len(arguments):
+                raise HFZSpaceFactorizedStudyError(
+                    f"{_CONTROL_GAIN_FLAG} has no value in a study plan"
+                )
+            raw_gain = str(arguments[index + 1])
+            index += 2
+        elif argument.startswith(f"{_CONTROL_GAIN_FLAG}="):
+            raw_gain = argument.split("=", 1)[1]
+            index += 1
+        else:
+            base_arguments.append(argument)
+            index += 1
+            continue
+        try:
+            gain = float(raw_gain)
+        except ValueError as exc:
+            raise HFZSpaceFactorizedStudyError(
+                f"{_CONTROL_GAIN_FLAG} is not numeric in a study plan"
+            ) from exc
+        if not math.isfinite(gain) or not 0.0 <= gain <= 1.0:
+            raise HFZSpaceFactorizedStudyError(
+                f"{_CONTROL_GAIN_FLAG} must be finite and in [0, 1]"
+            )
+        gains.append(gain)
+    if len(gains) > 1:
+        raise HFZSpaceFactorizedStudyError(
+            f"a study plan contains repeated {_CONTROL_GAIN_FLAG} options"
+        )
+    return (1.0 if not gains else gains[0]), base_arguments
+
+
+def _finite_report_number(value: object, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HFZSpaceFactorizedStudyError(f"{field} is not a finite number")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise HFZSpaceFactorizedStudyError(f"{field} is not a finite number")
+    return numeric
+
+
+def _load_completed_gain_study(study_dir: str | Path) -> dict[str, object]:
+    root = Path(study_dir).expanduser().resolve()
+    plan = _read_json(root / HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME)
+    if plan.get("schema") != HF_ZSPACE_FACTORIZED_STUDY_SCHEMA:
+        raise HFZSpaceFactorizedStudyError(f"unsupported study plan in {root}")
+    scientific_spec = plan.get("scientific_spec")
+    if not isinstance(scientific_spec, Mapping):
+        raise HFZSpaceFactorizedStudyError(f"study plan has no scientific spec: {root}")
+    study_id = plan.get("study_id")
+    if not isinstance(study_id, str) or study_id != _sha256_id(scientific_spec):
+        raise HFZSpaceFactorizedStudyError(f"study plan identity is invalid: {root}")
+    if Path(str(plan.get("study_dir"))).resolve() != root:
+        raise HFZSpaceFactorizedStudyError(
+            f"study plan directory is inconsistent: {root}"
+        )
+    summary = _read_json(root / HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_FILENAME)
+    if (
+        summary.get("schema") != HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA
+        or summary.get("study_id") != study_id
+        or summary.get("status") != "ready"
+        or summary.get("completed_run_count") != plan.get("run_count")
+        or summary.get("remaining_run_count") != 0
+    ):
+        raise HFZSpaceFactorizedStudyError(f"study is not completely ready: {root}")
+    artifacts = plan.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise HFZSpaceFactorizedStudyError(f"study plan has no artifacts: {root}")
+    event_path = Path(str(artifacts.get("events"))).resolve()
+    report_path = Path(str(artifacts.get("factorized_report"))).resolve()
+    if event_path != (root / HF_ZSPACE_FACTORIZED_STUDY_EVENTS_FILENAME).resolve():
+        raise HFZSpaceFactorizedStudyError(
+            f"study journal path is inconsistent: {root}"
+        )
+    if report_path != (root / HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME).resolve():
+        raise HFZSpaceFactorizedStudyError(f"study report path is inconsistent: {root}")
+    events = _load_events(event_path, study_id=study_id)
+    completed_events = [
+        event for event in events if event.get("event_type") == "study_completed"
+    ]
+    if not completed_events or completed_events[-1].get("status") != "ready":
+        raise HFZSpaceFactorizedStudyError(
+            f"study journal has no ready completion receipt: {root}"
+        )
+    if summary.get("event_count") != len(events):
+        raise HFZSpaceFactorizedStudyError(
+            f"study summary journal count drifted: {root}"
+        )
+    report_sha256 = _sha256_file(report_path)
+    if (
+        summary.get("factorized_report_sha256") != report_sha256
+        or completed_events[-1].get("factorized_report_sha256") != report_sha256
+    ):
+        raise HFZSpaceFactorizedStudyError(f"study report receipt drifted: {root}")
+    report = _read_json(report_path)
+    if (
+        report.get("schema") != HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA
+        or report.get("status") != "ready"
+        or report.get("error_count") != 0
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"factorized report is not completely ready: {root}"
+        )
+    arguments = scientific_spec.get("bridge_args")
+    if not isinstance(arguments, Sequence) or isinstance(arguments, (str, bytes)):
+        raise HFZSpaceFactorizedStudyError(
+            f"study bridge arguments are invalid: {root}"
+        )
+    gain, base_arguments = _split_control_gain([str(value) for value in arguments])
+    canonical_spec = {str(key): value for key, value in scientific_spec.items()}
+    canonical_spec["bridge_args"] = base_arguments
+    identity_anchor = summary.get("identity_anchor")
+    if not isinstance(identity_anchor, Mapping) or any(
+        not isinstance(identity_anchor.get(field), str)
+        for field in (
+            "execution_identity_id",
+            "runtime_identity_id",
+            "training_input_id",
+        )
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"study identity anchor is incomplete: {root}"
+        )
+    seed_rows = report.get("factorized_seeds")
+    if not isinstance(seed_rows, Sequence) or isinstance(seed_rows, (str, bytes)):
+        raise HFZSpaceFactorizedStudyError(f"factorized seed rows are missing: {root}")
+    baselines: dict[int, tuple[float, float]] = {}
+    trajectory_ids: set[str] = set()
+    for raw_row in seed_rows:
+        if not isinstance(raw_row, Mapping) or raw_row.get("status") != "ready":
+            raise HFZSpaceFactorizedStudyError(
+                f"factorized seed row is not ready: {root}"
+            )
+        seed = raw_row.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int) or seed in baselines:
+            raise HFZSpaceFactorizedStudyError(
+                f"factorized seed identity is invalid: {root}"
+            )
+        before = raw_row.get("eval_before_losses")
+        after = raw_row.get("eval_after_losses")
+        if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+            raise HFZSpaceFactorizedStudyError(
+                f"factorized baseline is missing: {root}"
+            )
+        baselines[seed] = (
+            _finite_report_number(
+                before.get("observe"), field=f"seed {seed} observe before loss"
+            ),
+            _finite_report_number(
+                after.get("observe"), field=f"seed {seed} observe after loss"
+            ),
+        )
+        trajectory_id = raw_row.get("trajectory_id")
+        if not isinstance(trajectory_id, str) or not trajectory_id.startswith(
+            "sha256:"
+        ):
+            raise HFZSpaceFactorizedStudyError(
+                f"factorized seed trajectory identity is invalid: {root}"
+            )
+        trajectory_ids.add(trajectory_id)
+    if report.get("matched_seed_count") != len(baselines):
+        raise HFZSpaceFactorizedStudyError(f"factorized seed count drifted: {root}")
+    reported_seeds = report.get("seeds")
+    if (
+        not isinstance(reported_seeds, Sequence)
+        or isinstance(reported_seeds, (str, bytes))
+        or list(reported_seeds) != list(baselines)
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"factorized seed ordering is inconsistent: {root}"
+        )
+    contrasts = report.get("contrasts")
+    if not isinstance(contrasts, Mapping):
+        raise HFZSpaceFactorizedStudyError(f"factorized contrasts are missing: {root}")
+    return {
+        "root": str(root),
+        "gain": gain,
+        "study_id": study_id,
+        "report_sha256": report_sha256,
+        "canonical_spec": canonical_spec,
+        "identity_anchor": {str(key): value for key, value in identity_anchor.items()},
+        "baselines": baselines,
+        "seeds": list(baselines),
+        "trajectory_ids": sorted(trajectory_ids),
+        "contrasts": {str(key): value for key, value in contrasts.items()},
+    }
+
+
+def _linear_gain_fit(points: Sequence[tuple[float, float]]) -> dict[str, float]:
+    count = len(points)
+    mean_x = sum(point[0] for point in points) / count
+    mean_y = sum(point[1] for point in points) / count
+    denominator = sum((point[0] - mean_x) ** 2 for point in points)
+    if denominator <= 0.0:
+        raise HFZSpaceFactorizedStudyError("gain response has no gain variance")
+    slope = (
+        sum((gain - mean_x) * (value - mean_y) for gain, value in points) / denominator
+    )
+    intercept = mean_y - slope * mean_x
+    residual = sum((value - (intercept + slope * gain)) ** 2 for gain, value in points)
+    total = sum((value - mean_y) ** 2 for _, value in points)
+    if total == 0.0:
+        r_squared = 1.0 if residual <= 1.0e-30 else 0.0
+    else:
+        r_squared = 1.0 - residual / total
+    return {
+        "slope": slope,
+        "intercept": intercept,
+        "r_squared": r_squared,
+    }
+
+
+def compare_hf_zspace_optimizer_factorized_gain_studies(
+    study_dirs: Sequence[str | Path],
+) -> dict[str, object]:
+    """Compare completed factorized studies whose only scientific change is gain."""
+
+    if len(study_dirs) < 3:
+        raise HFZSpaceFactorizedStudyError(
+            "gain response requires at least three completed study directories"
+        )
+    snapshots = sorted(
+        (_load_completed_gain_study(path) for path in study_dirs),
+        key=lambda value: float(value["gain"]),
+    )
+    gains = [float(snapshot["gain"]) for snapshot in snapshots]
+    if len(set(gains)) != len(gains):
+        raise HFZSpaceFactorizedStudyError("gain response study gains must be unique")
+    reference_spec = snapshots[0]["canonical_spec"]
+    reference_anchor = snapshots[0]["identity_anchor"]
+    reference_baselines = snapshots[0]["baselines"]
+    reference_seeds = snapshots[0]["seeds"]
+    for snapshot in snapshots[1:]:
+        if snapshot["canonical_spec"] != reference_spec:
+            raise HFZSpaceFactorizedStudyError(
+                "gain studies differ in scientific inputs beyond control gain"
+            )
+        if snapshot["identity_anchor"] != reference_anchor:
+            raise HFZSpaceFactorizedStudyError(
+                "gain studies disagree on execution, runtime, or training input identity"
+            )
+        if snapshot["baselines"] != reference_baselines:
+            raise HFZSpaceFactorizedStudyError(
+                "gain studies do not reproduce the observe baseline exactly"
+            )
+        if snapshot["seeds"] != reference_seeds:
+            raise HFZSpaceFactorizedStudyError(
+                "gain studies disagree on factorized seed ordering"
+            )
+    responses: dict[str, object] = {}
+    for contrast_name in _GAIN_RESPONSE_CONTRASTS:
+        points: list[dict[str, object]] = []
+        fit_points: list[tuple[float, float]] = []
+        reference_left: str | None = None
+        reference_right: str | None = None
+        for snapshot in snapshots:
+            contrasts = snapshot["contrasts"]
+            assert isinstance(contrasts, Mapping)
+            contrast = contrasts.get(contrast_name)
+            if (
+                not isinstance(contrast, Mapping)
+                or contrast.get("lower_is_better") is not True
+            ):
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain study has no valid {contrast_name} contrast"
+                )
+            left_arm = contrast.get("left_arm")
+            right_arm = contrast.get("right_arm")
+            if not isinstance(left_arm, str) or not isinstance(right_arm, str):
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain study has invalid {contrast_name} arms"
+                )
+            reference_left = left_arm if reference_left is None else reference_left
+            reference_right = right_arm if reference_right is None else reference_right
+            if left_arm != reference_left or right_arm != reference_right:
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain studies disagree on {contrast_name} arm semantics"
+                )
+            mean = _finite_report_number(
+                contrast.get("mean"), field=f"{contrast_name} mean"
+            )
+            raw_values = contrast.get("values")
+            if not isinstance(raw_values, Sequence) or isinstance(
+                raw_values, (str, bytes)
+            ):
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain study has no {contrast_name} seed values"
+                )
+            values = [
+                _finite_report_number(value, field=f"{contrast_name} seed value")
+                for value in raw_values
+            ]
+            if len(values) != len(reference_baselines):
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain study {contrast_name} seed count drifted"
+                )
+            observed_mean = sum(values) / len(values)
+            if not math.isclose(mean, observed_mean, rel_tol=1.0e-12, abs_tol=1.0e-15):
+                raise HFZSpaceFactorizedStudyError(
+                    f"gain study {contrast_name} mean differs from its seed values"
+                )
+            gain = float(snapshot["gain"])
+            fit_points.append((gain, mean))
+            points.append(
+                {
+                    "gain": gain,
+                    "mean": mean,
+                    "values": values,
+                    "bounded_trend_direction": contrast.get("bounded_trend_direction"),
+                }
+            )
+        means = [point[1] for point in fit_points]
+        responses[contrast_name] = {
+            "left_arm": reference_left,
+            "right_arm": reference_right,
+            "lower_is_better": True,
+            "points": points,
+            "ordinary_least_squares": _linear_gain_fit(fit_points),
+            "mean_is_monotonic_non_decreasing": all(
+                left <= right for left, right in zip(means, means[1:])
+            ),
+            "mean_is_monotonic_non_increasing": all(
+                left >= right for left, right in zip(means, means[1:])
+            ),
+            "right_arm_better_at_every_gain": all(mean > 0.0 for mean in means),
+            "left_arm_better_at_every_gain": all(mean < 0.0 for mean in means),
+        }
+    harm_trend = all(
+        isinstance(response, Mapping)
+        and response.get("mean_is_monotonic_non_decreasing") is True
+        and response.get("right_arm_better_at_every_gain") is True
+        and isinstance(response.get("ordinary_least_squares"), Mapping)
+        and float(response["ordinary_least_squares"]["slope"]) > 0.0
+        and float(response["ordinary_least_squares"]["r_squared"]) >= 0.95
+        for response in responses.values()
+    )
+    improvement_trend = all(
+        isinstance(response, Mapping)
+        and response.get("mean_is_monotonic_non_increasing") is True
+        and response.get("left_arm_better_at_every_gain") is True
+        and isinstance(response.get("ordinary_least_squares"), Mapping)
+        and float(response["ordinary_least_squares"]["slope"]) < 0.0
+        and float(response["ordinary_least_squares"]["r_squared"]) >= 0.95
+        for response in responses.values()
+    )
+    baseline_rows = [
+        {
+            "seed": seed,
+            "eval_before_loss": losses[0],
+            "eval_after_loss": losses[1],
+        }
+        for seed, losses in sorted(reference_baselines.items())
+    ]
+    source_studies = [
+        {
+            "gain": snapshot["gain"],
+            "study_id": snapshot["study_id"],
+            "factorized_report_sha256": snapshot["report_sha256"],
+            "trajectory_ids": snapshot["trajectory_ids"],
+        }
+        for snapshot in snapshots
+    ]
+    identity_payload = {
+        "schema": HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA,
+        "shared_scientific_spec_id": _sha256_id(reference_spec),
+        "shared_identity_anchor": reference_anchor,
+        "source_studies": source_studies,
+        "contrasts": responses,
+    }
+    return {
+        **identity_payload,
+        "row_type": "hf_zspace_factorized_gain_response",
+        "status": "ready",
+        "gain_response_id": _sha256_id(identity_payload),
+        "gain_count": len(gains),
+        "gains": gains,
+        "matched_seed_count": len(reference_baselines),
+        "seeds": sorted(reference_baselines),
+        "observe_baseline_exact_match": True,
+        "observe_baselines": baseline_rows,
+        "bounded_gain_correlated_loss_degradation_observed": harm_trend,
+        "bounded_gain_correlated_loss_improvement_observed": improvement_trend,
+        "bounded_improvement_observed": improvement_trend,
+        "efficacy_claim_ready": False,
+        "evidence_scope": "single_model_single_corpus_multi_seed_gain_response",
+        "evidence_boundary": (
+            "the matched studies establish a gain-correlated validation-loss response "
+            "for one GPT-2 LoRA recipe; they do not establish statistical significance, "
+            "mechanistic causality beyond the controlled optimizer path, or generality"
+        ),
+        "efficacy_claim_requirements": (
+            "a prespecified, adequately powered multi-model evaluation with held-out "
+            "quality and stability metrics remains required"
+        ),
+    }
+
+
+def write_hf_zspace_optimizer_factorized_gain_response_report(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    """Write one deterministic factorized gain-response report."""
+
+    output = Path(path)
+    _atomic_write_json(output, report)
+    return str(output)
+
+
 __all__ = [
+    "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME",
+    "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA",
     "HF_ZSPACE_FACTORIZED_STUDY_ARMS",
     "HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA",
     "HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME",
@@ -1245,5 +1673,7 @@ __all__ = [
     "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
     "HFZSpaceFactorizedStudyError",
     "build_hf_zspace_optimizer_factorized_study_plan",
+    "compare_hf_zspace_optimizer_factorized_gain_studies",
     "run_hf_zspace_optimizer_factorized_study",
+    "write_hf_zspace_optimizer_factorized_gain_response_report",
 ]

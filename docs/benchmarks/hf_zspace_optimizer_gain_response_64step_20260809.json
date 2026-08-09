@@ -1,0 +1,261 @@
+{
+  "bounded_gain_correlated_loss_degradation_observed": true,
+  "bounded_gain_correlated_loss_improvement_observed": false,
+  "bounded_improvement_observed": false,
+  "contrasts": {
+    "dose_effect": {
+      "left_arm": "dose_matched_constant",
+      "left_arm_better_at_every_gain": false,
+      "lower_is_better": true,
+      "mean_is_monotonic_non_decreasing": true,
+      "mean_is_monotonic_non_increasing": false,
+      "ordinary_least_squares": {
+        "intercept": 3.457069396972656e-05,
+        "r_squared": 0.9999615874316109,
+        "slope": 0.0028300966535295758
+      },
+      "points": [
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.25,
+          "mean": 0.0007370313008626302,
+          "values": [
+            0.0006251335144042969,
+            0.000713348388671875,
+            0.0008726119995117188
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.5,
+          "mean": 0.00145721435546875,
+          "values": [
+            0.0012354850769042969,
+            0.0014133453369140625,
+            0.0017228126525878906
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 1.0,
+          "mean": 0.002862135569254557,
+          "values": [
+            0.002425670623779297,
+            0.0027790069580078125,
+            0.0033817291259765625
+          ]
+        }
+      ],
+      "right_arm": "observe",
+      "right_arm_better_at_every_gain": true
+    },
+    "dose_normalized_shape_effect": {
+      "left_arm": "dose_normalized",
+      "left_arm_better_at_every_gain": false,
+      "lower_is_better": true,
+      "mean_is_monotonic_non_decreasing": true,
+      "mean_is_monotonic_non_increasing": false,
+      "ordinary_least_squares": {
+        "intercept": -1.271565755208337e-05,
+        "r_squared": 0.9999783948591501,
+        "slope": 0.0009138016473679315
+      },
+      "points": [
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.25,
+          "mean": 0.00021696090698242188,
+          "values": [
+            0.00018310546875,
+            0.0002503395080566406,
+            0.000217437744140625
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.5,
+          "mean": 0.00044234593709309894,
+          "values": [
+            0.0003733634948730469,
+            0.00051116943359375,
+            0.0004425048828125
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 1.0,
+          "mean": 0.0009016990661621094,
+          "values": [
+            0.0007681846618652344,
+            0.0010342597961425781,
+            0.0009026527404785156
+          ]
+        }
+      ],
+      "right_arm": "observe",
+      "right_arm_better_at_every_gain": true
+    },
+    "raw_total_effect": {
+      "left_arm": "raw",
+      "left_arm_better_at_every_gain": false,
+      "lower_is_better": true,
+      "mean_is_monotonic_non_decreasing": true,
+      "mean_is_monotonic_non_increasing": false,
+      "ordinary_least_squares": {
+        "intercept": 7.104873657226606e-05,
+        "r_squared": 0.9998751392455255,
+        "slope": 0.0035334995814732136
+      },
+      "points": [
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.25,
+          "mean": 0.0009430249532063802,
+          "values": [
+            0.0008025169372558594,
+            0.0009508132934570312,
+            0.00107574462890625
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.5,
+          "mean": 0.0018548965454101562,
+          "values": [
+            0.0015702247619628906,
+            0.0018749237060546875,
+            0.0021195411682128906
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 1.0,
+          "mean": 0.0035988489786783853,
+          "values": [
+            0.0030541419982910156,
+            0.0036301612854003906,
+            0.00411224365234375
+          ]
+        }
+      ],
+      "right_arm": "observe",
+      "right_arm_better_at_every_gain": true
+    },
+    "shape_effect_at_raw_dose": {
+      "left_arm": "raw",
+      "left_arm_better_at_every_gain": false,
+      "lower_is_better": true,
+      "mean_is_monotonic_non_decreasing": true,
+      "mean_is_monotonic_non_increasing": false,
+      "ordinary_least_squares": {
+        "intercept": 3.647804260253906e-05,
+        "r_squared": 0.999027565466465,
+        "slope": 0.0007034029279436384
+      },
+      "points": [
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.25,
+          "mean": 0.00020599365234375,
+          "values": [
+            0.0001773834228515625,
+            0.00023746490478515625,
+            0.00020313262939453125
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 0.5,
+          "mean": 0.00039768218994140625,
+          "values": [
+            0.00033473968505859375,
+            0.000461578369140625,
+            0.000396728515625
+          ]
+        },
+        {
+          "bounded_trend_direction": "right_arm_better",
+          "gain": 1.0,
+          "mean": 0.0007367134094238281,
+          "values": [
+            0.0006284713745117188,
+            0.0008511543273925781,
+            0.0007305145263671875
+          ]
+        }
+      ],
+      "right_arm": "dose_matched_constant",
+      "right_arm_better_at_every_gain": true
+    }
+  },
+  "efficacy_claim_ready": false,
+  "efficacy_claim_requirements": "a prespecified, adequately powered multi-model evaluation with held-out quality and stability metrics remains required",
+  "evidence_boundary": "the matched studies establish a gain-correlated validation-loss response for one GPT-2 LoRA recipe; they do not establish statistical significance, mechanistic causality beyond the controlled optimizer path, or generality",
+  "evidence_scope": "single_model_single_corpus_multi_seed_gain_response",
+  "gain_count": 3,
+  "gain_response_id": "sha256:dad7b0efa43afbf6c8914b3c446f30ac2b51b0d15b4877b3b96f210a5181f65b",
+  "gains": [
+    0.25,
+    0.5,
+    1.0
+  ],
+  "matched_seed_count": 3,
+  "observe_baseline_exact_match": true,
+  "observe_baselines": [
+    {
+      "eval_after_loss": 5.535153865814209,
+      "eval_before_loss": 5.550917148590088,
+      "seed": 13
+    },
+    {
+      "eval_after_loss": 5.340747356414795,
+      "eval_before_loss": 5.359510898590088,
+      "seed": 17
+    },
+    {
+      "eval_after_loss": 5.755316734313965,
+      "eval_before_loss": 5.77825927734375,
+      "seed": 23
+    }
+  ],
+  "row_type": "hf_zspace_factorized_gain_response",
+  "schema": "spiraltorch.hf_zspace_factorized_gain_response.v1",
+  "seeds": [
+    13,
+    17,
+    23
+  ],
+  "shared_identity_anchor": {
+    "execution_identity_id": "sha256:faa4ebc7d74b4014b0b0d700b74fe115c239035981b22916c73dfd7ad7a1bd97",
+    "runtime_identity_id": "sha256:c801a16eac806ac683b11540546abc5ce4d7be290cbc63540e299bcb92834287",
+    "training_input_id": "sha256:3fbbd3223e3abfee79481ac2b626a5e95e1bda3e403a4ed5cd24a7a0ec262381"
+  },
+  "shared_scientific_spec_id": "sha256:0784ee12858149f74ab523380c2478e6ca13e8503495891d8f67af5f92f34abb",
+  "source_studies": [
+    {
+      "factorized_report_sha256": "sha256:7a9b4b726429ca589cc648e8a4e4170f1ff86a59fee0b174cb74a715eb486c5c",
+      "gain": 0.25,
+      "study_id": "sha256:52ea73d27bd67ed8d4c2952711bd4121f5117766f217e7da04c859b0e02bd579",
+      "trajectory_ids": [
+        "sha256:13dd3f7d189835a799ebc5e22f98b997d514b7b5dbc8e79f40528f70fd186d14"
+      ]
+    },
+    {
+      "factorized_report_sha256": "sha256:00fabc1dac0104cebf929f14dfd5649b7290709b5f46dbcf5a26b94b2e8897b2",
+      "gain": 0.5,
+      "study_id": "sha256:3353930cb29491c8932e52969fd5e4ffd4c6d1f6f76b734ac48b59a1a703782e",
+      "trajectory_ids": [
+        "sha256:d36d7e75d245657bf9fbbd801098399561e0c65a001ff04491f9feda0cc15e0b"
+      ]
+    },
+    {
+      "factorized_report_sha256": "sha256:24b52358b188d62fe353983805e0042071558aac65fa2d3ffb8e4c51221c556f",
+      "gain": 1.0,
+      "study_id": "sha256:0784ee12858149f74ab523380c2478e6ca13e8503495891d8f67af5f92f34abb",
+      "trajectory_ids": [
+        "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      ]
+    }
+  ],
+  "status": "ready"
+}

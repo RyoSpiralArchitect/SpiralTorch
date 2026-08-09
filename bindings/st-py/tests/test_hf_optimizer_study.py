@@ -454,3 +454,109 @@ def test_factorized_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     assert (
         tmp_path / "study" / study.HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME
     ).is_file()
+
+
+def test_factorized_gain_studies_require_shared_evidence_and_report_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+
+    def execute(run: Mapping[str, object], *, cwd: Path) -> tuple[int, float]:
+        del cwd
+        _write_completed_run(run)
+        return 0, 0.25
+
+    def compare(paths: list[Path]) -> dict[str, object]:
+        card = json.loads(paths[0].read_text(encoding="utf-8"))
+        command = card["launch_command"]
+        gain = float(command[command.index("--zspace-optimizer-control-gain") + 1])
+        contrast_arms = {
+            "dose_effect": ("dose_matched_constant", "observe", 0.75),
+            "dose_normalized_shape_effect": ("dose_normalized", "observe", 0.25),
+            "raw_total_effect": ("raw", "observe", 1.0),
+            "shape_effect_at_raw_dose": (
+                "raw",
+                "dose_matched_constant",
+                0.25,
+            ),
+        }
+        return {
+            "schema": "spiraltorch.hf_zspace_factorized_ablation.v1",
+            "status": "ready",
+            "matched_seed_count": 1,
+            "seeds": [13],
+            "error_count": 0,
+            "errors": [],
+            "factorized_seeds": [
+                {
+                    "status": "ready",
+                    "seed": 13,
+                    "trajectory_id": _trajectory_id(13),
+                    "eval_before_losses": {"observe": 2.0},
+                    "eval_after_losses": {"observe": 1.9},
+                }
+            ],
+            "contrasts": {
+                name: {
+                    "left_arm": left,
+                    "right_arm": right,
+                    "lower_is_better": True,
+                    "mean": gain * multiplier,
+                    "values": [gain * multiplier],
+                    "bounded_trend_direction": "right_arm_better",
+                }
+                for name, (left, right, multiplier) in contrast_arms.items()
+            },
+        }
+
+    monkeypatch.setattr(study, "_execute_run", execute)
+    monkeypatch.setattr(
+        study,
+        "compare_hf_zspace_optimizer_factorized_run_cards",
+        compare,
+    )
+    directories = []
+    for gain in (0.25, 0.5, 1.0):
+        directory = tmp_path / f"gain-{gain}"
+        directories.append(directory)
+        summary = st.run_hf_zspace_optimizer_factorized_study(
+            study_dir=directory,
+            seeds=[13],
+            bridge_args=[
+                *_bridge_args(),
+                "--zspace-optimizer-control-gain",
+                str(gain),
+            ],
+            bridge_script=bridge,
+            launch_cwd=tmp_path,
+            min_free_disk_gb=0.0,
+            execute=True,
+        )
+        assert summary["status"] == "ready"
+
+    report = st.compare_hf_zspace_optimizer_factorized_gain_studies(directories)
+
+    assert report["status"] == "ready"
+    assert report["gains"] == [0.25, 0.5, 1.0]
+    assert report["observe_baseline_exact_match"] is True
+    assert report["bounded_gain_correlated_loss_degradation_observed"] is True
+    assert report["bounded_gain_correlated_loss_improvement_observed"] is False
+    assert all("study_dir" not in source for source in report["source_studies"])
+    assert report["contrasts"]["raw_total_effect"][  # type: ignore[index]
+        "ordinary_least_squares"
+    ]["r_squared"] == pytest.approx(1.0)
+
+    output = tmp_path / "gain-response.json"
+    status = hf_cli.zspace_optimizer_factorized_gain_compare_main(
+        [*[str(path) for path in directories], "--out", str(output)]
+    )
+    assert status == 0
+    assert output.is_file()
+    assert "gain_correlated_loss_degradation=True" in capsys.readouterr().out
+
+    source_report = directories[0] / study.HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME
+    source_report.write_text(source_report.read_text(encoding="utf-8") + "\n")
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="receipt drifted"):
+        st.compare_hf_zspace_optimizer_factorized_gain_studies(directories)
