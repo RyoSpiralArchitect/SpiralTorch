@@ -113,10 +113,59 @@ impl TensorExecutionComponent {
 }
 
 /// Tensor utility kernels represented by the current runtime contract.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TensorUtilOperation {
     Scale,
+    MaxAxis0,
+    MaxAxis0Backward,
+}
+
+/// Stable authorization slot for one operation family in a committed plan.
+///
+/// Components may own several distinct operations. Keeping this identity in
+/// `st-tensor` lets every caller authorize the same exact workload set without
+/// collapsing all tensor utilities into one component-level slot.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TensorExecutionWorkloadKey {
+    DenseMatmul,
+    PrepackedMatmul,
+    LayerNorm,
+    Attention,
+    Softmax,
+    TensorUtilScale,
+    TensorUtilMaxAxis0,
+    TensorUtilMaxAxis0Backward,
+}
+
+impl TensorExecutionWorkloadKey {
+    pub const COUNT: usize = 8;
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DenseMatmul => "dense_matmul",
+            Self::PrepackedMatmul => "prepacked_matmul",
+            Self::LayerNorm => "layer_norm",
+            Self::Attention => "attention",
+            Self::Softmax => "softmax",
+            Self::TensorUtilScale => "tensor_util.scale",
+            Self::TensorUtilMaxAxis0 => "tensor_util.max_axis0",
+            Self::TensorUtilMaxAxis0Backward => "tensor_util.max_axis0_backward",
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::DenseMatmul => 0,
+            Self::PrepackedMatmul => 1,
+            Self::LayerNorm => 2,
+            Self::Attention => 3,
+            Self::Softmax => 4,
+            Self::TensorUtilScale => 5,
+            Self::TensorUtilMaxAxis0 => 6,
+            Self::TensorUtilMaxAxis0Backward => 7,
+        }
+    }
 }
 
 /// One concrete tensor workload whose implementation can be preflighted.
@@ -168,6 +217,29 @@ impl TensorExecutionWorkload {
             Self::Attention { .. } => TensorExecutionComponent::Attention,
             Self::Softmax { .. } => TensorExecutionComponent::Softmax,
             Self::TensorUtil { .. } => TensorExecutionComponent::TensorUtil,
+        }
+    }
+
+    /// Operation-level identity used to bind one exact workload per plan slot.
+    pub const fn key(self) -> TensorExecutionWorkloadKey {
+        match self {
+            Self::DenseMatmul { .. } => TensorExecutionWorkloadKey::DenseMatmul,
+            Self::PrepackedMatmul { .. } => TensorExecutionWorkloadKey::PrepackedMatmul,
+            Self::LayerNorm { .. } => TensorExecutionWorkloadKey::LayerNorm,
+            Self::Attention { .. } => TensorExecutionWorkloadKey::Attention,
+            Self::Softmax { .. } => TensorExecutionWorkloadKey::Softmax,
+            Self::TensorUtil {
+                operation: TensorUtilOperation::Scale,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilScale,
+            Self::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilMaxAxis0,
+            Self::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0Backward,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilMaxAxis0Backward,
         }
     }
 
@@ -471,11 +543,18 @@ fn wgpu_supports(workload: TensorExecutionWorkload) -> bool {
         TensorExecutionWorkload::Softmax { rows, cols } => dimensions2(rows, cols)
             .is_some_and(|(rows, cols)| crate::wgpu_dense::supports_row_softmax(rows, cols)),
         TensorExecutionWorkload::TensorUtil {
-            operation: TensorUtilOperation::Scale,
+            operation,
             rows,
             cols,
-        } => dimensions2(rows, cols)
-            .is_some_and(|(rows, cols)| crate::wgpu_dense::supports_tensor_util_scale(rows, cols)),
+        } => dimensions2(rows, cols).is_some_and(|(rows, cols)| match operation {
+            TensorUtilOperation::Scale => crate::wgpu_dense::supports_tensor_util_scale(rows, cols),
+            TensorUtilOperation::MaxAxis0 => {
+                crate::wgpu_dense::supports_tensor_util_max_axis0(rows, cols)
+            }
+            TensorUtilOperation::MaxAxis0Backward => {
+                crate::wgpu_dense::supports_tensor_util_max_axis0_backward(rows, cols)
+            }
+        }),
     }
 }
 
@@ -538,15 +617,31 @@ fn verify_wgpu_dispatch(workload: TensorExecutionWorkload) -> Result<(), String>
             &[0.268_941_43, 0.731_058_6],
             1.0e-4,
         ),
-        TensorExecutionWorkload::TensorUtil {
-            operation: TensorUtilOperation::Scale,
-            ..
-        } => verify_dispatch_output(
-            "tensor scale",
-            &crate::wgpu_dense::scale(&[0.25, -0.5], 1, 2, 2.0)?,
-            &[0.5, -1.0],
-            1.0e-4,
-        ),
+        TensorExecutionWorkload::TensorUtil { operation, .. } => match operation {
+            TensorUtilOperation::Scale => verify_dispatch_output(
+                "tensor scale",
+                &crate::wgpu_dense::scale(&[0.25, -0.5], 1, 2, 2.0)?,
+                &[0.5, -1.0],
+                1.0e-4,
+            ),
+            TensorUtilOperation::MaxAxis0 => verify_dispatch_output(
+                "tensor max axis 0",
+                &crate::wgpu_dense::max_axis0(&[0.25, -0.5, 0.75, -1.0], 2, 2)?,
+                &[0.75, -0.5],
+                1.0e-4,
+            ),
+            TensorUtilOperation::MaxAxis0Backward => verify_dispatch_output(
+                "tensor max axis 0 backward",
+                &crate::wgpu_dense::max_axis0_backward(
+                    &[0.25, -0.5, 0.75, -0.5],
+                    &[2.0, -1.0],
+                    2,
+                    2,
+                )?,
+                &[0.0, -0.5, 2.0, -0.5],
+                1.0e-4,
+            ),
+        },
     }
 }
 
@@ -700,6 +795,73 @@ mod tests {
     }
 
     #[test]
+    fn tensor_util_host_contract_covers_each_typed_operation() {
+        for operation in [
+            TensorUtilOperation::Scale,
+            TensorUtilOperation::MaxAxis0,
+            TensorUtilOperation::MaxAxis0Backward,
+        ] {
+            let capability = observe_tensor_execution_capability(
+                TensorExecutionBackend::Cpu,
+                TensorExecutionWorkload::TensorUtil {
+                    operation,
+                    rows: 3,
+                    cols: 2,
+                },
+            );
+            assert_eq!(capability.status, TensorExecutionCapabilityStatus::Ready);
+            assert_eq!(
+                capability.ready_proof,
+                Some(TensorExecutionReadyProof::StaticHostContract)
+            );
+        }
+    }
+
+    #[test]
+    fn workload_authorization_keys_cover_every_canonical_slot_once() {
+        let workloads = [
+            dense_workload(),
+            TensorExecutionWorkload::PrepackedMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+                bias: true,
+            },
+            TensorExecutionWorkload::LayerNorm { rows: 2, cols: 4 },
+            TensorExecutionWorkload::Attention {
+                contexts: 1,
+                sequence: 2,
+                head_dim: 4,
+                z_bias: true,
+                attn_bias: true,
+            },
+            TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::Scale,
+                rows: 3,
+                cols: 2,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0Backward,
+                rows: 3,
+                cols: 2,
+            },
+        ];
+        let mut indexes = workloads
+            .map(TensorExecutionWorkload::key)
+            .map(TensorExecutionWorkloadKey::index);
+        indexes.sort_unstable();
+
+        assert_eq!(indexes, std::array::from_fn(|index| index));
+        assert_eq!(indexes.len(), TensorExecutionWorkloadKey::COUNT);
+    }
+
+    #[test]
     fn malformed_workloads_cannot_report_ready_without_st_core_validation() {
         let workloads = [
             TensorExecutionWorkload::DenseMatmul {
@@ -796,6 +958,16 @@ mod tests {
             TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
             TensorExecutionWorkload::TensorUtil {
                 operation: TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0Backward,
                 rows: 2,
                 cols: 4,
             },

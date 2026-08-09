@@ -201,7 +201,7 @@ mod tests {
             component_resolution: Default::default(),
             component_workloads: Vec::new(),
             component_capability_observation: None,
-            tensor_util_values: Some(2048),
+            tensor_util_values: Some(6),
             required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
         }
     }
@@ -231,8 +231,18 @@ mod tests {
             RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
             RuntimeComponentWorkload::TensorUtil {
                 operation: RuntimeTensorUtilOperation::Scale,
-                rows: 32,
-                cols: 64,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+                rows: 3,
+                cols: 2,
             },
         ];
         observe_runtime_execution_plan_capabilities(request).expect("CPU capability observation")
@@ -260,7 +270,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v6"
+            "spiraltorch.runtime_execution_plan.v7"
         );
         assert_eq!(
             wasm_transport["runtime_route"]["contract_version"],
@@ -269,6 +279,13 @@ mod tests {
         assert_eq!(wasm_transport["execution_allowed"], true);
         assert_eq!(wasm_transport["all_components_native"], true);
         assert_eq!(wasm_transport["policy"]["dense_matmul"], "faer");
+        assert_eq!(
+            wasm_transport["component_routes"][5]["workloads"]
+                .as_array()
+                .expect("tensor utility operation workloads")
+                .len(),
+            3
+        );
         assert_eq!(
             wasm_transport["request"]["component_resolution"],
             "concrete"
@@ -382,6 +399,16 @@ mod tests {
                 "missing TypeScript type {type_name}"
             );
         }
+        for operation in ["max_axis0", "max_axis0_backward"] {
+            assert!(
+                declarations.contains(operation),
+                "missing TypeScript tensor-util operation {operation}"
+            );
+        }
+        assert!(
+            declarations.contains("workloads?: RuntimeComponentWorkload[];"),
+            "runtime component routes must expose all authorized operation workloads"
+        );
     }
 
     #[test]

@@ -212,6 +212,12 @@ impl ForwardCache {
             activation_inputs: Vec::with_capacity(capacity),
         }
     }
+
+    fn matches_input(&self, input: &Tensor) -> bool {
+        self.conv_inputs
+            .first()
+            .is_some_and(|cached_input| cached_input == input)
+    }
 }
 
 /// Stack of [`ZSpaceGraphConvolution`] layers that preserves intermediate states for backprop.
@@ -234,10 +240,15 @@ impl ZSpaceGraphNetwork {
     fn store_cache(&self, cache: ForwardCache) {
         self.cache.replace(Some(cache));
     }
+
+    fn clear_cache(&self) {
+        self.cache.replace(None);
+    }
 }
 
 impl Module for ZSpaceGraphNetwork {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        self.clear_cache();
         let mut state = input.clone();
         let mut cache = ForwardCache::with_capacity(self.layers.len());
         for layer in &self.layers {
@@ -256,14 +267,20 @@ impl Module for ZSpaceGraphNetwork {
         Ok(state)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         if self.layers.is_empty() {
             return Err(TensorError::EmptyInput("graph_network_layers"));
         }
         let mut grad = grad_output.clone();
-        let cache = self.take_cache().ok_or(TensorError::InvalidValue {
-            label: "graph_network_cache",
-        })?;
+        let cache = match self.take_cache() {
+            Some(cache) if cache.matches_input(input) => cache,
+            Some(_) | None => {
+                let _ = self.forward(input)?;
+                self.take_cache().ok_or(TensorError::InvalidValue {
+                    label: "graph_network_cache",
+                })?
+            }
+        };
         if cache.conv_inputs.len() != self.layers.len()
             || cache.activation_inputs.len() != self.layers.len()
         {
@@ -296,6 +313,7 @@ impl Module for ZSpaceGraphNetwork {
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
+        self.clear_cache();
         for layer in &mut self.layers {
             layer.conv.visit_parameters_mut(visitor)?;
         }
@@ -303,6 +321,7 @@ impl Module for ZSpaceGraphNetwork {
     }
 
     fn apply_roundtable_band(&mut self, signal: &RoundtableBandSignal) -> PureResult<()> {
+        self.clear_cache();
         let influence = RoundtableBandInfluence::from_signal(signal)?;
         for layer in &mut self.layers {
             layer.set_roundtable(Some(influence.clone()));
@@ -311,6 +330,7 @@ impl Module for ZSpaceGraphNetwork {
     }
 
     fn clear_roundtable_band(&mut self) -> PureResult<()> {
+        self.clear_cache();
         for layer in &mut self.layers {
             layer.set_roundtable(None);
         }
@@ -322,6 +342,7 @@ impl Module for ZSpaceGraphNetwork {
         band: RoundtableBand,
         gradient: &Tensor,
     ) -> PureResult<()> {
+        self.clear_cache();
         let sample = band_pass_sample(band, gradient)?;
         for layer in &mut self.layers {
             layer.conv.set_roundtable_band_pass(Some(sample.clone()));
@@ -330,6 +351,7 @@ impl Module for ZSpaceGraphNetwork {
     }
 
     fn end_backward_band_pass(&mut self, _band: RoundtableBand) -> PureResult<()> {
+        self.clear_cache();
         for layer in &mut self.layers {
             layer.conv.set_roundtable_band_pass(None);
         }
@@ -406,6 +428,33 @@ mod tests {
         let grad_input = network.backward(&input, &grad_output).unwrap();
         assert_eq!(grad_input.shape(), (3, 2));
         assert!(grad_input.data().iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn stack_backward_rebuilds_missing_or_mismatched_forward_cache() {
+        let mut builder = ZSpaceGraphNetworkBuilder::new(
+            sample_context(),
+            NonZeroUsize::new(2).unwrap(),
+            -1.0,
+            0.05,
+        );
+        builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(2).unwrap()));
+        let mut network = builder.build("stack_cache_contract").unwrap();
+        let input_a = Tensor::from_vec(3, 2, vec![1.0, 0.5, 0.25, -0.75, 0.0, 1.0]).unwrap();
+        let input_b = Tensor::from_vec(3, 2, vec![-1.0, 0.25, 1.5, 0.75, 0.5, -2.0]).unwrap();
+        let grad_output = Tensor::from_vec(3, 2, vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2]).unwrap();
+
+        let _ = network.forward(&input_a).unwrap();
+        let recovered = network.backward(&input_b, &grad_output).unwrap();
+        let _ = network.forward(&input_b).unwrap();
+        let fresh = network.backward(&input_b, &grad_output).unwrap();
+        let rebuilt_without_forward = network.backward(&input_b, &grad_output).unwrap();
+
+        for expected in [&fresh, &rebuilt_without_forward] {
+            for (&actual, &expected) in recovered.data().iter().zip(expected.data()) {
+                assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+            }
+        }
     }
 
     #[test]

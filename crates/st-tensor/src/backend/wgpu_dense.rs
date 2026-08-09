@@ -401,6 +401,8 @@ enum TensorUtilKernel {
     AddRow,
     SumAxis0,
     SumAxis0Scaled,
+    MaxAxis0,
+    MaxAxis0Backward,
     ProjectToPoincare,
     WaveGateProject,
     WaveGateBackward,
@@ -408,7 +410,7 @@ enum TensorUtilKernel {
 
 impl TensorUtilKernel {
     #[cfg(test)]
-    const ALL: [Self; 45] = [
+    const ALL: [Self; 47] = [
         Self::Scale,
         Self::Add,
         Self::Hadamard,
@@ -451,6 +453,8 @@ impl TensorUtilKernel {
         Self::AddRow,
         Self::SumAxis0,
         Self::SumAxis0Scaled,
+        Self::MaxAxis0,
+        Self::MaxAxis0Backward,
         Self::ProjectToPoincare,
         Self::WaveGateProject,
         Self::WaveGateBackward,
@@ -500,6 +504,8 @@ impl TensorUtilKernel {
             Self::AddRow => "add_row",
             Self::SumAxis0 => "sum_axis0",
             Self::SumAxis0Scaled => "sum_axis0_scaled",
+            Self::MaxAxis0 => "max_axis0",
+            Self::MaxAxis0Backward => "max_axis0_backward",
             Self::ProjectToPoincare => "project_to_poincare",
             Self::WaveGateProject => "wave_gate_project",
             Self::WaveGateBackward => "wave_gate_backward",
@@ -3539,11 +3545,24 @@ mod tests {
         assert!(!supports_layer_norm(4, 0));
         assert!(!supports_row_softmax(0, 4));
         assert!(!supports_tensor_util_scale(4, 0));
+        assert!(!supports_tensor_util_max_axis0(4, 0));
+        assert!(!supports_tensor_util_max_axis0_backward(0, 4));
         assert!(!supports_fused_attention(
             1,
             1,
             FUSED_ATTENTION_MAX_HEAD_DIM as usize + 1
         ));
+    }
+
+    #[test]
+    fn max_axis0_rejects_non_finite_values_before_runtime_initialization() {
+        let forward = max_axis0(&[1.0, f32::NAN], 1, 2)
+            .expect_err("non-finite max input must fail before WGPU initialization");
+        assert!(forward.contains("input must be finite"));
+
+        let backward = max_axis0_backward(&[1.0, 2.0], &[0.5, f32::INFINITY], 1, 2)
+            .expect_err("non-finite max gradient must fail before WGPU initialization");
+        assert!(backward.contains("inputs must be finite"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3562,6 +3581,8 @@ mod tests {
         assert!(supports_layer_norm(2, 4));
         assert!(supports_row_softmax(2, 4));
         assert!(supports_tensor_util_scale(2, 4));
+        assert!(supports_tensor_util_max_axis0(2, 4));
+        assert!(supports_tensor_util_max_axis0_backward(2, 4));
         assert!(supports_fused_attention(1, 2, 4));
         assert!(supports_fused_attention_workload(1, 2, 4, true, true));
     }
@@ -7664,6 +7685,67 @@ pub fn sum_axis0_scaled(
     )
 }
 
+pub fn max_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let _ = checked_tensor_util_shape("max_axis0", input, rows, cols)?;
+    if input.iter().any(|value| !value.is_finite()) {
+        return Err("max_axis0 input must be finite".into());
+    }
+    let cols_u32 = u32::try_from(cols).map_err(|_| "max_axis0 cols exceed u32::MAX".to_string())?;
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        cols,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_pipeline(TensorUtilKernel::MaxAxis0)?,
+        cols_u32,
+        "max_axis0",
+    )
+}
+
+pub fn max_axis0_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    let (volume, _, cols_u32, _) =
+        checked_tensor_util_shape("max_axis0_backward", input, rows, cols)?;
+    if grad_output.len() != cols {
+        return Err(format!(
+            "max_axis0_backward gradient length mismatch: expected {cols} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    if input
+        .iter()
+        .chain(grad_output)
+        .any(|value| !value.is_finite())
+    {
+        return Err("max_axis0_backward inputs must be finite".into());
+    }
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        Some(grad_output),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_pipeline(TensorUtilKernel::MaxAxis0Backward)?,
+        cols_u32,
+        "max_axis0_backward",
+    )
+}
+
 pub fn project_to_poincare(
     input: &[f32],
     rows: usize,
@@ -9283,6 +9365,36 @@ pub fn supports_tensor_util_scale(rows: usize, cols: usize) -> bool {
     dispatch_1d_fits(ctx.device(), values, TENSOR_UTIL_WORKGROUP)
         && storage_values_fit(ctx.device(), values)
         && ctx.tensor_util_pipeline(TensorUtilKernel::Scale).is_ok()
+}
+
+/// Preflight the axis-0 maximum reduction in the lazy tensor-utility pipeline cache.
+pub fn supports_tensor_util_max_axis0(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), cols, 1)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx.tensor_util_pipeline(TensorUtilKernel::MaxAxis0).is_ok()
+}
+
+/// Preflight the tie-aware axis-0 maximum gradient kernel.
+pub fn supports_tensor_util_max_axis0_backward(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), cols, 1)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx
+            .tensor_util_pipeline(TensorUtilKernel::MaxAxis0Backward)
+            .is_ok()
 }
 
 pub fn supports_row_softmax_hardmax(rows: usize, cols: usize) -> bool {

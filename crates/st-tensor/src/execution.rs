@@ -7,6 +7,7 @@
 
 use crate::execution_capability::{
     TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload,
+    TensorExecutionWorkloadKey,
 };
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -190,10 +191,10 @@ impl TensorExecutionReceipt {
                 message: "workload component does not match the receipt component",
             });
         }
-        if !operation_matches_component(&self.operation, self.component) {
+        if !operation_matches_workload(&self.operation, self.workload) {
             return Err(TensorExecutionContractError::InvalidReceipt {
                 field: "operation",
-                message: "operation is not owned by the declared component",
+                message: "operation does not match the declared workload",
             });
         }
         self.require_supported_backend("requested_backend", self.requested_backend)?;
@@ -349,7 +350,7 @@ impl TensorExecutionReceipt {
 pub struct TensorExecutionPlanBinding {
     output_sha256: [u8; 32],
     backends: [TensorExecutionBackend; 6],
-    workloads: [Option<TensorExecutionWorkload>; 6],
+    workloads: [Option<TensorExecutionWorkload>; TensorExecutionWorkloadKey::COUNT],
     accelerator_fallback: AcceleratorFallback,
     tensor_util_wgpu_min_values: usize,
 }
@@ -364,7 +365,7 @@ impl TensorExecutionPlanBinding {
         Self {
             output_sha256,
             backends,
-            workloads: [None; 6],
+            workloads: [None; TensorExecutionWorkloadKey::COUNT],
             accelerator_fallback,
             tensor_util_wgpu_min_values,
         }
@@ -372,9 +373,9 @@ impl TensorExecutionPlanBinding {
 
     /// Creates a binding that additionally constrains declared component workloads.
     ///
-    /// Workloads are indexed by their Rust-owned component identity. Missing
-    /// components remain deliberately unbound for deferred operation-time
-    /// capability checks, while duplicate components fail closed.
+    /// Workloads are indexed by their Rust-owned operation identity. Missing
+    /// operation kinds remain deliberately unbound for deferred operation-time
+    /// capability checks, while duplicate operation kinds fail closed.
     pub fn try_new_with_workloads(
         output_sha256: [u8; 32],
         backends: [TensorExecutionBackend; 6],
@@ -390,9 +391,10 @@ impl TensorExecutionPlanBinding {
         );
         for workload in workloads {
             let component = workload.component();
-            let slot = &mut binding.workloads[component.index()];
+            let key = workload.key();
+            let slot = &mut binding.workloads[key.index()];
             if slot.replace(workload).is_some() {
-                return Err(TensorExecutionContractError::DuplicatePlanWorkload { component });
+                return Err(TensorExecutionContractError::DuplicatePlanWorkload { component, key });
             }
         }
         Ok(binding)
@@ -406,12 +408,20 @@ impl TensorExecutionPlanBinding {
         self.backends[component.index()]
     }
 
-    /// Returns the exact committed workload for `component`, when one was declared.
-    pub const fn workload_for(
+    /// Returns the committed workload for the actual operation kind, when declared.
+    pub const fn planned_workload_for(
         self,
-        component: TensorExecutionComponent,
+        actual: TensorExecutionWorkload,
     ) -> Option<TensorExecutionWorkload> {
-        self.workloads[component.index()]
+        self.workloads[actual.key().index()]
+    }
+
+    /// Whether this plan closes over an exact workload set for `component`.
+    pub fn binds_component(self, component: TensorExecutionComponent) -> bool {
+        self.workloads
+            .into_iter()
+            .flatten()
+            .any(|workload| workload.component() == component)
     }
 
     /// Validate that a self-consistent receipt was authorized by this binding.
@@ -440,7 +450,7 @@ impl TensorExecutionPlanBinding {
         }
 
         let component = receipt.component;
-        if let Some(planned_workload) = self.workload_for(component) {
+        if let Some(planned_workload) = self.planned_workload_for(receipt.workload) {
             if receipt.workload != planned_workload {
                 return Err(TensorExecutionContractError::ReceiptPlanWorkloadMismatch {
                     component,
@@ -448,6 +458,13 @@ impl TensorExecutionPlanBinding {
                     receipt: receipt.workload,
                 });
             }
+        } else if self.binds_component(component) {
+            return Err(
+                TensorExecutionContractError::ReceiptPlanWorkloadNotAuthorized {
+                    component,
+                    receipt: receipt.workload,
+                },
+            );
         }
 
         let planned_backend = self.backend_for(component);
@@ -652,7 +669,7 @@ pub fn prepare_tensor_execution(
         return Err(TensorExecutionContractError::InvalidOperation(operation));
     }
     let component = workload.component();
-    if !operation_matches_component(operation, component) {
+    if !operation_matches_workload(operation, workload) {
         return Err(TensorExecutionContractError::InvalidOperation(operation));
     }
     if !selected_backend.supports_component(component) {
@@ -676,7 +693,7 @@ pub fn prepare_tensor_execution(
     };
 
     let planned_backend = binding.backend_for(component);
-    if let Some(planned_workload) = binding.workload_for(component) {
+    if let Some(planned_workload) = binding.planned_workload_for(workload) {
         if workload != planned_workload {
             return Err(TensorExecutionContractError::PlanWorkloadMismatch {
                 component,
@@ -684,6 +701,11 @@ pub fn prepare_tensor_execution(
                 actual: workload,
             });
         }
+    } else if binding.binds_component(component) {
+        return Err(TensorExecutionContractError::PlanWorkloadNotAuthorized {
+            component,
+            actual: workload,
+        });
     }
     let threshold_cpu_route = binding.uses_tensor_util_cpu_threshold(workload);
     let planned_selected_backend = binding.selected_backend_for(workload);
@@ -923,8 +945,13 @@ pub enum TensorExecutionContractError {
         planned: TensorExecutionWorkload,
         actual: TensorExecutionWorkload,
     },
+    PlanWorkloadNotAuthorized {
+        component: TensorExecutionComponent,
+        actual: TensorExecutionWorkload,
+    },
     DuplicatePlanWorkload {
         component: TensorExecutionComponent,
+        key: TensorExecutionWorkloadKey,
     },
     UnsupportedBackend {
         component: TensorExecutionComponent,
@@ -943,6 +970,10 @@ pub enum TensorExecutionContractError {
     ReceiptPlanWorkloadMismatch {
         component: TensorExecutionComponent,
         planned: TensorExecutionWorkload,
+        receipt: TensorExecutionWorkload,
+    },
+    ReceiptPlanWorkloadNotAuthorized {
+        component: TensorExecutionComponent,
         receipt: TensorExecutionWorkload,
     },
     ReceiptPlanBackendMismatch {
@@ -985,10 +1016,16 @@ impl fmt::Display for TensorExecutionContractError {
                 "committed {} workload {planned:?} does not match tensor operation workload {actual:?}",
                 component.as_str()
             ),
-            Self::DuplicatePlanWorkload { component } => write!(
+            Self::PlanWorkloadNotAuthorized { component, actual } => write!(
                 formatter,
-                "committed execution plan contains duplicate {} workloads",
+                "committed {} workload set does not authorize tensor operation workload {actual:?}",
                 component.as_str()
+            ),
+            Self::DuplicatePlanWorkload { component, key } => write!(
+                formatter,
+                "committed execution plan contains duplicate {} operation workload '{}'",
+                component.as_str(),
+                key.as_str()
             ),
             Self::UnsupportedBackend { component, backend } => write!(
                 formatter,
@@ -1020,6 +1057,11 @@ impl fmt::Display for TensorExecutionContractError {
             } => write!(
                 formatter,
                 "committed {} workload {planned:?} does not match receipt workload {receipt:?}",
+                component.as_str()
+            ),
+            Self::ReceiptPlanWorkloadNotAuthorized { component, receipt } => write!(
+                formatter,
+                "committed {} workload set does not authorize receipt workload {receipt:?}",
                 component.as_str()
             ),
             Self::ReceiptPlanBackendMismatch {
@@ -1082,19 +1124,30 @@ fn valid_operation_name(operation: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
-fn operation_matches_component(operation: &str, component: TensorExecutionComponent) -> bool {
-    match component {
-        TensorExecutionComponent::DenseMatmul => matches!(
+fn operation_matches_workload(operation: &str, workload: TensorExecutionWorkload) -> bool {
+    match workload {
+        TensorExecutionWorkload::DenseMatmul { .. } => matches!(
             operation,
             "matmul" | "matmul_scaled" | "matmul_lhs_transpose_scaled"
         ),
-        TensorExecutionComponent::PrepackedMatmul => {
+        TensorExecutionWorkload::PrepackedMatmul { .. } => {
             matches!(operation, "matmul_prepacked" | "matmul_prepacked_bias")
         }
-        TensorExecutionComponent::LayerNorm => operation == "layer_norm",
-        TensorExecutionComponent::Attention => operation == "scaled_dot_attention",
-        TensorExecutionComponent::Softmax => operation == "row_softmax",
-        TensorExecutionComponent::TensorUtil => operation == "scale",
+        TensorExecutionWorkload::LayerNorm { .. } => operation == "layer_norm",
+        TensorExecutionWorkload::Attention { .. } => operation == "scaled_dot_attention",
+        TensorExecutionWorkload::Softmax { .. } => operation == "row_softmax",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::Scale,
+            ..
+        } => operation == "scale",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            ..
+        } => operation == "max_axis0",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0Backward,
+            ..
+        } => operation == "max_axis0_backward",
     }
 }
 
@@ -1138,8 +1191,8 @@ mod tests {
         )
     }
 
-    fn workload_bound_binding(
-        workloads: [Option<TensorExecutionWorkload>; 6],
+    fn workload_bound_binding<const N: usize>(
+        workloads: [Option<TensorExecutionWorkload>; N],
     ) -> TensorExecutionPlanBinding {
         TensorExecutionPlanBinding::try_new_with_workloads(
             [0xbc; 32],
@@ -1155,7 +1208,7 @@ mod tests {
             AcceleratorFallback::Allow,
             1024,
         )
-        .expect("test workloads are unique")
+        .expect("test operation workloads are unique")
     }
 
     #[test]
@@ -1170,6 +1223,36 @@ mod tests {
 
         assert_eq!(current_accelerator_fallback(), AcceleratorFallback::Forbid);
         drop(outer);
+    }
+
+    #[test]
+    fn tensor_util_operation_name_must_match_the_typed_workload() {
+        let workload = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            rows: 3,
+            cols: 2,
+        };
+
+        assert!(matches!(
+            prepare_tensor_execution(workload, "scale", TensorExecutionBackend::Cpu),
+            Err(TensorExecutionContractError::InvalidOperation("scale"))
+        ));
+
+        let mut receipt =
+            prepare_tensor_execution(workload, "max_axis0", TensorExecutionBackend::Cpu)
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt();
+        receipt.validate().unwrap();
+        receipt.operation = "max_axis0_backward".to_owned();
+        assert!(matches!(
+            receipt.validate(),
+            Err(TensorExecutionContractError::InvalidReceipt {
+                field: "operation",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1312,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_plan_binding_rejects_duplicate_workload_components() {
+    fn committed_plan_binding_rejects_duplicate_workload_operations() {
         let error = TensorExecutionPlanBinding::try_new_with_workloads(
             [0xbc; 32],
             [TensorExecutionBackend::Cpu; 6],
@@ -1323,12 +1406,113 @@ mod tests {
             AcceleratorFallback::Allow,
             1024,
         )
-        .expect_err("duplicate component commitments must fail closed");
+        .expect_err("duplicate operation commitments must fail closed");
 
         assert_eq!(
             error,
             TensorExecutionContractError::DuplicatePlanWorkload {
                 component: TensorExecutionComponent::Softmax,
+                key: TensorExecutionWorkloadKey::Softmax,
+            }
+        );
+    }
+
+    #[test]
+    fn committed_plan_authorizes_max_forward_and_backward_together() {
+        let forward = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            rows: 3,
+            cols: 2,
+        };
+        let backward = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0Backward,
+            rows: 3,
+            cols: 2,
+        };
+        let binding = TensorExecutionPlanBinding::try_new_with_workloads(
+            [0xcd; 32],
+            [TensorExecutionBackend::Cpu; 6],
+            [forward, backward],
+            AcceleratorFallback::Allow,
+            1024,
+        )
+        .expect("distinct tensor utility operations share one component plan");
+        let receipts = {
+            let _plan = push_execution_plan_binding(binding);
+            [
+                prepare_tensor_execution(forward, "max_axis0", TensorExecutionBackend::Cpu)
+                    .unwrap()
+                    .complete(TensorExecutionBackend::Cpu, None)
+                    .unwrap()
+                    .receipt(),
+                prepare_tensor_execution(
+                    backward,
+                    "max_axis0_backward",
+                    TensorExecutionBackend::Cpu,
+                )
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt(),
+            ]
+        };
+
+        for receipt in receipts {
+            binding
+                .validate_receipt(&receipt)
+                .expect("both operation receipts are authorized by the same plan");
+        }
+    }
+
+    #[test]
+    fn bound_component_rejects_an_undeclared_operation_kind() {
+        let forward = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            rows: 3,
+            cols: 2,
+        };
+        let backward = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0Backward,
+            rows: 3,
+            cols: 2,
+        };
+        let binding = TensorExecutionPlanBinding::try_new_with_workloads(
+            [0xde; 32],
+            [TensorExecutionBackend::Cpu; 6],
+            [forward],
+            AcceleratorFallback::Allow,
+            1024,
+        )
+        .unwrap();
+
+        {
+            let _plan = push_execution_plan_binding(binding);
+            assert_eq!(
+                prepare_tensor_execution(
+                    backward,
+                    "max_axis0_backward",
+                    TensorExecutionBackend::Cpu,
+                )
+                .unwrap_err(),
+                TensorExecutionContractError::PlanWorkloadNotAuthorized {
+                    component: TensorExecutionComponent::TensorUtil,
+                    actual: backward,
+                }
+            );
+        }
+
+        let mut receipt =
+            prepare_tensor_execution(backward, "max_axis0_backward", TensorExecutionBackend::Cpu)
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt();
+        receipt.runtime_execution_plan_output_sha256 = Some(sha256_hex(binding.output_sha256()));
+        assert_eq!(
+            binding.validate_receipt(&receipt).unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanWorkloadNotAuthorized {
+                component: TensorExecutionComponent::TensorUtil,
+                receipt: backward,
             }
         );
     }
