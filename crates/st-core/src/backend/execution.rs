@@ -14,13 +14,14 @@ use std::cell::RefCell;
 
 pub use super::execution_plan::{
     evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
-    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeComponentCapabilityEvidence,
-    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentReadyProof,
-    RuntimeComponentResolution, RuntimeComponentRoute, RuntimeComponentRouteClass,
-    RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeExecutionPlanError,
-    RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest, RuntimeExecutionPlanStatus,
-    RuntimeTensorBackend, RuntimeTensorBackendPolicy, RuntimeTensorUtilOperation, TensorUtilRoute,
-    TensorUtilRouteStatus,
+    validate_tensor_execution_receipt_against_runtime_plan, AcceleratorFallback, BackendPolicy,
+    ExecutionConfig, RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityState,
+    RuntimeComponentCapabilityStatus, RuntimeComponentReadyProof, RuntimeComponentResolution,
+    RuntimeComponentRoute, RuntimeComponentRouteClass, RuntimeComponentWorkload,
+    RuntimeExecutionComponent, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
+    RuntimeExecutionPlanRequest, RuntimeExecutionPlanStatus,
+    RuntimeExecutionReceiptValidationError, RuntimeTensorBackend, RuntimeTensorBackendPolicy,
+    RuntimeTensorUtilOperation, TensorUtilRoute, TensorUtilRouteStatus,
 };
 
 thread_local! {
@@ -413,6 +414,8 @@ mod tests {
         let receipt: TensorExecutionReceipt =
             serde_json::from_value(data["execution_receipt"].clone()).expect("typed receipt");
         receipt.validate().expect("receipt validates");
+        validate_tensor_execution_receipt_against_runtime_plan(&plan, &receipt)
+            .expect("the originating runtime plan authorizes its emitted receipt");
         assert_eq!(
             receipt.runtime_execution_plan_output_sha256.as_deref(),
             Some(plan.output_sha256.as_str())

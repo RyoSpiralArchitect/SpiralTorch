@@ -2573,6 +2573,14 @@ declare module "spiraltorch-wasm" {
     export function tensorExecutionReceiptValidateObject(
         receipt: TensorExecutionReceipt,
     ): TensorExecutionReceipt;
+    export function tensorExecutionReceiptValidateAgainstRuntimePlanJson(
+        receiptJson: string,
+        runtimePlanJson: string,
+    ): string;
+    export function tensorExecutionReceiptValidateAgainstRuntimePlanObject(
+        receipt: TensorExecutionReceipt,
+        runtimePlan: RuntimeExecutionPlan,
+    ): TensorExecutionReceipt;
     export function trainerOptimizerConfigJson(configJson: string): string;
     export function trainerOptimizerConfigObject(
         config: TrainerOptimizerConfig,

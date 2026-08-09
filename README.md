@@ -647,6 +647,21 @@ undeclared workloads remain unobserved. Once a committed plan is installed, ever
 declared workload is bound exactly through tensor dispatch: shape, bias, or utility
 operation mismatches are rejected before a kernel call. Undeclared components remain
 dynamic and continue through operation-time capability checks.
+Receipt self-validation deliberately does not treat a well-formed plan hash as
+authorization. Supply the original committed plan to make Rust replay the plan and
+reapply its exact workload, backend, threshold, and fallback rules:
+
+```python
+validated_receipt = st.validate_tensor_execution_receipt_against_runtime_plan(
+    receipt,
+    session.runtime_execution_plan,
+)
+```
+
+WASM exposes the same operation as
+`tensorExecutionReceiptValidateAgainstRuntimePlanJson` and
+`tensorExecutionReceiptValidateAgainstRuntimePlanObject`; neither client rebuilds
+the authorization rules.
 Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
 unobserved accelerator capabilities rather than guessing that a workload is ready.
 

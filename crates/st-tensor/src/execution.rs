@@ -414,6 +414,112 @@ impl TensorExecutionPlanBinding {
         self.workloads[component.index()]
     }
 
+    /// Validate that a self-consistent receipt was authorized by this binding.
+    ///
+    /// This reapplies the same workload, backend, threshold, and fallback
+    /// contract used before dispatch. A receipt cannot authorize itself merely
+    /// by carrying a syntactically valid plan commitment.
+    pub fn validate_receipt(
+        self,
+        receipt: &TensorExecutionReceipt,
+    ) -> Result<(), TensorExecutionContractError> {
+        receipt.validate()?;
+
+        let planned_commitment = sha256_hex(self.output_sha256);
+        let Some(receipt_commitment) = receipt.runtime_execution_plan_output_sha256.as_deref()
+        else {
+            return Err(TensorExecutionContractError::ReceiptPlanCommitmentMissing);
+        };
+        if receipt_commitment != planned_commitment {
+            return Err(
+                TensorExecutionContractError::ReceiptPlanCommitmentMismatch {
+                    planned: planned_commitment,
+                    receipt: receipt_commitment.to_owned(),
+                },
+            );
+        }
+
+        let component = receipt.component;
+        if let Some(planned_workload) = self.workload_for(component) {
+            if receipt.workload != planned_workload {
+                return Err(TensorExecutionContractError::ReceiptPlanWorkloadMismatch {
+                    component,
+                    planned: planned_workload,
+                    receipt: receipt.workload,
+                });
+            }
+        }
+
+        let planned_backend = self.backend_for(component);
+        if receipt.requested_backend != planned_backend {
+            return Err(TensorExecutionContractError::ReceiptPlanBackendMismatch {
+                field: "requested_backend",
+                component,
+                planned: planned_backend,
+                receipt: receipt.requested_backend,
+            });
+        }
+
+        let threshold_cpu_route = self.uses_tensor_util_cpu_threshold(receipt.workload);
+        let planned_selected_backend = self.selected_backend_for(receipt.workload);
+        if threshold_cpu_route {
+            if receipt.selected_backend != TensorExecutionBackend::Cpu {
+                return Err(TensorExecutionContractError::ReceiptPlanBackendMismatch {
+                    field: "selected_backend",
+                    component,
+                    planned: TensorExecutionBackend::Cpu,
+                    receipt: receipt.selected_backend,
+                });
+            }
+        } else if planned_selected_backend != TensorExecutionBackend::Auto
+            && receipt.selected_backend != planned_selected_backend
+        {
+            return Err(TensorExecutionContractError::ReceiptPlanBackendMismatch {
+                field: "selected_backend",
+                component,
+                planned: planned_selected_backend,
+                receipt: receipt.selected_backend,
+            });
+        }
+
+        let expected_route = if receipt.workload.has_empty_output() {
+            PlannedReceiptRoute::NoOp
+        } else if threshold_cpu_route {
+            PlannedReceiptRoute::CpuThreshold
+        } else if planned_backend == TensorExecutionBackend::Auto {
+            PlannedReceiptRoute::AutoResolved
+        } else if self.accelerator_fallback.allows_fallback() {
+            PlannedReceiptRoute::DirectOrRuntimeFallback
+        } else {
+            PlannedReceiptRoute::Direct
+        };
+        if !expected_route.accepts(receipt.route_status) {
+            return Err(TensorExecutionContractError::ReceiptPlanRouteMismatch {
+                component,
+                expected: expected_route.as_str(),
+                receipt: receipt.route_status,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn uses_tensor_util_cpu_threshold(self, workload: TensorExecutionWorkload) -> bool {
+        workload.component() == TensorExecutionComponent::TensorUtil
+            && self.backend_for(TensorExecutionComponent::TensorUtil)
+                == TensorExecutionBackend::Wgpu
+            && workload.output_values_saturating() < self.tensor_util_wgpu_min_values
+            && self.accelerator_fallback.allows_fallback()
+    }
+
+    fn selected_backend_for(self, workload: TensorExecutionWorkload) -> TensorExecutionBackend {
+        if self.uses_tensor_util_cpu_threshold(workload) {
+            TensorExecutionBackend::Cpu
+        } else {
+            self.backend_for(workload.component())
+        }
+    }
+
     pub const fn accelerator_fallback(self) -> AcceleratorFallback {
         self.accelerator_fallback
     }
@@ -489,6 +595,40 @@ enum PreparedRoute {
     CpuThreshold,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlannedReceiptRoute {
+    Direct,
+    DirectOrRuntimeFallback,
+    AutoResolved,
+    CpuThreshold,
+    NoOp,
+}
+
+impl PlannedReceiptRoute {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::DirectOrRuntimeFallback => "direct or runtime_fallback",
+            Self::AutoResolved => "auto_resolved",
+            Self::CpuThreshold => "cpu_threshold",
+            Self::NoOp => "no_op",
+        }
+    }
+
+    const fn accepts(self, actual: TensorExecutionRouteStatus) -> bool {
+        match self {
+            Self::Direct => matches!(actual, TensorExecutionRouteStatus::Direct),
+            Self::DirectOrRuntimeFallback => matches!(
+                actual,
+                TensorExecutionRouteStatus::Direct | TensorExecutionRouteStatus::RuntimeFallback
+            ),
+            Self::AutoResolved => matches!(actual, TensorExecutionRouteStatus::AutoResolved),
+            Self::CpuThreshold => matches!(actual, TensorExecutionRouteStatus::CpuThreshold),
+            Self::NoOp => matches!(actual, TensorExecutionRouteStatus::NoOp),
+        }
+    }
+}
+
 /// Validated request that may be completed into a receipt after output checks pass.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PreparedTensorExecution {
@@ -521,7 +661,6 @@ pub fn prepare_tensor_execution(
             backend: selected_backend,
         });
     }
-    let values = workload.output_values_saturating();
     let fallback = current_accelerator_fallback();
     let Some(binding) = current_execution_plan_binding() else {
         return Ok(PreparedTensorExecution {
@@ -546,15 +685,12 @@ pub fn prepare_tensor_execution(
             });
         }
     }
-    let threshold_cpu_route = component == TensorExecutionComponent::TensorUtil
-        && planned_backend == TensorExecutionBackend::Wgpu
-        && selected_backend == TensorExecutionBackend::Cpu
-        && values < binding.tensor_util_wgpu_min_values()
-        && binding.accelerator_fallback().allows_fallback();
-    if selected_backend != planned_backend && !threshold_cpu_route {
+    let threshold_cpu_route = binding.uses_tensor_util_cpu_threshold(workload);
+    let planned_selected_backend = binding.selected_backend_for(workload);
+    if selected_backend != planned_selected_backend {
         return Err(TensorExecutionContractError::PlanBackendMismatch {
             component,
-            planned: planned_backend,
+            planned: planned_selected_backend,
             selected: selected_backend,
         });
     }
@@ -799,6 +935,27 @@ pub enum TensorExecutionContractError {
         field: &'static str,
         message: &'static str,
     },
+    ReceiptPlanCommitmentMissing,
+    ReceiptPlanCommitmentMismatch {
+        planned: String,
+        receipt: String,
+    },
+    ReceiptPlanWorkloadMismatch {
+        component: TensorExecutionComponent,
+        planned: TensorExecutionWorkload,
+        receipt: TensorExecutionWorkload,
+    },
+    ReceiptPlanBackendMismatch {
+        field: &'static str,
+        component: TensorExecutionComponent,
+        planned: TensorExecutionBackend,
+        receipt: TensorExecutionBackend,
+    },
+    ReceiptPlanRouteMismatch {
+        component: TensorExecutionComponent,
+        expected: &'static str,
+        receipt: TensorExecutionRouteStatus,
+    },
 }
 
 impl fmt::Display for TensorExecutionContractError {
@@ -848,6 +1005,45 @@ impl fmt::Display for TensorExecutionContractError {
                     "invalid tensor execution receipt field '{field}': {message}"
                 )
             }
+            Self::ReceiptPlanCommitmentMissing => write!(
+                formatter,
+                "tensor execution receipt is not bound to a runtime execution plan"
+            ),
+            Self::ReceiptPlanCommitmentMismatch { planned, receipt } => write!(
+                formatter,
+                "tensor execution receipt commitment {receipt} does not match runtime execution plan {planned}"
+            ),
+            Self::ReceiptPlanWorkloadMismatch {
+                component,
+                planned,
+                receipt,
+            } => write!(
+                formatter,
+                "committed {} workload {planned:?} does not match receipt workload {receipt:?}",
+                component.as_str()
+            ),
+            Self::ReceiptPlanBackendMismatch {
+                field,
+                component,
+                planned,
+                receipt,
+            } => write!(
+                formatter,
+                "committed {} {field} is {}, but the receipt claims {}",
+                component.as_str(),
+                planned.as_str(),
+                receipt.as_str()
+            ),
+            Self::ReceiptPlanRouteMismatch {
+                component,
+                expected,
+                receipt,
+            } => write!(
+                formatter,
+                "committed {} route requires {expected}, but the receipt claims {}",
+                component.as_str(),
+                receipt.as_str()
+            ),
         }
     }
 }
@@ -1073,7 +1269,7 @@ mod tests {
             TensorExecutionBackend::Cpu,
             TensorExecutionBackend::Cpu,
             TensorExecutionBackend::Cpu,
-            TensorExecutionBackend::Wgpu,
+            TensorExecutionBackend::Cpu,
         ];
         let workloads = planned.map(Some);
         let _plan = push_execution_plan_binding(workload_bound_binding(workloads));
@@ -1138,10 +1334,150 @@ mod tests {
     }
 
     #[test]
+    fn receipt_validation_requires_the_authorizing_plan_commitment() {
+        let workload = TensorExecutionWorkload::Softmax { rows: 2, cols: 3 };
+        let binding = workload_bound_binding([None, None, None, None, Some(workload), None]);
+        let receipt = {
+            let _plan = push_execution_plan_binding(binding);
+            prepare_tensor_execution(workload, "row_softmax", TensorExecutionBackend::Cpu)
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt()
+        };
+
+        binding.validate_receipt(&receipt).unwrap();
+
+        let mut uncommitted = receipt.clone();
+        uncommitted.runtime_execution_plan_output_sha256 = None;
+        assert_eq!(
+            binding.validate_receipt(&uncommitted).unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanCommitmentMissing
+        );
+
+        let foreign_binding = committed_binding(AcceleratorFallback::Allow, 1024);
+        assert!(matches!(
+            foreign_binding.validate_receipt(&receipt).unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanCommitmentMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn receipt_validation_rejects_reconstructed_workload_and_backend_claims() {
+        let workload = TensorExecutionWorkload::Softmax { rows: 2, cols: 3 };
+        let binding = workload_bound_binding([None, None, None, None, Some(workload), None]);
+        let receipt = {
+            let _plan = push_execution_plan_binding(binding);
+            prepare_tensor_execution(workload, "row_softmax", TensorExecutionBackend::Cpu)
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt()
+        };
+
+        let mut reconstructed_workload = receipt.clone();
+        reconstructed_workload.workload = TensorExecutionWorkload::Softmax { rows: 2, cols: 5 };
+        reconstructed_workload.validate().unwrap();
+        assert_eq!(
+            binding
+                .validate_receipt(&reconstructed_workload)
+                .unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanWorkloadMismatch {
+                component: TensorExecutionComponent::Softmax,
+                planned: workload,
+                receipt: reconstructed_workload.workload,
+            }
+        );
+
+        let mut reconstructed_backend = receipt;
+        reconstructed_backend.requested_backend = TensorExecutionBackend::Wgpu;
+        reconstructed_backend.selected_backend = TensorExecutionBackend::Wgpu;
+        reconstructed_backend.executed_backend = Some(TensorExecutionBackend::Wgpu);
+        reconstructed_backend.kernel_backend = Some(TensorExecutionKernelBackend::WgpuDense);
+        reconstructed_backend.validate().unwrap();
+        assert_eq!(
+            binding
+                .validate_receipt(&reconstructed_backend)
+                .unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanBackendMismatch {
+                field: "requested_backend",
+                component: TensorExecutionComponent::Softmax,
+                planned: TensorExecutionBackend::Cpu,
+                receipt: TensorExecutionBackend::Wgpu,
+            }
+        );
+    }
+
+    #[test]
+    fn receipt_validation_reapplies_fallback_and_automatic_route_contracts() {
+        let wgpu_backends = [TensorExecutionBackend::Wgpu; 6];
+        let permissive = TensorExecutionPlanBinding::new(
+            [0xdd; 32],
+            wgpu_backends,
+            AcceleratorFallback::Allow,
+            1024,
+        );
+        let fallback_receipt = {
+            let _plan = push_execution_plan_binding(permissive);
+            prepare_tensor_execution(
+                TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+                "row_softmax",
+                TensorExecutionBackend::Wgpu,
+            )
+            .unwrap()
+            .complete(
+                TensorExecutionBackend::Cpu,
+                Some(TensorExecutionFallback::runtime_unavailable(
+                    TensorExecutionBackend::Wgpu,
+                    TensorExecutionBackend::Cpu,
+                )),
+            )
+            .unwrap()
+            .receipt()
+        };
+        permissive.validate_receipt(&fallback_receipt).unwrap();
+
+        let strict = TensorExecutionPlanBinding::new(
+            [0xdd; 32],
+            wgpu_backends,
+            AcceleratorFallback::Forbid,
+            1024,
+        );
+        assert_eq!(
+            strict.validate_receipt(&fallback_receipt).unwrap_err(),
+            TensorExecutionContractError::ReceiptPlanRouteMismatch {
+                component: TensorExecutionComponent::Softmax,
+                expected: "direct",
+                receipt: TensorExecutionRouteStatus::RuntimeFallback,
+            }
+        );
+
+        let automatic = TensorExecutionPlanBinding::new(
+            [0xee; 32],
+            [TensorExecutionBackend::Auto; 6],
+            AcceleratorFallback::Allow,
+            1024,
+        );
+        let automatic_receipt = {
+            let _plan = push_execution_plan_binding(automatic);
+            prepare_tensor_execution(
+                TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+                "row_softmax",
+                TensorExecutionBackend::Auto,
+            )
+            .unwrap()
+            .complete(TensorExecutionBackend::Cpu, None)
+            .unwrap()
+            .receipt()
+        };
+        automatic.validate_receipt(&automatic_receipt).unwrap();
+    }
+
+    #[test]
     fn committed_tensor_util_threshold_produces_a_bound_cpu_receipt() {
         let _fallback = push_accelerator_fallback(AcceleratorFallback::Allow);
-        let _plan =
-            push_execution_plan_binding(committed_binding(AcceleratorFallback::Allow, 1024));
+        let binding = committed_binding(AcceleratorFallback::Allow, 1024);
+        let _plan = push_execution_plan_binding(binding);
         let prepared = prepare_tensor_execution(
             TensorExecutionWorkload::TensorUtil {
                 operation: crate::execution_capability::TensorUtilOperation::Scale,
@@ -1172,6 +1508,32 @@ mod tests {
         assert_eq!(
             receipt.runtime_execution_plan_output_sha256.as_deref(),
             Some("abababababababababababababababababababababababababababababababab")
+        );
+        binding.validate_receipt(&receipt).unwrap();
+    }
+
+    #[test]
+    fn committed_tensor_util_threshold_cannot_be_bypassed_by_direct_wgpu_selection() {
+        let binding = committed_binding(AcceleratorFallback::Allow, 1024);
+        let _plan = push_execution_plan_binding(binding);
+        let error = prepare_tensor_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: crate::execution_capability::TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+            "scale",
+            TensorExecutionBackend::Wgpu,
+        )
+        .expect_err("the committed CPU threshold route is mandatory");
+
+        assert_eq!(
+            error,
+            TensorExecutionContractError::PlanBackendMismatch {
+                component: TensorExecutionComponent::TensorUtil,
+                planned: TensorExecutionBackend::Cpu,
+                selected: TensorExecutionBackend::Wgpu,
+            }
         );
     }
 

@@ -797,6 +797,52 @@ def test_tensor_execution_receipt_is_validated_only_by_rust() -> None:
     assert "validate_tensor_execution_receipt" in st.__all__
     assert st.validate_tensor_execution_receipt(receipt) == receipt
 
+    plan = st.evaluate_runtime_execution_plan(
+        st.describe_device("cpu"),
+        accelerator_fallback="allow",
+        tensor_util_wgpu_min_values=1024,
+        component_resolution="deferred",
+        component_workloads=[receipt["workload"]],
+    )
+    bound_receipt = {
+        **receipt,
+        "runtime_execution_plan_output_sha256": plan["output_sha256"],
+    }
+    assert "validate_tensor_execution_receipt_against_runtime_plan" in st.__all__
+    assert (
+        st.validate_tensor_execution_receipt_against_runtime_plan(
+            bound_receipt,
+            plan,
+        )
+        == bound_receipt
+    )
+
+    foreign_plan = st.evaluate_runtime_execution_plan(
+        st.describe_device("cpu"),
+        accelerator_fallback="allow",
+        tensor_util_wgpu_min_values=2048,
+        component_resolution="deferred",
+        component_workloads=[receipt["workload"]],
+    )
+    assert foreign_plan["output_sha256"] != plan["output_sha256"]
+    with pytest.raises(ValueError, match="receipt authorization failed"):
+        st.validate_tensor_execution_receipt_against_runtime_plan(
+            bound_receipt,
+            foreign_plan,
+        )
+
+    reconstructed_workload = json.loads(json.dumps(bound_receipt))
+    reconstructed_workload["workload"]["cols"] = 5
+    assert (
+        st.validate_tensor_execution_receipt(reconstructed_workload)
+        == reconstructed_workload
+    )
+    with pytest.raises(ValueError, match="receipt workload"):
+        st.validate_tensor_execution_receipt_against_runtime_plan(
+            reconstructed_workload,
+            plan,
+        )
+
     tampered = dict(receipt)
     tampered["executed_backend"] = "wgpu"
     with pytest.raises(ValueError, match="receipt validation failed"):

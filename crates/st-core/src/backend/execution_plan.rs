@@ -22,8 +22,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use spiral_config::execution::{AcceleratorFallback, ExecutionConfig};
 use st_tensor::{
-    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorExecutionWorkload,
-    TensorUtilBackend,
+    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorExecutionBackend,
+    TensorExecutionContractError, TensorExecutionPlanBinding, TensorExecutionReceipt,
+    TensorExecutionWorkload, TensorUtilBackend,
 };
 use thiserror::Error;
 
@@ -88,6 +89,15 @@ pub enum RuntimeExecutionPlanError {
         component: &'static str,
         backend: String,
     },
+}
+
+/// Failure to prove that a tensor receipt was authorized by a runtime plan.
+#[derive(Debug, Error, PartialEq)]
+pub enum RuntimeExecutionReceiptValidationError {
+    #[error(transparent)]
+    RuntimePlan(#[from] RuntimeExecutionPlanError),
+    #[error(transparent)]
+    TensorExecution(#[from] TensorExecutionContractError),
 }
 
 /// Tensor components whose backend choices are owned by the execution plan.
@@ -863,6 +873,38 @@ impl RuntimeExecutionPlanPayload {
     }
 }
 
+/// Validate a tensor completion receipt against one explicit committed plan.
+///
+/// The plan is replayed and must authorize execution, but validation does not
+/// require the receiving process to expose the same local accelerator. The
+/// exact tensor binding then reapplies dispatch-time workload and route rules.
+pub fn validate_tensor_execution_receipt_against_runtime_plan(
+    plan: &RuntimeExecutionPlanPayload,
+    receipt: &TensorExecutionReceipt,
+) -> Result<(), RuntimeExecutionReceiptValidationError> {
+    let binding = validated_tensor_execution_plan_binding(plan)?;
+    binding.validate_receipt(receipt)?;
+    Ok(())
+}
+
+fn validated_tensor_execution_plan_binding(
+    plan: &RuntimeExecutionPlanPayload,
+) -> Result<TensorExecutionPlanBinding, RuntimeExecutionPlanError> {
+    plan.try_planning_context()?;
+    TensorExecutionPlanBinding::try_new_with_workloads(
+        parse_sha256(&plan.output_sha256)?,
+        RuntimeExecutionComponent::ALL
+            .map(|component| tensor_execution_backend(plan.policy.backend_for(component))),
+        plan.request
+            .component_workloads
+            .iter()
+            .map(tensor_execution_workload),
+        plan.request.execution_config.accelerator_fallback,
+        plan.request.execution_config.tensor_util_wgpu_min_values,
+    )
+    .map_err(|error| invalid_payload("component_workloads", error.to_string()))
+}
+
 /// Observe local component kernels once and return an enriched replay request.
 ///
 /// The observation is a separate Rust-owned committed contract. Validation
@@ -1131,6 +1173,18 @@ pub(crate) fn runtime_tensor_policy_for(backend: BackendKind) -> RuntimeTensorBa
             softmax: RuntimeTensorBackend::Auto,
             tensor_util: RuntimeTensorBackend::Auto,
         },
+    }
+}
+
+const fn tensor_execution_backend(backend: RuntimeTensorBackend) -> TensorExecutionBackend {
+    match backend {
+        RuntimeTensorBackend::Auto => TensorExecutionBackend::Auto,
+        RuntimeTensorBackend::Cpu => TensorExecutionBackend::Cpu,
+        RuntimeTensorBackend::Faer => TensorExecutionBackend::Faer,
+        RuntimeTensorBackend::CpuSimd => TensorExecutionBackend::CpuSimd,
+        RuntimeTensorBackend::Naive => TensorExecutionBackend::Naive,
+        RuntimeTensorBackend::Wgpu => TensorExecutionBackend::Wgpu,
+        RuntimeTensorBackend::Hip => TensorExecutionBackend::Hip,
     }
 }
 
@@ -1580,6 +1634,35 @@ mod tests {
         }
     }
 
+    fn softmax_receipt(commitment: &str, rows: u64, cols: u64) -> TensorExecutionReceipt {
+        serde_json::from_value(serde_json::json!({
+            "kind": "spiraltorch.tensor_execution_receipt",
+            "contract_version": "spiraltorch.tensor_execution_receipt.v1",
+            "semantic_owner": "st-tensor::execution",
+            "component": "softmax",
+            "operation": "row_softmax",
+            "workload": {"component": "softmax", "rows": rows, "cols": cols},
+            "requested_backend": "cpu",
+            "selected_backend": "cpu",
+            "executed_backend": "cpu",
+            "kernel_backend": "cpu",
+            "route_status": "direct",
+            "runtime_execution_plan_output_sha256": commitment,
+        }))
+        .expect("typed softmax receipt")
+    }
+
+    fn cpu_softmax_plan(rows: u64, cols: u64, threshold: usize) -> RuntimeExecutionPlanPayload {
+        let mut request =
+            execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        request.execution_config.tensor_util_wgpu_min_values = threshold;
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+        request.component_workloads = vec![RuntimeComponentWorkload::Softmax { rows, cols }];
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("CPU softmax capability is observable");
+        evaluate_runtime_execution_plan(request).expect("CPU softmax plan evaluates")
+    }
+
     #[test]
     fn cpu_policy_keeps_accelerated_ops_on_cpu_or_auto() {
         let policy = BackendPolicy::from_device_caps_with_config(
@@ -1832,6 +1915,58 @@ mod tests {
             bound_workloads.into_iter().flatten().count(),
             RuntimeExecutionComponent::ALL.len()
         );
+    }
+
+    #[test]
+    fn runtime_plan_authorizes_only_its_exact_tensor_receipts() {
+        let plan = cpu_softmax_plan(2, 3, 1024);
+        let receipt = softmax_receipt(&plan.output_sha256, 2, 3);
+
+        validate_tensor_execution_receipt_against_runtime_plan(&plan, &receipt)
+            .expect("the committed plan authorizes its exact receipt");
+
+        let foreign_plan = cpu_softmax_plan(2, 3, 2048);
+        assert_ne!(foreign_plan.output_sha256, plan.output_sha256);
+        assert!(matches!(
+            validate_tensor_execution_receipt_against_runtime_plan(&foreign_plan, &receipt),
+            Err(RuntimeExecutionReceiptValidationError::TensorExecution(
+                TensorExecutionContractError::ReceiptPlanCommitmentMismatch { .. }
+            ))
+        ));
+
+        let reconstructed_workload = softmax_receipt(&plan.output_sha256, 2, 5);
+        reconstructed_workload
+            .validate()
+            .expect("the reconstructed receipt remains internally consistent");
+        assert_eq!(
+            validate_tensor_execution_receipt_against_runtime_plan(&plan, &reconstructed_workload,)
+                .unwrap_err(),
+            RuntimeExecutionReceiptValidationError::TensorExecution(
+                TensorExecutionContractError::ReceiptPlanWorkloadMismatch {
+                    component: st_tensor::TensorExecutionComponent::Softmax,
+                    planned: TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+                    receipt: TensorExecutionWorkload::Softmax { rows: 2, cols: 5 },
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn blocked_runtime_plan_cannot_authorize_a_tensor_receipt() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Forbid);
+        request.required_native_components = vec![RuntimeExecutionComponent::DenseMatmul];
+        let blocked =
+            evaluate_runtime_execution_plan(request).expect("blocked plan remains inspectable");
+        assert!(!blocked.execution_allowed);
+        let receipt = softmax_receipt(&blocked.output_sha256, 2, 3);
+
+        assert!(matches!(
+            validate_tensor_execution_receipt_against_runtime_plan(&blocked, &receipt),
+            Err(RuntimeExecutionReceiptValidationError::RuntimePlan(
+                RuntimeExecutionPlanError::ExecutionBlocked { .. }
+            ))
+        ));
     }
 
     #[test]
