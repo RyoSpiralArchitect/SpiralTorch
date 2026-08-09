@@ -88,6 +88,11 @@ from spiraltorch.hf_input_identity import (
     hf_finetune_input_identity_lines,
     hf_finetune_input_identity_report,
 )
+from spiraltorch.hf_optimizer_control import (
+    HF_ZSPACE_OPTIMIZER_TRACE_FILENAME,
+    hf_zspace_optimizer_control_callback,
+    hf_zspace_optimizer_recipe_contract,
+)
 from spiraltorch.hf_replay_identity import (
     HF_FINETUNE_REPLAY_IDENTITY_SCHEMA,
     hf_finetune_replay_identity_lines,
@@ -406,6 +411,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     parser.add_argument("--trainer-trace-run-id", default=None)
+    parser.add_argument(
+        "--zspace-optimizer-control",
+        choices=("off", "observe", "apply"),
+        default="off",
+        help=(
+            "off disables model-update control; observe derives the Rust control "
+            "without applying it; apply temporarily scales each optimizer update."
+        ),
+    )
+    parser.add_argument("--zspace-optimizer-control-gain", type=float, default=1.0)
+    parser.add_argument("--zspace-optimizer-z-dim", type=int, default=6)
+    parser.add_argument("--zspace-optimizer-curvature", type=float, default=-0.04)
+    parser.add_argument("--zspace-optimizer-volume-per-step", type=int, default=8)
+    parser.add_argument(
+        "--zspace-optimizer-trace-jsonl",
+        type=Path,
+        default=None,
+        help="Optional JSONL destination for per-update Z-space control evidence.",
+    )
     parser.add_argument(
         "--resume-from-checkpoint",
         type=Path,
@@ -988,6 +1012,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
+    if not 0.0 <= args.zspace_optimizer_control_gain <= 1.0 or not math.isfinite(
+        args.zspace_optimizer_control_gain
+    ):
+        parser.error("--zspace-optimizer-control-gain must be finite and in [0, 1]")
+    if args.zspace_optimizer_z_dim <= 0:
+        parser.error("--zspace-optimizer-z-dim must be positive")
+    if (
+        not math.isfinite(args.zspace_optimizer_curvature)
+        or args.zspace_optimizer_curvature >= 0.0
+    ):
+        parser.error("--zspace-optimizer-curvature must be finite and negative")
+    if args.zspace_optimizer_volume_per_step <= 0:
+        parser.error("--zspace-optimizer-volume-per-step must be positive")
+    if args.zspace_optimizer_control != "off" and not (
+        args.train or args.training_recipe_only
+    ):
+        parser.error(
+            "active --zspace-optimizer-control requires --train or "
+            "--training-recipe-only"
+        )
     geometry_guard_active = _trainer_geometry_guard_active(args)
     if (args.trainer_telemetry or geometry_guard_active) and args.no_trainer_trace:
         parser.error("trainer telemetry and geometry guards require trainer tracing")
@@ -1142,6 +1186,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args._hf_finetune_adapter_config = _adapter_config_from_args(args)
     except ValueError as exc:
         parser.error(f"invalid fine-tune adapter configuration: {exc}")
+    args._hf_zspace_optimizer_recipe_contract = (
+        hf_zspace_optimizer_recipe_contract(
+            mode=args.zspace_optimizer_control,
+            z_dim=args.zspace_optimizer_z_dim,
+            curvature=args.zspace_optimizer_curvature,
+            control_gain=args.zspace_optimizer_control_gain,
+            volume_per_step=args.zspace_optimizer_volume_per_step,
+        )
+    )
     args._hf_finetune_launch_command = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -3015,6 +3068,9 @@ def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, obj
                 args.trainer_loss_guard_threshold if trace_enabled else None
             ),
         },
+        "zspace_optimizer_control": dict(
+            args._hf_zspace_optimizer_recipe_contract
+        ),
     }
 
 
@@ -3607,6 +3663,10 @@ def _base_run_card(
         ),
         "model_artifact_load_report": None,
         "finetune_start_report": _finetune_start_report(args, artifact_report),
+        "zspace_optimizer_control_recipe": dict(
+            args._hf_zspace_optimizer_recipe_contract
+        ),
+        "zspace_optimizer_control_receipt": None,
         "adapter_input_identity": (
             dict(getattr(args, "_hf_adapter_input_identity_report", {}) or {})
             or None
@@ -4091,6 +4151,14 @@ def _trainer_trace_path(args: argparse.Namespace) -> Path | None:
     if isinstance(plan, Mapping) and plan.get("trace_path") is not None:
         return Path(str(plan["trace_path"]))
     return _trainer_trace_canonical_path(args)
+
+
+def _zspace_optimizer_trace_path(args: argparse.Namespace) -> Path | None:
+    if args.zspace_optimizer_control == "off":
+        return None
+    return args.zspace_optimizer_trace_jsonl or (
+        args.output_dir / HF_ZSPACE_OPTIMIZER_TRACE_FILENAME
+    )
 
 
 def _attach_trainer_trace_segment_receipt(
@@ -5354,6 +5422,31 @@ def _main_with_runtime_access(
                 inference_distortion_handoff=card.get("inference_distortion_handoff"),
             )
         )
+    zspace_optimizer_callback = None
+    try:
+        zspace_optimizer_callback = hf_zspace_optimizer_control_callback(
+            mode=args.zspace_optimizer_control,
+            z_dim=args.zspace_optimizer_z_dim,
+            curvature=args.zspace_optimizer_curvature,
+            control_gain=args.zspace_optimizer_control_gain,
+            volume_per_step=args.zspace_optimizer_volume_per_step,
+            trace_path=_zspace_optimizer_trace_path(args),
+            reset_trace=args.resume_from_checkpoint is None,
+            resume_from_checkpoint=args.resume_from_checkpoint,
+        )
+        callbacks.append(zspace_optimizer_callback)
+        card["zspace_optimizer_control_receipt"] = (
+            zspace_optimizer_callback.receipt()
+        )
+    except Exception as exc:
+        card.update(
+            {
+                "failure_stage": "zspace_optimizer_control_init",
+                "failure_error": f"{exc.__class__.__name__}: {exc}",
+            }
+        )
+        _write_card(card, args)
+        return 1
     try:
         trainer = transformers.Trainer(
             model=model,
@@ -5371,7 +5464,15 @@ def _main_with_runtime_access(
             )
         train_result = trainer.train(**_trainer_train_kwargs(args))
         trainer.save_model(str(args.output_dir))
+        card["zspace_optimizer_control_receipt"] = (
+            zspace_optimizer_callback.receipt()
+        )
     except Exception as exc:
+        if zspace_optimizer_callback is not None:
+            zspace_optimizer_callback.abort(exc)
+            card["zspace_optimizer_control_receipt"] = (
+                zspace_optimizer_callback.receipt()
+            )
         card.update(
             {
                 "failure_stage": "trainer_train",

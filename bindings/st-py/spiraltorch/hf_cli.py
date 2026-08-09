@@ -104,6 +104,10 @@ from .hf_peft import (
     hf_causal_lm_artifact_report,
     hf_merged_causal_lm_export_lines,
 )
+from .hf_optimizer_control import (
+    compare_hf_zspace_optimizer_run_cards,
+    write_hf_zspace_optimizer_matched_ablation_report,
+)
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
@@ -2051,6 +2055,27 @@ def zspace_generation_control_compare_main(argv: Sequence[str] | None = None) ->
         for line in lines:
             print(line, file=sys.stderr)
     return 0
+
+
+def zspace_optimizer_compare_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare seed-matched observe/apply HF Z-Space optimizer run cards."
+        ),
+    )
+    parser.add_argument("run_cards", nargs="+", type=Path)
+    parser.add_argument("--out", type=Path, default=None)
+    args = parser.parse_args(argv)
+    missing = [path for path in args.run_cards if not path.is_file()]
+    if missing:
+        parser.error("run card does not exist: " + ", ".join(map(str, missing)))
+    report = compare_hf_zspace_optimizer_run_cards(args.run_cards)
+    if args.out is not None:
+        write_hf_zspace_optimizer_matched_ablation_report(report, args.out)
+        print(f"zspace_optimizer_compare {args.out}")
+    else:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if report.get("status") == "ready" else 1
 
 
 def zspace_inference_distortion_probe_main(argv: Sequence[str] | None = None) -> int:

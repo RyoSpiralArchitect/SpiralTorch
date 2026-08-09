@@ -4054,7 +4054,7 @@ def hf_gpt2_finetune_preflight_report(
     """Build a strict preflight report for local GPT-2 fine-tuning."""
 
     requested_backends = _unique(runtime_device_backends)
-    if not requested_backends:
+    if runtime_device_backends is None:
         requested_backends = list(HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS)
     adapter_config = hf_finetune_adapter_config(mode=finetune_mode)
     runtime_preset = (
@@ -4220,7 +4220,7 @@ def hf_finetune_preflight_report(
         else runtime_defaults.get("required_runtime_device_ready_backends")
     )
     requested_backends = _unique(resolved_runtime_device_backends)
-    if not requested_backends:
+    if resolved_runtime_device_backends is None:
         requested_backends = list(HF_FINETUNE_DEFAULT_DEVICE_BACKENDS)
     runtime_preset = (
         "hf-peft-finetune"

@@ -362,6 +362,41 @@ def test_optimizer_report_property_returns_a_detached_copy() -> None:
     assert trainer.last_optimizer_report["state_after"]["z"][0] != 999.0
 
 
+def test_parameter_control_requires_and_validates_the_complete_report() -> None:
+    trainer = st.ZSpaceTrainer(z_dim=4, topos_control_gain=1.0)
+    trainer.step_partial(
+        st.topos_control_partial(
+            curvature=-0.04,
+            max_depth=8,
+            max_volume=64,
+            observed_depth=2,
+            visited_volume=16,
+            gradient_dim=4,
+        )
+    )
+    report = trainer.last_optimizer_report
+    assert report is not None
+
+    control = st.zspace_parameter_control(report)
+
+    assert control["contract_version"] == st.ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION
+    assert control["semantic_owner"] == st.ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER
+    assert control["semantic_backend"] == "rust"
+    assert control["source_step"] == 1
+    assert control["absolute_learning_rate_scale"] == pytest.approx(
+        report["topos_control"]["learning_rate_scale"]
+    )
+    assert control["source_effective_learning_rate"] == pytest.approx(
+        control["source_learning_rate"]
+        * control["absolute_learning_rate_scale"]
+    )
+
+    tampered = copy.deepcopy(report)
+    tampered["topos_control"]["learning_rate_scale"] = 0.5
+    with pytest.raises(ValueError, match="learning_rate_scale"):
+        st.zspace_parameter_control(tampered)
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -372,5 +407,12 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "zspace_meta_optimizer_init",
         "zspace_meta_optimizer_restore",
         "zspace_meta_optimizer_step",
+        "zspace_parameter_control",
+        "ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION",
+        "ZSPACE_PARAMETER_CONTROL_KIND",
+        "ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE",
+        "ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE",
+        "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
+        "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
     ):
         assert name in st.__all__
