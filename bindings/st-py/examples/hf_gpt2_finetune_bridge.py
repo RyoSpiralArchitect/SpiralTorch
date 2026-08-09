@@ -669,6 +669,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument(
+        "--require-eval-dataset",
+        action="store_true",
+        help=(
+            "Fail before Trainer construction when tokenization produces no "
+            "evaluation blocks."
+        ),
+    )
+    parser.add_argument(
         "--max-eval-blocks",
         type=int,
         default=0,
@@ -5392,6 +5400,18 @@ def _main_with_runtime_access(
                 "failure_error": (
                     "tokenized train split produced too few blocks: "
                     f"{dataset_fit_report['warnings']}"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if args.require_eval_dataset and eval_dataset is None:
+        card.update(
+            {
+                "failure_stage": "dataset_fit",
+                "failure_error": (
+                    "evaluation evidence was required, but tokenization produced "
+                    "no evaluation blocks"
                 ),
             }
         )

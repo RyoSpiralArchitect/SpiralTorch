@@ -105,6 +105,7 @@ _FEEDBACK_MANAGED_BRIDGE_FLAGS = frozenset(
     {
         *_MANAGED_BRIDGE_FLAGS,
         "--logging-steps",
+        "--require-eval-dataset",
         "--zspace-optimizer-feedback",
         *_FEEDBACK_CONFIG_FLAGS.values(),
     }
@@ -778,6 +779,7 @@ def _build_feedback_run_plan(
         str(seed),
         "--logging-steps",
         "1",
+        "--require-eval-dataset",
         "--zspace-optimizer-control",
         expected_mode,
         "--zspace-optimizer-feedback",
@@ -897,6 +899,7 @@ def build_hf_zspace_optimizer_feedback_study_plan(
         "seeds": list(normalized_seeds),
         "max_steps": max_steps,
         "logging_steps": 1,
+        "require_eval_dataset": True,
         "bridge_args": list(normalized_args),
         "bridge_argument_validation": bridge_argument_validation,
         "bridge_sha256": _sha256_file(resolved_bridge),

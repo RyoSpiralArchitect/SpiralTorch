@@ -6335,6 +6335,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
             self.assertEqual(status, 0)
 
+    def test_example_can_require_tokenized_eval_evidence(self) -> None:
+        module = load_bridge_example()
+
+        args = module.parse_args(["--require-eval-dataset"])
+
+        self.assertTrue(args.require_eval_dataset)
+
     def test_example_disk_report_records_free_space_and_threshold(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:

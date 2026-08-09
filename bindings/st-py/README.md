@@ -775,7 +775,8 @@ feedback flags, seals the fully resolved Rust config and loaded native binary,
 and writes `feedback-report.json` only after every run card and lineage receipt
 verifies. Its `unguarded_total_effect`, `guarded_total_effect`, and
 `guard_benefit` contrasts remain bounded evidence, never a general efficacy
-claim. `--training-use-cpu` explicitly selects the current Transformers
+claim. It also fails before Trainer construction when tokenization leaves no
+evaluation blocks. `--training-use-cpu` explicitly selects the current Transformers
 `use_cpu` argument (or its legacy `no_cuda` equivalent) instead of relying on
 ambient accelerator selection.
 

@@ -641,6 +641,7 @@ def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
     assert first["schema"] == st.HF_ZSPACE_FEEDBACK_STUDY_SCHEMA
     assert first["scientific_spec"]["seeds"] == [13, 23]
     assert first["scientific_spec"]["logging_steps"] == 1
+    assert first["scientific_spec"]["require_eval_dataset"] is True
     assert first["scientific_spec"]["feedback_config"] == _feedback_config()
     assert first["scientific_spec"]["bridge_argument_validation"]["status"] == (
         "not_run_custom_bridge"
@@ -650,6 +651,9 @@ def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
     assert [run["arm"] for run in seed_runs] == list(st.HF_ZSPACE_FEEDBACK_STUDY_ARMS)
     assert len({run["trajectory"] for run in seed_runs}) == 1
     assert all(run["command"].count("--logging-steps") == 1 for run in seed_runs)
+    assert all(
+        run["command"].count("--require-eval-dataset") == 1 for run in seed_runs
+    )
     assert all(
         run["command"][run["command"].index("--logging-steps") + 1] == "1"
         for run in seed_runs
@@ -727,6 +731,7 @@ def test_feedback_study_rejects_run_card_config_drift(
         ["--logging-steps", "2"],
         ["--zspace-optimizer-feedback", "loss_guard"],
         ["--zspace-optimizer-feedback-maximum-gate", "0.5"],
+        ["--require-eval-dataset"],
         ["--validate-args-only"],
     ],
 )

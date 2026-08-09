@@ -264,6 +264,11 @@ than being promoted into a vacuous comparison. Three consistent seeds permit a
 bounded single-model, single-corpus trend only; `efficacy_claim_ready` remains
 false by construction.
 
+The study also requires tokenization to leave at least one evaluation block.
+For a small corpus, verify that `validation_fraction * token_count` is not
+smaller than `block_size`; otherwise the bridge stops at `dataset_fit` before
+training rather than emitting an unanchored loss comparison.
+
 ## Read the contrasts
 
 All contrasts use `left_arm loss change - right_arm loss change`; lower is
