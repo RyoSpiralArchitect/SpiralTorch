@@ -329,6 +329,8 @@ mod tests {
             "runtimeDeviceProbeValidateObject",
             "runtimeDeviceProbeValidateAgainstJson",
             "runtimeDeviceProbeValidateAgainstObject",
+            "runtimeDeviceRouteFromProbesJson",
+            "runtimeDeviceRouteFromProbesObject",
             "runtimeExecutionPlanJson",
             "runtimeExecutionPlanObject",
             "runtimeExecutionPlanObserveCapabilitiesJson",
@@ -346,6 +348,7 @@ mod tests {
         for type_name in [
             "RuntimeDeviceProbe",
             "RuntimeDeviceProbeObservationRequest",
+            "RuntimeDeviceRouteProbeRequest",
             "RuntimeComponentResolution",
             "RuntimeExecutionPlanRequestInput",
             "RuntimeExecutionPlanRequest",

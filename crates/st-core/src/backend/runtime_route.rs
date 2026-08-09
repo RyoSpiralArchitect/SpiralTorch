@@ -5,6 +5,7 @@
 //! or failed. Python and WASM bindings should expose this contract rather than
 //! rebuilding readiness precedence and requirement gates in their host language.
 
+use super::runtime_probe::RuntimeDeviceProbePayload;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,6 +133,8 @@ pub enum RuntimeDeviceRouteError {
         second_requested_backend: String,
         second_readiness: RuntimeDeviceReadiness,
     },
+    #[error("runtime-device probe {index} failed committed validation: {message}")]
+    InvalidProbe { index: usize, message: String },
     #[error("runtime-device route has no executable selection: {failures:?}")]
     NoExecutableSelection { failures: Vec<String> },
     #[error("invalid runtime-device route payload field '{field}': {message}")]
@@ -170,6 +173,56 @@ pub struct RuntimeDeviceRouteRequest {
     pub requested_backends: Vec<String>,
     pub required_available_backends: Vec<String>,
     pub required_ready_backends: Vec<String>,
+}
+
+/// Committed runtime probes plus the route gates a caller wants Rust to enforce.
+///
+/// This is the preferred ingress when probes came from
+/// `st-core::backend::runtime_probe`. Rust validates every full probe commitment
+/// before projecting its canonical route evidence; clients never need to copy
+/// readiness fields into [`RuntimeDeviceRouteEvidence`].
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeDeviceRouteProbeRequest {
+    pub probes: Vec<RuntimeDeviceProbePayload>,
+    pub requested_backends: Vec<String>,
+    pub required_available_backends: Vec<String>,
+    pub required_ready_backends: Vec<String>,
+}
+
+impl RuntimeDeviceRouteProbeRequest {
+    fn into_route_request(self) -> Result<RuntimeDeviceRouteRequest, RuntimeDeviceRouteError> {
+        if self.probes.len() > RUNTIME_DEVICE_ROUTE_MAX_REPORTS {
+            return Err(RuntimeDeviceRouteError::TooManyReports {
+                actual: self.probes.len(),
+                max: RUNTIME_DEVICE_ROUTE_MAX_REPORTS,
+            });
+        }
+
+        let mut reports = Vec::with_capacity(self.probes.len());
+        let mut observed_backends = Vec::with_capacity(self.probes.len());
+        for (index, probe) in self.probes.into_iter().enumerate() {
+            probe
+                .validate()
+                .map_err(|error| RuntimeDeviceRouteError::InvalidProbe {
+                    index,
+                    message: error.to_string(),
+                })?;
+            observed_backends.push(probe.requested_backend().as_str().to_owned());
+            reports.push(probe.route_evidence);
+        }
+
+        Ok(RuntimeDeviceRouteRequest {
+            reports,
+            requested_backends: if self.requested_backends.is_empty() {
+                observed_backends
+            } else {
+                self.requested_backends
+            },
+            required_available_backends: self.required_available_backends,
+            required_ready_backends: self.required_ready_backends,
+        })
+    }
 }
 
 /// Evidence state kept separate from the fail-closed boolean projections used
@@ -889,6 +942,18 @@ pub fn evaluate_runtime_device_route(
     Ok(payload)
 }
 
+/// Evaluate a route directly from fully committed Rust runtime probes.
+///
+/// The returned payload remains the stable v5 evidence contract. Full probe
+/// provenance stays in the caller-owned probe payloads (and in execution-plan
+/// commitments), while this function guarantees that its route evidence was
+/// projected only after each source probe passed Rust self-validation.
+pub fn evaluate_runtime_device_route_from_probes(
+    request: RuntimeDeviceRouteProbeRequest,
+) -> Result<RuntimeDeviceRoutePayload, RuntimeDeviceRouteError> {
+    evaluate_runtime_device_route(request.into_route_request()?)
+}
+
 fn build_runtime_device_route(
     request: RuntimeDeviceRouteRequest,
 ) -> Result<RuntimeDeviceRoutePayload, RuntimeDeviceRouteError> {
@@ -1248,6 +1313,15 @@ fn invalid_payload(field: &'static str, message: impl ToString) -> RuntimeDevice
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::device_caps::BackendKind;
+    use crate::backend::runtime_probe::{
+        observe_runtime_device_probe, RuntimeDeviceProbeObservationRequest,
+    };
+
+    fn committed_probe(backend: BackendKind) -> RuntimeDeviceProbePayload {
+        observe_runtime_device_probe(RuntimeDeviceProbeObservationRequest::new(backend))
+            .expect("valid committed runtime probe")
+    }
 
     fn evidence(requested: &str, ready: bool, status: &str) -> RuntimeDeviceRouteEvidence {
         RuntimeDeviceRouteEvidence {
@@ -1312,6 +1386,50 @@ mod tests {
             mps.diagnostic.as_deref(),
             Some("native MPS kernels are not wired")
         );
+    }
+
+    #[test]
+    fn committed_probes_are_the_only_source_of_probe_route_evidence() {
+        let probe = committed_probe(BackendKind::Cpu)
+            .with_execution_client("python")
+            .expect("valid transport provenance");
+        let expected_evidence = probe.route_evidence.clone();
+
+        let payload = evaluate_runtime_device_route_from_probes(RuntimeDeviceRouteProbeRequest {
+            probes: vec![probe],
+            required_ready_backends: vec!["cpu".to_owned()],
+            ..RuntimeDeviceRouteProbeRequest::default()
+        })
+        .expect("committed probe route");
+
+        assert_eq!(payload.evidence, [expected_evidence]);
+        assert_eq!(payload.requested_backends, ["cpu"]);
+        assert_eq!(payload.ready_backends, ["cpu"]);
+        assert_eq!(
+            payload
+                .selection
+                .as_ref()
+                .map(|selection| selection.requested_backend.as_str()),
+            Some("cpu")
+        );
+        assert!(payload.passed);
+    }
+
+    #[test]
+    fn probe_route_ingress_rejects_tampering_before_selection() {
+        let mut probe = committed_probe(BackendKind::Cpu);
+        probe.route_evidence.runtime_ready = Some(false);
+
+        let error = evaluate_runtime_device_route_from_probes(RuntimeDeviceRouteProbeRequest {
+            probes: vec![probe],
+            ..RuntimeDeviceRouteProbeRequest::default()
+        })
+        .expect_err("tampered probes must fail before route selection");
+
+        assert!(matches!(
+            error,
+            RuntimeDeviceRouteError::InvalidProbe { index: 0, .. }
+        ));
     }
 
     #[test]

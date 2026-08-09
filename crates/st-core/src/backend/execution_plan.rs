@@ -10,8 +10,8 @@ use super::runtime_probe::{
     BackendRuntimeState, RuntimeDeviceProbeError, RuntimeDeviceProbePayload,
 };
 use super::runtime_route::{
-    evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
-    RuntimeDeviceRouteRequest,
+    evaluate_runtime_device_route_from_probes, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
+    RuntimeDeviceRouteProbeRequest,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -974,12 +974,13 @@ fn evaluate_canonical_runtime_execution_plan(
     let requested_backend = request.runtime_probe.requested_backend();
     let effective_backend = request.runtime_probe.effective_backend();
     let requested_label = requested_backend.as_str().to_owned();
-    let runtime_route = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
-        reports: vec![request.runtime_probe.route_evidence.clone()],
-        requested_backends: vec![requested_label.clone()],
-        required_available_backends: Vec::new(),
-        required_ready_backends: vec![requested_label.clone()],
-    })?;
+    let runtime_route =
+        evaluate_runtime_device_route_from_probes(RuntimeDeviceRouteProbeRequest {
+            probes: vec![request.runtime_probe.clone()],
+            requested_backends: vec![requested_label.clone()],
+            required_available_backends: Vec::new(),
+            required_ready_backends: vec![requested_label.clone()],
+        })?;
     let route_row = runtime_route.route_for(&requested_label)?;
     if route_row.effective_backend != effective_backend.as_str() {
         return Err(invalid_payload(

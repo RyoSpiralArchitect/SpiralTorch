@@ -247,6 +247,61 @@ def test_describe_runtime_devices_collects_backend_readiness(
         st.describe_runtime_devices(["mps"], continue_on_error=False)
 
 
+def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    import spiraltorch.runtime_imports as runtime_imports
+
+    def _unexpected_compatibility_projection(*_args: object, **_kwargs: object):
+        raise AssertionError("committed probes must bypass Python evidence projection")
+
+    monkeypatch.setattr(
+        runtime_imports,
+        "_runtime_device_route_evidence",
+        _unexpected_compatibility_projection,
+    )
+
+    probe = st.observe_runtime_device_probe("cpu")
+    route = st.evaluate_runtime_device_route_from_probes(
+        [probe],
+        required_ready_backends=["cpu"],
+    )
+    summary = st.describe_runtime_devices(["cpu"])
+
+    assert "evaluate_runtime_device_route_from_probes" in st.__all__
+    assert route["evidence"] == [probe["route_evidence"]]
+    assert route["requested_backends"] == ["cpu"]
+    assert route["selection"]["requested_backend"] == "cpu"
+    assert route["execution_client"] == "python"
+    assert summary["evidence"] == [summary["reports"][0]["route_evidence"]]
+
+    tampered = json.loads(json.dumps(probe))
+    tampered["contract"]["route_evidence"]["runtime_ready"] = False
+    with pytest.raises(ValueError, match="probe 0 failed committed validation"):
+        st.evaluate_runtime_device_route_from_probes([tampered])
+
+
+def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
+    st = require_native()
+
+    fields = st.runtime_device_report_fields(
+        {
+            "runtime_device_backends": ["cpu"],
+            "required_runtime_device_backends": ["cpu"],
+            "required_runtime_device_ready_backends": ["cpu"],
+        }
+    )
+    contract = json.loads(fields["runtime_device_route_contract_json"])
+
+    assert contract["required_available_backends"] == ["cpu"]
+    assert contract["required_ready_backends"] == ["cpu"]
+    assert contract["required_available_backends_passed"] is True
+    assert contract["required_ready_backends_passed"] is True
+    assert fields["required_runtime_device_backends_passed"] is True
+    assert fields["required_runtime_device_ready_backends_passed"] is True
+
+
 def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> None:
     st = require_native()
 

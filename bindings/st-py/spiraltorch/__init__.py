@@ -678,6 +678,7 @@ from .runtime_imports import (
     observe_runtime_execution_plan_capabilities,
     observe_runtime_device_probe,
     evaluate_runtime_device_route,
+    evaluate_runtime_device_route_from_probes,
     project_runtime_device_probe_contract,
     validate_runtime_execution_plan_contract,
     validate_runtime_device_probe_contract,
@@ -1276,6 +1277,7 @@ _EXTRAS = [
     "observe_runtime_execution_plan_capabilities",
     "observe_runtime_device_probe",
     "evaluate_runtime_device_route",
+    "evaluate_runtime_device_route_from_probes",
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
@@ -8657,12 +8659,29 @@ def describe_runtime_devices(
             report.setdefault("backend", str(report.get("effective_backend", backend)))
 
         reports.append(report)
-    contract = evaluate_runtime_device_route(
-        reports,
-        requested_backends=backend_labels,
-        required_available_backends=required_available_labels,
-        required_ready_backends=required_ready_labels,
-    )
+    canonical_probe_reports = []
+    for report in reports:
+        candidate = report.get("contract", report)
+        if not isinstance(candidate, _Mapping) or candidate.get("kind") != (
+            "spiraltorch.runtime_device_probe"
+        ):
+            canonical_probe_reports = []
+            break
+        canonical_probe_reports.append(report)
+    if canonical_probe_reports:
+        contract = evaluate_runtime_device_route_from_probes(
+            canonical_probe_reports,
+            requested_backends=backend_labels,
+            required_available_backends=required_available_labels,
+            required_ready_backends=required_ready_labels,
+        )
+    else:
+        contract = evaluate_runtime_device_route(
+            reports,
+            requested_backends=backend_labels,
+            required_available_backends=required_available_labels,
+            required_ready_backends=required_ready_labels,
+        )
     contract["reports"] = reports
     return contract
 

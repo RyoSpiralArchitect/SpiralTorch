@@ -48,6 +48,7 @@ __all__ = [
     "observe_runtime_execution_plan_capabilities",
     "observe_runtime_device_probe",
     "evaluate_runtime_device_route",
+    "evaluate_runtime_device_route_from_probes",
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
@@ -1224,6 +1225,54 @@ def evaluate_runtime_device_route(
     )
 
 
+def evaluate_runtime_device_route_from_probes(
+    probes: object,
+    *,
+    requested_backends: object = None,
+    required_available_backends: object = None,
+    required_ready_backends: object = None,
+) -> dict[str, object]:
+    """Route full committed probes without rebuilding their evidence in Python."""
+
+    if probes is None:
+        probe_values: list[object] = []
+    elif isinstance(probes, Mapping) or isinstance(probes, (str, bytes, bytearray)):
+        raise TypeError("probes must be an iterable of mappings")
+    else:
+        try:
+            probe_values = list(probes)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("probes must be an iterable of mappings") from exc
+
+    canonical_probes = []
+    for index, probe in enumerate(probe_values):
+        if not isinstance(probe, Mapping):
+            raise TypeError(f"probes[{index}] must be a mapping")
+        canonical_probes.append(_runtime_probe_contract_payload(probe))
+
+    evaluate = _native_runtime_device_route_function(
+        "_runtime_device_route_evaluate_probes"
+    )
+    payload = evaluate(
+        {
+            "probes": canonical_probes,
+            "requested_backends": _runtime_device_route_values(
+                requested_backends,
+                field="requested_backends",
+            ),
+            "required_available_backends": _runtime_device_route_values(
+                required_available_backends,
+                field="required_available_backends",
+            ),
+            "required_ready_backends": _runtime_device_route_values(
+                required_ready_backends,
+                field="required_ready_backends",
+            ),
+        }
+    )
+    return _require_trusted_runtime_device_route_contract(payload)
+
+
 def runtime_device_report_fields(
     source: object,
     *,
@@ -1280,8 +1329,17 @@ def runtime_device_report_fields(
         }
 
     describe = describe_runtime_devices or _default_describe_runtime_devices()
+    contract: dict[str, object] | None = None
+    describe_kwargs: dict[str, object] = {"continue_on_error": True}
+    if describe_runtime_devices is None:
+        describe_kwargs.update(
+            {
+                "required_available_backends": required,
+                "required_ready_backends": ready_required,
+            }
+        )
     try:
-        summary = describe(backends, continue_on_error=True)
+        summary = describe(backends, **describe_kwargs)
     except Exception as exc:
         reports = [
             {
@@ -1295,18 +1353,24 @@ def runtime_device_report_fields(
         ]
     else:
         if isinstance(summary, Mapping):
+            if (
+                describe_runtime_devices is None
+                and summary.get("kind") == "spiraltorch.runtime_device_route"
+            ):
+                contract = validate_runtime_device_route_contract(summary)
             reports = [
                 row for row in summary.get("reports", [])
                 if isinstance(row, Mapping)
             ]
         else:
             reports = []
-    contract = evaluate_runtime_device_route(
-        reports,
-        requested_backends=backends,
-        required_available_backends=required,
-        required_ready_backends=ready_required,
-    )
+    if contract is None:
+        contract = evaluate_runtime_device_route(
+            reports,
+            requested_backends=backends,
+            required_available_backends=required,
+            required_ready_backends=ready_required,
+        )
     available = list(contract.get("available_backends", []))
     successful_probes = list(contract.get("successful_probe_backends", []))
     ready = list(contract.get("ready_backends", []))

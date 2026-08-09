@@ -461,6 +461,43 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
             ["runtime_device_unavailable:cpu", "runtime_device_not_ready:mps"],
         )
 
+    def test_runtime_device_report_fields_replays_custom_route_with_current_gates(
+        self,
+    ) -> None:
+        module = load_runtime_imports()
+        report = {
+            "backend": "cpu",
+            "requested_backend": "cpu",
+            "runtime_ready": True,
+            "available": True,
+            "runtime_status": "cpu",
+        }
+        route = module.evaluate_runtime_device_route(
+            [report],
+            requested_backends=["cpu"],
+        )
+        route["reports"] = [report]
+
+        def fake_describe(backends, *, continue_on_error=True):
+            self.assertEqual(backends, ["cpu"])
+            self.assertTrue(continue_on_error)
+            return route
+
+        fields = module.runtime_device_report_fields(
+            {
+                "runtime_device_backends": ["cpu"],
+                "required_runtime_device_backends": ["cpu"],
+                "required_runtime_device_ready_backends": ["cpu"],
+            },
+            describe_runtime_devices=fake_describe,
+        )
+        contract = json.loads(fields["runtime_device_route_contract_json"])
+
+        self.assertEqual(contract["required_available_backends"], ["cpu"])
+        self.assertEqual(contract["required_ready_backends"], ["cpu"])
+        self.assertTrue(fields["required_runtime_device_backends_passed"])
+        self.assertTrue(fields["required_runtime_device_ready_backends_passed"])
+
     def test_runtime_device_report_keeps_ready_surrogate_diagnostic_available(
         self,
     ) -> None:
