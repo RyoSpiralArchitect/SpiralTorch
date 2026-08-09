@@ -3096,6 +3096,15 @@ def _feedback_seed_report(
         name: (None if not changes else changes[left] - changes[right])
         for name, (left, right) in _FEEDBACK_ABLATION_CONTRASTS.items()
     }
+    unguarded_effect = contrasts.get("unguarded_total_effect")
+    guard_benefit = contrasts.get("guard_benefit")
+    guard_recovery_fraction = (
+        -float(guard_benefit) / float(unguarded_effect)
+        if isinstance(unguarded_effect, float)
+        and unguarded_effect > 0.0
+        and isinstance(guard_benefit, float)
+        else None
+    )
     guarded_dose = measured_doses["raw_loss_guard"].get("actuated_learning_rate_dose")
     if (
         nominal_dose is None
@@ -3132,6 +3141,7 @@ def _feedback_seed_report(
         "eval_after_losses": after_losses,
         "eval_loss_changes": changes,
         "contrasts": contrasts,
+        "guard_recovery_fraction_of_unguarded_harm": guard_recovery_fraction,
         "optimizer_doses": measured_doses,
         "guarded_dose_fraction_of_raw_deviation": guarded_dose_fraction,
         "feedback_diagnostics": {
@@ -3148,6 +3158,40 @@ def _feedback_seed_report(
         "source_paths": {arm: fact.get("source_path") for arm, fact in arms.items()},
         "error_count": len(errors),
         "errors": errors,
+    }
+
+
+def _descriptive_summary(values: Sequence[float]) -> dict[str, object]:
+    count = len(values)
+    if count == 0:
+        return {
+            "count": 0,
+            "mean": None,
+            "median": None,
+            "minimum": None,
+            "maximum": None,
+            "population_standard_deviation": None,
+            "sample_standard_deviation": None,
+        }
+    mean = sum(values) / count
+    ordered = sorted(values)
+    midpoint = count // 2
+    median = (
+        ordered[midpoint]
+        if count % 2 == 1
+        else (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+    )
+    squared_residuals = sum((value - mean) ** 2 for value in values)
+    return {
+        "count": count,
+        "mean": mean,
+        "median": median,
+        "minimum": ordered[0],
+        "maximum": ordered[-1],
+        "population_standard_deviation": math.sqrt(squared_residuals / count),
+        "sample_standard_deviation": (
+            math.sqrt(squared_residuals / (count - 1)) if count > 1 else None
+        ),
     }
 
 
@@ -3179,10 +3223,65 @@ def _feedback_contrast_summary(
         "right_arm": right,
         "lower_is_better": True,
         "values": values,
-        "mean": sum(values) / len(values) if values else None,
+        **_descriptive_summary(values),
         "left_arm_win_count": sum(value < 0.0 for value in values),
         "bounded_trend_ready": status == "ready" and len(values) >= 3,
         "bounded_trend_direction": direction,
+    }
+
+
+def _feedback_harm_recovery_summary(
+    reports: Sequence[Mapping[str, object]],
+    *,
+    status: str,
+) -> dict[str, object]:
+    ready_reports = [report for report in reports if report.get("status") == "ready"]
+    values = [
+        float(report["guard_recovery_fraction_of_unguarded_harm"])
+        for report in ready_reports
+        if isinstance(report.get("guard_recovery_fraction_of_unguarded_harm"), float)
+    ]
+    applicable = bool(ready_reports) and len(values) == len(ready_reports)
+    unguarded_effects = [
+        float(_mapping(report.get("contrasts"))["unguarded_total_effect"])
+        for report in ready_reports
+        if isinstance(
+            _mapping(report.get("contrasts")).get("unguarded_total_effect"),
+            float,
+        )
+    ]
+    guarded_effects = [
+        float(_mapping(report.get("contrasts"))["guarded_total_effect"])
+        for report in ready_reports
+        if isinstance(
+            _mapping(report.get("contrasts")).get("guarded_total_effect"),
+            float,
+        )
+    ]
+    if (
+        applicable
+        and len(unguarded_effects) == len(ready_reports)
+        and len(guarded_effects) == len(ready_reports)
+    ):
+        mean_unguarded = sum(unguarded_effects) / len(unguarded_effects)
+        mean_guarded = sum(guarded_effects) / len(guarded_effects)
+        fraction_of_mean = (mean_unguarded - mean_guarded) / mean_unguarded
+    else:
+        mean_unguarded = None
+        mean_guarded = None
+        fraction_of_mean = None
+    return {
+        "applicable": applicable,
+        "applicability_rule": (
+            "defined only when every ready seed has positive unguarded_total_effect"
+        ),
+        "values": values if applicable else [],
+        **_descriptive_summary(values if applicable else []),
+        "mean_unguarded_total_effect": mean_unguarded,
+        "mean_guarded_total_effect": mean_guarded,
+        "fraction_of_mean_unguarded_harm": fraction_of_mean,
+        "all_seeds_reduced_harm": applicable and all(value > 0.0 for value in values),
+        "bounded_trend_ready": status == "ready" and applicable and len(values) >= 3,
     }
 
 
@@ -3235,6 +3334,7 @@ def compare_hf_zspace_optimizer_feedback_run_cards(
     }
     guard_summary = contrast_summaries["guard_benefit"]
     absolute_summary = contrast_summaries["guarded_total_effect"]
+    harm_recovery = _feedback_harm_recovery_summary(reports, status=status)
     return {
         "schema": HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA,
         "status": status,
@@ -3255,6 +3355,7 @@ def compare_hf_zspace_optimizer_feedback_run_cards(
             )
         ),
         "contrasts": contrast_summaries,
+        "guard_recovery_fraction_of_unguarded_harm": harm_recovery,
         "bounded_guard_benefit_observed": (
             guard_summary["bounded_trend_ready"] is True
             and guard_summary["bounded_trend_direction"] == "left_arm_better"

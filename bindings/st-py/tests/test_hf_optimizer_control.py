@@ -1784,9 +1784,41 @@ def test_three_feedback_seeds_support_only_bounded_guard_trends() -> None:
         "single_model_single_corpus_multi_seed_feedback_ablation"
     )
     assert report["contrasts"]["guard_benefit"]["bounded_trend_ready"] is True
+    assert report["contrasts"]["guard_benefit"][
+        "population_standard_deviation"
+    ] == pytest.approx(0.0)
+    assert report["feedback_seeds"][0][
+        "guard_recovery_fraction_of_unguarded_harm"
+    ] == pytest.approx(1.5)
+    recovery = report["guard_recovery_fraction_of_unguarded_harm"]
+    assert recovery["applicable"] is True
+    assert recovery["bounded_trend_ready"] is True
+    assert recovery["all_seeds_reduced_harm"] is True
+    assert recovery["count"] == 3
+    assert recovery["mean"] == pytest.approx(1.5)
+    assert recovery["fraction_of_mean_unguarded_harm"] == pytest.approx(1.5)
     assert report["bounded_guard_benefit_observed"] is True
     assert report["bounded_absolute_improvement_observed"] is True
     assert report["efficacy_claim_ready"] is False
+
+
+def test_feedback_harm_recovery_is_not_defined_when_raw_control_is_helpful() -> None:
+    cards = [
+        _feedback_card(arm="observe", seed=13, eval_after=2.2),
+        _feedback_card(arm="raw_unguarded", seed=13, eval_after=2.0),
+        _feedback_card(arm="raw_loss_guard", seed=13, eval_after=2.1),
+    ]
+
+    report = st.compare_hf_zspace_optimizer_feedback_run_cards(cards)
+
+    assert report["status"] == "ready"
+    assert report["feedback_seeds"][0][
+        "guard_recovery_fraction_of_unguarded_harm"
+    ] is None
+    recovery = report["guard_recovery_fraction_of_unguarded_harm"]
+    assert recovery["applicable"] is False
+    assert recovery["values"] == []
+    assert recovery["fraction_of_mean_unguarded_harm"] is None
 
 
 def test_matched_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None:

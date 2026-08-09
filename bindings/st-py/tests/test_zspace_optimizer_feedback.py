@@ -123,12 +123,26 @@ def test_feedback_restore_and_step_identity_fail_closed() -> None:
     )
     assert restored["state"] == first["state_after"]
 
-    tampered = copy.deepcopy(restored["state"])
+    active_checkpoint = st.zspace_optimizer_feedback_init(
+        {
+            "warmup_observations": 1,
+            "relative_delta_ema_alpha": 1.0,
+            "recovery_rate": 0.25,
+        }
+    )
+    active_control = _control(active_checkpoint, target_step=1)
+    first_observation = _observe(
+        _checkpoint(active_control),
+        step=1,
+        loss=2.0,
+    )
+    second_control = _control(_checkpoint(first_observation), target_step=2)
+    improvement = _observe(_checkpoint(second_control), step=2, loss=1.8)
+    tampered = copy.deepcopy(improvement["state_after"])
     tampered["halted"] = True
-    tampered["gate"] = 0.5
     with pytest.raises(ValueError, match="halted gate"):
         st.zspace_optimizer_feedback_restore(
-            config=restored["config"],  # type: ignore[arg-type]
+            config=improvement["config"],  # type: ignore[arg-type]
             state=tampered,
         )
     with pytest.raises(ValueError, match="next step"):

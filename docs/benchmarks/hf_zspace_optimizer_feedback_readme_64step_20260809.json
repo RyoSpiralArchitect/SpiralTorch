@@ -1,0 +1,390 @@
+{
+  "bounded_absolute_improvement_observed": false,
+  "bounded_guard_benefit_observed": true,
+  "contrasts": {
+    "guard_benefit": {
+      "bounded_trend_direction": "left_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "raw_loss_guard",
+      "left_arm_win_count": 3,
+      "lower_is_better": true,
+      "maximum": -0.0020351409912109375,
+      "mean": -0.004956563313802083,
+      "median": -0.004797935485839844,
+      "minimum": -0.008036613464355469,
+      "population_standard_deviation": 0.0024526570697009256,
+      "right_arm": "raw_unguarded",
+      "sample_standard_deviation": 0.003003879167398532,
+      "values": [
+        -0.008036613464355469,
+        -0.0020351409912109375,
+        -0.004797935485839844
+      ]
+    },
+    "guarded_total_effect": {
+      "bounded_trend_direction": "right_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "raw_loss_guard",
+      "left_arm_win_count": 0,
+      "lower_is_better": true,
+      "maximum": 0.0067119598388671875,
+      "mean": 0.003853321075439453,
+      "median": 0.0029702186584472656,
+      "minimum": 0.0018777847290039062,
+      "population_standard_deviation": 0.0020699782055822874,
+      "right_arm": "observe",
+      "sample_standard_deviation": 0.002535195191179271,
+      "values": [
+        0.0018777847290039062,
+        0.0067119598388671875,
+        0.0029702186584472656
+      ]
+    },
+    "unguarded_total_effect": {
+      "bounded_trend_direction": "right_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "raw_unguarded",
+      "left_arm_win_count": 0,
+      "lower_is_better": true,
+      "maximum": 0.009914398193359375,
+      "mean": 0.008809884389241537,
+      "median": 0.008747100830078125,
+      "minimum": 0.007768154144287109,
+      "population_standard_deviation": 0.0008773244215683834,
+      "right_arm": "observe",
+      "sample_standard_deviation": 0.00107449858586247,
+      "values": [
+        0.009914398193359375,
+        0.008747100830078125,
+        0.007768154144287109
+      ]
+    }
+  },
+  "efficacy_claim_ready": false,
+  "efficacy_claim_requirements": "a prespecified, adequately powered multi-model and multi-corpus evaluation with held-out quality and stability metrics is not implemented by this comparator",
+  "error_count": 0,
+  "errors": [],
+  "evidence_boundary": "the three-arm design compares one frozen Rust raw-control trajectory with and without within-run loss feedback against an observe baseline; three directionally consistent matched seeds support a bounded trend, not statistical significance or general superiority",
+  "evidence_scope": "single_model_single_corpus_multi_seed_feedback_ablation",
+  "feedback_config_id": "sha256:d5708a061761ba008874e56a1fb1926c7aac18b3f4ede2ae6d2cfcb0c0dcd053",
+  "feedback_seeds": [
+    {
+      "base_training_recipe_id": "sha256:6da4d9204e9be06369d6c69c7e004a1530df915390f63e8869b9c0526f22fb4e",
+      "contrasts": {
+        "guard_benefit": -0.008036613464355469,
+        "guarded_total_effect": 0.0018777847290039062,
+        "unguarded_total_effect": 0.009914398193359375
+      },
+      "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
+      "error_count": 0,
+      "errors": [],
+      "eval_after_losses": {
+        "observe": 5.170149803161621,
+        "raw_loss_guard": 5.172027587890625,
+        "raw_unguarded": 5.1800642013549805
+      },
+      "eval_before_losses": {
+        "observe": 5.230223655700684,
+        "raw_loss_guard": 5.230223655700684,
+        "raw_unguarded": 5.230223655700684
+      },
+      "eval_loss_changes": {
+        "observe": -0.0600738525390625,
+        "raw_loss_guard": -0.058196067810058594,
+        "raw_unguarded": -0.050159454345703125
+      },
+      "feedback_config": {
+        "attenuation_rate": 0.25,
+        "halt_regression_streak": 2,
+        "halt_threshold": 0.05,
+        "loss_ema_alpha": 0.2,
+        "loss_floor": 1e-08,
+        "max_stale_updates": 0,
+        "maximum_gate": 1.0,
+        "recovery_rate": 0.125,
+        "recovery_threshold": 0.001,
+        "regression_threshold": 0.01,
+        "relative_delta_ema_alpha": 0.5,
+        "resume_improvement_streak": 2,
+        "warmup_observations": 2
+      },
+      "feedback_config_id": "sha256:d5708a061761ba008874e56a1fb1926c7aac18b3f4ede2ae6d2cfcb0c0dcd053",
+      "feedback_diagnostics": {
+        "active_update_count": 39,
+        "control_count": 64,
+        "disposition_counts": {
+          "active": 39,
+          "halted": 16,
+          "identity_gate": 6,
+          "no_feedback": 1,
+          "warmup": 2
+        },
+        "final_gate": 0.5,
+        "halted": false,
+        "identity_update_count": 25,
+        "observation_count": 64,
+        "stale_update_count": 0
+      },
+      "feedback_match_id": "sha256:2cb044929c2c62c12dd9c0f0421ddd81cd21faeb9a250cf10834cd30f946d663",
+      "guard_recovery_fraction_of_unguarded_harm": 0.8106002308580224,
+      "guarded_dose_fraction_of_raw_deviation": 0.18983915815294072,
+      "identity_matches": {
+        "dataset_materialization": true,
+        "execution": true,
+        "model_runtime": true,
+        "tokenized_dataset": true,
+        "training_input": true
+      },
+      "lower_is_better": true,
+      "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
+      "optimizer_doses": {
+        "observe": {
+          "actuated_learning_rate_dose": 0.0032500000000000003,
+          "actuated_learning_rate_dose_ratio": 1.0,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_loss_guard": {
+          "actuated_learning_rate_dose": 0.0031904689270886594,
+          "actuated_learning_rate_dose_ratio": 0.9816827467965105,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_unguarded": {
+          "actuated_learning_rate_dose": 0.00293641310101375,
+          "actuated_learning_rate_dose_ratio": 0.9035117233888461,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        }
+      },
+      "seed": 13,
+      "source_paths": {
+        "observe": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s13/observe/run-card.json",
+        "raw_loss_guard": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s13/raw_loss_guard/run-card.json",
+        "raw_unguarded": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s13/raw_unguarded/run-card.json"
+      },
+      "status": "ready",
+      "trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+    },
+    {
+      "base_training_recipe_id": "sha256:ffad5fffca654882ae4bbad778f9121859c0e1148e12df1605c8104a64a11af6",
+      "contrasts": {
+        "guard_benefit": -0.0020351409912109375,
+        "guarded_total_effect": 0.0067119598388671875,
+        "unguarded_total_effect": 0.008747100830078125
+      },
+      "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
+      "error_count": 0,
+      "errors": [],
+      "eval_after_losses": {
+        "observe": 5.373618125915527,
+        "raw_loss_guard": 5.3803300857543945,
+        "raw_unguarded": 5.3823652267456055
+      },
+      "eval_before_losses": {
+        "observe": 5.425516128540039,
+        "raw_loss_guard": 5.425516128540039,
+        "raw_unguarded": 5.425516128540039
+      },
+      "eval_loss_changes": {
+        "observe": -0.05189800262451172,
+        "raw_loss_guard": -0.04518604278564453,
+        "raw_unguarded": -0.043150901794433594
+      },
+      "feedback_config": {
+        "attenuation_rate": 0.25,
+        "halt_regression_streak": 2,
+        "halt_threshold": 0.05,
+        "loss_ema_alpha": 0.2,
+        "loss_floor": 1e-08,
+        "max_stale_updates": 0,
+        "maximum_gate": 1.0,
+        "recovery_rate": 0.125,
+        "recovery_threshold": 0.001,
+        "regression_threshold": 0.01,
+        "relative_delta_ema_alpha": 0.5,
+        "resume_improvement_streak": 2,
+        "warmup_observations": 2
+      },
+      "feedback_config_id": "sha256:d5708a061761ba008874e56a1fb1926c7aac18b3f4ede2ae6d2cfcb0c0dcd053",
+      "feedback_diagnostics": {
+        "active_update_count": 54,
+        "control_count": 64,
+        "disposition_counts": {
+          "active": 54,
+          "identity_gate": 7,
+          "no_feedback": 1,
+          "warmup": 2
+        },
+        "final_gate": 0.5,
+        "halted": false,
+        "identity_update_count": 10,
+        "observation_count": 64,
+        "stale_update_count": 0
+      },
+      "feedback_match_id": "sha256:9aefaac22ae92f302e414571389fbdaf71165f1cea8acde735d207179bade992",
+      "guard_recovery_fraction_of_unguarded_harm": 0.23266463148713476,
+      "guarded_dose_fraction_of_raw_deviation": 0.7912134974320458,
+      "identity_matches": {
+        "dataset_materialization": true,
+        "execution": true,
+        "model_runtime": true,
+        "tokenized_dataset": true,
+        "training_input": true
+      },
+      "lower_is_better": true,
+      "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
+      "optimizer_doses": {
+        "observe": {
+          "actuated_learning_rate_dose": 0.0032500000000000003,
+          "actuated_learning_rate_dose_ratio": 1.0,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_loss_guard": {
+          "actuated_learning_rate_dose": 0.00300188581290422,
+          "actuated_learning_rate_dose_ratio": 0.9236571732012985,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_unguarded": {
+          "actuated_learning_rate_dose": 0.00293641310101375,
+          "actuated_learning_rate_dose_ratio": 0.9035117233888461,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        }
+      },
+      "seed": 17,
+      "source_paths": {
+        "observe": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s17/observe/run-card.json",
+        "raw_loss_guard": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s17/raw_loss_guard/run-card.json",
+        "raw_unguarded": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s17/raw_unguarded/run-card.json"
+      },
+      "status": "ready",
+      "trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+    },
+    {
+      "base_training_recipe_id": "sha256:06026c490674beca031948860c38e986f799a76f5f24c8256bf36a3d65dfdba8",
+      "contrasts": {
+        "guard_benefit": -0.004797935485839844,
+        "guarded_total_effect": 0.0029702186584472656,
+        "unguarded_total_effect": 0.007768154144287109
+      },
+      "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
+      "error_count": 0,
+      "errors": [],
+      "eval_after_losses": {
+        "observe": 5.319774150848389,
+        "raw_loss_guard": 5.322744369506836,
+        "raw_unguarded": 5.327542304992676
+      },
+      "eval_before_losses": {
+        "observe": 5.367155075073242,
+        "raw_loss_guard": 5.367155075073242,
+        "raw_unguarded": 5.367155075073242
+      },
+      "eval_loss_changes": {
+        "observe": -0.047380924224853516,
+        "raw_loss_guard": -0.04441070556640625,
+        "raw_unguarded": -0.039612770080566406
+      },
+      "feedback_config": {
+        "attenuation_rate": 0.25,
+        "halt_regression_streak": 2,
+        "halt_threshold": 0.05,
+        "loss_ema_alpha": 0.2,
+        "loss_floor": 1e-08,
+        "max_stale_updates": 0,
+        "maximum_gate": 1.0,
+        "recovery_rate": 0.125,
+        "recovery_threshold": 0.001,
+        "regression_threshold": 0.01,
+        "relative_delta_ema_alpha": 0.5,
+        "resume_improvement_streak": 2,
+        "warmup_observations": 2
+      },
+      "feedback_config_id": "sha256:d5708a061761ba008874e56a1fb1926c7aac18b3f4ede2ae6d2cfcb0c0dcd053",
+      "feedback_diagnostics": {
+        "active_update_count": 49,
+        "control_count": 64,
+        "disposition_counts": {
+          "active": 49,
+          "halted": 4,
+          "identity_gate": 8,
+          "no_feedback": 1,
+          "warmup": 2
+        },
+        "final_gate": 0.75,
+        "halted": false,
+        "identity_update_count": 15,
+        "observation_count": 64,
+        "stale_update_count": 0
+      },
+      "feedback_match_id": "sha256:954767ad5393b77a300434078bba42ebeb61fdbb2ed15c3add9d9a4cd67e2c4a",
+      "guard_recovery_fraction_of_unguarded_harm": 0.6176416426247622,
+      "guarded_dose_fraction_of_raw_deviation": 0.3836408745552768,
+      "identity_matches": {
+        "dataset_materialization": true,
+        "execution": true,
+        "model_runtime": true,
+        "tokenized_dataset": true,
+        "training_input": true
+      },
+      "lower_is_better": true,
+      "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
+      "optimizer_doses": {
+        "observe": {
+          "actuated_learning_rate_dose": 0.0032500000000000003,
+          "actuated_learning_rate_dose_ratio": 1.0,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_loss_guard": {
+          "actuated_learning_rate_dose": 0.0031296952478238383,
+          "actuated_learning_rate_dose_ratio": 0.9629831531765656,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        },
+        "raw_unguarded": {
+          "actuated_learning_rate_dose": 0.00293641310101375,
+          "actuated_learning_rate_dose_ratio": 0.9035117233888461,
+          "nominal_learning_rate_dose": 0.0032500000000000003
+        }
+      },
+      "seed": 23,
+      "source_paths": {
+        "observe": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s23/observe/run-card.json",
+        "raw_loss_guard": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s23/raw_loss_guard/run-card.json",
+        "raw_unguarded": "models/runs/hf-zspace-feedback-readme-64step-seeds13-17-23-20260809/runs/s23/raw_unguarded/run-card.json"
+      },
+      "status": "ready",
+      "trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+    }
+  ],
+  "guard_recovery_fraction_of_unguarded_harm": {
+    "all_seeds_reduced_harm": true,
+    "applicability_rule": "defined only when every ready seed has positive unguarded_total_effect",
+    "applicable": true,
+    "bounded_trend_ready": true,
+    "count": 3,
+    "fraction_of_mean_unguarded_harm": 0.5626138885380771,
+    "maximum": 0.8106002308580224,
+    "mean": 0.5536355016566398,
+    "mean_guarded_total_effect": 0.003853321075439453,
+    "mean_unguarded_total_effect": 0.008809884389241537,
+    "median": 0.6176416426247622,
+    "minimum": 0.23266463148713476,
+    "population_standard_deviation": 0.2402429032129359,
+    "sample_standard_deviation": 0.29423626359826915,
+    "values": [
+      0.8106002308580224,
+      0.23266463148713476,
+      0.6176416426247622
+    ]
+  },
+  "matched_seed_count": 3,
+  "ready_seed_count": 3,
+  "run_card_count": 9,
+  "schema": "spiraltorch.hf_zspace_feedback_ablation.v1",
+  "seeds": [
+    13,
+    17,
+    23
+  ],
+  "status": "ready"
+}
