@@ -174,8 +174,8 @@ mod tests {
     use st_core::backend::device_caps::{BackendKind, DeviceCaps};
     use st_core::backend::execution_plan::{
         AcceleratorFallback, ExecutionConfig, RuntimeComponentCapabilityStatus,
-        RuntimeComponentResolution, RuntimeComponentWorkload, RuntimeExecutionComponent,
-        RuntimeTensorBackend, RuntimeTensorUtilOperation,
+        RuntimeComponentReadyProof, RuntimeComponentResolution, RuntimeComponentWorkload,
+        RuntimeExecutionComponent, RuntimeTensorBackend, RuntimeTensorUtilOperation,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v5"
+            "spiraltorch.runtime_execution_plan.v6"
         );
         assert_eq!(
             wasm_transport["runtime_route"]["contract_version"],
@@ -319,6 +319,10 @@ mod tests {
             RuntimeComponentCapabilityStatus::Ready
         );
         assert_eq!(
+            observation.capabilities[0].ready_proof,
+            Some(RuntimeComponentReadyProof::StaticHostContract)
+        );
+        assert_eq!(
             observation.semantic_owner,
             "st-core::backend::execution_capability"
         );
@@ -367,6 +371,7 @@ mod tests {
             "RuntimeDeviceRouteProbeRequest",
             "RuntimeComponentCapabilityObservation",
             "RuntimeComponentCapabilityObservationRequest",
+            "RuntimeComponentReadyProof",
             "RuntimeComponentResolution",
             "RuntimeExecutionPlanRequestInput",
             "RuntimeExecutionPlanRequest",
@@ -453,7 +458,7 @@ mod tests {
             error,
             RuntimeExecutionPlanError::ComponentCapabilityObservation(
                 RuntimeComponentCapabilityObservationError::InvalidPayload {
-                    field: "output_sha256",
+                    field: "capabilities",
                     ..
                 }
             )
