@@ -36,6 +36,8 @@ pub const ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION: &str =
 pub const ZSPACE_PARAMETER_TRAJECTORY_KIND: &str = "spiraltorch.zspace_parameter_trajectory";
 pub const ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
 pub const ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND: &str = "rust";
+pub const ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
+pub const ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_ABSOLUTE_TOLERANCE: f64 = 1.0e-15;
 pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_STEPS: usize = 1_000_000;
 pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_PARAMETER_GROUPS: usize = 4_096;
 pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_NOMINAL_RATE_VALUES: usize = 2_000_000;
@@ -473,6 +475,13 @@ pub struct ZSpaceParameterTrajectoryReport {
     pub request: ZSpaceParameterTrajectoryRequest,
     pub step_count: usize,
     pub parameter_group_count: usize,
+    /// Tolerances used to decide whether an optimizer update changes any LR.
+    pub identity_relative_tolerance: f64,
+    pub identity_absolute_tolerance: f64,
+    /// Expected non-identity optimizer updates for each factorized arm.
+    pub raw_non_identity_update_count: usize,
+    pub dose_matched_constant_non_identity_update_count: usize,
+    pub dose_normalized_non_identity_update_count: usize,
     /// Sum of parameter-group learning rates over optimizer steps.
     pub nominal_dose: f64,
     pub raw_dose: f64,
@@ -1302,6 +1311,19 @@ pub fn plan_zspace_parameter_trajectory(
         constant_dose - raw_dose,
         dose_tolerance,
     )?;
+    let raw_non_identity_update_count = parameter_trajectory_non_identity_update_count(
+        request.raw_learning_rate_scales.iter().copied(),
+        &request.nominal_learning_rates,
+    );
+    let dose_matched_constant_non_identity_update_count =
+        parameter_trajectory_non_identity_update_count(
+            std::iter::repeat_n(constant_scale, step_count),
+            &request.nominal_learning_rates,
+        );
+    let dose_normalized_non_identity_update_count = parameter_trajectory_non_identity_update_count(
+        normalized_scales.iter().copied(),
+        &request.nominal_learning_rates,
+    );
 
     let mut minimum_saturations = 0;
     let mut maximum_saturations = 0;
@@ -1349,6 +1371,11 @@ pub fn plan_zspace_parameter_trajectory(
         request,
         step_count,
         parameter_group_count,
+        identity_relative_tolerance: ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_RELATIVE_TOLERANCE,
+        identity_absolute_tolerance: ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_ABSOLUTE_TOLERANCE,
+        raw_non_identity_update_count,
+        dose_matched_constant_non_identity_update_count,
+        dose_normalized_non_identity_update_count,
         nominal_dose,
         raw_dose,
         raw_dose_ratio,
@@ -1398,6 +1425,29 @@ fn bounded_parameter_trajectory_scale(raw_scale: f64, factor: f64) -> f64 {
         ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
         ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
     )
+}
+
+fn parameter_trajectory_non_identity_update_count<I>(
+    scales: I,
+    nominal_learning_rates: &[Vec<f64>],
+) -> usize
+where
+    I: IntoIterator<Item = f64>,
+{
+    scales
+        .into_iter()
+        .zip(nominal_learning_rates)
+        .filter(|(scale, rates)| {
+            rates.iter().copied().any(|nominal| {
+                let effective = nominal * scale;
+                let tolerance = ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_ABSOLUTE_TOLERANCE.max(
+                    ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_RELATIVE_TOLERANCE
+                        * nominal.abs().max(effective.abs()),
+                );
+                (nominal - effective).abs() > tolerance
+            })
+        })
+        .count()
 }
 
 fn validate_parameter_trajectory_shape(
@@ -2363,6 +2413,9 @@ mod tests {
         assert_eq!(report.semantic_backend, "rust");
         assert_eq!(report.step_count, 3);
         assert_eq!(report.parameter_group_count, 2);
+        assert_eq!(report.raw_non_identity_update_count, 3);
+        assert_eq!(report.dose_matched_constant_non_identity_update_count, 3);
+        assert!(report.dose_normalized_non_identity_update_count <= report.step_count);
         assert_eq!(report.trajectory_id, repeated.trajectory_id);
         assert!(report.trajectory_id.starts_with("sha256:"));
         assert_eq!(report.trajectory_id.len(), 71);
@@ -2395,6 +2448,36 @@ mod tests {
             step.dose_matched_constant_scale == report.dose_matched_constant_scale
                 && step.nominal_learning_rates.len() == report.parameter_group_count
         }));
+    }
+
+    #[test]
+    fn parameter_trajectory_marks_identity_control_arms() {
+        let constant = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![0.7, 0.7],
+            nominal_learning_rates: vec![vec![0.01], vec![0.005]],
+        })
+        .expect("constant raw trajectory");
+
+        assert_eq!(constant.raw_non_identity_update_count, 2);
+        assert_eq!(constant.dose_matched_constant_non_identity_update_count, 2);
+        assert_eq!(constant.dose_normalized_non_identity_update_count, 0);
+        assert_eq!(
+            constant.identity_relative_tolerance,
+            ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_RELATIVE_TOLERANCE
+        );
+        assert_eq!(
+            constant.identity_absolute_tolerance,
+            ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_ABSOLUTE_TOLERANCE
+        );
+
+        let identity = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![1.0],
+            nominal_learning_rates: vec![vec![0.01, 0.005]],
+        })
+        .expect("identity trajectory");
+        assert_eq!(identity.raw_non_identity_update_count, 0);
+        assert_eq!(identity.dose_matched_constant_non_identity_update_count, 0);
+        assert_eq!(identity.dose_normalized_non_identity_update_count, 0);
     }
 
     #[test]

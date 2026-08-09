@@ -1252,6 +1252,35 @@ def hf_zspace_optimizer_control_callback(
                     if self.trajectory_report is None
                     else self.trajectory_report.get("step_count")
                 ),
+                "trajectory_identity_relative_tolerance": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("identity_relative_tolerance")
+                ),
+                "trajectory_identity_absolute_tolerance": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("identity_absolute_tolerance")
+                ),
+                "trajectory_raw_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("raw_non_identity_update_count")
+                ),
+                "trajectory_dose_matched_constant_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get(
+                        "dose_matched_constant_non_identity_update_count"
+                    )
+                ),
+                "trajectory_dose_normalized_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get(
+                        "dose_normalized_non_identity_update_count"
+                    )
+                ),
                 "trajectory_nominal_dose": (
                     None
                     if self.trajectory_report is None
@@ -1767,6 +1796,8 @@ def _factorized_seed_report(
 
     trajectory_fields: dict[str, float] = {}
     for field in (
+        "trajectory_identity_relative_tolerance",
+        "trajectory_identity_absolute_tolerance",
         "trajectory_nominal_dose",
         "trajectory_raw_dose",
         "trajectory_dose_normalized_dose",
@@ -1784,6 +1815,18 @@ def _factorized_seed_report(
             errors.append(f"factorized arms do not share a valid {field}")
         else:
             trajectory_fields[field] = float(value)
+
+    expected_non_identity_counts: dict[str, int] = {}
+    for arm in _FACTORIZED_ARMS[1:]:
+        field = f"trajectory_{arm}_non_identity_update_count"
+        values = [receipt.get(field) for receipt in receipts.values()]
+        value = values[0] if all(item == values[0] for item in values[1:]) else None
+        count = _receipt_count(value)
+        step_count = _receipt_count(receipts[arm].get("trajectory_step_count"))
+        if count is None or step_count is None or count > step_count:
+            errors.append(f"factorized arms do not share a valid {field}")
+        else:
+            expected_non_identity_counts[arm] = count
 
     nominal_dose = trajectory_fields.get("trajectory_nominal_dose")
     raw_dose = trajectory_fields.get("trajectory_raw_dose")
@@ -1821,17 +1864,18 @@ def _factorized_seed_report(
 
     for arm in _FACTORIZED_ARMS[1:]:
         receipt = receipts[arm]
-        identity_dose_matched_constant = (
-            arm == "dose_matched_constant"
-            and receipt.get("model_update_intervened") is False
-            and _receipt_count(receipt.get("non_identity_update_count")) == 0
-            and raw_ratio is not None
-            and math.isclose(raw_ratio, 1.0, rel_tol=1e-10, abs_tol=0.0)
-        )
-        if (
-            receipt.get("model_update_intervened") is not True
-            and not identity_dose_matched_constant
-        ):
+        expected_count = expected_non_identity_counts.get(arm)
+        actual_count = _receipt_count(receipt.get("non_identity_update_count"))
+        if expected_count is not None:
+            if actual_count != expected_count:
+                errors.append(
+                    f"{arm} non-identity update count differs from the Rust trajectory"
+                )
+            if receipt.get("model_update_intervened") is not (expected_count > 0):
+                errors.append(
+                    f"{arm} model-update intervention flag differs from the Rust trajectory"
+                )
+        if arm == "raw" and expected_count == 0:
             errors.append(f"{arm} produced no non-identity model update")
 
     for arm, receipt in receipts.items():
@@ -1942,6 +1986,15 @@ def _factorized_seed_report(
         "trajectory_id": trajectory_id,
         "control_sequence_id": control_id,
         "nominal_schedule_sequence_id": nominal_id,
+        "trajectory_non_identity_update_counts": expected_non_identity_counts,
+        "trajectory_identity_tolerances": {
+            "relative": trajectory_fields.get(
+                "trajectory_identity_relative_tolerance"
+            ),
+            "absolute": trajectory_fields.get(
+                "trajectory_identity_absolute_tolerance"
+            ),
+        },
         "identity_matches": identity_matches,
         "eval_before_losses": before_losses,
         "eval_after_losses": after_losses,

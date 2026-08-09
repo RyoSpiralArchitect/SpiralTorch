@@ -23,10 +23,13 @@ Rust-derived raw scales `r_i` and scheduler-owned nominal rates, it sets
 
 Rust solves `c` so the bounded normalized schedule satisfies
 `sum(w_i clamp(c r_i, min, max)) = sum(w_i)`. The report includes the complete
-step table, saturation counts, invariant residuals, and a SHA-256 trajectory
-identity. Python transports the report, checks each live scheduler row against
-it, temporarily actuates `torch.optim.Optimizer.step`, and restores nominal
-rates before the scheduler advances.
+step table, saturation counts, invariant residuals, expected non-identity update
+counts, identity tolerances, and a SHA-256 trajectory identity. Python transports
+the report, checks each live scheduler row and measured intervention count
+against it, temporarily actuates `torch.optim.Optimizer.step`, and restores
+nominal rates before the scheduler advances. A constant or dose-normalized arm
+may legitimately be an identity control; the raw arm must still contain at least
+one non-identity update for the factorized comparison to be ready.
 
 This dose is the sum of parameter-group learning rates over optimizer updates.
 It is not parameter-count weighted and does not claim to measure gradient norm,

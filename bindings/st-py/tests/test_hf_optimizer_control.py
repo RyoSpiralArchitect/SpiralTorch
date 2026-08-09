@@ -263,6 +263,15 @@ def test_factorized_trajectory_arms_match_the_intended_integrated_doses(
     }
     assert observed_receipt["trajectory_generated"] is True
     assert all(receipt["trajectory_validated"] is True for receipt in receipts)
+    for arm, callback in (
+        ("raw", raw),
+        ("dose_matched_constant", constant),
+        ("dose_normalized", normalized),
+    ):
+        receipt = callback.receipt()
+        expected_count = trajectory[f"{arm}_non_identity_update_count"]
+        assert receipt["non_identity_update_count"] == expected_count
+        assert receipt["model_update_intervened"] is (expected_count > 0)
     assert observed_receipt["actuated_learning_rate_dose_ratio"] == pytest.approx(1.0)
     assert raw.receipt()["actuated_learning_rate_dose"] == pytest.approx(
         trajectory["raw_dose"]
@@ -679,6 +688,11 @@ def _factorized_card(
             "trajectory_id": trajectory_id,
             "trajectory_validated": True,
             "trajectory_step_count": 4,
+            "trajectory_identity_relative_tolerance": 1.0e-12,
+            "trajectory_identity_absolute_tolerance": 1.0e-15,
+            "trajectory_raw_non_identity_update_count": 4,
+            "trajectory_dose_matched_constant_non_identity_update_count": 4,
+            "trajectory_dose_normalized_non_identity_update_count": 4,
             "trajectory_nominal_dose": nominal_dose,
             "trajectory_raw_dose": raw_dose,
             "trajectory_dose_normalized_dose": nominal_dose,
@@ -868,6 +882,31 @@ def test_factorized_ablation_accepts_identity_dose_matched_constant() -> None:
     constant_receipt = cards[1]["zspace_optimizer_control_receipt"]
     constant_receipt["model_update_intervened"] = False
     constant_receipt["non_identity_update_count"] = 0
+    for card in cards:
+        card["zspace_optimizer_control_receipt"][
+            "trajectory_dose_matched_constant_non_identity_update_count"
+        ] = 0
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "ready"
+    assert report["factorized_seeds"][0]["errors"] == []
+
+
+def test_factorized_ablation_accepts_identity_dose_normalized_arm() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    for card in cards:
+        card["zspace_optimizer_control_receipt"][
+            "trajectory_dose_normalized_non_identity_update_count"
+        ] = 0
+    normalized_receipt = cards[3]["zspace_optimizer_control_receipt"]
+    normalized_receipt["model_update_intervened"] = False
+    normalized_receipt["non_identity_update_count"] = 0
 
     report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
 
@@ -890,7 +929,7 @@ def test_factorized_ablation_rejects_unexplained_identity_constant_arm() -> None
 
     assert report["status"] == "blocked"
     assert (
-        "dose_matched_constant produced no non-identity model update"
+        "dose_matched_constant non-identity update count differs from the Rust trajectory"
         in report["factorized_seeds"][0]["errors"]
     )
 

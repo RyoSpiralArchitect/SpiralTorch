@@ -417,7 +417,18 @@ def test_parameter_trajectory_is_rust_owned_and_dose_factorized() -> None:
     assert report["dose_matched_constant_dose"] == pytest.approx(report["raw_dose"])
     assert report["dose_normalized_dose"] == pytest.approx(report["nominal_dose"])
     assert report["dose_normalized_dose_ratio"] == pytest.approx(1.0)
+    assert report["raw_non_identity_update_count"] == 3
+    assert report["dose_matched_constant_non_identity_update_count"] == 3
+    assert 0 <= report["dose_normalized_non_identity_update_count"] <= 3
     assert st.validate_zspace_parameter_trajectory(report) == report
+
+    constant = st.zspace_parameter_trajectory(
+        raw_learning_rate_scales=[0.7, 0.7],
+        nominal_learning_rates=[[0.01], [0.005]],
+    )
+    assert constant["raw_non_identity_update_count"] == 2
+    assert constant["dose_matched_constant_non_identity_update_count"] == 2
+    assert constant["dose_normalized_non_identity_update_count"] == 0
 
 
 def test_parameter_trajectory_rejects_invalid_input_and_tampering() -> None:
