@@ -151,6 +151,14 @@ declare module "spiraltorch-wasm" {
         required_ready_backends?: string[];
     };
 
+    export type RuntimeDeviceRouteProbeRequest = {
+        probes: RuntimeDeviceProbe[];
+        diagnostic_reports?: RuntimeDeviceRouteEvidence[];
+        requested_backends?: string[];
+        required_available_backends?: string[];
+        required_ready_backends?: string[];
+    };
+
     export type RuntimeDeviceReadiness = "ready" | "not_ready" | "unknown";
 
     export type RuntimeDeviceRouteRow = {
@@ -2464,6 +2472,10 @@ declare module "spiraltorch-wasm" {
     export function runtimeDeviceRouteJson(requestJson: string): string;
     export function runtimeDeviceRouteObject(
         request: RuntimeDeviceRouteRequest,
+    ): RuntimeDeviceRoute;
+    export function runtimeDeviceRouteFromProbesJson(requestJson: string): string;
+    export function runtimeDeviceRouteFromProbesObject(
+        request: RuntimeDeviceRouteProbeRequest,
     ): RuntimeDeviceRoute;
     export function runtimeDeviceRouteValidateJson(payloadJson: string): string;
     export function runtimeDeviceRouteValidateObject(

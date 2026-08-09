@@ -423,7 +423,26 @@ fallback reimplements the route-policy formulas.
 
 Runtime-device readiness follows that boundary too. Browser code may collect WebGPU or host
 observations, but direct readiness, surrogate readiness, fallback identity, and requirement
-gates are evaluated only by `st-core::backend::runtime_route`:
+gates are evaluated only by `st-core::backend::runtime_route`. When the observation is a
+committed SpiralTorch probe, pass the whole payload back to Rust rather than copying fields:
+
+```ts
+import {
+    runtimeDeviceProbeObserveObject,
+    runtimeDeviceRouteFromProbesObject,
+} from "spiraltorch-wasm";
+
+const probe = runtimeDeviceProbeObserveObject({ requested_backend: "mps" });
+const runtime = runtimeDeviceRouteFromProbesObject({
+    probes: [probe],
+    required_ready_backends: ["mps"],
+});
+
+console.log(runtime.routes[0].native_ready, runtime.selection?.effective_backend);
+```
+
+`runtimeDeviceRouteObject` remains the explicit compatibility ingress when the browser owns an
+external evidence source rather than a committed probe:
 
 ```ts
 import { runtimeDeviceRouteObject } from "spiraltorch-wasm";

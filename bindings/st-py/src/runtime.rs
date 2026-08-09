@@ -12,7 +12,8 @@ use st_core::backend::runtime_probe::{
     RuntimeDeviceProbeRequest,
 };
 use st_core::backend::runtime_route::{
-    evaluate_runtime_device_route, RuntimeDeviceRoutePayload, RuntimeDeviceRouteRequest,
+    evaluate_runtime_device_route, evaluate_runtime_device_route_from_probes,
+    RuntimeDeviceRoutePayload, RuntimeDeviceRouteProbeRequest, RuntimeDeviceRouteRequest,
 };
 use st_core::runtime::api_llm_route_policy::{
     evaluate_api_llm_route_policy, ApiLlmRoutePolicyEvaluationRequest,
@@ -118,6 +119,19 @@ fn _runtime_device_route_evaluate(
     let payload = evaluate_runtime_device_route(request)
         .and_then(|payload| payload.with_execution_client("python"))
         .map_err(|error| json_error("runtime-device route evaluation failed", error))?;
+    payload_to_py(py, payload, "runtime-device route contract encoding failed")
+}
+
+#[pyfunction]
+fn _runtime_device_route_evaluate_probes(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request: RuntimeDeviceRouteProbeRequest =
+        request_from_py(request, "invalid runtime-device probe-route request")?;
+    let payload = evaluate_runtime_device_route_from_probes(request)
+        .and_then(|payload| payload.with_execution_client("python"))
+        .map_err(|error| json_error("runtime-device probe-route evaluation failed", error))?;
     payload_to_py(py, payload, "runtime-device route contract encoding failed")
 }
 
@@ -303,6 +317,10 @@ fn _runtime_execution_plan_validate_against(
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _runtime_device_route_evaluate_probes,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_observe, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_validate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_transport, parent)?)?;

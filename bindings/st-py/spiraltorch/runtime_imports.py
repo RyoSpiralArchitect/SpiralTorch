@@ -48,6 +48,7 @@ __all__ = [
     "observe_runtime_execution_plan_capabilities",
     "observe_runtime_device_probe",
     "evaluate_runtime_device_route",
+    "evaluate_runtime_device_route_from_probes",
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_runtime_device_probe_contract",
@@ -803,14 +804,8 @@ def _runtime_device_route_evidence(
     *,
     default_backend: object = None,
 ) -> dict[str, object]:
-    rust_evidence = row.get("route_evidence")
-    if rust_evidence is not None:
-        if not isinstance(rust_evidence, Mapping):
-            raise TypeError("report route_evidence must be a mapping")
-        return dict(rust_evidence)
-
-    # Compatibility path for external and pre-contract reports. Native
-    # SpiralTorch probes always carry the exact Rust-owned evidence above.
+    # Compatibility path for external and pre-contract reports. The
+    # `route_evidence` key is reserved for full probes and never copied here.
     evidence: dict[str, object] = {
         "requested_backend": _runtime_device_row_backend(row, default=default_backend),
     }
@@ -890,6 +885,18 @@ def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, 
     if not isinstance(contract, Mapping):
         raise TypeError("runtime probe contract must be a mapping")
     return dict(contract)
+
+
+def _is_runtime_device_probe_envelope(payload: Mapping[str, object]) -> bool:
+    if "contract" in payload:
+        return True
+    if payload.get("kind") == "spiraltorch.runtime_device_probe":
+        return True
+    if payload.get("contract_version") == "spiraltorch.runtime_device_probe.v1":
+        return True
+    if payload.get("semantic_owner") == "st-core::backend::runtime_probe":
+        return True
+    return "route_evidence" in payload
 
 
 def resolve_runtime_execution_config(
@@ -1200,10 +1207,43 @@ def evaluate_runtime_device_route(
         requested_backends,
         field="requested_backends",
     )
-    evidence = []
+    required_available = _runtime_device_route_values(
+        required_available_backends,
+        field="required_available_backends",
+    )
+    required_ready = _runtime_device_route_values(
+        required_ready_backends,
+        field="required_ready_backends",
+    )
+    canonical_reports = []
+    committed_probes = []
+    diagnostic_rows = []
     for index, row in enumerate(report_values):
         if not isinstance(row, Mapping):
             raise TypeError(f"reports[{index}] must be a mapping")
+        canonical_reports.append(row)
+        if _is_runtime_device_probe_envelope(row):
+            committed_probes.append(row)
+        else:
+            diagnostic_rows.append((index, row))
+    if committed_probes:
+        diagnostic_reports = [
+            _runtime_device_route_evidence(
+                row,
+                default_backend=requested[index] if index < len(requested) else None,
+            )
+            for index, row in diagnostic_rows
+        ]
+        return evaluate_runtime_device_route_from_probes(
+            committed_probes,
+            diagnostic_reports=diagnostic_reports,
+            requested_backends=requested,
+            required_available_backends=required_available,
+            required_ready_backends=required_ready,
+        )
+
+    evidence = []
+    for index, row in enumerate(canonical_reports):
         default_backend = requested[index] if index < len(requested) else None
         evidence.append(
             _runtime_device_route_evidence(row, default_backend=default_backend)
@@ -1212,6 +1252,68 @@ def evaluate_runtime_device_route(
         {
             "reports": evidence,
             "requested_backends": requested,
+            "required_available_backends": required_available,
+            "required_ready_backends": required_ready,
+        }
+    )
+
+
+def evaluate_runtime_device_route_from_probes(
+    probes: object,
+    *,
+    diagnostic_reports: object = None,
+    requested_backends: object = None,
+    required_available_backends: object = None,
+    required_ready_backends: object = None,
+) -> dict[str, object]:
+    """Route full committed probes without rebuilding their evidence in Python."""
+
+    if probes is None:
+        probe_values: list[object] = []
+    elif isinstance(probes, Mapping) or isinstance(probes, (str, bytes, bytearray)):
+        raise TypeError("probes must be an iterable of mappings")
+    else:
+        try:
+            probe_values = list(probes)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("probes must be an iterable of mappings") from exc
+
+    canonical_probes = []
+    for index, probe in enumerate(probe_values):
+        if not isinstance(probe, Mapping):
+            raise TypeError(f"probes[{index}] must be a mapping")
+        canonical_probes.append(_runtime_probe_contract_payload(probe))
+
+    if diagnostic_reports is None:
+        diagnostic_values: list[object] = []
+    elif isinstance(diagnostic_reports, Mapping) or isinstance(
+        diagnostic_reports, (str, bytes, bytearray)
+    ):
+        raise TypeError("diagnostic_reports must be an iterable of mappings")
+    else:
+        try:
+            diagnostic_values = list(diagnostic_reports)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError(
+                "diagnostic_reports must be an iterable of mappings"
+            ) from exc
+    canonical_diagnostics = []
+    for index, report in enumerate(diagnostic_values):
+        if not isinstance(report, Mapping):
+            raise TypeError(f"diagnostic_reports[{index}] must be a mapping")
+        canonical_diagnostics.append(dict(report))
+
+    evaluate = _native_runtime_device_route_function(
+        "_runtime_device_route_evaluate_probes"
+    )
+    payload = evaluate(
+        {
+            "probes": canonical_probes,
+            "diagnostic_reports": canonical_diagnostics,
+            "requested_backends": _runtime_device_route_values(
+                requested_backends,
+                field="requested_backends",
+            ),
             "required_available_backends": _runtime_device_route_values(
                 required_available_backends,
                 field="required_available_backends",
@@ -1222,6 +1324,7 @@ def evaluate_runtime_device_route(
             ),
         }
     )
+    return _require_trusted_runtime_device_route_contract(payload)
 
 
 def runtime_device_report_fields(
@@ -1280,8 +1383,16 @@ def runtime_device_report_fields(
         }
 
     describe = describe_runtime_devices or _default_describe_runtime_devices()
+    describe_kwargs: dict[str, object] = {"continue_on_error": True}
+    if describe_runtime_devices is None:
+        describe_kwargs.update(
+            {
+                "required_available_backends": required,
+                "required_ready_backends": ready_required,
+            }
+        )
     try:
-        summary = describe(backends, continue_on_error=True)
+        summary = describe(backends, **describe_kwargs)
     except Exception as exc:
         reports = [
             {
@@ -1322,6 +1433,8 @@ def runtime_device_report_fields(
     unknown_required = list(contract.get("required_available_backends_unknown", []))
     missing_ready_required = list(contract.get("required_ready_backends_missing", []))
     failures = list(contract.get("failures", []))
+    persisted_contract = dict(contract)
+    persisted_contract.pop("reports", None)
     return {
         f"{field_prefix}runtime_device_report_requested": True,
         f"{field_prefix}runtime_device_report_backends": csv_label(backends),
@@ -1341,7 +1454,7 @@ def runtime_device_report_fields(
             sort_keys=True,
         ),
         f"{field_prefix}runtime_device_route_contract_json": json.dumps(
-            contract,
+            persisted_contract,
             ensure_ascii=False,
             sort_keys=True,
         ),

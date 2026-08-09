@@ -72,13 +72,14 @@ print("route contract:", runtime["runtime_device_route_contract_version"])
 PY
 ```
 
-`describe_runtime_devices()` and HF preflight collect observations in Python, but direct
-readiness, surrogate readiness, fallback identity, and required-backend gates are owned by
+`describe_runtime_devices()` and HF preflight orchestrate observations in Python, but committed
+SpiralTorch probes are validated and projected into route evidence only by
 `st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly
 `native_ready = false` while being `route_ready = true` through its WGPU surrogate. Use
-`evaluate_runtime_device_route(...)` when another orchestrator already has device rows, and
+`evaluate_runtime_device_route_from_probes(...)` when an orchestrator has full committed probes;
+use `evaluate_runtime_device_route(...)` only for external or legacy evidence rows. Use
 `validate_runtime_device_route_contract(...)` to validate a persisted payload or replay it
-against its original request. The v4 contract retains canonical evidence and commits both the
+against its original request. The v5 contract retains canonical evidence and commits both the
 request and Rust-derived output with SHA-256; reports that disagree about the same effective
 backend fail closed. It also owns the payload-level `runtime_readiness` projection: explicit required
 backends use an all-required gate, while an ungated request accepts any ready route. Missing
@@ -87,7 +88,16 @@ boolean `runtime_ready` projection remains fail-closed.
 
 `describe_runtime_devices(...)` also appends the complete source `reports` for diagnostics.
 Those rows are Python transport metadata and are not committed; the canonical Rust-owned
-`evidence` field is the replayable source for route decisions.
+`evidence` field is the replayable source for route decisions. Python never copies readiness
+fields out of native probes on this path. If a diagnostic batch mixes committed probes with
+legacy or error rows, committed probes stay on the validated Rust ingress. Rust admits only
+explicit, non-ready error rows into the committed diagnostic projection, so collection failures
+remain visible without allowing uncommitted rows into executable selection; the whole batch is
+never downgraded to compatibility semantics.
+Malformed probe envelopes are recognized from their stable identity and commitment markers, then
+rejected rather than reclassified as legacy evidence when `kind` or another contract field drifts.
+The probe-only `route_evidence` transport key is also reserved for this validated ingress; external
+compatibility rows provide readiness fields directly instead of wrapping uncommitted evidence.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:

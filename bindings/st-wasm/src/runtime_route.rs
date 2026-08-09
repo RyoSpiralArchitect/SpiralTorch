@@ -1,7 +1,10 @@
+use serde::Deserialize;
 use serde_json::Value;
+use st_core::backend::runtime_probe::RuntimeDeviceProbePayload;
 use st_core::backend::runtime_route::{
-    evaluate_runtime_device_route, RuntimeDeviceRouteError, RuntimeDeviceRoutePayload,
-    RuntimeDeviceRouteRequest,
+    evaluate_runtime_device_route, evaluate_runtime_device_route_from_probes,
+    RuntimeDeviceRouteError, RuntimeDeviceRouteEvidence, RuntimeDeviceRoutePayload,
+    RuntimeDeviceRouteProbeRequest, RuntimeDeviceRouteRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -12,6 +15,16 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::js_error;
 
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RuntimeDeviceRouteProbeRequestWire {
+    probes: Vec<Value>,
+    diagnostic_reports: Vec<RuntimeDeviceRouteEvidence>,
+    requested_backends: Vec<String>,
+    required_available_backends: Vec<String>,
+    required_ready_backends: Vec<String>,
+}
+
 fn request_from_value(value: Value) -> Result<RuntimeDeviceRouteRequest, String> {
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
@@ -19,6 +32,37 @@ fn request_from_value(value: Value) -> Result<RuntimeDeviceRouteRequest, String>
 fn request_from_json(request_json: &str) -> Result<RuntimeDeviceRouteRequest, String> {
     let value = serde_json::from_str(request_json).map_err(|error| error.to_string())?;
     request_from_value(value)
+}
+
+fn probe_request_from_value(value: Value) -> Result<RuntimeDeviceRouteProbeRequest, String> {
+    let wire: RuntimeDeviceRouteProbeRequestWire =
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
+    let probes = wire
+        .probes
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let canonical = value
+                .as_object()
+                .and_then(|object| object.get("contract"))
+                .cloned()
+                .unwrap_or(value);
+            serde_json::from_value::<RuntimeDeviceProbePayload>(canonical)
+                .map_err(|error| format!("invalid runtime-device probe {index}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RuntimeDeviceRouteProbeRequest {
+        probes,
+        diagnostic_reports: wire.diagnostic_reports,
+        requested_backends: wire.requested_backends,
+        required_available_backends: wire.required_available_backends,
+        required_ready_backends: wire.required_ready_backends,
+    })
+}
+
+fn probe_request_from_json(request_json: &str) -> Result<RuntimeDeviceRouteProbeRequest, String> {
+    let value = serde_json::from_str(request_json).map_err(|error| error.to_string())?;
+    probe_request_from_value(value)
 }
 
 fn payload_from_value(value: Value) -> Result<RuntimeDeviceRoutePayload, String> {
@@ -42,6 +86,15 @@ pub fn runtime_device_route_value(
     request: RuntimeDeviceRouteRequest,
 ) -> Result<Value, RuntimeDeviceRouteError> {
     let payload = evaluate_runtime_device_route(request)?.with_execution_client("wasm")?;
+    Ok(serde_json::to_value(payload).expect("runtime-device route payload is serializable"))
+}
+
+/// Route committed browser probes without reconstructing evidence in JavaScript.
+pub fn runtime_device_route_from_probes_value(
+    request: RuntimeDeviceRouteProbeRequest,
+) -> Result<Value, RuntimeDeviceRouteError> {
+    let payload =
+        evaluate_runtime_device_route_from_probes(request)?.with_execution_client("wasm")?;
     Ok(serde_json::to_value(payload).expect("runtime-device route payload is serializable"))
 }
 
@@ -72,6 +125,23 @@ pub fn runtime_device_route_object(request: &JsValue) -> Result<JsValue, JsValue
     let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
     let request = request_from_value(request).map_err(js_error)?;
     let payload = runtime_device_route_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteFromProbesJson)]
+pub fn runtime_device_route_from_probes_json(request_json: &str) -> Result<String, JsValue> {
+    let request = probe_request_from_json(request_json).map_err(js_error)?;
+    let payload = runtime_device_route_from_probes_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceRouteFromProbesObject)]
+pub fn runtime_device_route_from_probes_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = probe_request_from_value(request).map_err(js_error)?;
+    let payload = runtime_device_route_from_probes_value(request).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -122,6 +192,8 @@ pub fn runtime_device_route_validate_against_object(
 mod tests {
     use super::*;
     use serde_json::json;
+    use st_core::backend::device_caps::BackendKind;
+    use st_core::backend::runtime_probe::RuntimeDeviceProbeObservationRequest;
 
     fn without_client(mut payload: Value) -> Value {
         payload
@@ -186,6 +258,73 @@ mod tests {
         assert_eq!(wasm["selection"]["requested_backend"], "mps");
         assert_eq!(wasm["selection"]["effective_backend"], "wgpu");
         assert_eq!(wasm["passed"], true);
+    }
+
+    #[test]
+    fn wasm_routes_committed_probe_transports_without_js_evidence_projection() {
+        let probe = crate::runtime_probe::observe_runtime_device_probe_value(
+            RuntimeDeviceProbeObservationRequest::new(BackendKind::Cpu),
+        )
+        .expect("committed CPU probe transport");
+        let expected_evidence = probe["route_evidence"].clone();
+        let request = probe_request_from_value(json!({
+            "probes": [probe],
+            "required_ready_backends": ["cpu"]
+        }))
+        .expect("valid probe-route request");
+
+        let route = runtime_device_route_from_probes_value(request)
+            .expect("committed probe route transport");
+
+        assert_eq!(route["execution_client"], "wasm");
+        assert_eq!(route["evidence"], json!([expected_evidence]));
+        assert_eq!(route["requested_backends"], json!(["cpu"]));
+        assert_eq!(route["selection"]["requested_backend"], "cpu");
+    }
+
+    #[test]
+    fn wasm_probe_route_retains_selection_ineligible_collection_failures() {
+        let probe = crate::runtime_probe::observe_runtime_device_probe_value(
+            RuntimeDeviceProbeObservationRequest::new(BackendKind::Cpu),
+        )
+        .expect("committed CPU probe transport");
+        let request = probe_request_from_value(json!({
+            "probes": [probe],
+            "diagnostic_reports": [{
+                "requested_backend": "mps",
+                "runtime_ready": false,
+                "runtime_status": "error",
+                "error": "browser MPS probe failed"
+            }],
+            "requested_backends": ["cpu", "mps"]
+        }))
+        .expect("valid diagnostic probe-route request");
+
+        let route = runtime_device_route_from_probes_value(request)
+            .expect("diagnostic probe route transport");
+
+        assert_eq!(route["error_backends"], json!(["mps"]));
+        assert_eq!(route["has_errors"], true);
+        assert_eq!(route["status_by_backend"]["mps"], "error");
+        assert_eq!(route["selection"]["requested_backend"], "cpu");
+    }
+
+    #[test]
+    fn wasm_probe_route_rejects_tampered_probe_contracts() {
+        let mut probe = crate::runtime_probe::observe_runtime_device_probe_value(
+            RuntimeDeviceProbeObservationRequest::new(BackendKind::Cpu),
+        )
+        .expect("committed CPU probe transport");
+        probe["contract"]["route_evidence"]["runtime_ready"] = false.into();
+        let request = probe_request_from_value(json!({"probes": [probe]}))
+            .expect("tampered probe still has the canonical wire shape");
+
+        let error = runtime_device_route_from_probes_value(request)
+            .expect_err("Rust must reject tampered probe commitments");
+        assert!(matches!(
+            error,
+            RuntimeDeviceRouteError::InvalidProbe { index: 0, .. }
+        ));
     }
 
     #[test]

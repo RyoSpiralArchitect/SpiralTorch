@@ -247,6 +247,207 @@ def test_describe_runtime_devices_collects_backend_readiness(
         st.describe_runtime_devices(["mps"], continue_on_error=False)
 
 
+def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    import spiraltorch.runtime_imports as runtime_imports
+
+    def _unexpected_compatibility_projection(*_args: object, **_kwargs: object):
+        raise AssertionError("committed probes must bypass Python evidence projection")
+
+    monkeypatch.setattr(
+        runtime_imports,
+        "_runtime_device_route_evidence",
+        _unexpected_compatibility_projection,
+    )
+
+    probe = st.observe_runtime_device_probe("cpu")
+    canonical_probe = st.validate_runtime_device_probe_contract(probe)
+    route = st.evaluate_runtime_device_route_from_probes(
+        [probe],
+        required_ready_backends=["cpu"],
+    )
+    public_route = st.evaluate_runtime_device_route(
+        [probe],
+        required_ready_backends=["cpu"],
+    )
+    canonical_route = st.evaluate_runtime_device_route(
+        [canonical_probe],
+        required_ready_backends=["cpu"],
+    )
+    summary = st.describe_runtime_devices(["cpu"])
+
+    assert "evaluate_runtime_device_route_from_probes" in st.__all__
+    assert route["evidence"] == [probe["route_evidence"]]
+    assert route["requested_backends"] == ["cpu"]
+    assert route["selection"]["requested_backend"] == "cpu"
+    assert route["execution_client"] == "python"
+    assert public_route == route
+    assert canonical_route == route
+    assert summary["evidence"] == [summary["reports"][0]["route_evidence"]]
+
+    tampered = json.loads(json.dumps(probe))
+    tampered["contract"]["route_evidence"]["runtime_ready"] = False
+    with pytest.raises(ValueError, match="probe 0 failed committed validation"):
+        st.evaluate_runtime_device_route_from_probes([tampered])
+
+
+def test_mixed_device_reports_never_downgrade_committed_probe_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    probe = st.observe_runtime_device_probe("cpu")
+    tampered_transport = json.loads(json.dumps(probe))
+    tampered_transport["route_evidence"]["runtime_ready"] = False
+
+    def _mixed_describe_device(backend: str = "cpu", **_kwargs: object):
+        if backend == "cpu":
+            return tampered_transport
+        raise RuntimeError("diagnostic-only probe failure")
+
+    monkeypatch.setattr(st, "describe_device", _mixed_describe_device, raising=False)
+
+    summary = st.describe_runtime_devices(
+        ["cpu", "mps"],
+        required_ready_backends=["cpu", "mps"],
+    )
+
+    assert summary["evidence"][0] == probe["contract"]["route_evidence"]
+    assert summary["evidence"][1]["requested_backend"] == "mps"
+    assert summary["evidence"][1]["runtime_status"] == "error"
+    assert summary["requested_backends"] == ["cpu", "mps"]
+    assert summary["ready_backends"] == ["cpu"]
+    assert summary["error_backends"] == ["mps"]
+    assert summary["status_by_backend"]["mps"] == "error"
+    assert summary["has_errors"] is True
+    assert summary["routes"][0]["requested_backend"] == "cpu"
+    assert summary["routes"][0]["route_ready"] is True
+    assert summary["selection"] is None
+    assert summary["required_ready_backends_passed"] is False
+    assert summary["runtime_missing_ready_backends"] == ["mps"]
+    assert summary["reports"][1]["error"] == "diagnostic-only probe failure"
+    assert summary["reports"][0]["route_evidence"]["runtime_ready"] is False
+    assert st.validate_runtime_device_route_contract(summary) == summary
+
+
+def test_malformed_probe_envelopes_never_fall_back_to_transport_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    malformed = json.loads(json.dumps(st.observe_runtime_device_probe("cpu")))
+    malformed["contract"]["kind"] = "forged.runtime_device_probe"
+    malformed["route_evidence"]["runtime_ready"] = False
+
+    monkeypatch.setattr(
+        st,
+        "describe_device",
+        lambda _backend="cpu", **_kwargs: malformed,
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="kind.*must be"):
+        st.describe_runtime_devices(["cpu"])
+
+
+@pytest.mark.parametrize("kind_mutation", ["corrupt", "remove"])
+def test_canonical_probe_contracts_never_downgrade_when_kind_is_damaged(
+    kind_mutation: str,
+) -> None:
+    st = require_native()
+    canonical = st.validate_runtime_device_probe_contract(
+        st.observe_runtime_device_probe("cpu")
+    )
+    if kind_mutation == "corrupt":
+        canonical["kind"] = "forged.runtime_device_probe"
+    else:
+        canonical.pop("kind")
+    canonical["route_evidence"]["runtime_ready"] = False
+
+    with pytest.raises(ValueError, match="kind|probe"):
+        st.evaluate_runtime_device_route([canonical])
+
+
+def test_naked_route_evidence_never_enters_compatibility_projection() -> None:
+    st = require_native()
+    canonical = st.validate_runtime_device_probe_contract(
+        st.observe_runtime_device_probe("cpu")
+    )
+    route_evidence = dict(canonical["route_evidence"])
+    route_evidence["runtime_ready"] = False
+
+    with pytest.raises(ValueError, match="kind|probe"):
+        st.evaluate_runtime_device_route([{"route_evidence": route_evidence}])
+
+
+def test_runtime_preflight_applies_required_gates_to_committed_probes() -> None:
+    st = require_native()
+
+    fields = st.runtime_device_report_fields(
+        {
+            "runtime_device_backends": ["cpu"],
+            "required_runtime_device_backends": ["cpu"],
+            "required_runtime_device_ready_backends": ["cpu"],
+        }
+    )
+    contract = json.loads(fields["runtime_device_route_contract_json"])
+    reports = json.loads(fields["runtime_device_reports_json"])
+
+    assert "reports" not in contract
+    assert reports
+    assert st.validate_runtime_device_route_contract(contract) == contract
+    assert contract["required_available_backends"] == ["cpu"]
+    assert contract["required_ready_backends"] == ["cpu"]
+    assert contract["required_available_backends_passed"] is True
+    assert contract["required_ready_backends_passed"] is True
+    assert fields["required_runtime_device_backends_passed"] is True
+    assert fields["required_runtime_device_ready_backends_passed"] is True
+
+
+def test_runtime_preflight_custom_collectors_preserve_committed_probe_ingress() -> None:
+    st = require_native()
+    probe = st.observe_runtime_device_probe("cpu")
+    tampered_transport = json.loads(json.dumps(probe))
+    tampered_transport["route_evidence"]["runtime_ready"] = False
+
+    def _custom_collector(_backends: object, **_kwargs: object):
+        return {
+            "reports": [
+                tampered_transport,
+                {
+                    "backend": "mps",
+                    "requested_backend": "mps",
+                    "runtime_ready": False,
+                    "runtime_status": "error",
+                    "error": "diagnostic-only custom collector failure",
+                },
+            ]
+        }
+
+    fields = st.runtime_device_report_fields(
+        {
+            "runtime_device_backends": ["cpu", "mps"],
+            "required_runtime_device_ready_backends": ["cpu", "mps"],
+        },
+        describe_runtime_devices=_custom_collector,
+    )
+    contract = json.loads(fields["runtime_device_route_contract_json"])
+    reports = json.loads(fields["runtime_device_reports_json"])
+
+    assert contract["evidence"][0] == probe["contract"]["route_evidence"]
+    assert contract["evidence"][1]["requested_backend"] == "mps"
+    assert contract["evidence"][1]["runtime_status"] == "error"
+    assert contract["ready_backends"] == ["cpu"]
+    assert contract["error_backends"] == ["mps"]
+    assert contract["status_by_backend"]["mps"] == "error"
+    assert contract["has_errors"] is True
+    assert fields["runtime_device_report_error_backends"] == "mps"
+    assert contract["required_ready_backends_passed"] is False
+    assert contract["runtime_missing_ready_backends"] == ["mps"]
+    assert reports[0]["route_evidence"]["runtime_ready"] is False
+    assert reports[1]["error"] == "diagnostic-only custom collector failure"
+
+
 def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> None:
     st = require_native()
 
