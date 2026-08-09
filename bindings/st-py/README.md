@@ -686,6 +686,46 @@ if `--trainer-telemetry` was not passed explicitly; the run card records both
 `--require-runtime-device-ready-backend wgpu`
 when the SpiralTorch WGPU surface must be available before the run starts.
 
+Trainer telemetry and generation controls do not, by themselves, change model
+weights. To test a Rust-owned Z-Space intervention during HF training, use the
+optimizer-control modes explicitly. `observe` derives and records the same
+Topos/meta-optimizer sequence without changing updates; `apply` temporarily
+scales each optimizer learning rate, restores the scheduler-owned nominal rate
+before the scheduler advances, and writes a resumable state plus JSONL receipt.
+Resume verifies the checkpoint's trace-prefix hash and starts a linked trace
+segment, preserving any post-checkpoint crash tail instead of mixing it with
+replayed updates.
+The v1 signal is derived from training-progress geometry, not loss or gradient
+feedback, so treat it as an auditable intervention primitive rather than an
+efficacy claim:
+
+```bash
+spiral-hf-finetune \
+  --model-name /path/to/local-model \
+  --train --train-file data/corpus.txt --finetune-mode lora \
+  --seed 13 --eval-before-train --eval-after-train-policy always \
+  --zspace-optimizer-control observe \
+  --output-dir runs/zspace-s13-observe
+
+spiral-hf-finetune \
+  --model-name /path/to/local-model \
+  --train --train-file data/corpus.txt --finetune-mode lora \
+  --seed 13 --eval-before-train --eval-after-train-policy always \
+  --zspace-optimizer-control apply \
+  --output-dir runs/zspace-s13-apply
+
+spiral-hf-zspace-optimizer-compare \
+  runs/zspace-s13-observe/spiraltorch-hf-finetune-run-card.json \
+  runs/zspace-s13-apply/spiraltorch-hf-finetune-run-card.json \
+  --out runs/zspace-s13-comparison.json
+```
+
+Repeat the matched observe/apply pair with at least three seeds before reading
+the report as a bounded empirical trend. The comparator fails closed on input,
+dataset, tokenization, model/runtime, execution, base-recipe, initial-eval, and
+Rust control-sequence mismatches; even a ready report does not establish general
+superiority.
+
 For an adapter run on Apple Silicon or a model that is too expensive to update
 fully, select one of the built-in LoRA profiles. `--mode auto` resolves these
 profiles to the Trainer-ready `hf-peft-finetune` preflight, while the bridge attaches PEFT

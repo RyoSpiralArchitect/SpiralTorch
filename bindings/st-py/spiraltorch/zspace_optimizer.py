@@ -15,6 +15,12 @@ ZSPACE_META_OBJECTIVE_FORMULA = (
     "J_obs=sum_i(lambda_i*tanh(metric_i))+lambda_topos*tanh(topos_pressure)"
     "+lambda_frac_eff*R_alpha(z)"
 )
+ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION = "spiraltorch.zspace_parameter_control.v2"
+ZSPACE_PARAMETER_CONTROL_KIND = "spiraltorch.zspace_parameter_control"
+ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
+ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND = "rust"
+ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE = 0.1
+ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE = 1.25
 
 __all__ = [
     "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -22,9 +28,16 @@ __all__ = [
     "ZSPACE_META_OPTIMIZER_KIND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+    "ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_CONTROL_KIND",
+    "ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE",
+    "ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE",
+    "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
+    "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
+    "zspace_parameter_control",
 ]
 
 
@@ -119,6 +132,68 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
             _mapping(contract, field)
 
 
+def _validate_parameter_control(contract: Mapping[str, Any]) -> None:
+    if (
+        contract.get("kind") != ZSPACE_PARAMETER_CONTROL_KIND
+        or contract.get("contract_version") != ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION
+        or contract.get("semantic_owner") != ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND
+    ):
+        raise RuntimeError(
+            "native Z-space core returned an untrusted parameter control"
+        )
+    if (
+        contract.get("source_contract_version")
+        != ZSPACE_META_OPTIMIZER_CONTRACT_VERSION
+        or contract.get("source_semantic_owner") != ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER
+    ):
+        raise RuntimeError("native Z-space parameter control has an unknown source")
+
+    source_step = contract.get("source_step")
+    if (
+        isinstance(source_step, bool)
+        or not isinstance(source_step, int)
+        or source_step <= 0
+    ):
+        raise RuntimeError(
+            "native Z-space parameter control returned invalid source_step"
+        )
+    numeric: dict[str, float] = {}
+    for field in (
+        "absolute_learning_rate_scale",
+        "source_learning_rate",
+        "source_effective_learning_rate",
+    ):
+        value = contract.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+        ):
+            raise RuntimeError(
+                f"native Z-space parameter control returned invalid {field}"
+            )
+        numeric[field] = float(value)
+    scale = numeric["absolute_learning_rate_scale"]
+    if not (
+        ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE
+        <= scale
+        <= ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE
+    ):
+        raise RuntimeError("native Z-space parameter control returned an unsafe scale")
+    expected = numeric["source_learning_rate"] * scale
+    if not math.isclose(
+        numeric["source_effective_learning_rate"],
+        expected,
+        rel_tol=1e-12,
+        abs_tol=1e-15,
+    ):
+        raise RuntimeError(
+            "native Z-space parameter control violated its rate invariant"
+        )
+
+
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
 ) -> dict[str, Any]:
@@ -157,3 +232,26 @@ def zspace_meta_optimizer_step(
             "observation": dict(observation),
         },
     )
+
+
+def zspace_parameter_control(
+    report: Mapping[str, object],
+) -> dict[str, Any]:
+    """Validate a complete optimizer report and extract Rust-owned model control."""
+
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, "_zspace_parameter_control", None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space parameter control requires the compiled Rust semantic core; "
+            "rebuild or reinstall SpiralTorch with _zspace_parameter_control"
+        )
+    contract = operation(dict(report))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError(
+            "native _zspace_parameter_control returned a non-mapping payload"
+        )
+    result = dict(contract)
+    _validate_parameter_control(result)
+    return result

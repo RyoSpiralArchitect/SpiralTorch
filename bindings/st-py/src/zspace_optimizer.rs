@@ -4,8 +4,8 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, restore_zspace_meta_optimizer,
-    transition_zspace_meta_optimizer, ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest,
-    ZSpaceMetaOptimizerStepRequest,
+    transition_zspace_meta_optimizer, zspace_parameter_control_from_value,
+    ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
 };
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
@@ -71,9 +71,18 @@ fn _zspace_meta_optimizer_step(py: Python<'_>, request: &Bound<'_, PyAny>) -> Py
     response_to_py(py, &report, "Z-space meta-optimizer report encoding failed")
 }
 
+#[pyfunction]
+fn _zspace_parameter_control(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let report = request_value(report, "Z-space meta-optimizer report")?;
+    let control = zspace_parameter_control_from_value(report)
+        .map_err(|error| json_error("Z-space parameter-control validation failed", error))?;
+    response_to_py(py, &control, "Z-space parameter-control encoding failed")
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_init, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_restore, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_step, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_parameter_control, parent)?)?;
     Ok(())
 }

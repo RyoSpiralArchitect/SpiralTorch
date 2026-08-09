@@ -652,6 +652,41 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: Dict[str, Any]
 HF_FINETUNE_DEFAULT_MODEL_PROFILE: str
 HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_RUN_CARD_FILENAME: str
+HF_ZSPACE_MATCHED_ABLATION_SCHEMA: str
+HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA: str
+HF_ZSPACE_OPTIMIZER_MODES: Tuple[str, ...]
+HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA: str
+HF_ZSPACE_OPTIMIZER_STATE_FILENAME: str
+HF_ZSPACE_OPTIMIZER_STATE_SCHEMA: str
+HF_ZSPACE_OPTIMIZER_TRACE_FILENAME: str
+HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA: str
+
+def hf_zspace_optimizer_recipe_contract(
+    *,
+    mode: str = ...,
+    z_dim: int = ...,
+    curvature: float = ...,
+    control_gain: float = ...,
+    volume_per_step: int = ...,
+) -> Dict[str, object]: ...
+def hf_zspace_optimizer_control_callback(
+    *,
+    mode: str = ...,
+    z_dim: int = ...,
+    curvature: float = ...,
+    control_gain: float = ...,
+    volume_per_step: int = ...,
+    trace_path: str | PathLike[str] | None = ...,
+    reset_trace: bool = ...,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
+) -> object: ...
+def compare_hf_zspace_optimizer_run_cards(
+    run_cards: Sequence[str | PathLike[str] | Mapping[str, object]],
+) -> Dict[str, object]: ...
+def write_hf_zspace_optimizer_matched_ablation_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA: str
 HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA: str
@@ -5156,6 +5191,12 @@ ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: str
 ZSPACE_META_OPTIMIZER_KIND: str
 ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND: str
 ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER: str
+ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION: str
+ZSPACE_PARAMETER_CONTROL_KIND: str
+ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE: float
+ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE: float
+ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND: str
+ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER: str
 
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
@@ -5171,6 +5212,9 @@ def zspace_meta_optimizer_step(
     config: Mapping[str, object],
     state: Mapping[str, object],
     observation: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_parameter_control(
+    report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
 def step_many(
@@ -11170,6 +11214,18 @@ __all__ = [
     "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
+    "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_MODES",
+    "HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_STATE_FILENAME",
+    "HF_ZSPACE_OPTIMIZER_STATE_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_TRACE_FILENAME",
+    "HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA",
+    "compare_hf_zspace_optimizer_run_cards",
+    "hf_zspace_optimizer_control_callback",
+    "hf_zspace_optimizer_recipe_contract",
+    "write_hf_zspace_optimizer_matched_ablation_report",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
     "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
@@ -11540,9 +11596,16 @@ __all__ = [
     "ZSPACE_META_OPTIMIZER_KIND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+    "ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_CONTROL_KIND",
+    "ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE",
+    "ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE",
+    "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
+    "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
+    "zspace_parameter_control",
     "zspace_generation_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
