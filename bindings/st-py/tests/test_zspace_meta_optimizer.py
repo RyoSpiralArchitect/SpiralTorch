@@ -387,14 +387,54 @@ def test_parameter_control_requires_and_validates_the_complete_report() -> None:
         report["topos_control"]["learning_rate_scale"]
     )
     assert control["source_effective_learning_rate"] == pytest.approx(
-        control["source_learning_rate"]
-        * control["absolute_learning_rate_scale"]
+        control["source_learning_rate"] * control["absolute_learning_rate_scale"]
     )
 
     tampered = copy.deepcopy(report)
     tampered["topos_control"]["learning_rate_scale"] = 0.5
     with pytest.raises(ValueError, match="learning_rate_scale"):
         st.zspace_parameter_control(tampered)
+
+
+def test_parameter_trajectory_is_rust_owned_and_dose_factorized() -> None:
+    report = st.zspace_parameter_trajectory(
+        raw_learning_rate_scales=[1.1, 0.8, 0.5],
+        nominal_learning_rates=[
+            [1.0, 0.5],
+            [0.5, 0.25],
+            [0.25, 0.125],
+        ],
+    )
+
+    assert report["contract_version"] == (
+        st.ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION
+    )
+    assert report["semantic_owner"] == st.ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER
+    assert report["semantic_backend"] == "rust"
+    assert report["trajectory_validated"] is True
+    assert report["step_count"] == 3
+    assert report["parameter_group_count"] == 2
+    assert report["dose_matched_constant_dose"] == pytest.approx(report["raw_dose"])
+    assert report["dose_normalized_dose"] == pytest.approx(report["nominal_dose"])
+    assert report["dose_normalized_dose_ratio"] == pytest.approx(1.0)
+    assert st.validate_zspace_parameter_trajectory(report) == report
+
+
+def test_parameter_trajectory_rejects_invalid_input_and_tampering() -> None:
+    with pytest.raises(ValueError, match="length mismatch"):
+        st.zspace_parameter_trajectory(
+            raw_learning_rate_scales=[0.8, 0.9],
+            nominal_learning_rates=[[1e-3]],
+        )
+
+    report = st.zspace_parameter_trajectory(
+        raw_learning_rate_scales=[0.7, 1.2],
+        nominal_learning_rates=[[1e-3], [5e-4]],
+    )
+    tampered = copy.deepcopy(report)
+    tampered["steps"][0]["dose_normalized_scale"] = 1.0
+    with pytest.raises(ValueError, match="canonical Rust trajectory"):
+        st.validate_zspace_parameter_trajectory(tampered)
 
 
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
@@ -414,5 +454,11 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE",
         "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
         "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
+        "ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION",
+        "ZSPACE_PARAMETER_TRAJECTORY_KIND",
+        "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
+        "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+        "validate_zspace_parameter_trajectory",
+        "zspace_parameter_trajectory",
     ):
         assert name in st.__all__

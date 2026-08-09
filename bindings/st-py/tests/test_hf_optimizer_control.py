@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import sys
 import types
@@ -14,6 +15,21 @@ from spiraltorch.hf_optimizer_control import (
     HF_ZSPACE_OPTIMIZER_STATE_FILENAME,
     hf_zspace_optimizer_control_callback,
 )
+
+BRIDGE_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_bridge.py"
+)
+
+
+def _load_bridge_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_optimizer_control_bridge_test",
+        BRIDGE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 class _HookHandle:
@@ -79,8 +95,11 @@ def _run_two_steps(
     *,
     mode: str,
     control_gain: float = 1.0,
+    learning_rate: float = 1.0e-3,
+    trajectory_arm: str = "raw",
+    trajectory: Path | dict[str, object] | None = None,
 ) -> tuple[object, _FakeOptimizer]:
-    optimizer = _FakeOptimizer()
+    optimizer = _FakeOptimizer(learning_rate=learning_rate)
     args = types.SimpleNamespace(output_dir=str(tmp_path / mode))
     state = types.SimpleNamespace(global_step=0, max_steps=2)
     control = types.SimpleNamespace()
@@ -89,6 +108,8 @@ def _run_two_steps(
         callback = hf_zspace_optimizer_control_callback(
             mode=mode,
             control_gain=control_gain,
+            trajectory_arm=trajectory_arm,
+            trajectory=trajectory,
             trace_path=tmp_path / f"{mode}.jsonl",
         )
     callback.on_train_begin(args, state, control, optimizer=optimizer)
@@ -179,6 +200,162 @@ def test_observe_and_apply_consume_identical_rust_control_sequences(
         == applied_receipt["control_sequence_id"]
     )
     assert observed_optimizer.step_learning_rates == [[1.0e-3], [1.0e-3]]
+
+
+def test_factorized_trajectory_arms_match_the_intended_integrated_doses(
+    tmp_path: Path,
+) -> None:
+    observed, observed_optimizer = _run_two_steps(tmp_path, mode="observe")
+    observed_receipt = observed.receipt()
+    trajectory_path = tmp_path / "observe" / st.HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME
+    trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+
+    raw, raw_optimizer = _run_two_steps(
+        tmp_path,
+        mode="apply",
+        trajectory_arm="raw",
+        trajectory=trajectory_path,
+    )
+    constant, constant_optimizer = _run_two_steps(
+        tmp_path,
+        mode="apply",
+        trajectory_arm="dose_matched_constant",
+        trajectory=trajectory_path,
+    )
+    normalized, normalized_optimizer = _run_two_steps(
+        tmp_path,
+        mode="apply",
+        trajectory_arm="dose_normalized",
+        trajectory=trajectory_path,
+    )
+    receipts = [
+        observed_receipt,
+        raw.receipt(),
+        constant.receipt(),
+        normalized.receipt(),
+    ]
+
+    assert observed_optimizer.step_learning_rates == [[1.0e-3], [1.0e-3]]
+    assert sum(row[0] for row in raw_optimizer.step_learning_rates) == pytest.approx(
+        trajectory["raw_dose"]
+    )
+    assert sum(
+        row[0] for row in constant_optimizer.step_learning_rates
+    ) == pytest.approx(trajectory["raw_dose"])
+    assert sum(
+        row[0] for row in normalized_optimizer.step_learning_rates
+    ) == pytest.approx(trajectory["nominal_dose"])
+    assert len({receipt["control_sequence_id"] for receipt in receipts}) == 1
+    assert len({receipt["nominal_schedule_sequence_id"] for receipt in receipts}) == 1
+    assert {receipt["trajectory_id"] for receipt in receipts} == {
+        trajectory["trajectory_id"]
+    }
+    assert observed_receipt["trajectory_generated"] is True
+    assert all(receipt["trajectory_validated"] is True for receipt in receipts)
+    assert observed_receipt["actuated_learning_rate_dose_ratio"] == pytest.approx(1.0)
+    assert raw.receipt()["actuated_learning_rate_dose"] == pytest.approx(
+        trajectory["raw_dose"]
+    )
+    assert constant.receipt()["actuated_learning_rate_dose"] == pytest.approx(
+        trajectory["raw_dose"]
+    )
+    assert normalized.receipt()["actuated_learning_rate_dose"] == pytest.approx(
+        trajectory["nominal_dose"]
+    )
+
+
+def test_planned_trajectory_rejects_scheduler_drift_before_optimizer_step(
+    tmp_path: Path,
+) -> None:
+    observed, _ = _run_two_steps(tmp_path, mode="observe")
+    trajectory = Path(str(observed.receipt()["trajectory_path"]))
+    optimizer = _FakeOptimizer(learning_rate=2.0e-3)
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "drift"))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        callback = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            trajectory_arm="dose_normalized",
+            trajectory=trajectory,
+        )
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+
+    with pytest.raises(RuntimeError, match="scheduler nominal learning rates differ"):
+        optimizer.step()
+
+    callback.abort(RuntimeError("expected scheduler drift"))
+
+
+def test_planned_trajectory_rejects_relative_drift_for_tiny_scheduler_rates(
+    tmp_path: Path,
+) -> None:
+    observed, _ = _run_two_steps(
+        tmp_path,
+        mode="observe",
+        learning_rate=1.0e-200,
+    )
+    trajectory = Path(str(observed.receipt()["trajectory_path"]))
+    optimizer = _FakeOptimizer(learning_rate=2.0e-200)
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "tiny-drift"))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        callback = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            trajectory_arm="dose_normalized",
+            trajectory=trajectory,
+        )
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+
+    with pytest.raises(RuntimeError, match="scheduler nominal learning rates differ"):
+        optimizer.step()
+
+    callback.abort(RuntimeError("expected tiny scheduler drift"))
+
+
+def test_non_raw_apply_requires_a_rust_trajectory_identity() -> None:
+    with pytest.raises(ValueError, match="requires trajectory_id"):
+        st.hf_zspace_optimizer_recipe_contract(
+            mode="apply",
+            trajectory_arm="dose_normalized",
+        )
+
+
+def test_hf_bridge_seals_validated_trajectory_identity_into_recipe(
+    tmp_path: Path,
+) -> None:
+    trajectory = st.zspace_parameter_trajectory(
+        raw_learning_rate_scales=[0.8, 1.1],
+        nominal_learning_rates=[[1e-3], [5e-4]],
+    )
+    trajectory_path = tmp_path / "trajectory.json"
+    trajectory_path.write_text(json.dumps(trajectory), encoding="utf-8")
+    bridge = _load_bridge_example()
+
+    args = bridge.parse_args(
+        [
+            "--training-recipe-only",
+            "--zspace-optimizer-control",
+            "apply",
+            "--zspace-optimizer-trajectory-arm",
+            "dose_normalized",
+            "--zspace-optimizer-trajectory-json",
+            str(trajectory_path),
+        ]
+    )
+
+    assert args._hf_zspace_optimizer_recipe_contract["trajectory_id"] == (
+        trajectory["trajectory_id"]
+    )
+    assert args._hf_zspace_optimizer_recipe_contract["trajectory_arm"] == (
+        "dose_normalized"
+    )
+    assert args._hf_zspace_optimizer_trajectory_report == trajectory
 
 
 def test_apply_resume_restores_pending_control_and_controller_state(
@@ -320,10 +497,15 @@ def test_public_control_surface_is_exported() -> None:
         "HF_ZSPACE_OPTIMIZER_STATE_SCHEMA",
         "HF_ZSPACE_OPTIMIZER_TRACE_FILENAME",
         "HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA",
+        "HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS",
+        "HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME",
         "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
+        "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
+        "compare_hf_zspace_optimizer_factorized_run_cards",
         "compare_hf_zspace_optimizer_run_cards",
         "hf_zspace_optimizer_control_callback",
         "hf_zspace_optimizer_recipe_contract",
+        "write_hf_zspace_optimizer_factorized_ablation_report",
         "write_hf_zspace_optimizer_matched_ablation_report",
     ):
         assert name in st.__all__
@@ -384,6 +566,52 @@ def _matched_card(
     }
 
 
+def _factorized_card(
+    *,
+    arm: str,
+    seed: int,
+    eval_after: float,
+) -> dict[str, object]:
+    mode = "observe" if arm == "observe" else "apply"
+    trajectory_arm = "raw" if arm == "observe" else arm
+    trajectory_id = "sha256:" + "a" * 64
+    recipe = st.hf_zspace_optimizer_recipe_contract(
+        mode=mode,
+        trajectory_arm=trajectory_arm,
+        trajectory_id=None if mode == "observe" else trajectory_id,
+    )
+    card = _matched_card(mode=mode, seed=seed, eval_after=eval_after)
+    card["zspace_optimizer_control_recipe"] = recipe
+    receipt = card["zspace_optimizer_control_receipt"]
+    nominal_dose = 1.0
+    raw_dose = 0.8
+    actuated_dose = nominal_dose if arm in {"observe", "dose_normalized"} else raw_dose
+    receipt.update(
+        {
+            "recipe": recipe,
+            "trajectory_arm": trajectory_arm,
+            "trajectory_id": trajectory_id,
+            "trajectory_validated": True,
+            "trajectory_step_count": 4,
+            "trajectory_nominal_dose": nominal_dose,
+            "trajectory_raw_dose": raw_dose,
+            "trajectory_dose_normalized_dose": nominal_dose,
+            "trajectory_raw_dose_ratio": raw_dose / nominal_dose,
+            "trajectory_dose_normalized_dose_ratio": 1.0,
+            "nominal_learning_rate_dose": nominal_dose,
+            "actuated_learning_rate_dose": actuated_dose,
+            "actuated_learning_rate_dose_ratio": actuated_dose / nominal_dose,
+            "nominal_schedule_sequence_id": "sha256:" + "d" * 64,
+            "actuated_schedule_sequence_id": "sha256:"
+            + arm.encode().hex().ljust(64, "0")[:64],
+        }
+    )
+    card["training_recipe_identity"]["identity_payload"]["trainer_contract"][
+        "zspace_optimizer_control"
+    ] = recipe
+    return card
+
+
 def test_matched_ablation_accepts_the_training_input_identity_schema_alias() -> None:
     observe = _matched_card(mode="observe", seed=13, eval_after=2.0)
     apply = _matched_card(mode="apply", seed=13, eval_after=1.8)
@@ -438,9 +666,9 @@ def test_matched_ablation_blocks_malformed_identity_hash() -> None:
     observe = _matched_card(mode="observe", seed=13, eval_after=2.0)
     apply = _matched_card(mode="apply", seed=13, eval_after=1.8)
     for card in (observe, apply):
-        card["training_input_identity_after_load"]["observed_identity_id"] = (
-            "sha256:not-a-digest"
-        )
+        card["training_input_identity_after_load"][
+            "observed_identity_id"
+        ] = "sha256:not-a-digest"
 
     report = st.compare_hf_zspace_optimizer_run_cards([observe, apply])
 
@@ -515,6 +743,126 @@ def test_consistent_regression_is_ready_as_a_negative_trend_not_efficacy() -> No
     assert report["efficacy_claim_ready"] is False
 
 
+def test_factorized_ablation_separates_dose_and_shape_contrasts() -> None:
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(
+        [
+            _factorized_card(arm="observe", seed=13, eval_after=2.0),
+            _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+            _factorized_card(arm="raw", seed=13, eval_after=1.9),
+            _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+        ]
+    )
+
+    assert report["status"] == "ready"
+    assert report["matched_seed_count"] == 1
+    seed = report["factorized_seeds"][0]
+    assert seed["contrasts"]["dose_effect"] == pytest.approx(0.1)
+    assert seed["contrasts"]["shape_effect_at_raw_dose"] == pytest.approx(-0.2)
+    assert seed["contrasts"]["dose_normalized_shape_effect"] == pytest.approx(-0.2)
+    assert seed["contrasts"]["raw_total_effect"] == pytest.approx(-0.1)
+    assert seed["eval_loss_changes"]["dose_normalized"] == pytest.approx(-0.7)
+    assert report["efficacy_claim_ready"] is False
+
+
+def test_factorized_ablation_blocks_nominal_scheduler_drift() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    cards[-1]["zspace_optimizer_control_receipt"]["nominal_schedule_sequence_id"] = (
+        "sha256:" + "e" * 64
+    )
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert (
+        "factorized arms do not share one nominal LR sequence"
+        in report["factorized_seeds"][0]["errors"]
+    )
+
+
+def test_factorized_ablation_blocks_mislabeled_optimizer_dose() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    cards[-1]["zspace_optimizer_control_receipt"]["actuated_learning_rate_dose"] = 0.8
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert (
+        "dose_normalized measured optimizer dose differs from its trajectory arm"
+        in report["factorized_seeds"][0]["errors"]
+    )
+    assert report["errors"] == [
+        "seed 13: dose_normalized measured optimizer dose differs from its trajectory arm"
+    ]
+
+
+def test_factorized_ablation_rejects_relative_dose_drift_at_tiny_scale() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    for card in cards:
+        receipt = card["zspace_optimizer_control_receipt"]
+        receipt["trajectory_nominal_dose"] = 1.0e-200
+        receipt["trajectory_raw_dose"] = 8.0e-201
+        receipt["trajectory_dose_normalized_dose"] = 1.0e-200
+        receipt["nominal_learning_rate_dose"] = 1.0e-200
+        if (
+            receipt["mode"] == "observe"
+            or receipt["trajectory_arm"] == "dose_normalized"
+        ):
+            receipt["actuated_learning_rate_dose"] = 1.0e-200
+            receipt["actuated_learning_rate_dose_ratio"] = 1.0
+        else:
+            receipt["actuated_learning_rate_dose"] = 8.0e-201
+            receipt["actuated_learning_rate_dose_ratio"] = 0.8
+    cards[-1]["zspace_optimizer_control_receipt"][
+        "actuated_learning_rate_dose"
+    ] = 2.0e-200
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert report["errors"] == [
+        "seed 13: dose_normalized measured optimizer dose differs from its trajectory arm"
+    ]
+
+
+def test_three_factorized_seeds_support_only_a_bounded_normalized_trend() -> None:
+    cards = []
+    for seed in (13, 17, 23):
+        cards.extend(
+            [
+                _factorized_card(arm="observe", seed=seed, eval_after=2.0),
+                _factorized_card(
+                    arm="dose_matched_constant", seed=seed, eval_after=2.05
+                ),
+                _factorized_card(arm="raw", seed=seed, eval_after=1.95),
+                _factorized_card(arm="dose_normalized", seed=seed, eval_after=1.9),
+            ]
+        )
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "ready"
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["bounded_trend_ready"] is True
+    assert normalized["bounded_trend_direction"] == "left_arm_better"
+    assert report["bounded_improvement_observed"] is True
+    assert report["efficacy_claim_ready"] is False
+
+
 def test_matched_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None:
     cards: list[Path] = []
     for mode, eval_after in (("observe", 2.0), ("apply", 1.9)):
@@ -534,3 +882,29 @@ def test_matched_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["status"] == "ready"
     assert report["matched_pair_count"] == 1
+
+
+def test_factorized_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None:
+    cards: list[Path] = []
+    for arm, eval_after in (
+        ("observe", 2.0),
+        ("dose_matched_constant", 2.1),
+        ("raw", 1.9),
+        ("dose_normalized", 1.8),
+    ):
+        path = tmp_path / f"{arm}.json"
+        path.write_text(
+            json.dumps(_factorized_card(arm=arm, seed=13, eval_after=eval_after)),
+            encoding="utf-8",
+        )
+        cards.append(path)
+    output = tmp_path / "factorized.json"
+
+    status = hf_cli.zspace_optimizer_factorized_compare_main(
+        [*[str(path) for path in cards], "--out", str(output)]
+    )
+
+    assert status == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "ready"
+    assert report["matched_seed_count"] == 1

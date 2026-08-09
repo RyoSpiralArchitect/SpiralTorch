@@ -105,7 +105,9 @@ from .hf_peft import (
     hf_merged_causal_lm_export_lines,
 )
 from .hf_optimizer_control import (
+    compare_hf_zspace_optimizer_factorized_run_cards,
     compare_hf_zspace_optimizer_run_cards,
+    write_hf_zspace_optimizer_factorized_ablation_report,
     write_hf_zspace_optimizer_matched_ablation_report,
 )
 
@@ -2073,6 +2075,30 @@ def zspace_optimizer_compare_main(argv: Sequence[str] | None = None) -> int:
     if args.out is not None:
         write_hf_zspace_optimizer_matched_ablation_report(report, args.out)
         print(f"zspace_optimizer_compare {args.out}")
+    else:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if report.get("status") == "ready" else 1
+
+
+def zspace_optimizer_factorized_compare_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare matched observe, constant-dose, raw, and normalized-dose "
+            "HF Z-Space optimizer run cards."
+        ),
+    )
+    parser.add_argument("run_cards", nargs="+", type=Path)
+    parser.add_argument("--out", type=Path, default=None)
+    args = parser.parse_args(argv)
+    missing = [path for path in args.run_cards if not path.is_file()]
+    if missing:
+        parser.error("run card does not exist: " + ", ".join(map(str, missing)))
+    report = compare_hf_zspace_optimizer_factorized_run_cards(args.run_cards)
+    if args.out is not None:
+        write_hf_zspace_optimizer_factorized_ablation_report(report, args.out)
+        print(f"zspace_optimizer_factorized_compare {args.out}")
     else:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if report.get("status") == "ready" else 1

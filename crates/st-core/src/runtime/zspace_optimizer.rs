@@ -9,6 +9,7 @@
 
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use st_tensor::{
     topos_optimizer_gradient_bias_amplitude, topos_optimizer_gradient_bias_basis,
     topos_optimizer_gradient_clip_threshold, TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION,
@@ -16,6 +17,7 @@ use st_tensor::{
     TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE,
 };
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use thiserror::Error;
 
 pub const ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: &str = "spiraltorch.zspace_meta_optimizer.v2";
@@ -29,6 +31,17 @@ pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER: &str = "st-core::runtime::zsp
 pub const ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND: &str = "rust";
 pub const ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE: f64 = 0.1;
 pub const ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE: f64 = 1.25;
+pub const ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_parameter_trajectory.v1";
+pub const ZSPACE_PARAMETER_TRAJECTORY_KIND: &str = "spiraltorch.zspace_parameter_trajectory";
+pub const ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_optimizer";
+pub const ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND: &str = "rust";
+pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_STEPS: usize = 1_000_000;
+pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_PARAMETER_GROUPS: usize = 4_096;
+pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_NOMINAL_RATE_VALUES: usize = 2_000_000;
+pub const ZSPACE_PARAMETER_TRAJECTORY_NORMALIZATION_RULE: &str =
+    "s_i=clamp(c*r_i,min_scale,max_scale),sum_i(w_i*s_i)=sum_i(w_i)";
+pub const ZSPACE_PARAMETER_TRAJECTORY_CONSTANT_RULE: &str = "s_constant=sum_i(w_i*r_i)/sum_i(w_i)";
 /// Allocation and transform guard for state carried by untrusted clients.
 pub const ZSPACE_META_OPTIMIZER_MAX_DIMENSION: usize = 4_096;
 /// Largest step represented exactly by Python, JSON, and JavaScript clients.
@@ -419,6 +432,63 @@ impl ZSpaceParameterControl {
     }
 }
 
+/// Observed raw controls and scheduler-owned learning rates for one horizon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceParameterTrajectoryRequest {
+    pub raw_learning_rate_scales: Vec<f64>,
+    pub nominal_learning_rates: Vec<Vec<f64>>,
+}
+
+/// One step of the factorized learning-rate trajectory.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZSpaceParameterTrajectoryStep {
+    pub index: u64,
+    pub nominal_learning_rates: Vec<f64>,
+    /// Sum of nominal learning rates across optimizer parameter groups.
+    pub nominal_weight: f64,
+    pub raw_learning_rate_scale: f64,
+    pub dose_matched_constant_scale: f64,
+    pub dose_normalized_scale: f64,
+    pub raw_weighted_dose: f64,
+    pub dose_matched_constant_weighted_dose: f64,
+    pub dose_normalized_weighted_dose: f64,
+    pub dose_normalized_saturated_min: bool,
+    pub dose_normalized_saturated_max: bool,
+}
+
+/// Rust-owned decomposition of schedule shape and integrated LR dose.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZSpaceParameterTrajectoryReport {
+    pub contract_version: &'static str,
+    pub kind: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub trajectory_validated: bool,
+    pub trajectory_id: String,
+    pub normalization_rule: &'static str,
+    pub constant_rule: &'static str,
+    pub minimum_learning_rate_scale: f64,
+    pub maximum_learning_rate_scale: f64,
+    pub request: ZSpaceParameterTrajectoryRequest,
+    pub step_count: usize,
+    pub parameter_group_count: usize,
+    /// Sum of parameter-group learning rates over optimizer steps.
+    pub nominal_dose: f64,
+    pub raw_dose: f64,
+    pub raw_dose_ratio: f64,
+    pub dose_matched_constant_scale: f64,
+    pub dose_matched_constant_dose: f64,
+    pub dose_normalization_factor: f64,
+    pub dose_normalized_dose: f64,
+    pub dose_normalized_dose_ratio: f64,
+    pub dose_normalized_residual: f64,
+    pub dose_invariant_tolerance: f64,
+    pub dose_normalized_saturated_min_count: usize,
+    pub dose_normalized_saturated_max_count: usize,
+    pub steps: Vec<ZSpaceParameterTrajectoryStep>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ParameterControlReportProof {
     contract_version: String,
@@ -511,6 +581,45 @@ pub enum ZSpaceMetaOptimizerError {
         minimum: f64,
         maximum: f64,
     },
+    #[error("parameter trajectory must contain at least one step")]
+    EmptyParameterTrajectory,
+    #[error("parameter trajectory contains {steps} steps, exceeding maximum {maximum}")]
+    ParameterTrajectoryStepLimit { steps: usize, maximum: usize },
+    #[error(
+        "parameter trajectory length mismatch: raw_scales={raw_scales}, nominal_rates={nominal_rates}"
+    )]
+    ParameterTrajectoryLengthMismatch {
+        raw_scales: usize,
+        nominal_rates: usize,
+    },
+    #[error("parameter trajectory step {step} has {actual} groups, expected {expected}")]
+    ParameterTrajectoryGroupCount {
+        step: usize,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "parameter trajectory contains {groups} parameter groups, exceeding maximum {maximum}"
+    )]
+    ParameterTrajectoryGroupLimit { groups: usize, maximum: usize },
+    #[error(
+        "parameter trajectory shape {steps}x{groups} exceeds maximum {maximum_values} nominal-rate values"
+    )]
+    ParameterTrajectoryShapeLimit {
+        steps: usize,
+        groups: usize,
+        maximum_values: usize,
+    },
+    #[error(
+        "parameter trajectory invariant {field} exceeded tolerance: residual={residual}, tolerance={tolerance}"
+    )]
+    ParameterTrajectoryInvariant {
+        field: &'static str,
+        residual: f64,
+        tolerance: f64,
+    },
+    #[error("malformed Z-space parameter trajectory report: {message}")]
+    MalformedParameterTrajectory { message: String },
 }
 
 /// Stateful Rust API for direct use without a language binding.
@@ -1040,6 +1149,331 @@ fn validate_parameter_control_fields(
         source_learning_rate,
         source_effective_learning_rate: expected_effective_learning_rate,
     })
+}
+
+/// Builds the canonical factorized LR trajectory from observed controls and
+/// scheduler-owned nominal learning rates.
+pub fn plan_zspace_parameter_trajectory(
+    request: ZSpaceParameterTrajectoryRequest,
+) -> Result<ZSpaceParameterTrajectoryReport, ZSpaceMetaOptimizerError> {
+    let step_count = request.raw_learning_rate_scales.len();
+    if step_count == 0 {
+        return Err(ZSpaceMetaOptimizerError::EmptyParameterTrajectory);
+    }
+    if step_count > ZSPACE_PARAMETER_TRAJECTORY_MAX_STEPS {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryStepLimit {
+            steps: step_count,
+            maximum: ZSPACE_PARAMETER_TRAJECTORY_MAX_STEPS,
+        });
+    }
+    if request.nominal_learning_rates.len() != step_count {
+        return Err(
+            ZSpaceMetaOptimizerError::ParameterTrajectoryLengthMismatch {
+                raw_scales: step_count,
+                nominal_rates: request.nominal_learning_rates.len(),
+            },
+        );
+    }
+
+    let parameter_group_count = request.nominal_learning_rates[0].len();
+    if parameter_group_count == 0 {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupCount {
+            step: 0,
+            expected: 1,
+            actual: 0,
+        });
+    }
+    validate_parameter_trajectory_shape(step_count, parameter_group_count)?;
+    let mut nominal_weights = Vec::with_capacity(step_count);
+    let mut nominal_dose = 0.0;
+    let mut raw_dose = 0.0;
+    for (step, (raw_scale, nominal_rates)) in request
+        .raw_learning_rate_scales
+        .iter()
+        .copied()
+        .zip(request.nominal_learning_rates.iter())
+        .enumerate()
+    {
+        require_finite(
+            &format!("trajectory.raw_learning_rate_scales[{step}]"),
+            raw_scale,
+        )?;
+        if !(ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE
+            ..=ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE)
+            .contains(&raw_scale)
+        {
+            return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
+                value: raw_scale,
+                minimum: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+                maximum: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+            });
+        }
+        if nominal_rates.len() != parameter_group_count {
+            return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupCount {
+                step,
+                expected: parameter_group_count,
+                actual: nominal_rates.len(),
+            });
+        }
+        let mut weight = 0.0;
+        for (group, rate) in nominal_rates.iter().copied().enumerate() {
+            require_non_negative(
+                &format!("trajectory.nominal_learning_rates[{step}][{group}]"),
+                rate,
+            )?;
+            weight += rate;
+            if !weight.is_finite() {
+                return Err(ZSpaceMetaOptimizerError::DerivedNonFinite {
+                    field: format!("trajectory.nominal_weight[{step}]"),
+                });
+            }
+        }
+        nominal_dose += weight;
+        raw_dose += weight * raw_scale;
+        if !nominal_dose.is_finite() || !raw_dose.is_finite() {
+            return Err(ZSpaceMetaOptimizerError::DerivedNonFinite {
+                field: "trajectory.integrated_dose".to_owned(),
+            });
+        }
+        nominal_weights.push(weight);
+    }
+    require_positive("trajectory.nominal_dose", nominal_dose)?;
+    require_positive("trajectory.raw_dose", raw_dose)?;
+
+    let raw_dose_ratio = raw_dose / nominal_dose;
+    let constant_scale = raw_dose_ratio;
+    if !(ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE
+        ..=ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE)
+        .contains(&constant_scale)
+    {
+        return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
+            value: constant_scale,
+            minimum: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+            maximum: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+        });
+    }
+    let constant_dose = nominal_dose * constant_scale;
+
+    let minimum_raw_scale = request
+        .raw_learning_rate_scales
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let mut lower_factor = 0.0;
+    let mut upper_factor = ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE / minimum_raw_scale;
+    for _ in 0..192 {
+        let candidate = 0.5 * (lower_factor + upper_factor);
+        let dose = bounded_parameter_trajectory_dose(
+            &request.raw_learning_rate_scales,
+            &nominal_weights,
+            candidate,
+        );
+        if dose < nominal_dose {
+            lower_factor = candidate;
+        } else {
+            upper_factor = candidate;
+        }
+    }
+    let normalization_factor = 0.5 * (lower_factor + upper_factor);
+    require_positive("trajectory.dose_normalization_factor", normalization_factor)?;
+
+    let normalized_scales = request
+        .raw_learning_rate_scales
+        .iter()
+        .copied()
+        .map(|raw| bounded_parameter_trajectory_scale(raw, normalization_factor))
+        .collect::<Vec<_>>();
+    let normalized_dose = normalized_scales
+        .iter()
+        .copied()
+        .zip(nominal_weights.iter().copied())
+        .map(|(scale, weight)| scale * weight)
+        .sum::<f64>();
+    require_positive("trajectory.dose_normalized_dose", normalized_dose)?;
+    let dose_tolerance = 1.0e-11 * nominal_dose.max(f64::MIN_POSITIVE);
+    let normalized_residual = normalized_dose - nominal_dose;
+    verify_parameter_trajectory_invariant(
+        "dose_normalized_dose",
+        normalized_residual,
+        dose_tolerance,
+    )?;
+    verify_parameter_trajectory_invariant(
+        "dose_matched_constant_dose",
+        constant_dose - raw_dose,
+        dose_tolerance,
+    )?;
+
+    let mut minimum_saturations = 0;
+    let mut maximum_saturations = 0;
+    let mut steps = Vec::with_capacity(step_count);
+    for (index, ((raw_scale, normalized_scale), nominal_rates)) in request
+        .raw_learning_rate_scales
+        .iter()
+        .copied()
+        .zip(normalized_scales.iter().copied())
+        .zip(request.nominal_learning_rates.iter())
+        .enumerate()
+    {
+        let nominal_weight = nominal_weights[index];
+        let saturated_min = normalized_scale == ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE;
+        let saturated_max = normalized_scale == ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE;
+        minimum_saturations += usize::from(saturated_min);
+        maximum_saturations += usize::from(saturated_max);
+        steps.push(ZSpaceParameterTrajectoryStep {
+            index: index as u64,
+            nominal_learning_rates: nominal_rates.clone(),
+            nominal_weight,
+            raw_learning_rate_scale: raw_scale,
+            dose_matched_constant_scale: constant_scale,
+            dose_normalized_scale: normalized_scale,
+            raw_weighted_dose: nominal_weight * raw_scale,
+            dose_matched_constant_weighted_dose: nominal_weight * constant_scale,
+            dose_normalized_weighted_dose: nominal_weight * normalized_scale,
+            dose_normalized_saturated_min: saturated_min,
+            dose_normalized_saturated_max: saturated_max,
+        });
+    }
+
+    let trajectory_id = parameter_trajectory_id(&request)?;
+    Ok(ZSpaceParameterTrajectoryReport {
+        contract_version: ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION,
+        kind: ZSPACE_PARAMETER_TRAJECTORY_KIND,
+        semantic_owner: ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND,
+        trajectory_validated: true,
+        trajectory_id,
+        normalization_rule: ZSPACE_PARAMETER_TRAJECTORY_NORMALIZATION_RULE,
+        constant_rule: ZSPACE_PARAMETER_TRAJECTORY_CONSTANT_RULE,
+        minimum_learning_rate_scale: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+        maximum_learning_rate_scale: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+        request,
+        step_count,
+        parameter_group_count,
+        nominal_dose,
+        raw_dose,
+        raw_dose_ratio,
+        dose_matched_constant_scale: constant_scale,
+        dose_matched_constant_dose: constant_dose,
+        dose_normalization_factor: normalization_factor,
+        dose_normalized_dose: normalized_dose,
+        dose_normalized_dose_ratio: normalized_dose / nominal_dose,
+        dose_normalized_residual: normalized_residual,
+        dose_invariant_tolerance: dose_tolerance,
+        dose_normalized_saturated_min_count: minimum_saturations,
+        dose_normalized_saturated_max_count: maximum_saturations,
+        steps,
+    })
+}
+
+/// Recomputes a serialized trajectory in Rust and rejects any changed field.
+pub fn validate_zspace_parameter_trajectory_value(
+    report: serde_json::Value,
+) -> Result<ZSpaceParameterTrajectoryReport, ZSpaceMetaOptimizerError> {
+    let request_value = report.get("request").cloned().ok_or_else(|| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+            message: "missing request".to_owned(),
+        }
+    })?;
+    let request = serde_json::from_value(request_value).map_err(|error| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+            message: error.to_string(),
+        }
+    })?;
+    let canonical = plan_zspace_parameter_trajectory(request)?;
+    let canonical_value = serde_json::to_value(&canonical).map_err(|error| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+            message: error.to_string(),
+        }
+    })?;
+    if report != canonical_value {
+        return Err(ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+            message: "report does not match the canonical Rust trajectory".to_owned(),
+        });
+    }
+    Ok(canonical)
+}
+
+fn bounded_parameter_trajectory_scale(raw_scale: f64, factor: f64) -> f64 {
+    (raw_scale * factor).clamp(
+        ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+        ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+    )
+}
+
+fn validate_parameter_trajectory_shape(
+    steps: usize,
+    groups: usize,
+) -> Result<(), ZSpaceMetaOptimizerError> {
+    if groups == 0 {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupCount {
+            step: 0,
+            expected: 1,
+            actual: 0,
+        });
+    }
+    if groups > ZSPACE_PARAMETER_TRAJECTORY_MAX_PARAMETER_GROUPS {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupLimit {
+            groups,
+            maximum: ZSPACE_PARAMETER_TRAJECTORY_MAX_PARAMETER_GROUPS,
+        });
+    }
+    if steps > ZSPACE_PARAMETER_TRAJECTORY_MAX_NOMINAL_RATE_VALUES / groups {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryShapeLimit {
+            steps,
+            groups,
+            maximum_values: ZSPACE_PARAMETER_TRAJECTORY_MAX_NOMINAL_RATE_VALUES,
+        });
+    }
+    Ok(())
+}
+
+fn bounded_parameter_trajectory_dose(
+    raw_scales: &[f64],
+    nominal_weights: &[f64],
+    factor: f64,
+) -> f64 {
+    raw_scales
+        .iter()
+        .copied()
+        .zip(nominal_weights.iter().copied())
+        .map(|(raw, weight)| bounded_parameter_trajectory_scale(raw, factor) * weight)
+        .sum()
+}
+
+fn verify_parameter_trajectory_invariant(
+    field: &'static str,
+    residual: f64,
+    tolerance: f64,
+) -> Result<(), ZSpaceMetaOptimizerError> {
+    if !residual.is_finite() || residual.abs() > tolerance {
+        return Err(ZSpaceMetaOptimizerError::ParameterTrajectoryInvariant {
+            field,
+            residual,
+            tolerance,
+        });
+    }
+    Ok(())
+}
+
+fn parameter_trajectory_id(
+    request: &ZSpaceParameterTrajectoryRequest,
+) -> Result<String, ZSpaceMetaOptimizerError> {
+    let encoded = serde_json::to_vec(&(ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION, request))
+        .map_err(
+            |error| ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+                message: error.to_string(),
+            },
+        )?;
+    let digest = Sha256::digest(encoded);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").map_err(|error| {
+            ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+                message: error.to_string(),
+            }
+        })?;
+    }
+    Ok(format!("sha256:{hex}"))
 }
 
 fn checkpoint(
@@ -1908,6 +2342,161 @@ mod tests {
             zspace_parameter_control_from_value(unvalidated),
             Err(ZSpaceMetaOptimizerError::UnvalidatedTransition)
         );
+    }
+
+    #[test]
+    fn parameter_trajectory_factorizes_shape_and_integrated_dose() {
+        let request = ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![1.1, 0.8, 0.5],
+            nominal_learning_rates: vec![vec![1.0, 0.5], vec![0.5, 0.25], vec![0.25, 0.125]],
+        };
+
+        let report = plan_zspace_parameter_trajectory(request.clone()).expect("valid trajectory");
+        let repeated = plan_zspace_parameter_trajectory(request).expect("deterministic trajectory");
+
+        assert!(report.trajectory_validated);
+        assert_eq!(
+            report.contract_version,
+            ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION
+        );
+        assert_eq!(report.kind, ZSPACE_PARAMETER_TRAJECTORY_KIND);
+        assert_eq!(report.semantic_backend, "rust");
+        assert_eq!(report.step_count, 3);
+        assert_eq!(report.parameter_group_count, 2);
+        assert_eq!(report.trajectory_id, repeated.trajectory_id);
+        assert!(report.trajectory_id.starts_with("sha256:"));
+        assert_eq!(report.trajectory_id.len(), 71);
+        assert_relative_eq!(report.nominal_dose, 2.625, epsilon = 1.0e-14);
+        assert_relative_eq!(report.raw_dose, 2.4375, epsilon = 1.0e-14);
+        assert_relative_eq!(
+            report.dose_matched_constant_scale,
+            report.raw_dose_ratio,
+            epsilon = 1.0e-14
+        );
+        assert_relative_eq!(
+            report.dose_matched_constant_dose,
+            report.raw_dose,
+            epsilon = report.dose_invariant_tolerance
+        );
+        assert_relative_eq!(
+            report.dose_normalized_dose,
+            report.nominal_dose,
+            epsilon = report.dose_invariant_tolerance
+        );
+        assert_relative_eq!(
+            report.dose_normalized_dose_ratio,
+            1.0,
+            epsilon = report.dose_invariant_tolerance
+        );
+        assert!(report.dose_normalization_factor > 1.0);
+        assert_eq!(report.dose_normalized_saturated_min_count, 0);
+        assert_eq!(report.dose_normalized_saturated_max_count, 0);
+        assert!(report.steps.iter().all(|step| {
+            step.dose_matched_constant_scale == report.dose_matched_constant_scale
+                && step.nominal_learning_rates.len() == report.parameter_group_count
+        }));
+    }
+
+    #[test]
+    fn parameter_trajectory_serialized_validation_rejects_tampering() {
+        let report = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![0.7, 1.2],
+            nominal_learning_rates: vec![vec![0.01], vec![0.005]],
+        })
+        .expect("valid trajectory");
+        let encoded = serde_json::to_value(&report).expect("serialized trajectory");
+
+        assert_eq!(
+            validate_zspace_parameter_trajectory_value(encoded.clone()).expect("canonical report"),
+            report
+        );
+
+        let mut tampered_step = encoded.clone();
+        tampered_step["steps"][0]["dose_normalized_scale"] = serde_json::json!(1.0);
+        assert!(matches!(
+            validate_zspace_parameter_trajectory_value(tampered_step),
+            Err(ZSpaceMetaOptimizerError::MalformedParameterTrajectory { .. })
+        ));
+
+        let mut tampered_identity = encoded;
+        tampered_identity["trajectory_id"] = serde_json::json!("sha256:changed");
+        assert!(matches!(
+            validate_zspace_parameter_trajectory_value(tampered_identity),
+            Err(ZSpaceMetaOptimizerError::MalformedParameterTrajectory { .. })
+        ));
+    }
+
+    #[test]
+    fn parameter_trajectory_preserves_relative_dose_for_tiny_schedules() {
+        let report = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![0.5, 1.2],
+            nominal_learning_rates: vec![vec![1.0e-200], vec![5.0e-201]],
+        })
+        .expect("tiny finite trajectory");
+
+        assert!(report.dose_invariant_tolerance < 2.0e-211);
+        assert_relative_eq!(report.dose_normalized_dose_ratio, 1.0, epsilon = 1.0e-12);
+    }
+
+    #[test]
+    fn parameter_trajectory_shape_guard_bounds_nested_rate_values() {
+        assert!(matches!(
+            validate_parameter_trajectory_shape(
+                1,
+                ZSPACE_PARAMETER_TRAJECTORY_MAX_PARAMETER_GROUPS + 1,
+            ),
+            Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupLimit { .. })
+        ));
+        assert!(matches!(
+            validate_parameter_trajectory_shape(ZSPACE_PARAMETER_TRAJECTORY_MAX_STEPS, 3),
+            Err(ZSpaceMetaOptimizerError::ParameterTrajectoryShapeLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn parameter_trajectory_rejects_invalid_horizons() {
+        assert_eq!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: Vec::new(),
+                nominal_learning_rates: Vec::new(),
+            }),
+            Err(ZSpaceMetaOptimizerError::EmptyParameterTrajectory)
+        );
+        assert!(matches!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: vec![0.8, 0.9],
+                nominal_learning_rates: vec![vec![0.01]],
+            }),
+            Err(ZSpaceMetaOptimizerError::ParameterTrajectoryLengthMismatch { .. })
+        ));
+        assert!(matches!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: vec![0.8, 0.9],
+                nominal_learning_rates: vec![vec![0.01], vec![0.01, 0.005]],
+            }),
+            Err(ZSpaceMetaOptimizerError::ParameterTrajectoryGroupCount { .. })
+        ));
+        assert!(matches!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: vec![0.05],
+                nominal_learning_rates: vec![vec![0.01]],
+            }),
+            Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange { .. })
+        ));
+        assert!(matches!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: vec![0.8],
+                nominal_learning_rates: vec![vec![f64::NAN]],
+            }),
+            Err(ZSpaceMetaOptimizerError::NonFinite { .. })
+        ));
+        assert!(matches!(
+            plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+                raw_learning_rate_scales: vec![0.8],
+                nominal_learning_rates: vec![vec![0.0]],
+            }),
+            Err(ZSpaceMetaOptimizerError::NonPositive { .. })
+        ));
     }
 
     #[test]

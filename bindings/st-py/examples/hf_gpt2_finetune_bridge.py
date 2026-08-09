@@ -90,6 +90,7 @@ from spiraltorch.hf_input_identity import (
 )
 from spiraltorch.hf_optimizer_control import (
     HF_ZSPACE_OPTIMIZER_TRACE_FILENAME,
+    HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS,
     hf_zspace_optimizer_control_callback,
     hf_zspace_optimizer_recipe_contract,
 )
@@ -424,6 +425,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--zspace-optimizer-z-dim", type=int, default=6)
     parser.add_argument("--zspace-optimizer-curvature", type=float, default=-0.04)
     parser.add_argument("--zspace-optimizer-volume-per-step", type=int, default=8)
+    parser.add_argument(
+        "--zspace-optimizer-trajectory-arm",
+        choices=HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS,
+        default="raw",
+        help=(
+            "Select raw, dose-matched constant, or dose-normalized Rust LR "
+            "actuation. Non-raw arms require a calibrated trajectory."
+        ),
+    )
+    parser.add_argument(
+        "--zspace-optimizer-trajectory-json",
+        type=Path,
+        default=None,
+        help="Rust-validated calibration trajectory consumed by apply mode.",
+    )
+    parser.add_argument(
+        "--zspace-optimizer-trajectory-out",
+        type=Path,
+        default=None,
+        help=(
+            "Optional canonical trajectory output path. Active runs otherwise "
+            "write inside --output-dir."
+        ),
+    )
     parser.add_argument(
         "--zspace-optimizer-trace-jsonl",
         type=Path,
@@ -1025,6 +1050,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--zspace-optimizer-curvature must be finite and negative")
     if args.zspace_optimizer_volume_per_step <= 0:
         parser.error("--zspace-optimizer-volume-per-step must be positive")
+    if (
+        args.zspace_optimizer_trajectory_arm != "raw"
+        and args.zspace_optimizer_control != "apply"
+    ):
+        parser.error("non-raw --zspace-optimizer-trajectory-arm requires apply mode")
+    if (
+        args.zspace_optimizer_trajectory_arm != "raw"
+        and args.zspace_optimizer_trajectory_json is None
+    ):
+        parser.error("non-raw trajectory arms require --zspace-optimizer-trajectory-json")
+    if (
+        args.zspace_optimizer_trajectory_json is not None
+        and args.zspace_optimizer_control != "apply"
+    ):
+        parser.error("--zspace-optimizer-trajectory-json requires apply mode")
+    if (
+        args.zspace_optimizer_trajectory_out is not None
+        and args.zspace_optimizer_control == "off"
+    ):
+        parser.error("--zspace-optimizer-trajectory-out requires active control")
     if args.zspace_optimizer_control != "off" and not (
         args.train or args.training_recipe_only
     ):
@@ -1186,6 +1231,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args._hf_finetune_adapter_config = _adapter_config_from_args(args)
     except ValueError as exc:
         parser.error(f"invalid fine-tune adapter configuration: {exc}")
+    args._hf_zspace_optimizer_trajectory_report = None
+    if args.zspace_optimizer_trajectory_json is not None:
+        if not args.zspace_optimizer_trajectory_json.is_file():
+            parser.error(
+                "--zspace-optimizer-trajectory-json does not exist or is not a "
+                f"file: {args.zspace_optimizer_trajectory_json}"
+            )
+        try:
+            trajectory_payload = json.loads(
+                args.zspace_optimizer_trajectory_json.read_text(encoding="utf-8")
+            )
+            if not isinstance(trajectory_payload, Mapping):
+                raise ValueError("trajectory JSON must contain a mapping")
+            args._hf_zspace_optimizer_trajectory_report = (
+                st.validate_zspace_parameter_trajectory(trajectory_payload)
+            )
+        except Exception as exc:
+            parser.error(f"invalid Z-space optimizer trajectory: {exc}")
     args._hf_zspace_optimizer_recipe_contract = (
         hf_zspace_optimizer_recipe_contract(
             mode=args.zspace_optimizer_control,
@@ -1193,6 +1256,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             curvature=args.zspace_optimizer_curvature,
             control_gain=args.zspace_optimizer_control_gain,
             volume_per_step=args.zspace_optimizer_volume_per_step,
+            trajectory_arm=args.zspace_optimizer_trajectory_arm,
+            trajectory_id=(
+                None
+                if args._hf_zspace_optimizer_trajectory_report is None
+                else args._hf_zspace_optimizer_trajectory_report["trajectory_id"]
+            ),
         )
     )
     args._hf_finetune_launch_command = [
@@ -3667,6 +3736,22 @@ def _base_run_card(
             args._hf_zspace_optimizer_recipe_contract
         ),
         "zspace_optimizer_control_receipt": None,
+        "zspace_optimizer_trajectory_input": (
+            None
+            if args._hf_zspace_optimizer_trajectory_report is None
+            else {
+                "path": str(args.zspace_optimizer_trajectory_json),
+                "trajectory_id": args._hf_zspace_optimizer_trajectory_report[
+                    "trajectory_id"
+                ],
+                "contract_version": args._hf_zspace_optimizer_trajectory_report[
+                    "contract_version"
+                ],
+                "step_count": args._hf_zspace_optimizer_trajectory_report[
+                    "step_count"
+                ],
+            }
+        ),
         "adapter_input_identity": (
             dict(getattr(args, "_hf_adapter_input_identity_report", {}) or {})
             or None
@@ -5430,6 +5515,9 @@ def _main_with_runtime_access(
             curvature=args.zspace_optimizer_curvature,
             control_gain=args.zspace_optimizer_control_gain,
             volume_per_step=args.zspace_optimizer_volume_per_step,
+            trajectory_arm=args.zspace_optimizer_trajectory_arm,
+            trajectory=args._hf_zspace_optimizer_trajectory_report,
+            trajectory_output_path=args.zspace_optimizer_trajectory_out,
             trace_path=_zspace_optimizer_trace_path(args),
             reset_trace=args.resume_from_checkpoint is None,
             resume_from_checkpoint=args.resume_from_checkpoint,

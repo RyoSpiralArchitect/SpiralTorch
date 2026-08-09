@@ -136,6 +136,11 @@ disconnected.
   scale, and gradient-temperature transitions. Python transports `config` and
   `state`; `st-core::inference::temperature_control` validates the request,
   computes every adjustment, and returns the auditable `next_state`.
+- `zspace_parameter_trajectory(...)` for Rust-owned factorization of an observed
+  HF learning-rate control into raw, dose-matched constant, and dose-normalized
+  schedules. `validate_zspace_parameter_trajectory(...)` recomputes persisted
+  reports in Rust; the [four-arm ablation guide](../../docs/hf_zspace_optimizer_ablation.md)
+  shows the matched Trainer workflow and fail-closed comparator.
 - `zspace_concept_diffusion(...)` for labelled probability-simplex heat flow.
   Rust owns observation blending, Z-bias tilt, symmetric conductivity, CFL
   substeps, and entropy/Dirichlet invariants; Python only carries graph state.
