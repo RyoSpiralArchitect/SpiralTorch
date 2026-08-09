@@ -237,6 +237,80 @@ def test_apply_resume_restores_pending_control_and_controller_state(
             )
 
 
+def test_resume_branches_trace_from_the_verified_checkpoint_prefix(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "trace-resume"
+    trace = output / "control.jsonl"
+    args = types.SimpleNamespace(output_dir=str(output))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    first_optimizer = _FakeOptimizer()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        first = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            trace_path=trace,
+        )
+    first.on_train_begin(args, state, control, optimizer=first_optimizer)
+    first.on_step_begin(args, state, control, optimizer=first_optimizer)
+    first_optimizer.step()
+    state.global_step = 1
+    first.on_step_end(args, state, control, optimizer=first_optimizer)
+    first.on_save(args, state, control, optimizer=first_optimizer)
+    checkpoint = output / "checkpoint-1"
+    checkpoint_state = json.loads(
+        (checkpoint / HF_ZSPACE_OPTIMIZER_STATE_FILENAME).read_text(encoding="utf-8")
+    )
+    first.abort(RuntimeError("simulated crash after checkpoint"))
+    parent_with_crash_tail = trace.read_bytes()
+
+    second_optimizer = _FakeOptimizer()
+    resumed_state = types.SimpleNamespace(global_step=1, max_steps=2)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        second = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            trace_path=trace,
+            reset_trace=True,
+            resume_from_checkpoint=checkpoint,
+        )
+
+    segment = Path(second.trace_path)
+    assert segment != trace
+    assert segment.name.startswith("control.resume-1.")
+    assert trace.read_bytes() == parent_with_crash_tail
+    segment_start = json.loads(segment.read_text(encoding="utf-8").splitlines()[0])
+    assert segment_start["event"] == "trace_segment_started"
+    assert segment_start["parent_trace_sha256"] == checkpoint_state["trace_sha256"]
+    assert (
+        segment_start["parent_trace_size_bytes"] == checkpoint_state["trace_size_bytes"]
+    )
+
+    second.on_train_begin(args, resumed_state, control, optimizer=second_optimizer)
+    second.on_step_begin(args, resumed_state, control, optimizer=second_optimizer)
+    second_optimizer.step()
+    resumed_state.global_step = 2
+    second.on_step_end(args, resumed_state, control, optimizer=second_optimizer)
+    second.on_train_end(args, resumed_state, control, optimizer=second_optimizer)
+    receipt = second.receipt()
+    assert receipt["status"] == "ready"
+    assert receipt["trace_segmented_on_resume"] is True
+    assert receipt["trace_parent_sha256"] == checkpoint_state["trace_sha256"]
+
+    trace.write_bytes(b"x" + parent_with_crash_tail[1:])
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        with pytest.raises(
+            RuntimeError, match="does not contain the checkpoint prefix"
+        ):
+            hf_zspace_optimizer_control_callback(
+                mode="apply",
+                trace_path=trace,
+                resume_from_checkpoint=checkpoint,
+            )
+
+
 def test_public_control_surface_is_exported() -> None:
     for name in (
         "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",

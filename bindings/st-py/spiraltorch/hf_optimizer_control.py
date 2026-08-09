@@ -89,6 +89,33 @@ def _sha256_id(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
+def _trace_file_evidence(path: Path | None) -> tuple[str | None, int | None]:
+    if path is None or not path.is_file():
+        return None, None
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return "sha256:" + digest.hexdigest(), size
+
+
+def _trace_prefix_matches(path: Path, size: int, expected_sha256: str) -> bool:
+    if not path.is_file():
+        return False
+    digest = hashlib.sha256()
+    remaining = size
+    with path.open("rb") as handle:
+        while remaining > 0:
+            chunk = handle.read(min(1024 * 1024, remaining))
+            if not chunk:
+                return False
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return "sha256:" + digest.hexdigest() == expected_sha256
+
+
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
@@ -285,12 +312,17 @@ def hf_zspace_optimizer_control_callback(
             self.restored_update_count = 0
             self.resume_state_loaded = False
             self.resume_state_path: str | None = None
+            self.resume_state_id: str | None = None
+            self.trace_parent_path: str | None = None
+            self.trace_parent_sha256: str | None = None
+            self.trace_parent_size_bytes: int | None = None
+            self.trace_segmented_on_resume = False
             self.started = False
             self.finished = False
             self.failure: str | None = None
             self.pre_hook_handle: object | None = None
             self.post_hook_handle: object | None = None
-            if self.trace_path is not None and reset_trace:
+            if self.trace_path is not None and reset_trace and resolved_resume is None:
                 self.trace_path.parent.mkdir(parents=True, exist_ok=True)
                 self.trace_path.write_text("", encoding="utf-8")
             if self.mode != "off":
@@ -301,6 +333,7 @@ def hf_zspace_optimizer_control_callback(
                 )
                 if resolved_resume is not None:
                     self._restore_resume_state(st, resolved_resume)
+                    self._start_resume_trace_segment()
 
         def _trace(self, event: str, **payload: object) -> None:
             _append_jsonl(
@@ -328,6 +361,7 @@ def hf_zspace_optimizer_control_callback(
             state_id = payload.pop("state_id", None)
             if not _is_sha256_id(state_id) or state_id != _sha256_id(payload):
                 raise RuntimeError("Z-space optimizer resume-state identity mismatch")
+            self.resume_state_id = str(state_id)
             if payload.get("schema") != HF_ZSPACE_OPTIMIZER_STATE_SCHEMA:
                 raise RuntimeError("unsupported Z-space optimizer resume-state schema")
             if payload.get("recipe") != self.recipe:
@@ -365,6 +399,7 @@ def hf_zspace_optimizer_control_callback(
                 payload.get("restored_update_count"),
                 label="restored_update_count",
             )
+            self._restore_trace_parent(payload)
             pending_report = payload.get("pending_report")
             if pending_report is not None:
                 if not isinstance(pending_report, Mapping):
@@ -390,6 +425,84 @@ def hf_zspace_optimizer_control_callback(
                 }
             self.resume_state_loaded = True
             self.resume_state_path = str(state_path)
+
+        def _restore_trace_parent(self, payload: Mapping[str, object]) -> None:
+            parent_path_value = payload.get("trace_path")
+            parent_sha256 = payload.get("trace_sha256")
+            parent_size = payload.get("trace_size_bytes")
+            if (
+                parent_path_value is None
+                and parent_sha256 is None
+                and parent_size is None
+            ):
+                return
+            if not isinstance(parent_path_value, str) or not _is_sha256_id(
+                parent_sha256
+            ):
+                raise RuntimeError(
+                    "Z-space optimizer resume trace lineage is malformed"
+                )
+            resolved_size = _non_negative_int(
+                parent_size,
+                label="trace_size_bytes",
+            )
+            candidates = [Path(parent_path_value)]
+            if self.trace_path is not None and self.trace_path not in candidates:
+                candidates.append(self.trace_path)
+            matched_path: Path | None = None
+            for candidate in candidates:
+                if _trace_prefix_matches(
+                    candidate,
+                    resolved_size,
+                    str(parent_sha256),
+                ):
+                    matched_path = candidate
+                    break
+            if matched_path is None:
+                raise RuntimeError(
+                    "Z-space optimizer resume trace does not contain the "
+                    "checkpoint prefix"
+                )
+            self.trace_parent_path = str(matched_path)
+            self.trace_parent_sha256 = str(parent_sha256)
+            self.trace_parent_size_bytes = resolved_size
+
+        def _start_resume_trace_segment(self) -> None:
+            if self.trace_path is None:
+                return
+            requested = self.trace_path
+            requested.parent.mkdir(parents=True, exist_ok=True)
+            candidate = requested
+            if candidate.exists():
+                suffix = candidate.suffix or ".jsonl"
+                stem = (
+                    candidate.name[: -len(suffix)]
+                    if candidate.suffix
+                    else candidate.name
+                )
+                segment = _safe_step(
+                    getattr(self, "resume_hf_step", 0),
+                    label="resume_hf_step",
+                )
+                index = 1
+                while True:
+                    candidate = requested.with_name(
+                        f"{stem}.resume-{segment}.{index}{suffix}"
+                    )
+                    if not candidate.exists():
+                        break
+                    index += 1
+            candidate.write_text("", encoding="utf-8")
+            self.trace_path = candidate
+            self.trace_segmented_on_resume = True
+            self._trace(
+                "trace_segment_started",
+                hf_global_step=getattr(self, "resume_hf_step", None),
+                resume_state_id=self.resume_state_id,
+                parent_trace_path=self.trace_parent_path,
+                parent_trace_sha256=self.trace_parent_sha256,
+                parent_trace_size_bytes=self.trace_parent_size_bytes,
+            )
 
         def _derive(self, hf_source_step: int) -> None:
             if self.zspace_trainer is None or self.max_steps is None:
@@ -644,6 +757,7 @@ def hf_zspace_optimizer_control_callback(
             if self.zspace_trainer is None or self.max_steps is None:
                 raise RuntimeError("Z-space optimizer state is unavailable")
             pending = self.pending or {}
+            trace_sha256, trace_size_bytes = _trace_file_evidence(self.trace_path)
             payload: dict[str, object] = {
                 "schema": HF_ZSPACE_OPTIMIZER_STATE_SCHEMA,
                 "recipe": dict(self.recipe),
@@ -659,6 +773,11 @@ def hf_zspace_optimizer_control_callback(
                 "non_identity_update_count": self.non_identity_update_count,
                 "observed_update_count": self.observed_update_count,
                 "restored_update_count": self.restored_update_count,
+                "trace_path": (
+                    None if self.trace_path is None else str(self.trace_path)
+                ),
+                "trace_sha256": trace_sha256,
+                "trace_size_bytes": trace_size_bytes,
             }
             payload["state_id"] = _sha256_id(payload)
             return payload
@@ -725,11 +844,7 @@ def hf_zspace_optimizer_control_callback(
                 status = "ready"
             else:
                 status = "active"
-            trace_sha256 = None
-            if self.trace_path is not None and self.trace_path.is_file():
-                trace_sha256 = (
-                    "sha256:" + hashlib.sha256(self.trace_path.read_bytes()).hexdigest()
-                )
+            trace_sha256, trace_size_bytes = _trace_file_evidence(self.trace_path)
             return {
                 "schema": HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA,
                 "status": status,
@@ -750,8 +865,14 @@ def hf_zspace_optimizer_control_callback(
                 "control_sequence_id": _sha256_id(self.consumed_sequence),
                 "resume_state_loaded": self.resume_state_loaded,
                 "resume_state_path": self.resume_state_path,
+                "resume_state_id": self.resume_state_id,
                 "trace_path": None if self.trace_path is None else str(self.trace_path),
                 "trace_sha256": trace_sha256,
+                "trace_size_bytes": trace_size_bytes,
+                "trace_segmented_on_resume": self.trace_segmented_on_resume,
+                "trace_parent_path": self.trace_parent_path,
+                "trace_parent_sha256": self.trace_parent_sha256,
+                "trace_parent_size_bytes": self.trace_parent_size_bytes,
                 "scheduler_nominal_lr_restored": (
                     self.mode != "apply"
                     or self.applied_update_count == self.restored_update_count

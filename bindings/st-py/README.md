@@ -692,6 +692,9 @@ optimizer-control modes explicitly. `observe` derives and records the same
 Topos/meta-optimizer sequence without changing updates; `apply` temporarily
 scales each optimizer learning rate, restores the scheduler-owned nominal rate
 before the scheduler advances, and writes a resumable state plus JSONL receipt.
+Resume verifies the checkpoint's trace-prefix hash and starts a linked trace
+segment, preserving any post-checkpoint crash tail instead of mixing it with
+replayed updates.
 The v1 signal is derived from training-progress geometry, not loss or gradient
 feedback, so treat it as an auditable intervention primitive rather than an
 efficacy claim:
