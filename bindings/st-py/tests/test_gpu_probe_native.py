@@ -267,6 +267,10 @@ def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
         [probe],
         required_ready_backends=["cpu"],
     )
+    public_route = st.evaluate_runtime_device_route(
+        [probe],
+        required_ready_backends=["cpu"],
+    )
     summary = st.describe_runtime_devices(["cpu"])
 
     assert "evaluate_runtime_device_route_from_probes" in st.__all__
@@ -274,6 +278,7 @@ def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
     assert route["requested_backends"] == ["cpu"]
     assert route["selection"]["requested_backend"] == "cpu"
     assert route["execution_client"] == "python"
+    assert public_route == route
     assert summary["evidence"] == [summary["reports"][0]["route_evidence"]]
 
     tampered = json.loads(json.dumps(probe))
@@ -331,7 +336,7 @@ def test_malformed_probe_envelopes_never_fall_back_to_transport_aliases(
         st.describe_runtime_devices(["cpu"])
 
 
-def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
+def test_runtime_preflight_applies_required_gates_to_committed_probes() -> None:
     st = require_native()
 
     fields = st.runtime_device_report_fields(

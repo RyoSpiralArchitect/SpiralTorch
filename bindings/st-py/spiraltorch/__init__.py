@@ -672,7 +672,6 @@ from .runtime_imports import (
     required_runtime_import_presets_from_source,
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
-    _runtime_device_route_contract_for_reports,
     evaluate_runtime_execution_plan,
     resolve_runtime_execution_config,
     require_executable_runtime_execution_plan,
@@ -8660,7 +8659,7 @@ def describe_runtime_devices(
             report.setdefault("backend", str(report.get("effective_backend", backend)))
 
         reports.append(report)
-    contract = _runtime_device_route_contract_for_reports(
+    contract = evaluate_runtime_device_route(
         reports,
         requested_backends=backend_labels,
         required_available_backends=required_available_labels,
