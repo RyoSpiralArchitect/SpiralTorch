@@ -382,6 +382,12 @@ mod tests {
                 "missing TypeScript type {type_name}"
             );
         }
+        for operation in ["max_axis0", "max_axis0_backward"] {
+            assert!(
+                declarations.contains(operation),
+                "missing TypeScript tensor-util operation {operation}"
+            );
+        }
     }
 
     #[test]

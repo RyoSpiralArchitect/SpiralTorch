@@ -190,10 +190,10 @@ impl TensorExecutionReceipt {
                 message: "workload component does not match the receipt component",
             });
         }
-        if !operation_matches_component(&self.operation, self.component) {
+        if !operation_matches_workload(&self.operation, self.workload) {
             return Err(TensorExecutionContractError::InvalidReceipt {
                 field: "operation",
-                message: "operation is not owned by the declared component",
+                message: "operation does not match the declared workload",
             });
         }
         self.require_supported_backend("requested_backend", self.requested_backend)?;
@@ -652,7 +652,7 @@ pub fn prepare_tensor_execution(
         return Err(TensorExecutionContractError::InvalidOperation(operation));
     }
     let component = workload.component();
-    if !operation_matches_component(operation, component) {
+    if !operation_matches_workload(operation, workload) {
         return Err(TensorExecutionContractError::InvalidOperation(operation));
     }
     if !selected_backend.supports_component(component) {
@@ -1082,19 +1082,30 @@ fn valid_operation_name(operation: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
-fn operation_matches_component(operation: &str, component: TensorExecutionComponent) -> bool {
-    match component {
-        TensorExecutionComponent::DenseMatmul => matches!(
+fn operation_matches_workload(operation: &str, workload: TensorExecutionWorkload) -> bool {
+    match workload {
+        TensorExecutionWorkload::DenseMatmul { .. } => matches!(
             operation,
             "matmul" | "matmul_scaled" | "matmul_lhs_transpose_scaled"
         ),
-        TensorExecutionComponent::PrepackedMatmul => {
+        TensorExecutionWorkload::PrepackedMatmul { .. } => {
             matches!(operation, "matmul_prepacked" | "matmul_prepacked_bias")
         }
-        TensorExecutionComponent::LayerNorm => operation == "layer_norm",
-        TensorExecutionComponent::Attention => operation == "scaled_dot_attention",
-        TensorExecutionComponent::Softmax => operation == "row_softmax",
-        TensorExecutionComponent::TensorUtil => operation == "scale",
+        TensorExecutionWorkload::LayerNorm { .. } => operation == "layer_norm",
+        TensorExecutionWorkload::Attention { .. } => operation == "scaled_dot_attention",
+        TensorExecutionWorkload::Softmax { .. } => operation == "row_softmax",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::Scale,
+            ..
+        } => operation == "scale",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            ..
+        } => operation == "max_axis0",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0Backward,
+            ..
+        } => operation == "max_axis0_backward",
     }
 }
 
@@ -1170,6 +1181,36 @@ mod tests {
 
         assert_eq!(current_accelerator_fallback(), AcceleratorFallback::Forbid);
         drop(outer);
+    }
+
+    #[test]
+    fn tensor_util_operation_name_must_match_the_typed_workload() {
+        let workload = TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
+            rows: 3,
+            cols: 2,
+        };
+
+        assert!(matches!(
+            prepare_tensor_execution(workload, "scale", TensorExecutionBackend::Cpu),
+            Err(TensorExecutionContractError::InvalidOperation("scale"))
+        ));
+
+        let mut receipt =
+            prepare_tensor_execution(workload, "max_axis0", TensorExecutionBackend::Cpu)
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt();
+        receipt.validate().unwrap();
+        receipt.operation = "max_axis0_backward".to_owned();
+        assert!(matches!(
+            receipt.validate(),
+            Err(TensorExecutionContractError::InvalidReceipt {
+                field: "operation",
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -15,6 +15,7 @@ struct TensorUtilParams {
 @group(0) @binding(3) var<uniform> params: TensorUtilParams;
 
 var<workgroup> scratch: array<f32, 256>;
+var<workgroup> scratch_u32: array<u32, 256>;
 
 fn finite_sign(value: f32) -> f32 {
     if (value < 0.0) {
@@ -1553,6 +1554,113 @@ fn sum_axis0_scaled(
 
     if (lane == 0u) {
         output[col] = scratch[0] * params.scalar;
+    }
+}
+
+@compute @workgroup_size(256)
+fn max_axis0(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    let col = workgroup_id.x;
+    let lane = local_id.x;
+    var max_value = bitcast<f32>(0xff7fffffu);
+    var row = lane;
+    loop {
+        if (row >= params.rows) {
+            break;
+        }
+        max_value = max(max_value, input[row * params.cols + col]);
+        row = row + 256u;
+    }
+    scratch[lane] = max_value;
+    workgroupBarrier();
+
+    var stride = 128u;
+    loop {
+        if (stride == 0u) {
+            break;
+        }
+        if (lane < stride) {
+            scratch[lane] = max(scratch[lane], scratch[lane + stride]);
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+
+    if (lane == 0u) {
+        output[col] = scratch[0];
+    }
+}
+
+@compute @workgroup_size(256)
+fn max_axis0_backward(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    let col = workgroup_id.x;
+    let lane = local_id.x;
+    var max_value = bitcast<f32>(0xff7fffffu);
+    var row = lane;
+    loop {
+        if (row >= params.rows) {
+            break;
+        }
+        max_value = max(max_value, input[row * params.cols + col]);
+        row = row + 256u;
+    }
+    scratch[lane] = max_value;
+    workgroupBarrier();
+
+    var stride = 128u;
+    loop {
+        if (stride == 0u) {
+            break;
+        }
+        if (lane < stride) {
+            scratch[lane] = max(scratch[lane], scratch[lane + stride]);
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let reduced_max = scratch[0];
+
+    var tie_count = 0u;
+    row = lane;
+    loop {
+        if (row >= params.rows) {
+            break;
+        }
+        if (input[row * params.cols + col] == reduced_max) {
+            tie_count = tie_count + 1u;
+        }
+        row = row + 256u;
+    }
+    scratch_u32[lane] = tie_count;
+    workgroupBarrier();
+
+    stride = 128u;
+    loop {
+        if (stride == 0u) {
+            break;
+        }
+        if (lane < stride) {
+            scratch_u32[lane] = scratch_u32[lane] + scratch_u32[lane + stride];
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let reduced_ties = scratch_u32[0];
+    let tied_gradient = select(0.0, aux[col] / f32(reduced_ties), reduced_ties > 0u);
+
+    row = lane;
+    loop {
+        if (row >= params.rows) {
+            break;
+        }
+        let idx = row * params.cols + col;
+        output[idx] = select(0.0, tied_gradient, input[idx] == reduced_max);
+        row = row + 256u;
     }
 }
 

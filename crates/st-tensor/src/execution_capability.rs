@@ -117,6 +117,8 @@ impl TensorExecutionComponent {
 #[serde(rename_all = "snake_case")]
 pub enum TensorUtilOperation {
     Scale,
+    MaxAxis0,
+    MaxAxis0Backward,
 }
 
 /// One concrete tensor workload whose implementation can be preflighted.
@@ -471,11 +473,18 @@ fn wgpu_supports(workload: TensorExecutionWorkload) -> bool {
         TensorExecutionWorkload::Softmax { rows, cols } => dimensions2(rows, cols)
             .is_some_and(|(rows, cols)| crate::wgpu_dense::supports_row_softmax(rows, cols)),
         TensorExecutionWorkload::TensorUtil {
-            operation: TensorUtilOperation::Scale,
+            operation,
             rows,
             cols,
-        } => dimensions2(rows, cols)
-            .is_some_and(|(rows, cols)| crate::wgpu_dense::supports_tensor_util_scale(rows, cols)),
+        } => dimensions2(rows, cols).is_some_and(|(rows, cols)| match operation {
+            TensorUtilOperation::Scale => crate::wgpu_dense::supports_tensor_util_scale(rows, cols),
+            TensorUtilOperation::MaxAxis0 => {
+                crate::wgpu_dense::supports_tensor_util_max_axis0(rows, cols)
+            }
+            TensorUtilOperation::MaxAxis0Backward => {
+                crate::wgpu_dense::supports_tensor_util_max_axis0_backward(rows, cols)
+            }
+        }),
     }
 }
 
@@ -538,15 +547,31 @@ fn verify_wgpu_dispatch(workload: TensorExecutionWorkload) -> Result<(), String>
             &[0.268_941_43, 0.731_058_6],
             1.0e-4,
         ),
-        TensorExecutionWorkload::TensorUtil {
-            operation: TensorUtilOperation::Scale,
-            ..
-        } => verify_dispatch_output(
-            "tensor scale",
-            &crate::wgpu_dense::scale(&[0.25, -0.5], 1, 2, 2.0)?,
-            &[0.5, -1.0],
-            1.0e-4,
-        ),
+        TensorExecutionWorkload::TensorUtil { operation, .. } => match operation {
+            TensorUtilOperation::Scale => verify_dispatch_output(
+                "tensor scale",
+                &crate::wgpu_dense::scale(&[0.25, -0.5], 1, 2, 2.0)?,
+                &[0.5, -1.0],
+                1.0e-4,
+            ),
+            TensorUtilOperation::MaxAxis0 => verify_dispatch_output(
+                "tensor max axis 0",
+                &crate::wgpu_dense::max_axis0(&[0.25, -0.5, 0.75, -1.0], 2, 2)?,
+                &[0.75, -0.5],
+                1.0e-4,
+            ),
+            TensorUtilOperation::MaxAxis0Backward => verify_dispatch_output(
+                "tensor max axis 0 backward",
+                &crate::wgpu_dense::max_axis0_backward(
+                    &[0.25, -0.5, 0.75, -0.5],
+                    &[2.0, -1.0],
+                    2,
+                    2,
+                )?,
+                &[0.0, -0.5, 2.0, -0.5],
+                1.0e-4,
+            ),
+        },
     }
 }
 
@@ -700,6 +725,29 @@ mod tests {
     }
 
     #[test]
+    fn tensor_util_host_contract_covers_each_typed_operation() {
+        for operation in [
+            TensorUtilOperation::Scale,
+            TensorUtilOperation::MaxAxis0,
+            TensorUtilOperation::MaxAxis0Backward,
+        ] {
+            let capability = observe_tensor_execution_capability(
+                TensorExecutionBackend::Cpu,
+                TensorExecutionWorkload::TensorUtil {
+                    operation,
+                    rows: 3,
+                    cols: 2,
+                },
+            );
+            assert_eq!(capability.status, TensorExecutionCapabilityStatus::Ready);
+            assert_eq!(
+                capability.ready_proof,
+                Some(TensorExecutionReadyProof::StaticHostContract)
+            );
+        }
+    }
+
+    #[test]
     fn malformed_workloads_cannot_report_ready_without_st_core_validation() {
         let workloads = [
             TensorExecutionWorkload::DenseMatmul {
@@ -796,6 +844,16 @@ mod tests {
             TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
             TensorExecutionWorkload::TensorUtil {
                 operation: TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0Backward,
                 rows: 2,
                 cols: 4,
             },

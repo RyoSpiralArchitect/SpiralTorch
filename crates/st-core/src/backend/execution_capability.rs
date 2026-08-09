@@ -57,6 +57,8 @@ pub enum RuntimeComponentCapabilityObservationError {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeTensorUtilOperation {
     Scale,
+    MaxAxis0,
+    MaxAxis0Backward,
 }
 
 /// One concrete workload whose native implementation can be observed.
@@ -613,6 +615,10 @@ pub(crate) fn tensor_execution_workload(
         } => TensorExecutionWorkload::TensorUtil {
             operation: match operation {
                 RuntimeTensorUtilOperation::Scale => TensorUtilOperation::Scale,
+                RuntimeTensorUtilOperation::MaxAxis0 => TensorUtilOperation::MaxAxis0,
+                RuntimeTensorUtilOperation::MaxAxis0Backward => {
+                    TensorUtilOperation::MaxAxis0Backward
+                }
             },
             rows: *rows,
             cols: *cols,
@@ -860,6 +866,45 @@ mod tests {
             RuntimeComponentCapabilityStatus::Unavailable
         );
         assert_eq!(evidence.ready_proof, None);
+    }
+
+    #[test]
+    fn runtime_tensor_util_operations_preserve_rust_semantics_and_wire_names() {
+        for (runtime_operation, tensor_operation, wire_name) in [
+            (
+                RuntimeTensorUtilOperation::Scale,
+                TensorUtilOperation::Scale,
+                "scale",
+            ),
+            (
+                RuntimeTensorUtilOperation::MaxAxis0,
+                TensorUtilOperation::MaxAxis0,
+                "max_axis0",
+            ),
+            (
+                RuntimeTensorUtilOperation::MaxAxis0Backward,
+                TensorUtilOperation::MaxAxis0Backward,
+                "max_axis0_backward",
+            ),
+        ] {
+            let runtime_workload = RuntimeComponentWorkload::TensorUtil {
+                operation: runtime_operation,
+                rows: 3,
+                cols: 2,
+            };
+            assert_eq!(
+                tensor_execution_workload(&runtime_workload),
+                TensorExecutionWorkload::TensorUtil {
+                    operation: tensor_operation,
+                    rows: 3,
+                    cols: 2,
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(&runtime_workload).unwrap()["operation"],
+                wire_name
+            );
+        }
     }
 
     #[test]

@@ -6669,6 +6669,286 @@ impl Tensor {
         Ok(output)
     }
 
+    /// Returns the maximum over rows for each column.
+    pub fn try_max_axis0(&self) -> PureResult<Vec<f32>> {
+        self.try_max_axis0_with_backend(TensorUtilBackend::Auto)
+    }
+
+    /// Returns the maximum over rows for each column with an explicit utility backend.
+    pub fn try_max_axis0_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Vec<f32>> {
+        if self.rows == 0 {
+            return Err(TensorError::EmptyInput("max_axis0_rows"));
+        }
+        Self::validate_finite_tensor_util_slice("max_axis0_input", self.data())?;
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0,
+                rows: execution_dimension(self.rows)?,
+                cols: execution_dimension(self.cols)?,
+            },
+            "max_axis0",
+            _backend.tensor_execution_backend(),
+        )?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::max_axis0(input, self.rows, self.cols) {
+                    Ok(buffer) => {
+                        Self::validate_finite_tensor_util_slice("max_axis0_output", &buffer)?;
+                        crate::emit_tensor_op(
+                            "max_axis0",
+                            &[self.rows, self.cols],
+                            &[1, self.cols],
+                        );
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
+                        emit_tensor_execution_receipt(completion, |data| {
+                            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+                            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+                            data.insert(
+                                "values".to_owned(),
+                                serde_json::json!(self.rows.saturating_mul(self.cols)),
+                            );
+                            data.insert(
+                                "layout".to_owned(),
+                                serde_json::json!(self.layout.as_str()),
+                            );
+                            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+                            data.insert("axis".to_owned(), serde_json::json!(0));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.max_axis0"),
+                            );
+                        });
+                        return Ok(buffer);
+                    }
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
+                    }
+                    Err(message) => {
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut maxima = vec![f32::NEG_INFINITY; self.cols];
+        if self.cols > 0 {
+            for row in input.chunks(self.cols) {
+                for (maximum, &value) in maxima.iter_mut().zip(row) {
+                    *maximum = maximum.max(value);
+                }
+            }
+        }
+        Self::validate_finite_tensor_util_slice("max_axis0_output", &maxima)?;
+        let is_empty = self.cols == 0;
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu) && !is_empty;
+        let completion = if is_empty {
+            completed_no_op_execution(execution)?
+        } else {
+            completed_component_execution(execution, "cpu", runtime_fallback)?
+        };
+        crate::emit_tensor_op("max_axis0", &[self.rows, self.cols], &[1, self.cols]);
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+            data.insert(
+                "values".to_owned(),
+                serde_json::json!(self.rows.saturating_mul(self.cols)),
+            );
+            data.insert("layout".to_owned(), serde_json::json!(self.layout.as_str()));
+            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+            data.insert("axis".to_owned(), serde_json::json!(0));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            if runtime_fallback {
+                #[cfg(feature = "wgpu")]
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
+        Ok(maxima)
+    }
+
+    /// Propagates an axis-0 maximum gradient, splitting ties evenly per column.
+    pub fn try_max_axis0_backward(&self, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.try_max_axis0_backward_with_backend(grad_output, TensorUtilBackend::Auto)
+    }
+
+    /// Propagates an axis-0 maximum gradient with an explicit utility backend.
+    pub fn try_max_axis0_backward_with_backend(
+        &self,
+        grad_output: &Tensor,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
+        if self.rows == 0 {
+            return Err(TensorError::EmptyInput("max_axis0_backward_rows"));
+        }
+        if grad_output.shape() != (1, self.cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (1, self.cols),
+            });
+        }
+        Self::validate_finite_tensor_util_slice("max_axis0_backward_input", self.data())?;
+        Self::validate_finite_tensor_util_slice("max_axis0_backward_gradient", grad_output.data())?;
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let row_major_gradient = grad_output.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
+        let gradient = row_major_gradient.data();
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::MaxAxis0Backward,
+                rows: execution_dimension(self.rows)?,
+                cols: execution_dimension(self.cols)?,
+            },
+            "max_axis0_backward",
+            _backend.tensor_execution_backend(),
+        )?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::max_axis0_backward(input, gradient, self.rows, self.cols) {
+                    Ok(buffer) => {
+                        Self::validate_finite_tensor_util_slice(
+                            "max_axis0_backward_output",
+                            &buffer,
+                        )?;
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "max_axis0_backward",
+                            &[self.rows, self.cols],
+                            &[self.rows, self.cols],
+                        );
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
+                        emit_tensor_execution_receipt(completion, |data| {
+                            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+                            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+                            data.insert(
+                                "values".to_owned(),
+                                serde_json::json!(self.rows.saturating_mul(self.cols)),
+                            );
+                            data.insert(
+                                "layout".to_owned(),
+                                serde_json::json!(self.layout.as_str()),
+                            );
+                            data.insert("kind".to_owned(), serde_json::json!("reduction_backward"));
+                            data.insert("axis".to_owned(), serde_json::json!(0));
+                            data.insert("tie_policy".to_owned(), serde_json::json!("equal_split"));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.max_axis0_backward"),
+                            );
+                        });
+                        return Ok(output);
+                    }
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
+                    }
+                    Err(message) => {
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut output = Tensor::zeros(self.rows, self.cols)?;
+        let mut maxima = vec![f32::NEG_INFINITY; self.cols];
+        if self.cols > 0 {
+            for row in input.chunks(self.cols) {
+                for (maximum, &value) in maxima.iter_mut().zip(row) {
+                    *maximum = maximum.max(value);
+                }
+            }
+            let mut tie_counts = vec![0usize; self.cols];
+            for row in input.chunks(self.cols) {
+                for (col, (&value, &maximum)) in row.iter().zip(&maxima).enumerate() {
+                    if value == maximum {
+                        tie_counts[col] += 1;
+                    }
+                }
+            }
+            let output_data = output.data_mut();
+            for (col, &tie_count) in tie_counts.iter().enumerate() {
+                if tie_count == 0 {
+                    return Err(TensorError::InvalidValue {
+                        label: "max_axis0_backward_ties",
+                    });
+                }
+                let tied_gradient = gradient[col] / tie_count as f32;
+                Self::validate_finite_tensor_util_value(
+                    "max_axis0_backward_output",
+                    tied_gradient,
+                )?;
+                for row in 0..self.rows {
+                    let index = row * self.cols + col;
+                    if input[index] == maxima[col] {
+                        output_data[index] = tied_gradient;
+                    }
+                }
+            }
+        }
+        let is_empty = self.cols == 0;
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu) && !is_empty;
+        let completion = if is_empty {
+            completed_no_op_execution(execution)?
+        } else {
+            completed_component_execution(execution, "cpu", runtime_fallback)?
+        };
+        crate::emit_tensor_op(
+            "max_axis0_backward",
+            &[self.rows, self.cols],
+            &[self.rows, self.cols],
+        );
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+            data.insert(
+                "values".to_owned(),
+                serde_json::json!(self.rows.saturating_mul(self.cols)),
+            );
+            data.insert("layout".to_owned(), serde_json::json!(self.layout.as_str()));
+            data.insert("kind".to_owned(), serde_json::json!("reduction_backward"));
+            data.insert("axis".to_owned(), serde_json::json!(0));
+            data.insert("tie_policy".to_owned(), serde_json::json!("equal_split"));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            if runtime_fallback {
+                #[cfg(feature = "wgpu")]
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
+        Ok(output)
+    }
+
     /// Returns the sum over rows for each column.
     pub fn sum_axis0(&self) -> Vec<f32> {
         self.sum_axis0_with_backend(TensorUtilBackend::Auto)
@@ -6685,7 +6965,11 @@ impl Tensor {
         if self.cols == 0 {
             return sums;
         }
-        for row in self.data().chunks(self.cols) {
+        let row_major_input = self.to_layout(Layout::RowMajor).ok();
+        let input = row_major_input
+            .as_ref()
+            .map_or_else(|| self.data(), Tensor::data);
+        for row in input.chunks(self.cols) {
             for (sum, value) in sums.iter_mut().zip(row.iter()) {
                 *sum += *value;
             }
@@ -6720,13 +7004,15 @@ impl Tensor {
             );
             return Ok(sums);
         }
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
         #[cfg(feature = "wgpu")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::sum_axis0(self.data(), self.rows, self.cols) {
+                match wgpu_dense::sum_axis0(input, self.rows, self.cols) {
                     Ok(buffer) => {
                         for &output in &buffer {
                             Self::validate_finite_tensor_util_value("sum_axis0_output", output)?;
@@ -6761,7 +7047,7 @@ impl Tensor {
                 }
             }
         }
-        for row in self.data().chunks(self.cols) {
+        for row in input.chunks(self.cols) {
             for (sum, value) in sums.iter_mut().zip(row.iter()) {
                 Self::validate_finite_tensor_util_value("sum_axis0_input", *value)?;
                 *sum += *value;
@@ -6811,7 +7097,11 @@ impl Tensor {
         if self.cols == 0 {
             return sums;
         }
-        for row in self.data().chunks(self.cols) {
+        let row_major_input = self.to_layout(Layout::RowMajor).ok();
+        let input = row_major_input
+            .as_ref()
+            .map_or_else(|| self.data(), Tensor::data);
+        for row in input.chunks(self.cols) {
             for (sum, value) in sums.iter_mut().zip(row.iter()) {
                 *sum += *value;
             }
@@ -6850,13 +7140,15 @@ impl Tensor {
             );
             return Ok(sums);
         }
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
         #[cfg(feature = "wgpu")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::sum_axis0_scaled(self.data(), self.rows, self.cols, scale) {
+                match wgpu_dense::sum_axis0_scaled(input, self.rows, self.cols, scale) {
                     Ok(buffer) => {
                         for &output in &buffer {
                             Self::validate_finite_tensor_util_value(
@@ -6899,7 +7191,7 @@ impl Tensor {
                 }
             }
         }
-        for row in self.data().chunks(self.cols) {
+        for row in input.chunks(self.cols) {
             for (sum, value) in sums.iter_mut().zip(row.iter()) {
                 Self::validate_finite_tensor_util_value("sum_axis0_scaled_input", *value)?;
                 *sum += *value;
@@ -13528,6 +13820,20 @@ mod tests {
             assert!((expected * 0.25 - summed_scaled[c]).abs() < 1e-5);
         }
 
+        let max_input = vec![3.0, 2.0, 3.0, 1.0, 0.0, 2.0];
+        let max_gradient = vec![0.6, -0.4];
+        let maxima = unwrap_ok(wgpu_dense::max_axis0(&max_input, 3, 2));
+        let max_backward = unwrap_ok(wgpu_dense::max_axis0_backward(
+            &max_input,
+            &max_gradient,
+            3,
+            2,
+        ));
+        assert_eq!(maxima, vec![3.0, 2.0]);
+        for (actual, expected) in max_backward.iter().zip([0.3, -0.2, 0.3, 0.0, 0.0, -0.2]) {
+            assert!((actual - expected).abs() < 1.0e-6);
+        }
+
         let projected = unwrap_ok(wgpu_dense::project_to_poincare(&input, rows, cols, -1.0));
         for r in 0..rows {
             let start = r * cols;
@@ -13631,6 +13937,11 @@ mod tests {
         );
         let _ = tensor.sum_axis0_with_backend(TensorUtilBackend::GpuWgpu);
         let _ = tensor.sum_axis0_scaled_with_backend(0.25, TensorUtilBackend::GpuWgpu);
+        let _ = unwrap_ok(tensor.try_max_axis0_with_backend(TensorUtilBackend::GpuWgpu));
+        let max_gradient = unwrap_ok(Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]));
+        let _ = unwrap_ok(
+            tensor.try_max_axis0_backward_with_backend(&max_gradient, TensorUtilBackend::GpuWgpu),
+        );
         let _ = unwrap_ok(tensor.squared_l2_norm_with_backend(TensorUtilBackend::GpuWgpu));
         let _ = unwrap_ok(tensor.sum_abs_with_backend(TensorUtilBackend::GpuWgpu));
         let _ =
@@ -13659,6 +13970,8 @@ mod tests {
             "add_row_inplace",
             "sum_axis0",
             "sum_axis0_scaled",
+            "max_axis0",
+            "max_axis0_backward",
             "squared_l2_norm",
             "sum_abs",
             "project_to_poincare",
@@ -13668,7 +13981,9 @@ mod tests {
                 .iter()
                 .find(|(observed, _)| *observed == op_name)
                 .unwrap_or_else(|| panic!("{op_name} metadata event"));
-            let expected_backend = if op_name == "scale" {
+            let has_execution_receipt =
+                matches!(op_name, "scale" | "max_axis0" | "max_axis0_backward");
+            let expected_backend = if has_execution_receipt {
                 "wgpu"
             } else {
                 "wgpu_dense"
@@ -13679,7 +13994,7 @@ mod tests {
                 .as_str()
                 .unwrap_or_default()
                 .starts_with("tensor_util."));
-            if op_name == "scale" {
+            if has_execution_receipt {
                 assert_eq!(data["event_phase"], "completed");
                 assert_eq!(data["route_status"], "direct");
                 assert_eq!(data["kernel_backend"], "wgpu_dense");
@@ -14483,6 +14798,165 @@ mod tests {
                 value,
             } if value.is_infinite()
         ));
+    }
+
+    #[test]
+    fn tensor_max_axis0_backward_splits_ties_and_conserves_each_column_gradient() {
+        let tensor = unwrap_ok(Tensor::from_vec(3, 2, vec![3.0, 2.0, 3.0, 1.0, 0.0, 2.0]));
+        let gradient = unwrap_ok(Tensor::from_vec(1, 2, vec![0.6, -0.4]));
+
+        let maxima = unwrap_ok(tensor.try_max_axis0_with_backend(TensorUtilBackend::Cpu));
+        let backward = unwrap_ok(
+            tensor.try_max_axis0_backward_with_backend(&gradient, TensorUtilBackend::Cpu),
+        );
+
+        assert_eq!(maxima, vec![3.0, 2.0]);
+        assert_eq!(backward.data(), &[0.3, -0.2, 0.3, 0.0, 0.0, -0.2]);
+        for col in 0..2 {
+            let propagated = (0..3)
+                .map(|row| backward.data()[row * 2 + col])
+                .sum::<f32>();
+            assert!((propagated - gradient.data()[col]).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn tensor_axis0_reductions_preserve_logical_values_for_column_major_inputs() {
+        let row_major = unwrap_ok(Tensor::from_vec(3, 2, vec![3.0, 2.0, 3.0, 1.0, 0.0, 2.0]));
+        let column_major = unwrap_ok(row_major.to_layout(Layout::ColMajor));
+        let gradient = unwrap_ok(Tensor::from_vec(1, 2, vec![0.6, -0.4]));
+
+        let maxima = unwrap_ok(column_major.try_max_axis0_with_backend(TensorUtilBackend::Cpu));
+        let backward = unwrap_ok(
+            column_major.try_max_axis0_backward_with_backend(&gradient, TensorUtilBackend::Cpu),
+        );
+
+        assert_eq!(maxima, vec![3.0, 2.0]);
+        assert_eq!(backward.data(), &[0.3, -0.2, 0.3, 0.0, 0.0, -0.2]);
+        assert_eq!(
+            unwrap_ok(column_major.try_sum_axis0_with_backend(TensorUtilBackend::Cpu)),
+            vec![6.0, 5.0]
+        );
+        assert_eq!(
+            unwrap_ok(column_major.try_sum_axis0_scaled_with_backend(0.5, TensorUtilBackend::Cpu)),
+            vec![3.0, 2.5]
+        );
+    }
+
+    #[test]
+    fn tensor_max_axis0_backward_matches_finite_differences_at_unique_maxima() {
+        let values = vec![1.0, -2.0, 3.0, 0.5, -1.0, 4.0];
+        let tensor = unwrap_ok(Tensor::from_vec(3, 2, values.clone()));
+        let gradient = unwrap_ok(Tensor::from_vec(1, 2, vec![0.7, -0.4]));
+        let analytic = unwrap_ok(
+            tensor.try_max_axis0_backward_with_backend(&gradient, TensorUtilBackend::Cpu),
+        );
+        let epsilon = 1.0e-3;
+
+        for index in 0..values.len() {
+            let mut plus = values.clone();
+            let mut minus = values.clone();
+            plus[index] += epsilon;
+            minus[index] -= epsilon;
+            let plus = unwrap_ok(Tensor::from_vec(3, 2, plus));
+            let minus = unwrap_ok(Tensor::from_vec(3, 2, minus));
+            let plus_objective = unwrap_ok(plus.try_max_axis0())
+                .iter()
+                .zip(gradient.data())
+                .map(|(value, grad)| value * grad)
+                .sum::<f32>();
+            let minus_objective = unwrap_ok(minus.try_max_axis0())
+                .iter()
+                .zip(gradient.data())
+                .map(|(value, grad)| value * grad)
+                .sum::<f32>();
+            let numerical = (plus_objective - minus_objective) / (2.0 * epsilon);
+            assert!(
+                (analytic.data()[index] - numerical).abs() < 1.0e-3,
+                "gradient mismatch at {index}: analytic={}, numerical={numerical}",
+                analytic.data()[index]
+            );
+        }
+    }
+
+    #[test]
+    fn tensor_max_axis0_fails_closed_for_invalid_numeric_inputs() {
+        let empty_rows = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+        assert!(matches!(
+            empty_rows.try_max_axis0(),
+            Err(TensorError::EmptyInput("max_axis0_rows"))
+        ));
+
+        let non_finite = unwrap_ok(Tensor::from_vec(1, 2, vec![f32::NAN, 1.0]));
+        assert!(matches!(
+            non_finite.try_max_axis0(),
+            Err(TensorError::NonFiniteValue {
+                label: "max_axis0_input",
+                ..
+            })
+        ));
+
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]));
+        let non_finite_gradient = unwrap_ok(Tensor::from_vec(1, 2, vec![0.5, f32::INFINITY]));
+        assert!(matches!(
+            tensor
+                .try_max_axis0_backward_with_backend(&non_finite_gradient, TensorUtilBackend::Cpu),
+            Err(TensorError::NonFiniteValue {
+                label: "max_axis0_backward_gradient",
+                ..
+            })
+        ));
+
+        let zero_columns = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+        let zero_gradient = unwrap_ok(Tensor::from_vec(1, 0, Vec::new()));
+        assert!(unwrap_ok(zero_columns.try_max_axis0()).is_empty());
+        assert_eq!(
+            unwrap_ok(
+                zero_columns
+                    .try_max_axis0_backward_with_backend(&zero_gradient, TensorUtilBackend::Cpu)
+            )
+            .shape(),
+            (3, 0)
+        );
+    }
+
+    #[test]
+    fn tensor_max_axis0_emits_typed_execution_receipts() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 4.0, 3.0, 2.0]));
+        let gradient = unwrap_ok(Tensor::from_vec(1, 2, vec![0.5, -0.25]));
+
+        let _ = unwrap_ok(tensor.try_max_axis0_with_backend(TensorUtilBackend::Cpu));
+        let _ = unwrap_ok(
+            tensor.try_max_axis0_backward_with_backend(&gradient, TensorUtilBackend::Cpu),
+        );
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for operation in ["max_axis0", "max_axis0_backward"] {
+            let event = events
+                .iter()
+                .find(|(name, data)| *name == operation && data["event_phase"] == "completed")
+                .unwrap_or_else(|| panic!("missing completed {operation} receipt"));
+            assert_eq!(
+                event.1["semantic_owner"],
+                crate::execution::TENSOR_EXECUTION_RECEIPT_SEMANTIC_OWNER
+            );
+            assert_eq!(event.1["execution_receipt"]["operation"], operation);
+            assert_eq!(
+                event.1["execution_receipt"]["workload"]["operation"],
+                operation
+            );
+            assert_eq!(event.1["execution_receipt"]["executed_backend"], "cpu");
+        }
     }
 
     #[test]

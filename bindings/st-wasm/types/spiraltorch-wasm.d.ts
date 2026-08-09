@@ -405,7 +405,7 @@ declare module "spiraltorch-wasm" {
         | { component: "softmax"; rows: number; cols: number }
         | {
               component: "tensor_util";
-              operation: "scale";
+              operation: "scale" | "max_axis0" | "max_axis0_backward";
               rows: number;
               cols: number;
           };
