@@ -145,6 +145,39 @@ def test_describe_device_auto_backend_uses_effective_wgpu_label() -> None:
     assert "shared_mem_per_workgroup" in report
 
 
+def test_public_runtime_device_observer_delegates_resolution_to_rust() -> None:
+    st = require_native()
+
+    report = st.observe_runtime_device_probe(
+        "cpu",
+        max_workgroup=64,
+        requested_workgroup=63,
+        cols=1024,
+    )
+
+    assert "observe_runtime_device_probe" in st.__all__
+    assert report["semantic_owner"] == "st-core::backend::runtime_probe"
+    assert report["semantic_backend"] == "rust"
+    assert report["execution_client"] == "python"
+    assert report["requested_backend"] == "cpu"
+    assert report["effective_backend"] == "cpu"
+    assert report["request"]["caps"]["backend"] == "cpu"
+    assert report["request"]["caps"]["max_workgroup"] == 64
+    assert report["requested_runtime"] == report["effective_runtime"]
+    assert st.validate_runtime_device_probe_contract(report) == report["contract"]
+
+    with pytest.raises(ValueError, match="max_workgroup.*must be positive"):
+        st.observe_runtime_device_probe("cpu", max_workgroup=0)
+
+    with pytest.raises(ValueError, match="unknown field"):
+        st._rs._runtime_device_probe_observe(
+            {
+                "requested_backend": "cpu",
+                "effective_backend": "wgpu",
+            }
+        )
+
+
 def test_describe_runtime_devices_collects_backend_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

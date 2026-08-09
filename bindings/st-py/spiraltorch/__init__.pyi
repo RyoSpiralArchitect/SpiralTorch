@@ -474,6 +474,19 @@ def observe_runtime_execution_plan_capabilities(
     request: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
+def observe_runtime_device_probe(
+    requested_backend: str = ...,
+    *,
+    lane_width: int | None = ...,
+    subgroup: bool | None = ...,
+    max_workgroup: int | None = ...,
+    shared_mem_per_workgroup: int | None = ...,
+    requested_workgroup: int | None = ...,
+    cols: int | None = ...,
+    tile_hint: int | None = ...,
+    compaction_hint: int | None = ...,
+) -> Dict[str, object]: ...
+
 def project_runtime_device_probe_contract(
     payload: Mapping[str, object],
 ) -> Dict[str, object]: ...

@@ -11,7 +11,7 @@
 //! [`RuntimeDeviceProbePayload::to_transport_value`] instead of reconstructing
 //! readiness, surrogate, or capability semantics in their host language.
 
-use super::device_caps::{BackendKind, DeviceCaps, DeviceCapsError};
+use super::device_caps::{BackendKind, DeviceCaps, DeviceCapsError, DeviceCapsOverrides};
 use super::runtime_route::RuntimeDeviceRouteEvidence;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -487,32 +487,181 @@ impl BackendResolution {
     pub fn requested_backend(&self) -> BackendKind {
         self.reported_backend
     }
+}
 
-    fn to_transport_value(self) -> serde_json::Value {
-        let requested = BackendRuntimeState::observe(self.reported_backend);
-        let effective = BackendRuntimeState::observe(self.effective_backend);
+/// Internal resolution snapshot that binds route identity to its observations.
+///
+/// The public compatibility projection remains [`BackendResolution`], while
+/// probe generation and telemetry retain these states without re-observing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BackendResolutionObservation {
+    resolution: BackendResolution,
+    requested_runtime: BackendRuntimeState,
+    effective_runtime: BackendRuntimeState,
+}
+
+impl BackendResolutionObservation {
+    fn requested_backend(&self) -> BackendKind {
+        self.resolution.requested_backend()
+    }
+
+    fn effective_backend(&self) -> BackendKind {
+        self.resolution.effective_backend
+    }
+
+    fn validate(&self) -> Result<(), RuntimeDeviceProbeError> {
+        self.requested_runtime.validate()?;
+        self.effective_runtime.validate()?;
+        if self.requested_runtime.backend != self.requested_backend() {
+            return Err(invalid_payload(
+                "requested_runtime.backend",
+                "must match the requested backend in the resolution snapshot",
+            ));
+        }
+        if self.effective_runtime.backend != self.effective_backend() {
+            return Err(invalid_payload(
+                "effective_runtime.backend",
+                "must match the effective backend in the resolution snapshot",
+            ));
+        }
+
+        match (self.requested_backend(), self.resolution.mps_probe.as_ref()) {
+            (BackendKind::Mps, Some(probe)) => {
+                probe.validate()?;
+                if self.effective_backend() != probe.planner_surrogate_backend {
+                    return Err(invalid_mps_overlay(
+                        "resolution backend must match planner_surrogate_backend",
+                    ));
+                }
+                if self.requested_runtime.feature_enabled != probe.feature_enabled
+                    || self.requested_runtime.placeholder != probe.placeholder()
+                    || self.requested_runtime.runtime_initialized != probe.initialized
+                {
+                    return Err(invalid_mps_overlay(
+                        "native MPS runtime state must agree with the MPS probe",
+                    ));
+                }
+                if !self.effective_runtime.runtime_ready {
+                    return Err(RuntimeDeviceProbeError::SurrogateNotReady {
+                        backend: self.effective_backend().as_str(),
+                    });
+                }
+            }
+            (BackendKind::Mps, None) => {
+                return Err(invalid_mps_overlay(
+                    "MPS resolutions require the canonical MPS probe",
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(RuntimeDeviceProbeError::InvalidMpsOverlay {
+                    backend: self.requested_backend().as_str(),
+                    message: "only MPS resolutions may carry an MPS probe".to_owned(),
+                });
+            }
+            (_, None) => {
+                if self.effective_backend() != self.requested_backend()
+                    || self.requested_runtime != self.effective_runtime
+                {
+                    return Err(invalid_payload(
+                        "runtime_state",
+                        "direct resolutions must retain one identical requested/effective observation",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn to_transport_value(&self) -> serde_json::Value {
         let mut payload = serde_json::Map::new();
-        payload.insert("backend".into(), self.effective_backend.as_str().into());
+        payload.insert("backend".into(), self.effective_backend().as_str().into());
         payload.insert(
             "requested_backend".into(),
-            self.reported_backend.as_str().into(),
+            self.requested_backend().as_str().into(),
         );
         payload.insert("kind".into(), "st_core_backend_resolution".into());
         payload.insert(
             "effective_backend".into(),
-            self.effective_backend.as_str().into(),
+            self.effective_backend().as_str().into(),
         );
         payload.insert(
             "reported_backend".into(),
-            self.reported_backend.as_str().into(),
+            self.requested_backend().as_str().into(),
         );
-        insert_backend_runtime_meta(&mut payload, "requested", &requested);
-        insert_backend_runtime_meta(&mut payload, "effective", &effective);
-        payload.insert("has_mps_probe".into(), self.mps_probe.is_some().into());
-        if let Some(probe) = self.mps_probe.as_ref() {
+        insert_backend_runtime_meta(&mut payload, "requested", &self.requested_runtime);
+        insert_backend_runtime_meta(&mut payload, "effective", &self.effective_runtime);
+        payload.insert(
+            "has_mps_probe".into(),
+            self.resolution.mps_probe.is_some().into(),
+        );
+        if let Some(probe) = self.resolution.mps_probe.as_ref() {
             insert_mps_meta(&mut payload, probe);
         }
         serde_json::Value::Object(payload)
+    }
+}
+
+/// Unresolved live-observation input shared by native Rust, Python, and WASM.
+///
+/// Callers may request a backend and capability overrides, but only Rust chooses
+/// the effective backend and constructs an MPS surrogate overlay.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeDeviceProbeObservationRequest {
+    pub requested_backend: BackendKind,
+    #[serde(default)]
+    pub caps_overrides: DeviceCapsOverrides,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_workgroup: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tile_hint: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_hint: Option<u32>,
+}
+
+impl RuntimeDeviceProbeObservationRequest {
+    /// Start a live request with canonical capability defaults and no workload hints.
+    pub fn new(requested_backend: BackendKind) -> Self {
+        Self {
+            requested_backend,
+            caps_overrides: DeviceCapsOverrides::default(),
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        }
+    }
+
+    fn resolve(
+        self,
+        observation: &mut BackendResolutionObservation,
+    ) -> Result<RuntimeDeviceProbeRequest, RuntimeDeviceProbeError> {
+        if self.requested_backend != observation.requested_backend() {
+            return Err(invalid_payload(
+                "requested_backend",
+                "observation input must match its Rust backend resolution",
+            ));
+        }
+        let caps = observation
+            .effective_backend()
+            .default_caps()
+            .try_with_overrides(self.caps_overrides)?;
+        if let Some(probe) = observation.resolution.mps_probe.as_mut() {
+            probe.planner_caps = caps;
+        }
+        let request = RuntimeDeviceProbeRequest {
+            requested_backend: self.requested_backend,
+            caps,
+            mps_probe: observation.resolution.mps_probe,
+            requested_workgroup: self.requested_workgroup,
+            cols: self.cols,
+            tile_hint: self.tile_hint,
+            compaction_hint: self.compaction_hint,
+        };
+        request.validate()?;
+        Ok(request)
     }
 }
 
@@ -921,15 +1070,18 @@ impl RuntimeDeviceProbePayload {
 }
 
 pub fn mps_probe() -> MpsProbeReport {
-    let planner_surrogate_backend =
-        if cfg!(target_os = "macos") && backend_runtime_ready(BackendKind::Wgpu) {
-            BackendKind::Wgpu
-        } else {
-            BackendKind::Cpu
-        };
+    observe_backend_resolution(BackendKind::Mps)
+        .resolution
+        .mps_probe
+        .expect("MPS resolution always carries its canonical probe")
+}
 
+fn mps_probe_for_resolution(
+    requested_runtime: &BackendRuntimeState,
+    effective_runtime: &BackendRuntimeState,
+) -> MpsProbeReport {
     MpsProbeReport {
-        feature_enabled: cfg!(feature = "mps"),
+        feature_enabled: requested_runtime.feature_enabled,
         platform_supported: cfg!(target_os = "macos"),
         host_class: if !cfg!(target_os = "macos") {
             MpsHostClass::NonMacHost
@@ -939,10 +1091,56 @@ pub fn mps_probe() -> MpsProbeReport {
             MpsHostClass::IntelMac
         },
         backend_wired: false,
-        initialized: false,
-        planner_surrogate_backend,
-        planner_caps: planner_surrogate_backend.default_caps(),
+        initialized: requested_runtime.runtime_initialized,
+        planner_surrogate_backend: effective_runtime.backend,
+        planner_caps: effective_runtime.backend.default_caps(),
     }
+}
+
+fn observe_backend_resolution_with(
+    requested_backend: BackendKind,
+    mut observe: impl FnMut(BackendKind) -> BackendRuntimeState,
+) -> BackendResolutionObservation {
+    let requested_runtime = observe(requested_backend);
+    let observation = match requested_backend {
+        BackendKind::Mps => {
+            let effective_runtime = if cfg!(target_os = "macos") {
+                let wgpu_runtime = observe(BackendKind::Wgpu);
+                if wgpu_runtime.runtime_ready {
+                    wgpu_runtime
+                } else {
+                    observe(BackendKind::Cpu)
+                }
+            } else {
+                observe(BackendKind::Cpu)
+            };
+            let probe = mps_probe_for_resolution(&requested_runtime, &effective_runtime);
+            BackendResolutionObservation {
+                resolution: BackendResolution {
+                    effective_backend: effective_runtime.backend,
+                    reported_backend: BackendKind::Mps,
+                    mps_probe: Some(probe),
+                },
+                requested_runtime,
+                effective_runtime,
+            }
+        }
+        _ => BackendResolutionObservation {
+            resolution: BackendResolution {
+                effective_backend: requested_backend,
+                reported_backend: requested_backend,
+                mps_probe: None,
+            },
+            effective_runtime: requested_runtime.clone(),
+            requested_runtime,
+        },
+    };
+    debug_assert!(observation.validate().is_ok());
+    observation
+}
+
+fn observe_backend_resolution(requested_backend: BackendKind) -> BackendResolutionObservation {
+    observe_backend_resolution_with(requested_backend, BackendRuntimeState::observe)
 }
 
 /// Whether planner/integration code for a backend is compiled at all.
@@ -1148,30 +1346,40 @@ const fn backend_runtime_recommendation_for_state(
 }
 
 pub fn resolve_backend(requested_backend: BackendKind) -> BackendResolution {
-    let resolution = match requested_backend {
-        BackendKind::Mps => {
-            let probe = mps_probe();
-            BackendResolution {
-                effective_backend: probe.planner_surrogate_backend,
-                reported_backend: BackendKind::Mps,
-                mps_probe: Some(probe),
-            }
-        }
-        _ => BackendResolution {
-            effective_backend: requested_backend,
-            reported_backend: requested_backend,
-            mps_probe: None,
-        },
-    };
-    emit_backend_resolution_meta(&resolution);
-    resolution
+    let observation = observe_backend_resolution(requested_backend);
+    emit_backend_resolution_meta(&observation);
+    observation.resolution
+}
+
+/// Observe and resolve one backend request entirely inside the Rust owner.
+///
+/// Unlike [`evaluate_runtime_device_probe`], this live entrypoint does not ask
+/// the caller to supply an effective backend, capability backend, or MPS
+/// surrogate. The resulting committed payload still uses the stable v1 replay
+/// request so persisted contracts remain compatible.
+pub fn observe_runtime_device_probe(
+    input: RuntimeDeviceProbeObservationRequest,
+) -> Result<RuntimeDeviceProbePayload, RuntimeDeviceProbeError> {
+    let mut observation = observe_backend_resolution(input.requested_backend);
+    let request = input.resolve(&mut observation)?;
+    observation.validate()?;
+    emit_backend_resolution_meta(&observation);
+    evaluate_runtime_device_probe_with_resolution(request, &observation)
 }
 
 /// Evaluate one canonical probe request and return a committed, replayable payload.
 pub fn evaluate_runtime_device_probe(
     request: RuntimeDeviceProbeRequest,
 ) -> Result<RuntimeDeviceProbePayload, RuntimeDeviceProbeError> {
-    let payload = build_runtime_device_probe(request)?;
+    let observation = observe_backend_resolution(request.requested_backend);
+    evaluate_runtime_device_probe_with_resolution(request, &observation)
+}
+
+fn evaluate_runtime_device_probe_with_resolution(
+    request: RuntimeDeviceProbeRequest,
+    observation: &BackendResolutionObservation,
+) -> Result<RuntimeDeviceProbePayload, RuntimeDeviceProbeError> {
+    let payload = build_runtime_device_probe(request, observation)?;
     payload.validate()?;
     emit_device_report_meta(&payload);
     Ok(payload)
@@ -1208,26 +1416,29 @@ pub fn build_device_report(
 
 fn build_runtime_device_probe(
     request: RuntimeDeviceProbeRequest,
+    observation: &BackendResolutionObservation,
 ) -> Result<RuntimeDeviceProbePayload, RuntimeDeviceProbeError> {
     request.validate()?;
-    if request.requested_backend == BackendKind::Mps
-        && request.mps_probe.as_ref() != Some(&mps_probe())
-    {
+    observation.validate()?;
+    if request.requested_backend != observation.requested_backend() {
+        return Err(invalid_payload(
+            "requested_backend",
+            "request does not match the Rust-observed backend resolution",
+        ));
+    }
+    if request.effective_backend() != observation.effective_backend() {
+        return Err(RuntimeDeviceProbeError::CapsBackendMismatch {
+            caps_backend: request.effective_backend().as_str(),
+            effective_backend: observation.effective_backend().as_str(),
+        });
+    }
+    if request.mps_probe != observation.resolution.mps_probe {
         return Err(invalid_mps_overlay(
             "generation requires the current Rust-observed MPS host and surrogate state",
         ));
     }
-    let requested_runtime = BackendRuntimeState::observe(request.requested_backend);
-    let effective_runtime = if request.requested_backend == request.effective_backend() {
-        requested_runtime.clone()
-    } else {
-        BackendRuntimeState::observe(request.effective_backend())
-    };
-    if request.requested_backend == BackendKind::Mps && !effective_runtime.runtime_ready {
-        return Err(RuntimeDeviceProbeError::SurrogateNotReady {
-            backend: request.effective_backend().as_str(),
-        });
-    }
+    let requested_runtime = observation.requested_runtime.clone();
+    let effective_runtime = observation.effective_runtime.clone();
 
     let (aligned_workgroup, occupancy_score, preferred_tile, preferred_compaction_tile) =
         derive_probe_metrics(&request)?;
@@ -1322,9 +1533,9 @@ fn route_evidence_for(payload: &RuntimeDeviceProbePayload) -> RuntimeDeviceRoute
     }
 }
 
-fn emit_backend_resolution_meta(resolution: &BackendResolution) {
+fn emit_backend_resolution_meta(observation: &BackendResolutionObservation) {
     emit_tensor_op("backend_resolution", &[1], &[1]);
-    let value = (*resolution).to_transport_value();
+    let value = observation.to_transport_value();
     emit_tensor_op_meta("backend_resolution", move || value);
 }
 
@@ -1559,6 +1770,88 @@ mod tests {
             assert_eq!(probe.planner_route(), "cpu-fallback");
         }
         assert!(backend_runtime_ready(probe.planner_surrogate_backend));
+    }
+
+    #[test]
+    fn backend_resolution_observes_each_runtime_at_most_once() {
+        let mut observed = Vec::new();
+        let observation = observe_backend_resolution_with(BackendKind::Mps, |backend| {
+            observed.push(backend);
+            BackendRuntimeState::observe(backend)
+        });
+
+        observation.validate().unwrap();
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|backend| **backend == BackendKind::Mps)
+                .count(),
+            1
+        );
+        for backend in [BackendKind::Wgpu, BackendKind::Cpu] {
+            assert!(
+                observed
+                    .iter()
+                    .filter(|candidate| **candidate == backend)
+                    .count()
+                    <= 1,
+                "backend '{}' was observed more than once: {observed:?}",
+                backend.as_str()
+            );
+        }
+        assert_eq!(observation.requested_runtime.backend, BackendKind::Mps);
+        assert_eq!(
+            observation.effective_runtime.backend,
+            observation.resolution.effective_backend
+        );
+    }
+
+    #[test]
+    fn unresolved_observation_input_is_resolved_and_committed_by_rust() {
+        let input = RuntimeDeviceProbeObservationRequest {
+            caps_overrides: DeviceCapsOverrides {
+                max_workgroup: Some(64),
+                ..DeviceCapsOverrides::default()
+            },
+            requested_workgroup: Some(63),
+            cols: Some(1024),
+            ..RuntimeDeviceProbeObservationRequest::new(BackendKind::Mps)
+        };
+
+        let payload = observe_runtime_device_probe(input).unwrap();
+
+        payload.validate().unwrap();
+        assert_eq!(payload.requested_backend(), BackendKind::Mps);
+        assert_eq!(payload.request.caps.max_workgroup, 64);
+        assert_eq!(
+            payload.request.caps.backend,
+            payload.request.mps_probe.unwrap().planner_surrogate_backend
+        );
+        assert_eq!(
+            payload.request.caps,
+            payload.request.mps_probe.unwrap().planner_caps
+        );
+        assert_eq!(
+            payload.requested_runtime.backend,
+            payload.requested_backend()
+        );
+        assert_eq!(
+            payload.effective_runtime.backend,
+            payload.effective_backend()
+        );
+        assert!(payload.effective_runtime.runtime_ready);
+    }
+
+    #[test]
+    fn unresolved_observation_input_rejects_client_selected_resolution_fields() {
+        let error =
+            serde_json::from_value::<RuntimeDeviceProbeObservationRequest>(serde_json::json!({
+                "requested_backend": "cpu",
+                "effective_backend": "wgpu"
+            }))
+            .expect_err("clients must not select the effective backend");
+
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]

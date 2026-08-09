@@ -7,7 +7,10 @@ use st_core::backend::execution_plan::{
     AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
     RuntimeExecutionPlanRequest,
 };
-use st_core::backend::runtime_probe::{RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest};
+use st_core::backend::runtime_probe::{
+    observe_runtime_device_probe, RuntimeDeviceProbeObservationRequest, RuntimeDeviceProbePayload,
+    RuntimeDeviceProbeRequest,
+};
 use st_core::backend::runtime_route::{
     evaluate_runtime_device_route, RuntimeDeviceRoutePayload, RuntimeDeviceRouteRequest,
 };
@@ -62,6 +65,16 @@ fn runtime_device_probe_payload_from_py(
         .unwrap_or(value);
     serde_json::from_value(canonical)
         .map_err(|error| json_error("invalid runtime-device probe payload", error))
+}
+
+#[pyfunction]
+fn _runtime_device_probe_observe(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request: RuntimeDeviceProbeObservationRequest =
+        request_from_py(request, "invalid runtime-device observation request")?;
+    let payload = observe_runtime_device_probe(request)
+        .and_then(|payload| payload.with_execution_client("python"))
+        .map_err(|error| json_error("runtime-device observation failed", error))?;
+    crate::json::json_to_py(py, &payload.to_transport_value())
 }
 
 #[pyfunction]
@@ -290,6 +303,7 @@ fn _runtime_execution_plan_validate_against(
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_runtime_device_probe_observe, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_validate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_probe_transport, parent)?)?;
     parent.add_function(wrap_pyfunction!(

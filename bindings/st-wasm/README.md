@@ -61,6 +61,14 @@ the same `st-tensor::pure::topos` contract used by native Rust and Python. WASM 
 converts the object/JSON boundary; it does not maintain separate pressure, hint, or route
 formulas:
 
+For live device discovery, call `runtimeDeviceProbeObserveObject` (or its JSON
+variant) with only `requested_backend`, optional `caps_overrides`, and workload
+hints. Rust selects the effective backend, constructs any MPS surrogate overlay,
+and commits both runtime observations. `runtimeDeviceProbeObject` remains the
+resolved v1 evaluation surface for callers that already hold the full request;
+`runtimeDeviceProbeValidate*` replays persisted contracts without probing mutable
+hardware. JavaScript should not rebuild the live resolution policy.
+
 ```ts
 import {
     toposControlSignalObject,

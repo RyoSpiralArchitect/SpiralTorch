@@ -323,6 +323,8 @@ mod tests {
         for symbol in [
             "runtimeDeviceProbeJson",
             "runtimeDeviceProbeObject",
+            "runtimeDeviceProbeObserveJson",
+            "runtimeDeviceProbeObserveObject",
             "runtimeDeviceProbeValidateJson",
             "runtimeDeviceProbeValidateObject",
             "runtimeDeviceProbeValidateAgainstJson",
@@ -343,6 +345,7 @@ mod tests {
         }
         for type_name in [
             "RuntimeDeviceProbe",
+            "RuntimeDeviceProbeObservationRequest",
             "RuntimeComponentResolution",
             "RuntimeExecutionPlanRequestInput",
             "RuntimeExecutionPlanRequest",
