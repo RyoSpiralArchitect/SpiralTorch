@@ -3,8 +3,8 @@ use serde_json::Value;
 use st_core::backend::runtime_probe::RuntimeDeviceProbePayload;
 use st_core::backend::runtime_route::{
     evaluate_runtime_device_route, evaluate_runtime_device_route_from_probes,
-    RuntimeDeviceRouteError, RuntimeDeviceRoutePayload, RuntimeDeviceRouteProbeRequest,
-    RuntimeDeviceRouteRequest,
+    RuntimeDeviceRouteError, RuntimeDeviceRouteEvidence, RuntimeDeviceRoutePayload,
+    RuntimeDeviceRouteProbeRequest, RuntimeDeviceRouteRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +19,7 @@ use crate::utils::js_error;
 #[serde(default, deny_unknown_fields)]
 struct RuntimeDeviceRouteProbeRequestWire {
     probes: Vec<Value>,
+    diagnostic_reports: Vec<RuntimeDeviceRouteEvidence>,
     requested_backends: Vec<String>,
     required_available_backends: Vec<String>,
     required_ready_backends: Vec<String>,
@@ -52,6 +53,7 @@ fn probe_request_from_value(value: Value) -> Result<RuntimeDeviceRouteProbeReque
         .collect::<Result<Vec<_>, _>>()?;
     Ok(RuntimeDeviceRouteProbeRequest {
         probes,
+        diagnostic_reports: wire.diagnostic_reports,
         requested_backends: wire.requested_backends,
         required_available_backends: wire.required_available_backends,
         required_ready_backends: wire.required_ready_backends,
@@ -277,6 +279,33 @@ mod tests {
         assert_eq!(route["execution_client"], "wasm");
         assert_eq!(route["evidence"], json!([expected_evidence]));
         assert_eq!(route["requested_backends"], json!(["cpu"]));
+        assert_eq!(route["selection"]["requested_backend"], "cpu");
+    }
+
+    #[test]
+    fn wasm_probe_route_retains_selection_ineligible_collection_failures() {
+        let probe = crate::runtime_probe::observe_runtime_device_probe_value(
+            RuntimeDeviceProbeObservationRequest::new(BackendKind::Cpu),
+        )
+        .expect("committed CPU probe transport");
+        let request = probe_request_from_value(json!({
+            "probes": [probe],
+            "diagnostic_reports": [{
+                "requested_backend": "mps",
+                "runtime_ready": false,
+                "runtime_status": "error",
+                "error": "browser MPS probe failed"
+            }],
+            "requested_backends": ["cpu", "mps"]
+        }))
+        .expect("valid diagnostic probe-route request");
+
+        let route = runtime_device_route_from_probes_value(request)
+            .expect("diagnostic probe route transport");
+
+        assert_eq!(route["error_backends"], json!(["mps"]));
+        assert_eq!(route["has_errors"], true);
+        assert_eq!(route["status_by_backend"]["mps"], "error");
         assert_eq!(route["selection"]["requested_backend"], "cpu");
     }
 

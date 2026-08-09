@@ -90,8 +90,10 @@ boolean `runtime_ready` projection remains fail-closed.
 Those rows are Python transport metadata and are not committed; the canonical Rust-owned
 `evidence` field is the replayable source for route decisions. Python never copies readiness
 fields out of native probes on this path. If a diagnostic batch mixes committed probes with
-legacy or error rows, committed probes stay on the validated Rust ingress and uncommitted rows
-remain diagnostics only; the whole batch is never downgraded to compatibility semantics.
+legacy or error rows, committed probes stay on the validated Rust ingress. Rust admits only
+explicit, non-ready error rows into the committed diagnostic projection, so collection failures
+remain visible without allowing uncommitted rows into executable selection; the whole batch is
+never downgraded to compatibility semantics.
 Malformed probe envelopes are rejected rather than reclassified as legacy evidence.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct

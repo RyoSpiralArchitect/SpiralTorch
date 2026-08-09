@@ -1211,6 +1211,7 @@ def evaluate_runtime_device_route(
     )
     canonical_reports = []
     committed_probes = []
+    diagnostic_rows = []
     for index, row in enumerate(report_values):
         if not isinstance(row, Mapping):
             raise TypeError(f"reports[{index}] must be a mapping")
@@ -1219,9 +1220,19 @@ def evaluate_runtime_device_route(
             "spiraltorch.runtime_device_probe"
         ):
             committed_probes.append(row)
+        else:
+            diagnostic_rows.append((index, row))
     if committed_probes:
+        diagnostic_reports = [
+            _runtime_device_route_evidence(
+                row,
+                default_backend=requested[index] if index < len(requested) else None,
+            )
+            for index, row in diagnostic_rows
+        ]
         return evaluate_runtime_device_route_from_probes(
             committed_probes,
+            diagnostic_reports=diagnostic_reports,
             requested_backends=requested,
             required_available_backends=required_available,
             required_ready_backends=required_ready,
@@ -1246,6 +1257,7 @@ def evaluate_runtime_device_route(
 def evaluate_runtime_device_route_from_probes(
     probes: object,
     *,
+    diagnostic_reports: object = None,
     requested_backends: object = None,
     required_available_backends: object = None,
     required_ready_backends: object = None,
@@ -1268,12 +1280,32 @@ def evaluate_runtime_device_route_from_probes(
             raise TypeError(f"probes[{index}] must be a mapping")
         canonical_probes.append(_runtime_probe_contract_payload(probe))
 
+    if diagnostic_reports is None:
+        diagnostic_values: list[object] = []
+    elif isinstance(diagnostic_reports, Mapping) or isinstance(
+        diagnostic_reports, (str, bytes, bytearray)
+    ):
+        raise TypeError("diagnostic_reports must be an iterable of mappings")
+    else:
+        try:
+            diagnostic_values = list(diagnostic_reports)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError(
+                "diagnostic_reports must be an iterable of mappings"
+            ) from exc
+    canonical_diagnostics = []
+    for index, report in enumerate(diagnostic_values):
+        if not isinstance(report, Mapping):
+            raise TypeError(f"diagnostic_reports[{index}] must be a mapping")
+        canonical_diagnostics.append(dict(report))
+
     evaluate = _native_runtime_device_route_function(
         "_runtime_device_route_evaluate_probes"
     )
     payload = evaluate(
         {
             "probes": canonical_probes,
+            "diagnostic_reports": canonical_diagnostics,
             "requested_backends": _runtime_device_route_values(
                 requested_backends,
                 field="requested_backends",

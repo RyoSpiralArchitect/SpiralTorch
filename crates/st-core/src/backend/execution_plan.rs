@@ -977,6 +977,7 @@ fn evaluate_canonical_runtime_execution_plan(
     let runtime_route =
         evaluate_runtime_device_route_from_probes(RuntimeDeviceRouteProbeRequest {
             probes: vec![request.runtime_probe.clone()],
+            diagnostic_reports: Vec::new(),
             requested_backends: vec![requested_label.clone()],
             required_available_backends: Vec::new(),
             required_ready_backends: vec![requested_label.clone()],

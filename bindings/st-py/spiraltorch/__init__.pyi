@@ -452,6 +452,7 @@ def evaluate_runtime_device_route(
 def evaluate_runtime_device_route_from_probes(
     probes: Iterable[Mapping[str, object]],
     *,
+    diagnostic_reports: Iterable[Mapping[str, object]] | None = ...,
     requested_backends: object = ...,
     required_available_backends: object = ...,
     required_ready_backends: object = ...,

@@ -307,9 +307,17 @@ def test_mixed_device_reports_never_downgrade_committed_probe_evidence(
         required_ready_backends=["cpu", "mps"],
     )
 
-    assert summary["evidence"] == [probe["contract"]["route_evidence"]]
+    assert summary["evidence"][0] == probe["contract"]["route_evidence"]
+    assert summary["evidence"][1]["requested_backend"] == "mps"
+    assert summary["evidence"][1]["runtime_status"] == "error"
     assert summary["requested_backends"] == ["cpu", "mps"]
     assert summary["ready_backends"] == ["cpu"]
+    assert summary["error_backends"] == ["mps"]
+    assert summary["status_by_backend"]["mps"] == "error"
+    assert summary["has_errors"] is True
+    assert summary["routes"][0]["requested_backend"] == "cpu"
+    assert summary["routes"][0]["route_ready"] is True
+    assert summary["selection"] is None
     assert summary["required_ready_backends_passed"] is False
     assert summary["runtime_missing_ready_backends"] == ["mps"]
     assert summary["reports"][1]["error"] == "diagnostic-only probe failure"
@@ -390,8 +398,14 @@ def test_runtime_preflight_custom_collectors_preserve_committed_probe_ingress() 
     contract = json.loads(fields["runtime_device_route_contract_json"])
     reports = json.loads(fields["runtime_device_reports_json"])
 
-    assert contract["evidence"] == [probe["contract"]["route_evidence"]]
+    assert contract["evidence"][0] == probe["contract"]["route_evidence"]
+    assert contract["evidence"][1]["requested_backend"] == "mps"
+    assert contract["evidence"][1]["runtime_status"] == "error"
     assert contract["ready_backends"] == ["cpu"]
+    assert contract["error_backends"] == ["mps"]
+    assert contract["status_by_backend"]["mps"] == "error"
+    assert contract["has_errors"] is True
+    assert fields["runtime_device_report_error_backends"] == "mps"
     assert contract["required_ready_backends_passed"] is False
     assert contract["runtime_missing_ready_backends"] == ["mps"]
     assert reports[0]["route_evidence"]["runtime_ready"] is False

@@ -153,6 +153,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeDeviceRouteProbeRequest = {
         probes: RuntimeDeviceProbe[];
+        diagnostic_reports?: RuntimeDeviceRouteEvidence[];
         requested_backends?: string[];
         required_available_backends?: string[];
         required_ready_backends?: string[];
