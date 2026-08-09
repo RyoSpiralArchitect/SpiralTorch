@@ -52,6 +52,7 @@ __all__ = [
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
     "validate_tensor_execution_receipt",
+    "validate_tensor_execution_receipt_against_runtime_plan",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source",
@@ -879,7 +880,7 @@ def _native_runtime_execution_plan_function(name: str):
     return function
 
 
-def _native_tensor_execution_receipt_function():
+def _native_tensor_execution_receipt_function(name: str):
     try:
         import spiraltorch as st  # type: ignore
     except Exception as exc:  # pragma: no cover - import failures vary by env.
@@ -887,11 +888,11 @@ def _native_tensor_execution_receipt_function():
             "tensor execution receipt semantics require the compiled Rust core"
         ) from exc
     native = getattr(st, "_rs", None)
-    function = getattr(native, "_tensor_execution_receipt_validate", None)
+    function = getattr(native, name, None)
     if not callable(function):
         raise RuntimeError(
             "tensor execution receipt semantics require the compiled Rust core; "
-            "rebuild or reinstall SpiralTorch with _tensor_execution_receipt_validate"
+            f"rebuild or reinstall SpiralTorch with {name}"
         )
     return function
 
@@ -1045,10 +1046,33 @@ def validate_tensor_execution_receipt(
 
     if not isinstance(receipt, Mapping):
         raise TypeError("receipt must be a mapping")
-    validate = _native_tensor_execution_receipt_function()
+    validate = _native_tensor_execution_receipt_function(
+        "_tensor_execution_receipt_validate"
+    )
     validated = validate(dict(receipt))
     if not isinstance(validated, Mapping):
         raise RuntimeError("tensor execution receipt validator returned a non-mapping payload")
+    return dict(validated)
+
+
+def validate_tensor_execution_receipt_against_runtime_plan(
+    receipt: Mapping[str, object],
+    runtime_execution_plan: Mapping[str, object],
+) -> dict[str, object]:
+    """Prove in Rust that a committed runtime plan authorized a receipt."""
+
+    if not isinstance(receipt, Mapping):
+        raise TypeError("receipt must be a mapping")
+    if not isinstance(runtime_execution_plan, Mapping):
+        raise TypeError("runtime_execution_plan must be a mapping")
+    validate = _native_tensor_execution_receipt_function(
+        "_tensor_execution_receipt_validate_against_runtime_plan"
+    )
+    validated = validate(dict(receipt), dict(runtime_execution_plan))
+    if not isinstance(validated, Mapping):
+        raise RuntimeError(
+            "tensor execution receipt authorizer returned a non-mapping payload"
+        )
     return dict(validated)
 
 

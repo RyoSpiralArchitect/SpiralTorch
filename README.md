@@ -647,6 +647,45 @@ undeclared workloads remain unobserved. Once a committed plan is installed, ever
 declared workload is bound exactly through tensor dispatch: shape, bias, or utility
 operation mismatches are rejected before a kernel call. Undeclared components remain
 dynamic and continue through operation-time capability checks.
+Receipt self-validation deliberately does not treat a well-formed plan hash as
+authorization. Supply the original committed plan to make Rust replay the plan and
+reapply its exact workload, backend, threshold, and fallback rules:
+
+```python
+import spiraltorch as st
+
+workload = {"component": "softmax", "rows": 2, "cols": 3}
+plan = st.evaluate_runtime_execution_plan(
+    st.describe_device("cpu"),
+    accelerator_fallback="allow",
+    tensor_util_wgpu_min_values=1024,
+    component_resolution="deferred",
+    component_workloads=[workload],
+)
+receipt = {
+    "kind": "spiraltorch.tensor_execution_receipt",
+    "contract_version": "spiraltorch.tensor_execution_receipt.v1",
+    "semantic_owner": "st-tensor::execution",
+    "component": "softmax",
+    "operation": "row_softmax",
+    "workload": workload,
+    "requested_backend": "cpu",
+    "selected_backend": "cpu",
+    "executed_backend": "cpu",
+    "kernel_backend": "cpu",
+    "route_status": "direct",
+    "runtime_execution_plan_output_sha256": plan["output_sha256"],
+}
+validated_receipt = st.validate_tensor_execution_receipt_against_runtime_plan(
+    receipt,
+    plan,
+)
+```
+
+WASM exposes the same operation as
+`tensorExecutionReceiptValidateAgainstRuntimePlanJson` and
+`tensorExecutionReceiptValidateAgainstRuntimePlanObject`; neither client rebuilds
+the authorization rules.
 Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
 unobserved accelerator capabilities rather than guessing that a workload is ready.
 

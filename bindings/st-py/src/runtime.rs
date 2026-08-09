@@ -4,8 +4,8 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::backend::execution_plan::{
     evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
-    AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeExecutionPlanPayload,
-    RuntimeExecutionPlanRequest,
+    validate_tensor_execution_receipt_against_runtime_plan, AcceleratorFallback, BackendPolicy,
+    ExecutionConfig, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
 };
 use st_core::backend::runtime_probe::{
     observe_runtime_device_probe, RuntimeDeviceProbeObservationRequest, RuntimeDeviceProbePayload,
@@ -332,6 +332,27 @@ fn _tensor_execution_receipt_validate(
     )
 }
 
+#[pyfunction]
+fn _tensor_execution_receipt_validate_against_runtime_plan(
+    py: Python<'_>,
+    receipt: &Bound<'_, PyAny>,
+    runtime_execution_plan: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let receipt: TensorExecutionReceipt =
+        request_from_py(receipt, "invalid tensor execution receipt")?;
+    let runtime_execution_plan: RuntimeExecutionPlanPayload = request_from_py(
+        runtime_execution_plan,
+        "invalid runtime execution-plan payload",
+    )?;
+    validate_tensor_execution_receipt_against_runtime_plan(&runtime_execution_plan, &receipt)
+        .map_err(|error| json_error("tensor execution receipt authorization failed", error))?;
+    payload_to_py(
+        py,
+        receipt,
+        "tensor execution receipt contract encoding failed",
+    )
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
@@ -368,6 +389,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
     )?)?;
     parent.add_function(wrap_pyfunction!(
         _tensor_execution_receipt_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _tensor_execution_receipt_validate_against_runtime_plan,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;
