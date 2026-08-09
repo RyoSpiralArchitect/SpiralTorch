@@ -33,7 +33,8 @@ pub use execution::{
     TENSOR_EXECUTION_RECEIPT_KIND, TENSOR_EXECUTION_RECEIPT_SEMANTIC_OWNER,
 };
 pub use execution_capability::{
-    TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload, TensorUtilOperation,
+    TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload,
+    TensorExecutionWorkloadKey, TensorUtilOperation,
 };
 
 #[cfg(feature = "wgpu_frac")]

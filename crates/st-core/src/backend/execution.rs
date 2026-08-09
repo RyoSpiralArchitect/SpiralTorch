@@ -68,7 +68,7 @@ pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
             policy.execution_config().accelerator_fallback,
             policy.execution_config().tensor_util_wgpu_min_values,
         )
-        .expect("validated runtime plans contain at most one workload per component");
+        .expect("validated runtime plans contain at most one workload per operation kind");
         st_tensor::execution::push_execution_plan_binding(binding)
     });
     let previous = ACTIVE_BACKEND_POLICY.with(|slot| slot.replace(Some(policy)));

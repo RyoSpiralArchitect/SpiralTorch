@@ -86,13 +86,15 @@ impl GraphReadout {
         };
         emit_graph_readout_meta(
             "graph_readout",
-            *self,
-            rows,
-            cols,
-            output.shape(),
-            meta_backend,
-            tensor_util_backend,
-            kernel,
+            GraphReadoutMeta {
+                readout: *self,
+                node_rows: rows,
+                cols,
+                output_shape: output.shape(),
+                backend: meta_backend,
+                requested_backend: tensor_util_backend,
+                kernel,
+            },
         );
         Ok(output)
     }
@@ -133,13 +135,15 @@ impl GraphReadout {
         };
         emit_graph_readout_meta(
             "graph_readout_backward",
-            *self,
-            rows,
-            cols,
-            output.shape(),
-            "composite",
-            tensor_util_backend,
-            kernel,
+            GraphReadoutMeta {
+                readout: *self,
+                node_rows: rows,
+                cols,
+                output_shape: output.shape(),
+                backend: "composite",
+                requested_backend: tensor_util_backend,
+                kernel,
+            },
         );
         Ok(output)
     }
@@ -153,8 +157,7 @@ fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     }
 }
 
-fn emit_graph_readout_meta(
-    op_name: &'static str,
+struct GraphReadoutMeta {
     readout: GraphReadout,
     node_rows: usize,
     cols: usize,
@@ -162,7 +165,18 @@ fn emit_graph_readout_meta(
     backend: &'static str,
     requested_backend: TensorUtilBackend,
     kernel: &'static str,
-) {
+}
+
+fn emit_graph_readout_meta(op_name: &'static str, meta: GraphReadoutMeta) {
+    let GraphReadoutMeta {
+        readout,
+        node_rows,
+        cols,
+        output_shape,
+        backend,
+        requested_backend,
+        kernel,
+    } = meta;
     emit_tensor_op(
         op_name,
         &[node_rows, cols],
@@ -229,12 +243,12 @@ impl GraphBatch {
             });
         }
         let nodes = nodes_per_graph.get();
-        if total_rows % nodes != 0 {
+        if !total_rows.is_multiple_of(nodes) {
             return Err(TensorError::InvalidValue {
                 label: "graph_batch_fixed_rows",
             });
         }
-        Self::from_node_counts(std::iter::repeat(nodes).take(total_rows / nodes))
+        Self::from_node_counts(std::iter::repeat_n(nodes, total_rows / nodes))
     }
 
     /// Returns the row offsets, including the leading zero and trailing total rows.
@@ -856,7 +870,16 @@ mod tests {
     use super::*;
     use crate::gnn::{GraphContext, GraphLayerSpec, ZSpaceGraphNetworkBuilder};
     use crate::{BandEnergy, Dataset, MeanSquaredError, ModuleTrainer, RoundtableConfig};
-    use st_core::backend::device_caps::DeviceCaps;
+    use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+    use st_core::backend::execution::{
+        evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
+        push_runtime_execution_plan, AcceleratorFallback, ExecutionConfig,
+        RuntimeComponentResolution, RuntimeComponentWorkload, RuntimeExecutionPlanPayload,
+        RuntimeExecutionPlanRequest, RuntimeTensorUtilOperation,
+    };
+    use st_core::backend::runtime_probe::{
+        evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
+    };
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
 
@@ -883,6 +906,42 @@ mod tests {
         );
         builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(2).unwrap()));
         builder.build("readout_regressor").unwrap()
+    }
+
+    fn max_readout_runtime_plan(rows: u64, cols: u64) -> RuntimeExecutionPlanPayload {
+        let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU runtime probe");
+        let request = RuntimeExecutionPlanRequest {
+            runtime_probe,
+            execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+            component_resolution: RuntimeComponentResolution::Deferred,
+            component_workloads: vec![
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+                    rows,
+                    cols,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::MaxAxis0,
+                    rows,
+                    cols,
+                },
+            ],
+            component_capability_observation: None,
+            tensor_util_values: None,
+            required_native_components: Vec::new(),
+        };
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("max readout operation capabilities");
+        evaluate_runtime_execution_plan(request).expect("max readout runtime plan")
     }
 
     #[test]
@@ -924,6 +983,20 @@ mod tests {
 
         let max_grad = GraphReadout::Max.backward(&nodes, &grad).unwrap();
         assert_eq!(max_grad.data(), &[0.0, 0.0, 0.6, -0.15, 0.0, -0.15]);
+    }
+
+    #[test]
+    fn committed_runtime_plan_executes_max_readout_forward_and_backward() {
+        let plan = max_readout_runtime_plan(3, 2);
+        let _policy = push_runtime_execution_plan(&plan).expect("executable max readout plan");
+        let nodes = sample_node_features();
+        let grad = Tensor::from_vec(1, 2, vec![0.6, -0.3]).unwrap();
+
+        let output = GraphReadout::Max.forward(&nodes).unwrap();
+        let propagated = GraphReadout::Max.backward(&nodes, &grad).unwrap();
+
+        assert_eq!(output.data(), &[3.0, 0.5]);
+        assert_eq!(propagated.data(), &[0.0, 0.0, 0.6, -0.15, 0.0, -0.15]);
     }
 
     #[test]

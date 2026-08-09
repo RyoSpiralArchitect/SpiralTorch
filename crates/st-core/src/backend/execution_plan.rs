@@ -24,12 +24,12 @@ pub use spiral_config::execution::{AcceleratorFallback, ExecutionConfig};
 use st_tensor::{
     AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorExecutionBackend,
     TensorExecutionContractError, TensorExecutionPlanBinding, TensorExecutionReceipt,
-    TensorExecutionWorkload, TensorUtilBackend,
+    TensorExecutionWorkload, TensorExecutionWorkloadKey, TensorUtilBackend,
 };
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v6";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v7";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -38,9 +38,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v6\0";
+    b"spiraltorch.runtime_execution_plan.request.v7\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v6\0";
+    b"spiraltorch.runtime_execution_plan.output.v7\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 pub(crate) const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -215,12 +215,12 @@ pub struct RuntimeComponentRoute {
     pub requested_backend: RuntimeTensorBackend,
     pub selected_backend: RuntimeTensorBackend,
     pub route: RuntimeComponentRouteClass,
-    /// Workload whose mutable accelerator capability was observed, when present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workload: Option<RuntimeComponentWorkload>,
+    /// Operation workloads whose mutable accelerator capabilities were observed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workloads: Vec<RuntimeComponentWorkload>,
     /// Whether the selected implementation is static, observed, or unavailable.
     pub capability_state: RuntimeComponentCapabilityState,
-    /// True only when this workload is concretely ready on the effective runtime backend.
+    /// True only when every declared workload is ready on the effective runtime backend.
     pub native: bool,
     pub fallback: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,7 +282,7 @@ impl RuntimeExecutionPlanRequest {
             return Err(RuntimeExecutionPlanError::InvalidRequest {
                 field: "request",
                 message:
-                    "must use canonical component ordering and omit nested transport provenance"
+                    "must use canonical operation ordering and omit nested transport provenance"
                         .to_owned(),
             });
         }
@@ -307,19 +307,35 @@ fn validate_component_capability_observation(
 fn canonicalize_tensor_util_values(
     request: &mut RuntimeExecutionPlanRequest,
 ) -> Result<(), RuntimeExecutionPlanError> {
-    let Some(RuntimeComponentWorkload::TensorUtil { rows, cols, .. }) = request
+    let mut volumes = request
         .component_workloads
         .iter()
-        .find(|workload| workload.component() == RuntimeExecutionComponent::TensorUtil)
-    else {
+        .filter_map(|workload| match workload {
+            RuntimeComponentWorkload::TensorUtil { rows, cols, .. } => {
+                Some(rows.checked_mul(*cols).ok_or_else(|| {
+                    invalid_request(
+                        "component_workloads",
+                        "tensor_util workload volume exceeds u64 range",
+                    )
+                }))
+            }
+            _ => None,
+        });
+    let Some(values_u64) = volumes.next() else {
         return Ok(());
     };
-    let values_u64 = rows.checked_mul(*cols).ok_or_else(|| {
-        invalid_request(
-            "component_workloads",
-            "tensor_util workload volume exceeds u64 range",
-        )
-    })?;
+    let values_u64 = values_u64?;
+    for volume in volumes {
+        let volume = volume?;
+        if volume != values_u64 {
+            return Err(invalid_request(
+                "component_workloads",
+                format!(
+                    "tensor_util operation workloads must share one route volume; got {values_u64} and {volume}"
+                ),
+            ));
+        }
+    }
     let values = usize::try_from(values_u64).map_err(|_| {
         invalid_request(
             "component_workloads",
@@ -419,7 +435,7 @@ pub struct BackendPolicy {
     attention_backend: AttentionBackend,
     softmax_backend: SoftmaxBackend,
     tensor_util_backend: TensorUtilBackend,
-    runtime_plan_workloads: [Option<TensorExecutionWorkload>; 6],
+    runtime_plan_workloads: [Option<TensorExecutionWorkload>; TensorExecutionWorkloadKey::COUNT],
     runtime_plan_output_sha256: Option<[u8; 32]>,
 }
 
@@ -449,7 +465,7 @@ impl BackendPolicy {
             attention_backend: attention_backend_for(runtime_policy.attention),
             softmax_backend: softmax_backend_for(runtime_policy.softmax),
             tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
-            runtime_plan_workloads: [None; 6],
+            runtime_plan_workloads: [None; TensorExecutionWorkloadKey::COUNT],
             runtime_plan_output_sha256: None,
         }
     }
@@ -495,7 +511,7 @@ impl BackendPolicy {
             attention_backend,
             softmax_backend,
             tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
-            runtime_plan_workloads: [None; 6],
+            runtime_plan_workloads: [None; TensorExecutionWorkloadKey::COUNT],
             runtime_plan_output_sha256: None,
         }
     }
@@ -532,10 +548,10 @@ impl BackendPolicy {
                 });
             }
         }
-        let mut runtime_plan_workloads = [None; 6];
+        let mut runtime_plan_workloads = [None; TensorExecutionWorkloadKey::COUNT];
         for workload in &plan.request.component_workloads {
             let workload = tensor_execution_workload(workload);
-            runtime_plan_workloads[workload.component().index()] = Some(workload);
+            runtime_plan_workloads[workload.key().index()] = Some(workload);
         }
         policy.runtime_plan_workloads = runtime_plan_workloads;
         policy.runtime_plan_output_sha256 = Some(parse_sha256(&plan.output_sha256)?);
@@ -612,7 +628,9 @@ impl BackendPolicy {
     }
 
     /// Exact component workloads declared by the committed runtime plan.
-    pub(crate) const fn runtime_plan_workloads(self) -> [Option<TensorExecutionWorkload>; 6] {
+    pub(crate) const fn runtime_plan_workloads(
+        self,
+    ) -> [Option<TensorExecutionWorkload>; TensorExecutionWorkloadKey::COUNT] {
         self.runtime_plan_workloads
     }
 
@@ -1074,7 +1092,7 @@ fn evaluate_canonical_runtime_execution_plan(
                         && !route.capability_state.is_ready()
                         && !route.capability_state.is_known_unready()
                         && (request.component_resolution == RuntimeComponentResolution::Concrete
-                            || route.workload.is_some())
+                            || !route.workloads.is_empty())
                 })
                 .map(|route| {
                     format!(
@@ -1250,11 +1268,12 @@ fn component_route(
             None,
         )
     };
-    let workload = request
+    let workloads = request
         .component_workloads
         .iter()
-        .find(|workload| workload.component() == component)
-        .cloned();
+        .filter(|workload| workload.component() == component)
+        .cloned()
+        .collect::<Vec<_>>();
     let capability_state = component_capability_state(
         request,
         component,
@@ -1271,7 +1290,7 @@ fn component_route(
         requested_backend,
         selected_backend,
         route,
-        workload,
+        workloads,
         capability_state,
         native,
         fallback,
@@ -1292,11 +1311,12 @@ fn component_capability_state(
     {
         return RuntimeComponentCapabilityState::NotApplicable;
     }
-    let workload = request
+    let workloads = request
         .component_workloads
         .iter()
-        .find(|workload| workload.component() == component);
-    if workload.is_none()
+        .filter(|workload| workload.component() == component)
+        .collect::<Vec<_>>();
+    if workloads.is_empty()
         && matches!(
             selected_backend,
             RuntimeTensorBackend::Cpu | RuntimeTensorBackend::CpuSimd | RuntimeTensorBackend::Naive
@@ -1304,14 +1324,39 @@ fn component_capability_state(
     {
         return RuntimeComponentCapabilityState::Static;
     }
-    request
-        .component_capability_observation
-        .as_ref()
-        .into_iter()
-        .flat_map(|observation| observation.capabilities.iter())
-        .find(|evidence| evidence.component() == component && evidence.backend == selected_backend)
-        .map(|evidence| evidence.status.into())
-        .unwrap_or(RuntimeComponentCapabilityState::Unobserved)
+    let Some(observation) = request.component_capability_observation.as_ref() else {
+        return RuntimeComponentCapabilityState::Unobserved;
+    };
+    let mut aggregate = RuntimeComponentCapabilityState::Ready;
+    let mut missing = false;
+    for workload in workloads {
+        let Some(evidence) = observation.capabilities.iter().find(|evidence| {
+            evidence.workload == *workload && evidence.backend == selected_backend
+        }) else {
+            missing = true;
+            continue;
+        };
+        match evidence.status {
+            RuntimeComponentCapabilityStatus::Unsupported => {
+                return RuntimeComponentCapabilityState::Unsupported;
+            }
+            RuntimeComponentCapabilityStatus::NotBuilt => {
+                aggregate = RuntimeComponentCapabilityState::NotBuilt;
+            }
+            RuntimeComponentCapabilityStatus::Unavailable
+                if aggregate == RuntimeComponentCapabilityState::Ready =>
+            {
+                aggregate = RuntimeComponentCapabilityState::Unavailable;
+            }
+            RuntimeComponentCapabilityStatus::Ready
+            | RuntimeComponentCapabilityStatus::Unavailable => {}
+        }
+    }
+    if missing && aggregate == RuntimeComponentCapabilityState::Ready {
+        RuntimeComponentCapabilityState::Unobserved
+    } else {
+        aggregate
+    }
 }
 
 fn tensor_backend_is_native(backend: RuntimeTensorBackend, effective: BackendKind) -> bool {
@@ -1906,14 +1951,14 @@ mod tests {
         for workload in &payload.request.component_workloads {
             let workload = tensor_execution_workload(workload);
             assert_eq!(
-                bound_workloads[workload.component().index()],
+                bound_workloads[workload.key().index()],
                 Some(workload),
                 "materialization must retain the exact declared workload"
             );
         }
         assert_eq!(
             bound_workloads.into_iter().flatten().count(),
-            RuntimeExecutionComponent::ALL.len()
+            payload.request.component_workloads.len()
         );
     }
 
@@ -2012,17 +2057,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v5_payload_is_rejected_at_the_contract_boundary() {
+    fn legacy_v6_payload_is_rejected_at_the_contract_boundary() {
         let mut payload = evaluate_runtime_execution_plan(execution_request(
             probe_for(BackendKind::Cpu),
             AcceleratorFallback::Allow,
         ))
         .expect("current execution plan evaluates");
-        payload.contract_version = "spiraltorch.runtime_execution_plan.v5".to_owned();
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v6".to_owned();
 
         let error = payload
             .validate()
-            .expect_err("v5 and v6 commitments must not share a digest domain");
+            .expect_err("v6 and v7 commitments must not share a digest domain");
         assert!(matches!(
             error,
             RuntimeExecutionPlanError::InvalidPayload {
@@ -2128,7 +2173,7 @@ mod tests {
         );
         assert!(observed.component_routes.iter().all(|route| {
             route.capability_state == RuntimeComponentCapabilityState::Ready
-                && route.workload.is_some()
+                && !route.workloads.is_empty()
         }));
         observed
             .validate_against(observed_request)
@@ -2242,6 +2287,107 @@ mod tests {
         );
     }
 
+    #[test]
+    fn one_runtime_plan_executes_max_forward_and_backward_operations() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+        request.tensor_util_values = None;
+        request.component_workloads = vec![
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+        ];
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("both tensor utility operations are observable");
+        let plan = evaluate_runtime_execution_plan(request)
+            .expect("one plan commits both tensor utility operations");
+        let route = plan
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor utility route");
+
+        assert_eq!(route.workloads.len(), 2);
+        assert_eq!(
+            route.capability_state,
+            RuntimeComponentCapabilityState::Ready
+        );
+        assert!(route.native);
+        assert_eq!(plan.request.tensor_util_values, Some(6));
+
+        let binding = validated_tensor_execution_plan_binding(&plan).expect("tensor binding");
+        let receipts = {
+            let _guard = st_tensor::execution::push_execution_plan_binding(binding);
+            [
+                st_tensor::prepare_tensor_execution(
+                    TensorExecutionWorkload::TensorUtil {
+                        operation: st_tensor::TensorUtilOperation::MaxAxis0,
+                        rows: 3,
+                        cols: 2,
+                    },
+                    "max_axis0",
+                    TensorExecutionBackend::Cpu,
+                )
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt(),
+                st_tensor::prepare_tensor_execution(
+                    TensorExecutionWorkload::TensorUtil {
+                        operation: st_tensor::TensorUtilOperation::MaxAxis0Backward,
+                        rows: 3,
+                        cols: 2,
+                    },
+                    "max_axis0_backward",
+                    TensorExecutionBackend::Cpu,
+                )
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt(),
+            ]
+        };
+        for receipt in receipts {
+            validate_tensor_execution_receipt_against_runtime_plan(&plan, &receipt)
+                .expect("the plan authorizes each operation receipt");
+        }
+    }
+
+    #[test]
+    fn tensor_util_component_route_rejects_mixed_operation_volumes() {
+        let mut request =
+            execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        request.tensor_util_values = None;
+        request.component_workloads = vec![
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+                rows: 4,
+                cols: 2,
+            },
+        ];
+
+        assert!(matches!(
+            evaluate_runtime_execution_plan(request),
+            Err(RuntimeExecutionPlanError::InvalidRequest {
+                field: "component_workloads",
+                ..
+            })
+        ));
+    }
+
     fn representative_component_workloads() -> Vec<RuntimeComponentWorkload> {
         vec![
             RuntimeComponentWorkload::DenseMatmul {
@@ -2266,6 +2412,16 @@ mod tests {
             RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
             RuntimeComponentWorkload::TensorUtil {
                 operation: RuntimeTensorUtilOperation::Scale,
+                rows: 32,
+                cols: 64,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 32,
+                cols: 64,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
                 rows: 32,
                 cols: 64,
             },

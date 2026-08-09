@@ -13,13 +13,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use st_tensor::execution_capability::{
     observe_tensor_execution_capability, TensorExecutionBackend, TensorExecutionCapabilityStatus,
-    TensorExecutionReadyProof, TensorExecutionWorkload, TensorUtilOperation,
+    TensorExecutionReadyProof, TensorExecutionWorkload, TensorExecutionWorkloadKey,
+    TensorUtilOperation,
 };
 use thiserror::Error;
 
 /// Stable contract identifier for Rust-owned component capability observations.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_CONTRACT_VERSION: &str =
-    "spiraltorch.runtime_component_capability_observation.v2";
+    "spiraltorch.runtime_component_capability_observation.v3";
 /// Payload kind for one committed component capability observation.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_KIND: &str =
     "spiraltorch.runtime_component_capability_observation";
@@ -30,9 +31,9 @@ pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_OWNER: &str =
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.request.v2\0";
+    b"spiraltorch.runtime_component_capability_observation.request.v3\0";
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.output.v2\0";
+    b"spiraltorch.runtime_component_capability_observation.output.v3\0";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum RuntimeComponentCapabilityObservationError {
@@ -62,7 +63,7 @@ pub enum RuntimeTensorUtilOperation {
 }
 
 /// One concrete workload whose native implementation can be observed.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(tag = "component", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RuntimeComponentWorkload {
     DenseMatmul {
@@ -307,7 +308,7 @@ impl RuntimeComponentCapabilityObservationRequest {
         if canonical != *self {
             return Err(invalid_observation_request(
                 "request",
-                "must use canonical component ordering and omit nested transport provenance",
+                "must use canonical operation ordering and omit nested transport provenance",
             ));
         }
         Ok(())
@@ -393,7 +394,7 @@ impl RuntimeComponentCapabilityObservationPayload {
         if canonical_capabilities != self.capabilities {
             return Err(invalid_observation_payload(
                 "capabilities",
-                "must use canonical component ordering",
+                "must use canonical operation ordering",
             ));
         }
 
@@ -629,24 +630,23 @@ pub(crate) fn tensor_execution_workload(
 pub(crate) fn canonicalize_component_workloads(
     workloads: &mut [RuntimeComponentWorkload],
 ) -> Result<(), String> {
-    if workloads.len() > RuntimeExecutionComponent::ALL.len() {
+    if workloads.len() > TensorExecutionWorkloadKey::COUNT {
         return Err(format!(
-            "contains {} entries, exceeding the {} canonical components",
+            "contains {} entries, exceeding the {} canonical operation kinds",
             workloads.len(),
-            RuntimeExecutionComponent::ALL.len()
+            TensorExecutionWorkloadKey::COUNT
         ));
     }
     for workload in workloads.iter() {
         workload.validate()?;
     }
-    workloads.sort_by_key(RuntimeComponentWorkload::component);
-    if let Some(duplicate) = workloads
-        .windows(2)
-        .find(|pair| pair[0].component() == pair[1].component())
-    {
+    workloads.sort_by_key(|workload| tensor_execution_workload(workload).key());
+    if let Some(duplicate) = workloads.windows(2).find(|pair| {
+        tensor_execution_workload(&pair[0]).key() == tensor_execution_workload(&pair[1]).key()
+    }) {
         return Err(format!(
-            "contains duplicate '{}' workloads",
-            duplicate[0].component().as_str()
+            "contains duplicate '{}' operation workloads",
+            tensor_execution_workload(&duplicate[0]).key().as_str()
         ));
     }
     Ok(())
@@ -671,16 +671,18 @@ fn canonicalize_component_capabilities(
             .validate()
             .map_err(|message| invalid_observation_payload("capabilities", message))?;
     }
-    capabilities.sort_by_key(RuntimeComponentCapabilityEvidence::component);
-    if let Some(duplicate) = capabilities
-        .windows(2)
-        .find(|pair| pair[0].component() == pair[1].component())
-    {
+    capabilities.sort_by_key(|evidence| tensor_execution_workload(&evidence.workload).key());
+    if let Some(duplicate) = capabilities.windows(2).find(|pair| {
+        tensor_execution_workload(&pair[0].workload).key()
+            == tensor_execution_workload(&pair[1].workload).key()
+    }) {
         return Err(invalid_observation_payload(
             "capabilities",
             format!(
-                "contains duplicate '{}' observations",
-                duplicate[0].component().as_str()
+                "contains duplicate '{}' operation observations",
+                tensor_execution_workload(&duplicate[0].workload)
+                    .key()
+                    .as_str()
             ),
         ));
     }
@@ -905,6 +907,70 @@ mod tests {
                 wire_name
             );
         }
+    }
+
+    #[test]
+    fn observation_commits_multiple_operations_for_one_component() {
+        let mut request = observation_request();
+        request.component_workloads = vec![
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+        ];
+
+        let observation = observe_runtime_component_capabilities(request)
+            .expect("distinct operation workloads share one component observation");
+
+        assert_eq!(observation.capabilities.len(), 2);
+        assert_eq!(
+            observation
+                .request
+                .component_workloads
+                .iter()
+                .map(|workload| tensor_execution_workload(workload).key())
+                .collect::<Vec<_>>(),
+            vec![
+                TensorExecutionWorkloadKey::TensorUtilMaxAxis0,
+                TensorExecutionWorkloadKey::TensorUtilMaxAxis0Backward,
+            ]
+        );
+        assert!(observation
+            .capabilities
+            .iter()
+            .all(|evidence| evidence.status == RuntimeComponentCapabilityStatus::Ready));
+        observation.validate().expect("multi-operation observation");
+    }
+
+    #[test]
+    fn observation_rejects_duplicate_operation_workloads() {
+        let mut request = observation_request();
+        request.component_workloads = vec![
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::MaxAxis0,
+                rows: 4,
+                cols: 2,
+            },
+        ];
+
+        assert!(matches!(
+            observe_runtime_component_capabilities(request),
+            Err(RuntimeComponentCapabilityObservationError::InvalidRequest {
+                field: "component_workloads",
+                ..
+            })
+        ));
     }
 
     #[test]
