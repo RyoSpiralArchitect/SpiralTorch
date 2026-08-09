@@ -96,6 +96,8 @@ remain visible without allowing uncommitted rows into executable selection; the 
 never downgraded to compatibility semantics.
 Malformed probe envelopes are recognized from their stable identity and commitment markers, then
 rejected rather than reclassified as legacy evidence when `kind` or another contract field drifts.
+The probe-only `route_evidence` transport key is also reserved for this validated ingress; external
+compatibility rows provide readiness fields directly instead of wrapping uncommitted evidence.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:

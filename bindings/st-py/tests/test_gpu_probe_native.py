@@ -368,6 +368,18 @@ def test_canonical_probe_contracts_never_downgrade_when_kind_is_damaged(
         st.evaluate_runtime_device_route([canonical])
 
 
+def test_naked_route_evidence_never_enters_compatibility_projection() -> None:
+    st = require_native()
+    canonical = st.validate_runtime_device_probe_contract(
+        st.observe_runtime_device_probe("cpu")
+    )
+    route_evidence = dict(canonical["route_evidence"])
+    route_evidence["runtime_ready"] = False
+
+    with pytest.raises(ValueError, match="kind|probe"):
+        st.evaluate_runtime_device_route([{"route_evidence": route_evidence}])
+
+
 def test_runtime_preflight_applies_required_gates_to_committed_probes() -> None:
     st = require_native()
 

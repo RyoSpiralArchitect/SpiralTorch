@@ -804,14 +804,8 @@ def _runtime_device_route_evidence(
     *,
     default_backend: object = None,
 ) -> dict[str, object]:
-    rust_evidence = row.get("route_evidence")
-    if rust_evidence is not None:
-        if not isinstance(rust_evidence, Mapping):
-            raise TypeError("report route_evidence must be a mapping")
-        return dict(rust_evidence)
-
-    # Compatibility path for external and pre-contract reports. Native
-    # SpiralTorch probes always carry the exact Rust-owned evidence above.
+    # Compatibility path for external and pre-contract reports. The
+    # `route_evidence` key is reserved for full probes and never copied here.
     evidence: dict[str, object] = {
         "requested_backend": _runtime_device_row_backend(row, default=default_backend),
     }
@@ -902,18 +896,7 @@ def _is_runtime_device_probe_envelope(payload: Mapping[str, object]) -> bool:
         return True
     if payload.get("semantic_owner") == "st-core::backend::runtime_probe":
         return True
-
-    commitment_markers = (
-        "contract_version",
-        "semantic_owner",
-        "semantic_backend",
-        "committed",
-        "request",
-        "request_sha256",
-        "output_sha256",
-    )
-    marker_count = sum(marker in payload for marker in commitment_markers)
-    return "route_evidence" in payload and marker_count >= 2
+    return "route_evidence" in payload
 
 
 def resolve_runtime_execution_config(
