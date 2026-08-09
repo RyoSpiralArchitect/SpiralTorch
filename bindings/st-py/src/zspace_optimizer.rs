@@ -3,9 +3,11 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_optimizer::{
-    initialize_zspace_meta_optimizer, restore_zspace_meta_optimizer,
-    transition_zspace_meta_optimizer, zspace_parameter_control_from_value,
+    initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
+    restore_zspace_meta_optimizer, transition_zspace_meta_optimizer,
+    validate_zspace_parameter_trajectory_value, zspace_parameter_control_from_value,
     ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
+    ZSpaceParameterTrajectoryRequest,
 };
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
@@ -79,10 +81,37 @@ fn _zspace_parameter_control(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyRes
     response_to_py(py, &control, "Z-space parameter-control encoding failed")
 }
 
+#[pyfunction]
+fn _zspace_parameter_trajectory(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space parameter-trajectory request")?;
+    let request: ZSpaceParameterTrajectoryRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space parameter-trajectory request", error))?;
+    let report = py
+        .allow_threads(|| plan_zspace_parameter_trajectory(request))
+        .map_err(|error| json_error("Z-space parameter-trajectory planning failed", error))?;
+    response_to_py(py, &report, "Z-space parameter-trajectory encoding failed")
+}
+
+#[pyfunction]
+fn _zspace_parameter_trajectory_validate(
+    py: Python<'_>,
+    report: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let report = request_value(report, "Z-space parameter-trajectory report")?;
+    let report = validate_zspace_parameter_trajectory_value(report)
+        .map_err(|error| json_error("Z-space parameter-trajectory validation failed", error))?;
+    response_to_py(py, &report, "Z-space parameter-trajectory encoding failed")
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_init, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_restore, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_step, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_parameter_control, parent)?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_parameter_trajectory, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_parameter_trajectory_validate,
+        parent
+    )?)?;
     Ok(())
 }

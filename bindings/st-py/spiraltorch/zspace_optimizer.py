@@ -21,6 +21,12 @@ ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
 ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND = "rust"
 ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE = 0.1
 ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE = 1.25
+ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION = (
+    "spiraltorch.zspace_parameter_trajectory.v1"
+)
+ZSPACE_PARAMETER_TRAJECTORY_KIND = "spiraltorch.zspace_parameter_trajectory"
+ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
+ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND = "rust"
 
 __all__ = [
     "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -34,10 +40,16 @@ __all__ = [
     "ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE",
     "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
+    "ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_TRAJECTORY_KIND",
+    "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
+    "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+    "validate_zspace_parameter_trajectory",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
     "zspace_parameter_control",
+    "zspace_parameter_trajectory",
 ]
 
 
@@ -194,6 +206,48 @@ def _validate_parameter_control(contract: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_parameter_trajectory(contract: Mapping[str, Any]) -> None:
+    if (
+        contract.get("kind") != ZSPACE_PARAMETER_TRAJECTORY_KIND
+        or contract.get("contract_version")
+        != ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION
+        or contract.get("semantic_owner") != ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER
+        or contract.get("semantic_backend")
+        != ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND
+        or contract.get("trajectory_validated") is not True
+    ):
+        raise RuntimeError(
+            "native Z-space core returned an untrusted parameter trajectory"
+        )
+    trajectory_id = contract.get("trajectory_id")
+    if (
+        not isinstance(trajectory_id, str)
+        or not trajectory_id.startswith("sha256:")
+        or len(trajectory_id) != 71
+    ):
+        raise RuntimeError(
+            "native Z-space parameter trajectory returned invalid identity"
+        )
+    step_count = contract.get("step_count")
+    group_count = contract.get("parameter_group_count")
+    steps = contract.get("steps")
+    request = contract.get("request")
+    if (
+        isinstance(step_count, bool)
+        or not isinstance(step_count, int)
+        or step_count <= 0
+        or isinstance(group_count, bool)
+        or not isinstance(group_count, int)
+        or group_count <= 0
+        or not isinstance(steps, list)
+        or len(steps) != step_count
+        or not isinstance(request, Mapping)
+    ):
+        raise RuntimeError(
+            "native Z-space parameter trajectory returned invalid dimensions"
+        )
+
+
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
 ) -> dict[str, Any]:
@@ -255,3 +309,50 @@ def zspace_parameter_control(
     result = dict(contract)
     _validate_parameter_control(result)
     return result
+
+
+def _parameter_trajectory_operation(
+    name: str,
+    payload: Mapping[str, object],
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space parameter trajectories require the compiled Rust semantic "
+            f"core; rebuild or reinstall SpiralTorch with {name}"
+        )
+    contract = operation(dict(payload))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError(f"native {name} returned a non-mapping payload")
+    result = dict(contract)
+    _validate_parameter_trajectory(result)
+    return result
+
+
+def zspace_parameter_trajectory(
+    *,
+    raw_learning_rate_scales: list[float] | tuple[float, ...],
+    nominal_learning_rates: list[list[float]] | tuple[tuple[float, ...], ...],
+) -> dict[str, Any]:
+    """Factor schedule shape and integrated LR dose in the canonical Rust core."""
+
+    return _parameter_trajectory_operation(
+        "_zspace_parameter_trajectory",
+        {
+            "raw_learning_rate_scales": list(raw_learning_rate_scales),
+            "nominal_learning_rates": [list(rates) for rates in nominal_learning_rates],
+        },
+    )
+
+
+def validate_zspace_parameter_trajectory(
+    report: Mapping[str, object],
+) -> dict[str, Any]:
+    """Recompute a serialized trajectory in Rust and reject changed fields."""
+
+    return _parameter_trajectory_operation(
+        "_zspace_parameter_trajectory_validate",
+        report,
+    )

@@ -10,17 +10,46 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .zspace_optimizer import (
+    ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION,
+    ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND,
+    ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER,
+    ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION,
+    ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND,
+    ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER,
+)
+
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA = "spiraltorch.hf_zspace_optimizer_control.v1"
 HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA = "spiraltorch.hf_zspace_optimizer_receipt.v1"
-HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v1"
+HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v2"
 HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA = "spiraltorch.hf_zspace_optimizer_trace.v1"
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_matched_ablation.v1"
+HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_factorized_ablation.v1"
 HF_ZSPACE_OPTIMIZER_STATE_FILENAME = "spiraltorch-hf-zspace-optimizer-state.json"
 HF_ZSPACE_OPTIMIZER_TRACE_FILENAME = "spiraltorch-hf-zspace-optimizer-trace.jsonl"
+HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME = (
+    "spiraltorch-hf-zspace-optimizer-trajectory.json"
+)
 HF_ZSPACE_OPTIMIZER_MODES = ("off", "observe", "apply")
+HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS = (
+    "raw",
+    "dose_matched_constant",
+    "dose_normalized",
+)
+_HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v1"
+_HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS = (
+    "trajectory_arm",
+    "trajectory_id",
+    "trajectory_contract",
+    "trajectory_semantic_owner",
+    "trajectory_semantic_backend",
+    "trajectory_required",
+    "actuation_scale_source",
+)
 
 __all__ = [
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_MODES",
     "HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA",
@@ -28,10 +57,14 @@ __all__ = [
     "HF_ZSPACE_OPTIMIZER_STATE_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_TRACE_FILENAME",
     "HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS",
+    "HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME",
     "hf_zspace_optimizer_control_callback",
     "hf_zspace_optimizer_recipe_contract",
     "compare_hf_zspace_optimizer_run_cards",
+    "compare_hf_zspace_optimizer_factorized_run_cards",
     "write_hf_zspace_optimizer_matched_ablation_report",
+    "write_hf_zspace_optimizer_factorized_ablation_report",
 ]
 
 
@@ -157,6 +190,8 @@ def hf_zspace_optimizer_recipe_contract(
     curvature: float = -0.04,
     control_gain: float = 1.0,
     volume_per_step: int = 8,
+    trajectory_arm: str = "raw",
+    trajectory_id: str | None = None,
 ) -> dict[str, object]:
     """Return the path-independent update recipe used by the HF callback."""
 
@@ -174,6 +209,22 @@ def hf_zspace_optimizer_recipe_contract(
         volume_per_step,
         label="volume_per_step",
     )
+    resolved_arm = str(trajectory_arm).strip().lower()
+    if resolved_arm not in HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS:
+        raise ValueError(
+            "trajectory_arm must be one of "
+            + ", ".join(HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS)
+        )
+    if resolved_mode != "apply" and resolved_arm != "raw":
+        raise ValueError("non-raw trajectory arms require apply mode")
+    if trajectory_id is not None and not _is_sha256_id(trajectory_id):
+        raise ValueError("trajectory_id must be a sha256 identity")
+    if resolved_mode != "apply" and trajectory_id is not None:
+        raise ValueError("only apply mode accepts an input parameter trajectory")
+    if resolved_mode == "apply" and resolved_arm != "raw" and trajectory_id is None:
+        raise ValueError(
+            f"apply trajectory arm {resolved_arm!r} requires trajectory_id"
+        )
     return {
         "schema": HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA,
         "mode": resolved_mode,
@@ -183,6 +234,12 @@ def hf_zspace_optimizer_recipe_contract(
         "curvature": resolved_curvature,
         "control_gain": resolved_gain,
         "volume_per_step": resolved_volume_per_step,
+        "trajectory_arm": resolved_arm,
+        "trajectory_id": trajectory_id,
+        "trajectory_contract": ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION,
+        "trajectory_semantic_owner": ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER,
+        "trajectory_semantic_backend": ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND,
+        "trajectory_required": (resolved_mode == "apply" and resolved_arm != "raw"),
         "control_signal": "topos_progress_geometry",
         "feedback_adaptive": False,
         "observation_mapping": "hf_global_step_to_open_topos_depth_and_volume",
@@ -191,16 +248,32 @@ def hf_zspace_optimizer_recipe_contract(
             "st-core::runtime::zspace_optimizer",
             "torch.optim.Optimizer.step",
         ],
-        "parameter_control_contract": "spiraltorch.zspace_parameter_control.v2",
-        "parameter_control_semantic_owner": "st-core::runtime::zspace_optimizer",
-        "parameter_control_semantic_backend": "rust",
+        "parameter_control_contract": ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION,
+        "parameter_control_semantic_owner": ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER,
+        "parameter_control_semantic_backend": ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND,
         "actuation_transport": "temporary_param_group_lr_scale",
+        "actuation_scale_source": (
+            "rust_parameter_control"
+            if resolved_arm == "raw"
+            else f"rust_parameter_trajectory.steps.{resolved_arm}_scale"
+        ),
         "scheduler_isolation": "restore_nominal_lr_before_scheduler_step",
         "first_control_source_step": 0,
         "control_target": "next_optimizer_update",
         "resume_state_required": resolved_mode in {"observe", "apply"},
         "fail_closed": True,
     }
+
+
+def _legacy_optimizer_recipe(
+    recipe: Mapping[str, object],
+) -> dict[str, object] | None:
+    if recipe.get("trajectory_arm") != "raw" or recipe.get("trajectory_id") is not None:
+        return None
+    legacy = dict(recipe)
+    for field in _HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS:
+        legacy.pop(field, None)
+    return legacy
 
 
 def _hookable_optimizer(optimizer: object) -> object:
@@ -253,6 +326,21 @@ def _safe_step(value: object, *, label: str) -> int:
     return _non_negative_int(0 if value is None else value, label=label)
 
 
+def _validated_parameter_trajectory(
+    value: str | Path | Mapping[str, object],
+) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        payload = dict(value)
+    else:
+        path = Path(value)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, Mapping):
+            raise ValueError("Z-space parameter trajectory must contain a mapping")
+        payload = dict(payload)
+    st = importlib.import_module("spiraltorch")
+    return st.validate_zspace_parameter_trajectory(payload)
+
+
 def hf_zspace_optimizer_control_callback(
     *,
     mode: str = "off",
@@ -260,6 +348,9 @@ def hf_zspace_optimizer_control_callback(
     curvature: float = -0.04,
     control_gain: float = 1.0,
     volume_per_step: int = 8,
+    trajectory_arm: str = "raw",
+    trajectory: str | Path | Mapping[str, object] | None = None,
+    trajectory_output_path: str | Path | None = None,
     trace_path: str | Path | None = None,
     reset_trace: bool = True,
     resume_from_checkpoint: str | Path | None = None,
@@ -277,15 +368,29 @@ def hf_zspace_optimizer_control_callback(
             "hf_zspace_optimizer_control_callback requires transformers"
         ) from exc
     base_cls = getattr(transformers, "TrainerCallback", object)
+    resolved_trajectory = (
+        None if trajectory is None else _validated_parameter_trajectory(trajectory)
+    )
+    resolved_trajectory_id = (
+        None
+        if resolved_trajectory is None
+        else str(resolved_trajectory["trajectory_id"])
+    )
     recipe = hf_zspace_optimizer_recipe_contract(
         mode=mode,
         z_dim=z_dim,
         curvature=curvature,
         control_gain=control_gain,
         volume_per_step=volume_per_step,
+        trajectory_arm=trajectory_arm,
+        trajectory_id=resolved_trajectory_id,
     )
     resolved_mode = str(recipe["mode"])
+    resolved_arm = str(recipe["trajectory_arm"])
     resolved_trace = None if trace_path is None else Path(trace_path)
+    resolved_trajectory_output = (
+        None if trajectory_output_path is None else Path(trajectory_output_path)
+    )
     resolved_resume = (
         None if resume_from_checkpoint is None else Path(resume_from_checkpoint)
     )
@@ -294,6 +399,15 @@ def hf_zspace_optimizer_control_callback(
         def __init__(self) -> None:
             self.recipe = dict(recipe)
             self.mode = resolved_mode
+            self.trajectory_arm = resolved_arm
+            self.trajectory_report = (
+                None
+                if resolved_trajectory is None
+                else _json_clone(resolved_trajectory)
+            )
+            self.trajectory_generated = False
+            self.trajectory_path: str | None = None
+            self.trajectory_output_path = resolved_trajectory_output
             self.trace_path = resolved_trace
             self.optimizer: object | None = None
             self.zspace_trainer: object | None = None
@@ -306,6 +420,8 @@ def hf_zspace_optimizer_control_callback(
             self.max_steps: int | None = None
             self.derived_sequence: list[dict[str, object]] = []
             self.consumed_sequence: list[dict[str, object]] = []
+            self.schedule_sequence: list[dict[str, object]] = []
+            self.schedule_prefix_missing_count = 0
             self.applied_update_count = 0
             self.non_identity_update_count = 0
             self.observed_update_count = 0
@@ -362,9 +478,20 @@ def hf_zspace_optimizer_control_callback(
             if not _is_sha256_id(state_id) or state_id != _sha256_id(payload):
                 raise RuntimeError("Z-space optimizer resume-state identity mismatch")
             self.resume_state_id = str(state_id)
-            if payload.get("schema") != HF_ZSPACE_OPTIMIZER_STATE_SCHEMA:
+            state_schema = payload.get("schema")
+            if state_schema not in {
+                HF_ZSPACE_OPTIMIZER_STATE_SCHEMA,
+                _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA,
+            }:
                 raise RuntimeError("unsupported Z-space optimizer resume-state schema")
-            if payload.get("recipe") != self.recipe:
+            stored_recipe = payload.get("recipe")
+            recipe_matches = stored_recipe == self.recipe
+            if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA:
+                recipe_matches = (
+                    recipe_matches
+                    or stored_recipe == _legacy_optimizer_recipe(self.recipe)
+                )
+            if not recipe_matches:
                 raise RuntimeError("Z-space optimizer resume recipe does not match")
             trainer_state = payload.get("zspace_trainer_state")
             if not isinstance(trainer_state, Mapping) or self.zspace_trainer is None:
@@ -383,6 +510,37 @@ def hf_zspace_optimizer_control_callback(
                 payload.get("consumed_sequence"),
                 label="consumed_sequence",
             )
+            schedule_sequence = payload.get("schedule_sequence")
+            if (
+                schedule_sequence is None
+                and state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA
+            ):
+                self.schedule_sequence = []
+                self.schedule_prefix_missing_count = len(self.consumed_sequence)
+            else:
+                self.schedule_sequence = _sequence_rows(
+                    schedule_sequence,
+                    label="schedule_sequence",
+                )
+                self.schedule_prefix_missing_count = (
+                    0
+                    if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA
+                    else _non_negative_int(
+                        payload.get("schedule_prefix_missing_count"),
+                        label="schedule_prefix_missing_count",
+                    )
+                )
+            if len(self.schedule_sequence) + self.schedule_prefix_missing_count != len(
+                self.consumed_sequence
+            ):
+                raise RuntimeError(
+                    "Z-space optimizer resume schedule coverage is inconsistent"
+                )
+            state_input_trajectory_id = payload.get("input_trajectory_id")
+            if state_input_trajectory_id != self.recipe.get("trajectory_id"):
+                raise RuntimeError(
+                    "Z-space optimizer resume trajectory identity does not match"
+                )
             self.applied_update_count = _safe_step(
                 payload.get("applied_update_count"),
                 label="applied_update_count",
@@ -551,6 +709,61 @@ def hf_zspace_optimizer_control_callback(
                 topos_control=_json_clone(report.get("topos_control")),
             )
 
+        def _planned_scale(
+            self,
+            *,
+            target_step: int,
+            raw_scale: float,
+            nominal_rates: Sequence[float],
+        ) -> float:
+            if self.trajectory_report is None:
+                if self.trajectory_arm != "raw":
+                    raise RuntimeError(
+                        "non-raw Z-space actuation has no validated trajectory"
+                    )
+                return raw_scale
+            steps = self.trajectory_report.get("steps")
+            if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+                raise RuntimeError("validated Z-space trajectory has no steps")
+            index = target_step - 1
+            if index < 0 or index >= len(steps):
+                raise RuntimeError(
+                    "Z-space trajectory does not cover the optimizer update"
+                )
+            row = steps[index]
+            if not isinstance(row, Mapping) or row.get("index") != index:
+                raise RuntimeError("Z-space trajectory step index is inconsistent")
+            planned_raw = _finite_float(
+                row.get("raw_learning_rate_scale"),
+                label="trajectory.raw_learning_rate_scale",
+            )
+            if planned_raw != raw_scale:
+                raise RuntimeError(
+                    "live Rust control differs from the calibrated trajectory"
+                )
+            planned_rates = row.get("nominal_learning_rates")
+            if not isinstance(planned_rates, Sequence) or isinstance(
+                planned_rates, (str, bytes)
+            ):
+                raise RuntimeError(
+                    "Z-space trajectory nominal learning rates are malformed"
+                )
+            if len(planned_rates) != len(nominal_rates) or any(
+                _finite_float(planned, label="trajectory.nominal_learning_rate")
+                != float(observed)
+                for planned, observed in zip(planned_rates, nominal_rates)
+            ):
+                raise RuntimeError(
+                    "scheduler nominal learning rates differ from the calibrated "
+                    "trajectory"
+                )
+            field = {
+                "raw": "raw_learning_rate_scale",
+                "dose_matched_constant": "dose_matched_constant_scale",
+                "dose_normalized": "dose_normalized_scale",
+            }[self.trajectory_arm]
+            return _finite_float(row.get(field), label=f"trajectory.{field}")
+
         def _consume_pending(
             self, *, nominal_rates: Sequence[float]
         ) -> dict[str, object]:
@@ -572,17 +785,59 @@ def hf_zspace_optimizer_control_callback(
                 control.get("absolute_learning_rate_scale"),
                 label="absolute_learning_rate_scale",
             )
-            effective_rates = [float(rate) * scale for rate in nominal_rates]
+            planned_scale = self._planned_scale(
+                target_step=target_step,
+                raw_scale=scale,
+                nominal_rates=nominal_rates,
+            )
+            applied_scale = planned_scale if self.mode == "apply" else 1.0
+            effective_rates = [float(rate) * applied_scale for rate in nominal_rates]
             return {
                 "hf_source_step": pending["hf_source_step"],
                 "hf_target_step": target_step,
                 "zspace_source_step": control["source_step"],
                 "absolute_learning_rate_scale": scale,
+                "applied_learning_rate_scale": applied_scale,
+                "trajectory_arm": self.trajectory_arm,
+                "trajectory_id": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("trajectory_id")
+                ),
                 "parameter_control_contract": control["contract_version"],
                 "parameter_control_semantic_owner": control["semantic_owner"],
                 "nominal_learning_rates": list(nominal_rates),
                 "effective_learning_rates": effective_rates,
             }
+
+        def _record_consumed(self, consumed: Mapping[str, object]) -> None:
+            self.consumed_sequence.append(
+                {
+                    key: consumed[key]
+                    for key in (
+                        "hf_source_step",
+                        "hf_target_step",
+                        "zspace_source_step",
+                        "absolute_learning_rate_scale",
+                        "parameter_control_contract",
+                        "parameter_control_semantic_owner",
+                    )
+                }
+            )
+            self.schedule_sequence.append(
+                {
+                    key: _json_clone(consumed[key])
+                    for key in (
+                        "hf_target_step",
+                        "absolute_learning_rate_scale",
+                        "applied_learning_rate_scale",
+                        "trajectory_arm",
+                        "trajectory_id",
+                        "nominal_learning_rates",
+                        "effective_learning_rates",
+                    )
+                }
+            )
 
         def _pre_step_hook(self, optimizer, args, kwargs):  # type: ignore[no-untyped-def]
             if self.active_nominal_rates is not None:
@@ -604,19 +859,7 @@ def hf_zspace_optimizer_control_callback(
             _set_optimizer_learning_rates(optimizer, nominal_rates)
             consumed = self._consume_pending(nominal_rates=nominal_rates)
             target_step = self.active_target_step
-            self.consumed_sequence.append(
-                {
-                    key: consumed[key]
-                    for key in (
-                        "hf_source_step",
-                        "hf_target_step",
-                        "zspace_source_step",
-                        "absolute_learning_rate_scale",
-                        "parameter_control_contract",
-                        "parameter_control_semantic_owner",
-                    )
-                }
-            )
+            self._record_consumed(consumed)
             self.applied_update_count += 1
             if any(
                 not math.isclose(
@@ -687,6 +930,15 @@ def hf_zspace_optimizer_control_callback(
             if self.max_steps is not None and self.max_steps != max_steps:
                 raise RuntimeError("Z-space optimizer resume max_steps does not match")
             self.max_steps = max_steps
+            if self.trajectory_report is not None:
+                planned_steps = _positive_int(
+                    self.trajectory_report.get("step_count"),
+                    label="trajectory.step_count",
+                )
+                if planned_steps != max_steps:
+                    raise RuntimeError(
+                        "Z-space trajectory horizon does not match Trainer max_steps"
+                    )
             if self.resume_state_loaded:
                 if self.resume_hf_step != global_step:
                     raise RuntimeError(
@@ -722,19 +974,7 @@ def hf_zspace_optimizer_control_callback(
                 hookable = _hookable_optimizer(optimizer)
                 nominal_rates = _optimizer_learning_rates(hookable)
                 consumed = self._consume_pending(nominal_rates=nominal_rates)
-                self.consumed_sequence.append(
-                    {
-                        key: consumed[key]
-                        for key in (
-                            "hf_source_step",
-                            "hf_target_step",
-                            "zspace_source_step",
-                            "absolute_learning_rate_scale",
-                            "parameter_control_contract",
-                            "parameter_control_semantic_owner",
-                        )
-                    }
-                )
+                self._record_consumed(consumed)
                 self.observed_update_count += 1
                 self.last_consumed_target_step = int(consumed["hf_target_step"])
                 self.pending = None
@@ -753,6 +993,99 @@ def hf_zspace_optimizer_control_callback(
             self._derive(global_step)
             return control
 
+        def _finalize_trajectory(self, output_dir: str | Path) -> None:
+            if self.max_steps is None:
+                raise RuntimeError("Z-space optimizer horizon is unavailable")
+            realized_steps = len(self.consumed_sequence)
+            if realized_steps > self.max_steps:
+                raise RuntimeError(
+                    "Z-space optimizer consumed beyond the planned horizon"
+                )
+            if len(self.schedule_sequence) + self.schedule_prefix_missing_count != (
+                realized_steps
+            ):
+                raise RuntimeError(
+                    "Z-space optimizer schedule coverage is inconsistent"
+                )
+            if self.schedule_prefix_missing_count > 0:
+                self._trace(
+                    "trajectory_unavailable",
+                    reason="legacy_state_has_no_historical_scheduler_rows",
+                    planned_step_count=self.max_steps,
+                    realized_step_count=realized_steps,
+                    schedule_prefix_missing_count=self.schedule_prefix_missing_count,
+                )
+                return
+            if realized_steps == 0:
+                self._trace(
+                    "trajectory_unavailable",
+                    reason="no_realized_optimizer_updates",
+                    planned_step_count=self.max_steps,
+                    realized_step_count=0,
+                )
+                return
+            st = importlib.import_module("spiraltorch")
+            if self.trajectory_report is None:
+                self.trajectory_report = st.zspace_parameter_trajectory(
+                    raw_learning_rate_scales=[
+                        float(row["absolute_learning_rate_scale"])
+                        for row in self.schedule_sequence
+                    ],
+                    nominal_learning_rates=[
+                        list(row["nominal_learning_rates"])
+                        for row in self.schedule_sequence
+                    ],
+                )
+                self.trajectory_generated = True
+            else:
+                self.trajectory_report = st.validate_zspace_parameter_trajectory(
+                    self.trajectory_report
+                )
+            path = self.trajectory_output_path or (
+                Path(output_dir) / HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME
+            )
+            _write_json(path, self.trajectory_report)
+            self.trajectory_path = str(path)
+            trajectory_steps = _positive_int(
+                self.trajectory_report.get("step_count"),
+                label="trajectory.step_count",
+            )
+            if trajectory_steps != realized_steps:
+                self._trace(
+                    "trajectory_partially_consumed",
+                    trajectory_id=self.trajectory_report.get("trajectory_id"),
+                    trajectory_arm=self.trajectory_arm,
+                    trajectory_path=self.trajectory_path,
+                    planned_step_count=self.max_steps,
+                    realized_step_count=realized_steps,
+                    trajectory_step_count=trajectory_steps,
+                )
+                return
+            self._trace(
+                "trajectory_finalized",
+                trajectory_id=self.trajectory_report.get("trajectory_id"),
+                trajectory_arm=self.trajectory_arm,
+                trajectory_generated=self.trajectory_generated,
+                trajectory_path=self.trajectory_path,
+            )
+
+        def _evidence_blockers(self) -> list[str]:
+            if self.mode == "off" or self.max_steps is None:
+                return []
+            realized_steps = len(self.consumed_sequence)
+            blockers: list[str] = []
+            if realized_steps == 0:
+                blockers.append("no_realized_optimizer_updates")
+            if realized_steps != self.max_steps:
+                blockers.append("trainer_stopped_before_planned_horizon")
+            if self.trajectory_report is not None:
+                trajectory_steps = _receipt_count(
+                    self.trajectory_report.get("step_count")
+                )
+                if trajectory_steps != realized_steps:
+                    blockers.append("input_trajectory_only_partially_consumed")
+            return blockers
+
         def _state_payload(self, hf_global_step: int) -> dict[str, object]:
             if self.zspace_trainer is None or self.max_steps is None:
                 raise RuntimeError("Z-space optimizer state is unavailable")
@@ -769,6 +1102,15 @@ def hf_zspace_optimizer_control_callback(
                 "pending_report": pending.get("report"),
                 "derived_sequence": _json_clone(self.derived_sequence),
                 "consumed_sequence": _json_clone(self.consumed_sequence),
+                "schedule_sequence": _json_clone(self.schedule_sequence),
+                "schedule_prefix_missing_count": self.schedule_prefix_missing_count,
+                "input_trajectory_id": self.recipe.get("trajectory_id"),
+                "trajectory_id": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("trajectory_id")
+                ),
+                "trajectory_path": self.trajectory_path,
                 "applied_update_count": self.applied_update_count,
                 "non_identity_update_count": self.non_identity_update_count,
                 "observed_update_count": self.observed_update_count,
@@ -798,16 +1140,13 @@ def hf_zspace_optimizer_control_callback(
         def on_train_end(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
             global_step = _safe_step(state.global_step, label="global_step")
             if self.mode != "off":
-                if self.mode == "apply" and self.applied_update_count == 0:
-                    raise RuntimeError(
-                        "Z-space apply mode completed without a parameter update"
-                    )
                 if self.mode == "apply" and (
                     self.applied_update_count != self.restored_update_count
                 ):
                     raise RuntimeError(
                         "Z-space optimizer learning rates were not restored"
                     )
+                self._finalize_trajectory(args.output_dir)
                 _write_json(
                     Path(args.output_dir) / HF_ZSPACE_OPTIMIZER_STATE_FILENAME,
                     self._state_payload(global_step),
@@ -824,21 +1163,66 @@ def hf_zspace_optimizer_control_callback(
             self._trace("aborted", failure=self.failure)
 
         def receipt(self) -> dict[str, object]:
-            scales = [
+            raw_scales = [
                 float(row["absolute_learning_rate_scale"])
                 for row in self.consumed_sequence
             ]
+            schedule_evidence_complete = (
+                self.schedule_prefix_missing_count == 0
+                and len(self.schedule_sequence) == len(self.consumed_sequence)
+            )
+            if schedule_evidence_complete:
+                applied_scales = [
+                    float(row["applied_learning_rate_scale"])
+                    for row in self.schedule_sequence
+                ]
+                nominal_sequence = [
+                    {
+                        "hf_target_step": row["hf_target_step"],
+                        "absolute_learning_rate_scale": row[
+                            "absolute_learning_rate_scale"
+                        ],
+                        "nominal_learning_rates": row["nominal_learning_rates"],
+                    }
+                    for row in self.schedule_sequence
+                ]
+                nominal_dose = sum(
+                    sum(
+                        _finite_float(rate, label="nominal_learning_rate")
+                        for rate in row["nominal_learning_rates"]
+                    )
+                    for row in self.schedule_sequence
+                )
+                actuated_dose = sum(
+                    sum(
+                        _finite_float(rate, label="effective_learning_rate")
+                        for rate in row["effective_learning_rates"]
+                    )
+                    for row in self.schedule_sequence
+                )
+                actuated_dose_ratio = (
+                    actuated_dose / nominal_dose if nominal_dose > 0.0 else None
+                )
+                nominal_sequence_id = _sha256_id(nominal_sequence)
+                actuated_sequence_id = _sha256_id(self.schedule_sequence)
+            else:
+                applied_scales = []
+                nominal_dose = None
+                actuated_dose = None
+                actuated_dose_ratio = None
+                nominal_sequence_id = None
+                actuated_sequence_id = None
             if self.failure is not None:
                 status = "blocked"
             elif self.mode == "off":
                 status = "disabled"
             elif not self.started:
                 status = "pending"
-            elif self.mode == "apply" and self.applied_update_count == 0:
-                status = "blocked"
             elif self.mode == "apply" and (
                 self.applied_update_count != self.restored_update_count
             ):
+                status = "blocked"
+            elif self.finished and self._evidence_blockers():
                 status = "blocked"
             elif self.finished:
                 status = "ready"
@@ -849,6 +1233,7 @@ def hf_zspace_optimizer_control_callback(
                 "schema": HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA,
                 "status": status,
                 "mode": self.mode,
+                "trajectory_arm": self.trajectory_arm,
                 "recipe": dict(self.recipe),
                 "model_update_intervened": self.non_identity_update_count > 0,
                 "control_observed": bool(self.consumed_sequence),
@@ -859,10 +1244,116 @@ def hf_zspace_optimizer_control_callback(
                 "non_identity_update_count": self.non_identity_update_count,
                 "restored_update_count": self.restored_update_count,
                 "unused_pending_control": self.pending is not None,
-                "scale_min": min(scales) if scales else None,
-                "scale_max": max(scales) if scales else None,
-                "scale_mean": sum(scales) / len(scales) if scales else None,
+                "planned_update_count": self.max_steps,
+                "realized_update_count": len(self.consumed_sequence),
+                "training_horizon_complete": (
+                    None
+                    if self.max_steps is None
+                    else len(self.consumed_sequence) == self.max_steps
+                ),
+                "trajectory_horizon_complete": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("step_count")
+                    == len(self.consumed_sequence)
+                ),
+                "evidence_blockers": self._evidence_blockers(),
+                "scale_min": min(raw_scales) if raw_scales else None,
+                "scale_max": max(raw_scales) if raw_scales else None,
+                "scale_mean": (
+                    sum(raw_scales) / len(raw_scales) if raw_scales else None
+                ),
+                "applied_scale_min": min(applied_scales) if applied_scales else None,
+                "applied_scale_max": max(applied_scales) if applied_scales else None,
+                "applied_scale_mean": (
+                    sum(applied_scales) / len(applied_scales)
+                    if applied_scales
+                    else None
+                ),
                 "control_sequence_id": _sha256_id(self.consumed_sequence),
+                "nominal_schedule_sequence_id": nominal_sequence_id,
+                "actuated_schedule_sequence_id": actuated_sequence_id,
+                "schedule_evidence_complete": schedule_evidence_complete,
+                "schedule_prefix_missing_count": self.schedule_prefix_missing_count,
+                "nominal_learning_rate_dose": nominal_dose,
+                "actuated_learning_rate_dose": actuated_dose,
+                "actuated_learning_rate_dose_ratio": actuated_dose_ratio,
+                "trajectory_id": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("trajectory_id")
+                ),
+                "trajectory_contract": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("contract_version")
+                ),
+                "trajectory_validated": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("trajectory_validated")
+                ),
+                "trajectory_generated": self.trajectory_generated,
+                "trajectory_path": self.trajectory_path,
+                "trajectory_step_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("step_count")
+                ),
+                "trajectory_identity_relative_tolerance": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("identity_relative_tolerance")
+                ),
+                "trajectory_identity_absolute_tolerance": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("identity_absolute_tolerance")
+                ),
+                "trajectory_raw_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("raw_non_identity_update_count")
+                ),
+                "trajectory_dose_matched_constant_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get(
+                        "dose_matched_constant_non_identity_update_count"
+                    )
+                ),
+                "trajectory_dose_normalized_non_identity_update_count": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get(
+                        "dose_normalized_non_identity_update_count"
+                    )
+                ),
+                "trajectory_nominal_dose": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("nominal_dose")
+                ),
+                "trajectory_raw_dose": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("raw_dose")
+                ),
+                "trajectory_dose_normalized_dose": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("dose_normalized_dose")
+                ),
+                "trajectory_raw_dose_ratio": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("raw_dose_ratio")
+                ),
+                "trajectory_dose_normalized_dose_ratio": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("dose_normalized_dose_ratio")
+                ),
                 "resume_state_loaded": self.resume_state_loaded,
                 "resume_state_path": self.resume_state_path,
                 "resume_state_id": self.resume_state_id,
@@ -880,9 +1371,18 @@ def hf_zspace_optimizer_control_callback(
                 "failure": self.failure,
                 "efficacy_evaluated": False,
                 "evidence_boundary": (
-                    "receipt proves control derivation and optimizer actuation, "
-                    "not learning-quality improvement; this v1 signal is derived "
-                    "from training progress, not gradients or loss feedback"
+                    (
+                        "legacy v1 resume preserved optimizer actuation, but the "
+                        "checkpoint had no historical scheduler rows; trajectory and "
+                        "integrated-dose evidence are unavailable"
+                    )
+                    if not schedule_evidence_complete
+                    else (
+                        "receipt proves control derivation and optimizer actuation, "
+                        "including Rust-owned trajectory and nominal-LR matching, not "
+                        "learning-quality improvement; this progress-derived signal "
+                        "does not use gradients or loss feedback"
+                    )
                 ),
             }
 
@@ -997,6 +1497,9 @@ def _card_ablation_facts(card: Mapping[str, object]) -> dict[str, object]:
     return {
         "source_path": card.get("_comparison_source_path"),
         "mode": receipt.get("mode", recipe.get("mode")),
+        "trajectory_arm": receipt.get(
+            "trajectory_arm", recipe.get("trajectory_arm", "raw")
+        ),
         "receipt": receipt,
         "base_training_recipe_id": base_recipe_id,
         "seed": seed,
@@ -1053,6 +1556,13 @@ def _matched_seed_pair(
         errors.append("observe arm receipt has the wrong mode")
     if apply_receipt.get("mode") != "apply":
         errors.append("apply arm receipt has the wrong mode")
+    if observe.get("trajectory_arm") != "raw":
+        errors.append("two-arm comparator requires a raw observe arm")
+    if apply.get("trajectory_arm") != "raw":
+        errors.append(
+            "two-arm comparator requires raw apply; use the factorized comparator "
+            "for calibrated trajectory arms"
+        )
     observe_applied_count = _receipt_count(observe_receipt.get("applied_update_count"))
     if observe_applied_count != 0:
         errors.append("observe arm changed model-update learning rates")
@@ -1215,9 +1725,7 @@ def compare_hf_zspace_optimizer_run_cards(
     evidence_scope = (
         "multi_seed_matched_ablation"
         if bounded_trend_ready
-        else "single_or_two_seed_diagnostic"
-        if status == "ready"
-        else "non_comparable"
+        else "single_or_two_seed_diagnostic" if status == "ready" else "non_comparable"
     )
     return {
         "schema": HF_ZSPACE_MATCHED_ABLATION_SCHEMA,
@@ -1252,6 +1760,424 @@ def write_hf_zspace_optimizer_matched_ablation_report(
     path: str | Path,
 ) -> str:
     """Write one matched-ablation report as canonical, readable JSON."""
+
+    output = Path(path)
+    _write_json(output, report)
+    return str(output)
+
+
+_FACTORIZED_ARMS = (
+    "observe",
+    "dose_matched_constant",
+    "raw",
+    "dose_normalized",
+)
+_FACTORIZED_CONTRASTS = {
+    "dose_effect": ("dose_matched_constant", "observe"),
+    "shape_effect_at_raw_dose": ("raw", "dose_matched_constant"),
+    "dose_normalized_shape_effect": ("dose_normalized", "observe"),
+    "raw_total_effect": ("raw", "observe"),
+}
+
+
+def _factorized_arm_key(fact: Mapping[str, object]) -> str | None:
+    mode = fact.get("mode")
+    arm = fact.get("trajectory_arm")
+    if mode == "observe" and arm == "raw":
+        return "observe"
+    if mode == "apply" and arm in HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS:
+        return str(arm)
+    return None
+
+
+def _factorized_seed_report(
+    seed: int,
+    arms: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    errors: list[str] = []
+    observe = arms["observe"]
+    receipts = {arm: _mapping(fact.get("receipt")) for arm, fact in arms.items()}
+    for arm in _FACTORIZED_ARMS:
+        receipt = receipts[arm]
+        expected_mode = "observe" if arm == "observe" else "apply"
+        if receipt.get("schema") != HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA:
+            errors.append(f"{arm} receipt schema is unsupported")
+        if receipt.get("status") != "ready":
+            errors.append(f"{arm} receipt is not ready")
+        if receipt.get("mode") != expected_mode:
+            errors.append(f"{arm} receipt has the wrong mode")
+        if receipt.get("trajectory_arm") != ("raw" if arm == "observe" else arm):
+            errors.append(f"{arm} receipt has the wrong trajectory arm")
+        consumed = _receipt_count(receipt.get("consumed_control_count"))
+        steps = _receipt_count(receipt.get("trajectory_step_count"))
+        if consumed is None or consumed <= 0 or steps != consumed:
+            errors.append(f"{arm} receipt has incomplete trajectory coverage")
+        if receipt.get("trajectory_validated") is not True:
+            errors.append(f"{arm} trajectory was not Rust-validated")
+        if not _is_sha256_id(receipt.get("actuated_schedule_sequence_id")):
+            errors.append(f"{arm} actuated schedule identity is invalid")
+        if arm == "observe":
+            if _receipt_count(receipt.get("observed_update_count")) != consumed:
+                errors.append("observe arm did not observe every update")
+            if _receipt_count(receipt.get("applied_update_count")) != 0:
+                errors.append("observe arm changed optimizer learning rates")
+        else:
+            applied = _receipt_count(receipt.get("applied_update_count"))
+            restored = _receipt_count(receipt.get("restored_update_count"))
+            if applied != consumed or restored != applied:
+                errors.append(f"{arm} actuation or restoration count is incomplete")
+
+    trajectory_ids = {receipt.get("trajectory_id") for receipt in receipts.values()}
+    trajectory_id = next(iter(trajectory_ids)) if len(trajectory_ids) == 1 else None
+    if not _is_sha256_id(trajectory_id):
+        errors.append("factorized arms do not share one valid trajectory identity")
+    control_ids = {receipt.get("control_sequence_id") for receipt in receipts.values()}
+    control_id = next(iter(control_ids)) if len(control_ids) == 1 else None
+    if not _is_sha256_id(control_id):
+        errors.append("factorized arms do not share one Rust control sequence")
+    nominal_ids = {
+        receipt.get("nominal_schedule_sequence_id") for receipt in receipts.values()
+    }
+    nominal_id = next(iter(nominal_ids)) if len(nominal_ids) == 1 else None
+    if not _is_sha256_id(nominal_id):
+        errors.append("factorized arms do not share one nominal LR sequence")
+
+    trajectory_fields: dict[str, float] = {}
+    for field in (
+        "trajectory_identity_relative_tolerance",
+        "trajectory_identity_absolute_tolerance",
+        "trajectory_nominal_dose",
+        "trajectory_raw_dose",
+        "trajectory_dose_normalized_dose",
+        "trajectory_raw_dose_ratio",
+        "trajectory_dose_normalized_dose_ratio",
+    ):
+        values = [receipt.get(field) for receipt in receipts.values()]
+        value = values[0] if all(item == values[0] for item in values[1:]) else None
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+        ):
+            errors.append(f"factorized arms do not share a valid {field}")
+        else:
+            trajectory_fields[field] = float(value)
+
+    expected_non_identity_counts: dict[str, int] = {}
+    for arm in _FACTORIZED_ARMS[1:]:
+        field = f"trajectory_{arm}_non_identity_update_count"
+        values = [receipt.get(field) for receipt in receipts.values()]
+        value = values[0] if all(item == values[0] for item in values[1:]) else None
+        count = _receipt_count(value)
+        step_count = _receipt_count(receipts[arm].get("trajectory_step_count"))
+        if count is None or step_count is None or count > step_count:
+            errors.append(f"factorized arms do not share a valid {field}")
+        else:
+            expected_non_identity_counts[arm] = count
+
+    nominal_dose = trajectory_fields.get("trajectory_nominal_dose")
+    raw_dose = trajectory_fields.get("trajectory_raw_dose")
+    normalized_dose = trajectory_fields.get("trajectory_dose_normalized_dose")
+    raw_ratio = trajectory_fields.get("trajectory_raw_dose_ratio")
+    normalized_ratio = trajectory_fields.get("trajectory_dose_normalized_dose_ratio")
+    if normalized_ratio is not None and not math.isclose(
+        normalized_ratio, 1.0, rel_tol=1e-10, abs_tol=0.0
+    ):
+        errors.append("dose-normalized trajectory does not match baseline dose")
+    if (
+        nominal_dose is not None
+        and raw_dose is not None
+        and raw_ratio is not None
+        and not math.isclose(
+            raw_dose / nominal_dose,
+            raw_ratio,
+            rel_tol=1e-10,
+            abs_tol=0.0,
+        )
+    ):
+        errors.append("raw trajectory dose and ratio are inconsistent")
+    if (
+        nominal_dose is not None
+        and normalized_dose is not None
+        and normalized_ratio is not None
+        and not math.isclose(
+            normalized_dose / nominal_dose,
+            normalized_ratio,
+            rel_tol=1e-10,
+            abs_tol=0.0,
+        )
+    ):
+        errors.append("dose-normalized trajectory dose and ratio are inconsistent")
+
+    for arm in _FACTORIZED_ARMS[1:]:
+        receipt = receipts[arm]
+        expected_count = expected_non_identity_counts.get(arm)
+        actual_count = _receipt_count(receipt.get("non_identity_update_count"))
+        if expected_count is not None:
+            if actual_count != expected_count:
+                errors.append(
+                    f"{arm} non-identity update count differs from the Rust trajectory"
+                )
+            if receipt.get("model_update_intervened") is not (expected_count > 0):
+                errors.append(
+                    f"{arm} model-update intervention flag differs from the Rust trajectory"
+                )
+        if arm == "raw" and expected_count == 0:
+            errors.append(f"{arm} produced no non-identity model update")
+
+    for arm, receipt in receipts.items():
+        actual_nominal = receipt.get("nominal_learning_rate_dose")
+        actual_actuated = receipt.get("actuated_learning_rate_dose")
+        actual_ratio = receipt.get("actuated_learning_rate_dose_ratio")
+        actual_values = (actual_nominal, actual_actuated, actual_ratio)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+            for value in actual_values
+        ):
+            errors.append(f"{arm} receipt has invalid measured optimizer dose")
+            continue
+        expected_actuated = {
+            "observe": nominal_dose,
+            "dose_matched_constant": raw_dose,
+            "raw": raw_dose,
+            "dose_normalized": normalized_dose,
+        }[arm]
+        if nominal_dose is None or expected_actuated is None:
+            continue
+        if not math.isclose(
+            float(actual_nominal), nominal_dose, rel_tol=1e-10, abs_tol=0.0
+        ):
+            errors.append(f"{arm} measured nominal dose differs from the trajectory")
+        if not math.isclose(
+            float(actual_actuated),
+            expected_actuated,
+            rel_tol=1e-10,
+            abs_tol=0.0,
+        ):
+            errors.append(
+                f"{arm} measured optimizer dose differs from its trajectory arm"
+            )
+        if not math.isclose(
+            float(actual_ratio),
+            expected_actuated / nominal_dose,
+            rel_tol=1e-10,
+            abs_tol=0.0,
+        ):
+            errors.append(f"{arm} measured optimizer dose ratio is inconsistent")
+
+    base_recipe_ids = {fact.get("base_training_recipe_id") for fact in arms.values()}
+    base_recipe_id = next(iter(base_recipe_ids)) if len(base_recipe_ids) == 1 else None
+    if not _is_sha256_id(base_recipe_id):
+        errors.append("non-intervention training recipes differ")
+
+    reference_identities = _mapping(observe.get("identities"))
+    identity_matches: dict[str, bool] = {}
+    for key in (
+        "training_input",
+        "dataset_materialization",
+        "tokenized_dataset",
+        "model_runtime",
+        "execution",
+    ):
+        reference = reference_identities.get(key)
+        matched = _is_sha256_id(reference) and all(
+            _mapping(fact.get("identities")).get(key) == reference
+            for fact in arms.values()
+        )
+        identity_matches[key] = matched
+        if not matched:
+            errors.append(f"{key} identity is missing or mismatched")
+
+    for arm, fact in arms.items():
+        if fact.get("training_completed") is not True:
+            errors.append(f"{arm} arm did not complete training")
+
+    before_losses = {arm: fact.get("eval_before_loss") for arm, fact in arms.items()}
+    after_losses = {arm: fact.get("eval_after_loss") for arm, fact in arms.items()}
+    if any(not isinstance(value, float) for value in before_losses.values()) or any(
+        not isinstance(value, float) for value in after_losses.values()
+    ):
+        errors.append("factorized before/after eval losses are incomplete")
+        changes: dict[str, float] = {}
+    else:
+        anchor = float(before_losses["observe"])
+        if any(
+            not math.isclose(float(value), anchor, rel_tol=1e-9, abs_tol=1e-9)
+            for value in before_losses.values()
+        ):
+            errors.append("before-train eval anchors differ")
+        changes = {
+            arm: float(after_losses[arm]) - float(before_losses[arm])
+            for arm in _FACTORIZED_ARMS
+        }
+    contrasts = {
+        name: (None if not changes else changes[left] - changes[right])
+        for name, (left, right) in _FACTORIZED_CONTRASTS.items()
+    }
+    match_payload = {
+        "seed": seed,
+        "base_training_recipe_id": base_recipe_id,
+        "identities": reference_identities,
+        "trajectory_id": trajectory_id,
+        "control_sequence_id": control_id,
+        "nominal_schedule_sequence_id": nominal_id,
+    }
+    return {
+        "seed": seed,
+        "status": "ready" if not errors else "blocked",
+        "factorized_match_id": _sha256_id(match_payload),
+        "base_training_recipe_id": base_recipe_id,
+        "trajectory_id": trajectory_id,
+        "control_sequence_id": control_id,
+        "nominal_schedule_sequence_id": nominal_id,
+        "trajectory_non_identity_update_counts": expected_non_identity_counts,
+        "trajectory_identity_tolerances": {
+            "relative": trajectory_fields.get(
+                "trajectory_identity_relative_tolerance"
+            ),
+            "absolute": trajectory_fields.get(
+                "trajectory_identity_absolute_tolerance"
+            ),
+        },
+        "identity_matches": identity_matches,
+        "eval_before_losses": before_losses,
+        "eval_after_losses": after_losses,
+        "eval_loss_changes": changes,
+        "contrasts": contrasts,
+        "lower_is_better": True,
+        "source_paths": {arm: fact.get("source_path") for arm, fact in arms.items()},
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def _contrast_summary(
+    reports: Sequence[Mapping[str, object]],
+    name: str,
+    *,
+    status: str,
+) -> dict[str, object]:
+    values = [
+        float(_mapping(report.get("contrasts"))[name])
+        for report in reports
+        if report.get("status") == "ready"
+        and isinstance(_mapping(report.get("contrasts")).get(name), float)
+    ]
+    bounded = status == "ready" and len(values) >= 3
+    if not values:
+        direction = None
+    elif all(value < 0.0 for value in values):
+        direction = "left_arm_better"
+    elif all(value > 0.0 for value in values):
+        direction = "right_arm_better"
+    elif all(value == 0.0 for value in values):
+        direction = "no_observed_difference"
+    else:
+        direction = "mixed"
+    left, right = _FACTORIZED_CONTRASTS[name]
+    return {
+        "left_arm": left,
+        "right_arm": right,
+        "lower_is_better": True,
+        "values": values,
+        "mean": sum(values) / len(values) if values else None,
+        "left_arm_win_count": sum(value < 0.0 for value in values),
+        "bounded_trend_ready": bounded,
+        "bounded_trend_direction": direction,
+    }
+
+
+def compare_hf_zspace_optimizer_factorized_run_cards(
+    run_cards: Sequence[str | Path | Mapping[str, object]],
+) -> dict[str, object]:
+    """Compare matched baseline, dose, raw-shape, and normalized-shape arms."""
+
+    facts = [_card_ablation_facts(_load_run_card(card)) for card in run_cards]
+    errors: list[str] = []
+    grouped: dict[int, dict[str, dict[str, object]]] = {}
+    for index, fact in enumerate(facts):
+        seed = fact.get("seed")
+        arm = _factorized_arm_key(fact)
+        if not isinstance(seed, int):
+            errors.append(f"run card {index} has no verified training seed")
+            continue
+        if arm is None:
+            errors.append(f"run card {index} is not a factorized optimizer arm")
+            continue
+        seed_arms = grouped.setdefault(seed, {})
+        if arm in seed_arms:
+            errors.append(f"seed {seed} has duplicate {arm} arms")
+            continue
+        seed_arms[arm] = fact
+
+    reports: list[dict[str, object]] = []
+    expected = set(_FACTORIZED_ARMS)
+    for seed, arms in sorted(grouped.items()):
+        if set(arms) != expected:
+            missing = sorted(expected - set(arms))
+            errors.append(f"seed {seed} is missing factorized arms: {missing}")
+            continue
+        reports.append(_factorized_seed_report(seed, arms))
+    blocked = [report for report in reports if report.get("status") != "ready"]
+    status = "ready" if reports and not errors and not blocked else "blocked"
+    report_errors = [
+        f"seed {report['seed']}: {error}"
+        for report in blocked
+        for error in report.get("errors", [])
+    ]
+    all_errors = [*errors, *report_errors]
+    contrast_summaries = {
+        name: _contrast_summary(reports, name, status=status)
+        for name in _FACTORIZED_CONTRASTS
+    }
+    normalized_summary = contrast_summaries["dose_normalized_shape_effect"]
+    bounded_improvement_observed = (
+        normalized_summary["bounded_trend_ready"] is True
+        and normalized_summary["bounded_trend_direction"] == "left_arm_better"
+    )
+    return {
+        "schema": HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA,
+        "status": status,
+        "run_card_count": len(facts),
+        "matched_seed_count": len(reports),
+        "ready_seed_count": len(reports) - len(blocked),
+        "seeds": [report["seed"] for report in reports],
+        "evidence_scope": (
+            "multi_seed_factorized_ablation"
+            if status == "ready" and len(reports) >= 3
+            else (
+                "single_or_two_seed_factorized_diagnostic"
+                if status == "ready"
+                else "non_comparable"
+            )
+        ),
+        "contrasts": contrast_summaries,
+        "bounded_improvement_observed": bounded_improvement_observed,
+        "efficacy_claim_ready": False,
+        "evidence_boundary": (
+            "the four-arm design separates integrated LR dose from schedule shape; "
+            "three directionally consistent matched seeds support a bounded trend, "
+            "not statistical significance or general superiority"
+        ),
+        "efficacy_claim_requirements": (
+            "a prespecified, adequately powered multi-model evaluation with held-out "
+            "quality and stability metrics is not implemented by this comparator"
+        ),
+        "factorized_seeds": reports,
+        "error_count": len(all_errors),
+        "errors": all_errors,
+    }
+
+
+def write_hf_zspace_optimizer_factorized_ablation_report(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    """Write one factorized optimizer-ablation report as canonical JSON."""
 
     output = Path(path)
     _write_json(output, report)
