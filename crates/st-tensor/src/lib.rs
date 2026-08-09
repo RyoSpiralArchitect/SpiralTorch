@@ -12,6 +12,7 @@ pub mod backend;
 pub mod compaction;
 pub mod dlpack;
 pub mod execution;
+pub mod execution_capability;
 mod hardmax;
 mod memory;
 pub mod observability;

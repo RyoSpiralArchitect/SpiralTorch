@@ -14,11 +14,12 @@ use std::cell::RefCell;
 pub use super::execution_plan::{
     evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
     AcceleratorFallback, BackendPolicy, ExecutionConfig, RuntimeComponentCapabilityEvidence,
-    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentResolution,
-    RuntimeComponentRoute, RuntimeComponentRouteClass, RuntimeComponentWorkload,
-    RuntimeExecutionComponent, RuntimeExecutionPlanError, RuntimeExecutionPlanPayload,
-    RuntimeExecutionPlanRequest, RuntimeExecutionPlanStatus, RuntimeTensorBackend,
-    RuntimeTensorBackendPolicy, RuntimeTensorUtilOperation, TensorUtilRoute, TensorUtilRouteStatus,
+    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentReadyProof,
+    RuntimeComponentResolution, RuntimeComponentRoute, RuntimeComponentRouteClass,
+    RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeExecutionPlanError,
+    RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest, RuntimeExecutionPlanStatus,
+    RuntimeTensorBackend, RuntimeTensorBackendPolicy, RuntimeTensorUtilOperation, TensorUtilRoute,
+    TensorUtilRouteStatus,
 };
 
 thread_local! {

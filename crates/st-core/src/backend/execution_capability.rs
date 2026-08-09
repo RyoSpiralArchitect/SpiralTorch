@@ -11,11 +11,15 @@ use super::execution_plan::{
 use super::runtime_probe::{RuntimeDeviceProbeError, RuntimeDeviceProbePayload};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use st_tensor::execution_capability::{
+    observe_tensor_execution_capability, TensorExecutionBackend, TensorExecutionCapabilityStatus,
+    TensorExecutionReadyProof, TensorExecutionWorkload, TensorUtilOperation,
+};
 use thiserror::Error;
 
 /// Stable contract identifier for Rust-owned component capability observations.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_CONTRACT_VERSION: &str =
-    "spiraltorch.runtime_component_capability_observation.v1";
+    "spiraltorch.runtime_component_capability_observation.v2";
 /// Payload kind for one committed component capability observation.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_KIND: &str =
     "spiraltorch.runtime_component_capability_observation";
@@ -26,9 +30,9 @@ pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_OWNER: &str =
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.request.v1\0";
+    b"spiraltorch.runtime_component_capability_observation.request.v2\0";
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.output.v1\0";
+    b"spiraltorch.runtime_component_capability_observation.output.v2\0";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum RuntimeComponentCapabilityObservationError {
@@ -208,6 +212,16 @@ pub enum RuntimeComponentCapabilityStatus {
     Unsupported,
 }
 
+/// Proof required before a component capability can be reported as ready.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeComponentReadyProof {
+    /// A compiled host implementation with a validated complete shape contract.
+    StaticHostContract,
+    /// Exact accelerator preflight plus an operation-specific dispatch/readback sentinel.
+    RuntimeDispatchSentinel,
+}
+
 impl RuntimeComponentCapabilityStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -230,6 +244,7 @@ pub struct RuntimeComponentCapabilityEvidence {
     pub workload: RuntimeComponentWorkload,
     pub backend: RuntimeTensorBackend,
     pub status: RuntimeComponentCapabilityStatus,
+    pub ready_proof: Option<RuntimeComponentReadyProof>,
 }
 
 impl RuntimeComponentCapabilityEvidence {
@@ -238,7 +253,31 @@ impl RuntimeComponentCapabilityEvidence {
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
-        self.workload.validate()
+        self.workload.validate()?;
+        match (self.status, self.ready_proof, self.backend) {
+            (
+                RuntimeComponentCapabilityStatus::Ready,
+                Some(RuntimeComponentReadyProof::StaticHostContract),
+                RuntimeTensorBackend::Cpu
+                | RuntimeTensorBackend::CpuSimd
+                | RuntimeTensorBackend::Naive
+                | RuntimeTensorBackend::Faer,
+            )
+            | (
+                RuntimeComponentCapabilityStatus::Ready,
+                Some(RuntimeComponentReadyProof::RuntimeDispatchSentinel),
+                RuntimeTensorBackend::Wgpu | RuntimeTensorBackend::Hip,
+            ) => Ok(()),
+            (RuntimeComponentCapabilityStatus::Ready, None, _) => {
+                Err("ready capability is missing its required proof".to_owned())
+            }
+            (RuntimeComponentCapabilityStatus::Ready, Some(proof), backend) => Err(format!(
+                "ready proof '{proof:?}' is invalid for backend '{}'",
+                backend.as_str()
+            )),
+            (_, None, _) => Ok(()),
+            (_, Some(_), _) => Err("non-ready capability must not carry a ready proof".to_owned()),
+        }
     }
 }
 
@@ -482,19 +521,100 @@ pub(crate) fn observe_component_capability(
     backend: RuntimeTensorBackend,
     workload: RuntimeComponentWorkload,
 ) -> RuntimeComponentCapabilityEvidence {
-    let status = match backend {
-        RuntimeTensorBackend::Cpu | RuntimeTensorBackend::CpuSimd | RuntimeTensorBackend::Naive => {
-            observe_builtin_host_capability(&workload)
+    let tensor_capability = observe_tensor_execution_capability(
+        tensor_execution_backend(backend),
+        tensor_execution_workload(&workload),
+    );
+    let status = match tensor_capability.status {
+        TensorExecutionCapabilityStatus::Ready => RuntimeComponentCapabilityStatus::Ready,
+        TensorExecutionCapabilityStatus::Unavailable => {
+            RuntimeComponentCapabilityStatus::Unavailable
         }
-        RuntimeTensorBackend::Faer => observe_faer_capability(&workload),
-        RuntimeTensorBackend::Wgpu => observe_wgpu_capability(&workload),
-        RuntimeTensorBackend::Hip => observe_hip_capability(&workload),
-        RuntimeTensorBackend::Auto => RuntimeComponentCapabilityStatus::Unsupported,
+        TensorExecutionCapabilityStatus::NotBuilt => RuntimeComponentCapabilityStatus::NotBuilt,
+        TensorExecutionCapabilityStatus::Unsupported => {
+            RuntimeComponentCapabilityStatus::Unsupported
+        }
     };
+    let ready_proof = tensor_capability.ready_proof.map(|proof| match proof {
+        TensorExecutionReadyProof::StaticHostContract => {
+            RuntimeComponentReadyProof::StaticHostContract
+        }
+        TensorExecutionReadyProof::RuntimeDispatchSentinel => {
+            RuntimeComponentReadyProof::RuntimeDispatchSentinel
+        }
+    });
     RuntimeComponentCapabilityEvidence {
         workload,
         backend,
         status,
+        ready_proof,
+    }
+}
+
+fn tensor_execution_backend(backend: RuntimeTensorBackend) -> TensorExecutionBackend {
+    match backend {
+        RuntimeTensorBackend::Auto => TensorExecutionBackend::Auto,
+        RuntimeTensorBackend::Cpu => TensorExecutionBackend::Cpu,
+        RuntimeTensorBackend::Faer => TensorExecutionBackend::Faer,
+        RuntimeTensorBackend::CpuSimd => TensorExecutionBackend::CpuSimd,
+        RuntimeTensorBackend::Naive => TensorExecutionBackend::Naive,
+        RuntimeTensorBackend::Wgpu => TensorExecutionBackend::Wgpu,
+        RuntimeTensorBackend::Hip => TensorExecutionBackend::Hip,
+    }
+}
+
+fn tensor_execution_workload(workload: &RuntimeComponentWorkload) -> TensorExecutionWorkload {
+    match workload {
+        RuntimeComponentWorkload::DenseMatmul { rows, inner, cols } => {
+            TensorExecutionWorkload::DenseMatmul {
+                rows: *rows,
+                inner: *inner,
+                cols: *cols,
+            }
+        }
+        RuntimeComponentWorkload::PrepackedMatmul {
+            rows,
+            inner,
+            cols,
+            bias,
+        } => TensorExecutionWorkload::PrepackedMatmul {
+            rows: *rows,
+            inner: *inner,
+            cols: *cols,
+            bias: *bias,
+        },
+        RuntimeComponentWorkload::LayerNorm { rows, cols } => TensorExecutionWorkload::LayerNorm {
+            rows: *rows,
+            cols: *cols,
+        },
+        RuntimeComponentWorkload::Attention {
+            contexts,
+            sequence,
+            head_dim,
+            z_bias,
+            attn_bias,
+        } => TensorExecutionWorkload::Attention {
+            contexts: *contexts,
+            sequence: *sequence,
+            head_dim: *head_dim,
+            z_bias: *z_bias,
+            attn_bias: *attn_bias,
+        },
+        RuntimeComponentWorkload::Softmax { rows, cols } => TensorExecutionWorkload::Softmax {
+            rows: *rows,
+            cols: *cols,
+        },
+        RuntimeComponentWorkload::TensorUtil {
+            operation,
+            rows,
+            cols,
+        } => TensorExecutionWorkload::TensorUtil {
+            operation: match operation {
+                RuntimeTensorUtilOperation::Scale => TensorUtilOperation::Scale,
+            },
+            rows: *rows,
+            cols: *cols,
+        },
     }
 }
 
@@ -646,199 +766,12 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn observe_builtin_host_capability(
-    workload: &RuntimeComponentWorkload,
-) -> RuntimeComponentCapabilityStatus {
-    if workload_fits_target(workload) {
-        RuntimeComponentCapabilityStatus::Ready
-    } else {
-        RuntimeComponentCapabilityStatus::Unavailable
-    }
-}
-
-fn observe_faer_capability(
-    workload: &RuntimeComponentWorkload,
-) -> RuntimeComponentCapabilityStatus {
-    if !st_tensor::faer_dense::is_available() {
-        return RuntimeComponentCapabilityStatus::NotBuilt;
-    }
-    match workload {
-        RuntimeComponentWorkload::DenseMatmul { .. }
-        | RuntimeComponentWorkload::PrepackedMatmul { .. }
-            if workload_fits_target(workload) =>
-        {
-            RuntimeComponentCapabilityStatus::Ready
-        }
-        RuntimeComponentWorkload::DenseMatmul { .. }
-        | RuntimeComponentWorkload::PrepackedMatmul { .. } => {
-            RuntimeComponentCapabilityStatus::Unavailable
-        }
-        _ => RuntimeComponentCapabilityStatus::Unsupported,
-    }
-}
-
-fn workload_fits_target(workload: &RuntimeComponentWorkload) -> bool {
-    match workload {
-        RuntimeComponentWorkload::DenseMatmul { rows, inner, cols } => {
-            host_f32_buffer_fits(&[*rows, *inner])
-                && host_f32_buffer_fits(&[*inner, *cols])
-                && host_f32_buffer_fits(&[*rows, *cols])
-        }
-        RuntimeComponentWorkload::PrepackedMatmul {
-            rows,
-            inner,
-            cols,
-            bias,
-        } => {
-            host_f32_buffer_fits(&[*rows, *inner])
-                && host_f32_buffer_fits(&[*inner, *cols])
-                && host_f32_buffer_fits(&[*rows, *cols])
-                && (!*bias || host_f32_buffer_fits(&[*cols]))
-        }
-        RuntimeComponentWorkload::LayerNorm { rows, cols }
-        | RuntimeComponentWorkload::Softmax { rows, cols }
-        | RuntimeComponentWorkload::TensorUtil { rows, cols, .. } => {
-            host_f32_buffer_fits(&[*rows, *cols])
-        }
-        RuntimeComponentWorkload::Attention {
-            contexts,
-            sequence,
-            head_dim,
-            z_bias,
-            attn_bias,
-        } => {
-            host_f32_buffer_fits(&[*contexts, *sequence, *head_dim])
-                && (!*z_bias || host_f32_buffer_fits(&[*contexts, *sequence]))
-                && (!*attn_bias || host_f32_buffer_fits(&[*contexts, *sequence, *sequence]))
-        }
-    }
-}
-
-fn host_f32_buffer_fits(factors: &[u64]) -> bool {
-    factors
-        .iter()
-        .try_fold(1_usize, |volume, factor| {
-            let factor = usize::try_from(*factor).ok()?;
-            volume.checked_mul(factor)
-        })
-        .and_then(|values| values.checked_mul(std::mem::size_of::<f32>()))
-        .is_some_and(|bytes| bytes <= isize::MAX as usize)
-}
-
-#[cfg(feature = "wgpu")]
-fn observe_wgpu_capability(
-    workload: &RuntimeComponentWorkload,
-) -> RuntimeComponentCapabilityStatus {
-    use RuntimeComponentCapabilityStatus::{Ready, Unavailable};
-
-    let supported = match workload {
-        RuntimeComponentWorkload::DenseMatmul { rows, inner, cols } => usize3(*rows, *inner, *cols)
-            .is_some_and(|(rows, inner, cols)| {
-                st_tensor::wgpu_dense::supports_matmul(rows, inner, cols)
-            }),
-        RuntimeComponentWorkload::PrepackedMatmul {
-            rows,
-            inner,
-            cols,
-            bias,
-        } => usize3(*rows, *inner, *cols).is_some_and(|(rows, inner, cols)| {
-            st_tensor::wgpu_dense::supports_prepacked_matmul(rows, inner, cols, *bias)
-        }),
-        RuntimeComponentWorkload::LayerNorm { rows, cols } => dimensions2(*rows, *cols)
-            .is_some_and(|(rows, cols)| st_tensor::wgpu_dense::supports_layer_norm(rows, cols)),
-        RuntimeComponentWorkload::Attention {
-            contexts,
-            sequence,
-            head_dim,
-            z_bias,
-            attn_bias,
-        } => dimensions3(*contexts, *sequence, *head_dim).is_some_and(
-            |(contexts, sequence, head_dim)| {
-                st_tensor::wgpu_dense::supports_fused_attention_workload(
-                    contexts, sequence, head_dim, *z_bias, *attn_bias,
-                )
-            },
-        ),
-        RuntimeComponentWorkload::Softmax { rows, cols } => dimensions2(*rows, *cols)
-            .is_some_and(|(rows, cols)| st_tensor::wgpu_dense::supports_row_softmax(rows, cols)),
-        RuntimeComponentWorkload::TensorUtil {
-            operation,
-            rows,
-            cols,
-        } => dimensions2(*rows, *cols).is_some_and(|(rows, cols)| match operation {
-            RuntimeTensorUtilOperation::Scale => {
-                st_tensor::wgpu_dense::supports_tensor_util_scale(rows, cols)
-            }
-        }),
-    };
-    if supported {
-        Ready
-    } else {
-        Unavailable
-    }
-}
-
-#[cfg(not(feature = "wgpu"))]
-fn observe_wgpu_capability(
-    _workload: &RuntimeComponentWorkload,
-) -> RuntimeComponentCapabilityStatus {
-    RuntimeComponentCapabilityStatus::NotBuilt
-}
-
-#[cfg(feature = "hip-real")]
-fn observe_hip_capability(workload: &RuntimeComponentWorkload) -> RuntimeComponentCapabilityStatus {
-    match workload {
-        RuntimeComponentWorkload::DenseMatmul { rows, inner, cols }
-            if usize3(*rows, *inner, *cols).is_some_and(|(rows, inner, cols)| {
-                st_tensor::backend::hip_dense::supports_matmul(rows, inner, cols)
-            }) =>
-        {
-            RuntimeComponentCapabilityStatus::Ready
-        }
-        RuntimeComponentWorkload::DenseMatmul { .. } => {
-            RuntimeComponentCapabilityStatus::Unavailable
-        }
-        _ => RuntimeComponentCapabilityStatus::Unsupported,
-    }
-}
-
-#[cfg(not(feature = "hip-real"))]
-fn observe_hip_capability(
-    _workload: &RuntimeComponentWorkload,
-) -> RuntimeComponentCapabilityStatus {
-    RuntimeComponentCapabilityStatus::NotBuilt
-}
-
-#[cfg(feature = "wgpu")]
-fn dimensions2(first: u64, second: u64) -> Option<(usize, usize)> {
-    let first: usize = first.try_into().ok()?;
-    let second: usize = second.try_into().ok()?;
-    first.checked_mul(second)?;
-    Some((first, second))
-}
-
-#[cfg(feature = "wgpu")]
-fn dimensions3(first: u64, second: u64, third: u64) -> Option<(usize, usize, usize)> {
-    let dimensions = usize3(first, second, third)?;
-    dimensions
-        .0
-        .checked_mul(dimensions.1)?
-        .checked_mul(dimensions.2)?;
-    Some(dimensions)
-}
-
-#[cfg(any(feature = "wgpu", feature = "hip-real"))]
-fn usize3(first: u64, second: u64, third: u64) -> Option<(usize, usize, usize)> {
-    let first: usize = first.try_into().ok()?;
-    let second: usize = second.try_into().ok()?;
-    let third: usize = third.try_into().ok()?;
-    Some((first, second, third))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::device_caps::{BackendKind, DeviceCaps};
+    #[cfg(feature = "wgpu")]
+    use crate::backend::runtime_probe::resolve_backend;
     use crate::backend::runtime_probe::{evaluate_runtime_device_probe, RuntimeDeviceProbeRequest};
 
     fn cpu_probe() -> RuntimeDeviceProbePayload {
@@ -907,6 +840,10 @@ mod tests {
         assert_eq!(evidence.workload, workload);
         assert_eq!(evidence.backend, RuntimeTensorBackend::Faer);
         assert_eq!(evidence.status, RuntimeComponentCapabilityStatus::Ready);
+        assert_eq!(
+            evidence.ready_proof,
+            Some(RuntimeComponentReadyProof::StaticHostContract)
+        );
     }
 
     #[test]
@@ -915,11 +852,31 @@ mod tests {
         let workload = RuntimeComponentWorkload::Softmax { rows: 1, cols };
 
         assert!(workload.validate().is_ok());
-        assert!(!workload_fits_target(&workload));
+        let evidence = observe_component_capability(RuntimeTensorBackend::Cpu, workload);
         assert_eq!(
-            observe_component_capability(RuntimeTensorBackend::Cpu, workload).status,
+            evidence.status,
             RuntimeComponentCapabilityStatus::Unavailable
         );
+        assert_eq!(evidence.ready_proof, None);
+    }
+
+    #[test]
+    fn incompatible_host_backend_cannot_report_ready() {
+        let workload = RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 };
+
+        for backend in [
+            RuntimeTensorBackend::CpuSimd,
+            RuntimeTensorBackend::Naive,
+            RuntimeTensorBackend::Faer,
+            RuntimeTensorBackend::Hip,
+        ] {
+            let evidence = observe_component_capability(backend, workload.clone());
+            assert_eq!(
+                evidence.status,
+                RuntimeComponentCapabilityStatus::Unsupported
+            );
+            assert_eq!(evidence.ready_proof, None);
+        }
     }
 
     #[test]
@@ -960,6 +917,9 @@ mod tests {
             .capabilities
             .iter()
             .all(|evidence| evidence.status == RuntimeComponentCapabilityStatus::Ready));
+        assert!(payload.capabilities.iter().all(|evidence| {
+            evidence.ready_proof == Some(RuntimeComponentReadyProof::StaticHostContract)
+        }));
     }
 
     #[test]
@@ -987,7 +947,18 @@ mod tests {
         assert!(matches!(
             status_tampered.validate(),
             Err(RuntimeComponentCapabilityObservationError::InvalidPayload {
-                field: "output_sha256",
+                field: "capabilities",
+                ..
+            })
+        ));
+
+        let mut proof_tampered = payload.clone();
+        proof_tampered.capabilities[0].ready_proof =
+            Some(RuntimeComponentReadyProof::RuntimeDispatchSentinel);
+        assert!(matches!(
+            proof_tampered.validate(),
+            Err(RuntimeComponentCapabilityObservationError::InvalidPayload {
+                field: "capabilities",
                 ..
             })
         ));
@@ -1017,5 +988,72 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn live_wgpu_observation_commits_dispatch_proofs() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS")
+            .ok()
+            .as_deref()
+            != Some("1")
+        {
+            eprintln!(
+                "skipping live WGPU observation test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1"
+            );
+            return;
+        }
+
+        let resolution = resolve_backend(BackendKind::Wgpu);
+        assert_eq!(resolution.effective_backend, BackendKind::Wgpu);
+        let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: resolution.reported_backend,
+            caps: DeviceCaps::wgpu(32, true, 256),
+            mps_probe: resolution.mps_probe,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("live WGPU probe");
+        let request = RuntimeComponentCapabilityObservationRequest {
+            runtime_probe,
+            policy: crate::backend::execution_plan::runtime_tensor_policy_for(BackendKind::Wgpu),
+            component_workloads: vec![
+                RuntimeComponentWorkload::DenseMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::PrepackedMatmul {
+                    rows: 2,
+                    inner: 3,
+                    cols: 4,
+                    bias: true,
+                },
+                RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
+                RuntimeComponentWorkload::Attention {
+                    contexts: 1,
+                    sequence: 2,
+                    head_dim: 4,
+                    z_bias: true,
+                    attn_bias: true,
+                },
+                RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::Scale,
+                    rows: 2,
+                    cols: 4,
+                },
+            ],
+        };
+
+        let observation =
+            observe_runtime_component_capabilities(request).expect("WGPU observation");
+        observation.validate().expect("committed WGPU observation");
+        assert!(observation.capabilities.iter().all(|evidence| {
+            evidence.status == RuntimeComponentCapabilityStatus::Ready
+                && evidence.ready_proof == Some(RuntimeComponentReadyProof::RuntimeDispatchSentinel)
+        }));
     }
 }
