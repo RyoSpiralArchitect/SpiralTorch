@@ -355,6 +355,44 @@ def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
     assert fields["required_runtime_device_ready_backends_passed"] is True
 
 
+def test_runtime_preflight_custom_collectors_preserve_committed_probe_ingress() -> None:
+    st = require_native()
+    probe = st.observe_runtime_device_probe("cpu")
+    tampered_transport = json.loads(json.dumps(probe))
+    tampered_transport["route_evidence"]["runtime_ready"] = False
+
+    def _custom_collector(_backends: object, **_kwargs: object):
+        return {
+            "reports": [
+                tampered_transport,
+                {
+                    "backend": "mps",
+                    "requested_backend": "mps",
+                    "runtime_ready": False,
+                    "runtime_status": "error",
+                    "error": "diagnostic-only custom collector failure",
+                },
+            ]
+        }
+
+    fields = st.runtime_device_report_fields(
+        {
+            "runtime_device_backends": ["cpu", "mps"],
+            "required_runtime_device_ready_backends": ["cpu", "mps"],
+        },
+        describe_runtime_devices=_custom_collector,
+    )
+    contract = json.loads(fields["runtime_device_route_contract_json"])
+    reports = json.loads(fields["runtime_device_reports_json"])
+
+    assert contract["evidence"] == [probe["contract"]["route_evidence"]]
+    assert contract["ready_backends"] == ["cpu"]
+    assert contract["required_ready_backends_passed"] is False
+    assert contract["runtime_missing_ready_backends"] == ["mps"]
+    assert reports[0]["route_evidence"]["runtime_ready"] is False
+    assert reports[1]["error"] == "diagnostic-only custom collector failure"
+
+
 def test_runtime_device_route_distinguishes_native_and_surrogate_readiness() -> None:
     st = require_native()
 

@@ -672,6 +672,7 @@ from .runtime_imports import (
     required_runtime_import_presets_from_source,
     required_runtime_imports_from_args,
     required_runtime_imports_from_source,
+    _runtime_device_route_contract_for_reports,
     evaluate_runtime_execution_plan,
     resolve_runtime_execution_config,
     require_executable_runtime_execution_plan,
@@ -8659,26 +8660,12 @@ def describe_runtime_devices(
             report.setdefault("backend", str(report.get("effective_backend", backend)))
 
         reports.append(report)
-    committed_probe_reports = []
-    for report in reports:
-        if "contract" in report or report.get("kind") == (
-            "spiraltorch.runtime_device_probe"
-        ):
-            committed_probe_reports.append(report)
-    if committed_probe_reports:
-        contract = evaluate_runtime_device_route_from_probes(
-            committed_probe_reports,
-            requested_backends=backend_labels,
-            required_available_backends=required_available_labels,
-            required_ready_backends=required_ready_labels,
-        )
-    else:
-        contract = evaluate_runtime_device_route(
-            reports,
-            requested_backends=backend_labels,
-            required_available_backends=required_available_labels,
-            required_ready_backends=required_ready_labels,
-        )
+    contract = _runtime_device_route_contract_for_reports(
+        reports,
+        requested_backends=backend_labels,
+        required_available_backends=required_available_labels,
+        required_ready_backends=required_ready_labels,
+    )
     contract["reports"] = reports
     return contract
 

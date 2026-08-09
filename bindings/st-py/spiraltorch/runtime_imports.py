@@ -779,7 +779,7 @@ def _default_describe_runtime_devices():
                     "error": str(exc),
                 }
             rows.append(row)
-        contract = evaluate_runtime_device_route(
+        contract = _runtime_device_route_contract_for_reports(
             rows,
             requested_backends=backend_labels,
             required_available_backends=required_available_labels,
@@ -1273,6 +1273,34 @@ def evaluate_runtime_device_route_from_probes(
     return _require_trusted_runtime_device_route_contract(payload)
 
 
+def _runtime_device_route_contract_for_reports(
+    reports: list[Mapping[str, object]],
+    *,
+    requested_backends: object = None,
+    required_available_backends: object = None,
+    required_ready_backends: object = None,
+) -> dict[str, object]:
+    committed_probes = [
+        report
+        for report in reports
+        if "contract" in report
+        or report.get("kind") == "spiraltorch.runtime_device_probe"
+    ]
+    if committed_probes:
+        return evaluate_runtime_device_route_from_probes(
+            committed_probes,
+            requested_backends=requested_backends,
+            required_available_backends=required_available_backends,
+            required_ready_backends=required_ready_backends,
+        )
+    return evaluate_runtime_device_route(
+        reports,
+        requested_backends=requested_backends,
+        required_available_backends=required_available_backends,
+        required_ready_backends=required_ready_backends,
+    )
+
+
 def runtime_device_report_fields(
     source: object,
     *,
@@ -1365,7 +1393,7 @@ def runtime_device_report_fields(
         else:
             reports = []
     if contract is None:
-        contract = evaluate_runtime_device_route(
+        contract = _runtime_device_route_contract_for_reports(
             reports,
             requested_backends=backends,
             required_available_backends=required,
