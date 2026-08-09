@@ -672,7 +672,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v5"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v6"
     assert plan["runtime_route"]["contract_version"] == "spiraltorch.runtime_device_route.v5"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
@@ -699,6 +699,10 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     ]
     observation = plan["request"]["component_capability_observation"]
     assert observation["kind"] == "spiraltorch.runtime_component_capability_observation"
+    assert (
+        observation["contract_version"]
+        == "spiraltorch.runtime_component_capability_observation.v2"
+    )
     assert observation["semantic_owner"] == "st-core::backend::execution_capability"
     assert observation["committed"] is True
     assert observation["request"]["policy"] == plan["policy"]
@@ -708,6 +712,10 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         evidence["status"]
         for evidence in observation["capabilities"]
     ] == ["ready"] * 6
+    assert [
+        evidence["ready_proof"]
+        for evidence in observation["capabilities"]
+    ] == ["static_host_contract"] * 6
     assert [
         route["capability_state"]
         for route in plan["component_routes"]
@@ -752,15 +760,76 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
             request=tampered_observation,
         )
 
+    tampered_proof = json.loads(json.dumps(plan["request"]))
+    tampered_proof["component_capability_observation"]["capabilities"][0][
+        "ready_proof"
+    ] = "runtime_dispatch_sentinel"
+    with pytest.raises(ValueError, match="runtime execution-plan replay failed"):
+        st.validate_runtime_execution_plan_contract(plan, request=tampered_proof)
+
     tampered = json.loads(json.dumps(plan))
     tampered["component_routes"][0]["selected_backend"] = "auto"
     with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
         st.validate_runtime_execution_plan_contract(tampered)
 
     legacy = json.loads(json.dumps(plan))
-    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v4"
+    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v5"
     with pytest.raises(ValueError, match="contract_version"):
         st.validate_runtime_execution_plan_contract(legacy)
+
+
+def test_python_transports_wgpu_dispatch_proofs_from_rust() -> None:
+    st = require_native()
+    require_wgpu_runtime(st)
+
+    plan = st.evaluate_runtime_execution_plan(
+        st.describe_device("wgpu"),
+        accelerator_fallback="forbid",
+        component_workloads=[
+            {
+                "component": "dense_matmul",
+                "rows": 2,
+                "inner": 3,
+                "cols": 4,
+            },
+            {
+                "component": "prepacked_matmul",
+                "rows": 2,
+                "inner": 3,
+                "cols": 4,
+                "bias": True,
+            },
+            {"component": "layer_norm", "rows": 2, "cols": 4},
+            {
+                "component": "attention",
+                "contexts": 1,
+                "sequence": 2,
+                "head_dim": 4,
+                "z_bias": True,
+                "attn_bias": True,
+            },
+            {"component": "softmax", "rows": 2, "cols": 8},
+            {
+                "component": "tensor_util",
+                "operation": "scale",
+                "rows": 32,
+                "cols": 64,
+            },
+        ],
+    )
+
+    observation = plan["request"]["component_capability_observation"]
+    assert plan["execution_allowed"] is True
+    assert [
+        evidence["backend"] for evidence in observation["capabilities"]
+    ] == ["wgpu"] * 6
+    assert [
+        evidence["status"] for evidence in observation["capabilities"]
+    ] == ["ready"] * 6
+    assert [
+        evidence["ready_proof"] for evidence in observation["capabilities"]
+    ] == ["runtime_dispatch_sentinel"] * 6
+    assert st.validate_runtime_execution_plan_contract(plan) == plan
 
 
 def test_runtime_execution_config_defaults_are_captured_by_rust(

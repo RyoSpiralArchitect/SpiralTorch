@@ -180,8 +180,10 @@ disconnected.
   evidence. Persisted v1 requests remain available for validation and replay.
   Workload-specific kernel readiness follows the same boundary:
   `evaluate_runtime_execution_plan(..., component_workloads=...)` embeds a committed
-  Rust `runtime_component_capability_observation` contract, and Python never supplies
-  or reconstructs a naked `Ready` capability list.
+  Rust `runtime_component_capability_observation` contract. Its `ready_proof` is
+  produced by `st-tensor` as either a static host contract or an accelerator
+  dispatch/readback sentinel; Python never supplies or reconstructs a naked `Ready`
+  capability list.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field

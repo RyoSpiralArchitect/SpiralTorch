@@ -628,12 +628,15 @@ print("effective backend:", getattr(session, "effective_backend", session.backen
 ```
 
 Runtime route readiness and workload-kernel readiness are deliberately separate.
-The v5 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
+The v6 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
 exact declared component shapes, bias bindings, device limits, and lazy pipelines.
-Those results live in a nested v1
+Those results live in a nested v2
 `spiraltorch.runtime_component_capability_observation` contract that binds the
 runtime probe, canonical workloads, selected Rust policy, evidence, and both
-commitment hashes. Passing `component_workloads=` to
+commitment hashes. Kernel support is decided by `st-tensor`, not reconstructed by
+`st-core`: host readiness carries `static_host_contract`, while accelerator readiness
+requires exact workload preflight plus an operation-specific device dispatch/readback
+sentinel and carries `runtime_dispatch_sentinel`. Passing `component_workloads=` to
 `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer automatically;
 WASM exposes the same contract as JSON/Object transport instead of rebuilding the
 rules in JavaScript. The execution plan owns policy selection; the capability

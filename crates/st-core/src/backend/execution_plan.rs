@@ -7,8 +7,8 @@ use super::execution_capability::{
 pub use super::execution_capability::{
     RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityObservationError,
     RuntimeComponentCapabilityObservationPayload, RuntimeComponentCapabilityObservationRequest,
-    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentWorkload,
-    RuntimeTensorUtilOperation,
+    RuntimeComponentCapabilityState, RuntimeComponentCapabilityStatus, RuntimeComponentReadyProof,
+    RuntimeComponentWorkload, RuntimeTensorUtilOperation,
 };
 use super::runtime_probe::{
     BackendRuntimeState, RuntimeDeviceProbeError, RuntimeDeviceProbePayload,
@@ -26,7 +26,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v5";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v6";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -35,9 +35,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v5\0";
+    b"spiraltorch.runtime_execution_plan.request.v6\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v5\0";
+    b"spiraltorch.runtime_execution_plan.output.v6\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 pub(crate) const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -1848,17 +1848,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v4_payload_is_rejected_at_the_contract_boundary() {
+    fn legacy_v5_payload_is_rejected_at_the_contract_boundary() {
         let mut payload = evaluate_runtime_execution_plan(execution_request(
             probe_for(BackendKind::Cpu),
             AcceleratorFallback::Allow,
         ))
         .expect("current execution plan evaluates");
-        payload.contract_version = "spiraltorch.runtime_execution_plan.v4".to_owned();
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v5".to_owned();
 
         let error = payload
             .validate()
-            .expect_err("v4 and v5 commitments must not share a digest domain");
+            .expect_err("v5 and v6 commitments must not share a digest domain");
         assert!(matches!(
             error,
             RuntimeExecutionPlanError::InvalidPayload {
@@ -2009,7 +2009,7 @@ mod tests {
             error,
             RuntimeExecutionPlanError::ComponentCapabilityObservation(
                 RuntimeComponentCapabilityObservationError::InvalidPayload {
-                    field: "output_sha256",
+                    field: "capabilities",
                     ..
                 }
             )

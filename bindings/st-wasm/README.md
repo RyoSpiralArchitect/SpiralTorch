@@ -602,8 +602,10 @@ claim that the browser can execute the committed tensor policy; a session or tra
 must still materialize that policy against its local runtime before executing kernels.
 The parent plan also records Rust's component-resolution contract. Concrete workload
 preflight must carry a committed
-`spiraltorch.runtime_component_capability_observation.v1` payload; naked browser
-capability arrays are not execution-plan input. A session-level `deferred` plan may
+`spiraltorch.runtime_component_capability_observation.v2` payload. Its
+`ready_proof` records either a static host contract or Rust's accelerator
+dispatch/readback sentinel; naked browser capability arrays are not execution-plan
+input. A session-level `deferred` plan may
 postpone unobserved shape checks without claiming those components are native. Strict
 fallback, runtime readiness, and tensor-utility threshold behavior remain Rust
 decisions in both cases, so JavaScript only transports the same contract used by

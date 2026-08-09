@@ -381,10 +381,15 @@ declare module "spiraltorch-wasm" {
         | "not_built"
         | "unsupported";
 
+    export type RuntimeComponentReadyProof =
+        | "static_host_contract"
+        | "runtime_dispatch_sentinel";
+
     export type RuntimeComponentCapabilityEvidence = {
         workload: RuntimeComponentWorkload;
         backend: RuntimeTensorBackend;
         status: RuntimeComponentCapabilityStatus;
+        ready_proof: RuntimeComponentReadyProof | null;
     };
 
     export type RuntimeComponentCapabilityObservationRequest = {
@@ -395,7 +400,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeComponentCapabilityObservation = {
         kind: "spiraltorch.runtime_component_capability_observation";
-        contract_version: "spiraltorch.runtime_component_capability_observation.v1";
+        contract_version: "spiraltorch.runtime_component_capability_observation.v2";
         semantic_owner: "st-core::backend::execution_capability";
         semantic_backend: "rust";
         request: RuntimeComponentCapabilityObservationRequest;
@@ -464,7 +469,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v5";
+        contract_version: "spiraltorch.runtime_execution_plan.v6";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;
