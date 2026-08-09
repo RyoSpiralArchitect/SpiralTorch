@@ -693,13 +693,19 @@ fn update_gate_from_delta(
     state: &mut ZSpaceOptimizerFeedbackState,
     delta_ema: f64,
 ) -> Result<ZSpaceOptimizerFeedbackObservationAction, ZSpaceOptimizerFeedbackError> {
+    if delta_ema >= config.halt_threshold {
+        state.regression_streak =
+            checked_increment("state.regression_streak", state.regression_streak)?;
+        state.improvement_streak = 0;
+        state.gate = 0.0;
+        state.halted = true;
+        return Ok(ZSpaceOptimizerFeedbackObservationAction::Halt);
+    }
     if delta_ema > config.regression_threshold {
         state.regression_streak =
             checked_increment("state.regression_streak", state.regression_streak)?;
         state.improvement_streak = 0;
-        if delta_ema >= config.halt_threshold
-            || state.regression_streak >= config.halt_regression_streak
-        {
+        if state.regression_streak >= config.halt_regression_streak {
             state.gate = 0.0;
             state.halted = true;
             return Ok(ZSpaceOptimizerFeedbackObservationAction::Halt);
@@ -1011,6 +1017,36 @@ mod tests {
             ZSpaceOptimizerFeedbackControlDisposition::Halted
         );
         assert_eq!(halted.applied_learning_rate_scale, 1.0);
+    }
+
+    #[test]
+    fn a_delta_equal_to_equal_regression_and_halt_thresholds_halts() {
+        let config = ZSpaceOptimizerFeedbackConfig {
+            warmup_observations: 0,
+            relative_delta_ema_alpha: 1.0,
+            regression_threshold: 0.125,
+            halt_threshold: 0.125,
+            recovery_rate: 0.5,
+            ..ZSpaceOptimizerFeedbackConfig::default()
+        };
+        let mut state = ZSpaceOptimizerFeedbackState::default();
+
+        state = control(&config, state, 1, 0.8).state_after;
+        state = observe(&config, state, 1.0).state_after;
+        state = control(&config, state, 2, 0.8).state_after;
+        state = observe(&config, state, 0.5).state_after;
+        assert_eq!(state.gate, 0.5);
+        state = control(&config, state, 3, 0.8).state_after;
+
+        let report = observe(&config, state, 0.5625);
+
+        assert_eq!(report.relative_loss_delta_ema, Some(0.125));
+        assert_eq!(
+            report.action,
+            ZSpaceOptimizerFeedbackObservationAction::Halt
+        );
+        assert!(report.state_after.halted);
+        assert_eq!(report.state_after.gate, 0.0);
     }
 
     #[test]

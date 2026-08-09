@@ -420,6 +420,12 @@ def test_loss_guard_commits_one_rust_control_per_completed_update(
     assert receipt["feedback_evidence_boundary"] == (
         "within_run_loss_guard_not_counterfactual_efficacy"
     )
+    assert receipt["evidence_boundary"] == (
+        "receipt proves control derivation and optimizer actuation, including "
+        "Rust-owned trajectory, nominal-LR matching, and checkpointed within-run "
+        "loss-feedback gating, not learning-quality improvement or counterfactual "
+        "efficacy"
+    )
     assert optimizer.param_groups[0]["lr"] == pytest.approx(1e-3)
 
 

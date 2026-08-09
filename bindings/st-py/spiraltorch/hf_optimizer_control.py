@@ -1753,6 +1753,26 @@ def hf_zspace_optimizer_control_callback(
             else:
                 status = "active"
             trace_sha256, trace_size_bytes = _trace_file_evidence(self.trace_path)
+            if not schedule_evidence_complete:
+                evidence_boundary = (
+                    "legacy v1 resume preserved optimizer actuation, but the "
+                    "checkpoint had no historical scheduler rows; trajectory and "
+                    "integrated-dose evidence are unavailable"
+                )
+            elif self.feedback_mode == "off":
+                evidence_boundary = (
+                    "receipt proves control derivation and optimizer actuation, "
+                    "including Rust-owned trajectory and nominal-LR matching, not "
+                    "learning-quality improvement; this progress-derived signal "
+                    "does not use gradients or loss feedback"
+                )
+            else:
+                evidence_boundary = (
+                    "receipt proves control derivation and optimizer actuation, "
+                    "including Rust-owned trajectory, nominal-LR matching, and "
+                    "checkpointed within-run loss-feedback gating, not "
+                    "learning-quality improvement or counterfactual efficacy"
+                )
             return {
                 "schema": HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA,
                 "status": status,
@@ -1948,20 +1968,7 @@ def hf_zspace_optimizer_control_callback(
                 ),
                 "failure": self.failure,
                 "efficacy_evaluated": False,
-                "evidence_boundary": (
-                    (
-                        "legacy v1 resume preserved optimizer actuation, but the "
-                        "checkpoint had no historical scheduler rows; trajectory and "
-                        "integrated-dose evidence are unavailable"
-                    )
-                    if not schedule_evidence_complete
-                    else (
-                        "receipt proves control derivation and optimizer actuation, "
-                        "including Rust-owned trajectory and nominal-LR matching, not "
-                        "learning-quality improvement; this progress-derived signal "
-                        "does not use gradients or loss feedback"
-                    )
-                ),
+                "evidence_boundary": evidence_boundary,
             }
 
     return SpiralTorchHFZSpaceOptimizerCallback()
