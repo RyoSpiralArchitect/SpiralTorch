@@ -1,7 +1,7 @@
 use serde_json::Value;
 use st_core::backend::runtime_probe::{
-    evaluate_runtime_device_probe, RuntimeDeviceProbeError, RuntimeDeviceProbePayload,
-    RuntimeDeviceProbeRequest,
+    evaluate_runtime_device_probe, observe_runtime_device_probe, RuntimeDeviceProbeError,
+    RuntimeDeviceProbeObservationRequest, RuntimeDeviceProbePayload, RuntimeDeviceProbeRequest,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +19,19 @@ fn request_from_value(value: Value) -> Result<RuntimeDeviceProbeRequest, String>
 fn request_from_json(request_json: &str) -> Result<RuntimeDeviceProbeRequest, String> {
     let value = serde_json::from_str(request_json).map_err(|error| error.to_string())?;
     request_from_value(value)
+}
+
+fn observation_request_from_value(
+    value: Value,
+) -> Result<RuntimeDeviceProbeObservationRequest, String> {
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn observation_request_from_json(
+    request_json: &str,
+) -> Result<RuntimeDeviceProbeObservationRequest, String> {
+    let value = serde_json::from_str(request_json).map_err(|error| error.to_string())?;
+    observation_request_from_value(value)
 }
 
 fn payload_from_value(value: Value) -> Result<RuntimeDeviceProbePayload, String> {
@@ -50,6 +63,14 @@ pub fn runtime_device_probe_value(
     Ok(payload.to_transport_value())
 }
 
+/// Observe and resolve a browser device request through the shared Rust owner.
+pub fn observe_runtime_device_probe_value(
+    request: RuntimeDeviceProbeObservationRequest,
+) -> Result<Value, RuntimeDeviceProbeError> {
+    let payload = observe_runtime_device_probe(request)?.with_execution_client("wasm")?;
+    Ok(payload.to_transport_value())
+}
+
 /// Validate a persisted probe contract without re-probing mutable hardware.
 pub fn validate_runtime_device_probe_value(
     payload: RuntimeDeviceProbePayload,
@@ -77,6 +98,23 @@ pub fn runtime_device_probe_object(request: &JsValue) -> Result<JsValue, JsValue
     let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
     let request = request_from_value(request).map_err(js_error)?;
     let payload = runtime_device_probe_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceProbeObserveJson)]
+pub fn runtime_device_probe_observe_json(request_json: &str) -> Result<String, JsValue> {
+    let request = observation_request_from_json(request_json).map_err(js_error)?;
+    let payload = observe_runtime_device_probe_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = runtimeDeviceProbeObserveObject)]
+pub fn runtime_device_probe_observe_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = observation_request_from_value(request).map_err(js_error)?;
+    let payload = observe_runtime_device_probe_value(request).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -166,6 +204,50 @@ mod tests {
     }
 
     #[test]
+    fn wasm_observer_delegates_backend_resolution_to_rust() {
+        let request = observation_request_from_value(json!({
+            "requested_backend": "cpu",
+            "caps_overrides": {"max_workgroup": 64},
+            "requested_workgroup": 63,
+            "cols": 1024
+        }))
+        .expect("valid unresolved observation request");
+
+        let wasm = observe_runtime_device_probe_value(request)
+            .expect("Rust-owned WASM observation succeeds");
+
+        assert_eq!(wasm["execution_client"], "wasm");
+        assert_eq!(wasm["requested_backend"], "cpu");
+        assert_eq!(wasm["effective_backend"], "cpu");
+        assert_eq!(wasm["request"]["caps"]["backend"], "cpu");
+        assert_eq!(wasm["request"]["caps"]["max_workgroup"], 64);
+        assert_eq!(wasm["requested_runtime"], wasm["effective_runtime"]);
+    }
+
+    #[test]
+    fn wasm_mps_observer_commits_the_rust_selected_caps() {
+        let request = observation_request_from_value(json!({
+            "requested_backend": "mps",
+            "caps_overrides": {"max_workgroup": 64},
+            "requested_workgroup": 63,
+            "cols": 1024
+        }))
+        .expect("valid unresolved MPS observation request");
+
+        let wasm = observe_runtime_device_probe_value(request)
+            .expect("Rust-owned MPS observation succeeds");
+
+        assert_eq!(wasm["requested_backend"], "mps");
+        assert!(matches!(
+            wasm["effective_backend"].as_str(),
+            Some("wgpu" | "cpu")
+        ));
+        assert_eq!(wasm["request"]["caps"]["max_workgroup"], 64);
+        assert_eq!(wasm["planner_caps"], wasm["request"]["caps"]);
+        assert_eq!(wasm["planner_surrogate_backend"], wasm["effective_backend"]);
+    }
+
+    #[test]
     fn wasm_can_validate_and_replay_persisted_probe_contracts() {
         let request = cpu_request();
         let transport = runtime_device_probe_value(request.clone()).expect("valid probe payload");
@@ -204,6 +286,12 @@ mod tests {
             }"#,
         )
         .expect_err("unknown request fields must fail closed");
+        assert!(error.contains("unknown field"));
+
+        let error = observation_request_from_json(
+            r#"{"requested_backend":"cpu","effective_backend":"wgpu"}"#,
+        )
+        .expect_err("browser clients must not select the effective backend");
         assert!(error.contains("unknown field"));
     }
 }

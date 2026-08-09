@@ -21,8 +21,8 @@ use st_core::backend::rankk_launch::with_launch_buffers_hip;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::runtime_probe::{
-    evaluate_runtime_device_probe, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
-    RuntimeDeviceProbeRequest,
+    mps_probe as core_mps_probe, observe_runtime_device_probe, resolve_backend, BackendResolution,
+    RuntimeDeviceProbeObservationRequest,
 };
 use st_core::backend::unison::RankKind;
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -692,20 +692,15 @@ fn describe_device(
     tile_hint: Option<u32>,
     compaction_hint: Option<u32>,
 ) -> PyResult<PyObject> {
-    let backend_resolution = parse_backend_for_planner(Some(backend))?;
-    let backend_kind = backend_resolution.effective_backend;
-    let caps = build_caps(
-        backend_kind,
-        lane_width,
-        subgroup,
-        max_workgroup,
-        shared_mem_per_workgroup,
-    )
-    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-    let report = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
-        requested_backend: backend_resolution.reported_backend,
-        caps,
-        mps_probe: backend_resolution.mps_probe,
+    let requested_backend = parse_backend(Some(backend))?;
+    let report = observe_runtime_device_probe(RuntimeDeviceProbeObservationRequest {
+        requested_backend,
+        caps_overrides: DeviceCapsOverrides {
+            lane_width,
+            subgroup,
+            max_workgroup,
+            shared_mem_per_workgroup,
+        },
         requested_workgroup: workgroup,
         cols,
         tile_hint,

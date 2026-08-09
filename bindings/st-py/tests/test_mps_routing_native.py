@@ -54,7 +54,12 @@ def test_mps_probe_exposes_placeholder_surface() -> None:
 def test_describe_device_accepts_mps_backend() -> None:
     st = require_native()
 
-    report = st.describe_device("mps", workgroup=300, cols=4096)
+    report = st.describe_device(
+        "mps",
+        max_workgroup=64,
+        workgroup=63,
+        cols=4096,
+    )
     assert report["kind"] == "spiraltorch.runtime_device_probe"
     assert report["contract_version"] == "spiraltorch.runtime_device_probe.v1"
     assert report["semantic_owner"] == "st-core::backend::runtime_probe"
@@ -91,6 +96,7 @@ def test_describe_device_accepts_mps_backend() -> None:
     assert report["planner_surrogate_backend"] in {"wgpu", "cpu"}
     assert report["planner_route"] in {"metal-via-wgpu", "cpu-fallback"}
     assert report["recommended_backend"] == report["planner_surrogate_backend"]
+    assert report["planner_caps"] == report["request"]["caps"]
     assert report["backend_wired"] is False
     assert report["placeholder"] is True
     assert report["available"] is False

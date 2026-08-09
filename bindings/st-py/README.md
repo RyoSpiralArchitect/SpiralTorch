@@ -157,13 +157,17 @@ disconnected.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
-  `probe_gpu_path`) that
+  `observe_runtime_device_probe`, `probe_gpu_path`) that
   reuse the same heuristics as the Rust executors. `RankPlan.contract()` exposes
   the validated Rust-owned shape, device capabilities, rich choice, and frozen
   execution policy; invalid dimensions and capability overrides fail closed
   instead of being clamped in Python. `spiralk_context()` and
   `rewrite_with_spiralk()` also delegate context construction, algorithm/mode
   interpretation, and override validation to that Rust contract.
+  `observe_runtime_device_probe(...)` is the lower-level live entrypoint: Python
+  supplies only a requested backend, capability overrides, and workload hints;
+  Rust alone selects any MPS surrogate and commits requested/effective runtime
+  evidence. Persisted v1 requests remain available for validation and replay.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field

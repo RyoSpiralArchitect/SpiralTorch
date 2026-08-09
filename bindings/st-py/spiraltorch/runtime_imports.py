@@ -46,6 +46,7 @@ __all__ = [
     "evaluate_runtime_execution_plan",
     "require_executable_runtime_execution_plan",
     "observe_runtime_execution_plan_capabilities",
+    "observe_runtime_device_probe",
     "evaluate_runtime_device_route",
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
@@ -1028,6 +1029,50 @@ def require_executable_runtime_execution_plan(
             "runtime execution-plan materializer returned a non-mapping payload"
         )
     return dict(executable)
+
+
+def observe_runtime_device_probe(
+    requested_backend: str = "wgpu",
+    *,
+    lane_width: int | None = None,
+    subgroup: bool | None = None,
+    max_workgroup: int | None = None,
+    shared_mem_per_workgroup: int | None = None,
+    requested_workgroup: int | None = None,
+    cols: int | None = None,
+    tile_hint: int | None = None,
+    compaction_hint: int | None = None,
+) -> dict[str, object]:
+    """Observe and resolve one device through the Rust semantic owner."""
+
+    caps_overrides = {
+        key: value
+        for key, value in {
+            "lane_width": lane_width,
+            "subgroup": subgroup,
+            "max_workgroup": max_workgroup,
+            "shared_mem_per_workgroup": shared_mem_per_workgroup,
+        }.items()
+        if value is not None
+    }
+    request: dict[str, object] = {
+        "requested_backend": requested_backend,
+        "caps_overrides": caps_overrides,
+    }
+    for key, value in {
+        "requested_workgroup": requested_workgroup,
+        "cols": cols,
+        "tile_hint": tile_hint,
+        "compaction_hint": compaction_hint,
+    }.items():
+        if value is not None:
+            request[key] = value
+
+    observe = _native_runtime_device_probe_function("_runtime_device_probe_observe")
+    payload = observe(request)
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("runtime-device observer returned a non-mapping payload")
+    return dict(payload)
 
 
 def validate_runtime_device_probe_contract(

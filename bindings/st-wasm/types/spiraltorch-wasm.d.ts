@@ -243,6 +243,13 @@ declare module "spiraltorch-wasm" {
         shared_mem_per_workgroup: number | null;
     };
 
+    export type RuntimeDeviceCapsOverrides = {
+        lane_width?: number;
+        subgroup?: boolean;
+        max_workgroup?: number;
+        shared_mem_per_workgroup?: number;
+    };
+
     export type RuntimeMpsProbeReport = {
         feature_enabled: boolean;
         platform_supported: boolean;
@@ -257,6 +264,15 @@ declare module "spiraltorch-wasm" {
         requested_backend: RuntimeBackendKind;
         caps: RuntimeDeviceCaps;
         mps_probe?: RuntimeMpsProbeReport;
+        requested_workgroup?: number;
+        cols?: number;
+        tile_hint?: number;
+        compaction_hint?: number;
+    };
+
+    export type RuntimeDeviceProbeObservationRequest = {
+        requested_backend: RuntimeBackendKind;
+        caps_overrides?: RuntimeDeviceCapsOverrides;
         requested_workgroup?: number;
         cols?: number;
         tile_hint?: number;
@@ -2428,6 +2444,10 @@ declare module "spiraltorch-wasm" {
     export function runtimeDeviceProbeJson(requestJson: string): string;
     export function runtimeDeviceProbeObject(
         request: RuntimeDeviceProbeRequest,
+    ): RuntimeDeviceProbe;
+    export function runtimeDeviceProbeObserveJson(requestJson: string): string;
+    export function runtimeDeviceProbeObserveObject(
+        request: RuntimeDeviceProbeObservationRequest,
     ): RuntimeDeviceProbe;
     export function runtimeDeviceProbeValidateJson(payloadJson: string): string;
     export function runtimeDeviceProbeValidateObject(
