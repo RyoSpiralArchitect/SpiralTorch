@@ -852,6 +852,49 @@ def test_factorized_ablation_separates_dose_and_shape_contrasts() -> None:
     assert report["efficacy_claim_ready"] is False
 
 
+def test_factorized_ablation_accepts_identity_dose_matched_constant() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    for card in cards:
+        receipt = card["zspace_optimizer_control_receipt"]
+        receipt["trajectory_raw_dose"] = 1.0
+        receipt["trajectory_raw_dose_ratio"] = 1.0
+        receipt["actuated_learning_rate_dose"] = 1.0
+        receipt["actuated_learning_rate_dose_ratio"] = 1.0
+    constant_receipt = cards[1]["zspace_optimizer_control_receipt"]
+    constant_receipt["model_update_intervened"] = False
+    constant_receipt["non_identity_update_count"] = 0
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "ready"
+    assert report["factorized_seeds"][0]["errors"] == []
+
+
+def test_factorized_ablation_rejects_unexplained_identity_constant_arm() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_matched_constant", seed=13, eval_after=2.1),
+        _factorized_card(arm="raw", seed=13, eval_after=1.9),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+    ]
+    constant_receipt = cards[1]["zspace_optimizer_control_receipt"]
+    constant_receipt["model_update_intervened"] = False
+    constant_receipt["non_identity_update_count"] = 0
+
+    report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert (
+        "dose_matched_constant produced no non-identity model update"
+        in report["factorized_seeds"][0]["errors"]
+    )
+
+
 def test_two_arm_comparator_rejects_calibrated_non_raw_apply() -> None:
     report = st.compare_hf_zspace_optimizer_run_cards(
         [

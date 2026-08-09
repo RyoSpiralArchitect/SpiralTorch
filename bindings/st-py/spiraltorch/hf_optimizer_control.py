@@ -1749,8 +1749,6 @@ def _factorized_seed_report(
             restored = _receipt_count(receipt.get("restored_update_count"))
             if applied != consumed or restored != applied:
                 errors.append(f"{arm} actuation or restoration count is incomplete")
-            if receipt.get("model_update_intervened") is not True:
-                errors.append(f"{arm} produced no non-identity model update")
 
     trajectory_ids = {receipt.get("trajectory_id") for receipt in receipts.values()}
     trajectory_id = next(iter(trajectory_ids)) if len(trajectory_ids) == 1 else None
@@ -1820,6 +1818,21 @@ def _factorized_seed_report(
         )
     ):
         errors.append("dose-normalized trajectory dose and ratio are inconsistent")
+
+    for arm in _FACTORIZED_ARMS[1:]:
+        receipt = receipts[arm]
+        identity_dose_matched_constant = (
+            arm == "dose_matched_constant"
+            and receipt.get("model_update_intervened") is False
+            and _receipt_count(receipt.get("non_identity_update_count")) == 0
+            and raw_ratio is not None
+            and math.isclose(raw_ratio, 1.0, rel_tol=1e-10, abs_tol=0.0)
+        )
+        if (
+            receipt.get("model_update_intervened") is not True
+            and not identity_dose_matched_constant
+        ):
+            errors.append(f"{arm} produced no non-identity model update")
 
     for arm, receipt in receipts.items():
         actual_nominal = receipt.get("nominal_learning_rate_dose")
