@@ -5671,10 +5671,7 @@ impl Tensor {
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
         let is_empty = self.rows == 0 || self.cols == 0;
-        #[cfg(feature = "wgpu")]
         let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu) && !is_empty;
-        #[cfg(not(feature = "wgpu"))]
-        let runtime_fallback = false;
         let completion = if is_empty {
             completed_no_op_execution(execution)?
         } else {
@@ -5692,15 +5689,14 @@ impl Tensor {
             data.insert("kind".to_owned(), serde_json::json!("elementwise"));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             data.insert("scale".to_owned(), serde_json::json!(value));
-            #[cfg(feature = "wgpu")]
             if runtime_fallback {
+                #[cfg(feature = "wgpu")]
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
-                    wgpu_runtime_fallback_meta(
-                        "cpu",
-                        WGPU_RUNTIME_FALLBACK_REASON,
-                        wgpu_failure.as_deref(),
-                    ),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
                 );
             }
         });
@@ -13686,7 +13682,9 @@ mod tests {
             if op_name == "scale" {
                 assert_eq!(data["event_phase"], "completed");
                 assert_eq!(data["route_status"], "direct");
+                assert_eq!(data["kernel_backend"], "wgpu_dense");
                 assert_eq!(data["execution_receipt"]["executed_backend"], "wgpu");
+                assert_eq!(data["execution_receipt"]["kernel_backend"], "wgpu_dense");
             }
         }
     }
@@ -15564,6 +15562,7 @@ mod tests {
             assert_eq!(event.1["route_status"], "no_op", "{operation}");
             assert_eq!(event.1["counts_as_execution"], false, "{operation}");
             assert!(event.1.get("backend").is_none(), "{operation}");
+            assert!(event.1.get("kernel_backend").is_none(), "{operation}");
             assert_eq!(
                 event.1["execution_receipt"]["route_status"], "no_op",
                 "{operation}"
@@ -15574,7 +15573,54 @@ mod tests {
                     .is_none(),
                 "{operation}"
             );
+            assert!(
+                event.1["execution_receipt"].get("kernel_backend").is_none(),
+                "{operation}"
+            );
         }
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn explicit_wgpu_scale_without_wgpu_feature_emits_typed_cpu_fallback() {
+        let _lock = observer_lock();
+        let _fallback = crate::execution::push_accelerator_fallback(
+            crate::execution::AcceleratorFallback::Allow,
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let tensor = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]));
+        let output = unwrap_ok(tensor.scale_with_backend(2.0, TensorUtilBackend::GpuWgpu));
+        crate::set_thread_meta_observer(previous);
+
+        assert_eq!(output.data(), &[2.0, -4.0, 1.0]);
+        let events = events.lock().unwrap();
+        let completed = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "scale" && data["event_phase"] == "completed")
+            .expect("completed scale fallback event");
+        assert_eq!(completed.1["backend"], "cpu");
+        assert_eq!(completed.1["kernel_backend"], "cpu");
+        assert_eq!(completed.1["route_status"], "runtime_fallback");
+        assert_eq!(completed.1["fallback"]["from"], "wgpu");
+        assert_eq!(completed.1["fallback"]["to"], "cpu");
+        assert_eq!(
+            completed.1["execution_receipt"]["requested_backend"],
+            "wgpu"
+        );
+        assert_eq!(completed.1["execution_receipt"]["executed_backend"], "cpu");
+        assert_eq!(completed.1["execution_receipt"]["kernel_backend"], "cpu");
+        assert_eq!(
+            completed.1["execution_receipt"]["fallback"]["reason"],
+            "runtime_unavailable"
+        );
     }
 
     #[test]
@@ -15686,12 +15732,17 @@ mod tests {
                 .unwrap_or_else(|| panic!("{op_name} completed event"));
             assert_eq!(completed.1["counts_as_execution"], true);
             assert_eq!(completed.1["backend"], "wgpu");
+            assert_eq!(completed.1["kernel_backend"], "wgpu_dense");
             assert_eq!(completed.1["route_status"], "direct");
             assert_eq!(
                 completed.1["execution_receipt"]["workload"]["component"],
                 expected_component
             );
             assert_eq!(completed.1["execution_receipt"]["executed_backend"], "wgpu");
+            assert_eq!(
+                completed.1["execution_receipt"]["kernel_backend"],
+                "wgpu_dense"
+            );
         }
     }
 

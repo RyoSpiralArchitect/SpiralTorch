@@ -1242,7 +1242,15 @@ impl TensorBackendStepTrace {
         let Some(backend) = executed_backend else {
             return;
         };
-        let kernel_backend = metric_fragment(backend);
+        let kernel_backend = match execution_receipt.as_ref() {
+            Some(receipt) => receipt
+                .kernel_backend
+                .map(|kernel| metric_fragment(kernel.as_str())),
+            None => Some(metric_fragment(backend)),
+        };
+        let Some(kernel_backend) = kernel_backend else {
+            return;
+        };
         let backend = backend_metric_fragment(backend);
         let op = metric_fragment(event.op_name);
         self.total = self.total.saturating_add(1);
@@ -13224,6 +13232,11 @@ mod tests {
         assert_eq!(trace.requested_wgpu_runtime_fallbacks, 0);
         assert_eq!(trace.fallbacks, 0);
         assert_eq!(trace.by_backend.get("wgpu"), Some(&1));
+        assert_eq!(trace.by_kernel_backend.get("wgpu_dense"), Some(&1));
+        assert_eq!(
+            trace.by_op_kernel_backend.get("row_softmax_wgpu_dense"),
+            Some(&1)
+        );
     }
 
     #[test]

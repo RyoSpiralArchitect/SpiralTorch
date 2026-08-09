@@ -356,6 +356,14 @@ declare module "spiraltorch-wasm" {
         | "runtime_fallback"
         | "no_op";
 
+    export type TensorExecutionKernelBackend =
+        | "cpu"
+        | "cpu_simd"
+        | "naive"
+        | "faer"
+        | "wgpu_dense"
+        | "hip";
+
     export type TensorExecutionReceipt = {
         kind: "spiraltorch.tensor_execution_receipt";
         contract_version: "spiraltorch.tensor_execution_receipt.v1";
@@ -366,6 +374,7 @@ declare module "spiraltorch-wasm" {
         requested_backend: RuntimeTensorBackend;
         selected_backend: RuntimeTensorBackend;
         executed_backend?: RuntimeTensorBackend;
+        kernel_backend?: TensorExecutionKernelBackend;
         route_status: TensorExecutionRouteStatus;
         fallback?: {
             from: RuntimeTensorBackend;

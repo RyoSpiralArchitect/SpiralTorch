@@ -49,6 +49,59 @@ impl TensorExecutionRouteStatus {
     }
 }
 
+/// Concrete kernel family that produced a completed tensor output.
+///
+/// Policy routing uses [`TensorExecutionBackend::Wgpu`], while the current
+/// implementation is the more precise `wgpu_dense` kernel family. Keeping
+/// both labels in the receipt prevents transport clients from reconstructing
+/// implementation telemetry from a canonical route backend.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TensorExecutionKernelBackend {
+    Cpu,
+    CpuSimd,
+    Naive,
+    Faer,
+    WgpuDense,
+    Hip,
+}
+
+impl TensorExecutionKernelBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::CpuSimd => "cpu_simd",
+            Self::Naive => "naive",
+            Self::Faer => "faer",
+            Self::WgpuDense => "wgpu_dense",
+            Self::Hip => "hip",
+        }
+    }
+
+    const fn for_executed_backend(backend: TensorExecutionBackend) -> Option<Self> {
+        match backend {
+            TensorExecutionBackend::Auto => None,
+            TensorExecutionBackend::Cpu => Some(Self::Cpu),
+            TensorExecutionBackend::CpuSimd => Some(Self::CpuSimd),
+            TensorExecutionBackend::Naive => Some(Self::Naive),
+            TensorExecutionBackend::Faer => Some(Self::Faer),
+            TensorExecutionBackend::Wgpu => Some(Self::WgpuDense),
+            TensorExecutionBackend::Hip => Some(Self::Hip),
+        }
+    }
+
+    const fn executed_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Cpu => TensorExecutionBackend::Cpu,
+            Self::CpuSimd => TensorExecutionBackend::CpuSimd,
+            Self::Naive => TensorExecutionBackend::Naive,
+            Self::Faer => TensorExecutionBackend::Faer,
+            Self::WgpuDense => TensorExecutionBackend::Wgpu,
+            Self::Hip => TensorExecutionBackend::Hip,
+        }
+    }
+}
+
 /// Stable reason vocabulary for a successful fallback completion.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +149,8 @@ pub struct TensorExecutionReceipt {
     pub selected_backend: TensorExecutionBackend,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executed_backend: Option<TensorExecutionBackend>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_backend: Option<TensorExecutionKernelBackend>,
     pub route_status: TensorExecutionRouteStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<TensorExecutionFallback>,
@@ -145,6 +200,28 @@ impl TensorExecutionReceipt {
         self.require_supported_backend("selected_backend", self.selected_backend)?;
         if let Some(executed) = self.executed_backend {
             self.require_supported_backend("executed_backend", executed)?;
+        }
+        match (self.executed_backend, self.kernel_backend) {
+            (Some(executed), Some(kernel)) if kernel.executed_backend() == executed => {}
+            (Some(_), Some(_)) => {
+                return Err(TensorExecutionContractError::InvalidReceipt {
+                    field: "kernel_backend",
+                    message: "kernel backend does not implement the executed route backend",
+                });
+            }
+            (Some(_), None) => {
+                return Err(TensorExecutionContractError::InvalidReceipt {
+                    field: "kernel_backend",
+                    message: "completed execution requires a concrete kernel backend",
+                });
+            }
+            (None, Some(_)) => {
+                return Err(TensorExecutionContractError::InvalidReceipt {
+                    field: "kernel_backend",
+                    message: "a no-op cannot claim a concrete kernel backend",
+                });
+            }
+            (None, None) => {}
         }
         if let Some(commitment) = self.runtime_execution_plan_output_sha256.as_deref() {
             if !valid_sha256_hex(commitment) {
@@ -571,6 +648,9 @@ impl TensorExecutionCompletion {
             requested_backend: self.prepared.requested_backend,
             selected_backend: self.selected_backend,
             executed_backend: self.executed_backend,
+            kernel_backend: self
+                .executed_backend
+                .and_then(TensorExecutionKernelBackend::for_executed_backend),
             route_status: self.route_status,
             fallback: self.fallback,
             runtime_execution_plan_output_sha256: self
@@ -621,6 +701,12 @@ where
             data.insert(
                 "executed_backend".to_owned(),
                 serde_json::json!(executed.as_str()),
+            );
+        }
+        if let Some(kernel) = receipt.kernel_backend {
+            data.insert(
+                "kernel_backend".to_owned(),
+                serde_json::json!(kernel.as_str()),
             );
         }
         data.insert(
@@ -853,6 +939,10 @@ mod tests {
         assert_eq!(receipt.selected_backend, TensorExecutionBackend::Cpu);
         assert_eq!(receipt.executed_backend, Some(TensorExecutionBackend::Cpu));
         assert_eq!(
+            receipt.kernel_backend,
+            Some(TensorExecutionKernelBackend::Cpu)
+        );
+        assert_eq!(
             receipt.route_status,
             TensorExecutionRouteStatus::CpuThreshold
         );
@@ -1032,11 +1122,21 @@ mod tests {
         let encoded = serde_json::to_value(&receipt).unwrap();
         let decoded: TensorExecutionReceipt = serde_json::from_value(encoded.clone()).unwrap();
         decoded.validate().unwrap();
+        assert_eq!(
+            decoded.kernel_backend,
+            Some(TensorExecutionKernelBackend::Faer)
+        );
 
         let mut tampered = encoded;
         tampered["executed_backend"] = serde_json::json!("naive");
         let tampered: TensorExecutionReceipt = serde_json::from_value(tampered).unwrap();
         assert!(tampered.validate().is_err());
+
+        let mut reconstructed_kernel = serde_json::to_value(&receipt).unwrap();
+        reconstructed_kernel["kernel_backend"] = serde_json::json!("wgpu_dense");
+        let reconstructed_kernel: TensorExecutionReceipt =
+            serde_json::from_value(reconstructed_kernel).unwrap();
+        assert!(reconstructed_kernel.validate().is_err());
 
         let mut mismatched_workload = serde_json::to_value(&receipt).unwrap();
         mismatched_workload["workload"] = serde_json::json!({

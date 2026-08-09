@@ -790,6 +790,7 @@ def test_tensor_execution_receipt_is_validated_only_by_rust() -> None:
         "requested_backend": "cpu",
         "selected_backend": "cpu",
         "executed_backend": "cpu",
+        "kernel_backend": "cpu",
         "route_status": "direct",
     }
 

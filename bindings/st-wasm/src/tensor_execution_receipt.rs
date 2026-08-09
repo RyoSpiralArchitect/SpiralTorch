@@ -66,6 +66,7 @@ mod tests {
             "requested_backend": "cpu",
             "selected_backend": "cpu",
             "executed_backend": "cpu",
+            "kernel_backend": "cpu",
             "route_status": "direct"
         }))
         .expect("typed receipt")
@@ -99,6 +100,14 @@ mod tests {
         receipt.requested_backend = st_tensor::TensorExecutionBackend::Faer;
         receipt.selected_backend = st_tensor::TensorExecutionBackend::Faer;
         receipt.executed_backend = Some(st_tensor::TensorExecutionBackend::Faer);
+
+        assert!(validate_tensor_execution_receipt_value(receipt).is_err());
+    }
+
+    #[test]
+    fn wasm_transport_rejects_a_reconstructed_kernel_backend() {
+        let mut receipt = direct_cpu_receipt();
+        receipt.kernel_backend = Some(st_tensor::TensorExecutionKernelBackend::WgpuDense);
 
         assert!(validate_tensor_execution_receipt_value(receipt).is_err());
     }
