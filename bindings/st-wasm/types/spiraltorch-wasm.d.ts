@@ -387,6 +387,25 @@ declare module "spiraltorch-wasm" {
         status: RuntimeComponentCapabilityStatus;
     };
 
+    export type RuntimeComponentCapabilityObservationRequest = {
+        runtime_probe: RuntimeDeviceProbe;
+        policy: RuntimeTensorBackendPolicy;
+        component_workloads: RuntimeComponentWorkload[];
+    };
+
+    export type RuntimeComponentCapabilityObservation = {
+        kind: "spiraltorch.runtime_component_capability_observation";
+        contract_version: "spiraltorch.runtime_component_capability_observation.v1";
+        semantic_owner: "st-core::backend::execution_capability";
+        semantic_backend: "rust";
+        request: RuntimeComponentCapabilityObservationRequest;
+        runtime_probe_output_sha256: string;
+        capabilities: RuntimeComponentCapabilityEvidence[];
+        request_sha256: string;
+        output_sha256: string;
+        committed: true;
+    };
+
     export type RuntimeExecutionConfig = {
         accelerator_fallback: "allow" | "forbid";
         tensor_util_wgpu_min_values: number;
@@ -399,7 +418,7 @@ declare module "spiraltorch-wasm" {
         execution_config: RuntimeExecutionConfig;
         component_resolution?: RuntimeComponentResolution;
         component_workloads?: RuntimeComponentWorkload[];
-        component_capabilities?: RuntimeComponentCapabilityEvidence[];
+        component_capability_observation?: RuntimeComponentCapabilityObservation | null;
         tensor_util_values?: number | null;
         required_native_components?: RuntimeExecutionComponent[];
     };
@@ -409,7 +428,7 @@ declare module "spiraltorch-wasm" {
         execution_config: RuntimeExecutionConfig;
         component_resolution: RuntimeComponentResolution;
         component_workloads: RuntimeComponentWorkload[];
-        component_capabilities: RuntimeComponentCapabilityEvidence[];
+        component_capability_observation: RuntimeComponentCapabilityObservation | null;
         tensor_util_values: number | null;
         required_native_components: RuntimeExecutionComponent[];
     };
@@ -445,7 +464,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v4";
+        contract_version: "spiraltorch.runtime_execution_plan.v5";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;
@@ -453,6 +472,7 @@ declare module "spiraltorch-wasm" {
         requested_backend: RuntimeBackendKind;
         effective_backend: RuntimeBackendKind;
         runtime_probe_output_sha256: string;
+        component_capability_observation_output_sha256: string | null;
         runtime_route: RuntimeDeviceRoute;
         runtime_route_output_sha256: string;
         policy: RuntimeTensorBackendPolicy;

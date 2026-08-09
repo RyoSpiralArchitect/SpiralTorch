@@ -178,6 +178,10 @@ disconnected.
   supplies only a requested backend, capability overrides, and workload hints;
   Rust alone selects any MPS surrogate and commits requested/effective runtime
   evidence. Persisted v1 requests remain available for validation and replay.
+  Workload-specific kernel readiness follows the same boundary:
+  `evaluate_runtime_execution_plan(..., component_workloads=...)` embeds a committed
+  Rust `runtime_component_capability_observation` contract, and Python never supplies
+  or reconstructs a naked `Ready` capability list.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field

@@ -4,6 +4,9 @@ use st_core::backend::execution_plan::{
     RuntimeExecutionPlanError, RuntimeExecutionPlanPayload, RuntimeExecutionPlanRequest,
 };
 
+#[cfg(test)]
+use st_core::backend::execution_plan::RuntimeComponentCapabilityObservationError;
+
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
@@ -172,7 +175,7 @@ mod tests {
     use st_core::backend::execution_plan::{
         AcceleratorFallback, ExecutionConfig, RuntimeComponentCapabilityStatus,
         RuntimeComponentResolution, RuntimeComponentWorkload, RuntimeExecutionComponent,
-        RuntimeTensorUtilOperation,
+        RuntimeTensorBackend, RuntimeTensorUtilOperation,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -197,7 +200,7 @@ mod tests {
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
             component_resolution: Default::default(),
             component_workloads: Vec::new(),
-            component_capabilities: Vec::new(),
+            component_capability_observation: None,
             tensor_util_values: Some(2048),
             required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
         }
@@ -257,7 +260,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v4"
+            "spiraltorch.runtime_execution_plan.v5"
         );
         assert_eq!(
             wasm_transport["runtime_route"]["contract_version"],
@@ -306,11 +309,24 @@ mod tests {
             .expect("WASM capability observation");
         let observed: RuntimeExecutionPlanRequest =
             serde_json::from_value(observed).expect("typed observed request");
-        assert_eq!(observed.component_capabilities.len(), 1);
+        let observation = observed
+            .component_capability_observation
+            .as_ref()
+            .expect("committed capability observation");
+        assert_eq!(observation.capabilities.len(), 1);
         assert_eq!(
-            observed.component_capabilities[0].status,
+            observation.capabilities[0].status,
             RuntimeComponentCapabilityStatus::Ready
         );
+        assert_eq!(
+            observation.semantic_owner,
+            "st-core::backend::execution_capability"
+        );
+        assert_eq!(
+            observation.request.policy.dense_matmul,
+            RuntimeTensorBackend::Faer
+        );
+        assert_eq!(observation.output_sha256.len(), 64);
 
         let payload = runtime_execution_plan_value(observed).expect("observed plan");
         assert_eq!(payload["component_routes"][0]["capability_state"], "ready");
@@ -349,6 +365,8 @@ mod tests {
             "RuntimeDeviceProbe",
             "RuntimeDeviceProbeObservationRequest",
             "RuntimeDeviceRouteProbeRequest",
+            "RuntimeComponentCapabilityObservation",
+            "RuntimeComponentCapabilityObservationRequest",
             "RuntimeComponentResolution",
             "RuntimeExecutionPlanRequestInput",
             "RuntimeExecutionPlanRequest",
@@ -413,6 +431,33 @@ mod tests {
         )
         .expect_err("unknown request fields must fail closed");
         assert!(unknown.contains("unknown field"));
+
+        let mut naked_claim = serde_json::to_value(cpu_request()).expect("request value");
+        naked_claim["component_capabilities"] = json!([{
+            "workload": {"component": "softmax", "rows": 2, "cols": 4},
+            "backend": "cpu",
+            "status": "ready"
+        }]);
+        let error = request_from_value(naked_claim)
+            .expect_err("naked browser capability claims must fail closed");
+        assert!(error.contains("component_capabilities"));
+
+        let mut observation_tampered = serde_json::to_value(cpu_request()).expect("request value");
+        observation_tampered["component_capability_observation"]["capabilities"][0]["status"] =
+            "not_built".into();
+        let observation_tampered =
+            request_from_value(observation_tampered).expect("tampered shape decodes");
+        let error = runtime_execution_plan_value(observation_tampered)
+            .expect_err("Rust rejects tampered capability commitments");
+        assert!(matches!(
+            error,
+            RuntimeExecutionPlanError::ComponentCapabilityObservation(
+                RuntimeComponentCapabilityObservationError::InvalidPayload {
+                    field: "output_sha256",
+                    ..
+                }
+            )
+        ));
 
         let mut tampered = payload;
         tampered["policy"]["softmax"] = "auto".into();

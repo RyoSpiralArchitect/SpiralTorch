@@ -672,7 +672,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v4"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v5"
     assert plan["runtime_route"]["contract_version"] == "spiraltorch.runtime_device_route.v5"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
@@ -697,9 +697,16 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         "dense_matmul",
         "softmax",
     ]
+    observation = plan["request"]["component_capability_observation"]
+    assert observation["kind"] == "spiraltorch.runtime_component_capability_observation"
+    assert observation["semantic_owner"] == "st-core::backend::execution_capability"
+    assert observation["committed"] is True
+    assert observation["request"]["policy"] == plan["policy"]
+    assert len(observation["request_sha256"]) == 64
+    assert len(observation["output_sha256"]) == 64
     assert [
         evidence["status"]
-        for evidence in plan["request"]["component_capabilities"]
+        for evidence in observation["capabilities"]
     ] == ["ready"] * 6
     assert [
         route["capability_state"]
@@ -711,6 +718,10 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         == plan["request"]["runtime_probe"]["output_sha256"]
     )
     assert (
+        plan["component_capability_observation_output_sha256"]
+        == observation["output_sha256"]
+    )
+    assert (
         plan["runtime_route_output_sha256"]
         == plan["runtime_route"]["output_sha256"]
     )
@@ -720,13 +731,34 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         == plan
     )
 
+    naked_claim = json.loads(json.dumps(plan["request"]))
+    naked_claim["component_capabilities"] = [
+        {
+            "workload": {"component": "softmax", "rows": 2, "cols": 8},
+            "backend": "cpu",
+            "status": "ready",
+        }
+    ]
+    with pytest.raises(ValueError, match="runtime execution-plan replay request"):
+        st.validate_runtime_execution_plan_contract(plan, request=naked_claim)
+
+    tampered_observation = json.loads(json.dumps(plan["request"]))
+    tampered_observation["component_capability_observation"]["capabilities"][0][
+        "status"
+    ] = "not_built"
+    with pytest.raises(ValueError, match="runtime execution-plan replay failed"):
+        st.validate_runtime_execution_plan_contract(
+            plan,
+            request=tampered_observation,
+        )
+
     tampered = json.loads(json.dumps(plan))
     tampered["component_routes"][0]["selected_backend"] = "auto"
     with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
         st.validate_runtime_execution_plan_contract(tampered)
 
     legacy = json.loads(json.dumps(plan))
-    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v3"
+    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v4"
     with pytest.raises(ValueError, match="contract_version"):
         st.validate_runtime_execution_plan_contract(legacy)
 

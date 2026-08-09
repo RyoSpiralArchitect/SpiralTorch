@@ -601,10 +601,13 @@ planning-only, so it does not require Faer or WGPU kernels in the browser and do
 claim that the browser can execute the committed tensor policy; a session or trainer
 must still materialize that policy against its local runtime before executing kernels.
 The parent plan also records Rust's component-resolution contract. Concrete workload
-preflight must carry capability evidence; a session-level `deferred` plan may postpone
-unobserved shape checks without claiming those components are native. Strict fallback,
-runtime readiness, and tensor-utility threshold behavior remain Rust decisions in both
-cases, so JavaScript only transports the same contract used by Python.
+preflight must carry a committed
+`spiraltorch.runtime_component_capability_observation.v1` payload; naked browser
+capability arrays are not execution-plan input. A session-level `deferred` plan may
+postpone unobserved shape checks without claiming those components are native. Strict
+fallback, runtime readiness, and tensor-utility threshold behavior remain Rust
+decisions in both cases, so JavaScript only transports the same contract used by
+Python.
 
 ## High-level Canvas utilities
 
