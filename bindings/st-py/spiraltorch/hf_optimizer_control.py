@@ -21,7 +21,7 @@ from .zspace_optimizer import (
 
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA = "spiraltorch.hf_zspace_optimizer_control.v1"
 HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA = "spiraltorch.hf_zspace_optimizer_receipt.v1"
-HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v1"
+HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v2"
 HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA = "spiraltorch.hf_zspace_optimizer_trace.v1"
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_matched_ablation.v1"
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_factorized_ablation.v1"
@@ -35,6 +35,16 @@ HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS = (
     "raw",
     "dose_matched_constant",
     "dose_normalized",
+)
+_HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v1"
+_HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS = (
+    "trajectory_arm",
+    "trajectory_id",
+    "trajectory_contract",
+    "trajectory_semantic_owner",
+    "trajectory_semantic_backend",
+    "trajectory_required",
+    "actuation_scale_source",
 )
 
 __all__ = [
@@ -255,6 +265,17 @@ def hf_zspace_optimizer_recipe_contract(
     }
 
 
+def _legacy_optimizer_recipe(
+    recipe: Mapping[str, object],
+) -> dict[str, object] | None:
+    if recipe.get("trajectory_arm") != "raw" or recipe.get("trajectory_id") is not None:
+        return None
+    legacy = dict(recipe)
+    for field in _HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS:
+        legacy.pop(field, None)
+    return legacy
+
+
 def _hookable_optimizer(optimizer: object) -> object:
     current = optimizer
     seen: set[int] = set()
@@ -400,6 +421,7 @@ def hf_zspace_optimizer_control_callback(
             self.derived_sequence: list[dict[str, object]] = []
             self.consumed_sequence: list[dict[str, object]] = []
             self.schedule_sequence: list[dict[str, object]] = []
+            self.schedule_prefix_missing_count = 0
             self.applied_update_count = 0
             self.non_identity_update_count = 0
             self.observed_update_count = 0
@@ -456,9 +478,20 @@ def hf_zspace_optimizer_control_callback(
             if not _is_sha256_id(state_id) or state_id != _sha256_id(payload):
                 raise RuntimeError("Z-space optimizer resume-state identity mismatch")
             self.resume_state_id = str(state_id)
-            if payload.get("schema") != HF_ZSPACE_OPTIMIZER_STATE_SCHEMA:
+            state_schema = payload.get("schema")
+            if state_schema not in {
+                HF_ZSPACE_OPTIMIZER_STATE_SCHEMA,
+                _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA,
+            }:
                 raise RuntimeError("unsupported Z-space optimizer resume-state schema")
-            if payload.get("recipe") != self.recipe:
+            stored_recipe = payload.get("recipe")
+            recipe_matches = stored_recipe == self.recipe
+            if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA:
+                recipe_matches = (
+                    recipe_matches
+                    or stored_recipe == _legacy_optimizer_recipe(self.recipe)
+                )
+            if not recipe_matches:
                 raise RuntimeError("Z-space optimizer resume recipe does not match")
             trainer_state = payload.get("zspace_trainer_state")
             if not isinstance(trainer_state, Mapping) or self.zspace_trainer is None:
@@ -477,10 +510,32 @@ def hf_zspace_optimizer_control_callback(
                 payload.get("consumed_sequence"),
                 label="consumed_sequence",
             )
-            self.schedule_sequence = _sequence_rows(
-                payload.get("schedule_sequence"),
-                label="schedule_sequence",
-            )
+            schedule_sequence = payload.get("schedule_sequence")
+            if (
+                schedule_sequence is None
+                and state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA
+            ):
+                self.schedule_sequence = []
+                self.schedule_prefix_missing_count = len(self.consumed_sequence)
+            else:
+                self.schedule_sequence = _sequence_rows(
+                    schedule_sequence,
+                    label="schedule_sequence",
+                )
+                self.schedule_prefix_missing_count = (
+                    0
+                    if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA
+                    else _non_negative_int(
+                        payload.get("schedule_prefix_missing_count"),
+                        label="schedule_prefix_missing_count",
+                    )
+                )
+            if len(self.schedule_sequence) + self.schedule_prefix_missing_count != len(
+                self.consumed_sequence
+            ):
+                raise RuntimeError(
+                    "Z-space optimizer resume schedule coverage is inconsistent"
+                )
             state_input_trajectory_id = payload.get("input_trajectory_id")
             if state_input_trajectory_id != self.recipe.get("trajectory_id"):
                 raise RuntimeError(
@@ -941,6 +996,20 @@ def hf_zspace_optimizer_control_callback(
         def _finalize_trajectory(self, output_dir: str | Path) -> None:
             if self.max_steps is None:
                 raise RuntimeError("Z-space optimizer horizon is unavailable")
+            if self.schedule_prefix_missing_count > 0:
+                if (
+                    len(self.schedule_sequence) + self.schedule_prefix_missing_count
+                    != self.max_steps
+                ):
+                    raise RuntimeError(
+                        "legacy Z-space optimizer schedule does not cover the horizon"
+                    )
+                self._trace(
+                    "trajectory_unavailable",
+                    reason="legacy_state_has_no_historical_scheduler_rows",
+                    schedule_prefix_missing_count=self.schedule_prefix_missing_count,
+                )
+                return
             if len(self.schedule_sequence) != self.max_steps:
                 raise RuntimeError(
                     "Z-space optimizer schedule does not cover the full horizon"
@@ -996,6 +1065,7 @@ def hf_zspace_optimizer_control_callback(
                 "derived_sequence": _json_clone(self.derived_sequence),
                 "consumed_sequence": _json_clone(self.consumed_sequence),
                 "schedule_sequence": _json_clone(self.schedule_sequence),
+                "schedule_prefix_missing_count": self.schedule_prefix_missing_count,
                 "input_trajectory_id": self.recipe.get("trajectory_id"),
                 "trajectory_id": (
                     None
@@ -1063,35 +1133,51 @@ def hf_zspace_optimizer_control_callback(
                 float(row["absolute_learning_rate_scale"])
                 for row in self.consumed_sequence
             ]
-            applied_scales = [
-                float(row["applied_learning_rate_scale"])
-                for row in self.schedule_sequence
-            ]
-            nominal_sequence = [
-                {
-                    "hf_target_step": row["hf_target_step"],
-                    "absolute_learning_rate_scale": row["absolute_learning_rate_scale"],
-                    "nominal_learning_rates": row["nominal_learning_rates"],
-                }
-                for row in self.schedule_sequence
-            ]
-            nominal_dose = sum(
-                sum(
-                    _finite_float(rate, label="nominal_learning_rate")
-                    for rate in row["nominal_learning_rates"]
+            schedule_evidence_complete = (
+                self.schedule_prefix_missing_count == 0
+                and len(self.schedule_sequence) == len(self.consumed_sequence)
+            )
+            if schedule_evidence_complete:
+                applied_scales = [
+                    float(row["applied_learning_rate_scale"])
+                    for row in self.schedule_sequence
+                ]
+                nominal_sequence = [
+                    {
+                        "hf_target_step": row["hf_target_step"],
+                        "absolute_learning_rate_scale": row[
+                            "absolute_learning_rate_scale"
+                        ],
+                        "nominal_learning_rates": row["nominal_learning_rates"],
+                    }
+                    for row in self.schedule_sequence
+                ]
+                nominal_dose = sum(
+                    sum(
+                        _finite_float(rate, label="nominal_learning_rate")
+                        for rate in row["nominal_learning_rates"]
+                    )
+                    for row in self.schedule_sequence
                 )
-                for row in self.schedule_sequence
-            )
-            actuated_dose = sum(
-                sum(
-                    _finite_float(rate, label="effective_learning_rate")
-                    for rate in row["effective_learning_rates"]
+                actuated_dose = sum(
+                    sum(
+                        _finite_float(rate, label="effective_learning_rate")
+                        for rate in row["effective_learning_rates"]
+                    )
+                    for row in self.schedule_sequence
                 )
-                for row in self.schedule_sequence
-            )
-            actuated_dose_ratio = (
-                actuated_dose / nominal_dose if nominal_dose > 0.0 else None
-            )
+                actuated_dose_ratio = (
+                    actuated_dose / nominal_dose if nominal_dose > 0.0 else None
+                )
+                nominal_sequence_id = _sha256_id(nominal_sequence)
+                actuated_sequence_id = _sha256_id(self.schedule_sequence)
+            else:
+                applied_scales = []
+                nominal_dose = None
+                actuated_dose = None
+                actuated_dose_ratio = None
+                nominal_sequence_id = None
+                actuated_sequence_id = None
             if self.failure is not None:
                 status = "blocked"
             elif self.mode == "off":
@@ -1137,8 +1223,10 @@ def hf_zspace_optimizer_control_callback(
                     else None
                 ),
                 "control_sequence_id": _sha256_id(self.consumed_sequence),
-                "nominal_schedule_sequence_id": _sha256_id(nominal_sequence),
-                "actuated_schedule_sequence_id": _sha256_id(self.schedule_sequence),
+                "nominal_schedule_sequence_id": nominal_sequence_id,
+                "actuated_schedule_sequence_id": actuated_sequence_id,
+                "schedule_evidence_complete": schedule_evidence_complete,
+                "schedule_prefix_missing_count": self.schedule_prefix_missing_count,
                 "nominal_learning_rate_dose": nominal_dose,
                 "actuated_learning_rate_dose": actuated_dose,
                 "actuated_learning_rate_dose_ratio": actuated_dose_ratio,
@@ -1206,10 +1294,18 @@ def hf_zspace_optimizer_control_callback(
                 "failure": self.failure,
                 "efficacy_evaluated": False,
                 "evidence_boundary": (
-                    "receipt proves control derivation and optimizer actuation, "
-                    "including Rust-owned trajectory and nominal-LR matching, not "
-                    "learning-quality improvement; this v1 signal is derived from "
-                    "training progress, not gradients or loss feedback"
+                    (
+                        "legacy v1 resume preserved optimizer actuation, but the "
+                        "checkpoint had no historical scheduler rows; trajectory and "
+                        "integrated-dose evidence are unavailable"
+                    )
+                    if not schedule_evidence_complete
+                    else (
+                        "receipt proves control derivation and optimizer actuation, "
+                        "including Rust-owned trajectory and nominal-LR matching, not "
+                        "learning-quality improvement; this progress-derived signal "
+                        "does not use gradients or loss feedback"
+                    )
                 ),
             }
 
@@ -1383,6 +1479,13 @@ def _matched_seed_pair(
         errors.append("observe arm receipt has the wrong mode")
     if apply_receipt.get("mode") != "apply":
         errors.append("apply arm receipt has the wrong mode")
+    if observe.get("trajectory_arm") != "raw":
+        errors.append("two-arm comparator requires a raw observe arm")
+    if apply.get("trajectory_arm") != "raw":
+        errors.append(
+            "two-arm comparator requires raw apply; use the factorized comparator "
+            "for calibrated trajectory arms"
+        )
     observe_applied_count = _receipt_count(observe_receipt.get("applied_update_count"))
     if observe_applied_count != 0:
         errors.append("observe arm changed model-update learning rates")

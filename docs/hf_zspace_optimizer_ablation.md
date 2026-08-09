@@ -145,3 +145,12 @@ assert validated["trajectory_id"] == trajectory["trajectory_id"]
 
 Changing any serialized report field causes Rust validation to reject the
 artifact rather than accepting Python-reconstructed semantics.
+
+## Resume compatibility
+
+New checkpoints use optimizer-state contract v2 and retain every scheduler row
+needed to reproduce the trajectory. A raw-control v1 checkpoint still resumes,
+but v1 did not store historical nominal/effective LR rows. SpiralTorch records
+that missing prefix explicitly, preserves optimizer actuation, and leaves the
+trajectory and integrated-dose receipt fields unavailable instead of inventing
+history. Such a migrated run cannot enter the four-arm comparator.

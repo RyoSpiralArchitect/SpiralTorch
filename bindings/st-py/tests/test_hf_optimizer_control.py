@@ -32,6 +32,17 @@ def _load_bridge_example():
     return module
 
 
+def _sha256_id(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
 class _HookHandle:
     def __init__(self, hooks: list[object], hook: object) -> None:
         self.hooks = hooks
@@ -414,6 +425,81 @@ def test_apply_resume_restores_pending_control_and_controller_state(
             )
 
 
+def test_legacy_v1_resume_preserves_training_without_inventing_schedule_history(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "legacy-resume"
+    args = types.SimpleNamespace(output_dir=str(output))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    first_optimizer = _FakeOptimizer()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        first = hf_zspace_optimizer_control_callback(mode="apply")
+    first.on_train_begin(args, state, control, optimizer=first_optimizer)
+    first.on_step_begin(args, state, control, optimizer=first_optimizer)
+    first_optimizer.step()
+    state.global_step = 1
+    first.on_step_end(args, state, control, optimizer=first_optimizer)
+    first.on_save(args, state, control, optimizer=first_optimizer)
+    checkpoint = output / "checkpoint-1"
+    state_path = checkpoint / HF_ZSPACE_OPTIMIZER_STATE_FILENAME
+
+    legacy = json.loads(state_path.read_text(encoding="utf-8"))
+    legacy.pop("state_id")
+    legacy["schema"] = "spiraltorch.hf_zspace_optimizer_state.v1"
+    for field in (
+        "schedule_sequence",
+        "schedule_prefix_missing_count",
+        "input_trajectory_id",
+        "trajectory_id",
+        "trajectory_path",
+    ):
+        legacy.pop(field, None)
+    for field in (
+        "trajectory_arm",
+        "trajectory_id",
+        "trajectory_contract",
+        "trajectory_semantic_owner",
+        "trajectory_semantic_backend",
+        "trajectory_required",
+        "actuation_scale_source",
+    ):
+        legacy["recipe"].pop(field, None)
+    legacy["state_id"] = _sha256_id(legacy)
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+    first.abort(RuntimeError("simulated legacy process handoff"))
+
+    second_optimizer = _FakeOptimizer()
+    resumed_state = types.SimpleNamespace(global_step=1, max_steps=2)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        second = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            resume_from_checkpoint=checkpoint,
+        )
+    second.on_train_begin(args, resumed_state, control, optimizer=second_optimizer)
+    second.on_step_begin(args, resumed_state, control, optimizer=second_optimizer)
+    second_optimizer.step()
+    resumed_state.global_step = 2
+    second.on_step_end(args, resumed_state, control, optimizer=second_optimizer)
+    second.on_train_end(args, resumed_state, control, optimizer=second_optimizer)
+    receipt = second.receipt()
+
+    assert receipt["status"] == "ready"
+    assert receipt["applied_update_count"] == 2
+    assert receipt["schedule_evidence_complete"] is False
+    assert receipt["schedule_prefix_missing_count"] == 1
+    assert receipt["trajectory_validated"] is None
+    assert receipt["nominal_learning_rate_dose"] is None
+    assert receipt["actuated_schedule_sequence_id"] is None
+    migrated = json.loads(
+        (output / HF_ZSPACE_OPTIMIZER_STATE_FILENAME).read_text(encoding="utf-8")
+    )
+    assert migrated["schema"] == st.HF_ZSPACE_OPTIMIZER_STATE_SCHEMA
+    assert migrated["schedule_prefix_missing_count"] == 1
+
+
 def test_resume_branches_trace_from_the_verified_checkpoint_prefix(
     tmp_path: Path,
 ) -> None:
@@ -601,6 +687,8 @@ def _factorized_card(
             "nominal_learning_rate_dose": nominal_dose,
             "actuated_learning_rate_dose": actuated_dose,
             "actuated_learning_rate_dose_ratio": actuated_dose / nominal_dose,
+            "schedule_evidence_complete": True,
+            "schedule_prefix_missing_count": 0,
             "nominal_schedule_sequence_id": "sha256:" + "d" * 64,
             "actuated_schedule_sequence_id": "sha256:"
             + arm.encode().hex().ljust(64, "0")[:64],
@@ -762,6 +850,22 @@ def test_factorized_ablation_separates_dose_and_shape_contrasts() -> None:
     assert seed["contrasts"]["raw_total_effect"] == pytest.approx(-0.1)
     assert seed["eval_loss_changes"]["dose_normalized"] == pytest.approx(-0.7)
     assert report["efficacy_claim_ready"] is False
+
+
+def test_two_arm_comparator_rejects_calibrated_non_raw_apply() -> None:
+    report = st.compare_hf_zspace_optimizer_run_cards(
+        [
+            _factorized_card(arm="observe", seed=13, eval_after=2.0),
+            _factorized_card(arm="dose_normalized", seed=13, eval_after=1.8),
+        ]
+    )
+
+    assert report["status"] == "blocked"
+    assert report["matched_pair_count"] == 1
+    assert (
+        "two-arm comparator requires raw apply; use the factorized comparator "
+        "for calibrated trajectory arms" in report["pairs"][0]["errors"]
+    )
 
 
 def test_factorized_ablation_blocks_nominal_scheduler_drift() -> None:
