@@ -115,6 +115,22 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
     card_path.write_text(json.dumps(card) + "\n", encoding="utf-8")
 
 
+def _write_failed_run(run: Mapping[str, object]) -> None:
+    card_path = Path(str(run["run_card"]))
+    card_path.parent.mkdir(parents=True, exist_ok=True)
+    card_path.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_finetune_run_card",
+                "failure_stage": "train",
+                "failure_error": "synthetic child failure",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _patch_ready_comparator(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         study,
@@ -278,6 +294,79 @@ def test_factorized_study_recovers_after_parent_crash_and_reuses_runs(
     card_path.write_text(json.dumps(card) + "\n", encoding="utf-8")
     with pytest.raises(st.HFZSpaceFactorizedStudyError, match="changed after receipt"):
         st.run_hf_zspace_optimizer_factorized_study(**common)
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="changed after receipt"):
+        st.run_hf_zspace_optimizer_factorized_study(
+            **common,
+            retry_failed=True,
+        )
+
+
+def test_factorized_study_quarantines_failed_run_card_before_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    calls: list[str] = []
+
+    def fail(run: Mapping[str, object], *, cwd: Path) -> tuple[int, float]:
+        del cwd
+        calls.append(str(run["label"]))
+        _write_failed_run(run)
+        return 1, 0.1
+
+    monkeypatch.setattr(study, "_execute_run", fail)
+    common = {
+        "study_dir": tmp_path / "study",
+        "seeds": [13],
+        "bridge_args": _bridge_args(),
+        "bridge_script": bridge,
+        "launch_cwd": tmp_path,
+        "min_free_disk_gb": 0.0,
+        "execute": True,
+    }
+    failed = st.run_hf_zspace_optimizer_factorized_study(**common)
+    assert failed["status"] == "failed"
+    assert calls == ["s13-observe"]
+
+    def complete(run: Mapping[str, object], *, cwd: Path) -> tuple[int, float]:
+        del cwd
+        calls.append(str(run["label"]))
+        _write_completed_run(run)
+        return 0, 0.25
+
+    monkeypatch.setattr(study, "_execute_run", complete)
+    _patch_ready_comparator(monkeypatch)
+    summary = st.run_hf_zspace_optimizer_factorized_study(
+        **common,
+        retry_failed=True,
+    )
+
+    assert summary["status"] == "ready"
+    assert calls == [
+        "s13-observe",
+        "s13-observe",
+        "s13-dose_matched_constant",
+        "s13-raw",
+        "s13-dose_normalized",
+    ]
+    quarantine = Path(str(common["study_dir"])) / "quarantine"
+    quarantined_cards = list(quarantine.glob("s13-observe-*/run-card.json"))
+    assert len(quarantined_cards) == 1
+    quarantined = json.loads(quarantined_cards[0].read_text(encoding="utf-8"))
+    assert quarantined["failure_error"] == "synthetic child failure"
+    event_path = (
+        Path(str(common["study_dir"]))
+        / study.HF_ZSPACE_FACTORIZED_STUDY_EVENTS_FILENAME
+    )
+    events = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+    ]
+    quarantine_events = [
+        event for event in events if event["event_type"] == "run_quarantined"
+    ]
+    assert len(quarantine_events) == 1
+    assert "training failure" in quarantine_events[0]["validation_error"]
 
 
 def test_factorized_study_rejects_cross_run_runtime_drift(

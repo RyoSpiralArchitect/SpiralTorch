@@ -1043,7 +1043,17 @@ def run_hf_zspace_optimizer_factorized_study(
                 run = {str(key): value for key, value in raw_run.items()}
                 label = str(run["label"])
                 run_id = str(run["run_id"])
-                reusable = _verify_reusable_run(run, completed_events.get(run_id))
+                completion_event = completed_events.get(run_id)
+                reuse_error: HFZSpaceFactorizedStudyError | None = None
+                try:
+                    reusable = _verify_reusable_run(run, completion_event)
+                except HFZSpaceFactorizedStudyError as error:
+                    # A completion receipt is immutable evidence. Failed or
+                    # interrupted attempts may instead be preserved and retried.
+                    if completion_event is not None or not retry_failed:
+                        raise
+                    reusable = None
+                    reuse_error = error
                 if reusable is not None:
                     _enforce_study_identity_anchor(identity_anchor, reusable)
                     status = "recovered" if reusable["recovered"] else "reused"
@@ -1094,6 +1104,9 @@ def run_hf_zspace_optimizer_factorized_study(
                             "run_id": run_id,
                             "label": label,
                             "destination": str(destination),
+                            "validation_error": (
+                                None if reuse_error is None else str(reuse_error)
+                            ),
                         },
                     )
                 free_before = _free_disk_gb(root)
