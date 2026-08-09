@@ -109,6 +109,90 @@ statistical significance. Even a consistent improvement is reported separately
 from `efficacy_claim_ready`, which remains false until a prespecified, powered,
 multi-model evaluation exists.
 
+## Run a resumable multi-seed study
+
+The installed study runner generates the four commands for every seed, runs
+`observe` before its three calibrated arms, and invokes the same comparator at
+the end. First omit `--run` to create a recovery anchor without training:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-study \
+  --study-dir models/runs/zspace-factorized-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Inspect `study-plan.json`, then repeat the identical command with `--run` before
+the separator. The plan is immutable inside one study directory and contains a
+SHA-256 study identity over the scientific arguments, bridge content, package
+source/native-extension fingerprint, available Git head/status, seeds, and arm
+order. If the study directory is inside the repository, that generated subtree
+is explicitly excluded from Git status so writing the plan does not change its
+own recovery identity.
+
+Each child completion is accepted only after the runner verifies its launch
+command, seed and arm, before/after eval losses, complete optimizer horizon,
+Rust trajectory identity, trainer and optimizer trace hashes, output directory,
+and path-independent execution/runtime/input identities. Those identities must
+also remain constant across every seed. The append-only `study-events.jsonl`
+journal is fsynced before and after child execution, so a restart can recover a
+child that finished immediately before the parent stopped without silently
+adopting unrelated artifacts. `study-summary.json` records live progress and
+`factorized-report.json` is written only after every verified arm is present.
+
+If a failed attempt left artifacts that cannot be verified, the study fails
+closed. `--retry-failed` preserves them under `quarantine/` before launching a
+new attempt; it never overwrites them in place.
+
+## Compare control gains
+
+Run otherwise identical studies with an explicit
+`--zspace-optimizer-control-gain`, then compare the completed study directories:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-gain-compare \
+  models/runs/zspace-factorized-gain-025 \
+  models/runs/zspace-factorized-gain-050 \
+  models/runs/zspace-factorized-gain-100 \
+  --out models/runs/zspace-factorized-gain-response.json
+```
+
+The gain comparator verifies each plan identity, hash-chained completion
+journal, factorized-report SHA-256, non-gain scientific arguments, seed set,
+execution/runtime/input anchor, and exact observe losses. It rejects fewer than
+three gains. The output reports per-contrast ordinary least-squares slope,
+intercept, and `R²`; this is a descriptive response curve, not a significance
+test.
+
+### Audited 64-step result (2026-08-09)
+
+The checked-in [gain-response artifact](benchmarks/hf_zspace_optimizer_gain_response_64step_20260809.json)
+records one local GPT-2 LoRA run family on
+`models/samples/spiral_corpus_en/06_spiral_longform.txt`: 64 optimizer updates,
+seeds 13/17/23, CPU float32, and gains 0.25/0.5/1.0. Observe before/after losses
+were exactly reproduced across all three studies.
+
+| Contrast (left minus right) | gain 0.25 | gain 0.5 | gain 1.0 | `R²` |
+| --- | ---: | ---: | ---: | ---: |
+| raw minus observe | +0.000943 | +0.001855 | +0.003599 | 0.99988 |
+| constant-dose minus observe | +0.000737 | +0.001457 | +0.002862 | 0.99996 |
+| dose-normalized minus observe | +0.000217 | +0.000442 | +0.000902 | 0.99998 |
+| raw minus constant-dose | +0.000206 | +0.000398 | +0.000737 | 0.99903 |
+
+Lower validation loss is better, so every positive value favors the right arm.
+For this single recipe the current progress-only, non-feedback control therefore
+produced gain-correlated loss degradation. This is useful actuator diagnosis,
+not evidence that Z-Space controls are generally harmful. It argues against
+making this open-loop policy a default and motivates a separately ablated,
+Rust-owned feedback gate before longer scale-up.
+
 The comparator fails closed unless each seed has exactly one arm of every
 kind and all four share:
 

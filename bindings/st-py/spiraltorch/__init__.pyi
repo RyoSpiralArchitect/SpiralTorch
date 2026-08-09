@@ -702,6 +702,43 @@ def write_hf_zspace_optimizer_factorized_ablation_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
+HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME: str
+HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA: str
+HF_ZSPACE_FACTORIZED_STUDY_ARMS: Tuple[str, ...]
+HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA: str
+HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME: str
+HF_ZSPACE_FACTORIZED_STUDY_SCHEMA: str
+HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA: str
+class HFZSpaceFactorizedStudyError(ValueError): ...
+def build_hf_zspace_optimizer_factorized_study_plan(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+) -> Dict[str, object]: ...
+def compare_hf_zspace_optimizer_factorized_gain_studies(
+    study_dirs: Sequence[str | PathLike[str]],
+) -> Dict[str, object]: ...
+def run_hf_zspace_optimizer_factorized_study(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+    execute: bool = ...,
+    retry_failed: bool = ...,
+) -> Dict[str, object]: ...
+def write_hf_zspace_optimizer_factorized_gain_response_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA: str
 HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA: str
@@ -11258,6 +11295,18 @@ __all__ = [
     "hf_zspace_optimizer_recipe_contract",
     "write_hf_zspace_optimizer_factorized_ablation_report",
     "write_hf_zspace_optimizer_matched_ablation_report",
+    "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME",
+    "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_STUDY_ARMS",
+    "HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME",
+    "HF_ZSPACE_FACTORIZED_STUDY_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
+    "HFZSpaceFactorizedStudyError",
+    "build_hf_zspace_optimizer_factorized_study_plan",
+    "compare_hf_zspace_optimizer_factorized_gain_studies",
+    "run_hf_zspace_optimizer_factorized_study",
+    "write_hf_zspace_optimizer_factorized_gain_response_report",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
     "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
