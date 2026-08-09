@@ -92,6 +92,7 @@ Those rows are Python transport metadata and are not committed; the canonical Ru
 fields out of native probes on this path. If a diagnostic batch mixes committed probes with
 legacy or error rows, committed probes stay on the validated Rust ingress and uncommitted rows
 remain diagnostics only; the whole batch is never downgraded to compatibility semantics.
+Malformed probe envelopes are rejected rather than reclassified as legacy evidence.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:

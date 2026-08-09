@@ -8661,8 +8661,7 @@ def describe_runtime_devices(
         reports.append(report)
     committed_probe_reports = []
     for report in reports:
-        candidate = report.get("contract", report)
-        if isinstance(candidate, _Mapping) and candidate.get("kind") == (
+        if "contract" in report or report.get("kind") == (
             "spiraltorch.runtime_device_probe"
         ):
             committed_probe_reports.append(report)

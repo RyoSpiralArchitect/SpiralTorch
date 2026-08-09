@@ -312,6 +312,25 @@ def test_mixed_device_reports_never_downgrade_committed_probe_evidence(
     assert st.validate_runtime_device_route_contract(summary) == summary
 
 
+def test_malformed_probe_envelopes_never_fall_back_to_transport_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    malformed = json.loads(json.dumps(st.observe_runtime_device_probe("cpu")))
+    malformed["contract"]["kind"] = "forged.runtime_device_probe"
+    malformed["route_evidence"]["runtime_ready"] = False
+
+    monkeypatch.setattr(
+        st,
+        "describe_device",
+        lambda _backend="cpu", **_kwargs: malformed,
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="kind.*must be"):
+        st.describe_runtime_devices(["cpu"])
+
+
 def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
     st = require_native()
 
