@@ -282,6 +282,36 @@ def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
         st.evaluate_runtime_device_route_from_probes([tampered])
 
 
+def test_mixed_device_reports_never_downgrade_committed_probe_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    probe = st.observe_runtime_device_probe("cpu")
+    tampered_transport = json.loads(json.dumps(probe))
+    tampered_transport["route_evidence"]["runtime_ready"] = False
+
+    def _mixed_describe_device(backend: str = "cpu", **_kwargs: object):
+        if backend == "cpu":
+            return tampered_transport
+        raise RuntimeError("diagnostic-only probe failure")
+
+    monkeypatch.setattr(st, "describe_device", _mixed_describe_device, raising=False)
+
+    summary = st.describe_runtime_devices(
+        ["cpu", "mps"],
+        required_ready_backends=["cpu", "mps"],
+    )
+
+    assert summary["evidence"] == [probe["contract"]["route_evidence"]]
+    assert summary["requested_backends"] == ["cpu", "mps"]
+    assert summary["ready_backends"] == ["cpu"]
+    assert summary["required_ready_backends_passed"] is False
+    assert summary["runtime_missing_ready_backends"] == ["mps"]
+    assert summary["reports"][1]["error"] == "diagnostic-only probe failure"
+    assert summary["reports"][0]["route_evidence"]["runtime_ready"] is False
+    assert st.validate_runtime_device_route_contract(summary) == summary
+
+
 def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
     st = require_native()
 

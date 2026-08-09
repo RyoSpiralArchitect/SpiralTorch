@@ -89,7 +89,9 @@ boolean `runtime_ready` projection remains fail-closed.
 `describe_runtime_devices(...)` also appends the complete source `reports` for diagnostics.
 Those rows are Python transport metadata and are not committed; the canonical Rust-owned
 `evidence` field is the replayable source for route decisions. Python never copies readiness
-fields out of native probes on this path.
+fields out of native probes on this path. If a diagnostic batch mixes committed probes with
+legacy or error rows, committed probes stay on the validated Rust ingress and uncommitted rows
+remain diagnostics only; the whole batch is never downgraded to compatibility semantics.
 
 Build a graph with the same `spiraltorch.autograd.v1` contract used by direct
 Rust and browser clients:

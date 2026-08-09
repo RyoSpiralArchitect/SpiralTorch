@@ -8659,18 +8659,16 @@ def describe_runtime_devices(
             report.setdefault("backend", str(report.get("effective_backend", backend)))
 
         reports.append(report)
-    canonical_probe_reports = []
+    committed_probe_reports = []
     for report in reports:
         candidate = report.get("contract", report)
-        if not isinstance(candidate, _Mapping) or candidate.get("kind") != (
+        if isinstance(candidate, _Mapping) and candidate.get("kind") == (
             "spiraltorch.runtime_device_probe"
         ):
-            canonical_probe_reports = []
-            break
-        canonical_probe_reports.append(report)
-    if canonical_probe_reports:
+            committed_probe_reports.append(report)
+    if committed_probe_reports:
         contract = evaluate_runtime_device_route_from_probes(
-            canonical_probe_reports,
+            committed_probe_reports,
             requested_backends=backend_labels,
             required_available_backends=required_available_labels,
             required_ready_backends=required_ready_labels,
