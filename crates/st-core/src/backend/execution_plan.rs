@@ -3,6 +3,7 @@
 use super::device_caps::{BackendKind, DeviceCaps};
 use super::execution_capability::{
     canonicalize_component_workloads, observe_runtime_component_capabilities,
+    tensor_execution_workload,
 };
 pub use super::execution_capability::{
     RuntimeComponentCapabilityEvidence, RuntimeComponentCapabilityObservationError,
@@ -21,7 +22,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use spiral_config::execution::{AcceleratorFallback, ExecutionConfig};
 use st_tensor::{
-    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorUtilBackend,
+    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorExecutionWorkload,
+    TensorUtilBackend,
 };
 use thiserror::Error;
 
@@ -407,6 +409,7 @@ pub struct BackendPolicy {
     attention_backend: AttentionBackend,
     softmax_backend: SoftmaxBackend,
     tensor_util_backend: TensorUtilBackend,
+    runtime_plan_workloads: [Option<TensorExecutionWorkload>; 6],
     runtime_plan_output_sha256: Option<[u8; 32]>,
 }
 
@@ -436,6 +439,7 @@ impl BackendPolicy {
             attention_backend: attention_backend_for(runtime_policy.attention),
             softmax_backend: softmax_backend_for(runtime_policy.softmax),
             tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
+            runtime_plan_workloads: [None; 6],
             runtime_plan_output_sha256: None,
         }
     }
@@ -481,6 +485,7 @@ impl BackendPolicy {
             attention_backend,
             softmax_backend,
             tensor_util_backend: tensor_util_backend_for(runtime_policy.tensor_util),
+            runtime_plan_workloads: [None; 6],
             runtime_plan_output_sha256: None,
         }
     }
@@ -517,6 +522,12 @@ impl BackendPolicy {
                 });
             }
         }
+        let mut runtime_plan_workloads = [None; 6];
+        for workload in &plan.request.component_workloads {
+            let workload = tensor_execution_workload(workload);
+            runtime_plan_workloads[workload.component().index()] = Some(workload);
+        }
+        policy.runtime_plan_workloads = runtime_plan_workloads;
         policy.runtime_plan_output_sha256 = Some(parse_sha256(&plan.output_sha256)?);
         Ok(policy)
     }
@@ -588,6 +599,11 @@ impl BackendPolicy {
     /// Commitment of the canonical runtime plan that produced this policy.
     pub const fn runtime_plan_output_sha256(self) -> Option<[u8; 32]> {
         self.runtime_plan_output_sha256
+    }
+
+    /// Exact component workloads declared by the committed runtime plan.
+    pub(crate) const fn runtime_plan_workloads(self) -> [Option<TensorExecutionWorkload>; 6] {
+        self.runtime_plan_workloads
     }
 
     pub fn runtime_plan_output_sha256_hex(self) -> Option<String> {
@@ -1802,6 +1818,19 @@ mod tests {
         assert_eq!(
             policy.runtime_plan_output_sha256_hex().as_deref(),
             Some(payload.output_sha256.as_str())
+        );
+        let bound_workloads = policy.runtime_plan_workloads();
+        for workload in &payload.request.component_workloads {
+            let workload = tensor_execution_workload(workload);
+            assert_eq!(
+                bound_workloads[workload.component().index()],
+                Some(workload),
+                "materialization must retain the exact declared workload"
+            );
+        }
+        assert_eq!(
+            bound_workloads.into_iter().flatten().count(),
+            RuntimeExecutionComponent::ALL.len()
         );
     }
 

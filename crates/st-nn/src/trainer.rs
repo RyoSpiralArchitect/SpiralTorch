@@ -9494,9 +9494,7 @@ mod tests {
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::backend::execution_plan::{
-        evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
-        RuntimeComponentWorkload, RuntimeExecutionComponent, RuntimeExecutionPlanRequest,
-        RuntimeTensorUtilOperation,
+        evaluate_runtime_execution_plan, RuntimeComponentResolution, RuntimeExecutionPlanRequest,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -9523,7 +9521,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
 
-    fn committed_cpu_execution_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
+    fn committed_cpu_session_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
         let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
             requested_backend: BackendKind::Cpu,
             caps: DeviceCaps::cpu(),
@@ -9537,40 +9535,12 @@ mod tests {
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: config,
-            component_resolution: Default::default(),
-            component_workloads: vec![
-                RuntimeComponentWorkload::DenseMatmul {
-                    rows: 2,
-                    inner: 3,
-                    cols: 4,
-                },
-                RuntimeComponentWorkload::PrepackedMatmul {
-                    rows: 2,
-                    inner: 3,
-                    cols: 4,
-                    bias: true,
-                },
-                RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
-                RuntimeComponentWorkload::Attention {
-                    contexts: 1,
-                    sequence: 2,
-                    head_dim: 4,
-                    z_bias: true,
-                    attn_bias: true,
-                },
-                RuntimeComponentWorkload::Softmax { rows: 2, cols: 8 },
-                RuntimeComponentWorkload::TensorUtil {
-                    operation: RuntimeTensorUtilOperation::Scale,
-                    rows: 32,
-                    cols: 64,
-                },
-            ],
+            component_resolution: RuntimeComponentResolution::Deferred,
+            component_workloads: Vec::new(),
             component_capability_observation: None,
             tensor_util_values: None,
-            required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
+            required_native_components: Vec::new(),
         };
-        let request = observe_runtime_execution_plan_capabilities(request)
-            .expect("CPU dense-matmul capability observation");
         evaluate_runtime_execution_plan(request).expect("committed CPU execution plan")
     }
 
@@ -11459,7 +11429,7 @@ mod tests {
             0.01,
         );
         let committed_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
-        let plan = committed_cpu_execution_plan(committed_config);
+        let plan = committed_cpu_session_plan(committed_config);
 
         trainer
             .bind_runtime_execution_plan(&plan)
@@ -11493,7 +11463,7 @@ mod tests {
     fn committed_execution_plan_scopes_step_train_and_evaluate() {
         assert!(st_core::backend::execution::current_backend_policy().is_none());
         let plan =
-            committed_cpu_execution_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
+            committed_cpu_session_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
         let expected_commitment = Some(plan.output_sha256.clone());
         let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
         trainer
@@ -11544,7 +11514,7 @@ mod tests {
     #[test]
     fn plan_bound_checkpoint_requires_the_same_execution_plan_on_restore() {
         let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
-        let plan = committed_cpu_execution_plan(config);
+        let plan = committed_cpu_session_plan(config);
         let mut source_trainer =
             ModuleTrainer::new_with_execution_config(DeviceCaps::cpu(), config, -1.0, 0.05, 0.01);
         source_trainer
@@ -11621,7 +11591,7 @@ mod tests {
     #[test]
     fn plan_bound_trainer_rejects_uncommitted_schedule_with_matching_config() {
         let config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
-        let plan = committed_cpu_execution_plan(config);
+        let plan = committed_cpu_session_plan(config);
         let mut trainer =
             ModuleTrainer::new_with_execution_config(DeviceCaps::cpu(), config, -1.0, 0.05, 0.01);
         trainer
