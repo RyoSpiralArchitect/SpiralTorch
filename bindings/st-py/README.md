@@ -731,6 +731,36 @@ dataset, tokenization, model/runtime, execution, base-recipe, initial-eval, and
 Rust control-sequence mismatches; even a ready report does not establish general
 superiority.
 
+For the four-arm dose/shape study, let SpiralTorch own the seed, arm, output,
+trace, and trajectory flags. Omit `--run` first to write and inspect the
+immutable plan; repeat the same command with `--run` to execute it:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-study \
+  --study-dir models/runs/zspace-factorized-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  --run \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --eval-before-train --eval-after-train-policy always
+```
+
+The study ID binds the bridge arguments, bridge content, package Python sources,
+native extension, available Git head/status, seeds, and arm order. Generated
+study artifacts are excluded from that Git status when the study lives inside
+the repository, preventing the recovery anchor from invalidating itself.
+`study-events.jsonl` is
+append-only and fsynced; `study-summary.json` is refreshed after every verified
+run. A restart reuses a run only when its journal receipt, run-card SHA, complete
+optimizer horizon, Rust trajectory, trainer/optimizer traces, execution/runtime
+identity, and training input still agree. Use `--retry-failed` only to move
+unverified prior artifacts into the study's quarantine before a fresh attempt.
+
 For an adapter run on Apple Silicon or a model that is too expensive to update
 fully, select one of the built-in LoRA profiles. `--mode auto` resolves these
 profiles to the Trainer-ready `hf-peft-finetune` preflight, while the bridge attaches PEFT

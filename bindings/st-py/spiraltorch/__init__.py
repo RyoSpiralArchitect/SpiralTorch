@@ -747,6 +747,17 @@ from .hf_optimizer_control import (
     write_hf_zspace_optimizer_matched_ablation_report,
 )
 
+from .hf_optimizer_study import (
+    HF_ZSPACE_FACTORIZED_STUDY_ARMS,
+    HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA,
+    HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME,
+    HF_ZSPACE_FACTORIZED_STUDY_SCHEMA,
+    HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA,
+    HFZSpaceFactorizedStudyError,
+    build_hf_zspace_optimizer_factorized_study_plan,
+    run_hf_zspace_optimizer_factorized_study,
+)
+
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_DEVICE_BACKENDS,
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
@@ -1591,6 +1602,14 @@ _EXTRAS = [
     "hf_zspace_optimizer_recipe_contract",
     "write_hf_zspace_optimizer_factorized_ablation_report",
     "write_hf_zspace_optimizer_matched_ablation_report",
+    "HF_ZSPACE_FACTORIZED_STUDY_ARMS",
+    "HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME",
+    "HF_ZSPACE_FACTORIZED_STUDY_SCHEMA",
+    "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
+    "HFZSpaceFactorizedStudyError",
+    "build_hf_zspace_optimizer_factorized_study_plan",
+    "run_hf_zspace_optimizer_factorized_study",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_RUN_CARD_FILENAME",
     "HF_GPT2_FT_TRAINER_TRACE_FILENAME",

@@ -110,6 +110,10 @@ from .hf_optimizer_control import (
     write_hf_zspace_optimizer_factorized_ablation_report,
     write_hf_zspace_optimizer_matched_ablation_report,
 )
+from .hf_optimizer_study import (
+    HFZSpaceFactorizedStudyError,
+    run_hf_zspace_optimizer_factorized_study,
+)
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
@@ -2102,6 +2106,78 @@ def zspace_optimizer_factorized_compare_main(
     else:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if report.get("status") == "ready" else 1
+
+
+def zspace_optimizer_factorized_study_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Plan or run a resumable multi-seed HF Z-Space optimizer "
+            "factorized study. Pass fine-tune bridge arguments after --."
+        ),
+        allow_abbrev=False,
+    )
+    parser.add_argument("--study-dir", type=Path, required=True)
+    parser.add_argument(
+        "--seed", dest="seeds", type=int, action="append", required=True
+    )
+    parser.add_argument("--bridge-script", type=Path, default=None)
+    parser.add_argument("--python-executable", type=Path, default=None)
+    parser.add_argument("--launch-cwd", type=Path, default=None)
+    parser.add_argument("--min-free-disk-gb", type=float, default=5.0)
+    parser.add_argument("--run", action="store_true")
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Preserve unverified prior artifacts in quarantine before retrying.",
+    )
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("bridge_args", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    bridge_args = list(args.bridge_args)
+    if bridge_args and bridge_args[0] == "--":
+        bridge_args.pop(0)
+    try:
+        summary = run_hf_zspace_optimizer_factorized_study(
+            study_dir=args.study_dir,
+            seeds=args.seeds,
+            bridge_args=bridge_args,
+            bridge_script=args.bridge_script,
+            python_executable=args.python_executable,
+            launch_cwd=args.launch_cwd,
+            min_free_disk_gb=args.min_free_disk_gb,
+            execute=args.run,
+            retry_failed=args.retry_failed,
+        )
+    except HFZSpaceFactorizedStudyError as exc:
+        print(f"zspace_optimizer_factorized_study_error {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(
+            f"zspace_optimizer_factorized_study_error {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            "zspace_optimizer_factorized_study "
+            f"status={summary.get('status')} "
+            f"study_id={summary.get('study_id')} "
+            f"completed={summary.get('completed_run_count')}/"
+            f"{summary.get('run_count')} "
+            f"remaining={summary.get('remaining_run_count')}"
+        )
+        print(f"zspace_optimizer_factorized_study_dir {summary.get('study_dir')}")
+        if summary.get("factorized_report_sha256") is not None:
+            print(
+                "zspace_optimizer_factorized_study_report "
+                f"path={summary.get('factorized_report')} "
+                f"sha256={summary.get('factorized_report_sha256')}"
+            )
+    return 0 if summary.get("status") in {"planned", "ready"} else 1
 
 
 def zspace_inference_distortion_probe_main(argv: Sequence[str] | None = None) -> int:

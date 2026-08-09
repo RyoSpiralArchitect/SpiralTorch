@@ -109,6 +109,48 @@ statistical significance. Even a consistent improvement is reported separately
 from `efficacy_claim_ready`, which remains false until a prespecified, powered,
 multi-model evaluation exists.
 
+## Run a resumable multi-seed study
+
+The installed study runner generates the four commands for every seed, runs
+`observe` before its three calibrated arms, and invokes the same comparator at
+the end. First omit `--run` to create a recovery anchor without training:
+
+```bash
+spiral-hf-zspace-optimizer-factorized-study \
+  --study-dir models/runs/zspace-factorized-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Inspect `study-plan.json`, then repeat the identical command with `--run` before
+the separator. The plan is immutable inside one study directory and contains a
+SHA-256 study identity over the scientific arguments, bridge content, package
+source/native-extension fingerprint, available Git head/status, seeds, and arm
+order. If the study directory is inside the repository, that generated subtree
+is explicitly excluded from Git status so writing the plan does not change its
+own recovery identity.
+
+Each child completion is accepted only after the runner verifies its launch
+command, seed and arm, before/after eval losses, complete optimizer horizon,
+Rust trajectory identity, trainer and optimizer trace hashes, output directory,
+and path-independent execution/runtime/input identities. Those identities must
+also remain constant across every seed. The append-only `study-events.jsonl`
+journal is fsynced before and after child execution, so a restart can recover a
+child that finished immediately before the parent stopped without silently
+adopting unrelated artifacts. `study-summary.json` records live progress and
+`factorized-report.json` is written only after every verified arm is present.
+
+If a failed attempt left artifacts that cannot be verified, the study fails
+closed. `--retry-failed` preserves them under `quarantine/` before launching a
+new attempt; it never overwrites them in place.
+
 The comparator fails closed unless each seed has exactly one arm of every
 kind and all four share:
 
