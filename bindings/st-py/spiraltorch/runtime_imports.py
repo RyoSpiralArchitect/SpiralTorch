@@ -1386,6 +1386,8 @@ def runtime_device_report_fields(
     unknown_required = list(contract.get("required_available_backends_unknown", []))
     missing_ready_required = list(contract.get("required_ready_backends_missing", []))
     failures = list(contract.get("failures", []))
+    persisted_contract = dict(contract)
+    persisted_contract.pop("reports", None)
     return {
         f"{field_prefix}runtime_device_report_requested": True,
         f"{field_prefix}runtime_device_report_backends": csv_label(backends),
@@ -1405,7 +1407,7 @@ def runtime_device_report_fields(
             sort_keys=True,
         ),
         f"{field_prefix}runtime_device_route_contract_json": json.dumps(
-            contract,
+            persisted_contract,
             ensure_ascii=False,
             sort_keys=True,
         ),

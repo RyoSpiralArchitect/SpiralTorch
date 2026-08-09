@@ -342,7 +342,11 @@ def test_runtime_preflight_reuses_the_required_probe_route_contract() -> None:
         }
     )
     contract = json.loads(fields["runtime_device_route_contract_json"])
+    reports = json.loads(fields["runtime_device_reports_json"])
 
+    assert "reports" not in contract
+    assert reports
+    assert st.validate_runtime_device_route_contract(contract) == contract
     assert contract["required_available_backends"] == ["cpu"]
     assert contract["required_ready_backends"] == ["cpu"]
     assert contract["required_available_backends_passed"] is True
