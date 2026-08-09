@@ -235,6 +235,21 @@ mod tests {
                 cols: 2,
             },
             RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::AddRow,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::SumAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::SumAxis0Scaled,
+                rows: 3,
+                cols: 2,
+            },
+            RuntimeComponentWorkload::TensorUtil {
                 operation: RuntimeTensorUtilOperation::MaxAxis0,
                 rows: 3,
                 cols: 2,
@@ -270,7 +285,7 @@ mod tests {
         assert_eq!(without_client(wasm_transport.clone()), rust);
         assert_eq!(
             wasm_transport["contract_version"],
-            "spiraltorch.runtime_execution_plan.v7"
+            "spiraltorch.runtime_execution_plan.v8"
         );
         assert_eq!(
             wasm_transport["runtime_route"]["contract_version"],
@@ -284,7 +299,7 @@ mod tests {
                 .as_array()
                 .expect("tensor utility operation workloads")
                 .len(),
-            3
+            6
         );
         assert_eq!(
             wasm_transport["request"]["component_resolution"],
@@ -399,7 +414,13 @@ mod tests {
                 "missing TypeScript type {type_name}"
             );
         }
-        for operation in ["max_axis0", "max_axis0_backward"] {
+        for operation in [
+            "add_row",
+            "sum_axis0",
+            "sum_axis0_scaled",
+            "max_axis0",
+            "max_axis0_backward",
+        ] {
             assert!(
                 declarations.contains(operation),
                 "missing TypeScript tensor-util operation {operation}"

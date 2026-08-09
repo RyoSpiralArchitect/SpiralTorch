@@ -117,6 +117,9 @@ impl TensorExecutionComponent {
 #[serde(rename_all = "snake_case")]
 pub enum TensorUtilOperation {
     Scale,
+    AddRow,
+    SumAxis0,
+    SumAxis0Scaled,
     MaxAxis0,
     MaxAxis0Backward,
 }
@@ -134,12 +137,15 @@ pub enum TensorExecutionWorkloadKey {
     Attention,
     Softmax,
     TensorUtilScale,
+    TensorUtilAddRow,
+    TensorUtilSumAxis0,
+    TensorUtilSumAxis0Scaled,
     TensorUtilMaxAxis0,
     TensorUtilMaxAxis0Backward,
 }
 
 impl TensorExecutionWorkloadKey {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 11;
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -149,6 +155,9 @@ impl TensorExecutionWorkloadKey {
             Self::Attention => "attention",
             Self::Softmax => "softmax",
             Self::TensorUtilScale => "tensor_util.scale",
+            Self::TensorUtilAddRow => "tensor_util.add_row",
+            Self::TensorUtilSumAxis0 => "tensor_util.sum_axis0",
+            Self::TensorUtilSumAxis0Scaled => "tensor_util.sum_axis0_scaled",
             Self::TensorUtilMaxAxis0 => "tensor_util.max_axis0",
             Self::TensorUtilMaxAxis0Backward => "tensor_util.max_axis0_backward",
         }
@@ -162,8 +171,11 @@ impl TensorExecutionWorkloadKey {
             Self::Attention => 3,
             Self::Softmax => 4,
             Self::TensorUtilScale => 5,
-            Self::TensorUtilMaxAxis0 => 6,
-            Self::TensorUtilMaxAxis0Backward => 7,
+            Self::TensorUtilAddRow => 6,
+            Self::TensorUtilSumAxis0 => 7,
+            Self::TensorUtilSumAxis0Scaled => 8,
+            Self::TensorUtilMaxAxis0 => 9,
+            Self::TensorUtilMaxAxis0Backward => 10,
         }
     }
 }
@@ -233,6 +245,18 @@ impl TensorExecutionWorkload {
                 ..
             } => TensorExecutionWorkloadKey::TensorUtilScale,
             Self::TensorUtil {
+                operation: TensorUtilOperation::AddRow,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilAddRow,
+            Self::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilSumAxis0,
+            Self::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0Scaled,
+                ..
+            } => TensorExecutionWorkloadKey::TensorUtilSumAxis0Scaled,
+            Self::TensorUtil {
                 operation: TensorUtilOperation::MaxAxis0,
                 ..
             } => TensorExecutionWorkloadKey::TensorUtilMaxAxis0,
@@ -261,7 +285,14 @@ impl TensorExecutionWorkload {
     }
 
     pub fn has_empty_output(self) -> bool {
-        self.output_values_saturating() == 0
+        match self {
+            Self::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0 | TensorUtilOperation::SumAxis0Scaled,
+                cols,
+                ..
+            } => cols == 0,
+            _ => self.output_values_saturating() == 0,
+        }
     }
 }
 
@@ -548,6 +579,15 @@ fn wgpu_supports(workload: TensorExecutionWorkload) -> bool {
             cols,
         } => dimensions2(rows, cols).is_some_and(|(rows, cols)| match operation {
             TensorUtilOperation::Scale => crate::wgpu_dense::supports_tensor_util_scale(rows, cols),
+            TensorUtilOperation::AddRow => {
+                crate::wgpu_dense::supports_tensor_util_add_row(rows, cols)
+            }
+            TensorUtilOperation::SumAxis0 => {
+                crate::wgpu_dense::supports_tensor_util_sum_axis0(rows, cols)
+            }
+            TensorUtilOperation::SumAxis0Scaled => {
+                crate::wgpu_dense::supports_tensor_util_sum_axis0_scaled(rows, cols)
+            }
             TensorUtilOperation::MaxAxis0 => {
                 crate::wgpu_dense::supports_tensor_util_max_axis0(rows, cols)
             }
@@ -622,6 +662,24 @@ fn verify_wgpu_dispatch(workload: TensorExecutionWorkload) -> Result<(), String>
                 "tensor scale",
                 &crate::wgpu_dense::scale(&[0.25, -0.5], 1, 2, 2.0)?,
                 &[0.5, -1.0],
+                1.0e-4,
+            ),
+            TensorUtilOperation::AddRow => verify_dispatch_output(
+                "tensor add row",
+                &crate::wgpu_dense::add_row(&[0.25, -0.5, 0.75, -1.0], &[0.5, 0.25], 2, 2)?,
+                &[0.75, -0.25, 1.25, -0.75],
+                1.0e-4,
+            ),
+            TensorUtilOperation::SumAxis0 => verify_dispatch_output(
+                "tensor sum axis 0",
+                &crate::wgpu_dense::sum_axis0(&[0.25, -0.5, 0.75, -1.0], 2, 2)?,
+                &[1.0, -1.5],
+                1.0e-4,
+            ),
+            TensorUtilOperation::SumAxis0Scaled => verify_dispatch_output(
+                "tensor scaled sum axis 0",
+                &crate::wgpu_dense::sum_axis0_scaled(&[0.25, -0.5, 0.75, -1.0], 2, 2, 0.5)?,
+                &[0.5, -0.75],
                 1.0e-4,
             ),
             TensorUtilOperation::MaxAxis0 => verify_dispatch_output(
@@ -798,6 +856,9 @@ mod tests {
     fn tensor_util_host_contract_covers_each_typed_operation() {
         for operation in [
             TensorUtilOperation::Scale,
+            TensorUtilOperation::AddRow,
+            TensorUtilOperation::SumAxis0,
+            TensorUtilOperation::SumAxis0Scaled,
             TensorUtilOperation::MaxAxis0,
             TensorUtilOperation::MaxAxis0Backward,
         ] {
@@ -842,6 +903,21 @@ mod tests {
                 cols: 2,
             },
             TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::AddRow,
+                rows: 3,
+                cols: 2,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0,
+                rows: 3,
+                cols: 2,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0Scaled,
+                rows: 3,
+                cols: 2,
+            },
+            TensorExecutionWorkload::TensorUtil {
                 operation: TensorUtilOperation::MaxAxis0,
                 rows: 3,
                 cols: 2,
@@ -859,6 +935,27 @@ mod tests {
 
         assert_eq!(indexes, std::array::from_fn(|index| index));
         assert_eq!(indexes.len(), TensorExecutionWorkloadKey::COUNT);
+    }
+
+    #[test]
+    fn axis0_sum_output_emptiness_follows_columns_not_input_volume() {
+        for operation in [
+            TensorUtilOperation::SumAxis0,
+            TensorUtilOperation::SumAxis0Scaled,
+        ] {
+            assert!(!TensorExecutionWorkload::TensorUtil {
+                operation,
+                rows: 0,
+                cols: 3,
+            }
+            .has_empty_output());
+            assert!(TensorExecutionWorkload::TensorUtil {
+                operation,
+                rows: 3,
+                cols: 0,
+            }
+            .has_empty_output());
+        }
     }
 
     #[test]
@@ -958,6 +1055,21 @@ mod tests {
             TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
             TensorExecutionWorkload::TensorUtil {
                 operation: TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::AddRow,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0,
+                rows: 2,
+                cols: 4,
+            },
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0Scaled,
                 rows: 2,
                 cols: 4,
             },

@@ -405,7 +405,13 @@ declare module "spiraltorch-wasm" {
         | { component: "softmax"; rows: number; cols: number }
         | {
               component: "tensor_util";
-              operation: "scale" | "max_axis0" | "max_axis0_backward";
+              operation:
+                  | "scale"
+                  | "add_row"
+                  | "sum_axis0"
+                  | "sum_axis0_scaled"
+                  | "max_axis0"
+                  | "max_axis0_backward";
               rows: number;
               cols: number;
           };
@@ -435,7 +441,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeComponentCapabilityObservation = {
         kind: "spiraltorch.runtime_component_capability_observation";
-        contract_version: "spiraltorch.runtime_component_capability_observation.v3";
+        contract_version: "spiraltorch.runtime_component_capability_observation.v4";
         semantic_owner: "st-core::backend::execution_capability";
         semantic_backend: "rust";
         request: RuntimeComponentCapabilityObservationRequest;
@@ -504,7 +510,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v7";
+        contract_version: "spiraltorch.runtime_execution_plan.v8";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;

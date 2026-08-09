@@ -20,7 +20,7 @@ use thiserror::Error;
 
 /// Stable contract identifier for Rust-owned component capability observations.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_CONTRACT_VERSION: &str =
-    "spiraltorch.runtime_component_capability_observation.v3";
+    "spiraltorch.runtime_component_capability_observation.v4";
 /// Payload kind for one committed component capability observation.
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_KIND: &str =
     "spiraltorch.runtime_component_capability_observation";
@@ -31,9 +31,9 @@ pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_OWNER: &str =
 pub const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.request.v3\0";
+    b"spiraltorch.runtime_component_capability_observation.request.v4\0";
 const RUNTIME_COMPONENT_CAPABILITY_OBSERVATION_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_component_capability_observation.output.v3\0";
+    b"spiraltorch.runtime_component_capability_observation.output.v4\0";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum RuntimeComponentCapabilityObservationError {
@@ -58,6 +58,9 @@ pub enum RuntimeComponentCapabilityObservationError {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeTensorUtilOperation {
     Scale,
+    AddRow,
+    SumAxis0,
+    SumAxis0Scaled,
     MaxAxis0,
     MaxAxis0Backward,
 }
@@ -616,6 +619,9 @@ pub(crate) fn tensor_execution_workload(
         } => TensorExecutionWorkload::TensorUtil {
             operation: match operation {
                 RuntimeTensorUtilOperation::Scale => TensorUtilOperation::Scale,
+                RuntimeTensorUtilOperation::AddRow => TensorUtilOperation::AddRow,
+                RuntimeTensorUtilOperation::SumAxis0 => TensorUtilOperation::SumAxis0,
+                RuntimeTensorUtilOperation::SumAxis0Scaled => TensorUtilOperation::SumAxis0Scaled,
                 RuntimeTensorUtilOperation::MaxAxis0 => TensorUtilOperation::MaxAxis0,
                 RuntimeTensorUtilOperation::MaxAxis0Backward => {
                     TensorUtilOperation::MaxAxis0Backward
@@ -879,6 +885,21 @@ mod tests {
                 "scale",
             ),
             (
+                RuntimeTensorUtilOperation::AddRow,
+                TensorUtilOperation::AddRow,
+                "add_row",
+            ),
+            (
+                RuntimeTensorUtilOperation::SumAxis0,
+                TensorUtilOperation::SumAxis0,
+                "sum_axis0",
+            ),
+            (
+                RuntimeTensorUtilOperation::SumAxis0Scaled,
+                TensorUtilOperation::SumAxis0Scaled,
+                "sum_axis0_scaled",
+            ),
+            (
                 RuntimeTensorUtilOperation::MaxAxis0,
                 TensorUtilOperation::MaxAxis0,
                 "max_axis0",
@@ -1036,6 +1057,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_v3_observation_is_rejected_at_the_contract_boundary() {
+        let mut payload = observe_runtime_component_capabilities(observation_request())
+            .expect("current capability observation");
+        payload.contract_version =
+            "spiraltorch.runtime_component_capability_observation.v3".to_owned();
+
+        let error = payload
+            .validate()
+            .expect_err("v3 and v4 observations must not share a contract boundary");
+        assert!(matches!(
+            error,
+            RuntimeComponentCapabilityObservationError::InvalidPayload {
+                field: "contract_version",
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn observation_strips_nested_transport_provenance() {
         let mut request = observation_request();
         request.runtime_probe = request
@@ -1155,6 +1195,31 @@ mod tests {
                 RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
                 RuntimeComponentWorkload::TensorUtil {
                     operation: RuntimeTensorUtilOperation::Scale,
+                    rows: 2,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::AddRow,
+                    rows: 2,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::SumAxis0,
+                    rows: 2,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::SumAxis0Scaled,
+                    rows: 2,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::MaxAxis0,
+                    rows: 2,
+                    cols: 4,
+                },
+                RuntimeComponentWorkload::TensorUtil {
+                    operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
                     rows: 2,
                     cols: 4,
                 },

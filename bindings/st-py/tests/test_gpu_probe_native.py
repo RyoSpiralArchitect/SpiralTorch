@@ -666,6 +666,24 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
             },
             {
                 "component": "tensor_util",
+                "operation": "add_row",
+                "rows": 32,
+                "cols": 64,
+            },
+            {
+                "component": "tensor_util",
+                "operation": "sum_axis0",
+                "rows": 32,
+                "cols": 64,
+            },
+            {
+                "component": "tensor_util",
+                "operation": "sum_axis0_scaled",
+                "rows": 32,
+                "cols": 64,
+            },
+            {
+                "component": "tensor_util",
                 "operation": "max_axis0",
                 "rows": 32,
                 "cols": 64,
@@ -684,7 +702,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert "observe_runtime_execution_plan_capabilities" in st.__all__
     assert "validate_runtime_execution_plan_contract" in st.__all__
     assert plan["kind"] == "spiraltorch.runtime_execution_plan"
-    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v7"
+    assert plan["contract_version"] == "spiraltorch.runtime_execution_plan.v8"
     assert plan["runtime_route"]["contract_version"] == "spiraltorch.runtime_device_route.v5"
     assert plan["semantic_owner"] == "st-core::backend::execution_plan"
     assert plan["semantic_backend"] == "rust"
@@ -713,7 +731,7 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert observation["kind"] == "spiraltorch.runtime_component_capability_observation"
     assert (
         observation["contract_version"]
-        == "spiraltorch.runtime_component_capability_observation.v3"
+        == "spiraltorch.runtime_component_capability_observation.v4"
     )
     assert observation["semantic_owner"] == "st-core::backend::execution_capability"
     assert observation["committed"] is True
@@ -723,19 +741,24 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     assert [
         evidence["status"]
         for evidence in observation["capabilities"]
-    ] == ["ready"] * 8
+    ] == ["ready"] * 11
     assert [
         evidence["ready_proof"]
         for evidence in observation["capabilities"]
-    ] == ["static_host_contract"] * 8
+    ] == ["static_host_contract"] * 11
     tensor_util_route = next(
         route
         for route in plan["component_routes"]
         if route["component"] == "tensor_util"
     )
-    assert [
-        workload["operation"] for workload in tensor_util_route["workloads"]
-    ] == ["scale", "max_axis0", "max_axis0_backward"]
+    assert [workload["operation"] for workload in tensor_util_route["workloads"]] == [
+        "scale",
+        "add_row",
+        "sum_axis0",
+        "sum_axis0_scaled",
+        "max_axis0",
+        "max_axis0_backward",
+    ]
     assert [
         route["capability_state"]
         for route in plan["component_routes"]
@@ -787,13 +810,23 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
     with pytest.raises(ValueError, match="runtime execution-plan replay failed"):
         st.validate_runtime_execution_plan_contract(plan, request=tampered_proof)
 
+    legacy_observation = json.loads(json.dumps(plan["request"]))
+    legacy_observation["component_capability_observation"]["contract_version"] = (
+        "spiraltorch.runtime_component_capability_observation.v3"
+    )
+    with pytest.raises(ValueError, match="runtime execution-plan replay failed"):
+        st.validate_runtime_execution_plan_contract(
+            plan,
+            request=legacy_observation,
+        )
+
     tampered = json.loads(json.dumps(plan))
     tampered["component_routes"][0]["selected_backend"] = "auto"
     with pytest.raises(ValueError, match="runtime execution-plan validation failed"):
         st.validate_runtime_execution_plan_contract(tampered)
 
     legacy = json.loads(json.dumps(plan))
-    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v6"
+    legacy["contract_version"] = "spiraltorch.runtime_execution_plan.v7"
     with pytest.raises(ValueError, match="contract_version"):
         st.validate_runtime_execution_plan_contract(legacy)
 

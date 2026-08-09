@@ -2,6 +2,12 @@
 
 ## 0.4.13
 
+- Runtime execution plan v8 and capability observation v4: make row broadcast,
+  axis-0 sum, and scaled axis-0 sum Rust-owned typed workloads alongside max
+  readout. Mean/Sum GNN readouts now execute forward and backward under one
+  exact workload plan, with the same receipt contract exposed to Python and
+  WASM. Axis-0 sum wrappers no longer reconstruct unchecked CPU results after
+  a Rust validation or execution-contract failure.
 - Runtime-device route v4: retain canonical evidence in the Rust payload, bind
   the request and derived decision with domain-separated SHA-256 commitments,
   reject cross-report effective-backend readiness drift, and expose Rust-owned

@@ -1141,6 +1141,18 @@ fn operation_matches_workload(operation: &str, workload: TensorExecutionWorkload
             ..
         } => operation == "scale",
         TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::AddRow,
+            ..
+        } => operation == "add_row_inplace",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::SumAxis0,
+            ..
+        } => operation == "sum_axis0",
+        TensorExecutionWorkload::TensorUtil {
+            operation: crate::execution_capability::TensorUtilOperation::SumAxis0Scaled,
+            ..
+        } => operation == "sum_axis0_scaled",
+        TensorExecutionWorkload::TensorUtil {
             operation: crate::execution_capability::TensorUtilOperation::MaxAxis0,
             ..
         } => operation == "max_axis0",

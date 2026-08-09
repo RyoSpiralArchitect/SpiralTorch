@@ -29,7 +29,7 @@ use st_tensor::{
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v7";
+pub const RUNTIME_EXECUTION_PLAN_CONTRACT_VERSION: &str = "spiraltorch.runtime_execution_plan.v8";
 /// Payload kind for committed tensor execution plans.
 pub const RUNTIME_EXECUTION_PLAN_KIND: &str = "spiraltorch.runtime_execution_plan";
 /// Crate/module that owns tensor execution-plan semantics.
@@ -38,9 +38,9 @@ pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_OWNER: &str = "st-core::backend::execu
 pub const RUNTIME_EXECUTION_PLAN_SEMANTIC_BACKEND: &str = "rust";
 
 const RUNTIME_EXECUTION_PLAN_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.request.v7\0";
+    b"spiraltorch.runtime_execution_plan.request.v8\0";
 const RUNTIME_EXECUTION_PLAN_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_execution_plan.output.v7\0";
+    b"spiraltorch.runtime_execution_plan.output.v8\0";
 const RUNTIME_EXECUTION_PLAN_MAX_CLIENT_BYTES: usize = 64;
 pub(crate) const RUNTIME_EXECUTION_PLAN_COMPONENT_COUNT: usize = 6;
 
@@ -2057,17 +2057,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v6_payload_is_rejected_at_the_contract_boundary() {
+    fn legacy_v7_payload_is_rejected_at_the_contract_boundary() {
         let mut payload = evaluate_runtime_execution_plan(execution_request(
             probe_for(BackendKind::Cpu),
             AcceleratorFallback::Allow,
         ))
         .expect("current execution plan evaluates");
-        payload.contract_version = "spiraltorch.runtime_execution_plan.v6".to_owned();
+        payload.contract_version = "spiraltorch.runtime_execution_plan.v7".to_owned();
 
         let error = payload
             .validate()
-            .expect_err("v6 and v7 commitments must not share a digest domain");
+            .expect_err("v7 and v8 commitments must not share a digest domain");
         assert!(matches!(
             error,
             RuntimeExecutionPlanError::InvalidPayload {
@@ -2362,6 +2362,80 @@ mod tests {
     }
 
     #[test]
+    fn one_runtime_plan_executes_linear_readout_operations() {
+        let operations = [
+            (
+                RuntimeTensorUtilOperation::AddRow,
+                st_tensor::TensorUtilOperation::AddRow,
+                "add_row_inplace",
+            ),
+            (
+                RuntimeTensorUtilOperation::SumAxis0,
+                st_tensor::TensorUtilOperation::SumAxis0,
+                "sum_axis0",
+            ),
+            (
+                RuntimeTensorUtilOperation::SumAxis0Scaled,
+                st_tensor::TensorUtilOperation::SumAxis0Scaled,
+                "sum_axis0_scaled",
+            ),
+        ];
+        let mut request =
+            execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
+        request.component_resolution = RuntimeComponentResolution::Deferred;
+        request.tensor_util_values = None;
+        request.component_workloads = operations
+            .iter()
+            .map(|(operation, _, _)| RuntimeComponentWorkload::TensorUtil {
+                operation: *operation,
+                rows: 3,
+                cols: 2,
+            })
+            .collect();
+        let request = observe_runtime_execution_plan_capabilities(request)
+            .expect("linear readout operations are observable");
+        let plan = evaluate_runtime_execution_plan(request)
+            .expect("one plan commits every linear readout operation");
+        let route = plan
+            .component_routes
+            .iter()
+            .find(|route| route.component == RuntimeExecutionComponent::TensorUtil)
+            .expect("tensor utility route");
+
+        assert_eq!(route.workloads.len(), operations.len());
+        assert_eq!(
+            route.capability_state,
+            RuntimeComponentCapabilityState::Ready
+        );
+        assert!(route.native);
+        assert_eq!(plan.request.tensor_util_values, Some(6));
+
+        let binding = validated_tensor_execution_plan_binding(&plan).expect("tensor binding");
+        let receipts = {
+            let _guard = st_tensor::execution::push_execution_plan_binding(binding);
+            operations.map(|(_, operation, name)| {
+                st_tensor::prepare_tensor_execution(
+                    TensorExecutionWorkload::TensorUtil {
+                        operation,
+                        rows: 3,
+                        cols: 2,
+                    },
+                    name,
+                    TensorExecutionBackend::Cpu,
+                )
+                .unwrap()
+                .complete(TensorExecutionBackend::Cpu, None)
+                .unwrap()
+                .receipt()
+            })
+        };
+        for receipt in receipts {
+            validate_tensor_execution_receipt_against_runtime_plan(&plan, &receipt)
+                .expect("the plan authorizes each linear readout operation receipt");
+        }
+    }
+
+    #[test]
     fn tensor_util_component_route_rejects_mixed_operation_volumes() {
         let mut request =
             execution_request(probe_for(BackendKind::Cpu), AcceleratorFallback::Allow);
@@ -2412,6 +2486,21 @@ mod tests {
             RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 },
             RuntimeComponentWorkload::TensorUtil {
                 operation: RuntimeTensorUtilOperation::Scale,
+                rows: 32,
+                cols: 64,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::AddRow,
+                rows: 32,
+                cols: 64,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::SumAxis0,
+                rows: 32,
+                cols: 64,
+            },
+            RuntimeComponentWorkload::TensorUtil {
+                operation: RuntimeTensorUtilOperation::SumAxis0Scaled,
                 rows: 32,
                 cols: 64,
             },
