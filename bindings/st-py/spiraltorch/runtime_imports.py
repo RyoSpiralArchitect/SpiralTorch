@@ -893,6 +893,29 @@ def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, 
     return dict(contract)
 
 
+def _is_runtime_device_probe_envelope(payload: Mapping[str, object]) -> bool:
+    if "contract" in payload:
+        return True
+    if payload.get("kind") == "spiraltorch.runtime_device_probe":
+        return True
+    if payload.get("contract_version") == "spiraltorch.runtime_device_probe.v1":
+        return True
+    if payload.get("semantic_owner") == "st-core::backend::runtime_probe":
+        return True
+
+    commitment_markers = (
+        "contract_version",
+        "semantic_owner",
+        "semantic_backend",
+        "committed",
+        "request",
+        "request_sha256",
+        "output_sha256",
+    )
+    marker_count = sum(marker in payload for marker in commitment_markers)
+    return "route_evidence" in payload and marker_count >= 2
+
+
 def resolve_runtime_execution_config(
     *,
     accelerator_fallback: str | None = None,
@@ -1216,9 +1239,7 @@ def evaluate_runtime_device_route(
         if not isinstance(row, Mapping):
             raise TypeError(f"reports[{index}] must be a mapping")
         canonical_reports.append(row)
-        if "contract" in row or row.get("kind") == (
-            "spiraltorch.runtime_device_probe"
-        ):
+        if _is_runtime_device_probe_envelope(row):
             committed_probes.append(row)
         else:
             diagnostic_rows.append((index, row))

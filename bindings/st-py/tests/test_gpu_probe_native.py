@@ -263,12 +263,17 @@ def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
     )
 
     probe = st.observe_runtime_device_probe("cpu")
+    canonical_probe = st.validate_runtime_device_probe_contract(probe)
     route = st.evaluate_runtime_device_route_from_probes(
         [probe],
         required_ready_backends=["cpu"],
     )
     public_route = st.evaluate_runtime_device_route(
         [probe],
+        required_ready_backends=["cpu"],
+    )
+    canonical_route = st.evaluate_runtime_device_route(
+        [canonical_probe],
         required_ready_backends=["cpu"],
     )
     summary = st.describe_runtime_devices(["cpu"])
@@ -279,6 +284,7 @@ def test_committed_probe_routes_do_not_rebuild_evidence_in_python(
     assert route["selection"]["requested_backend"] == "cpu"
     assert route["execution_client"] == "python"
     assert public_route == route
+    assert canonical_route == route
     assert summary["evidence"] == [summary["reports"][0]["route_evidence"]]
 
     tampered = json.loads(json.dumps(probe))
@@ -342,6 +348,24 @@ def test_malformed_probe_envelopes_never_fall_back_to_transport_aliases(
 
     with pytest.raises(ValueError, match="kind.*must be"):
         st.describe_runtime_devices(["cpu"])
+
+
+@pytest.mark.parametrize("kind_mutation", ["corrupt", "remove"])
+def test_canonical_probe_contracts_never_downgrade_when_kind_is_damaged(
+    kind_mutation: str,
+) -> None:
+    st = require_native()
+    canonical = st.validate_runtime_device_probe_contract(
+        st.observe_runtime_device_probe("cpu")
+    )
+    if kind_mutation == "corrupt":
+        canonical["kind"] = "forged.runtime_device_probe"
+    else:
+        canonical.pop("kind")
+    canonical["route_evidence"]["runtime_ready"] = False
+
+    with pytest.raises(ValueError, match="kind|probe"):
+        st.evaluate_runtime_device_route([canonical])
 
 
 def test_runtime_preflight_applies_required_gates_to_committed_probes() -> None:
