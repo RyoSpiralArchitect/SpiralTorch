@@ -6274,6 +6274,50 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(raw["save_total_limit"], 1)
         self.assertEqual(filtered["save_total_limit"], 1)
 
+    def test_example_training_arguments_force_cpu_across_transformers_versions(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+
+        class CurrentTrainingArguments:
+            def __init__(self, output_dir=None, use_cpu=False):
+                pass
+
+        class LegacyTrainingArguments:
+            def __init__(self, output_dir=None, no_cuda=False):
+                pass
+
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            train=True,
+            training_use_cpu=True,
+            num_train_epochs=1.0,
+            learning_rate=5e-5,
+            per_device_train_batch_size=2,
+            per_device_eval_batch_size=2,
+            gradient_accumulation_steps=1,
+            logging_steps=1,
+            save_steps=5,
+            save_total_limit=1,
+            seed=13,
+            max_steps=10,
+            eval_steps=5,
+        )
+
+        current = module._training_arguments_kwargs(
+            args,
+            has_eval=False,
+            cls=CurrentTrainingArguments,
+        )
+        legacy = module._training_arguments_kwargs(
+            args,
+            has_eval=False,
+            cls=LegacyTrainingArguments,
+        )
+
+        self.assertEqual(current, {"output_dir": "runs/gpt2", "use_cpu": True})
+        self.assertEqual(legacy, {"output_dir": "runs/gpt2", "no_cuda": True})
+
     def test_example_disk_report_records_free_space_and_threshold(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:

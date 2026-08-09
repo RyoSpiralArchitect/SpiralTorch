@@ -654,6 +654,7 @@ HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA: str
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA: str
+HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES: Tuple[str, ...]
 HF_ZSPACE_OPTIMIZER_MODES: Tuple[str, ...]
@@ -699,11 +700,18 @@ def compare_hf_zspace_optimizer_run_cards(
 def compare_hf_zspace_optimizer_factorized_run_cards(
     run_cards: Sequence[str | PathLike[str] | Mapping[str, object]],
 ) -> Dict[str, object]: ...
+def compare_hf_zspace_optimizer_feedback_run_cards(
+    run_cards: Sequence[str | PathLike[str] | Mapping[str, object]],
+) -> Dict[str, object]: ...
 def write_hf_zspace_optimizer_matched_ablation_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
 def write_hf_zspace_optimizer_factorized_ablation_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+def write_hf_zspace_optimizer_feedback_ablation_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
@@ -714,12 +722,28 @@ HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA: str
 HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME: str
 HF_ZSPACE_FACTORIZED_STUDY_SCHEMA: str
 HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA: str
+HF_ZSPACE_FEEDBACK_STUDY_ARMS: Tuple[str, ...]
+HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA: str
+HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME: str
+HF_ZSPACE_FEEDBACK_STUDY_SCHEMA: str
+HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA: str
 class HFZSpaceFactorizedStudyError(ValueError): ...
 def build_hf_zspace_optimizer_factorized_study_plan(
     *,
     study_dir: str | PathLike[str],
     seeds: Sequence[int],
     bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+) -> Dict[str, object]: ...
+def build_hf_zspace_optimizer_feedback_study_plan(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    feedback_config: Mapping[str, object] | None = ...,
     bridge_script: str | PathLike[str] | None = ...,
     python_executable: str | PathLike[str] | None = ...,
     launch_cwd: str | PathLike[str] | None = ...,
@@ -733,6 +757,19 @@ def run_hf_zspace_optimizer_factorized_study(
     study_dir: str | PathLike[str],
     seeds: Sequence[int],
     bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+    execute: bool = ...,
+    retry_failed: bool = ...,
+) -> Dict[str, object]: ...
+def run_hf_zspace_optimizer_feedback_study(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    feedback_config: Mapping[str, object] | None = ...,
     bridge_script: str | PathLike[str] | None = ...,
     python_executable: str | PathLike[str] | None = ...,
     launch_cwd: str | PathLike[str] | None = ...,
@@ -11311,6 +11348,7 @@ __all__ = [
     "HF_FINETUNE_RUN_CARD_FILENAME",
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
+    "HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
     "HF_ZSPACE_OPTIMIZER_MODES",
@@ -11322,10 +11360,12 @@ __all__ = [
     "HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS",
     "HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME",
     "compare_hf_zspace_optimizer_factorized_run_cards",
+    "compare_hf_zspace_optimizer_feedback_run_cards",
     "compare_hf_zspace_optimizer_run_cards",
     "hf_zspace_optimizer_control_callback",
     "hf_zspace_optimizer_recipe_contract",
     "write_hf_zspace_optimizer_factorized_ablation_report",
+    "write_hf_zspace_optimizer_feedback_ablation_report",
     "write_hf_zspace_optimizer_matched_ablation_report",
     "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME",
     "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA",
@@ -11334,10 +11374,17 @@ __all__ = [
     "HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME",
     "HF_ZSPACE_FACTORIZED_STUDY_SCHEMA",
     "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
+    "HF_ZSPACE_FEEDBACK_STUDY_ARMS",
+    "HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA",
+    "HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME",
+    "HF_ZSPACE_FEEDBACK_STUDY_SCHEMA",
+    "HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA",
     "HFZSpaceFactorizedStudyError",
     "build_hf_zspace_optimizer_factorized_study_plan",
+    "build_hf_zspace_optimizer_feedback_study_plan",
     "compare_hf_zspace_optimizer_factorized_gain_studies",
     "run_hf_zspace_optimizer_factorized_study",
+    "run_hf_zspace_optimizer_feedback_study",
     "write_hf_zspace_optimizer_factorized_gain_response_report",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",

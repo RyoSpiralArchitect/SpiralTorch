@@ -16,12 +16,19 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .hf_optimizer_control import (
     HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA,
     compare_hf_zspace_optimizer_factorized_run_cards,
+    compare_hf_zspace_optimizer_feedback_run_cards,
     write_hf_zspace_optimizer_factorized_ablation_report,
+    write_hf_zspace_optimizer_feedback_ablation_report,
+)
+from .zspace_optimizer import (
+    ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
+    ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
+    zspace_optimizer_feedback_init,
 )
 
 HF_ZSPACE_FACTORIZED_STUDY_SCHEMA = "spiraltorch.hf_zspace_factorized_study.v1"
@@ -45,6 +52,20 @@ HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA = (
     "spiraltorch.hf_zspace_factorized_gain_response.v1"
 )
 HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME = "gain-response.json"
+HF_ZSPACE_FEEDBACK_STUDY_SCHEMA = "spiraltorch.hf_zspace_feedback_study.v1"
+HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA = "spiraltorch.hf_zspace_feedback_study_event.v1"
+HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA = (
+    "spiraltorch.hf_zspace_feedback_study_summary.v1"
+)
+HF_ZSPACE_FEEDBACK_STUDY_ARMS = (
+    "observe",
+    "raw_unguarded",
+    "raw_loss_guard",
+)
+HF_ZSPACE_FEEDBACK_STUDY_PLAN_FILENAME = "feedback-study-plan.json"
+HF_ZSPACE_FEEDBACK_STUDY_EVENTS_FILENAME = "feedback-study-events.jsonl"
+HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_FILENAME = "feedback-study-summary.json"
+HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME = "feedback-report.json"
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
     {
@@ -58,6 +79,33 @@ _MANAGED_BRIDGE_FLAGS = frozenset(
         "--zspace-optimizer-trajectory-json",
         "--zspace-optimizer-trajectory-out",
         "--min-free-disk-gb",
+    }
+)
+_FEEDBACK_CONFIG_FLAGS = {
+    "loss_ema_alpha": "--zspace-optimizer-feedback-loss-ema-alpha",
+    "relative_delta_ema_alpha": (
+        "--zspace-optimizer-feedback-relative-delta-ema-alpha"
+    ),
+    "loss_floor": "--zspace-optimizer-feedback-loss-floor",
+    "regression_threshold": "--zspace-optimizer-feedback-regression-threshold",
+    "halt_threshold": "--zspace-optimizer-feedback-halt-threshold",
+    "recovery_threshold": "--zspace-optimizer-feedback-recovery-threshold",
+    "attenuation_rate": "--zspace-optimizer-feedback-attenuation-rate",
+    "recovery_rate": "--zspace-optimizer-feedback-recovery-rate",
+    "halt_regression_streak": ("--zspace-optimizer-feedback-halt-regression-streak"),
+    "resume_improvement_streak": (
+        "--zspace-optimizer-feedback-resume-improvement-streak"
+    ),
+    "warmup_observations": "--zspace-optimizer-feedback-warmup-observations",
+    "max_stale_updates": "--zspace-optimizer-feedback-max-stale-updates",
+    "maximum_gate": "--zspace-optimizer-feedback-maximum-gate",
+}
+_FEEDBACK_MANAGED_BRIDGE_FLAGS = frozenset(
+    {
+        *_MANAGED_BRIDGE_FLAGS,
+        "--logging-steps",
+        "--zspace-optimizer-feedback",
+        *_FEEDBACK_CONFIG_FLAGS.values(),
     }
 )
 _EVENT_RESERVED_FIELDS = frozenset(
@@ -154,7 +202,12 @@ def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def _load_events(path: Path, *, study_id: str) -> list[dict[str, Any]]:
+def _load_events(
+    path: Path,
+    *,
+    study_id: str,
+    event_schema: str = HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA,
+) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []
@@ -171,7 +224,7 @@ def _load_events(path: Path, *, study_id: str) -> list[dict[str, Any]]:
                         f"study journal row {line_number} is not an object"
                     )
                 event = {str(key): value for key, value in payload.items()}
-                if event.get("schema") != HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA:
+                if event.get("schema") != event_schema:
                     raise HFZSpaceFactorizedStudyError(
                         f"study journal row {line_number} has an unsupported schema"
                     )
@@ -211,13 +264,14 @@ def _append_event(
     study_id: str,
     event_type: str,
     details: Mapping[str, object] | None = None,
+    event_schema: str = HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA,
 ) -> dict[str, Any]:
     if details and _EVENT_RESERVED_FIELDS.intersection(details):
         raise HFZSpaceFactorizedStudyError(
             "study event details cannot replace reserved envelope fields"
         )
     event: dict[str, Any] = {
-        "schema": HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA,
+        "schema": event_schema,
         "sequence": len(events) + 1,
         "recorded_at": _utc_now(),
         "study_id": study_id,
@@ -310,10 +364,34 @@ def _runtime_source_fingerprint() -> dict[str, object]:
                 "sha256": _sha256_file(path),
             }
         )
+    package = sys.modules.get("spiraltorch")
+    native = getattr(package, "_rs", None)
+    native_file = getattr(native, "__file__", None)
+    native_path = (
+        Path(native_file).expanduser().resolve()
+        if isinstance(native_file, str) and native_file
+        else None
+    )
+    native_extension: dict[str, object]
+    if native_path is not None and native_path.is_file():
+        native_extension = {
+            "status": "ready",
+            "filename": native_path.name,
+            "size_bytes": native_path.stat().st_size,
+            "sha256": _sha256_file(native_path),
+        }
+    else:
+        native_extension = {
+            "status": "unavailable",
+            "filename": None,
+            "size_bytes": None,
+            "sha256": None,
+        }
     payload = {
         "package": "spiraltorch",
         "file_count": len(files),
         "files": files,
+        "loaded_native_extension": native_extension,
     }
     return {**payload, "source_id": _sha256_id(payload)}
 
@@ -438,6 +516,10 @@ def _build_run_plan(
         "label": label,
         "seed": seed,
         "arm": arm,
+        "expected_mode": "observe" if arm == "observe" else "apply",
+        "expected_trajectory_arm": "raw" if arm == "observe" else arm,
+        "expected_feedback_mode": "off",
+        "trajectory_owner": arm == "observe",
         "command": command,
         "run_dir": str(run_dir),
         "output_dir": str(output_dir),
@@ -556,9 +638,276 @@ def build_hf_zspace_optimizer_factorized_study_plan(
     }
 
 
+def _validate_feedback_base_args(arguments: Sequence[str]) -> int:
+    managed = sorted(
+        {
+            name
+            for argument in arguments
+            if (name := _option_name(argument)) in _FEEDBACK_MANAGED_BRIDGE_FLAGS
+        }
+    )
+    if managed:
+        raise HFZSpaceFactorizedStudyError(
+            "feedback study-managed bridge flags cannot be supplied directly: "
+            + ", ".join(managed)
+        )
+    return _validate_base_args(arguments)
+
+
+def _resolved_feedback_config(
+    requested: Mapping[str, object] | None,
+) -> dict[str, object]:
+    try:
+        checkpoint = zspace_optimizer_feedback_init(dict(requested or {}))
+    except Exception as exc:
+        raise HFZSpaceFactorizedStudyError(
+            "Rust could not validate the feedback study config"
+        ) from exc
+    if (
+        checkpoint.get("contract_version") != ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+        or checkpoint.get("semantic_owner") != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+        or checkpoint.get("semantic_backend") != "rust"
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            "feedback study config did not resolve through the Rust contract"
+        )
+    config = checkpoint.get("config")
+    if not isinstance(config, Mapping) or set(config) != set(_FEEDBACK_CONFIG_FLAGS):
+        raise HFZSpaceFactorizedStudyError(
+            "Rust feedback config does not match the study CLI surface"
+        )
+    return {str(key): value for key, value in config.items()}
+
+
+def _feedback_config_cli_args(config: Mapping[str, object]) -> list[str]:
+    arguments: list[str] = []
+    for field, flag in _FEEDBACK_CONFIG_FLAGS.items():
+        value = config[field]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise HFZSpaceFactorizedStudyError(
+                f"Rust feedback config field {field} is not numeric"
+            )
+        arguments.extend([flag, format(value, ".17g")])
+    return arguments
+
+
+def _build_feedback_run_plan(
+    *,
+    study_id: str,
+    study_dir: Path,
+    seed: int,
+    arm: str,
+    python_executable: Path,
+    bridge_script: Path,
+    base_args: Sequence[str],
+    feedback_config: Mapping[str, object],
+    min_free_disk_gb: float,
+) -> dict[str, object]:
+    label = _run_label(seed, arm)
+    run_dir = study_dir / "runs" / f"s{seed}" / arm
+    output_dir = run_dir / "output"
+    run_card = run_dir / "run-card.json"
+    trainer_trace = run_dir / "trainer-trace.jsonl"
+    optimizer_trace = run_dir / "optimizer-trace.jsonl"
+    log_path = run_dir / "run.log"
+    trajectory_path = study_dir / "runs" / f"s{seed}" / "trajectory.json"
+    expected_mode = "observe" if arm == "observe" else "apply"
+    expected_feedback_mode = "loss_guard" if arm == "raw_loss_guard" else "off"
+    command = [
+        str(python_executable),
+        str(bridge_script),
+        *base_args,
+        "--seed",
+        str(seed),
+        "--logging-steps",
+        "1",
+        "--zspace-optimizer-control",
+        expected_mode,
+        "--zspace-optimizer-feedback",
+        expected_feedback_mode,
+    ]
+    if expected_mode == "apply":
+        command.extend(["--zspace-optimizer-trajectory-arm", "raw"])
+    if expected_feedback_mode == "loss_guard":
+        command.extend(_feedback_config_cli_args(feedback_config))
+    command.extend(
+        [
+            "--output-dir",
+            str(output_dir),
+            "--run-card",
+            str(run_card),
+            "--trainer-trace-jsonl",
+            str(trainer_trace),
+            "--zspace-optimizer-trace-jsonl",
+            str(optimizer_trace),
+            "--min-free-disk-gb",
+            format(min_free_disk_gb, ".17g"),
+            (
+                "--zspace-optimizer-trajectory-out"
+                if arm == "observe"
+                else "--zspace-optimizer-trajectory-json"
+            ),
+            str(trajectory_path),
+        ]
+    )
+    run_identity = {
+        "study_id": study_id,
+        "seed": seed,
+        "arm": arm,
+        "command": command,
+    }
+    return {
+        "run_id": _sha256_id(run_identity),
+        "label": label,
+        "seed": seed,
+        "arm": arm,
+        "expected_mode": expected_mode,
+        "expected_trajectory_arm": "raw",
+        "expected_feedback_mode": expected_feedback_mode,
+        "expected_feedback_config_id": (
+            _sha256_id(feedback_config)
+            if expected_feedback_mode == "loss_guard"
+            else None
+        ),
+        "trajectory_owner": arm == "observe",
+        "command": command,
+        "run_dir": str(run_dir),
+        "output_dir": str(output_dir),
+        "run_card": str(run_card),
+        "trainer_trace": str(trainer_trace),
+        "optimizer_trace": str(optimizer_trace),
+        "log": str(log_path),
+        "trajectory": str(trajectory_path),
+    }
+
+
+def build_hf_zspace_optimizer_feedback_study_plan(
+    *,
+    study_dir: str | Path,
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    feedback_config: Mapping[str, object] | None = None,
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+) -> dict[str, object]:
+    """Build one immutable baseline/unguarded/guarded HF study plan."""
+
+    resolved_study_dir = Path(study_dir).expanduser().resolve()
+    resolved_bridge = (
+        Path(bridge_script or _default_bridge_script()).expanduser().resolve()
+    )
+    resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
+    resolved_cwd = Path(launch_cwd or Path.cwd()).expanduser().resolve()
+    if not resolved_bridge.is_file():
+        raise HFZSpaceFactorizedStudyError(
+            f"HF fine-tune bridge does not exist: {resolved_bridge}"
+        )
+    if not resolved_python.is_file():
+        raise HFZSpaceFactorizedStudyError(
+            f"Python executable does not exist: {resolved_python}"
+        )
+    normalized_args = tuple(str(argument) for argument in bridge_args)
+    max_steps = _validate_feedback_base_args(normalized_args)
+    normalized_seeds = tuple(sorted(set(int(seed) for seed in seeds)))
+    if not normalized_seeds or len(normalized_seeds) != len(seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "feedback study seeds must be non-empty and unique"
+        )
+    if any(seed < 0 for seed in normalized_seeds):
+        raise HFZSpaceFactorizedStudyError("feedback study seeds must be non-negative")
+    if not math.isfinite(min_free_disk_gb) or min_free_disk_gb < 0.0:
+        raise HFZSpaceFactorizedStudyError(
+            "min_free_disk_gb must be finite and non-negative"
+        )
+    resolved_feedback_config = _resolved_feedback_config(feedback_config)
+    feedback_config_id = _sha256_id(resolved_feedback_config)
+    runtime_source = _runtime_source_fingerprint()
+    git_provenance = _git_source_provenance(
+        resolved_cwd,
+        excluded_path=resolved_study_dir,
+    )
+    scientific_spec = {
+        "schema": HF_ZSPACE_FEEDBACK_STUDY_SCHEMA,
+        "arms": list(HF_ZSPACE_FEEDBACK_STUDY_ARMS),
+        "seeds": list(normalized_seeds),
+        "max_steps": max_steps,
+        "logging_steps": 1,
+        "bridge_args": list(normalized_args),
+        "bridge_sha256": _sha256_file(resolved_bridge),
+        "launch_cwd": str(resolved_cwd),
+        "runtime_source_id": runtime_source["source_id"],
+        "git_head": git_provenance.get("head"),
+        "git_status_id": git_provenance.get("status_id"),
+        "feedback_contract": ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
+        "feedback_semantic_owner": ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
+        "feedback_config": resolved_feedback_config,
+        "feedback_config_id": feedback_config_id,
+        "feedback_evidence_boundary": (
+            "within_run_loss_guard_not_counterfactual_efficacy"
+        ),
+    }
+    study_id = _sha256_id(scientific_spec)
+    runs = [
+        _build_feedback_run_plan(
+            study_id=study_id,
+            study_dir=resolved_study_dir,
+            seed=seed,
+            arm=arm,
+            python_executable=resolved_python,
+            bridge_script=resolved_bridge,
+            base_args=normalized_args,
+            feedback_config=resolved_feedback_config,
+            min_free_disk_gb=min_free_disk_gb,
+        )
+        for seed in normalized_seeds
+        for arm in HF_ZSPACE_FEEDBACK_STUDY_ARMS
+    ]
+    return {
+        "schema": HF_ZSPACE_FEEDBACK_STUDY_SCHEMA,
+        "row_type": "hf_zspace_feedback_study_plan",
+        "status": "planned",
+        "study_id": study_id,
+        "study_dir": str(resolved_study_dir),
+        "scientific_spec": scientific_spec,
+        "runtime_source_fingerprint": runtime_source,
+        "git_source_provenance": git_provenance,
+        "execution_policy": {
+            "python_executable": str(resolved_python),
+            "bridge_script": str(resolved_bridge),
+            "min_free_disk_gb": min_free_disk_gb,
+            "run_order": "seed_then_observe_unguarded_guarded",
+            "resume_policy": "verified_run_card_and_journal_receipt_only",
+            "failure_policy": "preserve_and_fail_closed",
+        },
+        "artifacts": {
+            "plan": str(resolved_study_dir / HF_ZSPACE_FEEDBACK_STUDY_PLAN_FILENAME),
+            "events": str(
+                resolved_study_dir / HF_ZSPACE_FEEDBACK_STUDY_EVENTS_FILENAME
+            ),
+            "summary": str(
+                resolved_study_dir / HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_FILENAME
+            ),
+            "feedback_report": str(
+                resolved_study_dir / HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME
+            ),
+        },
+        "run_count": len(runs),
+        "runs": runs,
+    }
+
+
 def _persist_plan(plan: Mapping[str, object]) -> Path:
     study_dir = Path(str(plan["study_dir"]))
-    path = study_dir / HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME
+    artifacts = plan.get("artifacts")
+    if not isinstance(artifacts, Mapping) or not isinstance(artifacts.get("plan"), str):
+        raise HFZSpaceFactorizedStudyError("study plan has no plan artifact path")
+    path = Path(str(artifacts["plan"]))
+    if path.parent != study_dir:
+        raise HFZSpaceFactorizedStudyError(
+            "study plan artifact must remain inside the study directory"
+        )
     if path.exists():
         existing = _read_json(path)
         if existing != plan:
@@ -710,14 +1059,50 @@ def _validate_completed_run_card(
             "run card has no ready Z-Space optimizer receipt"
         )
     expected_arm = str(run["arm"])
-    expected_mode = "observe" if expected_arm == "observe" else "apply"
-    receipt_arm = "raw" if expected_arm == "observe" else expected_arm
+    expected_mode = str(
+        run.get(
+            "expected_mode",
+            "observe" if expected_arm == "observe" else "apply",
+        )
+    )
+    receipt_arm = str(
+        run.get(
+            "expected_trajectory_arm",
+            "raw" if expected_arm == "observe" else expected_arm,
+        )
+    )
+    expected_feedback = str(run.get("expected_feedback_mode", "off"))
     if (
         receipt.get("mode") != expected_mode
         or receipt.get("trajectory_arm") != receipt_arm
+        or receipt.get("feedback_mode", "off") != expected_feedback
     ):
         raise HFZSpaceFactorizedStudyError(
             "run card optimizer arm does not match the study"
+        )
+    receipt_recipe = receipt.get("recipe")
+    feedback_config = (
+        receipt_recipe.get("feedback_config")
+        if isinstance(receipt_recipe, Mapping)
+        else None
+    )
+    expected_feedback_config_id = run.get("expected_feedback_config_id")
+    observed_feedback_config_id = (
+        _sha256_id(dict(feedback_config))
+        if isinstance(feedback_config, Mapping)
+        else None
+    )
+    if expected_feedback == "off":
+        if feedback_config not in (None, {}):
+            raise HFZSpaceFactorizedStudyError(
+                "feedback-off run card unexpectedly contains feedback config"
+            )
+    elif (
+        not isinstance(expected_feedback_config_id, str)
+        or observed_feedback_config_id != expected_feedback_config_id
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            "run card feedback config does not match the immutable study plan"
         )
     blockers = receipt.get("evidence_blockers")
     if blockers not in (None, []):
@@ -785,6 +1170,7 @@ def _validate_completed_run_card(
         "before_eval_loss": before_loss,
         "after_eval_loss": after_loss,
         "trajectory_id": trajectory_id,
+        "feedback_config_id": observed_feedback_config_id,
         "realized_update_count": realized,
         "execution_identity_id": _ready_identity_id(
             card,
@@ -875,7 +1261,7 @@ def _run_has_artifacts(run: Mapping[str, object]) -> bool:
         "optimizer_trace",
         "log",
     ]
-    if run.get("arm") == "observe":
+    if run.get("trajectory_owner", run.get("arm") == "observe") is True:
         fields.append("trajectory")
     return any(Path(str(run[field])).exists() for field in fields)
 
@@ -893,7 +1279,7 @@ def _quarantine_run_artifacts(
         "optimizer_trace",
         "log",
     ]
-    if run.get("arm") == "observe":
+    if run.get("trajectory_owner", run.get("arm") == "observe") is True:
         fields.append("trajectory")
     for field in fields:
         source = Path(str(run[field]))
@@ -935,6 +1321,10 @@ def _write_summary(
     factorized_report: Mapping[str, object] | None = None,
     identity_anchor: Mapping[str, str] | None = None,
     error: str | None = None,
+    summary_schema: str = HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA,
+    summary_row_type: str = "hf_zspace_factorized_study_summary",
+    report_artifact_key: str = "factorized_report",
+    report_prefix: str = "factorized",
 ) -> dict[str, object]:
     total_runs = int(plan["run_count"])
     completed = sum(
@@ -943,11 +1333,11 @@ def _write_summary(
         if value.get("status") in {"completed", "recovered", "reused"}
     )
     report_path = Path(
-        str(plan["artifacts"]["factorized_report"])  # type: ignore[index]
+        str(plan["artifacts"][report_artifact_key])  # type: ignore[index]
     )
     summary: dict[str, object] = {
-        "schema": HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA,
-        "row_type": "hf_zspace_factorized_study_summary",
+        "schema": summary_schema,
+        "row_type": summary_row_type,
         "recorded_at": _utc_now(),
         "status": status,
         "study_id": plan["study_id"],
@@ -960,11 +1350,11 @@ def _write_summary(
         "free_disk_gb": _free_disk_gb(Path(str(plan["study_dir"]))),
         "run_statuses": dict(run_statuses),
         "identity_anchor": dict(identity_anchor or {}),
-        "factorized_report": str(report_path),
-        "factorized_report_sha256": (
+        f"{report_prefix}_report": str(report_path),
+        f"{report_prefix}_report_sha256": (
             _sha256_file(report_path) if report_path.is_file() else None
         ),
-        "factorized_status": (
+        f"{report_prefix}_status": (
             None if factorized_report is None else factorized_report.get("status")
         ),
         "error": error,
@@ -996,6 +1386,33 @@ def run_hf_zspace_optimizer_factorized_study(
         launch_cwd=launch_cwd,
         min_free_disk_gb=min_free_disk_gb,
     )
+    return _run_hf_zspace_optimizer_study_plan(
+        plan,
+        execute=execute,
+        retry_failed=retry_failed,
+        event_schema=HF_ZSPACE_FACTORIZED_STUDY_EVENT_SCHEMA,
+        summary_schema=HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA,
+        summary_row_type="hf_zspace_factorized_study_summary",
+        report_artifact_key="factorized_report",
+        report_prefix="factorized",
+        compare_cards=compare_hf_zspace_optimizer_factorized_run_cards,
+        write_report=write_hf_zspace_optimizer_factorized_ablation_report,
+    )
+
+
+def _run_hf_zspace_optimizer_study_plan(
+    plan: Mapping[str, object],
+    *,
+    execute: bool,
+    retry_failed: bool,
+    event_schema: str,
+    summary_schema: str,
+    summary_row_type: str,
+    report_artifact_key: str,
+    report_prefix: str,
+    compare_cards: Callable[[Sequence[Path]], dict[str, object]],
+    write_report: Callable[[Mapping[str, object], str | Path], str],
+) -> dict[str, object]:
     root = Path(str(plan["study_dir"]))
     artifacts = plan["artifacts"]
     assert isinstance(artifacts, Mapping)
@@ -1011,9 +1428,38 @@ def run_hf_zspace_optimizer_factorized_study(
     run_statuses: dict[str, dict[str, object]] = {}
     factorized_report: dict[str, object] | None = None
     identity_anchor: dict[str, str] = {}
+
+    def write_summary(
+        *,
+        status: str,
+        run_statuses: Mapping[str, Mapping[str, object]],
+        events: Sequence[Mapping[str, object]],
+        factorized_report: Mapping[str, object] | None = None,
+        identity_anchor: Mapping[str, str] | None = None,
+        error: str | None = None,
+    ) -> dict[str, object]:
+        return _write_summary(
+            summary_path,
+            plan=plan,
+            status=status,
+            run_statuses=run_statuses,
+            events=events,
+            factorized_report=factorized_report,
+            identity_anchor=identity_anchor,
+            error=error,
+            summary_schema=summary_schema,
+            summary_row_type=summary_row_type,
+            report_artifact_key=report_artifact_key,
+            report_prefix=report_prefix,
+        )
+
     with _study_lock(root, study_id):
         _persist_plan(plan)
-        events = _load_events(event_path, study_id=study_id)
+        events = _load_events(
+            event_path,
+            study_id=study_id,
+            event_schema=event_schema,
+        )
         if not execute:
             if summary_path.is_file():
                 summary = _read_json(summary_path)
@@ -1022,9 +1468,7 @@ def run_hf_zspace_optimizer_factorized_study(
                         "study summary belongs to another immutable plan"
                     )
                 return summary
-            return _write_summary(
-                summary_path,
-                plan=plan,
+            return write_summary(
                 status="planned",
                 run_statuses={},
                 events=events,
@@ -1035,6 +1479,7 @@ def run_hf_zspace_optimizer_factorized_study(
             study_id=study_id,
             event_type="study_started" if not events else "study_resumed",
             details={"pid": os.getpid(), "hostname": socket.gethostname()},
+            event_schema=event_schema,
         )
         completed_events = _completed_event_by_run(events)
         try:
@@ -1077,11 +1522,10 @@ def run_hf_zspace_optimizer_factorized_study(
                             "runtime_identity_id": reusable["runtime_identity_id"],
                             "training_input_id": reusable["training_input_id"],
                         },
+                        event_schema=event_schema,
                     )
                     completed_events[run_id] = event
-                    _write_summary(
-                        summary_path,
-                        plan=plan,
+                    write_summary(
                         status="running",
                         run_statuses=run_statuses,
                         events=events,
@@ -1108,6 +1552,7 @@ def run_hf_zspace_optimizer_factorized_study(
                                 None if reuse_error is None else str(reuse_error)
                             ),
                         },
+                        event_schema=event_schema,
                     )
                 free_before = _free_disk_gb(root)
                 if free_before < min_free:
@@ -1129,6 +1574,7 @@ def run_hf_zspace_optimizer_factorized_study(
                         "command": run["command"],
                         "free_disk_gb_before": free_before,
                     },
+                    event_schema=event_schema,
                 )
                 returncode, duration = _execute_run(run, cwd=launch_directory)
                 free_after = _free_disk_gb(root)
@@ -1147,15 +1593,14 @@ def run_hf_zspace_optimizer_factorized_study(
                             "free_disk_gb_after": free_after,
                             "log": run["log"],
                         },
+                        event_schema=event_schema,
                     )
                     run_statuses[label] = {
                         "status": "failed",
                         "returncode": returncode,
                         "log": run["log"],
                     }
-                    return _write_summary(
-                        summary_path,
-                        plan=plan,
+                    return write_summary(
                         status="failed",
                         run_statuses=run_statuses,
                         events=events,
@@ -1189,6 +1634,7 @@ def run_hf_zspace_optimizer_factorized_study(
                         "run_card_sha256": card_sha256,
                         **facts,
                     },
+                    event_schema=event_schema,
                 )
                 completed_events[run_id] = event
                 run_statuses[label] = {
@@ -1197,9 +1643,7 @@ def run_hf_zspace_optimizer_factorized_study(
                     "run_card_sha256": card_sha256,
                     **facts,
                 }
-                _write_summary(
-                    summary_path,
-                    plan=plan,
+                write_summary(
                     status="running",
                     run_statuses=run_statuses,
                     events=events,
@@ -1207,12 +1651,9 @@ def run_hf_zspace_optimizer_factorized_study(
                 )
 
             cards = [Path(str(run["run_card"])) for run in plan["runs"]]  # type: ignore[index]
-            factorized_report = compare_hf_zspace_optimizer_factorized_run_cards(cards)
-            report_path = Path(str(artifacts["factorized_report"]))
-            write_hf_zspace_optimizer_factorized_ablation_report(
-                factorized_report,
-                report_path,
-            )
+            factorized_report = compare_cards(cards)
+            report_path = Path(str(artifacts[report_artifact_key]))
+            write_report(factorized_report, report_path)
             final_status = (
                 "ready" if factorized_report.get("status") == "ready" else "blocked"
             )
@@ -1223,15 +1664,14 @@ def run_hf_zspace_optimizer_factorized_study(
                 event_type="study_completed",
                 details={
                     "status": final_status,
-                    "factorized_report": str(report_path),
-                    "factorized_report_sha256": _sha256_file(report_path),
+                    f"{report_prefix}_report": str(report_path),
+                    f"{report_prefix}_report_sha256": _sha256_file(report_path),
                     "matched_seed_count": factorized_report.get("matched_seed_count"),
                     "error_count": factorized_report.get("error_count"),
                 },
+                event_schema=event_schema,
             )
-            return _write_summary(
-                summary_path,
-                plan=plan,
+            return write_summary(
                 status=final_status,
                 run_statuses=run_statuses,
                 events=events,
@@ -1248,10 +1688,9 @@ def run_hf_zspace_optimizer_factorized_study(
                     "error_type": exc.__class__.__name__,
                     "error": str(exc),
                 },
+                event_schema=event_schema,
             )
-            _write_summary(
-                summary_path,
-                plan=plan,
+            write_summary(
                 status="failed",
                 run_statuses=run_statuses,
                 events=events,
@@ -1260,6 +1699,45 @@ def run_hf_zspace_optimizer_factorized_study(
                 error=str(exc),
             )
             raise
+
+
+def run_hf_zspace_optimizer_feedback_study(
+    *,
+    study_dir: str | Path,
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    feedback_config: Mapping[str, object] | None = None,
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+    execute: bool = False,
+    retry_failed: bool = False,
+) -> dict[str, object]:
+    """Plan or execute a fail-closed, resumable feedback ablation study."""
+
+    plan = build_hf_zspace_optimizer_feedback_study_plan(
+        study_dir=study_dir,
+        seeds=seeds,
+        bridge_args=bridge_args,
+        feedback_config=feedback_config,
+        bridge_script=bridge_script,
+        python_executable=python_executable,
+        launch_cwd=launch_cwd,
+        min_free_disk_gb=min_free_disk_gb,
+    )
+    return _run_hf_zspace_optimizer_study_plan(
+        plan,
+        execute=execute,
+        retry_failed=retry_failed,
+        event_schema=HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA,
+        summary_schema=HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA,
+        summary_row_type="hf_zspace_feedback_study_summary",
+        report_artifact_key="feedback_report",
+        report_prefix="feedback",
+        compare_cards=compare_hf_zspace_optimizer_feedback_run_cards,
+        write_report=write_hf_zspace_optimizer_feedback_ablation_report,
+    )
 
 
 def _split_control_gain(arguments: Sequence[str]) -> tuple[float, list[str]]:

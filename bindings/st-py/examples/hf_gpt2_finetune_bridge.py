@@ -787,6 +787,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--training-use-cpu",
+        action="store_true",
+        help=(
+            "Force Transformers TrainingArguments onto CPU. This resolves to "
+            "use_cpu on current Transformers and no_cuda on legacy releases."
+        ),
+    )
+    parser.add_argument(
         "--finetune-mode",
         choices=("full", "lora"),
         default="full",
@@ -2274,6 +2282,16 @@ def _raw_training_arguments_kwargs(
             "steps" if has_eval and _training_semantics_requested(args) else "no"
         ),
     }
+    if bool(getattr(args, "training_use_cpu", False)):
+        parameter_names = _training_argument_parameter_names(cls)
+        if parameter_names is None or "use_cpu" in parameter_names:
+            kwargs["use_cpu"] = True
+        elif "no_cuda" in parameter_names:
+            kwargs["no_cuda"] = True
+        else:
+            raise TypeError(
+                "installed Transformers TrainingArguments has no CPU routing flag"
+            )
     resolved_pin_memory = getattr(args, "_resolved_dataloader_pin_memory", None)
     if resolved_pin_memory is not None:
         kwargs["dataloader_pin_memory"] = bool(resolved_pin_memory)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 from typing import Mapping
 
@@ -37,6 +38,32 @@ def _trajectory_id(seed: int) -> str:
     return f"sha256:{seed + 1:064x}"
 
 
+def _feedback_config() -> dict[str, object]:
+    return {
+        "loss_ema_alpha": 0.2,
+        "relative_delta_ema_alpha": 0.5,
+        "loss_floor": 1.0e-8,
+        "regression_threshold": 0.01,
+        "halt_threshold": 0.05,
+        "recovery_threshold": 0.0025,
+        "attenuation_rate": 0.25,
+        "recovery_rate": 0.125,
+        "halt_regression_streak": 2,
+        "resume_improvement_streak": 2,
+        "warmup_observations": 2,
+        "max_stale_updates": 0,
+        "maximum_gate": 1.0,
+    }
+
+
+def _patch_feedback_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        study,
+        "_resolved_feedback_config",
+        lambda requested: dict(_feedback_config() if requested is None else requested),
+    )
+
+
 def _write_completed_run(run: Mapping[str, object]) -> None:
     seed = int(run["seed"])
     arm = str(run["arm"])
@@ -55,7 +82,18 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
     Path(str(run["output_dir"])).mkdir(parents=True, exist_ok=True)
     command = [str(value) for value in run["command"]]  # type: ignore[index]
     max_steps = int(command[command.index("--max-steps") + 1])
-    receipt_arm = "raw" if arm == "observe" else arm
+    receipt_arm = str(
+        run.get("expected_trajectory_arm", "raw" if arm == "observe" else arm)
+    )
+    expected_mode = str(
+        run.get("expected_mode", "observe" if arm == "observe" else "apply")
+    )
+    expected_feedback = str(run.get("expected_feedback_mode", "off"))
+    arms = (
+        study.HF_ZSPACE_FACTORIZED_STUDY_ARMS
+        if arm in study.HF_ZSPACE_FACTORIZED_STUDY_ARMS
+        else study.HF_ZSPACE_FEEDBACK_STUDY_ARMS
+    )
     card = {
         "row_type": "hf_finetune_run_card",
         "failure_stage": None,
@@ -86,7 +124,13 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
         },
         "zspace_optimizer_control_receipt": {
             "status": "ready",
-            "mode": "observe" if arm == "observe" else "apply",
+            "mode": expected_mode,
+            "feedback_mode": expected_feedback,
+            "recipe": {
+                "feedback_config": (
+                    _feedback_config() if expected_feedback == "loss_guard" else None
+                ),
+            },
             "trajectory_arm": receipt_arm,
             "evidence_blockers": [],
             "schedule_evidence_complete": True,
@@ -107,8 +151,7 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
         "eval_before_train": {"status": "ok", "eval_loss": 2.0},
         "eval_after_train": {
             "status": "ok",
-            "eval_loss": 1.9
-            + 0.01 * list(study.HF_ZSPACE_FACTORIZED_STUDY_ARMS).index(arm),
+            "eval_loss": 1.9 + 0.01 * list(arms).index(arm),
         },
     }
     card_path = Path(str(run["run_card"]))
@@ -144,6 +187,20 @@ def _patch_ready_comparator(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _patch_ready_feedback_comparator(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        study,
+        "compare_hf_zspace_optimizer_feedback_run_cards",
+        lambda paths: {
+            "schema": "spiraltorch.hf_zspace_feedback_ablation.v1",
+            "status": "ready",
+            "matched_seed_count": len(paths) // 3,
+            "error_count": 0,
+            "errors": [],
+        },
+    )
+
+
 def test_factorized_study_plan_is_deterministic_and_owns_arm_flags(
     tmp_path: Path,
 ) -> None:
@@ -173,6 +230,23 @@ def test_factorized_study_plan_is_deterministic_and_owns_arm_flags(
     assert "--zspace-optimizer-trajectory-out" in observe["command"]
     assert "--zspace-optimizer-trajectory-json" in raw["command"]
     assert raw["command"].count("--seed") == 1
+
+
+def test_study_runtime_fingerprint_seals_loaded_native_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = tmp_path / "libspiraltorch.dylib"
+    native.write_bytes(b"rust-semantic-core")
+    monkeypatch.setattr(st, "_rs", types.SimpleNamespace(__file__=str(native)))
+
+    fingerprint = study._runtime_source_fingerprint()
+
+    sealed = fingerprint["loaded_native_extension"]
+    assert sealed["status"] == "ready"
+    assert sealed["filename"] == native.name
+    assert sealed["size_bytes"] == len(b"rust-semantic-core")
+    assert sealed["sha256"] == study._sha256_file(native)
 
 
 @pytest.mark.parametrize(
@@ -543,6 +617,195 @@ def test_factorized_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     assert (
         tmp_path / "study" / study.HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME
     ).is_file()
+
+
+def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_feedback_config(monkeypatch)
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    kwargs = {
+        "study_dir": tmp_path / "study",
+        "seeds": [23, 13],
+        "bridge_args": _bridge_args(max_steps=8),
+        "bridge_script": bridge,
+        "launch_cwd": tmp_path,
+        "min_free_disk_gb": 0.0,
+    }
+
+    first = st.build_hf_zspace_optimizer_feedback_study_plan(**kwargs)
+    second = st.build_hf_zspace_optimizer_feedback_study_plan(**kwargs)
+
+    assert first == second
+    assert first["schema"] == st.HF_ZSPACE_FEEDBACK_STUDY_SCHEMA
+    assert first["scientific_spec"]["seeds"] == [13, 23]
+    assert first["scientific_spec"]["logging_steps"] == 1
+    assert first["scientific_spec"]["feedback_config"] == _feedback_config()
+    assert first["run_count"] == 6
+    seed_runs = first["runs"][:3]
+    assert [run["arm"] for run in seed_runs] == list(st.HF_ZSPACE_FEEDBACK_STUDY_ARMS)
+    assert len({run["trajectory"] for run in seed_runs}) == 1
+    assert all(run["command"].count("--logging-steps") == 1 for run in seed_runs)
+    assert all(
+        run["command"][run["command"].index("--logging-steps") + 1] == "1"
+        for run in seed_runs
+    )
+    guarded = seed_runs[-1]
+    assert guarded["expected_feedback_mode"] == "loss_guard"
+    assert guarded["expected_feedback_config_id"] == first["scientific_spec"][
+        "feedback_config_id"
+    ]
+    assert "--zspace-optimizer-feedback-warmup-observations" in guarded["command"]
+    assert "--zspace-optimizer-trajectory-json" in guarded["command"]
+
+
+def test_feedback_study_rejects_run_card_config_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_feedback_config(monkeypatch)
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    plan = st.build_hf_zspace_optimizer_feedback_study_plan(
+        study_dir=tmp_path / "study",
+        seeds=[13],
+        bridge_args=_bridge_args(),
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+    )
+    guarded = plan["runs"][-1]
+    _write_completed_run(guarded)
+    card = study._read_json(Path(guarded["run_card"]))
+    card["zspace_optimizer_control_receipt"]["recipe"]["feedback_config"][
+        "maximum_gate"
+    ] = 0.5
+
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="feedback config does not match",
+    ):
+        study._validate_completed_run_card(guarded, card)
+
+
+@pytest.mark.parametrize(
+    "managed",
+    [
+        ["--logging-steps", "2"],
+        ["--zspace-optimizer-feedback", "loss_guard"],
+        ["--zspace-optimizer-feedback-maximum-gate", "0.5"],
+    ],
+)
+def test_feedback_study_rejects_caller_owned_feedback_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    managed: list[str],
+) -> None:
+    _patch_feedback_config(monkeypatch)
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="feedback study-managed",
+    ):
+        st.build_hf_zspace_optimizer_feedback_study_plan(
+            study_dir=tmp_path / "study",
+            seeds=[13],
+            bridge_args=[*_bridge_args(), *managed],
+            bridge_script=bridge,
+            launch_cwd=tmp_path,
+            min_free_disk_gb=0.0,
+        )
+
+
+def test_feedback_study_uses_shared_resumable_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_feedback_config(monkeypatch)
+    _patch_ready_feedback_comparator(monkeypatch)
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    calls: list[str] = []
+
+    def execute(run: Mapping[str, object], *, cwd: Path) -> tuple[int, float]:
+        del cwd
+        calls.append(str(run["label"]))
+        _write_completed_run(run)
+        return 0, 0.25
+
+    monkeypatch.setattr(study, "_execute_run", execute)
+    summary = st.run_hf_zspace_optimizer_feedback_study(
+        study_dir=tmp_path / "study",
+        seeds=[13],
+        bridge_args=_bridge_args(),
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+
+    assert calls == [
+        "s13-observe",
+        "s13-raw_unguarded",
+        "s13-raw_loss_guard",
+    ]
+    assert summary["status"] == "ready"
+    assert summary["feedback_status"] == "ready"
+    assert summary["feedback_report_sha256"].startswith("sha256:")
+    event_path = tmp_path / "study" / study.HF_ZSPACE_FEEDBACK_STUDY_EVENTS_FILENAME
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    assert all(
+        event["schema"] == study.HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA
+        for event in events
+    )
+
+    calls.clear()
+    reused = st.run_hf_zspace_optimizer_feedback_study(
+        study_dir=tmp_path / "study",
+        seeds=[13],
+        bridge_args=_bridge_args(),
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+    assert calls == []
+    assert reused["status"] == "ready"
+    assert {row["status"] for row in reused["run_statuses"].values()} == {"reused"}
+
+
+def test_feedback_study_cli_writes_a_rust_resolved_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    _patch_feedback_config(monkeypatch)
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    config_path = tmp_path / "feedback.json"
+    config_path.write_text(json.dumps(_feedback_config()), encoding="utf-8")
+
+    status = hf_cli.zspace_optimizer_feedback_study_main(
+        [
+            "--study-dir",
+            str(tmp_path / "study"),
+            "--seed",
+            "13",
+            "--feedback-config-json",
+            str(config_path),
+            "--bridge-script",
+            str(bridge),
+            "--launch-cwd",
+            str(tmp_path),
+            "--min-free-disk-gb",
+            "0",
+            "--",
+            *_bridge_args(),
+        ]
+    )
+
+    assert status == 0
+    assert "status=planned" in capsys.readouterr().out
+    assert (tmp_path / "study" / study.HF_ZSPACE_FEEDBACK_STUDY_PLAN_FILENAME).is_file()
 
 
 def test_factorized_gain_studies_require_shared_evidence_and_report_response(

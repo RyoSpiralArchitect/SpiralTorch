@@ -1111,11 +1111,14 @@ def test_public_control_surface_is_exported() -> None:
         "HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME",
         "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
         "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
+        "HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA",
         "compare_hf_zspace_optimizer_factorized_run_cards",
+        "compare_hf_zspace_optimizer_feedback_run_cards",
         "compare_hf_zspace_optimizer_run_cards",
         "hf_zspace_optimizer_control_callback",
         "hf_zspace_optimizer_recipe_contract",
         "write_hf_zspace_optimizer_factorized_ablation_report",
+        "write_hf_zspace_optimizer_feedback_ablation_report",
         "write_hf_zspace_optimizer_matched_ablation_report",
     ):
         assert name in st.__all__
@@ -1222,6 +1225,143 @@ def _factorized_card(
             "nominal_schedule_sequence_id": "sha256:" + "d" * 64,
             "actuated_schedule_sequence_id": "sha256:"
             + arm.encode().hex().ljust(64, "0")[:64],
+        }
+    )
+    card["training_recipe_identity"]["identity_payload"]["trainer_contract"][
+        "zspace_optimizer_control"
+    ] = recipe
+    return card
+
+
+def _feedback_card(
+    *,
+    arm: str,
+    seed: int,
+    eval_after: float,
+) -> dict[str, object]:
+    mode = "observe" if arm == "observe" else "apply"
+    trajectory_id = "sha256:" + "a" * 64
+    recipe = st.hf_zspace_optimizer_recipe_contract(
+        mode=mode,
+        trajectory_id=None if mode == "observe" else trajectory_id,
+    )
+    feedback_config = {
+        "loss_ema_alpha": 0.2,
+        "relative_delta_ema_alpha": 0.5,
+        "loss_floor": 1.0e-8,
+        "regression_threshold": 0.01,
+        "halt_threshold": 0.05,
+        "recovery_threshold": 0.0025,
+        "attenuation_rate": 0.25,
+        "recovery_rate": 0.125,
+        "halt_regression_streak": 2,
+        "resume_improvement_streak": 2,
+        "warmup_observations": 2,
+        "max_stale_updates": 0,
+        "maximum_gate": 1.0,
+    }
+    feedback_mode = "loss_guard" if arm == "raw_loss_guard" else "off"
+    if feedback_mode == "loss_guard":
+        recipe.update(
+            {
+                "feedback_mode": feedback_mode,
+                "feedback_adaptive": True,
+                "feedback_contract": st.ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
+                "feedback_semantic_owner": (
+                    st.ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+                ),
+                "feedback_semantic_backend": "rust",
+                "feedback_config": feedback_config,
+                "feedback_control_target": (
+                    "proposed_learning_rate_scale_deviation_from_identity"
+                ),
+                "feedback_evidence_boundary": (
+                    "within_run_loss_guard_not_counterfactual_efficacy"
+                ),
+            }
+        )
+    card = _matched_card(mode=mode, seed=seed, eval_after=eval_after)
+    card["zspace_optimizer_control_recipe"] = recipe
+    receipt = card["zspace_optimizer_control_receipt"]
+    count = 4
+    nominal_dose = 1.0
+    raw_dose = 0.8
+    actuated_dose = {
+        "observe": nominal_dose,
+        "raw_unguarded": raw_dose,
+        "raw_loss_guard": 0.95,
+    }[arm]
+    feedback_active = 1 if arm == "raw_loss_guard" else 0
+    feedback_identity = 3 if arm == "raw_loss_guard" else 0
+    receipt.update(
+        {
+            "recipe": recipe,
+            "feedback_mode": feedback_mode,
+            "trajectory_arm": "raw",
+            "trajectory_id": trajectory_id,
+            "trajectory_validated": True,
+            "trajectory_step_count": count,
+            "planned_update_count": count,
+            "realized_update_count": count,
+            "training_horizon_complete": True,
+            "trajectory_horizon_complete": True,
+            "evidence_blockers": [],
+            "trajectory_nominal_dose": nominal_dose,
+            "trajectory_raw_dose": raw_dose,
+            "nominal_learning_rate_dose": nominal_dose,
+            "actuated_learning_rate_dose": actuated_dose,
+            "actuated_learning_rate_dose_ratio": actuated_dose / nominal_dose,
+            "schedule_evidence_complete": True,
+            "schedule_prefix_missing_count": 0,
+            "nominal_schedule_sequence_id": "sha256:" + "d" * 64,
+            "actuated_schedule_sequence_id": "sha256:"
+            + hashlib.sha256(arm.encode("utf-8")).hexdigest(),
+            "guarded_control_sequence_id": "sha256:"
+            + hashlib.sha256(f"guarded-{arm}".encode("utf-8")).hexdigest(),
+            "scheduler_nominal_lr_restored": True,
+            "observed_update_count": count if arm == "observe" else 0,
+            "applied_update_count": 0 if arm == "observe" else count,
+            "restored_update_count": 0 if arm == "observe" else count,
+            "non_identity_update_count": {
+                "observe": 0,
+                "raw_unguarded": count,
+                "raw_loss_guard": feedback_active,
+            }[arm],
+            "model_update_intervened": arm != "observe",
+            "feedback_control_count": count if arm == "raw_loss_guard" else 0,
+            "feedback_observation_count": (count if arm == "raw_loss_guard" else 0),
+            "feedback_control_sequence_id": (
+                "sha256:" + "e" * 64 if arm == "raw_loss_guard" else None
+            ),
+            "feedback_observation_sequence_id": (
+                "sha256:" + "f" * 64 if arm == "raw_loss_guard" else None
+            ),
+            "feedback_disposition_counts": (
+                {"no_feedback": 1, "warmup": 2, "active": 1}
+                if arm == "raw_loss_guard"
+                else {}
+            ),
+            "feedback_active_update_count": feedback_active,
+            "feedback_identity_update_count": feedback_identity,
+            "feedback_stale_update_count": 0,
+            "feedback_halted_update_count": 0,
+            "feedback_gate": 0.125 if arm == "raw_loss_guard" else None,
+            "feedback_halted": False if arm == "raw_loss_guard" else None,
+            "feedback_contract": (
+                st.ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+                if arm == "raw_loss_guard"
+                else None
+            ),
+            "feedback_semantic_owner": (
+                st.ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+                if arm == "raw_loss_guard"
+                else None
+            ),
+            "feedback_evidence_boundary": (
+                "within_run_loss_guard_not_counterfactual_efficacy"
+                if arm == "raw_loss_guard"
+                else None
+            ),
         }
     )
     card["training_recipe_identity"]["identity_payload"]["trainer_contract"][
@@ -1565,6 +1705,90 @@ def test_three_factorized_seeds_support_only_a_bounded_normalized_trend() -> Non
     assert report["efficacy_claim_ready"] is False
 
 
+def test_feedback_ablation_separates_guard_benefit_from_absolute_effect() -> None:
+    report = st.compare_hf_zspace_optimizer_feedback_run_cards(
+        [
+            _feedback_card(arm="observe", seed=13, eval_after=2.2),
+            _feedback_card(arm="raw_unguarded", seed=13, eval_after=2.4),
+            _feedback_card(arm="raw_loss_guard", seed=13, eval_after=2.1),
+        ]
+    )
+
+    assert report["status"] == "ready"
+    seed = report["feedback_seeds"][0]
+    assert seed["contrasts"]["unguarded_total_effect"] == pytest.approx(0.2)
+    assert seed["contrasts"]["guarded_total_effect"] == pytest.approx(-0.1)
+    assert seed["contrasts"]["guard_benefit"] == pytest.approx(-0.3)
+    assert seed["feedback_diagnostics"]["active_update_count"] == 1
+    assert seed["guarded_dose_fraction_of_raw_deviation"] == pytest.approx(0.25)
+    assert report["evidence_scope"] == "single_or_two_seed_feedback_diagnostic"
+    assert report["efficacy_claim_ready"] is False
+
+
+def test_feedback_ablation_blocks_stale_loss_lineage() -> None:
+    cards = [
+        _feedback_card(arm="observe", seed=13, eval_after=2.2),
+        _feedback_card(arm="raw_unguarded", seed=13, eval_after=2.4),
+        _feedback_card(arm="raw_loss_guard", seed=13, eval_after=2.1),
+    ]
+    guarded = cards[-1]["zspace_optimizer_control_receipt"]
+    guarded["feedback_disposition_counts"] = {
+        "no_feedback": 1,
+        "warmup": 2,
+        "stale": 1,
+    }
+    guarded["feedback_active_update_count"] = 0
+    guarded["feedback_stale_update_count"] = 1
+
+    report = st.compare_hf_zspace_optimizer_feedback_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert "seed 13: guarded feedback used stale loss observations" in report["errors"]
+    assert "seed 13: guarded feedback gate never became active" in report["errors"]
+
+
+def test_feedback_ablation_blocks_raw_control_lineage_drift() -> None:
+    cards = [
+        _feedback_card(arm="observe", seed=13, eval_after=2.2),
+        _feedback_card(arm="raw_unguarded", seed=13, eval_after=2.4),
+        _feedback_card(arm="raw_loss_guard", seed=13, eval_after=2.1),
+    ]
+    cards[-1]["zspace_optimizer_control_receipt"]["control_sequence_id"] = (
+        "sha256:" + "b" * 64
+    )
+
+    report = st.compare_hf_zspace_optimizer_feedback_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert (
+        "seed 13: feedback arms do not share one raw Rust control sequence"
+        in report["errors"]
+    )
+
+
+def test_three_feedback_seeds_support_only_bounded_guard_trends() -> None:
+    cards = []
+    for seed in (13, 17, 23):
+        cards.extend(
+            [
+                _feedback_card(arm="observe", seed=seed, eval_after=2.2),
+                _feedback_card(arm="raw_unguarded", seed=seed, eval_after=2.4),
+                _feedback_card(arm="raw_loss_guard", seed=seed, eval_after=2.1),
+            ]
+        )
+
+    report = st.compare_hf_zspace_optimizer_feedback_run_cards(cards)
+
+    assert report["status"] == "ready"
+    assert report["evidence_scope"] == (
+        "single_model_single_corpus_multi_seed_feedback_ablation"
+    )
+    assert report["contrasts"]["guard_benefit"]["bounded_trend_ready"] is True
+    assert report["bounded_guard_benefit_observed"] is True
+    assert report["bounded_absolute_improvement_observed"] is True
+    assert report["efficacy_claim_ready"] is False
+
+
 def test_matched_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None:
     cards: list[Path] = []
     for mode, eval_after in (("observe", 2.0), ("apply", 1.9)):
@@ -1603,6 +1827,31 @@ def test_factorized_ablation_cli_writes_the_verified_report(tmp_path: Path) -> N
     output = tmp_path / "factorized.json"
 
     status = hf_cli.zspace_optimizer_factorized_compare_main(
+        [*[str(path) for path in cards], "--out", str(output)]
+    )
+
+    assert status == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "ready"
+    assert report["matched_seed_count"] == 1
+
+
+def test_feedback_ablation_cli_writes_the_verified_report(tmp_path: Path) -> None:
+    cards: list[Path] = []
+    for arm, eval_after in (
+        ("observe", 2.2),
+        ("raw_unguarded", 2.4),
+        ("raw_loss_guard", 2.1),
+    ):
+        path = tmp_path / f"{arm}.json"
+        path.write_text(
+            json.dumps(_feedback_card(arm=arm, seed=13, eval_after=eval_after)),
+            encoding="utf-8",
+        )
+        cards.append(path)
+    output = tmp_path / "feedback.json"
+
+    status = hf_cli.zspace_optimizer_feedback_compare_main(
         [*[str(path) for path in cards], "--out", str(output)]
     )
 

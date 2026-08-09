@@ -204,8 +204,8 @@ this frozen four-arm study: compare guarded and unguarded recipes in a new
 matched multi-seed run, and retain the receipt's
 `within_run_loss_guard_not_counterfactual_efficacy` boundary.
 
-The comparator fails closed unless each seed has exactly one arm of every
-kind and all four share:
+The frozen four-arm comparator fails closed unless each seed has exactly one
+arm of every kind and all four share:
 
 - the non-intervention training recipe and before-train loss anchor;
 - training input, materialized dataset, tokenized blocks, model, and execution
@@ -213,6 +213,56 @@ kind and all four share:
 - one Rust trajectory, raw control sequence, and nominal scheduler sequence;
 - complete optimizer actuation/restoration counts and a sealed actuation hash;
 - measured nominal and effective-LR doses matching the selected Rust arm.
+
+## Run the guarded feedback study
+
+The feedback study freezes one Rust raw-control trajectory per seed and executes
+three arms in this order:
+
+| Arm | Raw trajectory | Loss guard | Question |
+| --- | --- | --- | --- |
+| `observe` | recorded, not applied | off | What does ordinary FT do? |
+| `raw_unguarded` | applied | off | What is the total open-loop effect? |
+| `raw_loss_guard` | applied | Rust `loss_guard` | Does the guard improve that same intervention? |
+
+Create the immutable recovery anchor before training by omitting `--run`:
+
+```bash
+spiral-hf-zspace-optimizer-feedback-study \
+  --study-dir models/runs/zspace-feedback-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --validation-split 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Inspect `feedback-study-plan.json`, then repeat the exact command with `--run`
+before the separator. The runner owns `--seed`, output/run-card/trace paths,
+trajectory transport, `--logging-steps 1`, feedback mode, and every feedback
+parameter. Optional `--feedback-config-json config.json` accepts only a JSON
+object; Rust validates the overrides and the plan seals the complete resolved
+13-field config, contract owner, native-extension hash, and evidence boundary.
+
+The final `feedback-report.json` exposes three lower-is-better contrasts:
+
+- `unguarded_total_effect`: `raw_unguarded - observe`;
+- `guarded_total_effect`: `raw_loss_guard - observe`;
+- `guard_benefit`: `raw_loss_guard - raw_unguarded`.
+
+The comparator additionally requires complete per-update loss/control lineage,
+fail-closed warmup, no stale observations, a gate that actually became active,
+and a guarded schedule distinct from the unguarded schedule. A short calibration
+where the gate never actuates is preserved as useful `blocked` evidence rather
+than being promoted into a vacuous comparison. Three consistent seeds permit a
+bounded single-model, single-corpus trend only; `efficacy_claim_ready` remains
+false by construction.
 
 ## Read the contrasts
 

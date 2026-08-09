@@ -749,6 +749,36 @@ retain their Rust projection and resume lineage. The receipt labels this as a
 improve loss and open the gate, so guarded and unguarded runs still require a
 matched multi-seed comparison before making an efficacy claim.
 
+Use the three-arm study runner for that comparison. Omit `--run` first to seal
+the plan, then repeat the exact command with `--run` after inspecting it:
+
+```bash
+spiral-hf-zspace-optimizer-feedback-study \
+  --study-dir models/runs/zspace-feedback-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --validation-split 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+For each seed it records an `observe` trajectory, applies that exact raw
+trajectory as `raw_unguarded`, and applies it again through the Rust
+`loss_guard` as `raw_loss_guard`. The study owns per-step logging and all
+feedback flags, seals the fully resolved Rust config and loaded native binary,
+and writes `feedback-report.json` only after every run card and lineage receipt
+verifies. Its `unguarded_total_effect`, `guarded_total_effect`, and
+`guard_benefit` contrasts remain bounded evidence, never a general efficacy
+claim. `--training-use-cpu` explicitly selects the current Transformers
+`use_cpu` argument (or its legacy `no_cuda` equivalent) instead of relying on
+ambient accelerator selection.
+
 Repeat the matched observe/apply pair with at least three seeds before reading
 the report as a bounded empirical trend. The comparator fails closed on input,
 dataset, tokenization, model/runtime, execution, base-recipe, initial-eval, and

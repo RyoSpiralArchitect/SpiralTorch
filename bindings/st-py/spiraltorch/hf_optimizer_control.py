@@ -28,6 +28,7 @@ HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v3"
 HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA = "spiraltorch.hf_zspace_optimizer_trace.v1"
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_matched_ablation.v1"
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_factorized_ablation.v1"
+HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA = "spiraltorch.hf_zspace_feedback_ablation.v1"
 HF_ZSPACE_OPTIMIZER_STATE_FILENAME = "spiraltorch-hf-zspace-optimizer-state.json"
 HF_ZSPACE_OPTIMIZER_TRACE_FILENAME = "spiraltorch-hf-zspace-optimizer-trace.jsonl"
 HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME = (
@@ -65,6 +66,7 @@ _HF_ZSPACE_OPTIMIZER_FEEDBACK_RECIPE_ADDITIONS = (
 __all__ = [
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
     "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
+    "HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA",
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_MODES",
     "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
@@ -79,8 +81,10 @@ __all__ = [
     "hf_zspace_optimizer_recipe_contract",
     "compare_hf_zspace_optimizer_run_cards",
     "compare_hf_zspace_optimizer_factorized_run_cards",
+    "compare_hf_zspace_optimizer_feedback_run_cards",
     "write_hf_zspace_optimizer_matched_ablation_report",
     "write_hf_zspace_optimizer_factorized_ablation_report",
+    "write_hf_zspace_optimizer_feedback_ablation_report",
 ]
 
 
@@ -2085,6 +2089,9 @@ def _card_ablation_facts(card: Mapping[str, object]) -> dict[str, object]:
         "trajectory_arm": receipt.get(
             "trajectory_arm", recipe.get("trajectory_arm", "raw")
         ),
+        "feedback_mode": receipt.get(
+            "feedback_mode", recipe.get("feedback_mode", "off")
+        ),
         "receipt": receipt,
         "base_training_recipe_id": base_recipe_id,
         "seed": seed,
@@ -2761,6 +2768,524 @@ def write_hf_zspace_optimizer_factorized_ablation_report(
     path: str | Path,
 ) -> str:
     """Write one factorized optimizer-ablation report as canonical JSON."""
+
+    output = Path(path)
+    _write_json(output, report)
+    return str(output)
+
+
+_FEEDBACK_ABLATION_ARMS = (
+    "observe",
+    "raw_unguarded",
+    "raw_loss_guard",
+)
+_FEEDBACK_ABLATION_CONTRASTS = {
+    "unguarded_total_effect": ("raw_unguarded", "observe"),
+    "guarded_total_effect": ("raw_loss_guard", "observe"),
+    "guard_benefit": ("raw_loss_guard", "raw_unguarded"),
+}
+
+
+def _feedback_arm_key(fact: Mapping[str, object]) -> str | None:
+    mode = fact.get("mode")
+    arm = fact.get("trajectory_arm")
+    feedback_mode = fact.get("feedback_mode")
+    if mode == "observe" and arm == "raw" and feedback_mode == "off":
+        return "observe"
+    if mode == "apply" and arm == "raw" and feedback_mode == "off":
+        return "raw_unguarded"
+    if mode == "apply" and arm == "raw" and feedback_mode == "loss_guard":
+        return "raw_loss_guard"
+    return None
+
+
+def _shared_positive_receipt_number(
+    receipts: Mapping[str, Mapping[str, object]],
+    field: str,
+    errors: list[str],
+) -> float | None:
+    values = [receipt.get(field) for receipt in receipts.values()]
+    value = values[0] if all(item == values[0] for item in values[1:]) else None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) <= 0.0
+    ):
+        errors.append(f"feedback arms do not share a valid {field}")
+        return None
+    return float(value)
+
+
+def _feedback_seed_report(
+    seed: int,
+    arms: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    errors: list[str] = []
+    receipts = {arm: _mapping(fact.get("receipt")) for arm, fact in arms.items()}
+
+    for arm in _FEEDBACK_ABLATION_ARMS:
+        receipt = receipts[arm]
+        expected_mode = "observe" if arm == "observe" else "apply"
+        expected_feedback = "loss_guard" if arm == "raw_loss_guard" else "off"
+        if receipt.get("schema") != HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA:
+            errors.append(f"{arm} receipt schema is unsupported")
+        if receipt.get("status") != "ready":
+            errors.append(f"{arm} receipt is not ready")
+        if receipt.get("mode") != expected_mode:
+            errors.append(f"{arm} receipt has the wrong mode")
+        if receipt.get("trajectory_arm") != "raw":
+            errors.append(f"{arm} receipt is not a raw trajectory arm")
+        if receipt.get("feedback_mode") != expected_feedback:
+            errors.append(f"{arm} receipt has the wrong feedback mode")
+        if receipt.get("evidence_blockers") not in (None, []):
+            errors.append(f"{arm} receipt contains evidence blockers")
+        if receipt.get("schedule_evidence_complete") is not True:
+            errors.append(f"{arm} scheduler evidence is incomplete")
+        if receipt.get("trajectory_validated") is not True:
+            errors.append(f"{arm} trajectory was not Rust-validated")
+
+        consumed = _receipt_count(receipt.get("consumed_control_count"))
+        planned = _receipt_count(receipt.get("planned_update_count"))
+        realized = _receipt_count(receipt.get("realized_update_count"))
+        trajectory_steps = _receipt_count(receipt.get("trajectory_step_count"))
+        if (
+            consumed is None
+            or consumed <= 0
+            or planned != consumed
+            or realized != consumed
+            or trajectory_steps != consumed
+            or receipt.get("training_horizon_complete") is not True
+            or receipt.get("trajectory_horizon_complete") is not True
+        ):
+            errors.append(f"{arm} receipt has incomplete horizon coverage")
+        if not _is_sha256_id(receipt.get("actuated_schedule_sequence_id")):
+            errors.append(f"{arm} actuated schedule identity is invalid")
+
+        if arm == "observe":
+            if _receipt_count(receipt.get("observed_update_count")) != consumed:
+                errors.append("observe arm did not observe every optimizer update")
+            if _receipt_count(receipt.get("applied_update_count")) != 0:
+                errors.append("observe arm changed optimizer learning rates")
+        else:
+            applied = _receipt_count(receipt.get("applied_update_count"))
+            restored = _receipt_count(receipt.get("restored_update_count"))
+            if applied != consumed or restored != applied:
+                errors.append(f"{arm} actuation or restoration count is incomplete")
+            if receipt.get("scheduler_nominal_lr_restored") is not True:
+                errors.append(f"{arm} did not restore nominal scheduler rates")
+
+    trajectory_ids = {receipt.get("trajectory_id") for receipt in receipts.values()}
+    trajectory_id = next(iter(trajectory_ids)) if len(trajectory_ids) == 1 else None
+    if not _is_sha256_id(trajectory_id):
+        errors.append("feedback arms do not share one valid trajectory identity")
+    control_ids = {receipt.get("control_sequence_id") for receipt in receipts.values()}
+    control_id = next(iter(control_ids)) if len(control_ids) == 1 else None
+    if not _is_sha256_id(control_id):
+        errors.append("feedback arms do not share one raw Rust control sequence")
+    nominal_ids = {
+        receipt.get("nominal_schedule_sequence_id") for receipt in receipts.values()
+    }
+    nominal_id = next(iter(nominal_ids)) if len(nominal_ids) == 1 else None
+    if not _is_sha256_id(nominal_id):
+        errors.append("feedback arms do not share one nominal LR sequence")
+
+    unguarded_receipt = receipts["raw_unguarded"]
+    guarded_receipt = receipts["raw_loss_guard"]
+    for arm in ("observe", "raw_unguarded"):
+        receipt = receipts[arm]
+        if _receipt_count(receipt.get("feedback_control_count")) != 0:
+            errors.append(f"{arm} unexpectedly contains feedback controls")
+        if _receipt_count(receipt.get("feedback_observation_count")) != 0:
+            errors.append(f"{arm} unexpectedly contains feedback observations")
+        if any(
+            receipt.get(field) is not None
+            for field in (
+                "feedback_contract",
+                "feedback_semantic_owner",
+                "feedback_evidence_boundary",
+            )
+        ):
+            errors.append(f"{arm} unexpectedly claims feedback provenance")
+
+    guarded_consumed = _receipt_count(guarded_receipt.get("consumed_control_count"))
+    guarded_feedback_controls = _receipt_count(
+        guarded_receipt.get("feedback_control_count")
+    )
+    guarded_feedback_observations = _receipt_count(
+        guarded_receipt.get("feedback_observation_count")
+    )
+    if guarded_feedback_controls != guarded_consumed:
+        errors.append("guarded arm feedback control lineage is incomplete")
+    if guarded_feedback_observations != guarded_consumed:
+        errors.append("guarded arm must observe one training loss per optimizer update")
+    if not _is_sha256_id(guarded_receipt.get("feedback_control_sequence_id")):
+        errors.append("guarded feedback control sequence identity is invalid")
+    if not _is_sha256_id(guarded_receipt.get("feedback_observation_sequence_id")):
+        errors.append("guarded feedback observation sequence identity is invalid")
+    if (
+        guarded_receipt.get("feedback_contract")
+        != ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+    ):
+        errors.append("guarded arm does not use the Rust feedback contract")
+    if (
+        guarded_receipt.get("feedback_semantic_owner")
+        != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+    ):
+        errors.append("guarded arm has the wrong feedback semantic owner")
+    if (
+        guarded_receipt.get("feedback_evidence_boundary")
+        != "within_run_loss_guard_not_counterfactual_efficacy"
+    ):
+        errors.append("guarded arm has an invalid feedback evidence boundary")
+
+    guarded_recipe = _mapping(guarded_receipt.get("recipe"))
+    feedback_config = _mapping(guarded_recipe.get("feedback_config"))
+    feedback_config_id = _sha256_id(feedback_config) if feedback_config else None
+    warmup_observations = _receipt_count(feedback_config.get("warmup_observations"))
+    if not _is_sha256_id(feedback_config_id):
+        errors.append("guarded arm has no sealed feedback config")
+    if warmup_observations is None:
+        errors.append("guarded feedback warmup is invalid")
+
+    disposition_counts = _mapping(guarded_receipt.get("feedback_disposition_counts"))
+    validated_dispositions: dict[str, int] = {}
+    for disposition, value in disposition_counts.items():
+        count = _receipt_count(value)
+        if count is None:
+            errors.append(f"guarded feedback disposition {disposition} is invalid")
+        else:
+            validated_dispositions[disposition] = count
+    if (
+        guarded_consumed is None
+        or sum(validated_dispositions.values()) != guarded_consumed
+    ):
+        errors.append("guarded feedback disposition counts are incomplete")
+    active_count = _receipt_count(guarded_receipt.get("feedback_active_update_count"))
+    stale_count = _receipt_count(guarded_receipt.get("feedback_stale_update_count"))
+    identity_count = _receipt_count(
+        guarded_receipt.get("feedback_identity_update_count")
+    )
+    if active_count is None or active_count <= 0:
+        errors.append("guarded feedback gate never became active")
+    if stale_count != 0:
+        errors.append("guarded feedback used stale loss observations")
+    if (
+        identity_count is None
+        or warmup_observations is None
+        or identity_count < warmup_observations + 1
+    ):
+        errors.append("guarded feedback does not prove fail-closed warmup updates")
+    if guarded_receipt.get("model_update_intervened") is not True:
+        errors.append("guarded arm never applied a non-identity model update")
+    if _receipt_count(guarded_receipt.get("non_identity_update_count")) in (None, 0):
+        errors.append("guarded arm has no non-identity update count")
+    if unguarded_receipt.get("model_update_intervened") is not True:
+        errors.append("unguarded arm never applied a non-identity model update")
+    if guarded_receipt.get("actuated_schedule_sequence_id") == unguarded_receipt.get(
+        "actuated_schedule_sequence_id"
+    ):
+        errors.append("feedback did not change the actuated optimizer schedule")
+
+    nominal_dose = _shared_positive_receipt_number(
+        receipts, "trajectory_nominal_dose", errors
+    )
+    raw_dose = _shared_positive_receipt_number(receipts, "trajectory_raw_dose", errors)
+    measured_doses: dict[str, dict[str, float]] = {}
+    for arm, receipt in receipts.items():
+        values: dict[str, float] = {}
+        for field in (
+            "nominal_learning_rate_dose",
+            "actuated_learning_rate_dose",
+            "actuated_learning_rate_dose_ratio",
+        ):
+            value = receipt.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) <= 0.0
+            ):
+                errors.append(f"{arm} receipt has invalid {field}")
+            else:
+                values[field] = float(value)
+        measured_doses[arm] = values
+        if nominal_dose is not None and "nominal_learning_rate_dose" in values:
+            if not math.isclose(
+                values["nominal_learning_rate_dose"],
+                nominal_dose,
+                rel_tol=1e-10,
+                abs_tol=0.0,
+            ):
+                errors.append(f"{arm} nominal dose differs from the trajectory")
+        if {
+            "nominal_learning_rate_dose",
+            "actuated_learning_rate_dose",
+            "actuated_learning_rate_dose_ratio",
+        }.issubset(values):
+            expected_ratio = (
+                values["actuated_learning_rate_dose"]
+                / values["nominal_learning_rate_dose"]
+            )
+            if not math.isclose(
+                values["actuated_learning_rate_dose_ratio"],
+                expected_ratio,
+                rel_tol=1e-10,
+                abs_tol=0.0,
+            ):
+                errors.append(f"{arm} measured dose ratio is inconsistent")
+    if nominal_dose is not None:
+        observed_dose = measured_doses["observe"].get("actuated_learning_rate_dose")
+        if observed_dose is not None and not math.isclose(
+            observed_dose, nominal_dose, rel_tol=1e-10, abs_tol=0.0
+        ):
+            errors.append("observe arm changed the nominal optimizer dose")
+    if raw_dose is not None:
+        unguarded_dose = measured_doses["raw_unguarded"].get(
+            "actuated_learning_rate_dose"
+        )
+        if unguarded_dose is not None and not math.isclose(
+            unguarded_dose, raw_dose, rel_tol=1e-10, abs_tol=0.0
+        ):
+            errors.append("unguarded arm dose differs from the raw Rust trajectory")
+
+    base_recipe_ids = {fact.get("base_training_recipe_id") for fact in arms.values()}
+    base_recipe_id = next(iter(base_recipe_ids)) if len(base_recipe_ids) == 1 else None
+    if not _is_sha256_id(base_recipe_id):
+        errors.append("non-intervention training recipes differ")
+    reference_identities = _mapping(arms["observe"].get("identities"))
+    identity_matches: dict[str, bool] = {}
+    for key in (
+        "training_input",
+        "dataset_materialization",
+        "tokenized_dataset",
+        "model_runtime",
+        "execution",
+    ):
+        reference = reference_identities.get(key)
+        matched = _is_sha256_id(reference) and all(
+            _mapping(fact.get("identities")).get(key) == reference
+            for fact in arms.values()
+        )
+        identity_matches[key] = matched
+        if not matched:
+            errors.append(f"{key} identity is missing or mismatched")
+    for arm, fact in arms.items():
+        if fact.get("training_completed") is not True:
+            errors.append(f"{arm} arm did not complete training")
+
+    before_losses = {arm: fact.get("eval_before_loss") for arm, fact in arms.items()}
+    after_losses = {arm: fact.get("eval_after_loss") for arm, fact in arms.items()}
+    if any(not isinstance(value, float) for value in before_losses.values()) or any(
+        not isinstance(value, float) for value in after_losses.values()
+    ):
+        errors.append("feedback before/after eval losses are incomplete")
+        changes: dict[str, float] = {}
+    else:
+        anchor = float(before_losses["observe"])
+        if any(
+            not math.isclose(float(value), anchor, rel_tol=1e-9, abs_tol=1e-9)
+            for value in before_losses.values()
+        ):
+            errors.append("before-train eval anchors differ")
+        changes = {
+            arm: float(after_losses[arm]) - float(before_losses[arm])
+            for arm in _FEEDBACK_ABLATION_ARMS
+        }
+    contrasts = {
+        name: (None if not changes else changes[left] - changes[right])
+        for name, (left, right) in _FEEDBACK_ABLATION_CONTRASTS.items()
+    }
+    guarded_dose = measured_doses["raw_loss_guard"].get("actuated_learning_rate_dose")
+    if (
+        nominal_dose is None
+        or raw_dose is None
+        or guarded_dose is None
+        or math.isclose(raw_dose, nominal_dose, rel_tol=1e-12, abs_tol=1e-15)
+    ):
+        guarded_dose_fraction = None
+    else:
+        guarded_dose_fraction = (guarded_dose - nominal_dose) / (
+            raw_dose - nominal_dose
+        )
+    match_payload = {
+        "seed": seed,
+        "base_training_recipe_id": base_recipe_id,
+        "identities": reference_identities,
+        "trajectory_id": trajectory_id,
+        "control_sequence_id": control_id,
+        "nominal_schedule_sequence_id": nominal_id,
+        "feedback_config_id": feedback_config_id,
+    }
+    return {
+        "seed": seed,
+        "status": "ready" if not errors else "blocked",
+        "feedback_match_id": _sha256_id(match_payload),
+        "base_training_recipe_id": base_recipe_id,
+        "trajectory_id": trajectory_id,
+        "control_sequence_id": control_id,
+        "nominal_schedule_sequence_id": nominal_id,
+        "feedback_config_id": feedback_config_id,
+        "feedback_config": feedback_config,
+        "identity_matches": identity_matches,
+        "eval_before_losses": before_losses,
+        "eval_after_losses": after_losses,
+        "eval_loss_changes": changes,
+        "contrasts": contrasts,
+        "optimizer_doses": measured_doses,
+        "guarded_dose_fraction_of_raw_deviation": guarded_dose_fraction,
+        "feedback_diagnostics": {
+            "control_count": guarded_feedback_controls,
+            "observation_count": guarded_feedback_observations,
+            "active_update_count": active_count,
+            "identity_update_count": identity_count,
+            "stale_update_count": stale_count,
+            "disposition_counts": validated_dispositions,
+            "final_gate": guarded_receipt.get("feedback_gate"),
+            "halted": guarded_receipt.get("feedback_halted"),
+        },
+        "lower_is_better": True,
+        "source_paths": {arm: fact.get("source_path") for arm, fact in arms.items()},
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def _feedback_contrast_summary(
+    reports: Sequence[Mapping[str, object]],
+    name: str,
+    *,
+    status: str,
+) -> dict[str, object]:
+    values = [
+        float(_mapping(report.get("contrasts"))[name])
+        for report in reports
+        if report.get("status") == "ready"
+        and isinstance(_mapping(report.get("contrasts")).get(name), float)
+    ]
+    if not values:
+        direction = None
+    elif all(value < 0.0 for value in values):
+        direction = "left_arm_better"
+    elif all(value > 0.0 for value in values):
+        direction = "right_arm_better"
+    elif all(value == 0.0 for value in values):
+        direction = "no_observed_difference"
+    else:
+        direction = "mixed"
+    left, right = _FEEDBACK_ABLATION_CONTRASTS[name]
+    return {
+        "left_arm": left,
+        "right_arm": right,
+        "lower_is_better": True,
+        "values": values,
+        "mean": sum(values) / len(values) if values else None,
+        "left_arm_win_count": sum(value < 0.0 for value in values),
+        "bounded_trend_ready": status == "ready" and len(values) >= 3,
+        "bounded_trend_direction": direction,
+    }
+
+
+def compare_hf_zspace_optimizer_feedback_run_cards(
+    run_cards: Sequence[str | Path | Mapping[str, object]],
+) -> dict[str, object]:
+    """Compare one baseline and matched unguarded/guarded raw-control arms."""
+
+    facts = [_card_ablation_facts(_load_run_card(card)) for card in run_cards]
+    errors: list[str] = []
+    grouped: dict[int, dict[str, dict[str, object]]] = {}
+    for index, fact in enumerate(facts):
+        seed = fact.get("seed")
+        arm = _feedback_arm_key(fact)
+        if not isinstance(seed, int):
+            errors.append(f"run card {index} has no verified training seed")
+            continue
+        if arm is None:
+            errors.append(f"run card {index} is not a feedback-ablation arm")
+            continue
+        seed_arms = grouped.setdefault(seed, {})
+        if arm in seed_arms:
+            errors.append(f"seed {seed} has duplicate {arm} arms")
+            continue
+        seed_arms[arm] = fact
+
+    reports: list[dict[str, object]] = []
+    expected = set(_FEEDBACK_ABLATION_ARMS)
+    for seed, arms in sorted(grouped.items()):
+        if set(arms) != expected:
+            missing = sorted(expected - set(arms))
+            errors.append(f"seed {seed} is missing feedback arms: {missing}")
+            continue
+        reports.append(_feedback_seed_report(seed, arms))
+    ready_reports = [report for report in reports if report.get("status") == "ready"]
+    blocked = [report for report in reports if report.get("status") != "ready"]
+    config_ids = {report.get("feedback_config_id") for report in ready_reports}
+    if len(config_ids) > 1:
+        errors.append("matched seeds do not share one feedback config")
+    status = "ready" if reports and not errors and not blocked else "blocked"
+    report_errors = [
+        f"seed {report['seed']}: {error}"
+        for report in blocked
+        for error in report.get("errors", [])
+    ]
+    all_errors = [*errors, *report_errors]
+    contrast_summaries = {
+        name: _feedback_contrast_summary(reports, name, status=status)
+        for name in _FEEDBACK_ABLATION_CONTRASTS
+    }
+    guard_summary = contrast_summaries["guard_benefit"]
+    absolute_summary = contrast_summaries["guarded_total_effect"]
+    return {
+        "schema": HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA,
+        "status": status,
+        "run_card_count": len(facts),
+        "matched_seed_count": len(reports),
+        "ready_seed_count": len(ready_reports),
+        "seeds": [report["seed"] for report in reports],
+        "feedback_config_id": (
+            next(iter(config_ids)) if len(config_ids) == 1 else None
+        ),
+        "evidence_scope": (
+            "single_model_single_corpus_multi_seed_feedback_ablation"
+            if status == "ready" and len(reports) >= 3
+            else (
+                "single_or_two_seed_feedback_diagnostic"
+                if status == "ready"
+                else "non_comparable"
+            )
+        ),
+        "contrasts": contrast_summaries,
+        "bounded_guard_benefit_observed": (
+            guard_summary["bounded_trend_ready"] is True
+            and guard_summary["bounded_trend_direction"] == "left_arm_better"
+        ),
+        "bounded_absolute_improvement_observed": (
+            absolute_summary["bounded_trend_ready"] is True
+            and absolute_summary["bounded_trend_direction"] == "left_arm_better"
+        ),
+        "efficacy_claim_ready": False,
+        "evidence_boundary": (
+            "the three-arm design compares one frozen Rust raw-control trajectory "
+            "with and without within-run loss feedback against an observe baseline; "
+            "three directionally consistent matched seeds support a bounded trend, "
+            "not statistical significance or general superiority"
+        ),
+        "efficacy_claim_requirements": (
+            "a prespecified, adequately powered multi-model and multi-corpus "
+            "evaluation with held-out quality and stability metrics is not "
+            "implemented by this comparator"
+        ),
+        "feedback_seeds": reports,
+        "error_count": len(all_errors),
+        "errors": all_errors,
+    }
+
+
+def write_hf_zspace_optimizer_feedback_ablation_report(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    """Write one guarded-vs-unguarded optimizer report as canonical JSON."""
 
     output = Path(path)
     _write_json(output, report)
