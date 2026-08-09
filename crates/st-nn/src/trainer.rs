@@ -135,8 +135,8 @@ use st_core::telemetry::zspace_region::{
 };
 use st_core::theory::zpulse::ZScale;
 use st_tensor::{
-    set_thread_meta_observer, topos::OpenCartesianTopos, GradientSummary, TensorOpMetaEvent,
-    TensorOpMetaObserver,
+    set_thread_meta_observer, topos::OpenCartesianTopos, GradientSummary, TensorExecutionReceipt,
+    TensorExecutionRouteStatus, TensorOpMetaEvent, TensorOpMetaObserver,
 };
 use std::collections::HashMap;
 use std::env;
@@ -1209,7 +1209,37 @@ impl TensorBackendStepTrace {
 
         self.record_backend_policy_event(event);
 
-        let Some(backend) = event.data.get("backend").and_then(|value| value.as_str()) else {
+        if event
+            .data
+            .get("counts_as_execution")
+            .and_then(|value| value.as_bool())
+            == Some(false)
+        {
+            return;
+        }
+
+        let execution_receipt = match event.data.get("execution_receipt") {
+            None => None,
+            Some(value) => {
+                let Ok(receipt) = serde_json::from_value::<TensorExecutionReceipt>(value.clone())
+                else {
+                    return;
+                };
+                if receipt.validate().is_err() {
+                    return;
+                }
+                if receipt.operation != event.op_name {
+                    return;
+                }
+                Some(receipt)
+            }
+        };
+
+        let executed_backend = match execution_receipt.as_ref() {
+            Some(receipt) => receipt.executed_backend.map(|backend| backend.as_str()),
+            None => event.data.get("backend").and_then(|value| value.as_str()),
+        };
+        let Some(backend) = executed_backend else {
             return;
         };
         let kernel_backend = metric_fragment(backend);
@@ -1231,10 +1261,16 @@ impl TensorBackendStepTrace {
             .entry(format!("{op}_{kernel_backend}"))
             .or_default() += 1;
 
-        let requested_backend = event
-            .data
-            .get("requested_backend")
-            .and_then(|value| value.as_str())
+        let receipt_requested_backend = execution_receipt
+            .as_ref()
+            .map(|receipt| receipt.requested_backend.as_str());
+        let requested_backend = receipt_requested_backend
+            .or_else(|| {
+                event
+                    .data
+                    .get("requested_backend")
+                    .and_then(|value| value.as_str())
+            })
             .map(backend_metric_fragment);
         if let Some(requested) = requested_backend.as_deref() {
             if requested == "wgpu" {
@@ -1245,7 +1281,13 @@ impl TensorBackendStepTrace {
                         .requested_wgpu_hits_by_op_backend
                         .entry(op_backend)
                         .or_default() += 1;
-                } else if is_cpu_runtime_backend(&backend) && is_wgpu_runtime_fallback(&event.data)
+                } else if is_cpu_runtime_backend(&backend)
+                    && execution_receipt
+                        .as_ref()
+                        .map(|receipt| {
+                            receipt.route_status == TensorExecutionRouteStatus::RuntimeFallback
+                        })
+                        .unwrap_or_else(|| is_wgpu_runtime_fallback(&event.data))
                 {
                     self.requested_wgpu_runtime_fallbacks =
                         self.requested_wgpu_runtime_fallbacks.saturating_add(1);
@@ -1255,7 +1297,15 @@ impl TensorBackendStepTrace {
                         .or_default() += 1;
                 }
             }
-            if requested != "auto" && requested != backend && !is_metadata_only_backend(&backend) {
+            let typed_runtime_fallback = execution_receipt.as_ref().is_some_and(|receipt| {
+                receipt.route_status == TensorExecutionRouteStatus::RuntimeFallback
+            });
+            if typed_runtime_fallback
+                || (execution_receipt.is_none()
+                    && requested != "auto"
+                    && requested != backend
+                    && !is_metadata_only_backend(&backend))
+            {
                 self.fallbacks = self.fallbacks.saturating_add(1);
             }
         }
@@ -13138,6 +13188,139 @@ mod tests {
             extra.get("tensor_meta_non_finite_detected").copied(),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn tensor_backend_trace_counts_receipts_but_not_prepared_dispatches() {
+        let prepared = st_tensor::prepare_tensor_execution(
+            st_tensor::TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+            "row_softmax",
+            st_tensor::TensorExecutionBackend::Wgpu,
+        )
+        .unwrap();
+        let receipt = prepared
+            .complete(st_tensor::TensorExecutionBackend::Wgpu, None)
+            .unwrap()
+            .receipt();
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "row_softmax",
+            data: serde_json::json!({
+                "event_phase": "dispatch_prepared",
+                "counts_as_execution": false,
+                "backend": "wgpu_dense",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "row_softmax",
+            data: serde_json::json!({
+                "execution_receipt": receipt,
+            }),
+        });
+
+        assert_eq!(trace.meta_events, 2);
+        assert_eq!(trace.total, 1);
+        assert_eq!(trace.requested_wgpu_hits, 1);
+        assert_eq!(trace.requested_wgpu_runtime_fallbacks, 0);
+        assert_eq!(trace.fallbacks, 0);
+        assert_eq!(trace.by_backend.get("wgpu"), Some(&1));
+    }
+
+    #[test]
+    fn tensor_backend_trace_does_not_misclassify_threshold_routes_as_fallbacks() {
+        let _fallback = st_tensor::execution::push_accelerator_fallback(
+            st_tensor::execution::AcceleratorFallback::Allow,
+        );
+        let _plan = st_tensor::execution::push_execution_plan_binding(
+            st_tensor::TensorExecutionPlanBinding::new(
+                [0xcd; 32],
+                [
+                    st_tensor::TensorExecutionBackend::Faer,
+                    st_tensor::TensorExecutionBackend::Faer,
+                    st_tensor::TensorExecutionBackend::Cpu,
+                    st_tensor::TensorExecutionBackend::Cpu,
+                    st_tensor::TensorExecutionBackend::Cpu,
+                    st_tensor::TensorExecutionBackend::Wgpu,
+                ],
+                st_tensor::execution::AcceleratorFallback::Allow,
+                1024,
+            ),
+        );
+        let receipt = st_tensor::prepare_tensor_execution(
+            st_tensor::TensorExecutionWorkload::TensorUtil {
+                operation: st_tensor::TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+            "scale",
+            st_tensor::TensorExecutionBackend::Cpu,
+        )
+        .unwrap()
+        .complete(st_tensor::TensorExecutionBackend::Cpu, None)
+        .unwrap()
+        .receipt();
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "execution_receipt": receipt,
+            }),
+        });
+
+        assert_eq!(trace.total, 1);
+        assert_eq!(trace.fallbacks, 0);
+        assert_eq!(trace.requested_wgpu_hits, 0);
+        assert_eq!(trace.requested_wgpu_runtime_fallbacks, 0);
+        assert_eq!(trace.by_backend.get("cpu"), Some(&1));
+    }
+
+    #[test]
+    fn tensor_backend_trace_does_not_count_a_no_op_with_stale_backend_metadata() {
+        let receipt = st_tensor::prepare_tensor_execution(
+            st_tensor::TensorExecutionWorkload::Softmax { rows: 0, cols: 3 },
+            "row_softmax",
+            st_tensor::TensorExecutionBackend::Cpu,
+        )
+        .unwrap()
+        .complete_no_op()
+        .unwrap()
+        .receipt();
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "row_softmax",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "execution_receipt": receipt,
+            }),
+        });
+
+        assert_eq!(trace.meta_events, 1);
+        assert_eq!(trace.total, 0);
+        assert!(trace.by_backend.is_empty());
+    }
+
+    #[test]
+    fn tensor_backend_trace_rejects_a_receipt_attached_to_another_operation() {
+        let receipt = st_tensor::prepare_tensor_execution(
+            st_tensor::TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+            "row_softmax",
+            st_tensor::TensorExecutionBackend::Cpu,
+        )
+        .unwrap()
+        .complete(st_tensor::TensorExecutionBackend::Cpu, None)
+        .unwrap()
+        .receipt();
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "matmul",
+            data: serde_json::json!({
+                "execution_receipt": receipt,
+            }),
+        });
+
+        assert_eq!(trace.meta_events, 1);
+        assert_eq!(trace.total, 0);
+        assert!(trace.by_op.is_empty());
     }
 
     #[test]

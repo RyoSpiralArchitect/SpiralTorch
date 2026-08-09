@@ -8613,6 +8613,8 @@ fn layer_norm_internal(
 
     crate::emit_tensor_op_meta("layer_norm", || {
         serde_json::json!({
+            "event_phase": "dispatch_prepared",
+            "counts_as_execution": false,
             "backend": "wgpu_dense",
             "rows": rows,
             "cols": cols,
@@ -8752,6 +8754,8 @@ pub fn row_softmax(
 
     crate::emit_tensor_op_meta("row_softmax", || {
         serde_json::json!({
+            "event_phase": "dispatch_prepared",
+            "counts_as_execution": false,
             "backend": "wgpu_dense",
             "variant": variant.as_str(),
             "rows": rows,
@@ -9425,6 +9429,8 @@ pub fn fused_attention(
 
     crate::emit_tensor_op_meta("scaled_dot_attention", || {
         serde_json::json!({
+            "event_phase": "dispatch_prepared",
+            "counts_as_execution": false,
             "backend": "wgpu_dense",
             "contexts": contexts,
             "sequence": sequence,

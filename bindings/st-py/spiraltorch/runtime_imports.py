@@ -51,6 +51,7 @@ __all__ = [
     "evaluate_runtime_device_route_from_probes",
     "project_runtime_device_probe_contract",
     "validate_runtime_execution_plan_contract",
+    "validate_tensor_execution_receipt",
     "validate_runtime_device_probe_contract",
     "validate_runtime_device_route_contract",
     "runtime_device_backends_from_source",
@@ -878,6 +879,23 @@ def _native_runtime_execution_plan_function(name: str):
     return function
 
 
+def _native_tensor_execution_receipt_function():
+    try:
+        import spiraltorch as st  # type: ignore
+    except Exception as exc:  # pragma: no cover - import failures vary by env.
+        raise RuntimeError(
+            "tensor execution receipt semantics require the compiled Rust core"
+        ) from exc
+    native = getattr(st, "_rs", None)
+    function = getattr(native, "_tensor_execution_receipt_validate", None)
+    if not callable(function):
+        raise RuntimeError(
+            "tensor execution receipt semantics require the compiled Rust core; "
+            "rebuild or reinstall SpiralTorch with _tensor_execution_receipt_validate"
+        )
+    return function
+
+
 def _runtime_probe_contract_payload(payload: Mapping[str, object]) -> dict[str, object]:
     contract = payload.get("contract")
     if contract is None:
@@ -1017,6 +1035,20 @@ def validate_runtime_execution_plan_contract(
         validated = validate(dict(payload), dict(request))
     if not isinstance(validated, Mapping):
         raise RuntimeError("runtime execution-plan validator returned a non-mapping payload")
+    return dict(validated)
+
+
+def validate_tensor_execution_receipt(
+    receipt: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate a completed tensor dispatch receipt through its Rust owner."""
+
+    if not isinstance(receipt, Mapping):
+        raise TypeError("receipt must be a mapping")
+    validate = _native_tensor_execution_receipt_function()
+    validated = validate(dict(receipt))
+    if not isinstance(validated, Mapping):
+        raise RuntimeError("tensor execution receipt validator returned a non-mapping payload")
     return dict(validated)
 
 

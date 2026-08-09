@@ -22,6 +22,7 @@ use st_core::runtime::topos_route_policy::{
     build_topos_route_rewards, evaluate_topos_route_policy, resolve_topos_route_policy,
     ToposRoutePolicyEvaluationRequest, ToposRoutePolicyResolveRequest, ToposRouteRewardsRequest,
 };
+use st_tensor::TensorExecutionReceipt;
 
 #[pyfunction]
 fn _api_llm_route_policy_evaluate(
@@ -314,6 +315,23 @@ fn _runtime_execution_plan_validate_against(
     )
 }
 
+#[pyfunction]
+fn _tensor_execution_receipt_validate(
+    py: Python<'_>,
+    receipt: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let receipt: TensorExecutionReceipt =
+        request_from_py(receipt, "invalid tensor execution receipt")?;
+    receipt
+        .validate()
+        .map_err(|error| json_error("tensor execution receipt validation failed", error))?;
+    payload_to_py(
+        py,
+        receipt,
+        "tensor execution receipt contract encoding failed",
+    )
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_api_llm_route_policy_evaluate, parent)?)?;
     parent.add_function(wrap_pyfunction!(_runtime_device_route_evaluate, parent)?)?;
@@ -346,6 +364,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()
     )?)?;
     parent.add_function(wrap_pyfunction!(
         _runtime_execution_plan_validate_against,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _tensor_execution_receipt_validate,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_topos_route_policy_evaluate, parent)?)?;

@@ -506,6 +506,10 @@ def validate_runtime_execution_plan_contract(
     request: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 
+def validate_tensor_execution_receipt(
+    receipt: Mapping[str, object],
+) -> Dict[str, object]: ...
+
 def validate_runtime_device_probe_contract(
     payload: Mapping[str, object],
     *,

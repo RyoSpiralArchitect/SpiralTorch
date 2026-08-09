@@ -778,6 +778,42 @@ def test_runtime_execution_plan_is_rust_owned_and_replayable() -> None:
         st.validate_runtime_execution_plan_contract(legacy)
 
 
+def test_tensor_execution_receipt_is_validated_only_by_rust() -> None:
+    st = require_native()
+    receipt = {
+        "kind": "spiraltorch.tensor_execution_receipt",
+        "contract_version": "spiraltorch.tensor_execution_receipt.v1",
+        "semantic_owner": "st-tensor::execution",
+        "component": "softmax",
+        "operation": "row_softmax",
+        "workload": {"component": "softmax", "rows": 2, "cols": 3},
+        "requested_backend": "cpu",
+        "selected_backend": "cpu",
+        "executed_backend": "cpu",
+        "route_status": "direct",
+    }
+
+    assert "validate_tensor_execution_receipt" in st.__all__
+    assert st.validate_tensor_execution_receipt(receipt) == receipt
+
+    tampered = dict(receipt)
+    tampered["executed_backend"] = "wgpu"
+    with pytest.raises(ValueError, match="receipt validation failed"):
+        st.validate_tensor_execution_receipt(tampered)
+
+    unsupported = dict(receipt)
+    unsupported["requested_backend"] = "faer"
+    unsupported["selected_backend"] = "faer"
+    unsupported["executed_backend"] = "faer"
+    with pytest.raises(ValueError, match="receipt validation failed"):
+        st.validate_tensor_execution_receipt(unsupported)
+
+    reconstructed = dict(receipt)
+    reconstructed["python_route"] = "exploratory"
+    with pytest.raises(ValueError, match="invalid tensor execution receipt"):
+        st.validate_tensor_execution_receipt(reconstructed)
+
+
 def test_python_transports_wgpu_dispatch_proofs_from_rust() -> None:
     st = require_native()
     require_wgpu_runtime(st)

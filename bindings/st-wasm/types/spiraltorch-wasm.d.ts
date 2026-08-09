@@ -349,6 +349,32 @@ declare module "spiraltorch-wasm" {
         | "wgpu"
         | "hip";
 
+    export type TensorExecutionRouteStatus =
+        | "direct"
+        | "auto_resolved"
+        | "cpu_threshold"
+        | "runtime_fallback"
+        | "no_op";
+
+    export type TensorExecutionReceipt = {
+        kind: "spiraltorch.tensor_execution_receipt";
+        contract_version: "spiraltorch.tensor_execution_receipt.v1";
+        semantic_owner: "st-tensor::execution";
+        component: RuntimeExecutionComponent;
+        operation: string;
+        workload: RuntimeComponentWorkload;
+        requested_backend: RuntimeTensorBackend;
+        selected_backend: RuntimeTensorBackend;
+        executed_backend?: RuntimeTensorBackend;
+        route_status: TensorExecutionRouteStatus;
+        fallback?: {
+            from: RuntimeTensorBackend;
+            to: RuntimeTensorBackend;
+            reason: "runtime_unavailable";
+        };
+        runtime_execution_plan_output_sha256?: string;
+    };
+
     export type RuntimeComponentWorkload =
         | { component: "dense_matmul"; rows: number; inner: number; cols: number }
         | {
@@ -2534,6 +2560,10 @@ declare module "spiraltorch-wasm" {
         payload: RuntimeExecutionPlan,
         request: RuntimeExecutionPlanRequestInput,
     ): RuntimeExecutionPlan;
+    export function tensorExecutionReceiptValidateJson(receiptJson: string): string;
+    export function tensorExecutionReceiptValidateObject(
+        receipt: TensorExecutionReceipt,
+    ): TensorExecutionReceipt;
     export function trainerOptimizerConfigJson(configJson: string): string;
     export function trainerOptimizerConfigObject(
         config: TrainerOptimizerConfig,
