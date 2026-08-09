@@ -9,6 +9,12 @@ use st_core::runtime::zspace_optimizer::{
     ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
     ZSpaceParameterTrajectoryRequest,
 };
+use st_core::runtime::zspace_optimizer_feedback::{
+    control_zspace_optimizer_feedback, initialize_zspace_optimizer_feedback,
+    observe_zspace_optimizer_feedback, restore_zspace_optimizer_feedback,
+    ZSpaceOptimizerFeedbackConfig, ZSpaceOptimizerFeedbackControlRequest,
+    ZSpaceOptimizerFeedbackObserveRequest, ZSpaceOptimizerFeedbackRestoreRequest,
+};
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -103,6 +109,79 @@ fn _zspace_parameter_trajectory_validate(
     response_to_py(py, &report, "Z-space parameter-trajectory encoding failed")
 }
 
+#[pyfunction]
+fn _zspace_optimizer_feedback_init(
+    py: Python<'_>,
+    config: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let config = request_value(config, "Z-space optimizer feedback config")?;
+    let config: ZSpaceOptimizerFeedbackConfig = serde_json::from_value(config)
+        .map_err(|error| json_error("invalid Z-space optimizer feedback config", error))?;
+    let checkpoint = initialize_zspace_optimizer_feedback(config)
+        .map_err(|error| json_error("Z-space optimizer feedback initialization failed", error))?;
+    response_to_py(
+        py,
+        &checkpoint,
+        "Z-space optimizer feedback checkpoint encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_optimizer_feedback_restore(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space optimizer feedback restore request")?;
+    let request: ZSpaceOptimizerFeedbackRestoreRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space optimizer feedback restore request", error))?;
+    let checkpoint = restore_zspace_optimizer_feedback(request)
+        .map_err(|error| json_error("Z-space optimizer feedback restore failed", error))?;
+    response_to_py(
+        py,
+        &checkpoint,
+        "Z-space optimizer feedback checkpoint encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_optimizer_feedback_observe(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space optimizer feedback observation request")?;
+    let request: ZSpaceOptimizerFeedbackObserveRequest =
+        serde_json::from_value(request).map_err(|error| {
+            json_error(
+                "invalid Z-space optimizer feedback observation request",
+                error,
+            )
+        })?;
+    let report = observe_zspace_optimizer_feedback(request)
+        .map_err(|error| json_error("Z-space optimizer feedback observation failed", error))?;
+    response_to_py(
+        py,
+        &report,
+        "Z-space optimizer feedback observation encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_optimizer_feedback_control(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space optimizer feedback control request")?;
+    let request: ZSpaceOptimizerFeedbackControlRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space optimizer feedback control request", error))?;
+    let report = control_zspace_optimizer_feedback(request)
+        .map_err(|error| json_error("Z-space optimizer feedback control failed", error))?;
+    response_to_py(
+        py,
+        &report,
+        "Z-space optimizer feedback control encoding failed",
+    )
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_init, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_restore, parent)?)?;
@@ -111,6 +190,19 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
     parent.add_function(wrap_pyfunction!(_zspace_parameter_trajectory, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_parameter_trajectory_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_optimizer_feedback_init, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_optimizer_feedback_restore,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_optimizer_feedback_observe,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_optimizer_feedback_control,
         parent
     )?)?;
     Ok(())

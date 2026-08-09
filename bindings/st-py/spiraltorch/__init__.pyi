@@ -655,6 +655,7 @@ HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA: str
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA: str
+HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES: Tuple[str, ...]
 HF_ZSPACE_OPTIMIZER_MODES: Tuple[str, ...]
 HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_STATE_FILENAME: str
@@ -673,6 +674,8 @@ def hf_zspace_optimizer_recipe_contract(
     volume_per_step: int = ...,
     trajectory_arm: str = ...,
     trajectory_id: str | None = ...,
+    feedback_mode: str = ...,
+    feedback_config: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 def hf_zspace_optimizer_control_callback(
     *,
@@ -683,6 +686,8 @@ def hf_zspace_optimizer_control_callback(
     volume_per_step: int = ...,
     trajectory_arm: str = ...,
     trajectory: str | PathLike[str] | Mapping[str, object] | None = ...,
+    feedback_mode: str = ...,
+    feedback_config: Mapping[str, object] | None = ...,
     trajectory_output_path: str | PathLike[str] | None = ...,
     trace_path: str | PathLike[str] | None = ...,
     reset_trace: bool = ...,
@@ -5243,6 +5248,11 @@ ZSPACE_META_OPTIMIZER_CONTRACT_VERSION: str
 ZSPACE_META_OPTIMIZER_KIND: str
 ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND: str
 ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER: str
+ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION: str
+ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE: str
+ZSPACE_OPTIMIZER_FEEDBACK_KIND: str
+ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND: str
+ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER: str
 ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION: str
 ZSPACE_PARAMETER_CONTROL_KIND: str
 ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE: float
@@ -5268,6 +5278,27 @@ def zspace_meta_optimizer_step(
     config: Mapping[str, object],
     state: Mapping[str, object],
     observation: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_optimizer_feedback_init(
+    config: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+def zspace_optimizer_feedback_restore(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_optimizer_feedback_observe(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    observation: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_optimizer_feedback_control(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    target_step: int,
+    proposed_learning_rate_scale: float,
 ) -> Dict[str, object]: ...
 def zspace_parameter_control(
     report: Mapping[str, object],
@@ -11281,6 +11312,7 @@ __all__ = [
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
+    "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
     "HF_ZSPACE_OPTIMIZER_MODES",
     "HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_STATE_FILENAME",
@@ -11677,6 +11709,11 @@ __all__ = [
     "ZSPACE_META_OPTIMIZER_KIND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+    "ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION",
+    "ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE",
+    "ZSPACE_OPTIMIZER_FEEDBACK_KIND",
+    "ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND",
+    "ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION",
     "ZSPACE_PARAMETER_CONTROL_KIND",
     "ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE",
@@ -11691,6 +11728,10 @@ __all__ = [
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
+    "zspace_optimizer_feedback_control",
+    "zspace_optimizer_feedback_init",
+    "zspace_optimizer_feedback_observe",
+    "zspace_optimizer_feedback_restore",
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
     "zspace_generation_control",

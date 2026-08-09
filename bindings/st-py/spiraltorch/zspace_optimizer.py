@@ -27,6 +27,13 @@ ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION = (
 ZSPACE_PARAMETER_TRAJECTORY_KIND = "spiraltorch.zspace_parameter_trajectory"
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND = "rust"
+ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION = "spiraltorch.zspace_optimizer_feedback.v1"
+ZSPACE_OPTIMIZER_FEEDBACK_KIND = "spiraltorch.zspace_optimizer_feedback"
+ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer_feedback"
+ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND = "rust"
+ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE = (
+    "applied_scale=1+effective_gate*(proposed_scale-1)"
+)
 
 __all__ = [
     "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -34,6 +41,11 @@ __all__ = [
     "ZSPACE_META_OPTIMIZER_KIND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_BACKEND",
     "ZSPACE_META_OPTIMIZER_SEMANTIC_OWNER",
+    "ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION",
+    "ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE",
+    "ZSPACE_OPTIMIZER_FEEDBACK_KIND",
+    "ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND",
+    "ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION",
     "ZSPACE_PARAMETER_CONTROL_KIND",
     "ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE",
@@ -48,6 +60,10 @@ __all__ = [
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
+    "zspace_optimizer_feedback_control",
+    "zspace_optimizer_feedback_init",
+    "zspace_optimizer_feedback_observe",
+    "zspace_optimizer_feedback_restore",
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
 ]
@@ -248,6 +264,118 @@ def _validate_parameter_trajectory(contract: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_feedback_contract(contract: Mapping[str, Any]) -> None:
+    if (
+        contract.get("kind") != ZSPACE_OPTIMIZER_FEEDBACK_KIND
+        or contract.get("contract_version")
+        != ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+        or contract.get("semantic_owner") != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+        or contract.get("semantic_backend")
+        != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND
+    ):
+        raise RuntimeError(
+            "native Z-space core returned an untrusted optimizer feedback contract"
+        )
+    config = _mapping(contract, "config")
+    state = contract.get("state", contract.get("state_after"))
+    if not isinstance(state, Mapping):
+        raise RuntimeError("native Z-space optimizer feedback returned invalid state")
+    maximum_gate = config.get("maximum_gate")
+    gate = state.get("gate")
+    control_step = state.get("control_step")
+    observation_count = state.get("observation_count")
+    if (
+        isinstance(maximum_gate, bool)
+        or not isinstance(maximum_gate, (int, float))
+        or not math.isfinite(float(maximum_gate))
+        or not 0.0 < float(maximum_gate) <= 1.0
+        or isinstance(gate, bool)
+        or not isinstance(gate, (int, float))
+        or not math.isfinite(float(gate))
+        or not 0.0 <= float(gate) <= float(maximum_gate)
+        or isinstance(control_step, bool)
+        or not isinstance(control_step, int)
+        or control_step < 0
+        or isinstance(observation_count, bool)
+        or not isinstance(observation_count, int)
+        or observation_count < 0
+    ):
+        raise RuntimeError(
+            "native Z-space optimizer feedback returned invalid bounded state"
+        )
+    if "state_after" not in contract:
+        return
+    if contract.get("transition_validated") is not True:
+        raise RuntimeError(
+            "native Z-space optimizer feedback returned an unvalidated transition"
+        )
+    if "applied_learning_rate_scale" not in contract:
+        projection = contract.get("projection")
+        if (
+            not isinstance(projection, Mapping)
+            or projection.get("semantic_backend") != "rust"
+        ):
+            raise RuntimeError(
+                "native Z-space optimizer feedback returned an invalid projection"
+            )
+        return
+    if contract.get("control_rule") != ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE:
+        raise RuntimeError(
+            "native Z-space optimizer feedback returned an unknown control rule"
+        )
+    numeric: dict[str, float] = {}
+    for field in (
+        "proposed_learning_rate_scale",
+        "effective_feedback_gate",
+        "applied_learning_rate_scale",
+    ):
+        value = contract.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise RuntimeError(
+                f"native Z-space optimizer feedback returned invalid {field}"
+            )
+        numeric[field] = float(value)
+    effective_gate = numeric["effective_feedback_gate"]
+    if not 0.0 <= effective_gate <= float(maximum_gate):
+        raise RuntimeError(
+            "native Z-space optimizer feedback returned an unsafe effective gate"
+        )
+    expected = 1.0 + effective_gate * (numeric["proposed_learning_rate_scale"] - 1.0)
+    if not math.isclose(
+        numeric["applied_learning_rate_scale"],
+        expected,
+        rel_tol=1e-12,
+        abs_tol=1e-15,
+    ):
+        raise RuntimeError(
+            "native Z-space optimizer feedback violated its blend invariant"
+        )
+
+
+def _feedback_operation(
+    name: str,
+    payload: Mapping[str, object],
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space optimizer feedback requires the compiled Rust semantic core; "
+            f"rebuild or reinstall SpiralTorch with {name}"
+        )
+    contract = operation(dict(payload))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError(f"native {name} returned a non-mapping payload")
+    result = dict(contract)
+    _validate_feedback_contract(result)
+    return result
+
+
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
 ) -> dict[str, Any]:
@@ -309,6 +437,68 @@ def zspace_parameter_control(
     result = dict(contract)
     _validate_parameter_control(result)
     return result
+
+
+def zspace_optimizer_feedback_init(
+    config: Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    """Initialize a fail-closed feedback gate in the canonical Rust core."""
+
+    return _feedback_operation(
+        "_zspace_optimizer_feedback_init",
+        {} if config is None else dict(config),
+    )
+
+
+def zspace_optimizer_feedback_restore(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+) -> dict[str, Any]:
+    """Validate a checkpointed feedback gate without changing its state."""
+
+    return _feedback_operation(
+        "_zspace_optimizer_feedback_restore",
+        {"config": dict(config), "state": dict(state)},
+    )
+
+
+def zspace_optimizer_feedback_observe(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    observation: Mapping[str, object],
+) -> dict[str, Any]:
+    """Commit one completed trainer observation through the Rust loss guard."""
+
+    return _feedback_operation(
+        "_zspace_optimizer_feedback_observe",
+        {
+            "config": dict(config),
+            "state": dict(state),
+            "observation": dict(observation),
+        },
+    )
+
+
+def zspace_optimizer_feedback_control(
+    *,
+    config: Mapping[str, object],
+    state: Mapping[str, object],
+    target_step: int,
+    proposed_learning_rate_scale: float,
+) -> dict[str, Any]:
+    """Blend one proposed scale toward identity under Rust-owned feedback."""
+
+    return _feedback_operation(
+        "_zspace_optimizer_feedback_control",
+        {
+            "config": dict(config),
+            "state": dict(state),
+            "target_step": target_step,
+            "proposed_learning_rate_scale": proposed_learning_rate_scale,
+        },
+    )
 
 
 def _parameter_trajectory_operation(

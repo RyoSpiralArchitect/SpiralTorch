@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -12,6 +13,7 @@ import pytest
 import spiraltorch as st
 from spiraltorch import hf_cli
 from spiraltorch.hf_optimizer_control import (
+    HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES,
     HF_ZSPACE_OPTIMIZER_STATE_FILENAME,
     hf_zspace_optimizer_control_callback,
 )
@@ -89,6 +91,154 @@ class _FakeAcceleratedOptimizer:
 
     def register_step_post_hook(self, hook: object) -> object:
         raise AttributeError("wrapper hook storage is not initialized")
+
+
+class _FakeFeedbackCore:
+    def __init__(self) -> None:
+        self.control_calls = 0
+        self.observation_calls = 0
+        self.restore_calls = 0
+        self.default_config = {
+            "loss_ema_alpha": 0.2,
+            "relative_delta_ema_alpha": 0.5,
+            "loss_floor": 1e-8,
+            "regression_threshold": 0.01,
+            "halt_threshold": 0.05,
+            "recovery_threshold": 0.0025,
+            "attenuation_rate": 0.25,
+            "recovery_rate": 0.125,
+            "halt_regression_streak": 2,
+            "resume_improvement_streak": 2,
+            "warmup_observations": 2,
+            "max_stale_updates": 0,
+            "maximum_gate": 1.0,
+        }
+
+    @staticmethod
+    def _state() -> dict[str, object]:
+        return {
+            "control_step": 0,
+            "observation_count": 0,
+            "last_observation_step": None,
+            "last_loss": None,
+            "loss_ema": None,
+            "relative_loss_delta_ema": None,
+            "gate": 0.0,
+            "regression_streak": 0,
+            "improvement_streak": 0,
+            "halted": False,
+        }
+
+    @staticmethod
+    def _base(config: dict[str, object]) -> dict[str, object]:
+        return {
+            "contract_version": st.ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
+            "kind": st.ZSPACE_OPTIMIZER_FEEDBACK_KIND,
+            "semantic_owner": st.ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
+            "semantic_backend": "rust",
+            "config": copy.deepcopy(config),
+        }
+
+    def init(self, config: dict[str, object] | None = None) -> dict[str, object]:
+        resolved = {**self.default_config, **dict(config or {})}
+        return {**self._base(resolved), "state": self._state()}
+
+    def restore(
+        self,
+        *,
+        config: dict[str, object],
+        state: dict[str, object],
+    ) -> dict[str, object]:
+        self.restore_calls += 1
+        return {**self._base(config), "state": copy.deepcopy(state)}
+
+    def control(
+        self,
+        *,
+        config: dict[str, object],
+        state: dict[str, object],
+        target_step: int,
+        proposed_learning_rate_scale: float,
+    ) -> dict[str, object]:
+        self.control_calls += 1
+        if target_step != int(state["control_step"]) + 1:
+            raise ValueError("control target is not the next step")
+        gate = float(state["gate"])
+        applied_scale = 1.0 + gate * (proposed_learning_rate_scale - 1.0)
+        state_after = copy.deepcopy(state)
+        state_after["control_step"] = target_step
+        return {
+            **self._base(config),
+            "control_rule": st.ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE,
+            "transition_validated": True,
+            "target_step": target_step,
+            "proposed_learning_rate_scale": proposed_learning_rate_scale,
+            "proposed_deviation_from_identity": (proposed_learning_rate_scale - 1.0),
+            "feedback_observation_age_updates": (
+                None
+                if state["last_observation_step"] is None
+                else int(state["control_step"]) - int(state["last_observation_step"])
+            ),
+            "feedback_gate": gate,
+            "effective_feedback_gate": gate,
+            "applied_learning_rate_scale": applied_scale,
+            "applied_deviation_from_identity": applied_scale - 1.0,
+            "identity_applied": applied_scale == 1.0,
+            "disposition": "active" if gate > 0.0 else "no_feedback",
+            "state_before": copy.deepcopy(state),
+            "state_after": state_after,
+        }
+
+    def observe(
+        self,
+        *,
+        config: dict[str, object],
+        state: dict[str, object],
+        observation: dict[str, object],
+    ) -> dict[str, object]:
+        self.observation_calls += 1
+        step = int(observation["step"])
+        if step != int(state["control_step"]):
+            raise ValueError("observation does not match completed control step")
+        state_after = copy.deepcopy(state)
+        state_after.update(
+            {
+                "observation_count": int(state["observation_count"]) + 1,
+                "last_observation_step": step,
+                "last_loss": float(observation["loss"]),
+                "loss_ema": float(observation["loss"]),
+                "relative_loss_delta_ema": -0.1,
+                "gate": 0.5,
+                "improvement_streak": 1,
+            }
+        )
+        return {
+            **self._base(config),
+            "transition_validated": True,
+            "observation": copy.deepcopy(observation),
+            "projection": {
+                "semantic_backend": "rust",
+                "loss": float(observation["loss"]),
+            },
+            "relative_loss_delta": -0.1,
+            "relative_loss_delta_ema": -0.1,
+            "action": "recover",
+            "gate_before": state["gate"],
+            "gate_after": 0.5,
+            "state_before": copy.deepcopy(state),
+            "state_after": state_after,
+        }
+
+
+def _install_fake_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _FakeFeedbackCore:
+    core = _FakeFeedbackCore()
+    monkeypatch.setattr(st, "zspace_optimizer_feedback_init", core.init)
+    monkeypatch.setattr(st, "zspace_optimizer_feedback_restore", core.restore)
+    monkeypatch.setattr(st, "zspace_optimizer_feedback_control", core.control)
+    monkeypatch.setattr(st, "zspace_optimizer_feedback_observe", core.observe)
+    return core
 
 
 def _fake_transformers() -> types.ModuleType:
@@ -213,6 +363,201 @@ def test_observe_and_apply_consume_identical_rust_control_sequences(
     assert observed_optimizer.step_learning_rates == [[1.0e-3], [1.0e-3]]
 
 
+def test_loss_guard_commits_one_rust_control_per_completed_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+    feedback = _install_fake_feedback(monkeypatch)
+    optimizer = _FakeOptimizer()
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "feedback-apply"))
+    state = types.SimpleNamespace(global_step=0, max_steps=2, epoch=0.0)
+    control = types.SimpleNamespace()
+    callback = hf_zspace_optimizer_control_callback(
+        mode="apply",
+        feedback_mode="loss_guard",
+    )
+
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+    optimizer.step()
+    assert feedback.control_calls == 1
+    state.global_step = 1
+    callback.on_step_end(args, state, control, optimizer=optimizer)
+    callback.on_log(
+        args,
+        state,
+        control,
+        logs={"loss": 2.0, "learning_rate": 1e-3},
+    )
+
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+    optimizer.step()
+    assert feedback.control_calls == 2
+    state.global_step = 2
+    callback.on_step_end(args, state, control, optimizer=optimizer)
+    callback.on_train_end(args, state, control, optimizer=optimizer)
+
+    receipt = callback.receipt()
+    assert receipt["status"] == "ready"
+    assert optimizer.step_learning_rates[0] == [pytest.approx(1e-3)]
+    assert callback.schedule_sequence[1]["feedback_learning_rate_scale"] == (
+        pytest.approx(
+            1.0
+            + 0.5
+            * (
+                float(callback.schedule_sequence[1]["planned_learning_rate_scale"])
+                - 1.0
+            )
+        )
+    )
+    assert optimizer.step_learning_rates[1][0] == pytest.approx(
+        1e-3 * float(callback.schedule_sequence[1]["feedback_learning_rate_scale"])
+    )
+    assert receipt["feedback_control_count"] == 2
+    assert receipt["feedback_observation_count"] == 1
+    assert receipt["feedback_active_update_count"] == 1
+    assert receipt["feedback_evidence_boundary"] == (
+        "within_run_loss_guard_not_counterfactual_efficacy"
+    )
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(1e-3)
+
+
+def test_loss_guard_resume_restores_exact_feedback_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+    feedback = _install_fake_feedback(monkeypatch)
+    output = tmp_path / "feedback-resume"
+    args = types.SimpleNamespace(output_dir=str(output))
+    state = types.SimpleNamespace(global_step=0, max_steps=2, epoch=0.0)
+    control = types.SimpleNamespace()
+    first_optimizer = _FakeOptimizer()
+    first = hf_zspace_optimizer_control_callback(
+        mode="apply",
+        feedback_mode="loss_guard",
+    )
+    first.on_train_begin(args, state, control, optimizer=first_optimizer)
+    first.on_step_begin(args, state, control, optimizer=first_optimizer)
+    first_optimizer.step()
+    state.global_step = 1
+    first.on_step_end(args, state, control, optimizer=first_optimizer)
+    first.on_log(args, state, control, logs={"loss": 2.0})
+    first.on_save(args, state, control, optimizer=first_optimizer)
+    checkpoint = output / "checkpoint-1"
+    first.abort(RuntimeError("simulated process handoff"))
+
+    second_optimizer = _FakeOptimizer()
+    resumed_state = types.SimpleNamespace(global_step=1, max_steps=2, epoch=0.5)
+    second = hf_zspace_optimizer_control_callback(
+        mode="apply",
+        feedback_mode="loss_guard",
+        resume_from_checkpoint=checkpoint,
+    )
+    assert feedback.restore_calls == 1
+    second.on_train_begin(
+        args,
+        resumed_state,
+        control,
+        optimizer=second_optimizer,
+    )
+    second.on_step_begin(
+        args,
+        resumed_state,
+        control,
+        optimizer=second_optimizer,
+    )
+    second_optimizer.step()
+    resumed_state.global_step = 2
+    second.on_step_end(
+        args,
+        resumed_state,
+        control,
+        optimizer=second_optimizer,
+    )
+    second.on_train_end(
+        args,
+        resumed_state,
+        control,
+        optimizer=second_optimizer,
+    )
+
+    receipt = second.receipt()
+    assert receipt["status"] == "ready"
+    assert receipt["resume_state_loaded"] is True
+    assert receipt["feedback_control_count"] == 2
+    assert receipt["feedback_observation_count"] == 1
+    assert second.feedback_state["control_step"] == 2
+
+    state_path = checkpoint / HF_ZSPACE_OPTIMIZER_STATE_FILENAME
+    tampered = json.loads(state_path.read_text(encoding="utf-8"))
+    tampered.pop("state_id")
+    tampered["feedback_control_sequence"][0]["hf_target_step"] = 2
+    tampered["state_id"] = _sha256_id(tampered)
+    state_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="lineage is not contiguous"):
+        hf_zspace_optimizer_control_callback(
+            mode="apply",
+            feedback_mode="loss_guard",
+            resume_from_checkpoint=checkpoint,
+        )
+
+
+def test_bridge_resolves_feedback_defaults_in_the_rust_owned_recipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_feedback(monkeypatch)
+    bridge = _load_bridge_example()
+
+    args = bridge.parse_args(
+        [
+            "--training-recipe-only",
+            "--zspace-optimizer-control",
+            "observe",
+            "--zspace-optimizer-feedback",
+            "loss_guard",
+            "--zspace-optimizer-feedback-maximum-gate",
+            "0.75",
+        ]
+    )
+
+    recipe = args._hf_zspace_optimizer_recipe_contract
+    assert recipe["feedback_mode"] == "loss_guard"
+    assert recipe["feedback_config"]["maximum_gate"] == pytest.approx(0.75)
+    assert recipe["feedback_config"]["loss_ema_alpha"] == pytest.approx(0.2)
+    assert recipe["feedback_semantic_owner"] == (
+        "st-core::runtime::zspace_optimizer_feedback"
+    )
+
+
+def test_bridge_rejects_invalid_feedback_knobs_through_the_rust_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feedback = _install_fake_feedback(monkeypatch)
+
+    def rejecting_init(config=None):  # type: ignore[no-untyped-def]
+        if float(dict(config or {}).get("maximum_gate", 1.0)) > 1.0:
+            raise ValueError("maximum_gate must be in (0, 1]")
+        return feedback.init(config)
+
+    monkeypatch.setattr(st, "zspace_optimizer_feedback_init", rejecting_init)
+    bridge = _load_bridge_example()
+
+    with pytest.raises(SystemExit):
+        bridge.parse_args(
+            [
+                "--training-recipe-only",
+                "--zspace-optimizer-control",
+                "observe",
+                "--zspace-optimizer-feedback",
+                "loss_guard",
+                "--zspace-optimizer-feedback-maximum-gate",
+                "2.0",
+            ]
+        )
+
+
 def test_early_stopped_observe_seals_a_realized_trajectory(tmp_path: Path) -> None:
     optimizer = _FakeOptimizer()
     args = types.SimpleNamespace(output_dir=str(tmp_path / "early-observe"))
@@ -237,9 +582,7 @@ def test_early_stopped_observe_seals_a_realized_trajectory(tmp_path: Path) -> No
     assert receipt["trajectory_horizon_complete"] is True
     assert receipt["trajectory_generated"] is True
     assert receipt["trajectory_step_count"] == 1
-    assert receipt["evidence_blockers"] == [
-        "trainer_stopped_before_planned_horizon"
-    ]
+    assert receipt["evidence_blockers"] == ["trainer_stopped_before_planned_horizon"]
     assert (Path(args.output_dir) / st.HF_ZSPACE_OPTIMIZER_STATE_FILENAME).is_file()
 
 
@@ -463,8 +806,9 @@ def test_hf_bridge_seals_validated_trajectory_identity_into_recipe(
         ]
     )
 
-    assert args._hf_zspace_optimizer_recipe_contract["trajectory_id"] == (
-        trajectory["trajectory_id"]
+    assert (
+        args._hf_zspace_optimizer_recipe_contract["trajectory_id"]
+        == (trajectory["trajectory_id"])
     )
     assert args._hf_zspace_optimizer_recipe_contract["trajectory_arm"] == (
         "dose_normalized"
@@ -557,6 +901,9 @@ def test_legacy_v1_resume_preserves_training_without_inventing_schedule_history(
         "input_trajectory_id",
         "trajectory_id",
         "trajectory_path",
+        "feedback_state",
+        "feedback_observation_sequence",
+        "feedback_control_sequence",
     ):
         legacy.pop(field, None)
     for field in (
@@ -567,6 +914,14 @@ def test_legacy_v1_resume_preserves_training_without_inventing_schedule_history(
         "trajectory_semantic_backend",
         "trajectory_required",
         "actuation_scale_source",
+        "feedback_mode",
+        "feedback_adaptive",
+        "feedback_contract",
+        "feedback_semantic_owner",
+        "feedback_semantic_backend",
+        "feedback_config",
+        "feedback_control_target",
+        "feedback_evidence_boundary",
     ):
         legacy["recipe"].pop(field, None)
     legacy["state_id"] = _sha256_id(legacy)
@@ -601,6 +956,65 @@ def test_legacy_v1_resume_preserves_training_without_inventing_schedule_history(
     )
     assert migrated["schema"] == st.HF_ZSPACE_OPTIMIZER_STATE_SCHEMA
     assert migrated["schedule_prefix_missing_count"] == 1
+
+
+def test_v2_resume_is_accepted_only_when_feedback_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+    feedback = _install_fake_feedback(monkeypatch)
+    output = tmp_path / "v2-resume"
+    args = types.SimpleNamespace(output_dir=str(output))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    optimizer = _FakeOptimizer()
+    first = hf_zspace_optimizer_control_callback(mode="apply")
+    first.on_train_begin(args, state, control, optimizer=optimizer)
+    first.on_step_begin(args, state, control, optimizer=optimizer)
+    optimizer.step()
+    state.global_step = 1
+    first.on_step_end(args, state, control, optimizer=optimizer)
+    first.on_save(args, state, control, optimizer=optimizer)
+    checkpoint = output / "checkpoint-1"
+    state_path = checkpoint / HF_ZSPACE_OPTIMIZER_STATE_FILENAME
+    legacy = json.loads(state_path.read_text(encoding="utf-8"))
+    legacy.pop("state_id")
+    legacy["schema"] = "spiraltorch.hf_zspace_optimizer_state.v2"
+    for field in (
+        "feedback_state",
+        "feedback_observation_sequence",
+        "feedback_control_sequence",
+    ):
+        legacy.pop(field)
+    for field in (
+        "feedback_mode",
+        "feedback_adaptive",
+        "feedback_contract",
+        "feedback_semantic_owner",
+        "feedback_semantic_backend",
+        "feedback_config",
+        "feedback_control_target",
+        "feedback_evidence_boundary",
+    ):
+        legacy["recipe"].pop(field)
+    legacy["state_id"] = _sha256_id(legacy)
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+    first.abort(RuntimeError("simulated v2 process handoff"))
+
+    resumed = hf_zspace_optimizer_control_callback(
+        mode="apply",
+        resume_from_checkpoint=checkpoint,
+    )
+    assert resumed.resume_state_loaded is True
+
+    with pytest.raises(RuntimeError, match="has no feedback lineage"):
+        hf_zspace_optimizer_control_callback(
+            mode="apply",
+            feedback_mode="loss_guard",
+            resume_from_checkpoint=checkpoint,
+        )
+    assert feedback.restore_calls == 0
 
 
 def test_resume_branches_trace_from_the_verified_checkpoint_prefix(
@@ -680,6 +1094,7 @@ def test_resume_branches_trace_from_the_verified_checkpoint_prefix(
 def test_public_control_surface_is_exported() -> None:
     for name in (
         "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
+        "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
         "HF_ZSPACE_OPTIMIZER_MODES",
         "HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA",
         "HF_ZSPACE_OPTIMIZER_STATE_FILENAME",
@@ -698,6 +1113,7 @@ def test_public_control_surface_is_exported() -> None:
         "write_hf_zspace_optimizer_matched_ablation_report",
     ):
         assert name in st.__all__
+    assert HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES == ("off", "loss_guard")
 
 
 def _identity(label: str) -> dict[str, object]:
@@ -862,9 +1278,9 @@ def test_matched_ablation_blocks_malformed_identity_hash() -> None:
     observe = _matched_card(mode="observe", seed=13, eval_after=2.0)
     apply = _matched_card(mode="apply", seed=13, eval_after=1.8)
     for card in (observe, apply):
-        card["training_input_identity_after_load"][
-            "observed_identity_id"
-        ] = "sha256:not-a-digest"
+        card["training_input_identity_after_load"]["observed_identity_id"] = (
+            "sha256:not-a-digest"
+        )
 
     report = st.compare_hf_zspace_optimizer_run_cards([observe, apply])
 
@@ -1107,9 +1523,9 @@ def test_factorized_ablation_rejects_relative_dose_drift_at_tiny_scale() -> None
         else:
             receipt["actuated_learning_rate_dose"] = 8.0e-201
             receipt["actuated_learning_rate_dose_ratio"] = 0.8
-    cards[-1]["zspace_optimizer_control_receipt"][
-        "actuated_learning_rate_dose"
-    ] = 2.0e-200
+    cards[-1]["zspace_optimizer_control_receipt"]["actuated_learning_rate_dose"] = (
+        2.0e-200
+    )
 
     report = st.compare_hf_zspace_optimizer_factorized_run_cards(cards)
 
