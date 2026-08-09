@@ -1250,17 +1250,7 @@ pub fn plan_zspace_parameter_trajectory(
     require_positive("trajectory.raw_dose", raw_dose)?;
 
     let raw_dose_ratio = raw_dose / nominal_dose;
-    let constant_scale = raw_dose_ratio;
-    if !(ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE
-        ..=ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE)
-        .contains(&constant_scale)
-    {
-        return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
-            value: constant_scale,
-            minimum: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
-            maximum: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
-        });
-    }
+    let constant_scale = clamp_derived_parameter_control_scale(raw_dose_ratio)?;
     let constant_dose = nominal_dose * constant_scale;
 
     let minimum_raw_scale = request
@@ -1425,6 +1415,21 @@ fn bounded_parameter_trajectory_scale(raw_scale: f64, factor: f64) -> f64 {
         ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
         ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
     )
+}
+
+fn clamp_derived_parameter_control_scale(scale: f64) -> Result<f64, ZSpaceMetaOptimizerError> {
+    require_finite("trajectory.dose_matched_constant_scale", scale)?;
+    let minimum = ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE;
+    let maximum = ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE;
+    let tolerance = DERIVED_TOLERANCE * scale.abs().max(minimum.abs()).max(maximum.abs());
+    if scale < minimum - tolerance || scale > maximum + tolerance {
+        return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
+            value: scale,
+            minimum,
+            maximum,
+        });
+    }
+    Ok(scale.clamp(minimum, maximum))
 }
 
 fn parameter_trajectory_non_identity_update_count<I>(
@@ -2448,6 +2453,28 @@ mod tests {
             step.dose_matched_constant_scale == report.dose_matched_constant_scale
                 && step.nominal_learning_rates.len() == report.parameter_group_count
         }));
+    }
+
+    #[test]
+    fn parameter_trajectory_clamps_rounded_constant_scale_to_boundary() {
+        let minimum = ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE;
+        let report = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![minimum; 6],
+            nominal_learning_rates: vec![vec![1.0]; 6],
+        })
+        .expect("boundary trajectory");
+
+        assert!(report.raw_dose_ratio < minimum);
+        assert_eq!(report.dose_matched_constant_scale, minimum);
+        assert!(report
+            .steps
+            .iter()
+            .all(|step| step.dose_matched_constant_scale == minimum));
+        assert_relative_eq!(
+            report.dose_matched_constant_dose,
+            report.raw_dose,
+            epsilon = report.dose_invariant_tolerance
+        );
     }
 
     #[test]
