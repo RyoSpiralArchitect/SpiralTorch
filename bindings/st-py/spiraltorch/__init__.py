@@ -8600,20 +8600,17 @@ if callable(_native_describe_device):
 _RUNTIME_DEVICE_REPORT_BACKENDS: tuple[str, ...] = ("wgpu", "cpu", "mps")
 
 
-def _normalize_runtime_device_backends(backends: _Any) -> list[str]:
+def _runtime_device_backend_values(backends: _Any) -> list[_Any]:
     if backends is None:
         return list(_RUNTIME_DEVICE_REPORT_BACKENDS)
     if isinstance(backends, str):
-        raw_values = [backends]
-    else:
-        try:
-            raw_values = [str(value) for value in backends]
-        except TypeError as exc:
-            raise TypeError("backends must be a string or iterable of strings") from exc
-    normalized = [value.strip().lower() for value in raw_values if value.strip()]
-    if not normalized:
-        raise ValueError("backends must contain at least one backend label")
-    return list(dict.fromkeys(normalized))
+        return [backends]
+    if isinstance(backends, (bytes, bytearray, _Mapping)):
+        raise TypeError("backends must be a string or iterable of strings")
+    try:
+        return list(backends)
+    except TypeError as exc:
+        raise TypeError("backends must be a string or iterable of strings") from exc
 
 
 def describe_runtime_devices(
@@ -8630,7 +8627,15 @@ def describe_runtime_devices(
     if not callable(describe):
         raise RuntimeError("spiraltorch.describe_device is unavailable in this build")
 
-    backend_labels = _normalize_runtime_device_backends(backends)
+    canonical_request = evaluate_runtime_device_route(
+        [],
+        requested_backends=_runtime_device_backend_values(backends),
+        required_available_backends=required_available_backends,
+        required_ready_backends=required_ready_backends,
+    )
+    backend_labels = list(canonical_request["requested_backends"])
+    required_available_labels = list(canonical_request["required_available_backends"])
+    required_ready_labels = list(canonical_request["required_ready_backends"])
     reports: list[_Dict[str, _Any]] = []
     for backend in backend_labels:
         try:
@@ -8653,8 +8658,8 @@ def describe_runtime_devices(
     contract = evaluate_runtime_device_route(
         reports,
         requested_backends=backend_labels,
-        required_available_backends=required_available_backends,
-        required_ready_backends=required_ready_backends,
+        required_available_backends=required_available_labels,
+        required_ready_backends=required_ready_labels,
     )
     contract["reports"] = reports
     return contract

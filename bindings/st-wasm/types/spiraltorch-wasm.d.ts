@@ -156,7 +156,7 @@ declare module "spiraltorch-wasm" {
     export type RuntimeDeviceRouteRow = {
         requested_backend: string;
         effective_backend: string;
-        report_available: boolean;
+        probe_succeeded: boolean;
         native_readiness: RuntimeDeviceReadiness;
         native_ready: boolean | null;
         route_readiness: RuntimeDeviceReadiness;
@@ -170,9 +170,19 @@ declare module "spiraltorch-wasm" {
         diagnostic: string | null;
     };
 
+    export type RuntimeDeviceRouteSelection = {
+        requested_backend: string;
+        effective_backend: string;
+        native_readiness: RuntimeDeviceReadiness;
+        route_readiness: RuntimeDeviceReadiness;
+        fallback: boolean;
+        route: "direct" | "surrogate" | "unavailable";
+        route_status: "ready" | "surrogate_ready" | "not_ready" | "unknown" | "error";
+    };
+
     export type RuntimeDeviceRoute = {
         kind: "spiraltorch.runtime_device_route";
-        contract_version: "spiraltorch.runtime_device_route.v4";
+        contract_version: "spiraltorch.runtime_device_route.v5";
         semantic_owner: "st-core::backend::runtime_route";
         semantic_backend: "rust";
         execution_client?: string;
@@ -181,6 +191,7 @@ declare module "spiraltorch-wasm" {
         backends: string[];
         report_count: number;
         routes: RuntimeDeviceRouteRow[];
+        successful_probe_backends: string[];
         available_backends: string[];
         native_ready_backends: string[];
         native_not_ready_backends: string[];
@@ -197,11 +208,19 @@ declare module "spiraltorch-wasm" {
         has_errors: boolean;
         runtime_readiness: RuntimeDeviceReadiness;
         runtime_ready: boolean;
-        runtime_ready_basis: "required_ready_backends" | "any_ready_backend";
+        runtime_ready_basis:
+            | "required_ready_backends"
+            | "required_available_backends"
+            | "required_available_and_ready_backends"
+            | "any_ready_backend";
         runtime_missing_ready_backends: string[];
         runtime_unknown_ready_backends: string[];
+        selection_candidates: string[];
+        selection_policy: "first_ready_candidate";
+        selection: RuntimeDeviceRouteSelection | null;
         required_available_backends: string[];
         required_available_backends_missing: string[];
+        required_available_backends_unknown: string[];
         required_available_backends_passed: boolean | null;
         required_ready_backends: string[];
         required_ready_backends_missing: string[];
@@ -402,7 +421,7 @@ declare module "spiraltorch-wasm" {
 
     export type RuntimeExecutionPlan = {
         kind: "spiraltorch.runtime_execution_plan";
-        contract_version: "spiraltorch.runtime_execution_plan.v3";
+        contract_version: "spiraltorch.runtime_execution_plan.v4";
         semantic_owner: "st-core::backend::execution_plan";
         semantic_backend: "rust";
         execution_client?: string;

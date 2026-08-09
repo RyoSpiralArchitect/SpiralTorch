@@ -148,7 +148,6 @@ mod tests {
                 }
             ],
             "requested_backends": ["mps"],
-            "required_available_backends": ["mps"],
             "required_ready_backends": ["mps"]
         }))
         .expect("valid runtime-device route request");
@@ -164,7 +163,7 @@ mod tests {
         assert_eq!(wasm, rust);
         assert_eq!(
             wasm["contract_version"],
-            "spiraltorch.runtime_device_route.v4"
+            "spiraltorch.runtime_device_route.v5"
         );
         assert_eq!(wasm["committed"], true);
         assert_eq!(wasm["request_sha256"].as_str().unwrap().len(), 64);
@@ -175,10 +174,17 @@ mod tests {
         assert_eq!(wasm["routes"][0]["native_ready"], false);
         assert_eq!(wasm["routes"][0]["route_readiness"], "ready");
         assert_eq!(wasm["routes"][0]["route_ready"], true);
+        assert_eq!(wasm["routes"][0]["probe_succeeded"], true);
+        assert_eq!(wasm["successful_probe_backends"], json!(["mps"]));
+        assert_eq!(wasm["available_backends"], json!([]));
         assert_eq!(wasm["runtime_readiness"], "ready");
         assert_eq!(wasm["runtime_ready"], true);
         assert_eq!(wasm["runtime_ready_basis"], "required_ready_backends");
         assert_eq!(wasm["runtime_missing_ready_backends"], json!([]));
+        assert_eq!(wasm["selection_candidates"], json!(["mps"]));
+        assert_eq!(wasm["selection_policy"], "first_ready_candidate");
+        assert_eq!(wasm["selection"]["requested_backend"], "mps");
+        assert_eq!(wasm["selection"]["effective_backend"], "wgpu");
         assert_eq!(wasm["passed"], true);
     }
 

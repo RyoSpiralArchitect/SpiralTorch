@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use thiserror::Error;
 
 /// Stable contract identifier shared by Rust, Python, and WASM clients.
-pub const RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.runtime_device_route.v4";
+pub const RUNTIME_DEVICE_ROUTE_CONTRACT_VERSION: &str = "spiraltorch.runtime_device_route.v5";
 /// Payload kind for runtime-device route evaluation.
 pub const RUNTIME_DEVICE_ROUTE_KIND: &str = "spiraltorch.runtime_device_route";
 /// Crate/module that owns runtime-device route semantics.
@@ -27,9 +27,9 @@ pub const RUNTIME_DEVICE_ROUTE_MAX_STATUS_BYTES: usize = 128;
 pub const RUNTIME_DEVICE_ROUTE_MAX_DIAGNOSTIC_BYTES: usize = 4_096;
 
 const RUNTIME_DEVICE_ROUTE_REQUEST_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_device_route.request.v4\0";
+    b"spiraltorch.runtime_device_route.request.v5\0";
 const RUNTIME_DEVICE_ROUTE_OUTPUT_DIGEST_DOMAIN: &[u8] =
-    b"spiraltorch.runtime_device_route.output.v4\0";
+    b"spiraltorch.runtime_device_route.output.v5\0";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum RuntimeDeviceRouteError {
@@ -132,6 +132,8 @@ pub enum RuntimeDeviceRouteError {
         second_requested_backend: String,
         second_readiness: RuntimeDeviceReadiness,
     },
+    #[error("runtime-device route has no executable selection: {failures:?}")]
+    NoExecutableSelection { failures: Vec<String> },
     #[error("invalid runtime-device route payload field '{field}': {message}")]
     InvalidPayload {
         field: &'static str,
@@ -194,9 +196,16 @@ impl From<Option<bool>> for RuntimeDeviceReadiness {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeDeviceReadyBasis {
-    /// Every explicitly required backend must have a ready route.
+    /// Every explicitly required backend must have a ready route, and at least
+    /// one ordered selection candidate must be ready.
     RequiredReadyBackends,
-    /// With no explicit requirement, at least one observed route must be ready.
+    /// Every explicitly required native backend must be available, and at least
+    /// one ordered selection candidate must be ready.
+    RequiredAvailableBackends,
+    /// Native-availability and route-readiness requirements must both pass,
+    /// together with one ordered ready selection candidate.
+    RequiredAvailableAndReadyBackends,
+    /// With no explicit requirement, at least one ordered candidate must be ready.
     AnyReadyBackend,
 }
 
@@ -220,15 +229,23 @@ pub enum RuntimeDeviceRouteStatus {
     Error,
 }
 
+/// Deterministic policy used to choose one executable route. Candidate order is
+/// committed in the payload so every client makes the same decision.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeDeviceRouteSelectionPolicy {
+    FirstReadyCandidate,
+}
+
 /// Canonical interpretation of one runtime-device report.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeDeviceRouteRow {
     pub requested_backend: String,
     pub effective_backend: String,
-    /// The report was collected without an explicit probe error. This is not
-    /// evidence that either the native backend or effective route is ready.
-    pub report_available: bool,
+    /// The probe completed without an explicit error. This is observation
+    /// quality only, not native availability or route readiness.
+    pub probe_succeeded: bool,
     pub native_readiness: RuntimeDeviceReadiness,
     /// Compatibility projection; `None` means native readiness is unknown.
     pub native_ready: Option<bool>,
@@ -244,6 +261,35 @@ pub struct RuntimeDeviceRouteRow {
     pub requested_backend_runtime_status: Option<String>,
     pub effective_backend_runtime_status: Option<String>,
     pub diagnostic: Option<String>,
+}
+
+/// One Rust-selected executable route. This is intentionally redundant with a
+/// row in `routes`: the duplicate is committed and replay-validated so clients
+/// never need to rebuild selection policy from summary lists.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeDeviceRouteSelection {
+    pub requested_backend: String,
+    pub effective_backend: String,
+    pub native_readiness: RuntimeDeviceReadiness,
+    pub route_readiness: RuntimeDeviceReadiness,
+    pub fallback: bool,
+    pub route: RuntimeDeviceRouteClass,
+    pub route_status: RuntimeDeviceRouteStatus,
+}
+
+impl From<&RuntimeDeviceRouteRow> for RuntimeDeviceRouteSelection {
+    fn from(row: &RuntimeDeviceRouteRow) -> Self {
+        Self {
+            requested_backend: row.requested_backend.clone(),
+            effective_backend: row.effective_backend.clone(),
+            native_readiness: row.native_readiness,
+            route_readiness: row.route_readiness,
+            fallback: row.fallback,
+            route: row.route,
+            route_status: row.route_status,
+        }
+    }
 }
 
 /// Stable result consumed by Python preflight, native Rust callers, and WASM.
@@ -264,6 +310,9 @@ pub struct RuntimeDeviceRoutePayload {
     pub backends: Vec<String>,
     pub report_count: usize,
     pub routes: Vec<RuntimeDeviceRouteRow>,
+    /// Reports whose probe completed without an explicit error.
+    pub successful_probe_backends: Vec<String>,
+    /// Requested/native backends known to be ready without a surrogate.
     pub available_backends: Vec<String>,
     pub native_ready_backends: Vec<String>,
     pub native_not_ready_backends: Vec<String>,
@@ -288,12 +337,20 @@ pub struct RuntimeDeviceRoutePayload {
     /// Fail-closed execution projection; only `Ready` maps to `true`.
     pub runtime_ready: bool,
     pub runtime_ready_basis: RuntimeDeviceReadyBasis,
-    /// Required routes that are not ready. Empty for the any-ready projection.
+    /// Routes whose readiness blocks the payload-level projection.
     pub runtime_missing_ready_backends: Vec<String>,
     /// Relevant routes whose readiness evidence is unknown.
     pub runtime_unknown_ready_backends: Vec<String>,
+    /// Ordered candidates considered for executable route selection.
+    pub selection_candidates: Vec<String>,
+    pub selection_policy: RuntimeDeviceRouteSelectionPolicy,
+    /// Present only when readiness and every explicit requirement pass.
+    pub selection: Option<RuntimeDeviceRouteSelection>,
     pub required_available_backends: Vec<String>,
+    /// Required native backends that are not known ready. This includes known
+    /// unavailable, unknown, and missing observations.
     pub required_available_backends_missing: Vec<String>,
+    pub required_available_backends_unknown: Vec<String>,
     pub required_available_backends_passed: Option<bool>,
     pub required_ready_backends: Vec<String>,
     pub required_ready_backends_missing: Vec<String>,
@@ -420,6 +477,62 @@ impl RuntimeDeviceRoutePayload {
             ));
         }
         Ok(())
+    }
+
+    /// Validate the full commitment and resolve one requested route row.
+    pub fn route_for(
+        &self,
+        requested_backend: &str,
+    ) -> Result<&RuntimeDeviceRouteRow, RuntimeDeviceRouteError> {
+        self.validate()?;
+        let requested_backend = normalized_label(requested_backend, "requested_backend", 0)?;
+        self.routes
+            .iter()
+            .find(|row| row.requested_backend == requested_backend)
+            .ok_or_else(|| {
+                invalid_payload(
+                    "requested_backend",
+                    format!("has no route row for '{requested_backend}'"),
+                )
+            })
+    }
+
+    /// Validate the full commitment and return the optional Rust-selected row.
+    pub fn selected_route(
+        &self,
+    ) -> Result<Option<&RuntimeDeviceRouteRow>, RuntimeDeviceRouteError> {
+        self.validate()?;
+        let Some(selection) = self.selection.as_ref() else {
+            return Ok(None);
+        };
+        self.routes
+            .iter()
+            .find(|row| {
+                row.requested_backend == selection.requested_backend
+                    && row.effective_backend == selection.effective_backend
+                    && row.native_readiness == selection.native_readiness
+                    && row.route_readiness == selection.route_readiness
+                    && row.fallback == selection.fallback
+                    && row.route == selection.route
+                    && row.route_status == selection.route_status
+            })
+            .map(Some)
+            .ok_or_else(|| {
+                invalid_payload(
+                    "selection",
+                    "does not identify an exact row in the committed route table",
+                )
+            })
+    }
+
+    /// Require the committed route gate to have produced an executable selection.
+    pub fn require_selected_route(
+        &self,
+    ) -> Result<&RuntimeDeviceRouteRow, RuntimeDeviceRouteError> {
+        self.selected_route()?
+            .ok_or_else(|| RuntimeDeviceRouteError::NoExecutableSelection {
+                failures: self.failures.clone(),
+            })
     }
 }
 
@@ -693,7 +806,7 @@ fn evaluate_report(
     Ok(RuntimeDeviceRouteRow {
         requested_backend,
         effective_backend,
-        report_available: !probe_error,
+        probe_succeeded: !probe_error,
         native_readiness,
         native_ready,
         route_readiness,
@@ -713,6 +826,24 @@ fn append_missing(backends: &mut Vec<String>, seen: &mut BTreeSet<String>, value
         if seen.insert(value.clone()) {
             backends.push(value.clone());
         }
+    }
+}
+
+fn readiness_conjunction(
+    states: impl IntoIterator<Item = RuntimeDeviceReadiness>,
+) -> RuntimeDeviceReadiness {
+    let mut unknown = false;
+    for state in states {
+        match state {
+            RuntimeDeviceReadiness::Ready => {}
+            RuntimeDeviceReadiness::NotReady => return RuntimeDeviceReadiness::NotReady,
+            RuntimeDeviceReadiness::Unknown => unknown = true,
+        }
+    }
+    if unknown {
+        RuntimeDeviceReadiness::Unknown
+    } else {
+        RuntimeDeviceReadiness::Ready
     }
 }
 
@@ -805,7 +936,7 @@ fn build_runtime_device_route(
         .collect::<Vec<_>>();
     append_missing(&mut backends, &mut seen, &report_backends);
 
-    let mut available_backends = Vec::new();
+    let mut successful_probe_backends = Vec::new();
     let mut native_ready_backends = Vec::new();
     let mut native_not_ready_backends = Vec::new();
     let mut native_readiness_unknown_backends = Vec::new();
@@ -828,8 +959,8 @@ fn build_runtime_device_route(
             continue;
         };
         let route = &routes[index];
-        if route.report_available {
-            available_backends.push(backend.clone());
+        if route.probe_succeeded {
+            successful_probe_backends.push(backend.clone());
         } else {
             error_backends.push(backend.clone());
         }
@@ -855,7 +986,12 @@ fn build_runtime_device_route(
         status_by_backend.insert(backend.clone(), route.runtime_status.clone());
     }
 
+    let available_backends = native_ready_backends.clone();
     let available = available_backends.iter().cloned().collect::<BTreeSet<_>>();
+    let native_unknown = native_readiness_unknown_backends
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let ready = ready_backends.iter().cloned().collect::<BTreeSet<_>>();
     let route_unknown = route_readiness_unknown_backends
         .iter()
@@ -864,6 +1000,11 @@ fn build_runtime_device_route(
     let required_available_backends_missing = required_available
         .iter()
         .filter(|backend| !available.contains(*backend))
+        .cloned()
+        .collect::<Vec<_>>();
+    let required_available_backends_unknown = required_available_backends_missing
+        .iter()
+        .filter(|backend| native_unknown.contains(*backend))
         .cloned()
         .collect::<Vec<_>>();
     let required_ready_backends_missing = required_ready
@@ -880,46 +1021,91 @@ fn build_runtime_device_route(
         (!required_available.is_empty()).then_some(required_available_backends_missing.is_empty());
     let required_ready_backends_passed =
         (!required_ready.is_empty()).then_some(required_ready_backends_missing.is_empty());
-    let (
-        runtime_readiness,
-        runtime_ready_basis,
-        runtime_missing_ready_backends,
-        runtime_unknown_ready_backends,
-    ) = if required_ready.is_empty() {
-        let readiness = if !ready_backends.is_empty() {
-            RuntimeDeviceReadiness::Ready
-        } else if !route_readiness_unknown_backends.is_empty() {
-            RuntimeDeviceReadiness::Unknown
-        } else {
-            RuntimeDeviceReadiness::NotReady
-        };
-        (
-            readiness,
-            RuntimeDeviceReadyBasis::AnyReadyBackend,
-            Vec::new(),
-            route_readiness_unknown_backends.clone(),
-        )
+    let selection_candidates = if !requested_backends.is_empty() {
+        requested_backends.clone()
+    } else if !required_ready.is_empty() {
+        required_ready.clone()
     } else {
-        let readiness = if required_ready_backends_missing.is_empty() {
-            RuntimeDeviceReadiness::Ready
-        } else if required_ready_backends_missing
-            .iter()
-            .any(|backend| !route_unknown.contains(backend))
-        {
-            RuntimeDeviceReadiness::NotReady
-        } else {
-            RuntimeDeviceReadiness::Unknown
-        };
-        (
-            readiness,
-            RuntimeDeviceReadyBasis::RequiredReadyBackends,
-            required_ready_backends_missing.clone(),
-            required_ready_backends_unknown.clone(),
-        )
+        report_backends.clone()
     };
+    let selected_candidate = selection_candidates
+        .iter()
+        .find(|backend| ready.contains(*backend))
+        .cloned();
+    let selection_unknown_backends = selection_candidates
+        .iter()
+        .filter(|backend| route_unknown.contains(*backend))
+        .cloned()
+        .collect::<Vec<_>>();
+    let selection_readiness = if selected_candidate.is_some() {
+        RuntimeDeviceReadiness::Ready
+    } else if !selection_unknown_backends.is_empty() {
+        RuntimeDeviceReadiness::Unknown
+    } else {
+        RuntimeDeviceReadiness::NotReady
+    };
+    let required_readiness = if required_ready_backends_missing.is_empty() {
+        RuntimeDeviceReadiness::Ready
+    } else if required_ready_backends_missing
+        .iter()
+        .any(|backend| !route_unknown.contains(backend))
+    {
+        RuntimeDeviceReadiness::NotReady
+    } else {
+        RuntimeDeviceReadiness::Unknown
+    };
+    let required_availability = if required_available_backends_missing.is_empty() {
+        RuntimeDeviceReadiness::Ready
+    } else if required_available_backends_missing
+        .iter()
+        .any(|backend| !native_unknown.contains(backend))
+    {
+        RuntimeDeviceReadiness::NotReady
+    } else {
+        RuntimeDeviceReadiness::Unknown
+    };
+    let runtime_ready_basis = match (required_available.is_empty(), required_ready.is_empty()) {
+        (true, true) => RuntimeDeviceReadyBasis::AnyReadyBackend,
+        (true, false) => RuntimeDeviceReadyBasis::RequiredReadyBackends,
+        (false, true) => RuntimeDeviceReadyBasis::RequiredAvailableBackends,
+        (false, false) => RuntimeDeviceReadyBasis::RequiredAvailableAndReadyBackends,
+    };
+    let runtime_readiness = readiness_conjunction([
+        selection_readiness,
+        required_readiness,
+        required_availability,
+    ]);
+    let mut runtime_missing_ready_backends = required_ready_backends_missing.clone();
+    let mut runtime_missing_seen = runtime_missing_ready_backends
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if selected_candidate.is_none() {
+        append_missing(
+            &mut runtime_missing_ready_backends,
+            &mut runtime_missing_seen,
+            &selection_candidates,
+        );
+    }
+    let mut runtime_unknown_ready_backends = required_ready_backends_unknown.clone();
+    let mut runtime_unknown_seen = runtime_unknown_ready_backends
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    append_missing(
+        &mut runtime_unknown_ready_backends,
+        &mut runtime_unknown_seen,
+        &selection_unknown_backends,
+    );
     let mut failures = required_available_backends_missing
         .iter()
-        .map(|backend| format!("runtime_device_missing:{backend}"))
+        .map(|backend| {
+            if native_unknown.contains(backend) {
+                format!("runtime_device_availability_unknown:{backend}")
+            } else {
+                format!("runtime_device_unavailable:{backend}")
+            }
+        })
         .collect::<Vec<_>>();
     failures.extend(required_ready_backends_missing.iter().map(|backend| {
         if route_unknown.contains(backend) {
@@ -928,6 +1114,38 @@ fn build_runtime_device_route(
             format!("runtime_device_not_ready:{backend}")
         }
     }));
+    if selected_candidate.is_none() {
+        if selection_candidates.is_empty() {
+            failures.push("runtime_device_no_selection_candidate".to_owned());
+        } else {
+            let required_missing = required_ready_backends_missing
+                .iter()
+                .collect::<BTreeSet<_>>();
+            failures.extend(
+                selection_candidates
+                    .iter()
+                    .filter(|backend| !required_missing.contains(backend))
+                    .map(|backend| {
+                        if route_unknown.contains(backend) {
+                            format!("runtime_device_selection_readiness_unknown:{backend}")
+                        } else {
+                            format!("runtime_device_selection_not_ready:{backend}")
+                        }
+                    }),
+            );
+        }
+    }
+    let passed = failures.is_empty() && runtime_readiness == RuntimeDeviceReadiness::Ready;
+    let selection = if passed {
+        selected_candidate.as_ref().and_then(|backend| {
+            route_index
+                .get(backend)
+                .and_then(|index| routes.get(*index))
+                .map(RuntimeDeviceRouteSelection::from)
+        })
+    } else {
+        None
+    };
 
     let canonical_request = RuntimeDeviceRouteRequest {
         reports: evidence.clone(),
@@ -946,6 +1164,7 @@ fn build_runtime_device_route(
         requested_backends,
         report_count: routes.len(),
         routes,
+        successful_probe_backends,
         all_ready: !backends.is_empty() && not_ready_backends.is_empty(),
         has_errors: !error_backends.is_empty(),
         backends,
@@ -966,14 +1185,18 @@ fn build_runtime_device_route(
         runtime_ready_basis,
         runtime_missing_ready_backends,
         runtime_unknown_ready_backends,
+        selection_candidates,
+        selection_policy: RuntimeDeviceRouteSelectionPolicy::FirstReadyCandidate,
+        selection,
         required_available_backends: required_available,
         required_available_backends_missing,
+        required_available_backends_unknown,
         required_available_backends_passed,
         required_ready_backends: required_ready,
         required_ready_backends_missing,
         required_ready_backends_unknown,
         required_ready_backends_passed,
-        passed: failures.is_empty(),
+        passed,
         failures,
         request_sha256,
         output_sha256: String::new(),
@@ -1052,14 +1275,16 @@ mod tests {
 
         let payload = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
             reports: vec![evidence("cpu", true, "cpu"), mps],
-            requested_backends: vec!["CPU".to_owned(), " MPS ".to_owned()],
-            required_available_backends: vec!["mps".to_owned()],
+            requested_backends: vec![" MPS ".to_owned(), "CPU".to_owned()],
+            required_available_backends: vec!["cpu".to_owned()],
             required_ready_backends: vec!["mps".to_owned()],
         })
         .expect("valid route request");
 
-        assert_eq!(payload.ready_backends, ["cpu", "mps"]);
+        assert_eq!(payload.ready_backends, ["mps", "cpu"]);
         assert_eq!(payload.native_ready_backends, ["cpu"]);
+        assert_eq!(payload.available_backends, ["cpu"]);
+        assert_eq!(payload.successful_probe_backends, ["mps", "cpu"]);
         assert_eq!(payload.native_not_ready_backends, ["mps"]);
         assert_eq!(payload.fallback_backends, ["mps"]);
         assert!(payload.error_backends.is_empty());
@@ -1067,10 +1292,17 @@ mod tests {
         assert!(payload.runtime_ready);
         assert_eq!(
             payload.runtime_ready_basis,
-            RuntimeDeviceReadyBasis::RequiredReadyBackends
+            RuntimeDeviceReadyBasis::RequiredAvailableAndReadyBackends
         );
         assert!(payload.runtime_missing_ready_backends.is_empty());
         assert!(payload.passed);
+        assert_eq!(
+            payload
+                .selection
+                .as_ref()
+                .map(|selection| selection.requested_backend.as_str()),
+            Some("mps")
+        );
         let mps = &payload.routes[1];
         assert_eq!(mps.route, RuntimeDeviceRouteClass::Surrogate);
         assert_eq!(mps.route_status, RuntimeDeviceRouteStatus::SurrogateReady);
@@ -1099,7 +1331,7 @@ mod tests {
         assert_eq!(
             payload.failures,
             [
-                "runtime_device_missing:cpu",
+                "runtime_device_availability_unknown:cpu",
                 "runtime_device_not_ready:wgpu"
             ]
         );
@@ -1124,9 +1356,126 @@ mod tests {
         })
         .expect("diagnostic is not a transport error");
 
-        assert_eq!(payload.available_backends, ["mps"]);
+        assert!(payload.available_backends.is_empty());
+        assert_eq!(payload.successful_probe_backends, ["mps"]);
         assert_eq!(payload.ready_backends, ["mps"]);
         assert!(!payload.has_errors);
+        assert!(payload.selection.is_some());
+    }
+
+    #[test]
+    fn native_availability_does_not_accept_a_ready_surrogate() {
+        let mut mps = evidence("mps", true, "kernel_wired");
+        mps.effective_backend = Some("wgpu".to_owned());
+        mps.requested_backend_runtime_ready = Some(false);
+        mps.requested_backend_runtime_status = Some("placeholder".to_owned());
+        let payload = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![mps],
+            requested_backends: vec!["mps".to_owned()],
+            required_available_backends: vec!["mps".to_owned()],
+            required_ready_backends: vec!["mps".to_owned()],
+        })
+        .expect("surrogate evidence is structurally valid");
+
+        assert_eq!(payload.successful_probe_backends, ["mps"]);
+        assert!(payload.available_backends.is_empty());
+        assert_eq!(payload.ready_backends, ["mps"]);
+        assert_eq!(payload.required_available_backends_missing, ["mps"]);
+        assert!(payload.required_available_backends_unknown.is_empty());
+        assert_eq!(payload.required_available_backends_passed, Some(false));
+        assert_eq!(payload.runtime_readiness, RuntimeDeviceReadiness::NotReady);
+        assert!(!payload.runtime_ready);
+        assert!(!payload.passed);
+        assert!(payload.selection.is_none());
+        assert_eq!(payload.failures, ["runtime_device_unavailable:mps"]);
+        assert!(matches!(
+            payload.require_selected_route(),
+            Err(RuntimeDeviceRouteError::NoExecutableSelection { .. })
+        ));
+    }
+
+    #[test]
+    fn unknown_native_availability_keeps_the_full_gate_unknown() {
+        let mut mps = evidence("mps", true, "kernel_wired");
+        mps.effective_backend = Some("wgpu".to_owned());
+        mps.requested_backend_runtime_ready = None;
+        mps.requested_backend_runtime_status = None;
+        let payload = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![mps],
+            requested_backends: vec!["mps".to_owned()],
+            required_available_backends: vec!["mps".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect("partial native evidence is a valid unknown observation");
+
+        assert_eq!(payload.ready_backends, ["mps"]);
+        assert_eq!(payload.required_available_backends_unknown, ["mps"]);
+        assert_eq!(payload.runtime_readiness, RuntimeDeviceReadiness::Unknown);
+        assert!(!payload.runtime_ready);
+        assert_eq!(
+            payload.runtime_ready_basis,
+            RuntimeDeviceReadyBasis::RequiredAvailableBackends
+        );
+        assert_eq!(
+            payload.failures,
+            ["runtime_device_availability_unknown:mps"]
+        );
+        assert!(payload.selection.is_none());
+    }
+
+    #[test]
+    fn ungated_unready_route_cannot_pass_vacuously() {
+        let payload = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![evidence("wgpu", false, "feature_disabled")],
+            requested_backends: vec!["wgpu".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect("not-ready evidence is a valid route observation");
+
+        assert_eq!(payload.runtime_readiness, RuntimeDeviceReadiness::NotReady);
+        assert!(!payload.runtime_ready);
+        assert!(!payload.passed);
+        assert!(payload.selection.is_none());
+        assert_eq!(
+            payload.failures,
+            ["runtime_device_selection_not_ready:wgpu"]
+        );
+    }
+
+    #[test]
+    fn selection_uses_requested_order_and_never_promotes_an_extra_report() {
+        let ordered = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![
+                evidence("wgpu", true, "kernel_wired"),
+                evidence("cpu", true, "cpu"),
+            ],
+            requested_backends: vec!["cpu".to_owned(), "wgpu".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect("ordered candidates are valid");
+        assert_eq!(ordered.selection_candidates, ["cpu", "wgpu"]);
+        assert_eq!(
+            ordered
+                .require_selected_route()
+                .expect("a route is selected")
+                .requested_backend,
+            "cpu"
+        );
+
+        let blocked = evaluate_runtime_device_route(RuntimeDeviceRouteRequest {
+            reports: vec![
+                evidence("cpu", false, "feature_disabled"),
+                evidence("wgpu", true, "kernel_wired"),
+            ],
+            requested_backends: vec!["cpu".to_owned()],
+            ..RuntimeDeviceRouteRequest::default()
+        })
+        .expect("extra report is valid evidence, not an implicit candidate");
+        assert_eq!(blocked.ready_backends, ["wgpu"]);
+        assert_eq!(blocked.selection_candidates, ["cpu"]);
+        assert_eq!(blocked.runtime_readiness, RuntimeDeviceReadiness::NotReady);
+        assert!(!blocked.passed);
+        assert!(blocked.selection.is_none());
     }
 
     #[test]
@@ -1215,6 +1564,13 @@ mod tests {
         );
         assert!(payload.runtime_missing_ready_backends.is_empty());
         assert_eq!(payload.runtime_unknown_ready_backends, ["cpu"]);
+        assert_eq!(
+            payload
+                .selection
+                .as_ref()
+                .map(|selection| selection.requested_backend.as_str()),
+            Some("wgpu")
+        );
     }
 
     #[test]
@@ -1236,6 +1592,8 @@ mod tests {
         assert_eq!(payload.runtime_readiness, RuntimeDeviceReadiness::Unknown);
         assert!(!payload.runtime_ready);
         assert_eq!(payload.runtime_unknown_ready_backends, ["cpu"]);
+        assert!(payload.selection.is_none());
+        assert!(!payload.passed);
     }
 
     #[test]
