@@ -628,13 +628,19 @@ print("effective backend:", getattr(session, "effective_backend", session.backen
 ```
 
 Runtime route readiness and workload-kernel readiness are deliberately separate.
-The v3 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
-exact declared component shapes, bias bindings, device limits, and lazy pipelines,
-then commits that evidence for deterministic replay. Passing `component_workloads=`
-to `st.evaluate_runtime_execution_plan(...)` invokes that Rust observer
-automatically; WASM exposes the same observer as JSON/Object transport instead of
-rebuilding the rules in JavaScript. The commitment is reproducibility evidence,
-not cryptographic hardware attestation, and undeclared workloads remain unobserved.
+The v5 `spiraltorch.runtime_execution_plan` contract lets native Rust observe the
+exact declared component shapes, bias bindings, device limits, and lazy pipelines.
+Those results live in a nested v1
+`spiraltorch.runtime_component_capability_observation` contract that binds the
+runtime probe, canonical workloads, selected Rust policy, evidence, and both
+commitment hashes. Passing `component_workloads=` to
+`st.evaluate_runtime_execution_plan(...)` invokes that Rust observer automatically;
+WASM exposes the same contract as JSON/Object transport instead of rebuilding the
+rules in JavaScript. The execution plan owns policy selection; the capability
+observer measures that resolved policy and cannot replace it. Naked client-supplied
+capability arrays are rejected. The commitment is reproducibility evidence, not
+cryptographic hardware attestation, and
+undeclared workloads remain unobserved.
 Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
 unobserved accelerator capabilities rather than guessing that a workload is ready.
 

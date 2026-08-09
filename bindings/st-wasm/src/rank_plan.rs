@@ -212,7 +212,7 @@ mod tests {
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 37),
             component_resolution: Default::default(),
             component_workloads: Vec::new(),
-            component_capabilities: Vec::new(),
+            component_capability_observation: None,
             tensor_util_values: None,
             required_native_components: Vec::new(),
         })

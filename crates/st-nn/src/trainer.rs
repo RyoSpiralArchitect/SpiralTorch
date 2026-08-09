@@ -9507,7 +9507,7 @@ mod tests {
                     cols: 64,
                 },
             ],
-            component_capabilities: Vec::new(),
+            component_capability_observation: None,
             tensor_util_values: None,
             required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
         };

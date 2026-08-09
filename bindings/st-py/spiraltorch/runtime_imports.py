@@ -963,7 +963,7 @@ def evaluate_runtime_execution_plan(
         "execution_config": execution_config,
         "component_resolution": component_resolution,
         "component_workloads": workloads,
-        "component_capabilities": [],
+        "component_capability_observation": None,
         "tensor_util_values": tensor_util_values,
         "required_native_components": components,
     }
@@ -981,7 +981,7 @@ def evaluate_runtime_execution_plan(
 def observe_runtime_execution_plan_capabilities(
     request: Mapping[str, object],
 ) -> dict[str, object]:
-    """Enrich an execution-plan request with Rust-observed local capabilities."""
+    """Embed a committed Rust capability-observation contract in a plan request."""
 
     if not isinstance(request, Mapping):
         raise TypeError("request must be a mapping")
