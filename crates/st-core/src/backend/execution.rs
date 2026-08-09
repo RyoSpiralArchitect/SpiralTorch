@@ -53,7 +53,7 @@ pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
             TensorExecutionBackend::from_execution_id(label)
                 .expect("validated backend policy uses tensor execution identifiers")
         };
-        st_tensor::execution::push_execution_plan_binding(TensorExecutionPlanBinding::new(
+        let binding = TensorExecutionPlanBinding::try_new_with_workloads(
             commitment,
             [
                 backend(policy.matmul_backend_label()),
@@ -63,9 +63,12 @@ pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
                 backend(policy.softmax_backend_label()),
                 backend(policy.tensor_util_backend_label()),
             ],
+            policy.runtime_plan_workloads().into_iter().flatten(),
             policy.execution_config().accelerator_fallback,
             policy.execution_config().tensor_util_wgpu_min_values,
-        ))
+        )
+        .expect("validated runtime plans contain at most one workload per component");
+        st_tensor::execution::push_execution_plan_binding(binding)
     });
     let previous = ACTIVE_BACKEND_POLICY.with(|slot| slot.replace(Some(policy)));
     BackendPolicyGuard {
@@ -378,6 +381,26 @@ mod tests {
         .expect("rhs tensor");
         lhs.matmul_with_backend(&rhs, current_matmul_backend())
             .expect("committed matmul dispatch");
+        let mismatched_rhs = Tensor::from_vec(
+            3,
+            5,
+            vec![
+                1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0,
+            ],
+        )
+        .expect("mismatched rhs tensor");
+        let mismatch = lhs
+            .matmul_with_backend(&mismatched_rhs, current_matmul_backend())
+            .expect_err("a different shape must not reuse committed capability evidence");
+        assert!(matches!(
+            mismatch,
+            st_tensor::TensorError::BackendFailure {
+                backend: "execution_contract",
+                message,
+            } if message.contains("committed dense_matmul workload")
+                && message.contains("cols: 4")
+                && message.contains("cols: 5")
+        ));
         drop(guard);
         st_tensor::set_thread_meta_observer(previous_observer);
         assert!(current_backend_policy().is_none());
@@ -404,5 +427,47 @@ mod tests {
         assert_eq!(data["execution_receipt"]["workload"]["rows"], 2);
         assert_eq!(data["execution_receipt"]["workload"]["inner"], 3);
         assert_eq!(data["execution_receipt"]["workload"]["cols"], 4);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(op_name, data)| {
+                    *op_name == "matmul" && data.get("execution_receipt").is_some()
+                })
+                .count(),
+            1,
+            "the rejected workload must not emit a completion receipt"
+        );
+    }
+
+    #[test]
+    fn deferred_runtime_plan_keeps_undeclared_workloads_dynamic() {
+        let probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
+            requested_backend: crate::backend::device_caps::BackendKind::Cpu,
+            caps: DeviceCaps::cpu(),
+            mps_probe: None,
+            requested_workgroup: None,
+            cols: None,
+            tile_hint: None,
+            compaction_hint: None,
+        })
+        .expect("CPU probe");
+        let plan = evaluate_runtime_execution_plan(RuntimeExecutionPlanRequest {
+            runtime_probe: probe,
+            execution_config: ExecutionConfig::default(),
+            component_resolution: RuntimeComponentResolution::Deferred,
+            component_workloads: Vec::new(),
+            component_capability_observation: None,
+            tensor_util_values: None,
+            required_native_components: Vec::new(),
+        })
+        .expect("deferred CPU execution plan");
+        let _guard = push_runtime_execution_plan(&plan).expect("install deferred plan");
+        let lhs = Tensor::from_vec(2, 3, vec![1.0; 6]).expect("lhs tensor");
+
+        for cols in [4, 5] {
+            let rhs = Tensor::from_vec(3, cols, vec![1.0; 3 * cols]).expect("rhs tensor");
+            lhs.matmul_with_backend(&rhs, current_matmul_backend())
+                .expect("undeclared shape is checked at operation time");
+        }
     }
 }

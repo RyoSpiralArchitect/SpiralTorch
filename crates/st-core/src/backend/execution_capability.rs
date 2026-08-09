@@ -563,7 +563,9 @@ fn tensor_execution_backend(backend: RuntimeTensorBackend) -> TensorExecutionBac
     }
 }
 
-fn tensor_execution_workload(workload: &RuntimeComponentWorkload) -> TensorExecutionWorkload {
+pub(crate) fn tensor_execution_workload(
+    workload: &RuntimeComponentWorkload,
+) -> TensorExecutionWorkload {
     match workload {
         RuntimeComponentWorkload::DenseMatmul { rows, inner, cols } => {
             TensorExecutionWorkload::DenseMatmul {

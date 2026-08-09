@@ -643,7 +643,10 @@ rules in JavaScript. The execution plan owns policy selection; the capability
 observer measures that resolved policy and cannot replace it. Naked client-supplied
 capability arrays are rejected. The commitment is reproducibility evidence, not
 cryptographic hardware attestation, and
-undeclared workloads remain unobserved.
+undeclared workloads remain unobserved. Once a committed plan is installed, every
+declared workload is bound exactly through tensor dispatch: shape, bias, or utility
+operation mismatches are rejected before a kernel call. Undeclared components remain
+dynamic and continue through operation-time capability checks.
 Standalone evaluation uses `component_resolution="concrete"`, so strict plans reject
 unobserved accelerator capabilities rather than guessing that a workload is ready.
 

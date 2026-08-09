@@ -1159,9 +1159,8 @@ mod tests {
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
     use st_core::backend::execution_plan::{
-        evaluate_runtime_execution_plan, observe_runtime_execution_plan_capabilities,
-        AcceleratorFallback, RuntimeComponentWorkload, RuntimeExecutionComponent,
-        RuntimeExecutionPlanRequest, RuntimeTensorUtilOperation,
+        evaluate_runtime_execution_plan, AcceleratorFallback, RuntimeComponentResolution,
+        RuntimeExecutionPlanRequest,
     };
     use st_core::backend::runtime_probe::{
         evaluate_runtime_device_probe, RuntimeDeviceProbeRequest,
@@ -1174,7 +1173,7 @@ mod tests {
         Tensor::from_vec(1, a.len(), a.to_vec()).unwrap()
     }
 
-    fn committed_cpu_execution_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
+    fn committed_cpu_session_plan(config: ExecutionConfig) -> RuntimeExecutionPlanPayload {
         let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
             requested_backend: BackendKind::Cpu,
             caps: DeviceCaps::cpu(),
@@ -1188,40 +1187,12 @@ mod tests {
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: config,
-            component_resolution: Default::default(),
-            component_workloads: vec![
-                RuntimeComponentWorkload::DenseMatmul {
-                    rows: 2,
-                    inner: 3,
-                    cols: 4,
-                },
-                RuntimeComponentWorkload::PrepackedMatmul {
-                    rows: 2,
-                    inner: 3,
-                    cols: 4,
-                    bias: true,
-                },
-                RuntimeComponentWorkload::LayerNorm { rows: 2, cols: 4 },
-                RuntimeComponentWorkload::Attention {
-                    contexts: 1,
-                    sequence: 2,
-                    head_dim: 4,
-                    z_bias: true,
-                    attn_bias: true,
-                },
-                RuntimeComponentWorkload::Softmax { rows: 2, cols: 8 },
-                RuntimeComponentWorkload::TensorUtil {
-                    operation: RuntimeTensorUtilOperation::Scale,
-                    rows: 32,
-                    cols: 64,
-                },
-            ],
+            component_resolution: RuntimeComponentResolution::Deferred,
+            component_workloads: Vec::new(),
             component_capability_observation: None,
             tensor_util_values: None,
-            required_native_components: vec![RuntimeExecutionComponent::DenseMatmul],
+            required_native_components: Vec::new(),
         };
-        let request = observe_runtime_execution_plan_capabilities(request)
-            .expect("CPU component capability observation");
         evaluate_runtime_execution_plan(request).expect("committed CPU execution plan")
     }
 
@@ -1267,7 +1238,7 @@ mod tests {
     #[test]
     fn session_retains_committed_plan_across_rank_trainer_checkpoint_and_rebuild() {
         let execution_config = ExecutionConfig::new(AcceleratorFallback::Forbid, 37);
-        let plan = committed_cpu_execution_plan(execution_config);
+        let plan = committed_cpu_session_plan(execution_config);
         let session = SpiralSessionBuilder::try_from_runtime_execution_plan(&plan)
             .unwrap()
             .build()
@@ -1318,7 +1289,7 @@ mod tests {
         let mut builder = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
             .with_execution_config(initial_config);
         let plan =
-            committed_cpu_execution_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
+            committed_cpu_session_plan(ExecutionConfig::new(AcceleratorFallback::Forbid, 37));
         let mut tampered = plan.clone();
         tampered.output_sha256 = "0".repeat(64);
 

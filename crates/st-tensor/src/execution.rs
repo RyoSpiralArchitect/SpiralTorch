@@ -349,6 +349,7 @@ impl TensorExecutionReceipt {
 pub struct TensorExecutionPlanBinding {
     output_sha256: [u8; 32],
     backends: [TensorExecutionBackend; 6],
+    workloads: [Option<TensorExecutionWorkload>; 6],
     accelerator_fallback: AcceleratorFallback,
     tensor_util_wgpu_min_values: usize,
 }
@@ -363,9 +364,38 @@ impl TensorExecutionPlanBinding {
         Self {
             output_sha256,
             backends,
+            workloads: [None; 6],
             accelerator_fallback,
             tensor_util_wgpu_min_values,
         }
+    }
+
+    /// Creates a binding that additionally constrains declared component workloads.
+    ///
+    /// Workloads are indexed by their Rust-owned component identity. Missing
+    /// components remain deliberately unbound for deferred operation-time
+    /// capability checks, while duplicate components fail closed.
+    pub fn try_new_with_workloads(
+        output_sha256: [u8; 32],
+        backends: [TensorExecutionBackend; 6],
+        workloads: impl IntoIterator<Item = TensorExecutionWorkload>,
+        accelerator_fallback: AcceleratorFallback,
+        tensor_util_wgpu_min_values: usize,
+    ) -> Result<Self, TensorExecutionContractError> {
+        let mut binding = Self::new(
+            output_sha256,
+            backends,
+            accelerator_fallback,
+            tensor_util_wgpu_min_values,
+        );
+        for workload in workloads {
+            let component = workload.component();
+            let slot = &mut binding.workloads[component.index()];
+            if slot.replace(workload).is_some() {
+                return Err(TensorExecutionContractError::DuplicatePlanWorkload { component });
+            }
+        }
+        Ok(binding)
     }
 
     pub const fn output_sha256(self) -> [u8; 32] {
@@ -374,6 +404,14 @@ impl TensorExecutionPlanBinding {
 
     pub const fn backend_for(self, component: TensorExecutionComponent) -> TensorExecutionBackend {
         self.backends[component.index()]
+    }
+
+    /// Returns the exact committed workload for `component`, when one was declared.
+    pub const fn workload_for(
+        self,
+        component: TensorExecutionComponent,
+    ) -> Option<TensorExecutionWorkload> {
+        self.workloads[component.index()]
     }
 
     pub const fn accelerator_fallback(self) -> AcceleratorFallback {
@@ -499,6 +537,15 @@ pub fn prepare_tensor_execution(
     };
 
     let planned_backend = binding.backend_for(component);
+    if let Some(planned_workload) = binding.workload_for(component) {
+        if workload != planned_workload {
+            return Err(TensorExecutionContractError::PlanWorkloadMismatch {
+                component,
+                planned: planned_workload,
+                actual: workload,
+            });
+        }
+    }
     let threshold_cpu_route = component == TensorExecutionComponent::TensorUtil
         && planned_backend == TensorExecutionBackend::Wgpu
         && selected_backend == TensorExecutionBackend::Cpu
@@ -735,6 +782,14 @@ pub enum TensorExecutionContractError {
         planned: TensorExecutionBackend,
         selected: TensorExecutionBackend,
     },
+    PlanWorkloadMismatch {
+        component: TensorExecutionComponent,
+        planned: TensorExecutionWorkload,
+        actual: TensorExecutionWorkload,
+    },
+    DuplicatePlanWorkload {
+        component: TensorExecutionComponent,
+    },
     UnsupportedBackend {
         component: TensorExecutionComponent,
         backend: TensorExecutionBackend,
@@ -763,6 +818,20 @@ impl fmt::Display for TensorExecutionContractError {
                 component.as_str(),
                 planned.as_str(),
                 selected.as_str()
+            ),
+            Self::PlanWorkloadMismatch {
+                component,
+                planned,
+                actual,
+            } => write!(
+                formatter,
+                "committed {} workload {planned:?} does not match tensor operation workload {actual:?}",
+                component.as_str()
+            ),
+            Self::DuplicatePlanWorkload { component } => write!(
+                formatter,
+                "committed execution plan contains duplicate {} workloads",
+                component.as_str()
             ),
             Self::UnsupportedBackend { component, backend } => write!(
                 formatter,
@@ -873,6 +942,26 @@ mod tests {
         )
     }
 
+    fn workload_bound_binding(
+        workloads: [Option<TensorExecutionWorkload>; 6],
+    ) -> TensorExecutionPlanBinding {
+        TensorExecutionPlanBinding::try_new_with_workloads(
+            [0xbc; 32],
+            [
+                TensorExecutionBackend::Faer,
+                TensorExecutionBackend::Faer,
+                TensorExecutionBackend::Cpu,
+                TensorExecutionBackend::Cpu,
+                TensorExecutionBackend::Cpu,
+                TensorExecutionBackend::Wgpu,
+            ],
+            workloads.into_iter().flatten(),
+            AcceleratorFallback::Allow,
+            1024,
+        )
+        .expect("test workloads are unique")
+    }
+
     #[test]
     fn fallback_guard_restores_nested_contracts() {
         let outer = push_accelerator_fallback(AcceleratorFallback::Forbid);
@@ -912,6 +1001,140 @@ mod tests {
                 selected: TensorExecutionBackend::Naive,
             }
         ));
+    }
+
+    #[test]
+    fn committed_plan_enforces_declared_workloads_for_every_component_before_dispatch() {
+        let planned = [
+            TensorExecutionWorkload::DenseMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+            },
+            TensorExecutionWorkload::PrepackedMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+                bias: true,
+            },
+            TensorExecutionWorkload::LayerNorm { rows: 2, cols: 4 },
+            TensorExecutionWorkload::Attention {
+                contexts: 1,
+                sequence: 2,
+                head_dim: 4,
+                z_bias: true,
+                attn_bias: true,
+            },
+            TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
+            TensorExecutionWorkload::TensorUtil {
+                operation: crate::execution_capability::TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 4,
+            },
+        ];
+        let actual = [
+            TensorExecutionWorkload::DenseMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 5,
+            },
+            TensorExecutionWorkload::PrepackedMatmul {
+                rows: 2,
+                inner: 3,
+                cols: 4,
+                bias: false,
+            },
+            TensorExecutionWorkload::LayerNorm { rows: 3, cols: 4 },
+            TensorExecutionWorkload::Attention {
+                contexts: 1,
+                sequence: 2,
+                head_dim: 4,
+                z_bias: false,
+                attn_bias: true,
+            },
+            TensorExecutionWorkload::Softmax { rows: 2, cols: 5 },
+            TensorExecutionWorkload::TensorUtil {
+                operation: crate::execution_capability::TensorUtilOperation::Scale,
+                rows: 2,
+                cols: 5,
+            },
+        ];
+        let operations = [
+            "matmul",
+            "matmul_prepacked_bias",
+            "layer_norm",
+            "scaled_dot_attention",
+            "row_softmax",
+            "scale",
+        ];
+        let backends = [
+            TensorExecutionBackend::Faer,
+            TensorExecutionBackend::Faer,
+            TensorExecutionBackend::Cpu,
+            TensorExecutionBackend::Cpu,
+            TensorExecutionBackend::Cpu,
+            TensorExecutionBackend::Wgpu,
+        ];
+        let workloads = planned.map(Some);
+        let _plan = push_execution_plan_binding(workload_bound_binding(workloads));
+
+        for (((planned, actual), operation), backend) in planned
+            .into_iter()
+            .zip(actual)
+            .zip(operations)
+            .zip(backends)
+        {
+            prepare_tensor_execution(planned, operation, backend)
+                .expect("the exact committed workload is accepted");
+            let error = prepare_tensor_execution(actual, operation, backend).unwrap_err();
+            assert_eq!(
+                error,
+                TensorExecutionContractError::PlanWorkloadMismatch {
+                    component: planned.component(),
+                    planned,
+                    actual,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn undeclared_component_workloads_remain_unbound() {
+        let _plan =
+            push_execution_plan_binding(committed_binding(AcceleratorFallback::Allow, 1024));
+
+        for workload in [
+            TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+            TensorExecutionWorkload::Softmax {
+                rows: 128,
+                cols: 257,
+            },
+        ] {
+            prepare_tensor_execution(workload, "row_softmax", TensorExecutionBackend::Cpu)
+                .expect("undeclared deferred workloads remain operation-time checks");
+        }
+    }
+
+    #[test]
+    fn committed_plan_binding_rejects_duplicate_workload_components() {
+        let error = TensorExecutionPlanBinding::try_new_with_workloads(
+            [0xbc; 32],
+            [TensorExecutionBackend::Cpu; 6],
+            [
+                TensorExecutionWorkload::Softmax { rows: 2, cols: 3 },
+                TensorExecutionWorkload::Softmax { rows: 4, cols: 5 },
+            ],
+            AcceleratorFallback::Allow,
+            1024,
+        )
+        .expect_err("duplicate component commitments must fail closed");
+
+        assert_eq!(
+            error,
+            TensorExecutionContractError::DuplicatePlanWorkload {
+                component: TensorExecutionComponent::Softmax,
+            }
+        );
     }
 
     #[test]
