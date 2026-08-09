@@ -996,24 +996,34 @@ def hf_zspace_optimizer_control_callback(
         def _finalize_trajectory(self, output_dir: str | Path) -> None:
             if self.max_steps is None:
                 raise RuntimeError("Z-space optimizer horizon is unavailable")
+            realized_steps = len(self.consumed_sequence)
+            if realized_steps > self.max_steps:
+                raise RuntimeError(
+                    "Z-space optimizer consumed beyond the planned horizon"
+                )
+            if len(self.schedule_sequence) + self.schedule_prefix_missing_count != (
+                realized_steps
+            ):
+                raise RuntimeError(
+                    "Z-space optimizer schedule coverage is inconsistent"
+                )
             if self.schedule_prefix_missing_count > 0:
-                if (
-                    len(self.schedule_sequence) + self.schedule_prefix_missing_count
-                    != self.max_steps
-                ):
-                    raise RuntimeError(
-                        "legacy Z-space optimizer schedule does not cover the horizon"
-                    )
                 self._trace(
                     "trajectory_unavailable",
                     reason="legacy_state_has_no_historical_scheduler_rows",
+                    planned_step_count=self.max_steps,
+                    realized_step_count=realized_steps,
                     schedule_prefix_missing_count=self.schedule_prefix_missing_count,
                 )
                 return
-            if len(self.schedule_sequence) != self.max_steps:
-                raise RuntimeError(
-                    "Z-space optimizer schedule does not cover the full horizon"
+            if realized_steps == 0:
+                self._trace(
+                    "trajectory_unavailable",
+                    reason="no_realized_optimizer_updates",
+                    planned_step_count=self.max_steps,
+                    realized_step_count=0,
                 )
+                return
             st = importlib.import_module("spiraltorch")
             if self.trajectory_report is None:
                 self.trajectory_report = st.zspace_parameter_trajectory(
@@ -1031,15 +1041,26 @@ def hf_zspace_optimizer_control_callback(
                 self.trajectory_report = st.validate_zspace_parameter_trajectory(
                     self.trajectory_report
                 )
-            if self.trajectory_report.get("step_count") != len(self.schedule_sequence):
-                raise RuntimeError(
-                    "validated Z-space trajectory does not match consumed steps"
-                )
             path = self.trajectory_output_path or (
                 Path(output_dir) / HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME
             )
             _write_json(path, self.trajectory_report)
             self.trajectory_path = str(path)
+            trajectory_steps = _positive_int(
+                self.trajectory_report.get("step_count"),
+                label="trajectory.step_count",
+            )
+            if trajectory_steps != realized_steps:
+                self._trace(
+                    "trajectory_partially_consumed",
+                    trajectory_id=self.trajectory_report.get("trajectory_id"),
+                    trajectory_arm=self.trajectory_arm,
+                    trajectory_path=self.trajectory_path,
+                    planned_step_count=self.max_steps,
+                    realized_step_count=realized_steps,
+                    trajectory_step_count=trajectory_steps,
+                )
+                return
             self._trace(
                 "trajectory_finalized",
                 trajectory_id=self.trajectory_report.get("trajectory_id"),
@@ -1047,6 +1068,23 @@ def hf_zspace_optimizer_control_callback(
                 trajectory_generated=self.trajectory_generated,
                 trajectory_path=self.trajectory_path,
             )
+
+        def _evidence_blockers(self) -> list[str]:
+            if self.mode == "off" or self.max_steps is None:
+                return []
+            realized_steps = len(self.consumed_sequence)
+            blockers: list[str] = []
+            if realized_steps == 0:
+                blockers.append("no_realized_optimizer_updates")
+            if realized_steps != self.max_steps:
+                blockers.append("trainer_stopped_before_planned_horizon")
+            if self.trajectory_report is not None:
+                trajectory_steps = _receipt_count(
+                    self.trajectory_report.get("step_count")
+                )
+                if trajectory_steps != realized_steps:
+                    blockers.append("input_trajectory_only_partially_consumed")
+            return blockers
 
         def _state_payload(self, hf_global_step: int) -> dict[str, object]:
             if self.zspace_trainer is None or self.max_steps is None:
@@ -1102,10 +1140,6 @@ def hf_zspace_optimizer_control_callback(
         def on_train_end(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
             global_step = _safe_step(state.global_step, label="global_step")
             if self.mode != "off":
-                if self.mode == "apply" and self.applied_update_count == 0:
-                    raise RuntimeError(
-                        "Z-space apply mode completed without a parameter update"
-                    )
                 if self.mode == "apply" and (
                     self.applied_update_count != self.restored_update_count
                 ):
@@ -1184,11 +1218,11 @@ def hf_zspace_optimizer_control_callback(
                 status = "disabled"
             elif not self.started:
                 status = "pending"
-            elif self.mode == "apply" and self.applied_update_count == 0:
-                status = "blocked"
             elif self.mode == "apply" and (
                 self.applied_update_count != self.restored_update_count
             ):
+                status = "blocked"
+            elif self.finished and self._evidence_blockers():
                 status = "blocked"
             elif self.finished:
                 status = "ready"
@@ -1210,6 +1244,20 @@ def hf_zspace_optimizer_control_callback(
                 "non_identity_update_count": self.non_identity_update_count,
                 "restored_update_count": self.restored_update_count,
                 "unused_pending_control": self.pending is not None,
+                "planned_update_count": self.max_steps,
+                "realized_update_count": len(self.consumed_sequence),
+                "training_horizon_complete": (
+                    None
+                    if self.max_steps is None
+                    else len(self.consumed_sequence) == self.max_steps
+                ),
+                "trajectory_horizon_complete": (
+                    None
+                    if self.trajectory_report is None
+                    else self.trajectory_report.get("step_count")
+                    == len(self.consumed_sequence)
+                ),
+                "evidence_blockers": self._evidence_blockers(),
                 "scale_min": min(raw_scales) if raw_scales else None,
                 "scale_max": max(raw_scales) if raw_scales else None,
                 "scale_mean": (

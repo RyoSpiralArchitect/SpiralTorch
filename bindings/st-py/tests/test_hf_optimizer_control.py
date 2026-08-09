@@ -213,6 +213,100 @@ def test_observe_and_apply_consume_identical_rust_control_sequences(
     assert observed_optimizer.step_learning_rates == [[1.0e-3], [1.0e-3]]
 
 
+def test_early_stopped_observe_seals_a_realized_trajectory(tmp_path: Path) -> None:
+    optimizer = _FakeOptimizer()
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "early-observe"))
+    state = types.SimpleNamespace(global_step=0, max_steps=3)
+    control = types.SimpleNamespace()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        callback = hf_zspace_optimizer_control_callback(mode="observe")
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+    optimizer.step()
+    state.global_step = 1
+    callback.on_step_end(args, state, control, optimizer=optimizer)
+
+    callback.on_train_end(args, state, control, optimizer=optimizer)
+
+    receipt = callback.receipt()
+    assert receipt["status"] == "blocked"
+    assert receipt["planned_update_count"] == 3
+    assert receipt["realized_update_count"] == 1
+    assert receipt["training_horizon_complete"] is False
+    assert receipt["trajectory_horizon_complete"] is True
+    assert receipt["trajectory_generated"] is True
+    assert receipt["trajectory_step_count"] == 1
+    assert receipt["evidence_blockers"] == [
+        "trainer_stopped_before_planned_horizon"
+    ]
+    assert (Path(args.output_dir) / st.HF_ZSPACE_OPTIMIZER_STATE_FILENAME).is_file()
+
+
+def test_early_stopped_calibrated_apply_is_blocked_without_raising(
+    tmp_path: Path,
+) -> None:
+    observed, _ = _run_two_steps(tmp_path, mode="observe")
+    trajectory = Path(str(observed.receipt()["trajectory_path"]))
+    optimizer = _FakeOptimizer()
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "early-apply"))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        callback = hf_zspace_optimizer_control_callback(
+            mode="apply",
+            trajectory_arm="dose_normalized",
+            trajectory=trajectory,
+        )
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+    callback.on_step_begin(args, state, control, optimizer=optimizer)
+    optimizer.step()
+    state.global_step = 1
+    callback.on_step_end(args, state, control, optimizer=optimizer)
+
+    callback.on_train_end(args, state, control, optimizer=optimizer)
+
+    receipt = callback.receipt()
+    assert receipt["status"] == "blocked"
+    assert receipt["applied_update_count"] == 1
+    assert receipt["restored_update_count"] == 1
+    assert receipt["training_horizon_complete"] is False
+    assert receipt["trajectory_horizon_complete"] is False
+    assert receipt["trajectory_generated"] is False
+    assert receipt["trajectory_step_count"] == 2
+    assert receipt["evidence_blockers"] == [
+        "trainer_stopped_before_planned_horizon",
+        "input_trajectory_only_partially_consumed",
+    ]
+    assert (Path(args.output_dir) / st.HF_ZSPACE_OPTIMIZER_STATE_FILENAME).is_file()
+
+
+def test_zero_step_early_stop_still_seals_apply_state(tmp_path: Path) -> None:
+    optimizer = _FakeOptimizer()
+    args = types.SimpleNamespace(output_dir=str(tmp_path / "zero-step-apply"))
+    state = types.SimpleNamespace(global_step=0, max_steps=2)
+    control = types.SimpleNamespace()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "transformers", _fake_transformers())
+        callback = hf_zspace_optimizer_control_callback(mode="apply")
+    callback.on_train_begin(args, state, control, optimizer=optimizer)
+
+    callback.on_train_end(args, state, control, optimizer=optimizer)
+
+    receipt = callback.receipt()
+    assert receipt["status"] == "blocked"
+    assert receipt["realized_update_count"] == 0
+    assert receipt["trajectory_step_count"] is None
+    assert receipt["evidence_blockers"] == [
+        "no_realized_optimizer_updates",
+        "trainer_stopped_before_planned_horizon",
+    ]
+    assert optimizer.pre_hooks == []
+    assert optimizer.post_hooks == []
+    assert (Path(args.output_dir) / st.HF_ZSPACE_OPTIMIZER_STATE_FILENAME).is_file()
+
+
 def test_factorized_trajectory_arms_match_the_intended_integrated_doses(
     tmp_path: Path,
 ) -> None:

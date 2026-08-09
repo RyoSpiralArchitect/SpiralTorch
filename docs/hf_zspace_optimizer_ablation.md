@@ -31,6 +31,11 @@ nominal rates before the scheduler advances. A constant or dose-normalized arm
 may legitimately be an identity control; the raw arm must still contain at least
 one non-identity update for the factorized comparison to be ready.
 
+If another Trainer callback stops a run early, SpiralTorch seals the realized
+schedule instead of turning successful training into an exception. Generated
+trajectories use the realized update count; a partially consumed calibrated
+trajectory remains explicit `blocked` evidence and cannot enter the comparator.
+
 This dose is the sum of parameter-group learning rates over optimizer updates.
 It is not parameter-count weighted and does not claim to measure gradient norm,
 parameter displacement, or useful learning by itself.
