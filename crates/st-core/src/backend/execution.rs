@@ -7,7 +7,8 @@
 
 use serde_json::json;
 use st_tensor::{
-    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorUtilBackend,
+    AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend, TensorExecutionBackend,
+    TensorExecutionPlanBinding, TensorUtilBackend,
 };
 use std::cell::RefCell;
 
@@ -31,6 +32,7 @@ thread_local! {
 pub struct BackendPolicyGuard {
     previous: Option<BackendPolicy>,
     _tensor_fallback_guard: st_tensor::execution::AcceleratorFallbackGuard,
+    _tensor_execution_plan_guard: Option<st_tensor::execution::TensorExecutionPlanGuard>,
 }
 
 impl Drop for BackendPolicyGuard {
@@ -46,10 +48,30 @@ pub fn push_backend_policy(policy: BackendPolicy) -> BackendPolicyGuard {
     let tensor_fallback_guard = st_tensor::execution::push_accelerator_fallback(
         policy.execution_config().accelerator_fallback,
     );
+    let tensor_execution_plan_guard = policy.runtime_plan_output_sha256().map(|commitment| {
+        let backend = |label| {
+            TensorExecutionBackend::from_execution_id(label)
+                .expect("validated backend policy uses tensor execution identifiers")
+        };
+        st_tensor::execution::push_execution_plan_binding(TensorExecutionPlanBinding::new(
+            commitment,
+            [
+                backend(policy.matmul_backend_label()),
+                backend(policy.prepacked_matmul_backend_label()),
+                backend(policy.layer_norm_backend_label()),
+                backend(policy.attention_backend_label()),
+                backend(policy.softmax_backend_label()),
+                backend(policy.tensor_util_backend_label()),
+            ],
+            policy.execution_config().accelerator_fallback,
+            policy.execution_config().tensor_util_wgpu_min_values,
+        ))
+    });
     let previous = ACTIVE_BACKEND_POLICY.with(|slot| slot.replace(Some(policy)));
     BackendPolicyGuard {
         previous,
         _tensor_fallback_guard: tensor_fallback_guard,
+        _tensor_execution_plan_guard: tensor_execution_plan_guard,
     }
 }
 
@@ -164,6 +186,7 @@ mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
     use crate::backend::runtime_probe::{evaluate_runtime_device_probe, RuntimeDeviceProbeRequest};
+    use st_tensor::{Tensor, TensorExecutionReceipt};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -331,6 +354,14 @@ mod tests {
         .expect("observe CPU dense capability");
         let plan = evaluate_runtime_execution_plan(request).expect("CPU execution plan");
 
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let previous_observer = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
         let guard = push_runtime_execution_plan(&plan).expect("install committed plan");
         let current = current_backend_policy().expect("active policy");
         assert_eq!(current_matmul_backend(), MatmulBackend::CpuFaer);
@@ -338,7 +369,40 @@ mod tests {
             current.runtime_plan_output_sha256_hex().as_deref(),
             Some(plan.output_sha256.as_str())
         );
+        let lhs = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).expect("lhs tensor");
+        let rhs = Tensor::from_vec(
+            3,
+            4,
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0],
+        )
+        .expect("rhs tensor");
+        lhs.matmul_with_backend(&rhs, current_matmul_backend())
+            .expect("committed matmul dispatch");
         drop(guard);
+        st_tensor::set_thread_meta_observer(previous_observer);
         assert!(current_backend_policy().is_none());
+
+        let events = events.lock().unwrap();
+        let (_, data) = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "matmul" && data.get("execution_receipt").is_some())
+            .expect("completed matmul receipt");
+        let receipt: TensorExecutionReceipt =
+            serde_json::from_value(data["execution_receipt"].clone()).expect("typed receipt");
+        receipt.validate().expect("receipt validates");
+        assert_eq!(
+            receipt.runtime_execution_plan_output_sha256.as_deref(),
+            Some(plan.output_sha256.as_str())
+        );
+        assert_eq!(data["event_phase"], "completed");
+        assert_eq!(data["counts_as_execution"], true);
+        assert_eq!(data["backend"], "faer");
+        assert_eq!(
+            data["execution_receipt"]["workload"]["component"],
+            "dense_matmul"
+        );
+        assert_eq!(data["execution_receipt"]["workload"]["rows"], 2);
+        assert_eq!(data["execution_receipt"]["workload"]["inner"], 3);
+        assert_eq!(data["execution_receipt"]["workload"]["cols"], 4);
     }
 }

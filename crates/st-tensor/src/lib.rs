@@ -25,6 +25,16 @@ pub use autograd::{
     AUTOGRAD_SEMANTIC_OWNER,
 };
 pub use backend::faer_dense;
+pub use execution::{
+    emit_tensor_execution_receipt, prepare_tensor_execution, TensorExecutionCompletion,
+    TensorExecutionContractError, TensorExecutionFallback, TensorExecutionFallbackReason,
+    TensorExecutionKernelBackend, TensorExecutionPlanBinding, TensorExecutionReceipt,
+    TensorExecutionRouteStatus, TENSOR_EXECUTION_RECEIPT_CONTRACT_VERSION,
+    TENSOR_EXECUTION_RECEIPT_KIND, TENSOR_EXECUTION_RECEIPT_SEMANTIC_OWNER,
+};
+pub use execution_capability::{
+    TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload, TensorUtilOperation,
+};
 
 #[cfg(feature = "wgpu_frac")]
 pub use backend::wgpu_frac;

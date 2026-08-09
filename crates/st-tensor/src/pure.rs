@@ -68,6 +68,13 @@ use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
     DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
 };
+use crate::execution::{
+    emit_tensor_execution_receipt, prepare_tensor_execution, PreparedTensorExecution,
+    TensorExecutionCompletion, TensorExecutionFallback,
+};
+use crate::execution_capability::{
+    TensorExecutionBackend, TensorExecutionWorkload, TensorUtilOperation,
+};
 use crate::hardmax::{HardmaxBackend, HardmaxFusionPlan, HardmaxFusionResult, HardmaxMode};
 use crate::memory::{
     aligned_from_slice, aligned_from_vec, aligned_with_capacity, aligned_zeroed, is_ptr_aligned,
@@ -362,6 +369,19 @@ impl MatmulBackend {
         }
     }
 
+    const fn tensor_execution_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Auto => TensorExecutionBackend::Auto,
+            Self::CpuFaer => TensorExecutionBackend::Faer,
+            Self::CpuSimd => TensorExecutionBackend::CpuSimd,
+            Self::CpuNaive => TensorExecutionBackend::Naive,
+            #[cfg(feature = "wgpu")]
+            Self::GpuWgpu => TensorExecutionBackend::Wgpu,
+            #[cfg(feature = "hip")]
+            Self::GpuHip => TensorExecutionBackend::Hip,
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
             MatmulBackend::CpuSimd => "simd",
@@ -467,6 +487,55 @@ fn wgpu_backend_runtime_unavailable(error: &TensorError) -> bool {
     )
 }
 
+fn execution_contract_error(error: impl fmt::Display) -> TensorError {
+    TensorError::BackendFailure {
+        backend: "execution_contract",
+        message: error.to_string(),
+    }
+}
+
+fn execution_dimension(value: usize) -> PureResult<u64> {
+    u64::try_from(value).map_err(|_| {
+        execution_contract_error(format_args!(
+            "tensor dimension {value} exceeds the u64 execution receipt contract"
+        ))
+    })
+}
+
+fn prepare_component_execution(
+    workload: TensorExecutionWorkload,
+    operation: &'static str,
+    selected_backend: TensorExecutionBackend,
+) -> PureResult<PreparedTensorExecution> {
+    prepare_tensor_execution(workload, operation, selected_backend)
+        .map_err(execution_contract_error)
+}
+
+fn completed_component_execution(
+    prepared: PreparedTensorExecution,
+    backend_used: &'static str,
+    runtime_fallback: bool,
+) -> PureResult<TensorExecutionCompletion> {
+    let executed_backend =
+        TensorExecutionBackend::from_execution_id(backend_used).ok_or_else(|| {
+            execution_contract_error(format_args!(
+                "operation completed with unknown backend identifier '{backend_used}'"
+            ))
+        })?;
+    let fallback = runtime_fallback.then(|| {
+        TensorExecutionFallback::runtime_unavailable(TensorExecutionBackend::Wgpu, executed_backend)
+    });
+    prepared
+        .complete(executed_backend, fallback)
+        .map_err(execution_contract_error)
+}
+
+fn completed_no_op_execution(
+    prepared: PreparedTensorExecution,
+) -> PureResult<TensorExecutionCompletion> {
+    prepared.complete_no_op().map_err(execution_contract_error)
+}
+
 /// Explicit backend selection for row-wise softmax.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SoftmaxBackend {
@@ -487,6 +556,15 @@ impl SoftmaxBackend {
             SoftmaxBackend::Cpu => "cpu",
             #[cfg(feature = "wgpu")]
             SoftmaxBackend::GpuWgpu => "wgpu",
+        }
+    }
+
+    const fn tensor_execution_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Auto => TensorExecutionBackend::Auto,
+            Self::Cpu => TensorExecutionBackend::Cpu,
+            #[cfg(feature = "wgpu")]
+            Self::GpuWgpu => TensorExecutionBackend::Wgpu,
         }
     }
 
@@ -724,6 +802,14 @@ impl AttentionBackend {
         }
     }
 
+    const fn tensor_execution_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Auto => TensorExecutionBackend::Auto,
+            Self::Cpu => TensorExecutionBackend::Cpu,
+            Self::GpuWgpu => TensorExecutionBackend::Wgpu,
+        }
+    }
+
     fn label(self) -> &'static str {
         self.execution_id()
     }
@@ -756,6 +842,14 @@ impl LayerNormBackend {
         }
     }
 
+    const fn tensor_execution_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Auto => TensorExecutionBackend::Auto,
+            Self::Cpu => TensorExecutionBackend::Cpu,
+            Self::GpuWgpu => TensorExecutionBackend::Wgpu,
+        }
+    }
+
     fn label(self) -> &'static str {
         self.execution_id()
     }
@@ -785,6 +879,14 @@ impl TensorUtilBackend {
             TensorUtilBackend::Auto => "auto",
             TensorUtilBackend::Cpu => "cpu",
             TensorUtilBackend::GpuWgpu => "wgpu",
+        }
+    }
+
+    const fn tensor_execution_backend(self) -> TensorExecutionBackend {
+        match self {
+            Self::Auto => TensorExecutionBackend::Auto,
+            Self::Cpu => TensorExecutionBackend::Cpu,
+            Self::GpuWgpu => TensorExecutionBackend::Wgpu,
         }
     }
 
@@ -1926,6 +2028,15 @@ impl Tensor {
         self.layout.expect_row_major("matmul lhs")?;
         dst.layout.expect_row_major("matmul destination")?;
         dst.layout = Layout::RowMajor;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::DenseMatmul {
+                rows: execution_dimension(rows)?,
+                inner: execution_dimension(inner)?,
+                cols: execution_dimension(cols)?,
+            },
+            "matmul",
+            backend.tensor_execution_backend(),
+        )?;
 
         let lhs = self.data();
         let mut scratch = aligned_zeroed(rows * cols);
@@ -1939,88 +2050,94 @@ impl Tensor {
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
 
-        let backend_used = match backend {
-            MatmulBackend::Auto => self.matmul_auto_into(other, work_slice, rows, inner, cols)?,
-            MatmulBackend::CpuSimd => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "simd matmul expects row-major rhs",
-                    });
+        let completion = if rows == 0 || cols == 0 {
+            completed_no_op_execution(execution)?
+        } else {
+            let backend_used = match backend {
+                MatmulBackend::Auto => {
+                    self.matmul_auto_into(other, work_slice, rows, inner, cols)?
                 }
-                cpu_dense::matmul_into(work_slice, lhs, other.data(), rows, inner, cols).map_err(
-                    |message| TensorError::BackendFailure {
-                        backend: "cpu_simd",
-                        message,
-                    },
-                )?;
-                "cpu_simd"
-            }
-            MatmulBackend::CpuNaive => {
-                let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
-                "naive"
-            }
-            MatmulBackend::CpuFaer => {
-                let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                let lhs_layout = self.layout.to_dense(rows, inner)?;
-                let rhs_layout = packed.layout().to_dense();
-                faer_dense::matmul_oriented_into(
-                    work_slice,
-                    lhs,
-                    lhs_layout,
-                    packed.as_slice(),
-                    rhs_layout,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "faer",
-                    message,
-                })?;
-                "faer"
-            }
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "wgpu matmul expects row-major rhs",
-                    });
-                }
-                let rhs = other.data();
-                match matmul_wgpu(lhs, rhs, rows, inner, cols) {
-                    Ok(buffer) => {
-                        work_slice.copy_from_slice(&buffer);
-                        "wgpu"
+                MatmulBackend::CpuSimd => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "simd matmul expects row-major rhs",
+                        });
                     }
-                    Err(error)
-                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
-                    {
-                        let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                        matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
-                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                        fallback_message = Some(error.to_string());
-                        "naive"
-                    }
-                    Err(error) => return Err(error),
+                    cpu_dense::matmul_into(work_slice, lhs, other.data(), rows, inner, cols)
+                        .map_err(|message| TensorError::BackendFailure {
+                            backend: "cpu_simd",
+                            message,
+                        })?;
+                    "cpu_simd"
                 }
-            }
-            #[cfg(feature = "hip")]
-            MatmulBackend::GpuHip => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "hip matmul expects row-major rhs",
-                    });
+                MatmulBackend::CpuNaive => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
+                    "naive"
                 }
-                let rhs = other.data();
-                hip_dense::matmul_into(lhs, rhs, work_slice, rows, inner, cols).map_err(
-                    |message| TensorError::BackendFailure {
-                        backend: "hip",
+                MatmulBackend::CpuFaer => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    let lhs_layout = self.layout.to_dense(rows, inner)?;
+                    let rhs_layout = packed.layout().to_dense();
+                    faer_dense::matmul_oriented_into(
+                        work_slice,
+                        lhs,
+                        lhs_layout,
+                        packed.as_slice(),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
                         message,
-                    },
-                )?;
-                "hip"
-            }
+                    })?;
+                    "faer"
+                }
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "wgpu matmul expects row-major rhs",
+                        });
+                    }
+                    let rhs = other.data();
+                    match matmul_wgpu(lhs, rhs, rows, inner, cols) {
+                        Ok(buffer) => {
+                            work_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(error)
+                            if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                        {
+                            let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                            matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(error.to_string());
+                            "naive"
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "hip matmul expects row-major rhs",
+                        });
+                    }
+                    let rhs = other.data();
+                    hip_dense::matmul_into(lhs, rhs, work_slice, rows, inner, cols).map_err(
+                        |message| TensorError::BackendFailure {
+                            backend: "hip",
+                            message,
+                        },
+                    )?;
+                    "hip"
+                }
+            };
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?
         };
         Self::validate_finite_tensor_util_slice("matmul_output", scratch.as_slice())?;
         dst.data_mut().copy_from_slice(scratch.as_slice());
@@ -2030,19 +2147,24 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[rows, cols],
         );
-        crate::emit_tensor_op_meta("matmul", || {
-            serde_json::json!({
-                "backend": backend_used,
-                "requested_backend": backend.label(),
-                "rows": rows,
-                "inner": inner,
-                "cols": cols,
-                "lhs_layout": self.layout.as_str(),
-                "rhs_layout": other.layout.as_str(),
-                "fallback": fallback_reason.map(|reason| {
-                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
-                }),
-            })
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("inner".to_owned(), serde_json::json!(inner));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert(
+                "lhs_layout".to_owned(),
+                serde_json::json!(self.layout.as_str()),
+            );
+            data.insert(
+                "rhs_layout".to_owned(),
+                serde_json::json!(other.layout.as_str()),
+            );
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref()),
+                );
+            }
         });
         Ok(())
     }
@@ -2070,6 +2192,15 @@ impl Tensor {
         self.layout.expect_row_major("matmul lhs")?;
         tensor.layout.expect_row_major("matmul destination")?;
         tensor.layout = Layout::RowMajor;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::DenseMatmul {
+                rows: execution_dimension(rows)?,
+                inner: execution_dimension(inner)?,
+                cols: execution_dimension(cols)?,
+            },
+            "matmul_scaled",
+            backend.tensor_execution_backend(),
+        )?;
 
         let lhs = self.data();
         let dst_slice = tensor.data_mut();
@@ -2082,99 +2213,103 @@ impl Tensor {
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
 
-        let backend_used = match backend {
-            MatmulBackend::Auto => {
-                self.matmul_scaled_auto_into(other, scale, dst_slice, rows, inner, cols)?
-            }
-            MatmulBackend::CpuSimd => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "simd matmul expects row-major rhs",
-                    });
+        let completion = if rows == 0 || cols == 0 {
+            completed_no_op_execution(execution)?
+        } else {
+            let backend_used = match backend {
+                MatmulBackend::Auto => {
+                    self.matmul_scaled_auto_into(other, scale, dst_slice, rows, inner, cols)?
                 }
-                cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols).map_err(
-                    |message| TensorError::BackendFailure {
-                        backend: "cpu_simd",
+                MatmulBackend::CpuSimd => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "simd matmul expects row-major rhs",
+                        });
+                    }
+                    cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols)
+                        .map_err(|message| TensorError::BackendFailure {
+                            backend: "cpu_simd",
+                            message,
+                        })?;
+                    scale_inplace(dst_slice, scale);
+                    "cpu_simd"
+                }
+                MatmulBackend::CpuNaive => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                    scale_inplace(dst_slice, scale);
+                    "naive"
+                }
+                MatmulBackend::CpuFaer => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    let lhs_layout = self.layout.to_dense(rows, inner)?;
+                    let rhs_layout = packed.layout().to_dense();
+                    faer_dense::matmul_oriented_into(
+                        dst_slice,
+                        lhs,
+                        lhs_layout,
+                        packed.as_slice(),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
                         message,
-                    },
-                )?;
-                scale_inplace(dst_slice, scale);
-                "cpu_simd"
-            }
-            MatmulBackend::CpuNaive => {
-                let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
-                scale_inplace(dst_slice, scale);
-                "naive"
-            }
-            MatmulBackend::CpuFaer => {
-                let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                let lhs_layout = self.layout.to_dense(rows, inner)?;
-                let rhs_layout = packed.layout().to_dense();
-                faer_dense::matmul_oriented_into(
-                    dst_slice,
-                    lhs,
-                    lhs_layout,
-                    packed.as_slice(),
-                    rhs_layout,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "faer",
-                    message,
-                })?;
-                scale_inplace(dst_slice, scale);
-                "faer"
-            }
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "wgpu matmul expects row-major rhs",
-                    });
+                    })?;
+                    scale_inplace(dst_slice, scale);
+                    "faer"
                 }
-                match matmul_scaled_wgpu(lhs, other.data(), rows, inner, cols, scale) {
-                    Ok(buffer) => {
-                        dst_slice.copy_from_slice(&buffer);
-                        "wgpu"
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "wgpu matmul expects row-major rhs",
+                        });
                     }
-                    Err(error)
-                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
-                    {
-                        let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                        matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
-                        scale_inplace(dst_slice, scale);
-                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                        fallback_message = Some(error.to_string());
-                        "naive"
+                    match matmul_scaled_wgpu(lhs, other.data(), rows, inner, cols, scale) {
+                        Ok(buffer) => {
+                            dst_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(error)
+                            if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                        {
+                            let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                            matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                            scale_inplace(dst_slice, scale);
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(error.to_string());
+                            "naive"
+                        }
+                        Err(error) => return Err(error),
                     }
-                    Err(error) => return Err(error),
                 }
-            }
-            #[cfg(feature = "hip")]
-            MatmulBackend::GpuHip => {
-                if !matches!(other.layout, Layout::RowMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "hip matmul expects row-major rhs",
-                    });
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "hip matmul expects row-major rhs",
+                        });
+                    }
+                    hip_dense::matmul_scaled_into(
+                        lhs,
+                        other.data(),
+                        dst_slice,
+                        rows,
+                        inner,
+                        cols,
+                        scale,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                    "hip"
                 }
-                hip_dense::matmul_scaled_into(
-                    lhs,
-                    other.data(),
-                    dst_slice,
-                    rows,
-                    inner,
-                    cols,
-                    scale,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "hip",
-                    message,
-                })?;
-                "hip"
-            }
+            };
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?
         };
         Self::validate_finite_tensor_util_slice("matmul_scaled_output", dst_slice)?;
 
@@ -2183,20 +2318,25 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[rows, cols],
         );
-        crate::emit_tensor_op_meta("matmul_scaled", || {
-            serde_json::json!({
-                "backend": backend_used,
-                "requested_backend": backend.label(),
-                "rows": rows,
-                "inner": inner,
-                "cols": cols,
-                "lhs_layout": self.layout.as_str(),
-                "rhs_layout": other.layout.as_str(),
-                "scale": scale,
-                "fallback": fallback_reason.map(|reason| {
-                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
-                }),
-            })
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("inner".to_owned(), serde_json::json!(inner));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert(
+                "lhs_layout".to_owned(),
+                serde_json::json!(self.layout.as_str()),
+            );
+            data.insert(
+                "rhs_layout".to_owned(),
+                serde_json::json!(other.layout.as_str()),
+            );
+            data.insert("scale".to_owned(), serde_json::json!(scale));
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref()),
+                );
+            }
         });
         Ok(tensor)
     }
@@ -2225,6 +2365,15 @@ impl Tensor {
         other.layout.expect_row_major("matmul rhs")?;
         tensor.layout.expect_row_major("matmul destination")?;
         tensor.layout = Layout::RowMajor;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::DenseMatmul {
+                rows: execution_dimension(rows)?,
+                inner: execution_dimension(inner)?,
+                cols: execution_dimension(cols)?,
+            },
+            "matmul_lhs_transpose_scaled",
+            backend.tensor_execution_backend(),
+        )?;
 
         let dst_slice = tensor.data_mut();
         #[cfg(feature = "wgpu")]
@@ -2235,113 +2384,118 @@ impl Tensor {
         let fallback_reason: Option<&'static str> = None;
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
-        let backend_used = match backend {
-            MatmulBackend::Auto => self.matmul_lhs_transpose_scaled_auto_into(
-                other, scale, dst_slice, rows, inner, cols,
-            )?,
-            MatmulBackend::CpuSimd => {
-                let mut lhs_transposed = aligned_zeroed(self.len());
-                for source_row in 0..inner {
-                    for source_col in 0..rows {
-                        lhs_transposed[source_col * inner + source_row] =
-                            self.data()[source_row * rows + source_col];
+        let completion = if rows == 0 || cols == 0 {
+            completed_no_op_execution(execution)?
+        } else {
+            let backend_used = match backend {
+                MatmulBackend::Auto => self.matmul_lhs_transpose_scaled_auto_into(
+                    other, scale, dst_slice, rows, inner, cols,
+                )?,
+                MatmulBackend::CpuSimd => {
+                    let mut lhs_transposed = aligned_zeroed(self.len());
+                    for source_row in 0..inner {
+                        for source_col in 0..rows {
+                            lhs_transposed[source_col * inner + source_row] =
+                                self.data()[source_row * rows + source_col];
+                        }
+                    }
+                    cpu_dense::matmul_into(
+                        dst_slice,
+                        lhs_transposed.as_slice(),
+                        other.data(),
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                    scale_inplace(dst_slice, scale);
+                    "cpu_simd"
+                }
+                MatmulBackend::CpuNaive => {
+                    matmul_lhs_transpose_scaled_naive_into(
+                        dst_slice,
+                        self.data(),
+                        other.data(),
+                        inner,
+                        rows,
+                        cols,
+                        scale,
+                    );
+                    "naive"
+                }
+                MatmulBackend::CpuFaer => {
+                    faer_dense::matmul_oriented_into(
+                        dst_slice,
+                        self.data(),
+                        faer_dense::DenseLayout::ColMajor,
+                        other.data(),
+                        other.layout.to_dense(inner, cols)?,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                    scale_inplace(dst_slice, scale);
+                    "faer"
+                }
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    match matmul_lhs_transpose_scaled_wgpu(
+                        self.data(),
+                        other.data(),
+                        inner,
+                        rows,
+                        cols,
+                        scale,
+                    ) {
+                        Ok(buffer) => {
+                            dst_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(error)
+                            if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                        {
+                            matmul_lhs_transpose_scaled_naive_into(
+                                dst_slice,
+                                self.data(),
+                                other.data(),
+                                inner,
+                                rows,
+                                cols,
+                                scale,
+                            );
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(error.to_string());
+                            "naive"
+                        }
+                        Err(error) => return Err(error),
                     }
                 }
-                cpu_dense::matmul_into(
-                    dst_slice,
-                    lhs_transposed.as_slice(),
-                    other.data(),
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "cpu_simd",
-                    message,
-                })?;
-                scale_inplace(dst_slice, scale);
-                "cpu_simd"
-            }
-            MatmulBackend::CpuNaive => {
-                matmul_lhs_transpose_scaled_naive_into(
-                    dst_slice,
-                    self.data(),
-                    other.data(),
-                    inner,
-                    rows,
-                    cols,
-                    scale,
-                );
-                "naive"
-            }
-            MatmulBackend::CpuFaer => {
-                faer_dense::matmul_oriented_into(
-                    dst_slice,
-                    self.data(),
-                    faer_dense::DenseLayout::ColMajor,
-                    other.data(),
-                    other.layout.to_dense(inner, cols)?,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "faer",
-                    message,
-                })?;
-                scale_inplace(dst_slice, scale);
-                "faer"
-            }
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                match matmul_lhs_transpose_scaled_wgpu(
-                    self.data(),
-                    other.data(),
-                    inner,
-                    rows,
-                    cols,
-                    scale,
-                ) {
-                    Ok(buffer) => {
-                        dst_slice.copy_from_slice(&buffer);
-                        "wgpu"
-                    }
-                    Err(error)
-                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
-                    {
-                        matmul_lhs_transpose_scaled_naive_into(
-                            dst_slice,
-                            self.data(),
-                            other.data(),
-                            inner,
-                            rows,
-                            cols,
-                            scale,
-                        );
-                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                        fallback_message = Some(error.to_string());
-                        "naive"
-                    }
-                    Err(error) => return Err(error),
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    hip_dense::matmul_lhs_transpose_scaled_into(
+                        self.data(),
+                        other.data(),
+                        dst_slice,
+                        rows,
+                        inner,
+                        cols,
+                        scale,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "hip",
+                        message,
+                    })?;
+                    "hip"
                 }
-            }
-            #[cfg(feature = "hip")]
-            MatmulBackend::GpuHip => {
-                hip_dense::matmul_lhs_transpose_scaled_into(
-                    self.data(),
-                    other.data(),
-                    dst_slice,
-                    rows,
-                    inner,
-                    cols,
-                    scale,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "hip",
-                    message,
-                })?;
-                "hip"
-            }
+            };
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?
         };
         Self::validate_finite_tensor_util_slice("matmul_lhs_transpose_scaled_output", dst_slice)?;
 
@@ -2350,21 +2504,26 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[rows, cols],
         );
-        crate::emit_tensor_op_meta("matmul_lhs_transpose_scaled", || {
-            serde_json::json!({
-                "backend": backend_used,
-                "requested_backend": backend.label(),
-                "rows": rows,
-                "inner": inner,
-                "cols": cols,
-                "lhs_layout": self.layout.as_str(),
-                "rhs_layout": other.layout.as_str(),
-                "lhs_transpose": true,
-                "scale": scale,
-                "fallback": fallback_reason.map(|reason| {
-                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
-                }),
-            })
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("inner".to_owned(), serde_json::json!(inner));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert(
+                "lhs_layout".to_owned(),
+                serde_json::json!(self.layout.as_str()),
+            );
+            data.insert(
+                "rhs_layout".to_owned(),
+                serde_json::json!(other.layout.as_str()),
+            );
+            data.insert("lhs_transpose".to_owned(), serde_json::json!(true));
+            data.insert("scale".to_owned(), serde_json::json!(scale));
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref()),
+                );
+            }
         });
         Ok(tensor)
     }
@@ -2421,6 +2580,16 @@ impl Tensor {
         self.layout.expect_row_major("matmul lhs")?;
         tensor.layout.expect_row_major("matmul destination")?;
         tensor.layout = Layout::RowMajor;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::PrepackedMatmul {
+                rows: execution_dimension(rows)?,
+                inner: execution_dimension(inner)?,
+                cols: execution_dimension(cols)?,
+                bias: true,
+            },
+            "matmul_prepacked_bias",
+            backend.tensor_execution_backend(),
+        )?;
 
         let lhs = self.data();
         let dst_slice = tensor.data_mut();
@@ -2433,78 +2602,91 @@ impl Tensor {
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
 
-        let backend_used = match backend {
-            MatmulBackend::Auto => {
-                self.matmul_prepacked_bias_auto_into(packed, bias, dst_slice, rows, inner, cols)?
-            }
-            MatmulBackend::CpuSimd => {
-                if !matches!(packed.layout(), PackedLayout::ColMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "simd matmul expects col-major packed rhs",
-                    });
-                }
-                cpu_dense::matmul_packed_into(dst_slice, lhs, packed.as_slice(), rows, inner, cols)
+        let completion = if rows == 0 || cols == 0 {
+            completed_no_op_execution(execution)?
+        } else {
+            let backend_used = match backend {
+                MatmulBackend::Auto => self
+                    .matmul_prepacked_bias_auto_into(packed, bias, dst_slice, rows, inner, cols)?,
+                MatmulBackend::CpuSimd => {
+                    if !matches!(packed.layout(), PackedLayout::ColMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "simd matmul expects col-major packed rhs",
+                        });
+                    }
+                    cpu_dense::matmul_packed_into(
+                        dst_slice,
+                        lhs,
+                        packed.as_slice(),
+                        rows,
+                        inner,
+                        cols,
+                    )
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "cpu_simd",
                         message,
                     })?;
-                add_bias_inplace(dst_slice, rows, cols, bias);
-                "cpu_simd"
-            }
-            MatmulBackend::CpuNaive => {
-                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
-                add_bias_inplace(dst_slice, rows, cols, bias);
-                "naive"
-            }
-            MatmulBackend::CpuFaer => {
-                let lhs_layout = self.layout.to_dense(rows, inner)?;
-                let rhs_layout = packed.layout().to_dense();
-                faer_dense::matmul_oriented_into(
-                    dst_slice,
-                    lhs,
-                    lhs_layout,
-                    packed.as_slice(),
-                    rhs_layout,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "faer",
-                    message,
-                })?;
-                add_bias_inplace(dst_slice, rows, cols, bias);
-                "faer"
-            }
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                match wgpu_dense::matmul_prepacked_bias(lhs, packed, bias, rows, inner, cols) {
-                    Ok(buffer) => {
-                        dst_slice.copy_from_slice(&buffer);
-                        "wgpu"
-                    }
-                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
-                        matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
-                        add_bias_inplace(dst_slice, rows, cols, bias);
-                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                        fallback_message = Some(message);
-                        "naive"
-                    }
-                    Err(message) => {
-                        return Err(TensorError::BackendFailure {
-                            backend: "wgpu",
-                            message,
-                        });
+                    add_bias_inplace(dst_slice, rows, cols, bias);
+                    "cpu_simd"
+                }
+                MatmulBackend::CpuNaive => {
+                    matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+                    add_bias_inplace(dst_slice, rows, cols, bias);
+                    "naive"
+                }
+                MatmulBackend::CpuFaer => {
+                    let lhs_layout = self.layout.to_dense(rows, inner)?;
+                    let rhs_layout = packed.layout().to_dense();
+                    faer_dense::matmul_oriented_into(
+                        dst_slice,
+                        lhs,
+                        lhs_layout,
+                        packed.as_slice(),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                    add_bias_inplace(dst_slice, rows, cols, bias);
+                    "faer"
+                }
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    match wgpu_dense::matmul_prepacked_bias(lhs, packed, bias, rows, inner, cols) {
+                        Ok(buffer) => {
+                            dst_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(message)
+                            if !strict_gpu_path() && wgpu_runtime_unavailable(&message) =>
+                        {
+                            matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+                            add_bias_inplace(dst_slice, rows, cols, bias);
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(message);
+                            "naive"
+                        }
+                        Err(message) => {
+                            return Err(TensorError::BackendFailure {
+                                backend: "wgpu",
+                                message,
+                            });
+                        }
                     }
                 }
-            }
-            #[cfg(feature = "hip")]
-            MatmulBackend::GpuHip => {
-                return Err(TensorError::BackendFailure {
-                    backend: "hip",
-                    message: "hip matmul does not yet support prepacked operands".into(),
-                });
-            }
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    return Err(TensorError::BackendFailure {
+                        backend: "hip",
+                        message: "hip matmul does not yet support prepacked operands".into(),
+                    });
+                }
+            };
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?
         };
         Self::validate_finite_tensor_util_slice("matmul_prepacked_bias_output", dst_slice)?;
 
@@ -2513,26 +2695,34 @@ impl Tensor {
             &[self.rows, self.cols, packed.inner(), packed.cols()],
             &[rows, cols],
         );
-        crate::emit_tensor_op_meta("matmul_prepacked_bias", || {
-            serde_json::json!({
-                "backend": backend_used,
-                "requested_backend": backend.label(),
-                "rows": rows,
-                "inner": inner,
-                "cols": cols,
-                "lhs_layout": self.layout.as_str(),
-                "rhs_layout": "packed",
-                "packed_layout": packed.layout().as_str(),
-                "packed_tile": {
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("inner".to_owned(), serde_json::json!(inner));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert(
+                "lhs_layout".to_owned(),
+                serde_json::json!(self.layout.as_str()),
+            );
+            data.insert("rhs_layout".to_owned(), serde_json::json!("packed"));
+            data.insert(
+                "packed_layout".to_owned(),
+                serde_json::json!(packed.layout().as_str()),
+            );
+            data.insert(
+                "packed_tile".to_owned(),
+                serde_json::json!({
                     "tm": packed.tile().tm,
                     "tn": packed.tile().tn,
                     "tk": packed.tile().tk,
-                },
-                "fused_bias": true,
-                "fallback": fallback_reason.map(|reason| {
-                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
                 }),
-            })
+            );
+            data.insert("fused_bias".to_owned(), serde_json::json!(true));
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref()),
+                );
+            }
         });
         Ok(tensor)
     }
@@ -2571,6 +2761,16 @@ impl Tensor {
         self.layout.expect_row_major("matmul lhs")?;
         dst.layout.expect_row_major("matmul destination")?;
         dst.layout = Layout::RowMajor;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::PrepackedMatmul {
+                rows: execution_dimension(rows)?,
+                inner: execution_dimension(inner)?,
+                cols: execution_dimension(cols)?,
+                bias: false,
+            },
+            "matmul_prepacked",
+            backend.tensor_execution_backend(),
+        )?;
 
         let lhs = self.data();
         let mut scratch = aligned_zeroed(rows * cols);
@@ -2584,81 +2784,88 @@ impl Tensor {
         #[cfg(not(feature = "wgpu"))]
         let fallback_message: Option<String> = None;
 
-        let backend_used = match backend {
-            MatmulBackend::Auto => {
-                self.matmul_prepacked_auto_into(packed, work_slice, rows, inner, cols)?
-            }
-            MatmulBackend::CpuSimd => {
-                if !matches!(packed.layout(), PackedLayout::ColMajor) {
-                    return Err(TensorError::UnsupportedLayout {
-                        label: "simd matmul expects col-major packed rhs",
-                    });
+        let completion = if rows == 0 || cols == 0 {
+            completed_no_op_execution(execution)?
+        } else {
+            let backend_used = match backend {
+                MatmulBackend::Auto => {
+                    self.matmul_prepacked_auto_into(packed, work_slice, rows, inner, cols)?
                 }
-                cpu_dense::matmul_packed_into(
-                    work_slice,
-                    lhs,
-                    packed.as_slice(),
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "cpu_simd",
-                    message,
-                })?;
-                "cpu_simd"
-            }
-            MatmulBackend::CpuNaive => {
-                matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
-                "naive"
-            }
-            MatmulBackend::CpuFaer => {
-                let lhs_layout = self.layout.to_dense(rows, inner)?;
-                let rhs_layout = packed.layout().to_dense();
-                faer_dense::matmul_oriented_into(
-                    work_slice,
-                    lhs,
-                    lhs_layout,
-                    packed.as_slice(),
-                    rhs_layout,
-                    rows,
-                    inner,
-                    cols,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "faer",
-                    message,
-                })?;
-                "faer"
-            }
-            #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => {
-                match wgpu_dense::matmul_prepacked(lhs, packed, rows, inner, cols) {
-                    Ok(buffer) => {
-                        work_slice.copy_from_slice(&buffer);
-                        "wgpu"
-                    }
-                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
-                        matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
-                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
-                        fallback_message = Some(message);
-                        "naive"
-                    }
-                    Err(message) => {
-                        return Err(TensorError::BackendFailure {
-                            backend: "wgpu",
-                            message,
+                MatmulBackend::CpuSimd => {
+                    if !matches!(packed.layout(), PackedLayout::ColMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "simd matmul expects col-major packed rhs",
                         });
                     }
+                    cpu_dense::matmul_packed_into(
+                        work_slice,
+                        lhs,
+                        packed.as_slice(),
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                    "cpu_simd"
                 }
-            }
-            #[cfg(feature = "hip")]
-            MatmulBackend::GpuHip => {
-                return Err(TensorError::BackendFailure {
-                    backend: "hip",
-                    message: "hip matmul does not yet support prepacked operands".into(),
-                });
-            }
+                MatmulBackend::CpuNaive => {
+                    matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
+                    "naive"
+                }
+                MatmulBackend::CpuFaer => {
+                    let lhs_layout = self.layout.to_dense(rows, inner)?;
+                    let rhs_layout = packed.layout().to_dense();
+                    faer_dense::matmul_oriented_into(
+                        work_slice,
+                        lhs,
+                        lhs_layout,
+                        packed.as_slice(),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                    "faer"
+                }
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    match wgpu_dense::matmul_prepacked(lhs, packed, rows, inner, cols) {
+                        Ok(buffer) => {
+                            work_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(message)
+                            if !strict_gpu_path() && wgpu_runtime_unavailable(&message) =>
+                        {
+                            matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(message);
+                            "naive"
+                        }
+                        Err(message) => {
+                            return Err(TensorError::BackendFailure {
+                                backend: "wgpu",
+                                message,
+                            });
+                        }
+                    }
+                }
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    return Err(TensorError::BackendFailure {
+                        backend: "hip",
+                        message: "hip matmul does not yet support prepacked operands".into(),
+                    });
+                }
+            };
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?
         };
         Self::validate_finite_tensor_util_slice("matmul_prepacked_output", scratch.as_slice())?;
         dst.data_mut().copy_from_slice(scratch.as_slice());
@@ -2668,25 +2875,33 @@ impl Tensor {
             &[self.rows, self.cols, packed.inner(), packed.cols()],
             &[rows, cols],
         );
-        crate::emit_tensor_op_meta("matmul_prepacked", || {
-            serde_json::json!({
-                "backend": backend_used,
-                "requested_backend": backend.label(),
-                "rows": rows,
-                "inner": inner,
-                "cols": cols,
-                "lhs_layout": self.layout.as_str(),
-                "rhs_layout": "packed",
-                "packed_layout": packed.layout().as_str(),
-                "packed_tile": {
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("inner".to_owned(), serde_json::json!(inner));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert(
+                "lhs_layout".to_owned(),
+                serde_json::json!(self.layout.as_str()),
+            );
+            data.insert("rhs_layout".to_owned(), serde_json::json!("packed"));
+            data.insert(
+                "packed_layout".to_owned(),
+                serde_json::json!(packed.layout().as_str()),
+            );
+            data.insert(
+                "packed_tile".to_owned(),
+                serde_json::json!({
                     "tm": packed.tile().tm,
                     "tn": packed.tile().tn,
                     "tk": packed.tile().tk,
-                },
-                "fallback": fallback_reason.map(|reason| {
-                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
                 }),
-            })
+            );
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref()),
+                );
+            }
         });
         Ok(())
     }
@@ -3041,35 +3256,52 @@ impl Tensor {
         let rows = self.rows;
         let cols = self.cols;
         Self::validate_finite_tensor_util_slice("row_softmax_input", self.data())?;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::Softmax {
+                rows: execution_dimension(rows)?,
+                cols: execution_dimension(cols)?,
+            },
+            "row_softmax",
+            backend.tensor_execution_backend(),
+        )?;
 
-        let (output, backend_used, fallback_reason) = match backend {
-            SoftmaxBackend::Auto => self
-                .row_softmax_auto(rows, cols)
-                .map(|(tensor, backend)| (tensor, backend, None::<&'static str>)),
-            SoftmaxBackend::Cpu => {
-                let buffer = row_softmax_cpu(self.data(), rows, cols);
-                Tensor::from_vec(rows, cols, buffer)
-                    .map(|tensor| (tensor, "cpu", None::<&'static str>))
-            }
-            #[cfg(feature = "wgpu")]
-            SoftmaxBackend::GpuWgpu => self.row_softmax_wgpu_or_cpu(rows, cols),
-        }?;
+        let (output, completion, fallback_reason) = if rows == 0 || cols == 0 {
+            (
+                Tensor::zeros(rows, cols)?,
+                completed_no_op_execution(execution)?,
+                None,
+            )
+        } else {
+            let (output, backend_used, fallback_reason) = match backend {
+                SoftmaxBackend::Auto => self
+                    .row_softmax_auto(rows, cols)
+                    .map(|(tensor, backend)| (tensor, backend, None::<&'static str>)),
+                SoftmaxBackend::Cpu => {
+                    let buffer = row_softmax_cpu(self.data(), rows, cols);
+                    Tensor::from_vec(rows, cols, buffer)
+                        .map(|tensor| (tensor, "cpu", None::<&'static str>))
+                }
+                #[cfg(feature = "wgpu")]
+                SoftmaxBackend::GpuWgpu => self.row_softmax_wgpu_or_cpu(rows, cols),
+            }?;
+            let completion =
+                completed_component_execution(execution, backend_used, fallback_reason.is_some())?;
+            (output, completion, fallback_reason)
+        };
         Self::validate_finite_tensor_util_slice("row_softmax_output", output.data())?;
 
         crate::emit_tensor_op("row_softmax", &[rows, cols], &[rows, cols]);
-        if backend_used != "wgpu_dense" {
-            crate::emit_tensor_op_meta("row_softmax", || {
-                serde_json::json!({
-                    "backend": backend_used,
-                    "requested_backend": backend.label(),
-                    "rows": rows,
-                    "cols": cols,
-                    "layout": self.layout.as_str(),
-                    "fallback": fallback_reason
-                        .map(|reason| wgpu_runtime_fallback_meta("cpu", reason, None)),
-                })
-            });
-        }
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert("layout".to_owned(), serde_json::json!(self.layout.as_str()));
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", reason, None),
+                );
+            }
+        });
         Ok(output)
     }
 
@@ -3541,22 +3773,29 @@ impl Tensor {
         } else {
             None
         };
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::LayerNorm {
+                rows: execution_dimension(rows)?,
+                cols: execution_dimension(cols)?,
+            },
+            "layer_norm",
+            backend.tensor_execution_backend(),
+        )?;
 
         if rows == 0 {
             let tensor = Tensor::zeros(rows, cols)?;
             crate::emit_tensor_op("layer_norm", &[rows, cols], &[rows, cols]);
-            crate::emit_tensor_op_meta("layer_norm", || {
-                serde_json::json!({
-                    "backend": "cpu",
-                    "requested_backend": backend.label(),
-                    "rows": rows,
-                    "cols": cols,
-                    "epsilon": epsilon,
-                    "flags": {
+            emit_tensor_execution_receipt(completed_no_op_execution(execution)?, |data| {
+                data.insert("rows".to_owned(), serde_json::json!(rows));
+                data.insert("cols".to_owned(), serde_json::json!(cols));
+                data.insert("epsilon".to_owned(), serde_json::json!(epsilon));
+                data.insert(
+                    "flags".to_owned(),
+                    serde_json::json!({
                         "use_residual": residual_data.is_some(),
                         "empty": true,
-                    }
-                })
+                    }),
+                );
             });
             return Ok(tensor);
         }
@@ -3571,6 +3810,14 @@ impl Tensor {
 
         let gamma_slice = gamma.data();
         let beta_slice = beta.data();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
 
         let (tensor, backend_used): (Tensor, &'static str) = match backend {
             LayerNormBackend::Auto => {
@@ -3640,7 +3887,7 @@ impl Tensor {
                             ),
                         });
                     }
-                    let tensor = Self::layer_norm_wgpu(
+                    match Self::layer_norm_wgpu(
                         self.data(),
                         residual_data,
                         gamma_slice,
@@ -3648,12 +3895,28 @@ impl Tensor {
                         rows,
                         cols,
                         epsilon,
-                    )
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "wgpu",
-                        message,
-                    })?;
-                    (tensor, "wgpu_dense")
+                    ) {
+                        Ok(tensor) => (tensor, "wgpu_dense"),
+                        Err(message)
+                            if !strict_gpu_path() && wgpu_runtime_unavailable(&message) =>
+                        {
+                            let tensor = self.layer_norm_cpu(
+                                residual_data,
+                                gamma_slice,
+                                beta_slice,
+                                epsilon,
+                            )?;
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(message);
+                            (tensor, "cpu")
+                        }
+                        Err(message) => {
+                            return Err(TensorError::BackendFailure {
+                                backend: "wgpu",
+                                message,
+                            });
+                        }
+                    }
                 }
                 #[cfg(not(feature = "wgpu"))]
                 {
@@ -3664,22 +3927,27 @@ impl Tensor {
                 }
             }
         };
+        let completion =
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?;
 
         crate::emit_tensor_op("layer_norm", &[rows, cols], &[rows, cols]);
-        if backend_used != "wgpu_dense" {
-            crate::emit_tensor_op_meta("layer_norm", || {
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(rows));
+            data.insert("cols".to_owned(), serde_json::json!(cols));
+            data.insert("epsilon".to_owned(), serde_json::json!(epsilon));
+            data.insert(
+                "flags".to_owned(),
                 serde_json::json!({
-                    "backend": backend_used,
-                    "requested_backend": backend.label(),
-                    "rows": rows,
-                    "cols": cols,
-                    "epsilon": epsilon,
-                    "flags": {
-                        "use_residual": residual_data.is_some(),
-                    }
-                })
-            });
-        }
+                    "use_residual": residual_data.is_some(),
+                }),
+            );
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", reason, fallback_message.as_deref()),
+                );
+            }
+        });
         Ok(tensor)
     }
 
@@ -3862,6 +4130,17 @@ impl Tensor {
         }
 
         let head_dim = self.cols;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::Attention {
+                contexts: execution_dimension(contexts)?,
+                sequence: execution_dimension(sequence)?,
+                head_dim: execution_dimension(head_dim)?,
+                z_bias: z_bias_slice.is_some(),
+                attn_bias: attn_bias_slice.is_some(),
+            },
+            "scaled_dot_attention",
+            backend.tensor_execution_backend(),
+        )?;
         if expected_rows == 0 || head_dim == 0 {
             let tensor = Tensor::zeros(expected_rows, head_dim)?;
             crate::emit_tensor_op(
@@ -3869,26 +4148,33 @@ impl Tensor {
                 &[expected_rows, head_dim],
                 &[expected_rows, head_dim],
             );
-            crate::emit_tensor_op_meta("scaled_dot_attention", || {
-                serde_json::json!({
-                    "backend": "cpu",
-                    "requested_backend": backend.label(),
-                    "contexts": contexts,
-                    "sequence": sequence,
-                    "head_dim": head_dim,
-                    "scale": scale,
-                    "flags": {
+            emit_tensor_execution_receipt(completed_no_op_execution(execution)?, |data| {
+                data.insert("contexts".to_owned(), serde_json::json!(contexts));
+                data.insert("sequence".to_owned(), serde_json::json!(sequence));
+                data.insert("head_dim".to_owned(), serde_json::json!(head_dim));
+                data.insert("scale".to_owned(), serde_json::json!(scale));
+                data.insert(
+                    "flags".to_owned(),
+                    serde_json::json!({
                         "use_z_bias": z_bias_slice.is_some(),
                         "use_attn_bias": attn_bias_slice.is_some(),
                         "empty": true,
-                    }
-                })
+                    }),
+                );
             });
             return Ok(tensor);
         }
         let queries = self.data();
         let keys_data = keys.data();
         let values_data = values.data();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
 
         let make_tensor = |buffer: Vec<f32>| {
             Self::validate_finite_tensor_util_slice(
@@ -3970,7 +4256,7 @@ impl Tensor {
             }
             #[cfg(feature = "wgpu")]
             AttentionBackend::GpuWgpu => {
-                let data = wgpu_dense::fused_attention(
+                match wgpu_dense::fused_attention(
                     queries,
                     keys_data,
                     values_data,
@@ -3980,12 +4266,29 @@ impl Tensor {
                     scale,
                     z_bias_slice,
                     attn_bias_slice,
-                )
-                .map_err(|message| TensorError::BackendFailure {
-                    backend: "wgpu",
-                    message,
-                })?;
-                make_tensor(data).map(|tensor| (tensor, "wgpu_dense"))
+                ) {
+                    Ok(data) => make_tensor(data).map(|tensor| (tensor, "wgpu_dense")),
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        let buffer = fused_attention_cpu(
+                            queries,
+                            keys_data,
+                            values_data,
+                            contexts,
+                            sequence,
+                            head_dim,
+                            scale,
+                            z_bias_slice,
+                            attn_bias_slice,
+                        )?;
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(message);
+                        make_tensor(buffer).map(|tensor| (tensor, "cpu"))
+                    }
+                    Err(message) => Err(TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    }),
+                }
             }
             #[cfg(not(feature = "wgpu"))]
             AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
@@ -3993,28 +4296,33 @@ impl Tensor {
                 message: "wgpu backend disabled at compile time".into(),
             }),
         }?;
+        let completion =
+            completed_component_execution(execution, backend_used, fallback_reason.is_some())?;
 
         crate::emit_tensor_op(
             "scaled_dot_attention",
             &[expected_rows, head_dim],
             &[expected_rows, head_dim],
         );
-        if backend_used != "wgpu_dense" {
-            crate::emit_tensor_op_meta("scaled_dot_attention", || {
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("contexts".to_owned(), serde_json::json!(contexts));
+            data.insert("sequence".to_owned(), serde_json::json!(sequence));
+            data.insert("head_dim".to_owned(), serde_json::json!(head_dim));
+            data.insert("scale".to_owned(), serde_json::json!(scale));
+            data.insert(
+                "flags".to_owned(),
                 serde_json::json!({
-                    "backend": backend_used,
-                    "requested_backend": backend.label(),
-                    "contexts": contexts,
-                    "sequence": sequence,
-                    "head_dim": head_dim,
-                    "scale": scale,
-                    "flags": {
-                        "use_z_bias": z_bias_slice.is_some(),
-                        "use_attn_bias": attn_bias_slice.is_some(),
-                    }
-                })
-            });
-        }
+                    "use_z_bias": z_bias_slice.is_some(),
+                    "use_attn_bias": attn_bias_slice.is_some(),
+                }),
+            );
+            if let Some(reason) = fallback_reason {
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", reason, fallback_message.as_deref()),
+                );
+            }
+        });
         Ok(tensor)
     }
 
@@ -5293,6 +5601,15 @@ impl Tensor {
         _backend: TensorUtilBackend,
     ) -> PureResult<Tensor> {
         Self::validate_scale_factor("scale_factor", value)?;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::Scale,
+                rows: execution_dimension(self.rows)?,
+                cols: execution_dimension(self.cols)?,
+            },
+            "scale",
+            _backend.tensor_execution_backend(),
+        )?;
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -5314,27 +5631,35 @@ impl Tensor {
                             &[self.rows, self.cols],
                             &[self.rows, self.cols],
                         );
-                        emit_wgpu_tensor_op_meta(
-                            "scale",
-                            _backend.label(),
-                            self.rows,
-                            self.cols,
-                            self.rows,
-                            self.cols,
-                            self.layout,
-                            "elementwise",
-                            "tensor_util.scale",
-                            |data| {
-                                data.insert("scale".to_string(), serde_json::json!(value));
-                            },
-                        );
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
+                        emit_tensor_execution_receipt(completion, |data| {
+                            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+                            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+                            data.insert(
+                                "values".to_owned(),
+                                serde_json::json!(self.rows.saturating_mul(self.cols)),
+                            );
+                            data.insert(
+                                "layout".to_owned(),
+                                serde_json::json!(self.layout.as_str()),
+                            );
+                            data.insert("kind".to_owned(), serde_json::json!("elementwise"));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.scale"),
+                            );
+                            data.insert("scale".to_owned(), serde_json::json!(value));
+                        });
                         return Ok(output);
                     }
-                    Err(message) if strict_gpu_path() => {
-                        return Err(strict_gpu_fallback_error("wgpu", "scale", message));
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
                     }
                     Err(message) => {
-                        wgpu_failure = Some(message);
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
                     }
                 }
             }
@@ -5345,31 +5670,36 @@ impl Tensor {
             data.push(Self::checked_scale_output(a, value)?);
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        let is_empty = self.rows == 0 || self.cols == 0;
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu) && !is_empty;
+        let completion = if is_empty {
+            completed_no_op_execution(execution)?
+        } else {
+            completed_component_execution(execution, "cpu", runtime_fallback)?
+        };
         crate::emit_tensor_op("scale", &[self.rows, self.cols], &[self.rows, self.cols]);
-        emit_tensor_util_cpu_op_meta(
-            "scale",
-            self.rows,
-            self.cols,
-            self.rows,
-            self.cols,
-            self.layout,
-            _backend.label(),
-            "elementwise",
-            |data| {
-                data.insert("scale".to_string(), serde_json::json!(value));
+        emit_tensor_execution_receipt(completion, |data| {
+            data.insert("rows".to_owned(), serde_json::json!(self.rows));
+            data.insert("cols".to_owned(), serde_json::json!(self.cols));
+            data.insert(
+                "values".to_owned(),
+                serde_json::json!(self.rows.saturating_mul(self.cols)),
+            );
+            data.insert("layout".to_owned(), serde_json::json!(self.layout.as_str()));
+            data.insert("kind".to_owned(), serde_json::json!("elementwise"));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            data.insert("scale".to_owned(), serde_json::json!(value));
+            if runtime_fallback {
                 #[cfg(feature = "wgpu")]
-                if let Some(message) = wgpu_failure.as_deref() {
-                    data.insert(
-                        "fallback".to_string(),
-                        wgpu_runtime_fallback_meta(
-                            "cpu",
-                            WGPU_RUNTIME_FALLBACK_REASON,
-                            Some(message),
-                        ),
-                    );
-                }
-            },
-        );
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
         Ok(output)
     }
 
@@ -13338,12 +13668,24 @@ mod tests {
                 .iter()
                 .find(|(observed, _)| *observed == op_name)
                 .unwrap_or_else(|| panic!("{op_name} metadata event"));
-            assert_eq!(data["backend"], "wgpu_dense");
+            let expected_backend = if op_name == "scale" {
+                "wgpu"
+            } else {
+                "wgpu_dense"
+            };
+            assert_eq!(data["backend"], expected_backend);
             assert_eq!(data["requested_backend"], "wgpu");
             assert!(data["kernel"]
                 .as_str()
                 .unwrap_or_default()
                 .starts_with("tensor_util."));
+            if op_name == "scale" {
+                assert_eq!(data["event_phase"], "completed");
+                assert_eq!(data["route_status"], "direct");
+                assert_eq!(data["kernel_backend"], "wgpu_dense");
+                assert_eq!(data["execution_receipt"]["executed_backend"], "wgpu");
+                assert_eq!(data["execution_receipt"]["kernel_backend"], "wgpu_dense");
+            }
         }
     }
 
@@ -14296,8 +14638,14 @@ mod tests {
                     && data["head_dim"] == 4
             })
             .expect("empty scaled attention metadata event");
-        assert_eq!(attention.1["backend"], "cpu");
+        assert!(attention.1.get("backend").is_none());
         assert_eq!(attention.1["requested_backend"], "cpu");
+        assert_eq!(attention.1["route_status"], "no_op");
+        assert_eq!(attention.1["event_phase"], "completed");
+        assert_eq!(attention.1["execution_receipt"]["route_status"], "no_op");
+        assert!(attention.1["execution_receipt"]
+            .get("executed_backend")
+            .is_none());
         assert_eq!(attention.1["flags"]["empty"], true);
         assert_eq!(attention.1["flags"]["use_z_bias"], true);
         assert_eq!(attention.1["flags"]["use_attn_bias"], true);
@@ -14464,8 +14812,14 @@ mod tests {
                 *op_name == "layer_norm" && data["rows"] == 0 && data["cols"] == 3
             })
             .expect("empty layer_norm metadata event");
-        assert_eq!(layer_norm.1["backend"], "cpu");
+        assert!(layer_norm.1.get("backend").is_none());
         assert_eq!(layer_norm.1["requested_backend"], "cpu");
+        assert_eq!(layer_norm.1["route_status"], "no_op");
+        assert_eq!(layer_norm.1["event_phase"], "completed");
+        assert_eq!(layer_norm.1["execution_receipt"]["route_status"], "no_op");
+        assert!(layer_norm.1["execution_receipt"]
+            .get("executed_backend")
+            .is_none());
         assert_eq!(layer_norm.1["flags"]["empty"], true);
         assert_eq!(layer_norm.1["flags"]["use_residual"], true);
     }
@@ -14695,7 +15049,7 @@ mod tests {
 
         let backends = vec![
             (MatmulBackend::CpuNaive, "naive", "naive"),
-            (MatmulBackend::CpuSimd, "simd", "cpu_simd"),
+            (MatmulBackend::CpuSimd, "cpu_simd", "cpu_simd"),
             #[cfg(feature = "faer")]
             (MatmulBackend::CpuFaer, "faer", "faer"),
         ];
@@ -15128,6 +15482,15 @@ mod tests {
             .expect("matmul metadata event");
         assert_eq!(matmul.1["requested_backend"], "auto");
         assert!(matmul.1["backend"].as_str().is_some());
+        assert_eq!(matmul.1["event_phase"], "completed");
+        assert_eq!(
+            matmul.1["execution_receipt"]["route_status"],
+            "auto_resolved"
+        );
+        assert_eq!(
+            matmul.1["execution_receipt"]["executed_backend"],
+            matmul.1["backend"]
+        );
         assert_eq!(matmul.1["rows"], 4);
         assert_eq!(matmul.1["inner"], 3);
         assert_eq!(matmul.1["cols"], 5);
@@ -15145,6 +15508,119 @@ mod tests {
         assert!(prepacked.1["backend"].as_str().is_some());
         assert_eq!(prepacked.1["rhs_layout"], "packed");
         assert_eq!(prepacked.1["packed_layout"], "col_major");
+    }
+
+    #[test]
+    fn empty_component_outputs_emit_no_op_receipts_without_backend_claims() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let lhs = unwrap_ok(Tensor::zeros(0, 3));
+        let rhs = unwrap_ok(Tensor::zeros(3, 2));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let transposed_lhs = unwrap_ok(Tensor::zeros(2, 0));
+        let transposed_rhs = unwrap_ok(Tensor::zeros(2, 4));
+
+        let _ = unwrap_ok(lhs.matmul_with_backend(&rhs, MatmulBackend::CpuNaive));
+        let _ = unwrap_ok(lhs.matmul_scaled_with_backend(&rhs, 0.5, MatmulBackend::CpuNaive));
+        let _ = unwrap_ok(transposed_lhs.matmul_lhs_transpose_scaled_with_backend(
+            &transposed_rhs,
+            0.5,
+            MatmulBackend::CpuNaive,
+        ));
+        let _ = unwrap_ok(lhs.matmul_prepacked_with_backend(&packed, MatmulBackend::CpuNaive));
+        let _ = unwrap_ok(lhs.matmul_prepacked_bias_with_backend(
+            &packed,
+            &[0.0, 0.0],
+            MatmulBackend::CpuNaive,
+        ));
+        let _ = unwrap_ok(lhs.row_softmax_with_backend(SoftmaxBackend::Cpu));
+        let _ = unwrap_ok(lhs.scale_with_backend(2.0, TensorUtilBackend::Cpu));
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for operation in [
+            "matmul",
+            "matmul_scaled",
+            "matmul_lhs_transpose_scaled",
+            "matmul_prepacked",
+            "matmul_prepacked_bias",
+            "row_softmax",
+            "scale",
+        ] {
+            let event = events
+                .iter()
+                .find(|(op_name, data)| *op_name == operation && data["event_phase"] == "completed")
+                .unwrap_or_else(|| panic!("missing completed {operation} metadata event"));
+            assert_eq!(event.1["route_status"], "no_op", "{operation}");
+            assert_eq!(event.1["counts_as_execution"], false, "{operation}");
+            assert!(event.1.get("backend").is_none(), "{operation}");
+            assert!(event.1.get("kernel_backend").is_none(), "{operation}");
+            assert_eq!(
+                event.1["execution_receipt"]["route_status"], "no_op",
+                "{operation}"
+            );
+            assert!(
+                event.1["execution_receipt"]
+                    .get("executed_backend")
+                    .is_none(),
+                "{operation}"
+            );
+            assert!(
+                event.1["execution_receipt"].get("kernel_backend").is_none(),
+                "{operation}"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn explicit_wgpu_scale_without_wgpu_feature_emits_typed_cpu_fallback() {
+        let _lock = observer_lock();
+        let _fallback = crate::execution::push_accelerator_fallback(
+            crate::execution::AcceleratorFallback::Allow,
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let tensor = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]));
+        let output = unwrap_ok(tensor.scale_with_backend(2.0, TensorUtilBackend::GpuWgpu));
+        crate::set_thread_meta_observer(previous);
+
+        assert_eq!(output.data(), &[2.0, -4.0, 1.0]);
+        let events = events.lock().unwrap();
+        let completed = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "scale" && data["event_phase"] == "completed")
+            .expect("completed scale fallback event");
+        assert_eq!(completed.1["backend"], "cpu");
+        assert_eq!(completed.1["kernel_backend"], "cpu");
+        assert_eq!(completed.1["route_status"], "runtime_fallback");
+        assert_eq!(completed.1["fallback"]["from"], "wgpu");
+        assert_eq!(completed.1["fallback"]["to"], "cpu");
+        assert_eq!(
+            completed.1["execution_receipt"]["requested_backend"],
+            "wgpu"
+        );
+        assert_eq!(completed.1["execution_receipt"]["executed_backend"], "cpu");
+        assert_eq!(completed.1["execution_receipt"]["kernel_backend"], "cpu");
+        assert_eq!(
+            completed.1["execution_receipt"]["fallback"]["reason"],
+            "runtime_unavailable"
+        );
     }
 
     #[test]
@@ -15178,7 +15654,96 @@ mod tests {
             })
             .expect("row_softmax metadata event");
         assert_eq!(softmax.1["requested_backend"], "cpu");
+        assert_eq!(softmax.1["event_phase"], "completed");
+        assert_eq!(softmax.1["route_status"], "direct");
+        assert_eq!(softmax.1["counts_as_execution"], true);
+        assert_eq!(softmax.1["execution_receipt"]["executed_backend"], "cpu");
         assert_eq!(softmax.1["layout"], "row_major");
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn live_wgpu_components_emit_one_completed_receipt_after_prepared_dispatch() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let _strict = crate::execution::push_accelerator_fallback(
+            crate::execution::AcceleratorFallback::Forbid,
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let logits = unwrap_ok(Tensor::from_vec(1, 2, vec![0.0, 1.0]));
+        let _ = unwrap_ok(logits.row_softmax_with_backend(SoftmaxBackend::GpuWgpu));
+
+        let input = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 3.0]));
+        let gamma = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 1.0]));
+        let beta = unwrap_ok(Tensor::from_vec(1, 2, vec![0.0, 0.0]));
+        let _ = unwrap_ok(input.layer_norm_affine_with_backend(
+            &gamma,
+            &beta,
+            1.0e-5,
+            LayerNormBackend::GpuWgpu,
+        ));
+
+        let queries = unwrap_ok(Tensor::from_vec(1, 2, vec![0.25, -0.5]));
+        let keys = unwrap_ok(Tensor::from_vec(1, 2, vec![0.75, 0.5]));
+        let values = unwrap_ok(Tensor::from_vec(1, 2, vec![0.125, -0.25]));
+        let _ = unwrap_ok(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            1,
+            1,
+            std::f32::consts::FRAC_1_SQRT_2,
+            None,
+            None,
+            AttentionBackend::GpuWgpu,
+        ));
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for (op_name, expected_component) in [
+            ("row_softmax", "softmax"),
+            ("layer_norm", "layer_norm"),
+            ("scaled_dot_attention", "attention"),
+        ] {
+            let matching: Vec<_> = events
+                .iter()
+                .filter(|(observed, _)| *observed == op_name)
+                .collect();
+            assert_eq!(matching.len(), 2, "{op_name} event phases");
+            let prepared = matching
+                .iter()
+                .find(|(_, data)| data["event_phase"] == "dispatch_prepared")
+                .unwrap_or_else(|| panic!("{op_name} prepared event"));
+            assert_eq!(prepared.1["counts_as_execution"], false);
+            assert!(prepared.1.get("execution_receipt").is_none());
+
+            let completed = matching
+                .iter()
+                .find(|(_, data)| data["event_phase"] == "completed")
+                .unwrap_or_else(|| panic!("{op_name} completed event"));
+            assert_eq!(completed.1["counts_as_execution"], true);
+            assert_eq!(completed.1["backend"], "wgpu");
+            assert_eq!(completed.1["kernel_backend"], "wgpu_dense");
+            assert_eq!(completed.1["route_status"], "direct");
+            assert_eq!(
+                completed.1["execution_receipt"]["workload"]["component"],
+                expected_component
+            );
+            assert_eq!(completed.1["execution_receipt"]["executed_backend"], "wgpu");
+            assert_eq!(
+                completed.1["execution_receipt"]["kernel_backend"],
+                "wgpu_dense"
+            );
+        }
     }
 
     #[cfg(feature = "wgpu")]

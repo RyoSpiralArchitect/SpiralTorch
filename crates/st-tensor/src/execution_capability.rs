@@ -6,8 +6,11 @@
 //! recreate backend/component support rules. Accelerator readiness combines an
 //! exact workload preflight with a small operation-specific dispatch sentinel.
 
+use serde::{Deserialize, Serialize};
+
 /// Stable backend vocabulary used by tensor capability observations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorExecutionBackend {
     Auto,
     Cpu,
@@ -18,8 +21,55 @@ pub enum TensorExecutionBackend {
     Hip,
 }
 
+impl TensorExecutionBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Cpu => "cpu",
+            Self::CpuSimd => "cpu_simd",
+            Self::Naive => "naive",
+            Self::Faer => "faer",
+            Self::Wgpu => "wgpu",
+            Self::Hip => "hip",
+        }
+    }
+
+    pub const fn from_execution_id(value: &str) -> Option<Self> {
+        match value.as_bytes() {
+            b"auto" => Some(Self::Auto),
+            b"cpu" => Some(Self::Cpu),
+            b"cpu_simd" | b"simd" => Some(Self::CpuSimd),
+            b"naive" => Some(Self::Naive),
+            b"faer" => Some(Self::Faer),
+            b"wgpu" | b"wgpu_dense" => Some(Self::Wgpu),
+            b"hip" => Some(Self::Hip),
+            _ => None,
+        }
+    }
+
+    /// Whether this backend belongs to the component's stable execution vocabulary.
+    pub const fn supports_component(self, component: TensorExecutionComponent) -> bool {
+        match self {
+            Self::Auto | Self::Wgpu => true,
+            Self::Cpu => matches!(
+                component,
+                TensorExecutionComponent::LayerNorm
+                    | TensorExecutionComponent::Attention
+                    | TensorExecutionComponent::Softmax
+                    | TensorExecutionComponent::TensorUtil
+            ),
+            Self::CpuSimd | Self::Naive | Self::Faer => matches!(
+                component,
+                TensorExecutionComponent::DenseMatmul | TensorExecutionComponent::PrepackedMatmul
+            ),
+            Self::Hip => matches!(component, TensorExecutionComponent::DenseMatmul),
+        }
+    }
+}
+
 /// Tensor operation families whose execution support can be observed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorExecutionComponent {
     DenseMatmul,
     PrepackedMatmul,
@@ -29,14 +79,49 @@ pub enum TensorExecutionComponent {
     TensorUtil,
 }
 
+impl TensorExecutionComponent {
+    pub const ALL: [Self; 6] = [
+        Self::DenseMatmul,
+        Self::PrepackedMatmul,
+        Self::LayerNorm,
+        Self::Attention,
+        Self::Softmax,
+        Self::TensorUtil,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DenseMatmul => "dense_matmul",
+            Self::PrepackedMatmul => "prepacked_matmul",
+            Self::LayerNorm => "layer_norm",
+            Self::Attention => "attention",
+            Self::Softmax => "softmax",
+            Self::TensorUtil => "tensor_util",
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::DenseMatmul => 0,
+            Self::PrepackedMatmul => 1,
+            Self::LayerNorm => 2,
+            Self::Attention => 3,
+            Self::Softmax => 4,
+            Self::TensorUtil => 5,
+        }
+    }
+}
+
 /// Tensor utility kernels represented by the current runtime contract.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorUtilOperation {
     Scale,
 }
 
 /// One concrete tensor workload whose implementation can be preflighted.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "component", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TensorExecutionWorkload {
     DenseMatmul {
         rows: u64,
@@ -47,6 +132,7 @@ pub enum TensorExecutionWorkload {
         rows: u64,
         inner: u64,
         cols: u64,
+        #[serde(default)]
         bias: bool,
     },
     LayerNorm {
@@ -57,7 +143,9 @@ pub enum TensorExecutionWorkload {
         contexts: u64,
         sequence: u64,
         head_dim: u64,
+        #[serde(default)]
         z_bias: bool,
+        #[serde(default)]
         attn_bias: bool,
     },
     Softmax {
@@ -81,6 +169,27 @@ impl TensorExecutionWorkload {
             Self::Softmax { .. } => TensorExecutionComponent::Softmax,
             Self::TensorUtil { .. } => TensorExecutionComponent::TensorUtil,
         }
+    }
+
+    pub fn output_values_saturating(self) -> usize {
+        let volume = match self {
+            Self::DenseMatmul { rows, cols, .. }
+            | Self::PrepackedMatmul { rows, cols, .. }
+            | Self::LayerNorm { rows, cols }
+            | Self::Softmax { rows, cols }
+            | Self::TensorUtil { rows, cols, .. } => rows.saturating_mul(cols),
+            Self::Attention {
+                contexts,
+                sequence,
+                head_dim,
+                ..
+            } => contexts.saturating_mul(sequence).saturating_mul(head_dim),
+        };
+        usize::try_from(volume).unwrap_or(usize::MAX)
+    }
+
+    pub fn has_empty_output(self) -> bool {
+        self.output_values_saturating() == 0
     }
 }
 
