@@ -1395,8 +1395,9 @@ impl PyTensor {
         Ok(Self { inner: tensor })
     }
 
-    pub fn sum_axis0(&self) -> Vec<f32> {
-        self.inner.sum_axis0()
+    pub fn sum_axis0(&self, py: Python<'_>) -> PyResult<Vec<f32>> {
+        py.allow_threads(|| self.inner.try_sum_axis0())
+            .map_err(tensor_err_to_py)
     }
 
     pub fn sum_axis1(&self) -> Vec<f32> {

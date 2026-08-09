@@ -908,7 +908,11 @@ mod tests {
         builder.build("readout_regressor").unwrap()
     }
 
-    fn max_readout_runtime_plan(rows: u64, cols: u64) -> RuntimeExecutionPlanPayload {
+    fn readout_runtime_plan(
+        readout: GraphReadout,
+        rows: u64,
+        cols: u64,
+    ) -> RuntimeExecutionPlanPayload {
         let runtime_probe = evaluate_runtime_device_probe(RuntimeDeviceProbeRequest {
             requested_backend: BackendKind::Cpu,
             caps: DeviceCaps::cpu(),
@@ -919,29 +923,39 @@ mod tests {
             compaction_hint: None,
         })
         .expect("CPU runtime probe");
+        let operations = match readout {
+            GraphReadout::Mean => vec![
+                RuntimeTensorUtilOperation::SumAxis0Scaled,
+                RuntimeTensorUtilOperation::AddRow,
+            ],
+            GraphReadout::Sum => vec![
+                RuntimeTensorUtilOperation::SumAxis0,
+                RuntimeTensorUtilOperation::AddRow,
+            ],
+            GraphReadout::Max => vec![
+                RuntimeTensorUtilOperation::MaxAxis0,
+                RuntimeTensorUtilOperation::MaxAxis0Backward,
+            ],
+        };
         let request = RuntimeExecutionPlanRequest {
             runtime_probe,
             execution_config: ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
             component_resolution: RuntimeComponentResolution::Deferred,
-            component_workloads: vec![
-                RuntimeComponentWorkload::TensorUtil {
-                    operation: RuntimeTensorUtilOperation::MaxAxis0Backward,
+            component_workloads: operations
+                .into_iter()
+                .map(|operation| RuntimeComponentWorkload::TensorUtil {
+                    operation,
                     rows,
                     cols,
-                },
-                RuntimeComponentWorkload::TensorUtil {
-                    operation: RuntimeTensorUtilOperation::MaxAxis0,
-                    rows,
-                    cols,
-                },
-            ],
+                })
+                .collect(),
             component_capability_observation: None,
             tensor_util_values: None,
             required_native_components: Vec::new(),
         };
         let request = observe_runtime_execution_plan_capabilities(request)
-            .expect("max readout operation capabilities");
-        evaluate_runtime_execution_plan(request).expect("max readout runtime plan")
+            .expect("readout operation capabilities");
+        evaluate_runtime_execution_plan(request).expect("readout runtime plan")
     }
 
     #[test]
@@ -986,17 +1000,41 @@ mod tests {
     }
 
     #[test]
-    fn committed_runtime_plan_executes_max_readout_forward_and_backward() {
-        let plan = max_readout_runtime_plan(3, 2);
-        let _policy = push_runtime_execution_plan(&plan).expect("executable max readout plan");
+    fn committed_runtime_plans_execute_every_readout_forward_and_backward() {
         let nodes = sample_node_features();
         let grad = Tensor::from_vec(1, 2, vec![0.6, -0.3]).unwrap();
+        let cases = [
+            (
+                GraphReadout::Mean,
+                vec![2.0 / 3.0, 0.0],
+                vec![0.2, -0.1, 0.2, -0.1, 0.2, -0.1],
+            ),
+            (
+                GraphReadout::Sum,
+                vec![2.0, 0.0],
+                vec![0.6, -0.3, 0.6, -0.3, 0.6, -0.3],
+            ),
+            (
+                GraphReadout::Max,
+                vec![3.0, 0.5],
+                vec![0.0, 0.0, 0.6, -0.15, 0.0, -0.15],
+            ),
+        ];
 
-        let output = GraphReadout::Max.forward(&nodes).unwrap();
-        let propagated = GraphReadout::Max.backward(&nodes, &grad).unwrap();
+        for (readout, expected_output, expected_gradient) in cases {
+            let plan = readout_runtime_plan(readout, 3, 2);
+            let _policy =
+                push_runtime_execution_plan(&plan).expect("executable readout runtime plan");
+            let output = readout.forward(&nodes).unwrap();
+            let propagated = readout.backward(&nodes, &grad).unwrap();
 
-        assert_eq!(output.data(), &[3.0, 0.5]);
-        assert_eq!(propagated.data(), &[0.0, 0.0, 0.6, -0.15, 0.0, -0.15]);
+            for (&actual, expected) in output.data().iter().zip(expected_output) {
+                assert!((actual - expected).abs() < 1.0e-6);
+            }
+            for (&actual, expected) in propagated.data().iter().zip(expected_gradient) {
+                assert!((actual - expected).abs() < 1.0e-6);
+            }
+        }
     }
 
     #[test]

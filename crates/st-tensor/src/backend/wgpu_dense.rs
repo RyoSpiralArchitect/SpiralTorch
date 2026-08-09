@@ -3545,6 +3545,9 @@ mod tests {
         assert!(!supports_layer_norm(4, 0));
         assert!(!supports_row_softmax(0, 4));
         assert!(!supports_tensor_util_scale(4, 0));
+        assert!(!supports_tensor_util_add_row(0, 4));
+        assert!(!supports_tensor_util_sum_axis0(4, 0));
+        assert!(!supports_tensor_util_sum_axis0_scaled(0, 4));
         assert!(!supports_tensor_util_max_axis0(4, 0));
         assert!(!supports_tensor_util_max_axis0_backward(0, 4));
         assert!(!supports_fused_attention(
@@ -3565,6 +3568,25 @@ mod tests {
         assert!(backward.contains("inputs must be finite"));
     }
 
+    #[test]
+    fn readout_utilities_reject_non_finite_values_before_runtime_initialization() {
+        let add = add_row(&[1.0, f32::NAN], &[0.5, 0.25], 1, 2)
+            .expect_err("non-finite add-row input must fail before WGPU initialization");
+        assert!(add.contains("input must be finite"));
+
+        let bias = add_row(&[1.0, 2.0], &[0.5, f32::INFINITY], 1, 2)
+            .expect_err("non-finite add-row bias must fail before WGPU initialization");
+        assert!(bias.contains("bias must be finite"));
+
+        let sum = sum_axis0(&[1.0, f32::NAN], 1, 2)
+            .expect_err("non-finite sum input must fail before WGPU initialization");
+        assert!(sum.contains("input must be finite"));
+
+        let scaled = sum_axis0_scaled(&[1.0, 2.0], 1, 2, f32::NAN)
+            .expect_err("non-finite sum scale must fail before WGPU initialization");
+        assert!(scaled.contains("scale must be finite"));
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn component_preflights_compile_the_selected_lazy_pipelines() {
@@ -3581,6 +3603,9 @@ mod tests {
         assert!(supports_layer_norm(2, 4));
         assert!(supports_row_softmax(2, 4));
         assert!(supports_tensor_util_scale(2, 4));
+        assert!(supports_tensor_util_add_row(2, 4));
+        assert!(supports_tensor_util_sum_axis0(2, 4));
+        assert!(supports_tensor_util_sum_axis0_scaled(2, 4));
         assert!(supports_tensor_util_max_axis0(2, 4));
         assert!(supports_tensor_util_max_axis0_backward(2, 4));
         assert!(supports_fused_attention(1, 2, 4));
@@ -5130,6 +5155,13 @@ fn checked_tensor_util_shape(
     let cols_u32 = u32::try_from(cols).map_err(|_| format!("{op} cols exceed u32::MAX"))?;
     let volume_u32 = u32::try_from(volume).map_err(|_| format!("{op} volume exceeds u32::MAX"))?;
     Ok((volume, rows_u32, cols_u32, volume_u32))
+}
+
+fn require_finite_tensor_util_values(label: &str, values: &[f32]) -> Result<(), String> {
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(format!("{label} must be finite"));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7621,9 +7653,11 @@ pub fn add_row(input: &[f32], bias: &[f32], rows: usize, cols: usize) -> Result<
             bias.len()
         ));
     }
+    require_finite_tensor_util_values("add_row input", input)?;
+    require_finite_tensor_util_values("add_row bias", bias)?;
     let ctx = dense_context()?;
     let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
-    tensor_util_internal(
+    let output = tensor_util_internal(
         input,
         Some(bias),
         rows,
@@ -7636,14 +7670,17 @@ pub fn add_row(input: &[f32], bias: &[f32], rows: usize, cols: usize) -> Result<
         ctx.tensor_util_pipeline(TensorUtilKernel::AddRow)?,
         workgroups,
         "add_row",
-    )
+    )?;
+    require_finite_tensor_util_values("add_row output", &output)?;
+    Ok(output)
 }
 
 pub fn sum_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
     let _ = checked_tensor_util_shape("sum_axis0", input, rows, cols)?;
+    require_finite_tensor_util_values("sum_axis0 input", input)?;
     let cols_u32 = u32::try_from(cols).map_err(|_| "sum_axis0 cols exceed u32::MAX".to_string())?;
     let ctx = dense_context()?;
-    tensor_util_internal(
+    let output = tensor_util_internal(
         input,
         None,
         rows,
@@ -7656,7 +7693,9 @@ pub fn sum_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, St
         ctx.tensor_util_pipeline(TensorUtilKernel::SumAxis0)?,
         cols_u32,
         "sum_axis0",
-    )
+    )?;
+    require_finite_tensor_util_values("sum_axis0 output", &output)?;
+    Ok(output)
 }
 
 pub fn sum_axis0_scaled(
@@ -7666,10 +7705,14 @@ pub fn sum_axis0_scaled(
     scale: f32,
 ) -> Result<Vec<f32>, String> {
     let _ = checked_tensor_util_shape("sum_axis0_scaled", input, rows, cols)?;
+    require_finite_tensor_util_values("sum_axis0_scaled input", input)?;
+    if !scale.is_finite() {
+        return Err("sum_axis0_scaled scale must be finite".to_string());
+    }
     let cols_u32 =
         u32::try_from(cols).map_err(|_| "sum_axis0_scaled cols exceed u32::MAX".to_string())?;
     let ctx = dense_context()?;
-    tensor_util_internal(
+    let output = tensor_util_internal(
         input,
         None,
         rows,
@@ -7682,7 +7725,9 @@ pub fn sum_axis0_scaled(
         ctx.tensor_util_pipeline(TensorUtilKernel::SumAxis0Scaled)?,
         cols_u32,
         "sum_axis0_scaled",
-    )
+    )?;
+    require_finite_tensor_util_values("sum_axis0_scaled output", &output)?;
+    Ok(output)
 }
 
 pub fn max_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
@@ -9365,6 +9410,50 @@ pub fn supports_tensor_util_scale(rows: usize, cols: usize) -> bool {
     dispatch_1d_fits(ctx.device(), values, TENSOR_UTIL_WORKGROUP)
         && storage_values_fit(ctx.device(), values)
         && ctx.tensor_util_pipeline(TensorUtilKernel::Scale).is_ok()
+}
+
+/// Preflight row-wise broadcast addition in the lazy tensor-utility pipeline cache.
+pub fn supports_tensor_util_add_row(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), values, TENSOR_UTIL_WORKGROUP)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx.tensor_util_pipeline(TensorUtilKernel::AddRow).is_ok()
+}
+
+/// Preflight the axis-0 sum reduction in the lazy tensor-utility pipeline cache.
+pub fn supports_tensor_util_sum_axis0(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), cols, 1)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx.tensor_util_pipeline(TensorUtilKernel::SumAxis0).is_ok()
+}
+
+/// Preflight the scaled axis-0 sum reduction in the lazy tensor-utility pipeline cache.
+pub fn supports_tensor_util_sum_axis0_scaled(rows: usize, cols: usize) -> bool {
+    let Some(values) = matrix_values(rows, cols) else {
+        return false;
+    };
+    let Ok(ctx) = dense_context() else {
+        return false;
+    };
+    dispatch_1d_fits(ctx.device(), cols, 1)
+        && storage_values_fit(ctx.device(), values)
+        && storage_values_fit(ctx.device(), cols)
+        && ctx
+            .tensor_util_pipeline(TensorUtilKernel::SumAxis0Scaled)
+            .is_ok()
 }
 
 /// Preflight the axis-0 maximum reduction in the lazy tensor-utility pipeline cache.

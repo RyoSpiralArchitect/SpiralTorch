@@ -1117,6 +1117,33 @@ fn emit_tensor_util_cpu_op_meta<F>(
     );
 }
 
+fn insert_tensor_shape_meta(
+    data: &mut serde_json::Map<String, serde_json::Value>,
+    rows: usize,
+    cols: usize,
+    output_rows: usize,
+    output_cols: usize,
+    layout: Layout,
+) {
+    data.insert("rows".to_owned(), serde_json::json!(rows));
+    data.insert("cols".to_owned(), serde_json::json!(cols));
+    data.insert(
+        "values".to_owned(),
+        serde_json::json!(rows.saturating_mul(cols)),
+    );
+    data.insert("output_rows".to_owned(), serde_json::json!(output_rows));
+    data.insert("output_cols".to_owned(), serde_json::json!(output_cols));
+    data.insert(
+        "output_values".to_owned(),
+        serde_json::json!(output_rows.saturating_mul(output_cols)),
+    );
+    data.insert("layout".to_owned(), serde_json::json!(layout.as_str()));
+    data.insert(
+        "empty".to_owned(),
+        serde_json::json!(rows == 0 || cols == 0 || output_rows == 0 || output_cols == 0),
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_cpu_tensor_op_meta<F>(
     op_name: &'static str,
@@ -6176,102 +6203,116 @@ impl Tensor {
         bias: &[f32],
         _backend: TensorUtilBackend,
     ) -> PureResult<()> {
+        let rows = self.rows;
+        let cols = self.cols;
+        let input_layout = self.layout;
         if bias.len() != self.cols {
             return Err(TensorError::DataLength {
                 expected: self.cols,
                 got: bias.len(),
             });
         }
-        Self::validate_add_row_outputs(self.rows, self.cols, self.data(), bias)?;
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
+        Self::validate_add_row_outputs(rows, cols, input, bias)?;
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::AddRow,
+                rows: execution_dimension(rows)?,
+                cols: execution_dimension(cols)?,
+            },
+            "add_row_inplace",
+            _backend.tensor_execution_backend(),
+        )?;
+        let is_empty = rows == 0 || cols == 0;
+        if is_empty {
+            let completion = completed_no_op_execution(execution)?;
+            crate::emit_tensor_op(
+                "add_row_inplace",
+                &[rows, cols, 1, bias.len()],
+                &[rows, cols],
+            );
+            emit_tensor_execution_receipt(completion, |data| {
+                insert_tensor_shape_meta(data, rows, cols, rows, cols, input_layout);
+                data.insert("kind".to_owned(), serde_json::json!("broadcast_inplace"));
+                data.insert("bias_cols".to_owned(), serde_json::json!(bias.len()));
+                data.insert("kernel".to_owned(), serde_json::json!("no_op"));
+            });
+            return Ok(());
+        }
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
         #[cfg(feature = "wgpu")]
         {
-            if matches!(_backend, TensorUtilBackend::GpuWgpu)
-                && self.rows > 0
-                && self.cols > 0
-                && wgpu_dense::is_available()
-            {
-                let input_layout = self.layout;
-                match wgpu_dense::add_row(self.data(), bias, self.rows, self.cols) {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
+                match wgpu_dense::add_row(input, bias, rows, cols) {
                     Ok(buffer) => {
-                        for &output in &buffer {
-                            Self::validate_finite_tensor_util_value("add_row_output", output)?;
-                        }
+                        Self::validate_finite_tensor_util_slice("add_row_output", &buffer)?;
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
                         self.data = Arc::new(TensorBuffer::from_aligned(aligned_from_vec(buffer)));
                         self.layout = Layout::RowMajor;
                         crate::emit_tensor_op(
                             "add_row_inplace",
-                            &[self.rows, self.cols, 1, bias.len()],
-                            &[self.rows, self.cols],
+                            &[rows, cols, 1, bias.len()],
+                            &[rows, cols],
                         );
-                        emit_wgpu_tensor_op_meta(
-                            "add_row_inplace",
-                            _backend.label(),
-                            self.rows,
-                            self.cols,
-                            self.rows,
-                            self.cols,
-                            input_layout,
-                            "broadcast_inplace",
-                            "tensor_util.add_row",
-                            |data| {
-                                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
-                            },
-                        );
+                        emit_tensor_execution_receipt(completion, |data| {
+                            insert_tensor_shape_meta(data, rows, cols, rows, cols, input_layout);
+                            data.insert("kind".to_owned(), serde_json::json!("broadcast_inplace"));
+                            data.insert("bias_cols".to_owned(), serde_json::json!(bias.len()));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.add_row"),
+                            );
+                        });
                         return Ok(());
                     }
-                    Err(message) if strict_gpu_path() => {
-                        return Err(strict_gpu_fallback_error(
-                            "wgpu",
-                            "add_row_inplace",
-                            message,
-                        ));
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
                     }
                     Err(message) => {
-                        wgpu_failure = Some(message);
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
                     }
                 }
             }
         }
 
-        let data = Arc::make_mut(&mut self.data);
-        for r in 0..self.rows {
-            let offset = r * self.cols;
-            for c in 0..self.cols {
-                data[offset + c] += bias[c];
+        let mut buffer = input.to_vec();
+        for row in buffer.chunks_mut(cols) {
+            for (value, &bias) in row.iter_mut().zip(bias) {
+                *value += bias;
             }
         }
+        Self::validate_finite_tensor_util_slice("add_row_output", &buffer)?;
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu);
+        let completion = completed_component_execution(execution, "cpu", runtime_fallback)?;
+        self.data = Arc::new(TensorBuffer::from_aligned(aligned_from_vec(buffer)));
+        self.layout = Layout::RowMajor;
         crate::emit_tensor_op(
             "add_row_inplace",
-            &[self.rows, self.cols, 1, bias.len()],
-            &[self.rows, self.cols],
+            &[rows, cols, 1, bias.len()],
+            &[rows, cols],
         );
-        emit_tensor_util_cpu_op_meta(
-            "add_row_inplace",
-            self.rows,
-            self.cols,
-            self.rows,
-            self.cols,
-            self.layout,
-            _backend.label(),
-            "broadcast_inplace",
-            |data| {
-                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
+        emit_tensor_execution_receipt(completion, |data| {
+            insert_tensor_shape_meta(data, rows, cols, rows, cols, input_layout);
+            data.insert("kind".to_owned(), serde_json::json!("broadcast_inplace"));
+            data.insert("bias_cols".to_owned(), serde_json::json!(bias.len()));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            if runtime_fallback {
                 #[cfg(feature = "wgpu")]
-                if let Some(message) = wgpu_failure.as_deref() {
-                    data.insert(
-                        "fallback".to_string(),
-                        wgpu_runtime_fallback_meta(
-                            "cpu",
-                            WGPU_RUNTIME_FALLBACK_REASON,
-                            Some(message),
-                        ),
-                    );
-                }
-            },
-        );
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
         Ok(())
     }
 
@@ -6950,31 +6991,24 @@ impl Tensor {
     }
 
     /// Returns the sum over rows for each column.
+    ///
+    /// # Panics
+    ///
+    /// Panics when numeric validation or the active execution contract fails.
+    /// Use [`Tensor::try_sum_axis0`] when the caller needs to recover.
     pub fn sum_axis0(&self) -> Vec<f32> {
         self.sum_axis0_with_backend(TensorUtilBackend::Auto)
     }
 
     /// Returns the sum over rows for each column with an explicit utility backend.
+    ///
+    /// # Panics
+    ///
+    /// Panics when numeric validation or the active execution contract fails.
+    /// Use [`Tensor::try_sum_axis0_with_backend`] when the caller needs to recover.
     pub fn sum_axis0_with_backend(&self, _backend: TensorUtilBackend) -> Vec<f32> {
         self.try_sum_axis0_with_backend(_backend)
-            .unwrap_or_else(|_| self.sum_axis0_unchecked())
-    }
-
-    fn sum_axis0_unchecked(&self) -> Vec<f32> {
-        let mut sums = vec![0.0; self.cols];
-        if self.cols == 0 {
-            return sums;
-        }
-        let row_major_input = self.to_layout(Layout::RowMajor).ok();
-        let input = row_major_input
-            .as_ref()
-            .map_or_else(|| self.data(), Tensor::data);
-        for row in input.chunks(self.cols) {
-            for (sum, value) in sums.iter_mut().zip(row.iter()) {
-                *sum += *value;
-            }
-        }
-        sums
+            .unwrap_or_else(|error| panic!("sum_axis0 failed: {error}"))
     }
 
     /// Fallible sum over rows for each column with finite-output validation.
@@ -6984,65 +7018,64 @@ impl Tensor {
 
     /// Fallible sum over rows for each column with an explicit utility backend.
     pub fn try_sum_axis0_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Vec<f32>> {
+        let rows = self.rows;
+        let cols = self.cols;
+        Self::validate_finite_tensor_util_slice("sum_axis0_input", self.data())?;
+        let row_major_input = self.to_layout(Layout::RowMajor)?;
+        let input = row_major_input.data();
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0,
+                rows: execution_dimension(rows)?,
+                cols: execution_dimension(cols)?,
+            },
+            "sum_axis0",
+            _backend.tensor_execution_backend(),
+        )?;
         let mut sums = vec![0.0; self.cols];
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
-        if self.cols == 0 {
-            crate::emit_tensor_op("sum_axis0", &[self.rows, self.cols], &[1, self.cols]);
-            emit_tensor_util_cpu_op_meta(
-                "sum_axis0",
-                self.rows,
-                self.cols,
-                1,
-                self.cols,
-                self.layout,
-                _backend.label(),
-                "reduction",
-                |data| {
-                    data.insert("axis".to_string(), serde_json::json!(0));
-                },
-            );
+        if cols == 0 {
+            let completion = completed_no_op_execution(execution)?;
+            crate::emit_tensor_op("sum_axis0", &[rows, cols], &[1, cols]);
+            emit_tensor_execution_receipt(completion, |data| {
+                insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+                data.insert("kind".to_owned(), serde_json::json!("reduction"));
+                data.insert("axis".to_owned(), serde_json::json!(0));
+                data.insert("kernel".to_owned(), serde_json::json!("no_op"));
+            });
             return Ok(sums);
         }
-        let row_major_input = self.to_layout(Layout::RowMajor)?;
-        let input = row_major_input.data();
         #[cfg(feature = "wgpu")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
-                && self.rows > 0
+                && rows > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::sum_axis0(input, self.rows, self.cols) {
+                match wgpu_dense::sum_axis0(input, rows, cols) {
                     Ok(buffer) => {
-                        for &output in &buffer {
-                            Self::validate_finite_tensor_util_value("sum_axis0_output", output)?;
-                        }
-                        crate::emit_tensor_op(
-                            "sum_axis0",
-                            &[self.rows, self.cols],
-                            &[1, self.cols],
-                        );
-                        emit_wgpu_tensor_op_meta(
-                            "sum_axis0",
-                            _backend.label(),
-                            self.rows,
-                            self.cols,
-                            1,
-                            self.cols,
-                            self.layout,
-                            "reduction",
-                            "tensor_util.sum_axis0",
-                            |data| {
-                                data.insert("axis".to_string(), serde_json::json!(0));
-                            },
-                        );
+                        Self::validate_finite_tensor_util_slice("sum_axis0_output", &buffer)?;
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
+                        crate::emit_tensor_op("sum_axis0", &[rows, cols], &[1, cols]);
+                        emit_tensor_execution_receipt(completion, |data| {
+                            insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+                            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+                            data.insert("axis".to_owned(), serde_json::json!(0));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.sum_axis0"),
+                            );
+                        });
                         return Ok(buffer);
                     }
-                    Err(message) if strict_gpu_path() => {
-                        return Err(strict_gpu_fallback_error("wgpu", "sum_axis0", message));
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
                     }
                     Err(message) => {
-                        wgpu_failure = Some(message);
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
                     }
                 }
             }
@@ -7054,62 +7087,41 @@ impl Tensor {
                 Self::validate_finite_tensor_util_value("sum_axis0_output", *sum)?;
             }
         }
-        crate::emit_tensor_op("sum_axis0", &[self.rows, self.cols], &[1, self.cols]);
-        emit_tensor_util_cpu_op_meta(
-            "sum_axis0",
-            self.rows,
-            self.cols,
-            1,
-            self.cols,
-            self.layout,
-            _backend.label(),
-            "reduction",
-            |data| {
-                data.insert("axis".to_string(), serde_json::json!(0));
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu);
+        let completion = completed_component_execution(execution, "cpu", runtime_fallback)?;
+        crate::emit_tensor_op("sum_axis0", &[rows, cols], &[1, cols]);
+        emit_tensor_execution_receipt(completion, |data| {
+            insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+            data.insert("axis".to_owned(), serde_json::json!(0));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            if runtime_fallback {
                 #[cfg(feature = "wgpu")]
-                if let Some(message) = wgpu_failure.as_deref() {
-                    data.insert(
-                        "fallback".to_string(),
-                        wgpu_runtime_fallback_meta(
-                            "cpu",
-                            WGPU_RUNTIME_FALLBACK_REASON,
-                            Some(message),
-                        ),
-                    );
-                }
-            },
-        );
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
         Ok(sums)
     }
 
     /// Returns the sum over rows for each column multiplied by `scale`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when numeric validation or the active execution contract fails.
+    /// Use [`Tensor::try_sum_axis0_scaled_with_backend`] when the caller needs to recover.
     pub fn sum_axis0_scaled_with_backend(
         &self,
         scale: f32,
         _backend: TensorUtilBackend,
     ) -> Vec<f32> {
         self.try_sum_axis0_scaled_with_backend(scale, _backend)
-            .unwrap_or_else(|_| self.sum_axis0_scaled_unchecked(scale))
-    }
-
-    fn sum_axis0_scaled_unchecked(&self, scale: f32) -> Vec<f32> {
-        let mut sums = vec![0.0; self.cols];
-        if self.cols == 0 {
-            return sums;
-        }
-        let row_major_input = self.to_layout(Layout::RowMajor).ok();
-        let input = row_major_input
-            .as_ref()
-            .map_or_else(|| self.data(), Tensor::data);
-        for row in input.chunks(self.cols) {
-            for (sum, value) in sums.iter_mut().zip(row.iter()) {
-                *sum += *value;
-            }
-        }
-        for sum in &mut sums {
-            *sum *= scale;
-        }
-        sums
+            .unwrap_or_else(|error| panic!("sum_axis0_scaled failed: {error}"))
     }
 
     /// Fallible sum over rows multiplied by `scale` with finite-output validation.
@@ -7118,75 +7130,70 @@ impl Tensor {
         scale: f32,
         _backend: TensorUtilBackend,
     ) -> PureResult<Vec<f32>> {
+        let rows = self.rows;
+        let cols = self.cols;
         Self::validate_scale_factor("sum_axis0_scaled_factor", scale)?;
-        let mut sums = vec![0.0; self.cols];
-        #[cfg(feature = "wgpu")]
-        let mut wgpu_failure: Option<String> = None;
-        if self.cols == 0 {
-            crate::emit_tensor_op("sum_axis0_scaled", &[self.rows, self.cols], &[1, self.cols]);
-            emit_tensor_util_cpu_op_meta(
-                "sum_axis0_scaled",
-                self.rows,
-                self.cols,
-                1,
-                self.cols,
-                self.layout,
-                _backend.label(),
-                "reduction",
-                |data| {
-                    data.insert("axis".to_string(), serde_json::json!(0));
-                    data.insert("scale".to_string(), serde_json::json!(scale));
-                },
-            );
-            return Ok(sums);
-        }
+        Self::validate_finite_tensor_util_slice("sum_axis0_scaled_input", self.data())?;
         let row_major_input = self.to_layout(Layout::RowMajor)?;
         let input = row_major_input.data();
+        let execution = prepare_component_execution(
+            TensorExecutionWorkload::TensorUtil {
+                operation: TensorUtilOperation::SumAxis0Scaled,
+                rows: execution_dimension(rows)?,
+                cols: execution_dimension(cols)?,
+            },
+            "sum_axis0_scaled",
+            _backend.tensor_execution_backend(),
+        )?;
+        let mut sums = vec![0.0; cols];
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+        if cols == 0 {
+            let completion = completed_no_op_execution(execution)?;
+            crate::emit_tensor_op("sum_axis0_scaled", &[rows, cols], &[1, cols]);
+            emit_tensor_execution_receipt(completion, |data| {
+                insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+                data.insert("kind".to_owned(), serde_json::json!("reduction"));
+                data.insert("axis".to_owned(), serde_json::json!(0));
+                data.insert("scale".to_owned(), serde_json::json!(scale));
+                data.insert("kernel".to_owned(), serde_json::json!("no_op"));
+            });
+            return Ok(sums);
+        }
         #[cfg(feature = "wgpu")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
-                && self.rows > 0
+                && rows > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::sum_axis0_scaled(input, self.rows, self.cols, scale) {
+                match wgpu_dense::sum_axis0_scaled(input, rows, cols, scale) {
                     Ok(buffer) => {
-                        for &output in &buffer {
-                            Self::validate_finite_tensor_util_value(
-                                "sum_axis0_scaled_output",
-                                output,
-                            )?;
-                        }
-                        crate::emit_tensor_op(
-                            "sum_axis0_scaled",
-                            &[self.rows, self.cols],
-                            &[1, self.cols],
-                        );
-                        emit_wgpu_tensor_op_meta(
-                            "sum_axis0_scaled",
-                            _backend.label(),
-                            self.rows,
-                            self.cols,
-                            1,
-                            self.cols,
-                            self.layout,
-                            "reduction",
-                            "tensor_util.sum_axis0_scaled",
-                            |data| {
-                                data.insert("axis".to_string(), serde_json::json!(0));
-                                data.insert("scale".to_string(), serde_json::json!(scale));
-                            },
-                        );
+                        Self::validate_finite_tensor_util_slice(
+                            "sum_axis0_scaled_output",
+                            &buffer,
+                        )?;
+                        let completion = completed_component_execution(execution, "wgpu", false)?;
+                        crate::emit_tensor_op("sum_axis0_scaled", &[rows, cols], &[1, cols]);
+                        emit_tensor_execution_receipt(completion, |data| {
+                            insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+                            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+                            data.insert("axis".to_owned(), serde_json::json!(0));
+                            data.insert("scale".to_owned(), serde_json::json!(scale));
+                            data.insert(
+                                "kernel".to_owned(),
+                                serde_json::json!("tensor_util.sum_axis0_scaled"),
+                            );
+                        });
                         return Ok(buffer);
                     }
-                    Err(message) if strict_gpu_path() => {
-                        return Err(strict_gpu_fallback_error(
-                            "wgpu",
-                            "sum_axis0_scaled",
-                            message,
-                        ));
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        wgpu_failure = Some(message);
                     }
                     Err(message) => {
-                        wgpu_failure = Some(message);
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
                     }
                 }
             }
@@ -7202,32 +7209,26 @@ impl Tensor {
             *sum *= scale;
             Self::validate_finite_tensor_util_value("sum_axis0_scaled_output", *sum)?;
         }
-        crate::emit_tensor_op("sum_axis0_scaled", &[self.rows, self.cols], &[1, self.cols]);
-        emit_tensor_util_cpu_op_meta(
-            "sum_axis0_scaled",
-            self.rows,
-            self.cols,
-            1,
-            self.cols,
-            self.layout,
-            _backend.label(),
-            "reduction",
-            |data| {
-                data.insert("axis".to_string(), serde_json::json!(0));
-                data.insert("scale".to_string(), serde_json::json!(scale));
+        let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu);
+        let completion = completed_component_execution(execution, "cpu", runtime_fallback)?;
+        crate::emit_tensor_op("sum_axis0_scaled", &[rows, cols], &[1, cols]);
+        emit_tensor_execution_receipt(completion, |data| {
+            insert_tensor_shape_meta(data, rows, cols, 1, cols, self.layout);
+            data.insert("kind".to_owned(), serde_json::json!("reduction"));
+            data.insert("axis".to_owned(), serde_json::json!(0));
+            data.insert("scale".to_owned(), serde_json::json!(scale));
+            data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            if runtime_fallback {
                 #[cfg(feature = "wgpu")]
-                if let Some(message) = wgpu_failure.as_deref() {
-                    data.insert(
-                        "fallback".to_string(),
-                        wgpu_runtime_fallback_meta(
-                            "cpu",
-                            WGPU_RUNTIME_FALLBACK_REASON,
-                            Some(message),
-                        ),
-                    );
-                }
-            },
-        );
+                let message = wgpu_failure.as_deref();
+                #[cfg(not(feature = "wgpu"))]
+                let message = Some("WGPU support is not compiled into this build");
+                data.insert(
+                    "fallback".to_owned(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, message),
+                );
+            }
+        });
         Ok(sums)
     }
 
@@ -13981,8 +13982,15 @@ mod tests {
                 .iter()
                 .find(|(observed, _)| *observed == op_name)
                 .unwrap_or_else(|| panic!("{op_name} metadata event"));
-            let has_execution_receipt =
-                matches!(op_name, "scale" | "max_axis0" | "max_axis0_backward");
+            let has_execution_receipt = matches!(
+                op_name,
+                "scale"
+                    | "add_row_inplace"
+                    | "sum_axis0"
+                    | "sum_axis0_scaled"
+                    | "max_axis0"
+                    | "max_axis0_backward"
+            );
             let expected_backend = if has_execution_receipt {
                 "wgpu"
             } else {
@@ -14844,6 +14852,26 @@ mod tests {
     }
 
     #[test]
+    fn tensor_add_row_preserves_logical_values_for_column_major_inputs() {
+        let row_major = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0],
+        ));
+        let mut expected = row_major.clone();
+        unwrap_ok(expected.add_row_inplace_with_backend(&[0.5, -1.0, 2.0], TensorUtilBackend::Cpu));
+        let mut column_major = unwrap_ok(row_major.to_layout(Layout::ColMajor));
+
+        unwrap_ok(
+            column_major.add_row_inplace_with_backend(&[0.5, -1.0, 2.0], TensorUtilBackend::Cpu),
+        );
+
+        assert_eq!(column_major.layout(), Layout::RowMajor);
+        assert_eq!(column_major.data(), expected.data());
+        assert_eq!(column_major.data(), &[1.5, 1.0, 5.0, -0.5, -3.0, -1.0]);
+    }
+
+    #[test]
     fn tensor_max_axis0_backward_matches_finite_differences_at_unique_maxima() {
         let values = vec![1.0, -2.0, 3.0, 0.5, -1.0, 4.0];
         let tensor = unwrap_ok(Tensor::from_vec(3, 2, values.clone()));
@@ -14957,6 +14985,113 @@ mod tests {
             );
             assert_eq!(event.1["execution_receipt"]["executed_backend"], "cpu");
         }
+    }
+
+    #[test]
+    fn tensor_linear_readout_utilities_emit_typed_execution_receipts() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 4.0, 3.0, 2.0]));
+        let mut biased = tensor.clone();
+
+        unwrap_ok(biased.add_row_inplace_with_backend(&[0.5, -0.25], TensorUtilBackend::Cpu));
+        let _ = unwrap_ok(tensor.try_sum_axis0_with_backend(TensorUtilBackend::Cpu));
+        let _ = unwrap_ok(tensor.try_sum_axis0_scaled_with_backend(0.5, TensorUtilBackend::Cpu));
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for (operation, workload_operation) in [
+            ("add_row_inplace", "add_row"),
+            ("sum_axis0", "sum_axis0"),
+            ("sum_axis0_scaled", "sum_axis0_scaled"),
+        ] {
+            let event = events
+                .iter()
+                .find(|(name, data)| *name == operation && data["event_phase"] == "completed")
+                .unwrap_or_else(|| panic!("missing completed {operation} receipt"));
+            assert_eq!(
+                event.1["semantic_owner"],
+                crate::execution::TENSOR_EXECUTION_RECEIPT_SEMANTIC_OWNER
+            );
+            assert_eq!(event.1["execution_receipt"]["operation"], operation);
+            assert_eq!(
+                event.1["execution_receipt"]["workload"]["operation"],
+                workload_operation
+            );
+            assert_eq!(event.1["execution_receipt"]["executed_backend"], "cpu");
+        }
+    }
+
+    #[test]
+    fn tensor_axis0_sum_distinguishes_nonempty_identity_from_empty_output() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let zero_rows = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+        let zero_cols = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+
+        assert_eq!(
+            unwrap_ok(zero_rows.try_sum_axis0_with_backend(TensorUtilBackend::Cpu)),
+            vec![0.0, 0.0]
+        );
+        assert!(unwrap_ok(zero_cols.try_sum_axis0_with_backend(TensorUtilBackend::Cpu)).is_empty());
+        crate::set_thread_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let receipts = events
+            .iter()
+            .filter(|(name, data)| *name == "sum_axis0" && data["event_phase"] == "completed")
+            .map(|(_, data)| &data["execution_receipt"])
+            .collect::<Vec<_>>();
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(receipts[0]["route_status"], "direct");
+        assert_eq!(receipts[0]["executed_backend"], "cpu");
+        assert_eq!(receipts[1]["route_status"], "no_op");
+        assert!(receipts[1].get("executed_backend").is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "sum_axis0 failed")]
+    fn infallible_sum_wrapper_does_not_reconstruct_invalid_cpu_results() {
+        let tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, f32::NAN]));
+
+        let _ = tensor.sum_axis0();
+    }
+
+    #[test]
+    #[should_panic(expected = "sum_axis0_scaled failed")]
+    fn infallible_sum_wrapper_cannot_bypass_an_active_exact_workload_plan() {
+        let workload = TensorExecutionWorkload::TensorUtil {
+            operation: TensorUtilOperation::SumAxis0,
+            rows: 2,
+            cols: 2,
+        };
+        let binding = unwrap_ok(
+            crate::execution::TensorExecutionPlanBinding::try_new_with_workloads(
+                [0xa5; 32],
+                [TensorExecutionBackend::Cpu; 6],
+                [workload],
+                spiral_config::execution::AcceleratorFallback::Allow,
+                1024,
+            ),
+        );
+        let _plan = crate::execution::push_execution_plan_binding(binding);
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]));
+
+        let _ = tensor.sum_axis0_scaled_with_backend(0.5, TensorUtilBackend::Cpu);
     }
 
     #[test]
