@@ -89,6 +89,7 @@ from spiraltorch.hf_input_identity import (
     hf_finetune_input_identity_report,
 )
 from spiraltorch.hf_optimizer_control import (
+    HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES,
     HF_ZSPACE_OPTIMIZER_TRACE_FILENAME,
     HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS,
     hf_zspace_optimizer_control_callback,
@@ -425,6 +426,66 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--zspace-optimizer-z-dim", type=int, default=6)
     parser.add_argument("--zspace-optimizer-curvature", type=float, default=-0.04)
     parser.add_argument("--zspace-optimizer-volume-per-step", type=int, default=8)
+    parser.add_argument(
+        "--zspace-optimizer-feedback",
+        choices=HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES,
+        default="off",
+        help=(
+            "Optional Rust-owned closed-loop guard for the proposed Z-space LR "
+            "scale. loss_guard fails closed to the identity update."
+        ),
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-loss-ema-alpha", type=float, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-relative-delta-ema-alpha",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-loss-floor", type=float, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-regression-threshold",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-halt-threshold", type=float, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-recovery-threshold",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-attenuation-rate", type=float, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-recovery-rate", type=float, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-halt-regression-streak",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-resume-improvement-streak",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-warmup-observations",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-max-stale-updates", type=int, default=None
+    )
+    parser.add_argument(
+        "--zspace-optimizer-feedback-maximum-gate", type=float, default=None
+    )
     parser.add_argument(
         "--zspace-optimizer-trajectory-arm",
         choices=HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS,
@@ -1050,6 +1111,46 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--zspace-optimizer-curvature must be finite and negative")
     if args.zspace_optimizer_volume_per_step <= 0:
         parser.error("--zspace-optimizer-volume-per-step must be positive")
+    feedback_config_fields = {
+        "loss_ema_alpha": args.zspace_optimizer_feedback_loss_ema_alpha,
+        "relative_delta_ema_alpha": (
+            args.zspace_optimizer_feedback_relative_delta_ema_alpha
+        ),
+        "loss_floor": args.zspace_optimizer_feedback_loss_floor,
+        "regression_threshold": (
+            args.zspace_optimizer_feedback_regression_threshold
+        ),
+        "halt_threshold": args.zspace_optimizer_feedback_halt_threshold,
+        "recovery_threshold": args.zspace_optimizer_feedback_recovery_threshold,
+        "attenuation_rate": args.zspace_optimizer_feedback_attenuation_rate,
+        "recovery_rate": args.zspace_optimizer_feedback_recovery_rate,
+        "halt_regression_streak": (
+            args.zspace_optimizer_feedback_halt_regression_streak
+        ),
+        "resume_improvement_streak": (
+            args.zspace_optimizer_feedback_resume_improvement_streak
+        ),
+        "warmup_observations": (
+            args.zspace_optimizer_feedback_warmup_observations
+        ),
+        "max_stale_updates": args.zspace_optimizer_feedback_max_stale_updates,
+        "maximum_gate": args.zspace_optimizer_feedback_maximum_gate,
+    }
+    args._hf_zspace_optimizer_feedback_config = {
+        key: value
+        for key, value in feedback_config_fields.items()
+        if value is not None
+    }
+    if (
+        args.zspace_optimizer_feedback != "off"
+        and args.zspace_optimizer_control == "off"
+    ):
+        parser.error("--zspace-optimizer-feedback requires active optimizer control")
+    if (
+        args.zspace_optimizer_feedback == "off"
+        and args._hf_zspace_optimizer_feedback_config
+    ):
+        parser.error("Z-space optimizer feedback knobs require loss_guard mode")
     if (
         args.zspace_optimizer_trajectory_arm != "raw"
         and args.zspace_optimizer_control != "apply"
@@ -1249,8 +1350,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             )
         except Exception as exc:
             parser.error(f"invalid Z-space optimizer trajectory: {exc}")
-    args._hf_zspace_optimizer_recipe_contract = (
-        hf_zspace_optimizer_recipe_contract(
+    try:
+        args._hf_zspace_optimizer_recipe_contract = hf_zspace_optimizer_recipe_contract(
             mode=args.zspace_optimizer_control,
             z_dim=args.zspace_optimizer_z_dim,
             curvature=args.zspace_optimizer_curvature,
@@ -1262,8 +1363,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 if args._hf_zspace_optimizer_trajectory_report is None
                 else args._hf_zspace_optimizer_trajectory_report["trajectory_id"]
             ),
+            feedback_mode=args.zspace_optimizer_feedback,
+            feedback_config=args._hf_zspace_optimizer_feedback_config,
         )
-    )
+    except Exception as exc:
+        parser.error(f"invalid Z-space optimizer control recipe: {exc}")
     args._hf_finetune_launch_command = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -5517,6 +5621,8 @@ def _main_with_runtime_access(
             volume_per_step=args.zspace_optimizer_volume_per_step,
             trajectory_arm=args.zspace_optimizer_trajectory_arm,
             trajectory=args._hf_zspace_optimizer_trajectory_report,
+            feedback_mode=args.zspace_optimizer_feedback,
+            feedback_config=args._hf_zspace_optimizer_feedback_config,
             trajectory_output_path=args.zspace_optimizer_trajectory_out,
             trace_path=_zspace_optimizer_trace_path(args),
             reset_trace=args.resume_from_checkpoint is None,

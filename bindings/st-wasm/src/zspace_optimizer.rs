@@ -6,6 +6,12 @@ use st_core::runtime::zspace_optimizer::{
     transition_zspace_meta_optimizer, zspace_parameter_control_from_value,
     ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
 };
+use st_core::runtime::zspace_optimizer_feedback::{
+    control_zspace_optimizer_feedback, initialize_zspace_optimizer_feedback,
+    observe_zspace_optimizer_feedback, restore_zspace_optimizer_feedback,
+    ZSpaceOptimizerFeedbackConfig, ZSpaceOptimizerFeedbackControlRequest,
+    ZSpaceOptimizerFeedbackObserveRequest, ZSpaceOptimizerFeedbackRestoreRequest,
+};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -73,6 +79,36 @@ pub fn zspace_meta_optimizer_parameter_control_value(report: Value) -> Result<Va
     }
     let control = zspace_parameter_control_from_value(report).map_err(|error| error.to_string())?;
     response_value(&control)
+}
+
+pub fn zspace_optimizer_feedback_init_value(
+    config: ZSpaceOptimizerFeedbackConfig,
+) -> Result<Value, String> {
+    let checkpoint =
+        initialize_zspace_optimizer_feedback(config).map_err(|error| error.to_string())?;
+    response_value(&checkpoint)
+}
+
+pub fn zspace_optimizer_feedback_restore_value(
+    request: ZSpaceOptimizerFeedbackRestoreRequest,
+) -> Result<Value, String> {
+    let checkpoint =
+        restore_zspace_optimizer_feedback(request).map_err(|error| error.to_string())?;
+    response_value(&checkpoint)
+}
+
+pub fn zspace_optimizer_feedback_observe_value(
+    request: ZSpaceOptimizerFeedbackObserveRequest,
+) -> Result<Value, String> {
+    let report = observe_zspace_optimizer_feedback(request).map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_optimizer_feedback_control_value(
+    request: ZSpaceOptimizerFeedbackControlRequest,
+) -> Result<Value, String> {
+    let report = control_zspace_optimizer_feedback(request).map_err(|error| error.to_string())?;
+    response_value(&report)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -153,6 +189,85 @@ pub fn zspace_meta_optimizer_parameter_control_object(
     to_json_compatible_js(&payload)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackInitJson)]
+pub fn zspace_optimizer_feedback_init_json(config_json: &str) -> Result<String, JsValue> {
+    let config =
+        request_from_json(config_json, "Z-space optimizer feedback config").map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_init_value(config).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackInitObject)]
+pub fn zspace_optimizer_feedback_init_object(config: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(config.clone()).map_err(js_error)?;
+    let config =
+        request_from_value(value, "Z-space optimizer feedback config").map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_init_value(config).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackRestoreJson)]
+pub fn zspace_optimizer_feedback_restore_json(request_json: &str) -> Result<String, JsValue> {
+    let request = request_from_json(request_json, "Z-space optimizer feedback restore request")
+        .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_restore_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackRestoreObject)]
+pub fn zspace_optimizer_feedback_restore_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = request_from_value(value, "Z-space optimizer feedback restore request")
+        .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_restore_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackObserveJson)]
+pub fn zspace_optimizer_feedback_observe_json(request_json: &str) -> Result<String, JsValue> {
+    let request = request_from_json(
+        request_json,
+        "Z-space optimizer feedback observation request",
+    )
+    .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_observe_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackObserveObject)]
+pub fn zspace_optimizer_feedback_observe_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = request_from_value(value, "Z-space optimizer feedback observation request")
+        .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_observe_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackControlJson)]
+pub fn zspace_optimizer_feedback_control_json(request_json: &str) -> Result<String, JsValue> {
+    let request = request_from_json(request_json, "Z-space optimizer feedback control request")
+        .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_control_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceOptimizerFeedbackControlObject)]
+pub fn zspace_optimizer_feedback_control_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = request_from_value(value, "Z-space optimizer feedback control request")
+        .map_err(js_error)?;
+    let payload = zspace_optimizer_feedback_control_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +275,11 @@ mod tests {
     use st_core::runtime::zspace_optimizer::{
         restore_zspace_meta_optimizer, transition_zspace_meta_optimizer,
         ZSPACE_META_OPTIMIZER_MAX_SAFE_STEP,
+    };
+    use st_core::runtime::zspace_optimizer_feedback::{
+        control_zspace_optimizer_feedback, initialize_zspace_optimizer_feedback,
+        observe_zspace_optimizer_feedback, ZSpaceOptimizerFeedbackControlRequest,
+        ZSpaceOptimizerFeedbackObservation, ZSpaceOptimizerFeedbackObserveRequest,
     };
 
     #[test]
@@ -330,5 +450,82 @@ mod tests {
             .expect_err("next step must exceed the shared exact integer limit");
 
         assert!(error.contains("cross-client maximum"));
+    }
+
+    #[test]
+    fn wasm_feedback_observation_and_control_match_rust_exactly() {
+        let config = ZSpaceOptimizerFeedbackConfig {
+            warmup_observations: 0,
+            ..ZSpaceOptimizerFeedbackConfig::default()
+        };
+        let checkpoint = initialize_zspace_optimizer_feedback(config.clone()).unwrap();
+        let control_request = ZSpaceOptimizerFeedbackControlRequest {
+            config: config.clone(),
+            state: checkpoint.state,
+            target_step: 1,
+            proposed_learning_rate_scale: 0.5,
+        };
+        let control = control_zspace_optimizer_feedback(control_request).unwrap();
+        let observe_request = ZSpaceOptimizerFeedbackObserveRequest {
+            config,
+            state: control.state_after,
+            observation: ZSpaceOptimizerFeedbackObservation {
+                step: 1,
+                max_steps: Some(8),
+                epoch: None,
+                loss: 2.0,
+                grad_norm: Some(1.0),
+                learning_rate: Some(1.0e-4),
+            },
+        };
+        let mut expected = serde_json::to_value(
+            observe_zspace_optimizer_feedback(observe_request.clone()).unwrap(),
+        )
+        .unwrap();
+        expected.as_object_mut().unwrap().insert(
+            "execution_client".to_owned(),
+            Value::String("wasm".to_owned()),
+        );
+
+        let actual = zspace_optimizer_feedback_observe_value(observe_request).unwrap();
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual["semantic_backend"], "rust");
+        assert_eq!(actual["projection"]["semantic_backend"], "rust");
+    }
+
+    #[test]
+    fn wasm_feedback_rejects_out_of_order_control() {
+        let checkpoint =
+            initialize_zspace_optimizer_feedback(ZSpaceOptimizerFeedbackConfig::default()).unwrap();
+        let error =
+            zspace_optimizer_feedback_control_value(ZSpaceOptimizerFeedbackControlRequest {
+                config: checkpoint.config,
+                state: checkpoint.state,
+                target_step: 2,
+                proposed_learning_rate_scale: 1.0,
+            })
+            .expect_err("out-of-order feedback control must fail");
+
+        assert!(error.contains("next step"));
+    }
+
+    #[test]
+    fn wasm_feedback_types_declare_the_complete_shared_surface() {
+        let declarations = include_str!("../types/spiraltorch-wasm.d.ts");
+
+        for symbol in [
+            "ZSpaceOptimizerFeedbackConfigInput",
+            "ZSpaceOptimizerFeedbackState",
+            "ZSpaceOptimizerFeedbackObservationReport",
+            "ZSpaceOptimizerFeedbackControlReport",
+            "zspaceOptimizerFeedbackInitObject",
+            "zspaceOptimizerFeedbackRestoreObject",
+            "zspaceOptimizerFeedbackObserveObject",
+            "zspaceOptimizerFeedbackControlObject",
+        ] {
+            assert!(declarations.contains(symbol), "missing {symbol}");
+        }
+        assert!(declarations.contains("st-core::runtime::zspace_optimizer_feedback"));
     }
 }

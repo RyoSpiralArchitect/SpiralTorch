@@ -15,3 +15,4 @@ pub mod trainer_checkpoint;
 pub mod trainer_external;
 pub mod trainer_optimizer;
 pub mod zspace_optimizer;
+pub mod zspace_optimizer_feedback;

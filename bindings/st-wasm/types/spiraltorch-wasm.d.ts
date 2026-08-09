@@ -2179,6 +2179,164 @@ declare module "spiraltorch-wasm" {
         execution_client: "wasm";
     };
 
+    export type ZSpaceOptimizerFeedbackConfigInput = {
+        loss_ema_alpha?: number;
+        relative_delta_ema_alpha?: number;
+        loss_floor?: number;
+        regression_threshold?: number;
+        halt_threshold?: number;
+        recovery_threshold?: number;
+        attenuation_rate?: number;
+        recovery_rate?: number;
+        halt_regression_streak?: number;
+        resume_improvement_streak?: number;
+        warmup_observations?: number;
+        max_stale_updates?: number;
+        maximum_gate?: number;
+    };
+
+    export type ZSpaceOptimizerFeedbackConfig =
+        Required<ZSpaceOptimizerFeedbackConfigInput>;
+
+    export type ZSpaceOptimizerFeedbackState = {
+        control_step: number;
+        observation_count: number;
+        last_observation_step: number | null;
+        last_loss: number | null;
+        loss_ema: number | null;
+        relative_loss_delta_ema: number | null;
+        gate: number;
+        regression_streak: number;
+        improvement_streak: number;
+        halted: boolean;
+    };
+
+    export type ZSpaceOptimizerFeedbackObservation = {
+        step: number;
+        max_steps?: number | null;
+        epoch?: number | null;
+        loss: number;
+        grad_norm?: number | null;
+        learning_rate?: number | null;
+    };
+
+    export type ZSpaceOptimizerFeedbackRestoreRequest = {
+        config: ZSpaceOptimizerFeedbackConfigInput;
+        state: ZSpaceOptimizerFeedbackState;
+    };
+
+    export type ZSpaceOptimizerFeedbackObserveRequest =
+        ZSpaceOptimizerFeedbackRestoreRequest & {
+            observation: ZSpaceOptimizerFeedbackObservation;
+        };
+
+    export type ZSpaceOptimizerFeedbackControlRequest =
+        ZSpaceOptimizerFeedbackRestoreRequest & {
+            target_step: number;
+            proposed_learning_rate_scale: number;
+        };
+
+    export type TrainingTelemetryProjection = {
+        kind: "spiraltorch.training_telemetry_projection";
+        contract_version: "spiraltorch.training_telemetry_projection.v1";
+        semantic_owner: "st-core::telemetry::training_projection";
+        semantic_backend: "rust";
+        signal_source: "trainer_log_proxy";
+        signal_semantics: "surrogate";
+        step: number | null;
+        max_steps: number | null;
+        epoch: number | null;
+        progress: number | null;
+        loss: number | null;
+        previous_loss: number | null;
+        loss_delta: number | null;
+        loss_improvement: number | null;
+        grad_norm: number | null;
+        learning_rate: number | null;
+        desire: {
+            gain: number;
+            pressure: number | null;
+            stability: number | null;
+            saturation: number | null;
+            improvement_pressure: number | null;
+        };
+        psi: {
+            gain: number;
+            total: number | null;
+            loss_component: number | null;
+            gradient_component: number | null;
+            learning_rate_component: number | null;
+        };
+        telemetry: Record<string, number>;
+        observation_count: number;
+        psi_component_count: number;
+    };
+
+    export type ZSpaceOptimizerFeedbackCheckpoint = {
+        contract_version: "spiraltorch.zspace_optimizer_feedback.v1";
+        kind: "spiraltorch.zspace_optimizer_feedback";
+        semantic_owner: "st-core::runtime::zspace_optimizer_feedback";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        config: ZSpaceOptimizerFeedbackConfig;
+        state: ZSpaceOptimizerFeedbackState;
+    };
+
+    export type ZSpaceOptimizerFeedbackObservationReport = {
+        contract_version: "spiraltorch.zspace_optimizer_feedback.v1";
+        kind: "spiraltorch.zspace_optimizer_feedback";
+        semantic_owner: "st-core::runtime::zspace_optimizer_feedback";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        transition_validated: true;
+        config: ZSpaceOptimizerFeedbackConfig;
+        observation: ZSpaceOptimizerFeedbackObservation;
+        projection: TrainingTelemetryProjection;
+        relative_loss_delta: number | null;
+        relative_loss_delta_ema: number | null;
+        action:
+            | "initialize"
+            | "warmup"
+            | "hold"
+            | "recover"
+            | "attenuate"
+            | "halt"
+            | "hold_halted";
+        gate_before: number;
+        gate_after: number;
+        state_before: ZSpaceOptimizerFeedbackState;
+        state_after: ZSpaceOptimizerFeedbackState;
+    };
+
+    export type ZSpaceOptimizerFeedbackControlReport = {
+        contract_version: "spiraltorch.zspace_optimizer_feedback.v1";
+        kind: "spiraltorch.zspace_optimizer_feedback";
+        semantic_owner: "st-core::runtime::zspace_optimizer_feedback";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        control_rule: "applied_scale=1+effective_gate*(proposed_scale-1)";
+        transition_validated: true;
+        config: ZSpaceOptimizerFeedbackConfig;
+        target_step: number;
+        proposed_learning_rate_scale: number;
+        proposed_deviation_from_identity: number;
+        feedback_observation_age_updates: number | null;
+        feedback_gate: number;
+        effective_feedback_gate: number;
+        applied_learning_rate_scale: number;
+        applied_deviation_from_identity: number;
+        identity_applied: boolean;
+        disposition:
+            | "no_feedback"
+            | "warmup"
+            | "halted"
+            | "stale"
+            | "identity_gate"
+            | "active";
+        state_before: ZSpaceOptimizerFeedbackState;
+        state_after: ZSpaceOptimizerFeedbackState;
+    };
+
     export type WasmReportRuntimeAudit = {
         status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
         score: number;
@@ -2695,6 +2853,22 @@ declare module "spiraltorch-wasm" {
     export function zspaceMetaOptimizerParameterControlObject(
         report: ZSpaceMetaOptimizerStepReport,
     ): ZSpaceParameterControl;
+    export function zspaceOptimizerFeedbackInitJson(configJson: string): string;
+    export function zspaceOptimizerFeedbackInitObject(
+        config: ZSpaceOptimizerFeedbackConfigInput,
+    ): ZSpaceOptimizerFeedbackCheckpoint;
+    export function zspaceOptimizerFeedbackRestoreJson(requestJson: string): string;
+    export function zspaceOptimizerFeedbackRestoreObject(
+        request: ZSpaceOptimizerFeedbackRestoreRequest,
+    ): ZSpaceOptimizerFeedbackCheckpoint;
+    export function zspaceOptimizerFeedbackObserveJson(requestJson: string): string;
+    export function zspaceOptimizerFeedbackObserveObject(
+        request: ZSpaceOptimizerFeedbackObserveRequest,
+    ): ZSpaceOptimizerFeedbackObservationReport;
+    export function zspaceOptimizerFeedbackControlJson(requestJson: string): string;
+    export function zspaceOptimizerFeedbackControlObject(
+        request: ZSpaceOptimizerFeedbackControlRequest,
+    ): ZSpaceOptimizerFeedbackControlReport;
 
     export function scalarScaleStackProbeJson(
         field: Float32Array,

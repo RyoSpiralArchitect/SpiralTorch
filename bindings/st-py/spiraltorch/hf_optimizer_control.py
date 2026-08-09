@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from .zspace_optimizer import (
+    ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
+    ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND,
+    ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
     ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION,
     ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND,
     ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER,
@@ -21,7 +24,7 @@ from .zspace_optimizer import (
 
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA = "spiraltorch.hf_zspace_optimizer_control.v1"
 HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA = "spiraltorch.hf_zspace_optimizer_receipt.v1"
-HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v2"
+HF_ZSPACE_OPTIMIZER_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v3"
 HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA = "spiraltorch.hf_zspace_optimizer_trace.v1"
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_matched_ablation.v1"
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA = "spiraltorch.hf_zspace_factorized_ablation.v1"
@@ -31,13 +34,15 @@ HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME = (
     "spiraltorch-hf-zspace-optimizer-trajectory.json"
 )
 HF_ZSPACE_OPTIMIZER_MODES = ("off", "observe", "apply")
+HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES = ("off", "loss_guard")
 HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS = (
     "raw",
     "dose_matched_constant",
     "dose_normalized",
 )
 _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v1"
-_HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS = (
+_HF_ZSPACE_OPTIMIZER_V2_STATE_SCHEMA = "spiraltorch.hf_zspace_optimizer_state.v2"
+_HF_ZSPACE_OPTIMIZER_V1_RECIPE_ADDITIONS = (
     "trajectory_arm",
     "trajectory_id",
     "trajectory_contract",
@@ -46,12 +51,23 @@ _HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS = (
     "trajectory_required",
     "actuation_scale_source",
 )
+_HF_ZSPACE_OPTIMIZER_FEEDBACK_RECIPE_ADDITIONS = (
+    "feedback_mode",
+    "feedback_adaptive",
+    "feedback_contract",
+    "feedback_semantic_owner",
+    "feedback_semantic_backend",
+    "feedback_config",
+    "feedback_control_target",
+    "feedback_evidence_boundary",
+)
 
 __all__ = [
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
     "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_MODES",
+    "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
     "HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_STATE_FILENAME",
     "HF_ZSPACE_OPTIMIZER_STATE_SCHEMA",
@@ -192,6 +208,8 @@ def hf_zspace_optimizer_recipe_contract(
     volume_per_step: int = 8,
     trajectory_arm: str = "raw",
     trajectory_id: str | None = None,
+    feedback_mode: str = "off",
+    feedback_config: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return the path-independent update recipe used by the HF callback."""
 
@@ -225,6 +243,25 @@ def hf_zspace_optimizer_recipe_contract(
         raise ValueError(
             f"apply trajectory arm {resolved_arm!r} requires trajectory_id"
         )
+    resolved_feedback_mode = str(feedback_mode).strip().lower()
+    if resolved_feedback_mode not in HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES:
+        raise ValueError(
+            "feedback_mode must be one of "
+            + ", ".join(HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES)
+        )
+    if resolved_feedback_mode != "off" and resolved_mode == "off":
+        raise ValueError("optimizer feedback requires observe or apply mode")
+    requested_feedback_config = dict(feedback_config or {})
+    if resolved_feedback_mode == "off" and requested_feedback_config:
+        raise ValueError("feedback_config requires an active feedback mode")
+    resolved_feedback_config: dict[str, object] | None = None
+    if resolved_feedback_mode == "loss_guard":
+        st = importlib.import_module("spiraltorch")
+        checkpoint = st.zspace_optimizer_feedback_init(requested_feedback_config)
+        config_payload = checkpoint.get("config")
+        if not isinstance(config_payload, Mapping):
+            raise RuntimeError("Rust feedback checkpoint has no validated config")
+        resolved_feedback_config = dict(config_payload)
     return {
         "schema": HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA,
         "mode": resolved_mode,
@@ -240,12 +277,55 @@ def hf_zspace_optimizer_recipe_contract(
         "trajectory_semantic_owner": ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER,
         "trajectory_semantic_backend": ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND,
         "trajectory_required": (resolved_mode == "apply" and resolved_arm != "raw"),
-        "control_signal": "topos_progress_geometry",
-        "feedback_adaptive": False,
-        "observation_mapping": "hf_global_step_to_open_topos_depth_and_volume",
+        "control_signal": (
+            "topos_progress_geometry"
+            if resolved_feedback_mode == "off"
+            else "topos_progress_geometry_guarded_by_training_loss_feedback"
+        ),
+        "feedback_mode": resolved_feedback_mode,
+        "feedback_adaptive": resolved_feedback_mode != "off",
+        "feedback_contract": (
+            None
+            if resolved_feedback_config is None
+            else ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+        ),
+        "feedback_semantic_owner": (
+            None
+            if resolved_feedback_config is None
+            else ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+        ),
+        "feedback_semantic_backend": (
+            None
+            if resolved_feedback_config is None
+            else ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_BACKEND
+        ),
+        "feedback_config": resolved_feedback_config,
+        "feedback_control_target": (
+            None
+            if resolved_feedback_config is None
+            else "proposed_learning_rate_scale_deviation_from_identity"
+        ),
+        "feedback_evidence_boundary": (
+            None
+            if resolved_feedback_config is None
+            else "within_run_loss_guard_not_counterfactual_efficacy"
+        ),
+        "observation_mapping": (
+            "hf_global_step_to_open_topos_depth_and_volume"
+            if resolved_feedback_mode == "off"
+            else (
+                "hf_global_step_to_open_topos_depth_and_volume;"
+                "hf_training_log_to_rust_training_projection"
+            )
+        ),
         "control_pipeline": [
             "st-tensor::pure::topos",
             "st-core::runtime::zspace_optimizer",
+            *(
+                []
+                if resolved_feedback_config is None
+                else ["st-core::runtime::zspace_optimizer_feedback"]
+            ),
             "torch.optim.Optimizer.step",
         ],
         "parameter_control_contract": ZSPACE_PARAMETER_CONTROL_CONTRACT_VERSION,
@@ -253,9 +333,13 @@ def hf_zspace_optimizer_recipe_contract(
         "parameter_control_semantic_backend": ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND,
         "actuation_transport": "temporary_param_group_lr_scale",
         "actuation_scale_source": (
-            "rust_parameter_control"
-            if resolved_arm == "raw"
-            else f"rust_parameter_trajectory.steps.{resolved_arm}_scale"
+            (
+                "rust_parameter_control"
+                if resolved_arm == "raw"
+                else f"rust_parameter_trajectory.steps.{resolved_arm}_scale"
+            )
+            if resolved_feedback_mode == "off"
+            else "rust_optimizer_feedback(applied_scale)"
         ),
         "scheduler_isolation": "restore_nominal_lr_before_scheduler_step",
         "first_control_source_step": 0,
@@ -267,11 +351,19 @@ def hf_zspace_optimizer_recipe_contract(
 
 def _legacy_optimizer_recipe(
     recipe: Mapping[str, object],
+    state_schema: str,
 ) -> dict[str, object] | None:
-    if recipe.get("trajectory_arm") != "raw" or recipe.get("trajectory_id") is not None:
+    if (
+        recipe.get("trajectory_arm") != "raw"
+        or recipe.get("trajectory_id") is not None
+        or recipe.get("feedback_mode") != "off"
+    ):
         return None
     legacy = dict(recipe)
-    for field in _HF_ZSPACE_OPTIMIZER_LEGACY_RECIPE_ADDITIONS:
+    additions = list(_HF_ZSPACE_OPTIMIZER_FEEDBACK_RECIPE_ADDITIONS)
+    if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA:
+        additions.extend(_HF_ZSPACE_OPTIMIZER_V1_RECIPE_ADDITIONS)
+    for field in additions:
         legacy.pop(field, None)
     return legacy
 
@@ -350,6 +442,8 @@ def hf_zspace_optimizer_control_callback(
     volume_per_step: int = 8,
     trajectory_arm: str = "raw",
     trajectory: str | Path | Mapping[str, object] | None = None,
+    feedback_mode: str = "off",
+    feedback_config: Mapping[str, object] | None = None,
     trajectory_output_path: str | Path | None = None,
     trace_path: str | Path | None = None,
     reset_trace: bool = True,
@@ -384,9 +478,12 @@ def hf_zspace_optimizer_control_callback(
         volume_per_step=volume_per_step,
         trajectory_arm=trajectory_arm,
         trajectory_id=resolved_trajectory_id,
+        feedback_mode=feedback_mode,
+        feedback_config=feedback_config,
     )
     resolved_mode = str(recipe["mode"])
     resolved_arm = str(recipe["trajectory_arm"])
+    resolved_feedback_mode = str(recipe["feedback_mode"])
     resolved_trace = None if trace_path is None else Path(trace_path)
     resolved_trajectory_output = (
         None if trajectory_output_path is None else Path(trajectory_output_path)
@@ -400,6 +497,14 @@ def hf_zspace_optimizer_control_callback(
             self.recipe = dict(recipe)
             self.mode = resolved_mode
             self.trajectory_arm = resolved_arm
+            self.feedback_mode = resolved_feedback_mode
+            recipe_feedback_config = self.recipe.get("feedback_config")
+            self.feedback_config = (
+                None if recipe_feedback_config is None else dict(recipe_feedback_config)
+            )
+            self.feedback_state: dict[str, object] | None = None
+            self.feedback_observation_sequence: list[dict[str, object]] = []
+            self.feedback_control_sequence: list[dict[str, object]] = []
             self.trajectory_report = (
                 None
                 if resolved_trajectory is None
@@ -415,6 +520,8 @@ def hf_zspace_optimizer_control_callback(
             self.active_nominal_rates: list[float] | None = None
             self.active_effective_rates: list[float] | None = None
             self.active_target_step: int | None = None
+            self.active_consumed: dict[str, object] | None = None
+            self.active_feedback_report: dict[str, object] | None = None
             self.expected_target_step: int | None = None
             self.last_consumed_target_step: int | None = None
             self.max_steps: int | None = None
@@ -447,6 +554,23 @@ def hf_zspace_optimizer_control_callback(
                     z_dim=int(self.recipe["z_dim"]),
                     topos_control_gain=float(self.recipe["control_gain"]),
                 )
+                if self.feedback_mode != "off":
+                    if self.feedback_config is None:
+                        raise RuntimeError(
+                            "active Z-space optimizer feedback has no Rust config"
+                        )
+                    checkpoint = st.zspace_optimizer_feedback_init(self.feedback_config)
+                    checkpoint_config = checkpoint.get("config")
+                    checkpoint_state = checkpoint.get("state")
+                    if (
+                        not isinstance(checkpoint_config, Mapping)
+                        or dict(checkpoint_config) != self.feedback_config
+                        or not isinstance(checkpoint_state, Mapping)
+                    ):
+                        raise RuntimeError(
+                            "Rust feedback initialization changed the sealed recipe"
+                        )
+                    self.feedback_state = _json_clone(checkpoint_state)
                 if resolved_resume is not None:
                     self._restore_resume_state(st, resolved_resume)
                     self._start_resume_trace_segment()
@@ -481,15 +605,24 @@ def hf_zspace_optimizer_control_callback(
             state_schema = payload.get("schema")
             if state_schema not in {
                 HF_ZSPACE_OPTIMIZER_STATE_SCHEMA,
+                _HF_ZSPACE_OPTIMIZER_V2_STATE_SCHEMA,
                 _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA,
             }:
                 raise RuntimeError("unsupported Z-space optimizer resume-state schema")
+            if (
+                state_schema != HF_ZSPACE_OPTIMIZER_STATE_SCHEMA
+                and self.feedback_mode != "off"
+            ):
+                raise RuntimeError(
+                    "legacy Z-space optimizer state has no feedback lineage"
+                )
             stored_recipe = payload.get("recipe")
             recipe_matches = stored_recipe == self.recipe
-            if state_schema == _HF_ZSPACE_OPTIMIZER_LEGACY_STATE_SCHEMA:
+            if state_schema != HF_ZSPACE_OPTIMIZER_STATE_SCHEMA:
                 recipe_matches = (
                     recipe_matches
-                    or stored_recipe == _legacy_optimizer_recipe(self.recipe)
+                    or stored_recipe
+                    == _legacy_optimizer_recipe(self.recipe, str(state_schema))
                 )
             if not recipe_matches:
                 raise RuntimeError("Z-space optimizer resume recipe does not match")
@@ -502,6 +635,52 @@ def hf_zspace_optimizer_control_callback(
                 payload.get("hf_global_step"),
                 label="hf_global_step",
             )
+            if self.feedback_mode != "off":
+                feedback_state = payload.get("feedback_state")
+                if self.feedback_config is None or not isinstance(
+                    feedback_state, Mapping
+                ):
+                    raise RuntimeError(
+                        "Z-space optimizer feedback resume state is incomplete"
+                    )
+                feedback_checkpoint = st.zspace_optimizer_feedback_restore(
+                    config=self.feedback_config,
+                    state=dict(feedback_state),
+                )
+                restored_feedback_state = feedback_checkpoint.get("state")
+                if not isinstance(restored_feedback_state, Mapping):
+                    raise RuntimeError(
+                        "Rust feedback restore returned no validated state"
+                    )
+                feedback_control_step = _safe_step(
+                    restored_feedback_state.get("control_step"),
+                    label="feedback_state.control_step",
+                )
+                if feedback_control_step != self.resume_hf_step:
+                    raise RuntimeError(
+                        "Z-space optimizer feedback step does not match Trainer"
+                    )
+                self.feedback_state = _json_clone(restored_feedback_state)
+                self.feedback_observation_sequence = _sequence_rows(
+                    payload.get("feedback_observation_sequence"),
+                    label="feedback_observation_sequence",
+                )
+                self.feedback_control_sequence = _sequence_rows(
+                    payload.get("feedback_control_sequence"),
+                    label="feedback_control_sequence",
+                )
+                self._validate_feedback_resume_lineage()
+            elif state_schema == HF_ZSPACE_OPTIMIZER_STATE_SCHEMA:
+                if payload.get("feedback_state") is not None or any(
+                    payload.get(field)
+                    for field in (
+                        "feedback_observation_sequence",
+                        "feedback_control_sequence",
+                    )
+                ):
+                    raise RuntimeError(
+                        "disabled Z-space optimizer feedback has unexpected state"
+                    )
             self.derived_sequence = _sequence_rows(
                 payload.get("derived_sequence"),
                 label="derived_sequence",
@@ -583,6 +762,88 @@ def hf_zspace_optimizer_control_callback(
                 }
             self.resume_state_loaded = True
             self.resume_state_path = str(state_path)
+
+        def _validate_feedback_resume_lineage(self) -> None:
+            if self.feedback_state is None:
+                raise RuntimeError("Z-space optimizer feedback state is unavailable")
+            control_step = _safe_step(
+                self.feedback_state.get("control_step"),
+                label="feedback_state.control_step",
+            )
+            if len(self.feedback_control_sequence) != control_step:
+                raise RuntimeError(
+                    "Z-space optimizer feedback control lineage is incomplete"
+                )
+            for expected_step, row in enumerate(
+                self.feedback_control_sequence,
+                start=1,
+            ):
+                target_step = _positive_int(
+                    row.get("hf_target_step"),
+                    label="feedback_control_sequence.hf_target_step",
+                )
+                if target_step != expected_step:
+                    raise RuntimeError(
+                        "Z-space optimizer feedback control lineage is not contiguous"
+                    )
+                if (
+                    row.get("feedback_contract")
+                    != ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+                    or row.get("feedback_semantic_owner")
+                    != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+                ):
+                    raise RuntimeError(
+                        "Z-space optimizer feedback control provenance is invalid"
+                    )
+                _finite_float(
+                    row.get("proposed_learning_rate_scale"),
+                    label="feedback_control_sequence.proposed_learning_rate_scale",
+                )
+                _finite_float(
+                    row.get("applied_learning_rate_scale"),
+                    label="feedback_control_sequence.applied_learning_rate_scale",
+                )
+            observation_count = _safe_step(
+                self.feedback_state.get("observation_count"),
+                label="feedback_state.observation_count",
+            )
+            if len(self.feedback_observation_sequence) != observation_count:
+                raise RuntimeError(
+                    "Z-space optimizer feedback observation lineage is incomplete"
+                )
+            previous_step: int | None = None
+            for row in self.feedback_observation_sequence:
+                observation_step = _safe_step(
+                    row.get("hf_global_step"),
+                    label="feedback_observation_sequence.hf_global_step",
+                )
+                if (
+                    observation_step > control_step
+                    or previous_step is not None
+                    and observation_step <= previous_step
+                ):
+                    raise RuntimeError(
+                        "Z-space optimizer feedback observation lineage is not ordered"
+                    )
+                if (
+                    row.get("feedback_contract")
+                    != ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION
+                    or row.get("feedback_semantic_owner")
+                    != ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER
+                ):
+                    raise RuntimeError(
+                        "Z-space optimizer feedback observation provenance is invalid"
+                    )
+                _finite_float(
+                    row.get("loss"),
+                    label="feedback_observation_sequence.loss",
+                )
+                previous_step = observation_step
+            last_observation_step = self.feedback_state.get("last_observation_step")
+            if previous_step != last_observation_step:
+                raise RuntimeError(
+                    "Z-space optimizer feedback observation tail does not match state"
+                )
 
         def _restore_trace_parent(self, payload: Mapping[str, object]) -> None:
             parent_path_value = payload.get("trace_path")
@@ -766,7 +1027,7 @@ def hf_zspace_optimizer_control_callback(
 
         def _consume_pending(
             self, *, nominal_rates: Sequence[float]
-        ) -> dict[str, object]:
+        ) -> tuple[dict[str, object], dict[str, object] | None]:
             pending = self.pending
             if not isinstance(pending, Mapping):
                 raise RuntimeError("no Rust-validated control is pending")
@@ -790,13 +1051,33 @@ def hf_zspace_optimizer_control_callback(
                 raw_scale=scale,
                 nominal_rates=nominal_rates,
             )
-            applied_scale = planned_scale if self.mode == "apply" else 1.0
+            feedback_scale = planned_scale
+            feedback_report: dict[str, object] | None = None
+            if self.feedback_mode != "off":
+                if self.feedback_config is None or self.feedback_state is None:
+                    raise RuntimeError(
+                        "active Z-space optimizer feedback state is unavailable"
+                    )
+                st = importlib.import_module("spiraltorch")
+                feedback_report = st.zspace_optimizer_feedback_control(
+                    config=self.feedback_config,
+                    state=self.feedback_state,
+                    target_step=target_step,
+                    proposed_learning_rate_scale=planned_scale,
+                )
+                feedback_scale = _finite_float(
+                    feedback_report.get("applied_learning_rate_scale"),
+                    label="feedback.applied_learning_rate_scale",
+                )
+            applied_scale = feedback_scale if self.mode == "apply" else 1.0
             effective_rates = [float(rate) * applied_scale for rate in nominal_rates]
-            return {
+            consumed = {
                 "hf_source_step": pending["hf_source_step"],
                 "hf_target_step": target_step,
                 "zspace_source_step": control["source_step"],
                 "absolute_learning_rate_scale": scale,
+                "planned_learning_rate_scale": planned_scale,
+                "feedback_learning_rate_scale": feedback_scale,
                 "applied_learning_rate_scale": applied_scale,
                 "trajectory_arm": self.trajectory_arm,
                 "trajectory_id": (
@@ -806,9 +1087,101 @@ def hf_zspace_optimizer_control_callback(
                 ),
                 "parameter_control_contract": control["contract_version"],
                 "parameter_control_semantic_owner": control["semantic_owner"],
+                "feedback_mode": self.feedback_mode,
+                "feedback_contract": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("contract_version")
+                ),
+                "feedback_semantic_owner": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("semantic_owner")
+                ),
+                "feedback_disposition": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("disposition")
+                ),
+                "feedback_gate": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("feedback_gate")
+                ),
+                "effective_feedback_gate": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("effective_feedback_gate")
+                ),
+                "feedback_observation_age_updates": (
+                    None
+                    if feedback_report is None
+                    else feedback_report.get("feedback_observation_age_updates")
+                ),
                 "nominal_learning_rates": list(nominal_rates),
                 "effective_learning_rates": effective_rates,
             }
+            return consumed, feedback_report
+
+        def _commit_active_consumed(self, *, applied: bool) -> dict[str, object]:
+            consumed = self.active_consumed
+            if consumed is None:
+                raise RuntimeError("completed optimizer update has no active control")
+            feedback_report = self.active_feedback_report
+            if self.feedback_mode != "off":
+                if not isinstance(feedback_report, Mapping):
+                    raise RuntimeError(
+                        "completed optimizer update has no Rust feedback transition"
+                    )
+                state_after = feedback_report.get("state_after")
+                if not isinstance(state_after, Mapping):
+                    raise RuntimeError("Rust feedback transition has no state_after")
+                self.feedback_state = _json_clone(state_after)
+                self.feedback_control_sequence.append(
+                    {
+                        "hf_target_step": consumed["hf_target_step"],
+                        "proposed_learning_rate_scale": feedback_report[
+                            "proposed_learning_rate_scale"
+                        ],
+                        "applied_learning_rate_scale": feedback_report[
+                            "applied_learning_rate_scale"
+                        ],
+                        "disposition": feedback_report["disposition"],
+                        "feedback_gate": feedback_report["feedback_gate"],
+                        "effective_feedback_gate": feedback_report[
+                            "effective_feedback_gate"
+                        ],
+                        "feedback_observation_age_updates": feedback_report[
+                            "feedback_observation_age_updates"
+                        ],
+                        "feedback_contract": feedback_report["contract_version"],
+                        "feedback_semantic_owner": feedback_report["semantic_owner"],
+                    }
+                )
+            self._record_consumed(consumed)
+            if applied:
+                self.applied_update_count += 1
+                if any(
+                    not math.isclose(
+                        float(nominal),
+                        float(effective),
+                        rel_tol=1e-12,
+                        abs_tol=1e-15,
+                    )
+                    for nominal, effective in zip(
+                        consumed["nominal_learning_rates"],
+                        consumed["effective_learning_rates"],
+                    )
+                ):
+                    self.non_identity_update_count += 1
+            else:
+                self.observed_update_count += 1
+            target_step = int(consumed["hf_target_step"])
+            self.last_consumed_target_step = target_step
+            self.pending = None
+            self.active_consumed = None
+            self.active_feedback_report = None
+            return consumed
 
         def _record_consumed(self, consumed: Mapping[str, object]) -> None:
             self.consumed_sequence.append(
@@ -819,6 +1192,15 @@ def hf_zspace_optimizer_control_callback(
                         "hf_target_step",
                         "zspace_source_step",
                         "absolute_learning_rate_scale",
+                        "planned_learning_rate_scale",
+                        "feedback_learning_rate_scale",
+                        "feedback_mode",
+                        "feedback_contract",
+                        "feedback_semantic_owner",
+                        "feedback_disposition",
+                        "feedback_gate",
+                        "effective_feedback_gate",
+                        "feedback_observation_age_updates",
                         "parameter_control_contract",
                         "parameter_control_semantic_owner",
                     )
@@ -830,6 +1212,8 @@ def hf_zspace_optimizer_control_callback(
                     for key in (
                         "hf_target_step",
                         "absolute_learning_rate_scale",
+                        "planned_learning_rate_scale",
+                        "feedback_learning_rate_scale",
                         "applied_learning_rate_scale",
                         "trajectory_arm",
                         "trajectory_id",
@@ -840,15 +1224,22 @@ def hf_zspace_optimizer_control_callback(
             )
 
         def _pre_step_hook(self, optimizer, args, kwargs):  # type: ignore[no-untyped-def]
-            if self.active_nominal_rates is not None:
+            if (
+                self.active_nominal_rates is not None
+                or self.active_consumed is not None
+            ):
                 raise RuntimeError("nested optimizer.step is unsupported")
             nominal_rates = _optimizer_learning_rates(optimizer)
-            consumed = self._consume_pending(nominal_rates=nominal_rates)
+            consumed, feedback_report = self._consume_pending(
+                nominal_rates=nominal_rates
+            )
             effective_rates = list(consumed["effective_learning_rates"])
             _set_optimizer_learning_rates(optimizer, effective_rates)
             self.active_nominal_rates = nominal_rates
             self.active_effective_rates = effective_rates
             self.active_target_step = int(consumed["hf_target_step"])
+            self.active_consumed = consumed
+            self.active_feedback_report = feedback_report
             self._trace("optimizer_step_pre", **consumed)
             return None
 
@@ -856,27 +1247,25 @@ def hf_zspace_optimizer_control_callback(
             if self.active_nominal_rates is None or self.active_target_step is None:
                 raise RuntimeError("optimizer.step post-hook has no active control")
             nominal_rates = list(self.active_nominal_rates)
-            _set_optimizer_learning_rates(optimizer, nominal_rates)
-            consumed = self._consume_pending(nominal_rates=nominal_rates)
-            target_step = self.active_target_step
-            self._record_consumed(consumed)
-            self.applied_update_count += 1
-            if any(
+            effective_rates = _optimizer_learning_rates(optimizer)
+            if self.active_effective_rates is None or any(
                 not math.isclose(
-                    float(nominal),
-                    float(effective),
+                    observed,
+                    expected,
                     rel_tol=1e-12,
                     abs_tol=1e-15,
                 )
-                for nominal, effective in zip(
-                    consumed["nominal_learning_rates"],
-                    consumed["effective_learning_rates"],
+                for observed, expected in zip(
+                    effective_rates,
+                    self.active_effective_rates,
                 )
             ):
-                self.non_identity_update_count += 1
+                raise RuntimeError(
+                    "optimizer learning rates changed inside the controlled step"
+                )
+            _set_optimizer_learning_rates(optimizer, nominal_rates)
+            consumed = self._commit_active_consumed(applied=True)
             self.restored_update_count += 1
-            self.last_consumed_target_step = target_step
-            self.pending = None
             self.active_nominal_rates = None
             self.active_effective_rates = None
             self.active_target_step = None
@@ -916,6 +1305,8 @@ def hf_zspace_optimizer_control_callback(
                 self.active_nominal_rates = None
                 self.active_effective_rates = None
                 self.active_target_step = None
+            self.active_consumed = None
+            self.active_feedback_report = None
 
         def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
             self.started = True
@@ -948,6 +1339,19 @@ def hf_zspace_optimizer_control_callback(
                 raise RuntimeError(
                     "nonzero Trainer state requires a Z-space optimizer resume state"
                 )
+            if self.feedback_mode != "off":
+                if self.feedback_state is None:
+                    raise RuntimeError(
+                        "Z-space optimizer feedback state is unavailable"
+                    )
+                feedback_step = _safe_step(
+                    self.feedback_state.get("control_step"),
+                    label="feedback_state.control_step",
+                )
+                if feedback_step != global_step:
+                    raise RuntimeError(
+                        "Z-space optimizer feedback step does not match Trainer"
+                    )
             optimizer = kwargs.get("optimizer")
             if optimizer is None:
                 raise RuntimeError(
@@ -970,27 +1374,90 @@ def hf_zspace_optimizer_control_callback(
             global_step = _safe_step(state.global_step, label="global_step")
             self.expected_target_step = global_step + 1
             if self.mode == "observe":
+                if self.active_consumed is not None:
+                    raise RuntimeError(
+                        "previous observed optimizer update is unresolved"
+                    )
                 optimizer = kwargs.get("optimizer", self.optimizer)
                 hookable = _hookable_optimizer(optimizer)
                 nominal_rates = _optimizer_learning_rates(hookable)
-                consumed = self._consume_pending(nominal_rates=nominal_rates)
-                self._record_consumed(consumed)
-                self.observed_update_count += 1
-                self.last_consumed_target_step = int(consumed["hf_target_step"])
-                self.pending = None
-                self._trace("optimizer_step_observed", **consumed)
+                consumed, feedback_report = self._consume_pending(
+                    nominal_rates=nominal_rates
+                )
+                self.active_consumed = consumed
+                self.active_feedback_report = feedback_report
             return control
 
         def on_step_end(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
             if self.mode == "off":
                 return control
             global_step = _safe_step(state.global_step, label="global_step")
+            if self.mode == "observe":
+                if (
+                    self.active_consumed is None
+                    or int(self.active_consumed["hf_target_step"]) != global_step
+                ):
+                    raise RuntimeError(
+                        "observed optimizer update has no matching active control"
+                    )
+                consumed = self._commit_active_consumed(applied=False)
+                self._trace("optimizer_step_observed", **consumed)
             if self.last_consumed_target_step != global_step:
                 raise RuntimeError(
                     "Z-space control was not consumed by the completed optimizer update"
                 )
             self.expected_target_step = None
             self._derive(global_step)
+            return control
+
+        def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]
+            if self.feedback_mode == "off" or not isinstance(logs, Mapping):
+                return control
+            if "loss" not in logs:
+                return control
+            if self.feedback_config is None or self.feedback_state is None:
+                raise RuntimeError("Z-space optimizer feedback state is unavailable")
+            observation_step = _safe_step(
+                state.global_step,
+                label="feedback_observation.step",
+            )
+            observation: dict[str, object] = {
+                "step": observation_step,
+                "max_steps": self.max_steps,
+                "loss": logs["loss"],
+            }
+            for field, fallback in (
+                ("epoch", getattr(state, "epoch", None)),
+                ("grad_norm", None),
+                ("learning_rate", None),
+            ):
+                value = logs.get(field, fallback)
+                if value is not None:
+                    observation[field] = value
+            st = importlib.import_module("spiraltorch")
+            report = st.zspace_optimizer_feedback_observe(
+                config=self.feedback_config,
+                state=self.feedback_state,
+                observation=observation,
+            )
+            state_after = report.get("state_after")
+            if not isinstance(state_after, Mapping):
+                raise RuntimeError("Rust feedback observation has no state_after")
+            self.feedback_state = _json_clone(state_after)
+            sequence_row = {
+                "hf_global_step": observation_step,
+                "loss": observation["loss"],
+                "action": report["action"],
+                "relative_loss_delta": report["relative_loss_delta"],
+                "relative_loss_delta_ema": report["relative_loss_delta_ema"],
+                "gate_before": report["gate_before"],
+                "gate_after": report["gate_after"],
+                "feedback_contract": report["contract_version"],
+                "feedback_semantic_owner": report["semantic_owner"],
+                "projection": _json_clone(report["projection"]),
+            }
+            self.feedback_observation_sequence.append(sequence_row)
+            self._trace("feedback_observed", **sequence_row)
             return control
 
         def _finalize_trajectory(self, output_dir: str | Path) -> None:
@@ -1084,11 +1551,30 @@ def hf_zspace_optimizer_control_callback(
                 )
                 if trajectory_steps != realized_steps:
                     blockers.append("input_trajectory_only_partially_consumed")
+            if self.active_consumed is not None:
+                blockers.append("optimizer_update_control_not_committed")
+            if self.feedback_mode != "off":
+                if self.feedback_state is None:
+                    blockers.append("feedback_state_missing")
+                elif (
+                    _safe_step(
+                        self.feedback_state.get("control_step"),
+                        label="feedback_state.control_step",
+                    )
+                    != realized_steps
+                ):
+                    blockers.append("feedback_control_step_mismatch")
+                if len(self.feedback_control_sequence) != realized_steps:
+                    blockers.append("feedback_control_lineage_incomplete")
             return blockers
 
         def _state_payload(self, hf_global_step: int) -> dict[str, object]:
             if self.zspace_trainer is None or self.max_steps is None:
                 raise RuntimeError("Z-space optimizer state is unavailable")
+            if self.active_consumed is not None:
+                raise RuntimeError(
+                    "cannot checkpoint an unresolved optimizer update control"
+                )
             pending = self.pending or {}
             trace_sha256, trace_size_bytes = _trace_file_evidence(self.trace_path)
             payload: dict[str, object] = {
@@ -1097,6 +1583,13 @@ def hf_zspace_optimizer_control_callback(
                 "hf_global_step": hf_global_step,
                 "max_steps": self.max_steps,
                 "zspace_trainer_state": self.zspace_trainer.state_dict(),
+                "feedback_state": _json_clone(self.feedback_state),
+                "feedback_observation_sequence": _json_clone(
+                    self.feedback_observation_sequence
+                ),
+                "feedback_control_sequence": _json_clone(
+                    self.feedback_control_sequence
+                ),
                 "pending_hf_source_step": pending.get("hf_source_step"),
                 "pending_hf_target_step": pending.get("hf_target_step"),
                 "pending_report": pending.get("report"),
@@ -1167,6 +1660,37 @@ def hf_zspace_optimizer_control_callback(
                 float(row["absolute_learning_rate_scale"])
                 for row in self.consumed_sequence
             ]
+            raw_control_sequence = [
+                {
+                    key: row[key]
+                    for key in (
+                        "hf_source_step",
+                        "hf_target_step",
+                        "zspace_source_step",
+                        "absolute_learning_rate_scale",
+                        "parameter_control_contract",
+                        "parameter_control_semantic_owner",
+                    )
+                }
+                for row in self.consumed_sequence
+            ]
+            feedback_scales = (
+                []
+                if self.feedback_mode == "off"
+                else [
+                    float(row["feedback_learning_rate_scale"])
+                    for row in self.consumed_sequence
+                ]
+            )
+            feedback_dispositions = [
+                row["feedback_disposition"]
+                for row in self.consumed_sequence
+                if row.get("feedback_disposition") is not None
+            ]
+            feedback_disposition_counts = {
+                disposition: feedback_dispositions.count(disposition)
+                for disposition in sorted(set(feedback_dispositions))
+            }
             schedule_evidence_complete = (
                 self.schedule_prefix_missing_count == 0
                 and len(self.schedule_sequence) == len(self.consumed_sequence)
@@ -1229,10 +1753,31 @@ def hf_zspace_optimizer_control_callback(
             else:
                 status = "active"
             trace_sha256, trace_size_bytes = _trace_file_evidence(self.trace_path)
+            if not schedule_evidence_complete:
+                evidence_boundary = (
+                    "legacy v1 resume preserved optimizer actuation, but the "
+                    "checkpoint had no historical scheduler rows; trajectory and "
+                    "integrated-dose evidence are unavailable"
+                )
+            elif self.feedback_mode == "off":
+                evidence_boundary = (
+                    "receipt proves control derivation and optimizer actuation, "
+                    "including Rust-owned trajectory and nominal-LR matching, not "
+                    "learning-quality improvement; this progress-derived signal "
+                    "does not use gradients or loss feedback"
+                )
+            else:
+                evidence_boundary = (
+                    "receipt proves control derivation and optimizer actuation, "
+                    "including Rust-owned trajectory, nominal-LR matching, and "
+                    "checkpointed within-run loss-feedback gating, not "
+                    "learning-quality improvement or counterfactual efficacy"
+                )
             return {
                 "schema": HF_ZSPACE_OPTIMIZER_RECEIPT_SCHEMA,
                 "status": status,
                 "mode": self.mode,
+                "feedback_mode": self.feedback_mode,
                 "trajectory_arm": self.trajectory_arm,
                 "recipe": dict(self.recipe),
                 "model_update_intervened": self.non_identity_update_count > 0,
@@ -1270,7 +1815,60 @@ def hf_zspace_optimizer_control_callback(
                     if applied_scales
                     else None
                 ),
-                "control_sequence_id": _sha256_id(self.consumed_sequence),
+                "control_sequence_id": _sha256_id(raw_control_sequence),
+                "guarded_control_sequence_id": _sha256_id(self.consumed_sequence),
+                "feedback_control_count": len(self.feedback_control_sequence),
+                "feedback_observation_count": len(self.feedback_observation_sequence),
+                "feedback_control_sequence_id": (
+                    None
+                    if self.feedback_mode == "off"
+                    else _sha256_id(self.feedback_control_sequence)
+                ),
+                "feedback_observation_sequence_id": (
+                    None
+                    if self.feedback_mode == "off"
+                    else _sha256_id(self.feedback_observation_sequence)
+                ),
+                "feedback_disposition_counts": feedback_disposition_counts,
+                "feedback_active_update_count": feedback_disposition_counts.get(
+                    "active", 0
+                ),
+                "feedback_identity_update_count": sum(
+                    math.isclose(scale, 1.0, rel_tol=1e-12, abs_tol=1e-15)
+                    for scale in feedback_scales
+                ),
+                "feedback_stale_update_count": feedback_disposition_counts.get(
+                    "stale", 0
+                ),
+                "feedback_halted_update_count": feedback_disposition_counts.get(
+                    "halted", 0
+                ),
+                "feedback_scale_min": (
+                    min(feedback_scales) if feedback_scales else None
+                ),
+                "feedback_scale_max": (
+                    max(feedback_scales) if feedback_scales else None
+                ),
+                "feedback_scale_mean": (
+                    sum(feedback_scales) / len(feedback_scales)
+                    if feedback_scales
+                    else None
+                ),
+                "feedback_gate": (
+                    None
+                    if self.feedback_state is None
+                    else self.feedback_state.get("gate")
+                ),
+                "feedback_halted": (
+                    None
+                    if self.feedback_state is None
+                    else self.feedback_state.get("halted")
+                ),
+                "feedback_contract": self.recipe.get("feedback_contract"),
+                "feedback_semantic_owner": self.recipe.get("feedback_semantic_owner"),
+                "feedback_evidence_boundary": self.recipe.get(
+                    "feedback_evidence_boundary"
+                ),
                 "nominal_schedule_sequence_id": nominal_sequence_id,
                 "actuated_schedule_sequence_id": actuated_sequence_id,
                 "schedule_evidence_complete": schedule_evidence_complete,
@@ -1370,20 +1968,7 @@ def hf_zspace_optimizer_control_callback(
                 ),
                 "failure": self.failure,
                 "efficacy_evaluated": False,
-                "evidence_boundary": (
-                    (
-                        "legacy v1 resume preserved optimizer actuation, but the "
-                        "checkpoint had no historical scheduler rows; trajectory and "
-                        "integrated-dose evidence are unavailable"
-                    )
-                    if not schedule_evidence_complete
-                    else (
-                        "receipt proves control derivation and optimizer actuation, "
-                        "including Rust-owned trajectory and nominal-LR matching, not "
-                        "learning-quality improvement; this progress-derived signal "
-                        "does not use gradients or loss feedback"
-                    )
-                ),
+                "evidence_boundary": evidence_boundary,
             }
 
     return SpiralTorchHFZSpaceOptimizerCallback()
@@ -1725,7 +2310,9 @@ def compare_hf_zspace_optimizer_run_cards(
     evidence_scope = (
         "multi_seed_matched_ablation"
         if bounded_trend_ready
-        else "single_or_two_seed_diagnostic" if status == "ready" else "non_comparable"
+        else "single_or_two_seed_diagnostic"
+        if status == "ready"
+        else "non_comparable"
     )
     return {
         "schema": HF_ZSPACE_MATCHED_ABLATION_SCHEMA,
@@ -2036,12 +2623,8 @@ def _factorized_seed_report(
         "nominal_schedule_sequence_id": nominal_id,
         "trajectory_non_identity_update_counts": expected_non_identity_counts,
         "trajectory_identity_tolerances": {
-            "relative": trajectory_fields.get(
-                "trajectory_identity_relative_tolerance"
-            ),
-            "absolute": trajectory_fields.get(
-                "trajectory_identity_absolute_tolerance"
-            ),
+            "relative": trajectory_fields.get("trajectory_identity_relative_tolerance"),
+            "absolute": trajectory_fields.get("trajectory_identity_absolute_tolerance"),
         },
         "identity_matches": identity_matches,
         "eval_before_losses": before_losses,

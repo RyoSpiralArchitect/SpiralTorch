@@ -193,6 +193,17 @@ not evidence that Z-Space controls are generally harmful. It argues against
 making this open-loop policy a default and motivates a separately ablated,
 Rust-owned feedback gate before longer scale-up.
 
+That gate is now available as the explicit
+`--zspace-optimizer-feedback loss_guard` mode. It consumes the selected raw or
+trajectory-arm proposal but keeps all loss projection, EMA, warmup, staleness,
+halt/recovery state, and the final blend in
+`st-core::runtime::zspace_optimizer_feedback`. Python and WASM expose the same
+state-machine checkpoint/report contract; the HF receipt additionally seals
+its observation and control lineage. It is deliberately not a fifth arm in
+this frozen four-arm study: compare guarded and unguarded recipes in a new
+matched multi-seed run, and retain the receipt's
+`within_run_loss_guard_not_counterfactual_efficacy` boundary.
+
 The comparator fails closed unless each seed has exactly one arm of every
 kind and all four share:
 

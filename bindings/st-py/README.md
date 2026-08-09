@@ -700,9 +700,9 @@ before the scheduler advances, and writes a resumable state plus JSONL receipt.
 Resume verifies the checkpoint's trace-prefix hash and starts a linked trace
 segment, preserving any post-checkpoint crash tail instead of mixing it with
 replayed updates.
-The v1 signal is derived from training-progress geometry, not loss or gradient
-feedback, so treat it as an auditable intervention primitive rather than an
-efficacy claim:
+Without an explicit feedback mode, the proposal is derived from
+training-progress geometry, not loss or gradient feedback, so treat it as an
+auditable intervention primitive rather than an efficacy claim:
 
 ```bash
 spiral-hf-finetune \
@@ -724,6 +724,30 @@ spiral-hf-zspace-optimizer-compare \
   runs/zspace-s13-apply/spiraltorch-hf-finetune-run-card.json \
   --out runs/zspace-s13-comparison.json
 ```
+
+Add `--zspace-optimizer-feedback loss_guard` to `observe` or `apply` when the
+proposal should pass through the checkpointed Rust feedback state machine.
+Training `loss` log events are projected by
+`st-core::telemetry::training_projection`; Rust owns the loss/delta EMAs,
+warmup, regression/recovery streaks, staleness, and the bounded blend
+`applied = 1 + gate * (proposed - 1)`. Missing, warmup, stale, or halted
+feedback applies the identity scale. Inspect resolved Rust defaults without
+loading a model first:
+
+```bash
+spiral-hf-finetune \
+  --training-recipe-only \
+  --model-name /path/to/local-model \
+  --train-file data/corpus.txt --finetune-mode lora \
+  --zspace-optimizer-control apply \
+  --zspace-optimizer-feedback loss_guard
+```
+
+Every completed update has one feedback-control row, while loss observations
+retain their Rust projection and resume lineage. The receipt labels this as a
+`within_run_loss_guard_not_counterfactual_efficacy`: ordinary training can
+improve loss and open the gate, so guarded and unguarded runs still require a
+matched multi-seed comparison before making an efficacy claim.
 
 Repeat the matched observe/apply pair with at least three seeds before reading
 the report as a bounded empirical trend. The comparator fails closed on input,
