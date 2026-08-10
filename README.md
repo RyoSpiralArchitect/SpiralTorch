@@ -478,14 +478,14 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- STATS:START -->
-> _auto-generated: 2026-08-03 07:25 UTC_
+> _auto-generated: 2026-08-10 06:44 UTC_
 
 | Metric | Value |
 |---|---:|
-| Rust code LOC | **343,645** |
-| Rust files | 552 |
-| Total code LOC (all langs) | 639,002 |
-| Workspace+deps crates | 452 |
+| Rust code LOC | **355,780** |
+| Rust files | 558 |
+| Total code LOC (all langs) | 660,442 |
+| Workspace+deps crates | 447 |
 
 <p>
 <img src="docs/badges/rust-loc.svg" alt="rust loc" />
