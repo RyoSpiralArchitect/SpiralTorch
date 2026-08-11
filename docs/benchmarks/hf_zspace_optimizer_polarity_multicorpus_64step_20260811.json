@@ -81,9 +81,9 @@
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
     "loaded_native_extension_sha256": "sha256:f27843531e2599e22126a12b53ea536fd119bfb944ab6e2c3e8f1e5ea7ded4a4",
-    "stable_aggregation_git_commit": "6f6579adaa0fbdd42cefe04019bc850f002c0558",
-    "outer_report_id": "sha256:6ecd5e053a56dcfbfba5ba600e3c476eaa1cc564d7fcb82bfd97bf2aaae13301",
-    "outer_report_sha256": "sha256:5b69fe924ce25322f38f3993b65fb93ddcac942782f857c268ceb3b282aabfa1",
+    "stable_aggregation_git_commit": "7fd80a7fa1c5f3fe535fd253fd9c397a4f9e8696",
+    "outer_report_id": "sha256:2bb26ad25acc4535eef20131e207ad653f833eaf564bdc0116109ade8bfe6eec",
+    "outer_report_sha256": "sha256:5d1a6c5ff1ced8d833f7f3e251c4711a554c63ea41b3ba7ecc93b9438b2a49ed",
     "rust_evidence_id": "sha256:9a9bc55664bbcc4331a8587760f90c1663f62caaa0b85f68edce6aeadf9b2634",
     "independent_comparator_byte_match": true,
     "exact_runner_reuse_completed_runs": 27
@@ -111,6 +111,35 @@
       "corpus_left_arm_win_count": 3,
       "corpus_right_arm_win_count": 0
     }
+  },
+  "report_identity": {
+    "corpora": [
+      {
+        "completion_event_id": "sha256:873ceca8a36e7b4dcb626a8e3a86aa9b4700dee90a3ec0124b8feccfe6dc37a9",
+        "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+        "plan_sha256": "sha256:cb30c2d985e87a7fb6bcbb457ee64c0aec99a3ae83be3ef69d7a064a72082535",
+        "polarity_report_sha256": "sha256:4582d800da56879159929dcb7388d0fb18e653adc7c85482ea833ff9ed4ba48a",
+        "study_id": "sha256:7f3c1a94391d990136f4cb25476e2743469c4337da225d6ddd8e0e3b37a39bf2"
+      },
+      {
+        "completion_event_id": "sha256:783bf0cf01f58eb460fb2ea33ee1f373de745c983ec984b862cc919850eaaf26",
+        "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+        "plan_sha256": "sha256:a1bdbefa6fcf744b5f05e2a521df008dbbb4c37862ff747739099acacedd34b7",
+        "polarity_report_sha256": "sha256:f0851903c8ff9e233b82863b273bf8d93937e39edc05a67a28b38117b7744e88",
+        "study_id": "sha256:3663c2f7cced8f632c3a5c159c20da1deffaf69f04466fa3366f5ba5958c1da9"
+      },
+      {
+        "completion_event_id": "sha256:a06d16074d8fdaf812b1007cf59e736f468b7911925ce60546b195f8639bbfd1",
+        "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+        "plan_sha256": "sha256:baed8bb604e3e312f5739b1e73a982b29e2abe5666b7efa1474f24c43bfd0009",
+        "polarity_report_sha256": "sha256:5ee6cc0bca862fcea88ff1b6e805c0e2fb38b711cd91f998b0814dfe3e5247c1",
+        "study_id": "sha256:a7c19b61359aaf59fb983a815a4c86ba6a76d6cdfe18d05ba4c4c350bf0d023f"
+      }
+    ],
+    "protocol_id": "sha256:5be29dafc9374c21420cb97093daa634b3032aa4c66900513487ba4bbb32c865",
+    "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+    "rust_evidence_id": "sha256:9a9bc55664bbcc4331a8587760f90c1663f62caaa0b85f68edce6aeadf9b2634",
+    "schema": "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
   },
   "rust_evidence": {
     "aggregation_rule": "validate balanced (corpus_id,seed) rows; summarize seeds within corpus; summarize corpus means with equal corpus weight",

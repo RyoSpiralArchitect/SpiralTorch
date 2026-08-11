@@ -432,7 +432,9 @@ calling Rust. A label or file path is presentation metadata; the corpus key in
 the Rust evidence is the path-independent training-input identity. The outer
 report retains the first ready completion-event ID rather than the mutable
 summary SHA, so a verified reuse can extend the journal without changing the
-scientific report identity.
+scientific report identity. That identity hashes the Rust evidence plus sealed
+plan, completion, and source-report IDs in corpus-ID order; labels and local
+paths remain outside it.
 
 ### Audited cross-corpus polarity result (2026-08-11)
 
@@ -466,9 +468,10 @@ power analysis or independent generation-quality endpoint. Accordingly,
 The frozen provenance anchors are:
 
 - outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
-- stable outer report SHA-256 `5b69fe924ce25322f38f3993b65fb93ddcac942782f857c268ceb3b282aabfa1`;
+- alias-independent outer report ID `sha256:2bb26ad25acc4535eef20131e207ad653f833eaf564bdc0116109ade8bfe6eec`;
+- stable outer report SHA-256 `5d1a6c5ff1ced8d833f7f3e251c4711a554c63ea41b3ba7ecc93b9438b2a49ed`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `6f6579adaa0fbdd42cefe04019bc850f002c0558`;
+- stable aggregation Git commit `7fd80a7fa1c5f3fe535fd253fd9c397a4f9e8696`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
 - native library SHA-256 `f27843531e2599e22126a12b53ea536fd119bfb944ab6e2c3e8f1e5ea7ded4a4`.
 
