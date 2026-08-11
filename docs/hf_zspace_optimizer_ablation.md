@@ -478,11 +478,11 @@ The frozen provenance anchors are:
 - path- and alias-independent protocol ID `sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f`;
 - path-independent data-preparation ID `sha256:75f83e30bbd86776fee86b91cda4bf36624282cbbc880c1bb8df450a1bbe982f`;
 - path- and alias-independent outer report ID `sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08`;
-- stable outer report SHA-256 `b9f01a1b2fee527cf8ae6b17f8faa46218535724cb6e92169177e7ba73e8ed62`;
+- stable outer report SHA-256 `1d020a8d9916614c4ea42cc4dd28b59d55c763452e72923d2fc384d2846708b1`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `2b9ce104488602ae98d4eb15d01c6e7d4a533ce9`;
+- stable aggregation Git commit `f6bcc70f07a77ee81d5f64c9a0d06888230dac44`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
-- native library SHA-256 `a55beb8ff4aacbc69789236a5cb3fb5cf1a72a6668d17e6c607be12f3dfb2bb1`.
+- native library SHA-256 `29a125bbb5e1dbb79df359417a8d97094cea8188e5f067712524b16e76b8b949`.
 
 ## Read the contrasts
 
