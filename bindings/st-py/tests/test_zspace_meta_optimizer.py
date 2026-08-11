@@ -686,6 +686,40 @@ def test_polarity_evidence_preserves_subnormal_residuals_after_cancellation() ->
     assert normalized["bounded_trend_direction"] == "right_arm_better"
 
 
+def test_polarity_evidence_uses_exact_corpus_sum_sign_before_mean_rounding() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": 0.0,
+            "complement_shape_effect": (-smallest_subnormal if seed == 13 else 0.0),
+            "polarity_effect": -smallest_subnormal if seed == 13 else 0.0,
+        }
+        for corpus in ("a", "b", "c")
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    polarity = report["contrasts"]["polarity_effect"]
+    assert all(corpus["mean"].hex() == "-0x0.0p+0" for corpus in polarity["corpora"])
+    assert polarity["corpus_left_arm_win_count"] == 3
+    assert polarity["corpus_right_arm_win_count"] == 0
+    assert polarity["corpus_tie_count"] == 0
+    assert polarity["bounded_trend_direction"] == "left_arm_better"
+    assert polarity["bounded_trend_ready"] is True
+    assert report["bounded_polarity_improvement_observed"] is True
+
+
 def test_polarity_evidence_uses_subnormal_to_break_large_rounding_ties() -> None:
     maximum = float.fromhex("0x1.fffffffffffffp+1023")
     next_down_maximum = math.nextafter(maximum, 0.0)

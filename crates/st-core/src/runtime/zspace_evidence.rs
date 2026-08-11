@@ -440,13 +440,15 @@ where
             });
     }
     let mut corpora = Vec::with_capacity(values_by_corpus.len());
+    let mut corpus_mean_signs = Vec::with_capacity(values_by_corpus.len());
     for (corpus_id, mut values) in values_by_corpus {
         values.sort_by_key(|item| item.seed);
         let corpus_values = values.iter().map(|item| item.value).collect::<Vec<_>>();
-        let mean = finite_mean(
+        let (mean, mean_sign) = finite_mean_with_sign(
             &corpus_values,
             &format!("{left_arm}_vs_{right_arm}.corpus[{corpus_id}].mean"),
         )?;
+        corpus_mean_signs.push(mean_sign);
         corpora.push(ZSpacePolarityCorpusContrastSummary {
             corpus_id: corpus_id.to_owned(),
             seed_count: values.len(),
@@ -470,7 +472,7 @@ where
         &corpus_means,
         &format!("{left_arm}_vs_{right_arm}.corpus_mean_population_standard_deviation"),
     )?;
-    let direction = evidence_direction(&corpus_means);
+    let direction = evidence_direction(&corpus_mean_signs);
     let bounded_trend_ready = bounded_ready && direction != ZSpacePolarityEvidenceDirection::Mixed;
 
     Ok(ZSpacePolarityContrastSummary {
@@ -491,9 +493,18 @@ where
         seed_left_arm_win_count: seed_values.iter().filter(|value| **value < 0.0).count(),
         seed_right_arm_win_count: seed_values.iter().filter(|value| **value > 0.0).count(),
         seed_tie_count: seed_values.iter().filter(|value| **value == 0.0).count(),
-        corpus_left_arm_win_count: corpus_means.iter().filter(|value| **value < 0.0).count(),
-        corpus_right_arm_win_count: corpus_means.iter().filter(|value| **value > 0.0).count(),
-        corpus_tie_count: corpus_means.iter().filter(|value| **value == 0.0).count(),
+        corpus_left_arm_win_count: corpus_mean_signs
+            .iter()
+            .filter(|sign| **sign == Sign::Minus)
+            .count(),
+        corpus_right_arm_win_count: corpus_mean_signs
+            .iter()
+            .filter(|sign| **sign == Sign::Plus)
+            .count(),
+        corpus_tie_count: corpus_mean_signs
+            .iter()
+            .filter(|sign| **sign == Sign::NoSign)
+            .count(),
         bounded_trend_ready,
         bounded_trend_direction: direction,
         corpora,
@@ -501,8 +512,23 @@ where
 }
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
+    finite_mean_with_sign(values, field).map(|(mean, _)| mean)
+}
+
+fn finite_mean_with_sign(
+    values: &[f64],
+    field: &str,
+) -> Result<(f64, Sign), ZSpacePolarityEvidenceError> {
     if values.iter().all(|value| *value == values[0]) {
-        return Ok(values[0]);
+        let value = values[0];
+        let sign = if value < 0.0 {
+            Sign::Minus
+        } else if value > 0.0 {
+            Sign::Plus
+        } else {
+            Sign::NoSign
+        };
+        return Ok((value, sign));
     }
     // Every finite f64 is an integer multiple of the minimum subnormal. Summing
     // those integers first lets the final division perform the only rounding.
@@ -510,9 +536,10 @@ fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenc
     for value in values {
         exact_sum += finite_binary_units(*value);
     }
+    let sum_sign = exact_sum.sign();
     let mean = rounded_binary_mean(exact_sum, values.len());
     if mean.is_finite() {
-        Ok(mean)
+        Ok((mean, sum_sign))
     } else {
         Err(ZSpacePolarityEvidenceError::NonFiniteAggregate {
             field: field.to_owned(),
@@ -649,12 +676,12 @@ fn rounded_binary_mean(exact_sum: BigInt, count: usize) -> f64 {
     f64::from_bits(sign_bit | magnitude_bits)
 }
 
-fn evidence_direction(values: &[f64]) -> ZSpacePolarityEvidenceDirection {
-    if values.iter().all(|value| *value < 0.0) {
+fn evidence_direction(signs: &[Sign]) -> ZSpacePolarityEvidenceDirection {
+    if signs.iter().all(|sign| *sign == Sign::Minus) {
         ZSpacePolarityEvidenceDirection::LeftArmBetter
-    } else if values.iter().all(|value| *value > 0.0) {
+    } else if signs.iter().all(|sign| *sign == Sign::Plus) {
         ZSpacePolarityEvidenceDirection::RightArmBetter
-    } else if values.iter().all(|value| *value == 0.0) {
+    } else if signs.iter().all(|sign| *sign == Sign::NoSign) {
         ZSpacePolarityEvidenceDirection::NoObservedDifference
     } else {
         ZSpacePolarityEvidenceDirection::Mixed
@@ -959,6 +986,45 @@ mod tests {
             finite_mean(&values, "reversed_subnormal_residual")
                 .expect("reversed subnormal residual mean"),
             mean
+        );
+    }
+
+    #[test]
+    fn trend_direction_uses_exact_corpus_sum_before_mean_rounding() {
+        let smallest_subnormal = f64::from_bits(1);
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            row.dose_normalized_shape_effect = 0.0;
+            row.complement_shape_effect = if row.seed == 13 {
+                -smallest_subnormal
+            } else {
+                0.0
+            };
+            row.polarity_effect = row.complement_shape_effect;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("subnormal evidence");
+        let polarity = &report.contrasts["polarity_effect"];
+        assert!(polarity
+            .corpora
+            .iter()
+            .all(|corpus| corpus.mean.to_bits() == (-0.0_f64).to_bits()));
+        assert_eq!(polarity.corpus_left_arm_win_count, 3);
+        assert_eq!(polarity.corpus_right_arm_win_count, 0);
+        assert_eq!(polarity.corpus_tie_count, 0);
+        assert_eq!(
+            polarity.bounded_trend_direction,
+            ZSpacePolarityEvidenceDirection::LeftArmBetter
+        );
+        assert!(polarity.bounded_trend_ready);
+        assert!(report.bounded_polarity_improvement_observed);
+
+        let mut reversed_request = report.request.clone();
+        reversed_request.rows.reverse();
+        assert_eq!(
+            summarize_zspace_polarity_evidence(reversed_request)
+                .expect("reversed subnormal evidence"),
+            report
         );
     }
 
