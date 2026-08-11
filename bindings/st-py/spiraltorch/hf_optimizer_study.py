@@ -101,7 +101,10 @@ _HF_ZSPACE_POLARITY_CORPUS_REPORT_IDENTITY_SCHEMA = (
     "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
 )
 _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA = (
-    "spiraltorch.hf_zspace_polarity_corpus_protocol.v1"
+    "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v1"
+)
+_HF_ZSPACE_POLARITY_CORPUS_PLAN_PROTOCOL_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_plan_protocol.v1"
 )
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
@@ -929,7 +932,7 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
         excluded_path=resolved_study_dir,
     )
     protocol_payload = {
-        "schema": _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA,
+        "schema": _HF_ZSPACE_POLARITY_CORPUS_PLAN_PROTOCOL_SCHEMA,
         "arms": list(HF_ZSPACE_POLARITY_STUDY_ARMS),
         "seeds": list(normalized_seeds),
         "max_steps": max_steps,
@@ -1475,6 +1478,11 @@ def _validate_completed_run_card(
         raise HFZSpaceFactorizedStudyError(
             "run card has no ready training recipe identity"
         )
+    training_recipe_identity_id = _ready_identity_id(
+        card,
+        "training_recipe_identity",
+        "observed_identity_id",
+    )
     identity_payload = identity.get("identity_payload")
     training_arguments = (
         identity_payload.get("training_arguments")
@@ -1662,6 +1670,7 @@ def _validate_completed_run_card(
             "training_input_identity_after_load",
             "observed_input_id",
         ),
+        "training_recipe_identity_id": training_recipe_identity_id,
     }
 
 
@@ -2408,12 +2417,51 @@ def _polarity_corpus_study_bundle(
         sealed_completion_events[0].get("event_id"),
         field="completion event identity",
     )
+    completion_events_by_run = _completed_event_by_run(events)
     run_cards: list[Path] = []
+    sealed_identity_anchor: dict[str, str] = {}
+    training_recipe_runs: list[dict[str, object]] = []
     for index, run in enumerate(runs):
         if not isinstance(run, Mapping) or not isinstance(run.get("run_card"), str):
             raise HFZSpaceFactorizedStudyError(
                 f"polarity corpus {normalized_label} run {index} has no run card"
             )
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has no run identity"
+            )
+        completion_event = completion_events_by_run.get(run_id)
+        if completion_event is None:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has no sealed completion receipt"
+            )
+        sealed_facts = _verify_reusable_run(run, completion_event)
+        if sealed_facts is None:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has no sealed run evidence"
+            )
+        _enforce_study_identity_anchor(sealed_identity_anchor, sealed_facts)
+        seed = run.get("seed")
+        arm = run.get("arm")
+        if (
+            isinstance(seed, bool)
+            or not isinstance(seed, int)
+            or not isinstance(arm, str)
+        ):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has invalid recipe coordinates"
+            )
+        training_recipe_runs.append(
+            {
+                "arm": arm,
+                "seed": seed,
+                "training_recipe_identity_id": _sha256_identity(
+                    sealed_facts.get("training_recipe_identity_id"),
+                    field="training recipe identity",
+                ),
+            }
+        )
         card_path = Path(str(run["run_card"])).resolve()
         if not card_path.is_file() or not _path_is_within(card_path, root):
             raise HFZSpaceFactorizedStudyError(
@@ -2436,21 +2484,27 @@ def _polarity_corpus_study_bundle(
         raise HFZSpaceFactorizedStudyError(
             f"polarity corpus {normalized_label} has invalid bridge arguments"
         )
-    shared_args, source_args = _split_local_corpus_source_args(bridge_args)
+    _, source_args = _split_local_corpus_source_args(bridge_args)
     source_flags = source_args[::2]
     identity_anchor = summary.get("identity_anchor")
     if not isinstance(identity_anchor, Mapping):
         raise HFZSpaceFactorizedStudyError(
             f"polarity corpus {normalized_label} has no identity anchor"
         )
-    corpus_id = _sha256_identity(
-        identity_anchor.get("training_input_id"),
-        field="training input identity",
-    )
-    runtime_identity_id = _sha256_identity(
-        identity_anchor.get("runtime_identity_id"),
-        field="runtime identity",
-    )
+    summary_identity_anchor = {
+        field: _sha256_identity(identity_anchor.get(field), field=field.replace("_", " "))
+        for field in (
+            "execution_identity_id",
+            "runtime_identity_id",
+            "training_input_id",
+        )
+    }
+    if summary_identity_anchor != sealed_identity_anchor:
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} summary identity anchor does not match sealed run evidence"
+        )
+    corpus_id = sealed_identity_anchor["training_input_id"]
+    runtime_identity_id = sealed_identity_anchor["runtime_identity_id"]
     seeds = stored_report.get("seeds")
     polarity_seeds = stored_report.get("polarity_seeds")
     if not isinstance(seeds, list) or not all(isinstance(seed, int) for seed in seeds):
@@ -2508,12 +2562,17 @@ def _polarity_corpus_study_bundle(
         "arms": scientific_spec.get("arms"),
         "seeds": seeds,
         "max_steps": scientific_spec.get("max_steps"),
-        "shared_bridge_args": shared_args,
         "corpus_source_flags": source_flags,
         "bridge_sha256": scientific_spec.get("bridge_sha256"),
         "runtime_source_id": runtime_source.get("source_id"),
         "git_head": git_provenance.get("head"),
         "git_status_id": git_provenance.get("status_id"),
+        "execution_identity_id": sealed_identity_anchor["execution_identity_id"],
+        "runtime_identity_id": runtime_identity_id,
+        "training_recipe_runs": sorted(
+            training_recipe_runs,
+            key=lambda row: (int(row["seed"]), str(row["arm"])),
+        ),
     }
     return {
         "label": normalized_label,

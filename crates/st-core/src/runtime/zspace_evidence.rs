@@ -379,9 +379,8 @@ fn validate_rows(rows: &[ZSpacePolarityEvidenceRow]) -> Result<(), ZSpacePolarit
                 value: expected,
             });
         }
-        let tolerance = CONTRAST_ABSOLUTE_TOLERANCE.max(
-            CONTRAST_RELATIVE_TOLERANCE * row.polarity_effect.abs().max(expected.abs()).max(1.0),
-        );
+        let scale = row.polarity_effect.abs().max(expected.abs());
+        let tolerance = CONTRAST_ABSOLUTE_TOLERANCE.max(CONTRAST_RELATIVE_TOLERANCE * scale);
         if (row.polarity_effect - expected).abs() > tolerance {
             return Err(ZSpacePolarityEvidenceError::ContrastInvariant {
                 index,
@@ -724,6 +723,19 @@ mod tests {
     fn contrast_algebra_is_an_enforced_invariant() {
         let mut invalid = request(1, &[13]);
         invalid.rows[0].polarity_effect = 0.0;
+
+        assert!(matches!(
+            summarize_zspace_polarity_evidence(invalid),
+            Err(ZSpacePolarityEvidenceError::ContrastInvariant { .. })
+        ));
+    }
+
+    #[test]
+    fn tiny_contrast_cannot_reverse_the_validated_direction() {
+        let mut invalid = request(1, &[13]);
+        invalid.rows[0].dose_normalized_shape_effect = 4.0e-13;
+        invalid.rows[0].complement_shape_effect = -4.0e-13;
+        invalid.rows[0].polarity_effect = 1.0e-13;
 
         assert!(matches!(
             summarize_zspace_polarity_evidence(invalid),

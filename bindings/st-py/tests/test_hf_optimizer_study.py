@@ -118,6 +118,11 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
         "launch_command": command,
         "training_recipe_identity": {
             "status": "ready",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(
+                300 + seed * len(arms) + list(arms).index(arm)
+            ),
             "identity_payload": {"training_arguments": {"seed": seed}},
         },
         "finetune_execution_identity_after_model": {
@@ -1391,10 +1396,14 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
         compare,
     )
     root = tmp_path / "polarity"
+    original_args = _bridge_args()
+    original_model = str(tmp_path / "checkout-a" / "same-model")
+    original_args[original_args.index("local-model")] = original_model
+    original_args.extend(("--tokenizer-name", original_model))
     summary = st.run_hf_zspace_optimizer_polarity_study(
         study_dir=root,
         seeds=[13],
-        bridge_args=_bridge_args(),
+        bridge_args=original_args,
         bridge_script=bridge,
         launch_cwd=tmp_path,
         min_free_disk_gb=0.0,
@@ -1405,6 +1414,44 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
     bundle = study._polarity_corpus_study_bundle("alpha", root)
     assert bundle["study_id"] == summary["study_id"]
     assert bundle["protocol_payload"]["corpus_source_flags"] == ["--train-file"]  # type: ignore[index]
+    assert "shared_bridge_args" not in bundle["protocol_payload"]  # type: ignore[operator]
+    assert len(bundle["protocol_payload"]["training_recipe_runs"]) == 3  # type: ignore[index]
+
+    summary_path = root / study.HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
+    stored_summary = study._read_json(summary_path)
+    tampered_summary = dict(stored_summary)
+    tampered_anchor = dict(tampered_summary["identity_anchor"])
+    tampered_anchor["training_input_id"] = "sha256:" + "f" * 64
+    tampered_summary["identity_anchor"] = tampered_anchor
+    study._atomic_write_json(summary_path, tampered_summary)
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="summary identity anchor does not match sealed run evidence",
+    ):
+        study._polarity_corpus_study_bundle("alpha", root)
+    study._atomic_write_json(summary_path, stored_summary)
+
+    relocated_root = tmp_path / "relocated-polarity"
+    relocated_args = _bridge_args()
+    relocated_model = str(tmp_path / "checkout-b" / "same-model")
+    relocated_args[relocated_args.index("local-model")] = relocated_model
+    relocated_args.extend(("--tokenizer-name", relocated_model))
+    relocated_summary = st.run_hf_zspace_optimizer_polarity_study(
+        study_dir=relocated_root,
+        seeds=[13],
+        bridge_args=relocated_args,
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+    assert relocated_summary["status"] == "ready"
+    relocated_bundle = study._polarity_corpus_study_bundle(
+        "relocated-alpha", relocated_root
+    )
+    assert relocated_bundle["protocol_payload"] == bundle["protocol_payload"]
+    assert relocated_bundle["protocol_id"] == bundle["protocol_id"]
+
     event_path = root / study.HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
     with event_path.open("a", encoding="utf-8") as handle:
         handle.write("\n")

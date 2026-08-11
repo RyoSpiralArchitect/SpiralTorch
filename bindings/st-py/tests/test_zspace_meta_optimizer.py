@@ -553,6 +553,25 @@ def test_polarity_evidence_rejects_unbalanced_seed_sets() -> None:
         )
 
 
+def test_polarity_evidence_rejects_tiny_direction_reversal() -> None:
+    rows = _polarity_evidence_rows()
+    for row in rows:
+        row["dose_normalized_shape_effect"] = 4.0e-13
+        row["complement_shape_effect"] = -4.0e-13
+        row["polarity_effect"] = 1.0e-13
+
+    with pytest.raises(ValueError, match="polarity contrast identity"):
+        st.zspace_polarity_evidence(
+            protocol_id=_sha_id("1"),
+            runtime_identity_id=_sha_id("2"),
+            trajectory_id=_sha_id("3"),
+            trajectory_policy_id=_sha_id("4"),
+            control_sequence_id=_sha_id("5"),
+            nominal_schedule_sequence_id=_sha_id("6"),
+            rows=rows,
+        )
+
+
 def test_polarity_evidence_keeps_large_finite_aggregates_numeric() -> None:
     rows = _polarity_evidence_rows()
     for row in rows:
