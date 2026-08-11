@@ -467,7 +467,6 @@ where
     )?;
     let corpus_mean_population_standard_deviation = finite_population_standard_deviation(
         &corpus_means,
-        corpus_equal_weight_mean,
         &format!("{left_arm}_vs_{right_arm}.corpus_mean_population_standard_deviation"),
     )?;
     let direction = evidence_direction(&corpus_means);
@@ -536,21 +535,22 @@ fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenc
 
 fn finite_population_standard_deviation(
     values: &[f64],
-    mean: f64,
     field: &str,
 ) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let scale = values
-        .iter()
-        .map(|value| value.abs())
-        .fold(mean.abs(), f64::max);
+    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
     let standard_deviation = if scale == 0.0 {
         0.0
     } else {
-        let normalized_mean = mean / scale;
-        let normalized_variance = compensated_sum(values.iter().map(|value| {
-            let deviation = value / scale - normalized_mean;
-            deviation * deviation
-        })) / values.len() as f64;
+        // Welford centers normalized values before squaring, without a rounded report mean.
+        let mut normalized_mean = 0.0;
+        let mut normalized_m2 = 0.0;
+        for (index, value) in values.iter().enumerate() {
+            let normalized = value / scale;
+            let delta = normalized - normalized_mean;
+            normalized_mean += delta / (index + 1) as f64;
+            normalized_m2 += delta * (normalized - normalized_mean);
+        }
+        let normalized_variance = normalized_m2 / values.len() as f64;
         scale * normalized_variance.clamp(0.0, 1.0).sqrt()
     };
     if standard_deviation.is_finite() {
@@ -561,24 +561,6 @@ fn finite_population_standard_deviation(
             value: standard_deviation,
         })
     }
-}
-
-fn compensated_sum<I>(values: I) -> f64
-where
-    I: IntoIterator<Item = f64>,
-{
-    let mut sum = 0.0;
-    let mut compensation = 0.0;
-    for value in values {
-        let updated = sum + value;
-        if sum.abs() >= value.abs() {
-            compensation += (sum - updated) + value;
-        } else {
-            compensation += (value - updated) + sum;
-        }
-        sum = updated;
-    }
-    sum + compensation
 }
 
 fn rounded_binary_mean(exact_sum: BigInt, count: usize) -> f64 {
@@ -949,14 +931,35 @@ mod tests {
     #[test]
     fn finite_standard_deviation_scales_before_tiny_deviations_underflow() {
         let values = [1.0e-200, 2.0e-200, 3.0e-200];
-        let mean = finite_mean(&values, "tiny_variance_mean").expect("finite mean");
-        let standard_deviation =
-            finite_population_standard_deviation(&values, mean, "tiny_variance")
-                .expect("finite standard deviation");
+        let standard_deviation = finite_population_standard_deviation(&values, "tiny_variance")
+            .expect("finite standard deviation");
         let expected = (2.0_f64 / 3.0).sqrt() * 1.0e-200;
 
         assert!(standard_deviation > 0.0);
         assert!((standard_deviation / expected - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn finite_standard_deviation_centers_before_subnormal_mean_rounding() {
+        let smallest_subnormal = f64::from_bits(1);
+        let mut values = [
+            smallest_subnormal,
+            smallest_subnormal,
+            smallest_subnormal * 2.0,
+        ];
+
+        let standard_deviation =
+            finite_population_standard_deviation(&values, "subnormal_variance")
+                .expect("subnormal standard deviation");
+        assert_eq!(standard_deviation.to_bits(), 0.0_f64.to_bits());
+
+        values.reverse();
+        assert_eq!(
+            finite_population_standard_deviation(&values, "reversed_subnormal_variance")
+                .expect("reversed subnormal standard deviation")
+                .to_bits(),
+            standard_deviation.to_bits()
+        );
     }
 
     #[test]

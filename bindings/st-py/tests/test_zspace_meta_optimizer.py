@@ -748,6 +748,40 @@ def test_polarity_evidence_preserves_tiny_corpus_variance() -> None:
     )
 
 
+def test_polarity_evidence_centers_before_subnormal_mean_rounding() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_values = {
+        "a": smallest_subnormal,
+        "b": smallest_subnormal,
+        "c": smallest_subnormal * 2.0,
+    }
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_mean_population_standard_deviation"] == 0.0
+
+
 def test_polarity_evidence_preserves_ulp_residuals_after_prefix_overflow() -> None:
     maximum = float.fromhex("0x1.fffffffffffffp+1023")
     next_down_maximum = math.nextafter(maximum, 0.0)
