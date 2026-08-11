@@ -1576,3 +1576,53 @@ def test_polarity_corpus_runner_reuses_substudy_executor_and_writes_receipt(
     assert summary["rust_evidence_id"] == rust_evidence["evidence_id"]
     report_path = Path(str(summary["polarity_corpus_report"]))
     assert json.loads(report_path.read_text(encoding="utf-8")) == aggregate
+
+
+def test_polarity_corpus_runner_rechecks_each_source_before_substudy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    corpora = {}
+    for label in ("a", "b", "c"):
+        path = tmp_path / f"{label}.txt"
+        path.write_text(f"{label} corpus\n", encoding="utf-8")
+        corpora[label] = path
+    executed: list[str] = []
+
+    def run_substudy(plan, **_kwargs):
+        label = Path(str(plan["study_dir"])).name
+        executed.append(label)
+        if label == "a":
+            corpora["b"].write_text("changed corpus\n", encoding="utf-8")
+        return {
+            "status": "ready",
+            "completed_run_count": 9,
+            "run_count": 9,
+        }
+
+    monkeypatch.setattr(study, "_run_hf_zspace_optimizer_study_plan", run_substudy)
+    root = tmp_path / "corpus-study"
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="source changed after the outer plan",
+    ):
+        st.run_hf_zspace_optimizer_polarity_corpus_study(
+            study_dir=root,
+            corpora=corpora,
+            seeds=[13, 17, 23],
+            bridge_args=_shared_corpus_bridge_args(),
+            bridge_script=bridge,
+            launch_cwd=tmp_path,
+            min_free_disk_gb=0.0,
+            execute=True,
+        )
+
+    assert executed == ["a"]
+    summary = json.loads(
+        (root / study.HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["status"] == "failed"
+    assert "source changed after the outer plan" in summary["error"]

@@ -599,7 +599,7 @@ def test_polarity_evidence_keeps_large_finite_aggregates_numeric() -> None:
 
 def test_polarity_evidence_preserves_large_cancellation_residuals() -> None:
     rows = _polarity_evidence_rows()
-    values = {13: -1.0e308, 17: 1.0, 23: 1.0e308}
+    values = {13: -1.0e308, 17: 1.0e-16, 23: 1.0e308}
     for row in rows:
         value = values[int(row["seed"])]
         row["dose_normalized_shape_effect"] = value
@@ -617,9 +617,42 @@ def test_polarity_evidence_preserves_large_cancellation_residuals() -> None:
     )
 
     normalized = report["contrasts"]["dose_normalized_shape_effect"]
-    assert normalized["corpus_equal_weight_mean"] == pytest.approx(1.0 / 3.0)
+    assert normalized["corpus_equal_weight_mean"] == pytest.approx(1.0e-16 / 3.0)
     assert normalized["corpus_right_arm_win_count"] == 3
     assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_canonicalizes_tolerated_row_error() -> None:
+    rows = _polarity_evidence_rows()
+    values = {
+        13: (4.0e-16, 1.0e-15),
+        17: (-4.0e-16, -1.0e-17),
+        23: (-4.0e-16, -1.0e-17),
+    }
+    for row in rows:
+        expected, supplied = values[int(row["seed"])]
+        row["dose_normalized_shape_effect"] = 0.0
+        row["complement_shape_effect"] = expected
+        row["polarity_effect"] = supplied
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    polarity = report["contrasts"]["polarity_effect"]
+    assert polarity["bounded_trend_direction"] == "left_arm_better"
+    assert polarity["corpus_left_arm_win_count"] == 3
+    assert all(
+        row["polarity_effect"]
+        == row["complement_shape_effect"] - row["dose_normalized_shape_effect"]
+        for row in report["request"]["rows"]
+    )
 
 
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:

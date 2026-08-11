@@ -2783,6 +2783,31 @@ def _write_polarity_corpus_study_summary(
     return summary
 
 
+def _verify_planned_corpus_source(
+    substudy: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    source_path = Path(str(substudy.get("path"))).expanduser().resolve()
+    planned_size = substudy.get("size_bytes")
+    if isinstance(planned_size, bool) or not isinstance(planned_size, int):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {label} has no planned source size"
+        )
+    planned_sha256 = _sha256_identity(
+        substudy.get("sha256"),
+        field=f"corpus {label} source digest",
+    )
+    if (
+        not source_path.is_file()
+        or source_path.stat().st_size != planned_size
+        or _sha256_file(source_path) != planned_sha256
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {label} source changed after the outer plan"
+        )
+
+
 def run_hf_zspace_optimizer_polarity_corpus_study(
     *,
     study_dir: str | Path,
@@ -2848,6 +2873,7 @@ def run_hf_zspace_optimizer_polarity_corpus_study(
                     raise HFZSpaceFactorizedStudyError(
                         f"polarity corpus {label} has no immutable substudy plan"
                     )
+                _verify_planned_corpus_source(raw_substudy, label=label)
                 summary = _run_hf_zspace_optimizer_study_plan(
                     substudy_plan,
                     execute=True,

@@ -182,7 +182,7 @@ pub fn summarize_zspace_polarity_evidence(
             maximum: ZSPACE_POLARITY_EVIDENCE_MAX_ROWS,
         });
     }
-    validate_rows(&request.rows)?;
+    validate_rows(&mut request.rows)?;
     request.rows.sort_by(|left, right| {
         (left.corpus_id.as_str(), left.seed).cmp(&(right.corpus_id.as_str(), right.seed))
     });
@@ -345,8 +345,10 @@ fn validate_request_identities(
     Ok(())
 }
 
-fn validate_rows(rows: &[ZSpacePolarityEvidenceRow]) -> Result<(), ZSpacePolarityEvidenceError> {
-    for (index, row) in rows.iter().enumerate() {
+fn validate_rows(
+    rows: &mut [ZSpacePolarityEvidenceRow],
+) -> Result<(), ZSpacePolarityEvidenceError> {
+    for (index, row) in rows.iter_mut().enumerate() {
         require_sha256_id(&format!("rows[{index}].corpus_id"), &row.corpus_id)?;
         if row.seed > ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED {
             return Err(ZSpacePolarityEvidenceError::SeedLimit {
@@ -393,6 +395,7 @@ fn validate_rows(rows: &[ZSpacePolarityEvidenceRow]) -> Result<(), ZSpacePolarit
                 tolerance,
             });
         }
+        row.polarity_effect = expected;
     }
     Ok(())
 }
@@ -497,14 +500,8 @@ where
 }
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
-    let mean = if scale == 0.0 {
-        0.0
-    } else {
-        let normalized_sum = compensated_sum(values.iter().map(|value| value / scale));
-        let normalized_mean = (normalized_sum / values.len() as f64).clamp(-1.0, 1.0);
-        scale * normalized_mean
-    };
+    let count = values.len() as f64;
+    let mean = compensated_sum(values.iter().map(|value| value / count));
     if mean.is_finite() {
         Ok(mean)
     } else {
@@ -811,7 +808,7 @@ mod tests {
         for row in &mut request.rows {
             let value = match row.seed {
                 13 => -1.0e308,
-                17 => 1.0,
+                17 => 1.0e-16,
                 23 => 1.0e308,
                 _ => unreachable!("fixture contains only the requested seeds"),
             };
@@ -822,12 +819,37 @@ mod tests {
 
         let report = summarize_zspace_polarity_evidence(request).expect("finite evidence");
         let normalized = &report.contrasts["dose_normalized_shape_effect"];
-        assert!((normalized.corpus_equal_weight_mean - 1.0 / 3.0).abs() < 1.0e-12);
+        assert!((normalized.corpus_equal_weight_mean - 1.0e-16 / 3.0).abs() < 1.0e-30);
         assert_eq!(normalized.corpus_right_arm_win_count, 3);
         assert_eq!(
             normalized.bounded_trend_direction,
             ZSpacePolarityEvidenceDirection::RightArmBetter
         );
+    }
+
+    #[test]
+    fn tolerated_row_error_is_canonicalized_before_aggregation() {
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            let (expected, supplied) = match row.seed {
+                13 => (4.0e-16, 1.0e-15),
+                17 | 23 => (-4.0e-16, -1.0e-17),
+                _ => unreachable!("fixture contains only the requested seeds"),
+            };
+            row.dose_normalized_shape_effect = 0.0;
+            row.complement_shape_effect = expected;
+            row.polarity_effect = supplied;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("canonical evidence");
+        let polarity = &report.contrasts["polarity_effect"];
+        assert_eq!(
+            polarity.bounded_trend_direction,
+            ZSpacePolarityEvidenceDirection::LeftArmBetter
+        );
+        assert_eq!(polarity.corpus_left_arm_win_count, 3);
+        assert!(report.request.rows.iter().all(|row| row.polarity_effect
+            == row.complement_shape_effect - row.dose_normalized_shape_effect));
     }
 
     #[test]
