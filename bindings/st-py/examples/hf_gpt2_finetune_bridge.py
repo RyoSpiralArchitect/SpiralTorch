@@ -658,8 +658,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "with the observed recipe identity pinned."
         ),
     )
+    parser.add_argument(
+        "--validate-args-only",
+        action="store_true",
+        help=(
+            "Validate the complete CLI contract and exit before runtime, model, "
+            "dataset, or output initialization."
+        ),
+    )
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
+    parser.add_argument(
+        "--require-eval-dataset",
+        action="store_true",
+        help=(
+            "Fail before Trainer construction when tokenization produces no "
+            "evaluation blocks."
+        ),
+    )
     parser.add_argument(
         "--max-eval-blocks",
         type=int,
@@ -784,6 +800,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Model dtype policy before Trainer.train(). auto casts fp16/bf16 "
             "loaded checkpoints back to float32 for stable continued FT."
+        ),
+    )
+    parser.add_argument(
+        "--training-use-cpu",
+        action="store_true",
+        help=(
+            "Force Transformers TrainingArguments onto CPU. This resolves to "
+            "use_cpu on current Transformers and no_cuda on legacy releases."
         ),
     )
     parser.add_argument(
@@ -2274,6 +2298,16 @@ def _raw_training_arguments_kwargs(
             "steps" if has_eval and _training_semantics_requested(args) else "no"
         ),
     }
+    if bool(getattr(args, "training_use_cpu", False)):
+        parameter_names = _training_argument_parameter_names(cls)
+        if parameter_names is None or "use_cpu" in parameter_names:
+            kwargs["use_cpu"] = True
+        elif "no_cuda" in parameter_names:
+            kwargs["no_cuda"] = True
+        else:
+            raise TypeError(
+                "installed Transformers TrainingArguments has no CPU routing flag"
+            )
     resolved_pin_memory = getattr(args, "_resolved_dataloader_pin_memory", None)
     if resolved_pin_memory is not None:
         kwargs["dataloader_pin_memory"] = bool(resolved_pin_memory)
@@ -4383,6 +4417,9 @@ def _print_trainer_trace_lineage(card: Mapping[str, Any]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.validate_args_only:
+        print("hf_finetune_bridge_args_valid")
+        return 0
     remote_access_report = _hf_remote_access_report(args)
     with _hf_remote_access(args):
         return _main_with_runtime_access(args, remote_access_report)
@@ -5363,6 +5400,18 @@ def _main_with_runtime_access(
                 "failure_error": (
                     "tokenized train split produced too few blocks: "
                     f"{dataset_fit_report['warnings']}"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if args.require_eval_dataset and eval_dataset is None:
+        card.update(
+            {
+                "failure_stage": "dataset_fit",
+                "failure_error": (
+                    "evaluation evidence was required, but tokenization produced "
+                    "no evaluation blocks"
                 ),
             }
         )

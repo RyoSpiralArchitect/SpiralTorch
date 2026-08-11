@@ -204,8 +204,8 @@ this frozen four-arm study: compare guarded and unguarded recipes in a new
 matched multi-seed run, and retain the receipt's
 `within_run_loss_guard_not_counterfactual_efficacy` boundary.
 
-The comparator fails closed unless each seed has exactly one arm of every
-kind and all four share:
+The frozen four-arm comparator fails closed unless each seed has exactly one
+arm of every kind and all four share:
 
 - the non-intervention training recipe and before-train loss anchor;
 - training input, materialized dataset, tokenized blocks, model, and execution
@@ -213,6 +213,93 @@ kind and all four share:
 - one Rust trajectory, raw control sequence, and nominal scheduler sequence;
 - complete optimizer actuation/restoration counts and a sealed actuation hash;
 - measured nominal and effective-LR doses matching the selected Rust arm.
+
+## Run the guarded feedback study
+
+The feedback study freezes one Rust raw-control trajectory per seed and executes
+three arms in this order:
+
+| Arm | Raw trajectory | Loss guard | Question |
+| --- | --- | --- | --- |
+| `observe` | recorded, not applied | off | What does ordinary FT do? |
+| `raw_unguarded` | applied | off | What is the total open-loop effect? |
+| `raw_loss_guard` | applied | Rust `loss_guard` | Does the guard improve that same intervention? |
+
+Create the immutable recovery anchor before training by omitting `--run`:
+
+```bash
+spiral-hf-zspace-optimizer-feedback-study \
+  --study-dir models/runs/zspace-feedback-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Inspect `feedback-study-plan.json`, then repeat the exact command with `--run`
+before the separator. The runner owns `--seed`, output/run-card/trace paths,
+trajectory transport, `--logging-steps 1`, feedback mode, and every feedback
+parameter. Optional `--feedback-config-json config.json` accepts only a JSON
+object; Rust validates the overrides and the plan seals the complete resolved
+13-field config, contract owner, native-extension hash, and evidence boundary.
+
+The final `feedback-report.json` exposes three lower-is-better contrasts:
+
+- `unguarded_total_effect`: `raw_unguarded - observe`;
+- `guarded_total_effect`: `raw_loss_guard - observe`;
+- `guard_benefit`: `raw_loss_guard - raw_unguarded`.
+
+The comparator additionally requires complete per-update loss/control lineage,
+fail-closed warmup, no stale observations, a gate that actually became active,
+and a guarded schedule distinct from the unguarded schedule. A short calibration
+where the gate never actuates is preserved as useful `blocked` evidence rather
+than being promoted into a vacuous comparison. Three consistent seeds permit a
+bounded single-model, single-corpus trend only; `efficacy_claim_ready` remains
+false by construction.
+
+The study also requires tokenization to leave at least one evaluation block.
+For a small corpus, verify that `validation_fraction * token_count` is not
+smaller than `block_size`; otherwise the bridge stops at `dataset_fit` before
+training rather than emitting an unanchored loss comparison.
+
+### Audited feedback result (2026-08-09)
+
+The checked-in [feedback artifact](benchmarks/hf_zspace_optimizer_feedback_readme_64step_20260809.json)
+records one local GPT-2 LoRA run family over this repository's `README.md`: 64
+optimizer updates, seeds 13/17/23, CPU float32, rank 4, alpha 8, batch size 2,
+gradient accumulation 8, block size 128, 464 training blocks, and 16 capped
+evaluation blocks. Each seed reused one frozen Rust raw-control trajectory
+across all three arms.
+
+| Seed | unguarded minus observe | guarded minus unguarded | guarded minus observe | active guard updates |
+| ---: | ---: | ---: | ---: | ---: |
+| 13 | +0.009914 | -0.008037 | +0.001878 | 39 / 64 |
+| 17 | +0.008747 | -0.002035 | +0.006712 | 54 / 64 |
+| 23 | +0.007768 | -0.004798 | +0.002970 | 49 / 64 |
+| Mean | +0.008810 | -0.004957 | +0.003853 | 47.3 / 64 |
+
+Lower validation loss is better. The open-loop raw arm was worse than ordinary
+FT for 3/3 seeds, while the Rust loss guard improved that same intervention for
+3/3 seeds. It recovered 56.26% of the mean unguarded harm, but the guarded arm
+still lost to `observe` for 3/3 seeds. This is bounded evidence that the guard
+mitigates this known failure mode, not evidence of absolute Z-Space efficacy or
+statistical significance. The artifact therefore keeps
+`efficacy_claim_ready=false`.
+
+The frozen provenance anchors are:
+
+- study ID `sha256:7558e02b75d2d696afa586af421e74328d8ec5f0e2f30c95f1742f1fdaf867e3`;
+- original runner report SHA-256 `a5b5e8be0def36322737431ec3cc570815d0aeb99c5203886e5ff8bc924adcc3`;
+- experiment Git commit `30513bf0532eb8f8ad118d362e6fac69de7c4096`;
+- runtime source ID `sha256:ab4366caebae6808659177a60f81893571e1d6825a99513d39ccad5b825895e1`;
+- native library SHA-256 `3981319b4d4d55c53c059b9a3cd7dc58884a9a79f8c9a1386645653131a8d908`.
 
 ## Read the contrasts
 
