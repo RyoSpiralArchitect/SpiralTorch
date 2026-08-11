@@ -431,8 +431,12 @@ SHA-256, runtime identity, trajectory, policy, control, and nominal schedule
 before calling Rust. A mutable summary is status metadata only: its identity
 anchor must exactly match the corpus, runtime, and execution identities
 re-derived from those sealed run cards. The scientific protocol likewise uses
-the path-independent execution/runtime identities and one content-addressed
-training-recipe identity per seed and arm, never raw model or tokenizer paths.
+the path-independent execution/runtime identities, one content-addressed
+training-recipe identity per seed and arm, and one path-independent
+data-preparation identity reconstructed from sealed effective settings plus
+materialization/tokenization receipt contracts. Raw model, tokenizer, and
+corpus paths never enter that identity, and local source flag order is
+canonicalized before hashing.
 Per-study Git status and path-bearing receipts remain sealed audit and recovery
 metadata, but do not define cross-study protocol equality; an earlier study's
 output therefore cannot perturb a later standalone comparison. The report
@@ -460,7 +464,7 @@ FT for 9/9 seeds and all 3/3 corpus means. The dose-preserving complement beat
 ordinary FT for 9/9 and beat the normalized shape for 9/9; all three corpus
 means agreed in both comparisons. The independent comparator regenerated the
 same report byte-for-byte, and the Rust validator recomputed evidence ID
-`sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2`.
+`sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8`.
 
 This advances the earlier single-corpus observation to a balanced corpus-level
 trend, but not to a general efficacy result. It is still one local GPT-2 model,
@@ -471,11 +475,12 @@ power analysis or independent generation-quality endpoint. Accordingly,
 The frozen provenance anchors are:
 
 - outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
-- path- and alias-independent protocol ID `sha256:9c3eea0a389e371eba5394c4aa97e119b97e8d60875852ac0f5f87896d7c5449`;
-- path- and alias-independent outer report ID `sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518`;
-- stable outer report SHA-256 `5ad2218fac52185e3df970013d0193053a973a1221b84fabe4cda4eda9663dd8`;
+- path- and alias-independent protocol ID `sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f`;
+- path-independent data-preparation ID `sha256:75f83e30bbd86776fee86b91cda4bf36624282cbbc880c1bb8df450a1bbe982f`;
+- path- and alias-independent outer report ID `sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08`;
+- stable outer report SHA-256 `b9f01a1b2fee527cf8ae6b17f8faa46218535724cb6e92169177e7ba73e8ed62`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `0dca6d43a9057bb6f3f7a9476a564b13471453e4`;
+- stable aggregation Git commit `2b9ce104488602ae98d4eb15d01c6e7d4a533ce9`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
 - native library SHA-256 `a55beb8ff4aacbc69789236a5cb3fb5cf1a72a6668d17e6c607be12f3dfb2bb1`.
 

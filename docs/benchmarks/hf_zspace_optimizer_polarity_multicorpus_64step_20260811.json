@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
-  "recorded_at": "2026-08-11T11:34:55Z",
+  "recorded_at": "2026-08-11T11:54:40Z",
   "status": "ready",
   "study": {
     "model": "gpt2",
@@ -75,16 +75,16 @@
   ],
   "provenance": {
     "outer_study_id": "sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec",
-    "protocol_id": "sha256:9c3eea0a389e371eba5394c4aa97e119b97e8d60875852ac0f5f87896d7c5449",
+    "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
     "runtime_source_id": "sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2",
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
     "loaded_native_extension_sha256": "sha256:a55beb8ff4aacbc69789236a5cb3fb5cf1a72a6668d17e6c607be12f3dfb2bb1",
-    "stable_aggregation_git_commit": "0dca6d43a9057bb6f3f7a9476a564b13471453e4",
-    "outer_report_id": "sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518",
-    "outer_report_sha256": "sha256:5ad2218fac52185e3df970013d0193053a973a1221b84fabe4cda4eda9663dd8",
-    "rust_evidence_id": "sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2",
+    "stable_aggregation_git_commit": "2b9ce104488602ae98d4eb15d01c6e7d4a533ce9",
+    "outer_report_id": "sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08",
+    "outer_report_sha256": "sha256:b9f01a1b2fee527cf8ae6b17f8faa46218535724cb6e92169177e7ba73e8ed62",
+    "rust_evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
     "independent_comparator_byte_match": true,
     "exact_runner_reuse_completed_runs": 27
   },
@@ -98,12 +98,54 @@
     "corpus_source_flags": [
       "--train-file"
     ],
+    "data_preparation_identity": {
+      "identity_id": "sha256:75f83e30bbd86776fee86b91cda4bf36624282cbbc880c1bb8df450a1bbe982f",
+      "identity_payload": {
+        "corpus_source_flags": [
+          "--train-file"
+        ],
+        "dataset": {
+          "dataset_config": "text",
+          "dataset_format": "text",
+          "dataset_name": "local-files",
+          "dataset_revision": null,
+          "dataset_source": "local_files",
+          "dataset_streaming": false,
+          "eval_split": "validation",
+          "streaming_shuffle_buffer_size": 0,
+          "streaming_validation_samples": 0,
+          "text_column": "text",
+          "train_split": "train",
+          "validation_fraction": 0.1
+        },
+        "receipt_contracts": {
+          "dataset_materialization_identity": {
+            "coverage": "exact_selected_text_rows_in_order",
+            "schema": "spiraltorch.hf_dataset_materialization_identity.v1"
+          },
+          "tokenized_dataset_identity": {
+            "coverage": "exact_tokenized_rows_all_columns_in_order",
+            "schema": "spiraltorch.hf_tokenized_dataset_identity.v1"
+          }
+        },
+        "schema": "spiraltorch.hf_zspace_data_preparation_identity.v1",
+        "selection": {
+          "max_eval_blocks": 16,
+          "max_eval_samples": 512,
+          "max_train_samples": 4096
+        },
+        "tokenization": {
+          "block_size": 128
+        }
+      },
+      "path_independent": true
+    },
     "execution_identity_id": "sha256:4c134303908d7ca3ba56e6089456e9bf7f0d90b830b7acc32dd2ce2f5bdabb95",
     "git_head": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "max_steps": 64,
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "runtime_source_id": "sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2",
-    "schema": "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v1",
+    "schema": "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v2",
     "seeds": [
       13,
       17,
@@ -193,9 +235,9 @@
         "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097"
       }
     ],
-    "protocol_id": "sha256:9c3eea0a389e371eba5394c4aa97e119b97e8d60875852ac0f5f87896d7c5449",
+    "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
-    "rust_evidence_id": "sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2",
+    "rust_evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
     "schema": "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
   },
   "rust_evidence": {
@@ -482,7 +524,7 @@
     "efficacy_claim_ready": false,
     "efficacy_claim_requirements": "a prespecified, adequately powered multi-model evaluation with independent held-out quality and stability metrics remains required",
     "evidence_boundary": "balanced multi-corpus matched contrasts support only a bounded corpus-level trend; corpus means are equally weighted and do not establish statistical significance or general model superiority",
-    "evidence_id": "sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2",
+    "evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
     "evidence_scope": "multi_corpus_multi_seed_dose_matched_polarity_ablation",
     "evidence_validated": true,
     "kind": "spiraltorch.zspace_polarity_evidence",
@@ -490,7 +532,7 @@
     "request": {
       "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
       "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
-      "protocol_id": "sha256:9c3eea0a389e371eba5394c4aa97e119b97e8d60875852ac0f5f87896d7c5449",
+      "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
       "rows": [
         {
           "complement_shape_effect": -0.0009312629699707031,
