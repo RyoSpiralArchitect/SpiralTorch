@@ -483,6 +483,507 @@ def test_parameter_trajectory_policy_is_rust_owned_and_dose_preserving() -> None
         st.zspace_parameter_trajectory_policy(changed_source)
 
 
+def _sha_id(value: str) -> str:
+    return "sha256:" + value * 64
+
+
+def _polarity_evidence_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for corpus in ("a", "b", "c"):
+        for seed in (13, 17, 23):
+            normalized = 0.002 + seed * 1e-7
+            complement = -0.001 - seed * 1e-7
+            rows.append(
+                {
+                    "corpus_id": _sha_id(corpus),
+                    "seed": seed,
+                    "dose_normalized_shape_effect": normalized,
+                    "complement_shape_effect": complement,
+                    "polarity_effect": complement - normalized,
+                }
+            )
+    return rows
+
+
+def test_polarity_evidence_is_rust_owned_balanced_and_tamper_evident() -> None:
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(_polarity_evidence_rows())),
+    )
+
+    assert report["contract_version"] == st.ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION
+    assert report["semantic_owner"] == st.ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER
+    assert report["semantic_backend"] == "rust"
+    assert report["corpus_count"] == 3
+    assert report["seed_count_per_corpus"] == 3
+    assert report["observation_count"] == 9
+    assert report["bounded_polarity_improvement_observed"] is True
+    assert report["efficacy_claim_ready"] is False
+    assert (
+        report["contrasts"]["polarity_effect"][  # type: ignore[index]
+            "bounded_trend_direction"
+        ]
+        == "left_arm_better"
+    )
+    assert st.validate_zspace_polarity_evidence(report) == report
+
+    tampered = copy.deepcopy(report)
+    tampered["contrasts"]["polarity_effect"][  # type: ignore[index]
+        "corpus_equal_weight_mean"
+    ] = 0.0
+    with pytest.raises(ValueError, match="canonical Rust evidence aggregate"):
+        st.validate_zspace_polarity_evidence(tampered)
+
+
+def test_polarity_evidence_rejects_unbalanced_seed_sets() -> None:
+    with pytest.raises(ValueError, match="seed set"):
+        st.zspace_polarity_evidence(
+            protocol_id=_sha_id("1"),
+            runtime_identity_id=_sha_id("2"),
+            trajectory_id=_sha_id("3"),
+            trajectory_policy_id=_sha_id("4"),
+            control_sequence_id=_sha_id("5"),
+            nominal_schedule_sequence_id=_sha_id("6"),
+            rows=_polarity_evidence_rows()[:-1],
+        )
+
+
+def test_polarity_evidence_rejects_tiny_direction_reversal() -> None:
+    rows = _polarity_evidence_rows()
+    for row in rows:
+        row["dose_normalized_shape_effect"] = 4.0e-16
+        row["complement_shape_effect"] = -4.0e-16
+        row["polarity_effect"] = 1.0e-16
+
+    with pytest.raises(ValueError, match="polarity contrast identity"):
+        st.zspace_polarity_evidence(
+            protocol_id=_sha_id("1"),
+            runtime_identity_id=_sha_id("2"),
+            trajectory_id=_sha_id("3"),
+            trajectory_policy_id=_sha_id("4"),
+            control_sequence_id=_sha_id("5"),
+            nominal_schedule_sequence_id=_sha_id("6"),
+            rows=rows,
+        )
+
+
+def test_polarity_evidence_keeps_large_finite_aggregates_numeric() -> None:
+    rows = _polarity_evidence_rows()
+    for row in rows:
+        row["dose_normalized_shape_effect"] = 5.0e307
+        row["complement_shape_effect"] = -5.0e307
+        row["polarity_effect"] = -1.0e308
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    for summary in report["contrasts"].values():
+        assert math.isfinite(summary["pooled_seed_mean"])
+        assert math.isfinite(summary["corpus_equal_weight_mean"])
+        assert math.isfinite(summary["corpus_mean_population_standard_deviation"])
+        assert all(math.isfinite(corpus["mean"]) for corpus in summary["corpora"])
+    assert st.validate_zspace_polarity_evidence(report) == report
+
+
+def test_polarity_evidence_preserves_large_cancellation_residuals() -> None:
+    rows = _polarity_evidence_rows()
+    values = {13: -1.0e308, 17: 1.0e-16, 23: 1.0e308}
+    for row in rows:
+        value = values[int(row["seed"])]
+        row["dose_normalized_shape_effect"] = value
+        row["complement_shape_effect"] = value
+        row["polarity_effect"] = 0.0
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == pytest.approx(1.0e-16 / 3.0)
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_preserves_smallest_subnormal_means() -> None:
+    rows = _polarity_evidence_rows()
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    for index, row in enumerate(rows):
+        value = smallest_subnormal * (index % 3 + 1)
+        row["dose_normalized_shape_effect"] = value
+        row["complement_shape_effect"] = value
+        row["polarity_effect"] = 0.0
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal * 2.0
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_preserves_subnormal_residuals_after_cancellation() -> None:
+    maximum = float.fromhex("0x1.fffffffffffffp+1023")
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    values = [
+        maximum,
+        maximum,
+        -maximum,
+        -maximum,
+        smallest_subnormal * 9.0,
+        smallest_subnormal * -4.0,
+    ]
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus in ("a", "b", "c")
+        for seed, value in enumerate(values)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_uses_exact_corpus_sum_sign_before_mean_rounding() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": 0.0,
+            "complement_shape_effect": (-smallest_subnormal if seed == 13 else 0.0),
+            "polarity_effect": -smallest_subnormal if seed == 13 else 0.0,
+        }
+        for corpus in ("a", "b", "c")
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    polarity = report["contrasts"]["polarity_effect"]
+    assert all(corpus["mean"].hex() == "-0x0.0p+0" for corpus in polarity["corpora"])
+    assert polarity["corpus_left_arm_win_count"] == 3
+    assert polarity["corpus_right_arm_win_count"] == 0
+    assert polarity["corpus_tie_count"] == 0
+    assert polarity["bounded_trend_direction"] == "left_arm_better"
+    assert polarity["bounded_trend_ready"] is True
+    assert report["bounded_polarity_improvement_observed"] is True
+
+
+def test_polarity_evidence_uses_exact_rational_corpus_means() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_sum_units = {"a": 1, "b": 1, "c": 3}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, units in corpus_sum_units.items()
+        for seed in (13, 17, 23)
+        for value in [smallest_subnormal * units if seed == 13 else 0.0]
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert [corpus["mean"] for corpus in normalized["corpora"]] == [
+        0.0,
+        0.0,
+        smallest_subnormal,
+    ]
+    assert normalized["pooled_seed_mean"] == smallest_subnormal
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_uses_exact_rational_corpus_variance() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_sum_units = {"a": -40, "b": -40, "c": -36}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, units in corpus_sum_units.items()
+        for seed in (13, 17, 23)
+        for value in [smallest_subnormal * units if seed == 13 else 0.0]
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_mean_population_standard_deviation"] == smallest_subnormal
+
+
+def test_polarity_evidence_uses_subnormal_to_break_large_rounding_ties() -> None:
+    maximum = float.fromhex("0x1.fffffffffffffp+1023")
+    next_down_maximum = math.nextafter(maximum, 0.0)
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    values = [-maximum, -next_down_maximum, -smallest_subnormal] + [0.0] * 13
+    rows = [
+        {
+            "corpus_id": _sha_id("a"),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for seed, value in enumerate(values)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["pooled_seed_mean"] == -maximum / 8.0
+
+
+def test_polarity_evidence_preserves_tiny_corpus_variance() -> None:
+    corpus_values = {"a": 1.0e-200, "b": 2.0e-200, "c": 3.0e-200}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    expected = math.sqrt(2.0 / 3.0) * 1.0e-200
+    assert normalized["corpus_mean_population_standard_deviation"] == pytest.approx(
+        expected,
+        rel=1.0e-15,
+    )
+
+
+def test_polarity_evidence_centers_before_subnormal_mean_rounding() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_values = {
+        "a": smallest_subnormal,
+        "b": smallest_subnormal,
+        "c": smallest_subnormal * 2.0,
+    }
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_mean_population_standard_deviation"] == 0.0
+
+
+def test_polarity_evidence_preserves_variance_between_adjacent_maxima() -> None:
+    maximum = float.fromhex("0x1.fffffffffffffp+1023")
+    next_down_maximum = math.nextafter(maximum, 0.0)
+    expected = float.fromhex("0x1.e2b7dddfefa66p+969")
+    corpus_values = {
+        "a": maximum,
+        "b": next_down_maximum,
+        "c": next_down_maximum,
+    }
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_mean_population_standard_deviation"] == expected
+
+
+def test_polarity_evidence_preserves_ulp_residuals_after_prefix_overflow() -> None:
+    maximum = float.fromhex("0x1.fffffffffffffp+1023")
+    next_down_maximum = math.nextafter(maximum, 0.0)
+    values = [maximum] * 11 + [-maximum] * 10 + [-next_down_maximum, -1.0e290]
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus in ("a", "b", "c")
+        for seed, value in enumerate(values)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] > 0.0
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_canonicalizes_tolerated_row_error() -> None:
+    rows = _polarity_evidence_rows()
+    values = {
+        13: (4.0e-16, 1.0e-15),
+        17: (-4.0e-16, -1.0e-17),
+        23: (-4.0e-16, -1.0e-17),
+    }
+    for row in rows:
+        expected, supplied = values[int(row["seed"])]
+        row["dose_normalized_shape_effect"] = 0.0
+        row["complement_shape_effect"] = expected
+        row["polarity_effect"] = supplied
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    polarity = report["contrasts"]["polarity_effect"]
+    assert polarity["bounded_trend_direction"] == "left_arm_better"
+    assert polarity["corpus_left_arm_win_count"] == 3
+    assert all(
+        row["polarity_effect"]
+        == row["complement_shape_effect"] - row["dose_normalized_shape_effect"]
+        for row in report["request"]["rows"]
+    )
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -510,9 +1011,18 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+        "ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE",
+        "ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION",
+        "ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE",
+        "ZSPACE_POLARITY_EVIDENCE_KIND",
+        "ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED",
+        "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
+        "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
         "validate_zspace_parameter_trajectory",
         "validate_zspace_parameter_trajectory_policy",
+        "validate_zspace_polarity_evidence",
         "zspace_parameter_trajectory",
         "zspace_parameter_trajectory_policy",
+        "zspace_polarity_evidence",
     ):
         assert name in st.__all__

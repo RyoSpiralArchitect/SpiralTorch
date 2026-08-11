@@ -29,6 +29,13 @@ def _bridge_args(*, max_steps: int = 4) -> list[str]:
     ]
 
 
+def _shared_corpus_bridge_args(*, max_steps: int = 4) -> list[str]:
+    arguments = _bridge_args(max_steps=max_steps)
+    source_index = arguments.index("--train-file")
+    del arguments[source_index : source_index + 2]
+    return arguments
+
+
 def _fake_bridge(path: Path) -> Path:
     path.write_text("print('fake bridge')\n", encoding="utf-8")
     return path
@@ -89,6 +96,15 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
     trainer_trace.write_text('{"event":"trainer"}\n', encoding="utf-8")
     Path(str(run["output_dir"])).mkdir(parents=True, exist_ok=True)
     command = [str(value) for value in run["command"]]  # type: ignore[index]
+
+    def command_value(flag: str, default: str) -> str:
+        for index, argument in enumerate(command):
+            if argument == flag:
+                return command[index + 1]
+            if argument.startswith(f"{flag}="):
+                return argument.split("=", 1)[1]
+        return default
+
     max_steps = int(command[command.index("--max-steps") + 1])
     receipt_arm = str(
         run.get("expected_trajectory_arm", "raw" if arm == "observe" else arm)
@@ -97,11 +113,12 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
         run.get("expected_mode", "observe" if arm == "observe" else "apply")
     )
     expected_feedback = str(run.get("expected_feedback_mode", "off"))
-    arms = (
-        study.HF_ZSPACE_FACTORIZED_STUDY_ARMS
-        if arm in study.HF_ZSPACE_FACTORIZED_STUDY_ARMS
-        else study.HF_ZSPACE_FEEDBACK_STUDY_ARMS
-    )
+    if arm == "dose_preserving_complement":
+        arms = study.HF_ZSPACE_POLARITY_STUDY_ARMS
+    elif arm in study.HF_ZSPACE_FACTORIZED_STUDY_ARMS:
+        arms = study.HF_ZSPACE_FACTORIZED_STUDY_ARMS
+    else:
+        arms = study.HF_ZSPACE_FEEDBACK_STUDY_ARMS
     card = {
         "row_type": "hf_finetune_run_card",
         "failure_stage": None,
@@ -110,6 +127,11 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
         "launch_command": command,
         "training_recipe_identity": {
             "status": "ready",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(
+                300 + seed * len(arms) + list(arms).index(arm)
+            ),
             "identity_payload": {"training_arguments": {"seed": seed}},
         },
         "finetune_execution_identity_after_model": {
@@ -130,6 +152,42 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
             "path_independent": True,
             "observed_input_id": _trajectory_id(102),
         },
+        "dataset_materialization_identity": {
+            "schema": "spiraltorch.hf_dataset_materialization_identity.v1",
+            "status": "ready",
+            "coverage": "exact_selected_text_rows_in_order",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(103),
+        },
+        "tokenized_dataset_identity": {
+            "schema": "spiraltorch.hf_tokenized_dataset_identity.v1",
+            "status": "ready",
+            "coverage": "exact_tokenized_rows_all_columns_in_order",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(104),
+        },
+        "dataset_source": "local_files",
+        "dataset_name": "local-files",
+        "dataset_config": command_value("--dataset-format", "text"),
+        "dataset_revision": None,
+        "dataset_format": command_value("--dataset-format", "text"),
+        "dataset_streaming": "--dataset-streaming" in command,
+        "streaming_shuffle_buffer_size": int(
+            command_value("--streaming-shuffle-buffer-size", "0")
+        ),
+        "streaming_validation_samples": int(
+            command_value("--streaming-validation-samples", "0")
+        ),
+        "validation_fraction": float(command_value("--validation-fraction", "0.0")),
+        "train_split": command_value("--train-split", "train"),
+        "eval_split": command_value("--eval-split", "validation"),
+        "text_column": command_value("--text-column", "text"),
+        "max_train_samples": int(command_value("--max-train-samples", "4096")),
+        "max_eval_samples": int(command_value("--max-eval-samples", "512")),
+        "max_eval_blocks": int(command_value("--max-eval-blocks", "0")),
+        "block_size": int(command_value("--block-size", "128")),
         "zspace_optimizer_control_receipt": {
             "status": "ready",
             "mode": expected_mode,
@@ -162,6 +220,32 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
             "eval_loss": 1.9 + 0.01 * list(arms).index(arm),
         },
     }
+    if receipt_arm == "dose_preserving_complement":
+        policy_id = _trajectory_id(seed + 200)
+        policy_path = Path(str(run["output_dir"])) / "trajectory-policy.json"
+        policy_path.write_text(
+            json.dumps(
+                {
+                    "policy_id": policy_id,
+                    "source_trajectory_id": trajectory_id,
+                    "policy_validated": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        receipt = card["zspace_optimizer_control_receipt"]
+        assert isinstance(receipt, dict)
+        receipt.update(
+            {
+                "trajectory_policy_id": policy_id,
+                "trajectory_policy_path": str(policy_path),
+                "trajectory_policy_validated": True,
+                "trajectory_policy_source_trajectory_id": trajectory_id,
+                "trajectory_policy_sha256": study._sha256_file(policy_path),
+                "trajectory_policy_size_bytes": policy_path.stat().st_size,
+            }
+        )
     card_path = Path(str(run["run_card"]))
     card_path.write_text(json.dumps(card) + "\n", encoding="utf-8")
 
@@ -262,9 +346,7 @@ def test_polarity_study_plan_is_deterministic_and_owns_policy_arm(
     assert first["scientific_spec"]["seeds"] == [13, 23]
     assert first["run_count"] == 6
     seed_runs = first["runs"][:3]
-    assert [run["arm"] for run in seed_runs] == list(
-        st.HF_ZSPACE_POLARITY_STUDY_ARMS
-    )
+    assert [run["arm"] for run in seed_runs] == list(st.HF_ZSPACE_POLARITY_STUDY_ARMS)
     assert "--zspace-optimizer-trajectory-out" in seed_runs[0]["command"]
     for run in seed_runs[1:]:
         assert "--zspace-optimizer-trajectory-json" in run["command"]
@@ -272,6 +354,127 @@ def test_polarity_study_plan_is_deterministic_and_owns_policy_arm(
     arm_index = complement["command"].index("--zspace-optimizer-trajectory-arm")
     assert complement["command"][arm_index + 1] == "dose_preserving_complement"
     assert first["artifacts"]["polarity_report"].endswith("polarity-report.json")
+
+
+def test_polarity_corpus_study_plan_seals_sources_and_substudies(
+    tmp_path: Path,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    corpus_a = tmp_path / "a.txt"
+    corpus_b = tmp_path / "b.txt"
+    corpus_a.write_text("alpha corpus\n", encoding="utf-8")
+    corpus_b.write_text("beta corpus\n", encoding="utf-8")
+    kwargs = {
+        "study_dir": tmp_path / "corpus-study",
+        "corpora": {"beta": corpus_b, "alpha": corpus_a},
+        "seeds": [23, 13],
+        "bridge_args": _shared_corpus_bridge_args(),
+        "bridge_script": bridge,
+        "python_executable": sys.executable,
+        "launch_cwd": tmp_path,
+        "min_free_disk_gb": 0.0,
+    }
+
+    first = st.build_hf_zspace_optimizer_polarity_corpus_study_plan(**kwargs)
+    second = st.build_hf_zspace_optimizer_polarity_corpus_study_plan(**kwargs)
+
+    assert first == second
+    assert first["schema"] == st.HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA
+    assert first["corpus_count"] == 2
+    assert first["run_count"] == 12
+    assert first["scientific_spec"]["protocol"]["corpus_source_flags"] == [  # type: ignore[index]
+        "--train-file"
+    ]
+    assert [substudy["label"] for substudy in first["substudies"]] == [  # type: ignore[index]
+        "alpha",
+        "beta",
+    ]
+    assert all(
+        substudy["sha256"].startswith("sha256:")
+        for substudy in first["substudies"]  # type: ignore[index]
+    )
+    for substudy in first["substudies"]:  # type: ignore[index]
+        scientific_spec = substudy["plan"]["scientific_spec"]
+        assert scientific_spec["bridge_args"].count("--train-file") == 1
+        assert scientific_spec["seeds"] == [13, 23]
+
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="owns dataset source"):
+        st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+            **{**kwargs, "bridge_args": _bridge_args()}
+        )
+
+    assert (
+        st._rs.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED
+        == st.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED
+    )
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="cross-client maximum"):
+        st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+            **{
+                **kwargs,
+                "seeds": [st.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED + 1],
+            }
+        )
+
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="filesystem-equivalent substudy paths",
+    ):
+        st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+            **{
+                **kwargs,
+                "corpora": {"Fiction": corpus_a, "fiction": corpus_b},
+            }
+        )
+
+    for reserved_label in (
+        "CON",
+        "nul",
+        "Aux",
+        "COM1",
+        "com9",
+        "LPT1",
+        "lpt9",
+        "COM\N{SUPERSCRIPT ONE}",
+        "lpt\N{SUPERSCRIPT THREE}",
+    ):
+        with pytest.raises(
+            st.HFZSpaceFactorizedStudyError,
+            match="reserved Windows device name",
+        ):
+            st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+                **{
+                    **kwargs,
+                    "corpora": {reserved_label: corpus_a},
+                }
+            )
+
+
+def test_polarity_corpus_source_flags_ignore_distinct_option_order() -> None:
+    _, first_sources = study._split_local_corpus_source_args(
+        [
+            "--train-file",
+            "/corpora/train.txt",
+            "--validation-file",
+            "/corpora/eval.txt",
+        ]
+    )
+    _, second_sources = study._split_local_corpus_source_args(
+        [
+            "--validation-file",
+            "/relocated/eval.txt",
+            "--train-file",
+            "/relocated/train.txt",
+        ]
+    )
+
+    assert study._canonical_corpus_source_flags(first_sources) == [
+        "--train-file",
+        "--validation-file",
+    ]
+    assert study._canonical_corpus_source_flags(second_sources) == [
+        "--train-file",
+        "--validation-file",
+    ]
 
 
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
@@ -475,8 +678,7 @@ def test_factorized_study_quarantines_failed_run_card_before_retry(
         / study.HF_ZSPACE_FACTORIZED_STUDY_EVENTS_FILENAME
     )
     events = [
-        json.loads(line)
-        for line in event_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()
     ]
     quarantine_events = [
         event for event in events if event["event_type"] == "run_quarantined"
@@ -635,6 +837,65 @@ def test_factorized_study_excludes_its_artifacts_from_git_provenance(
     assert persisted["git_source_provenance"]["excluded_paths"] == ["runs/study"]
 
 
+def test_polarity_corpus_study_reuses_outer_git_provenance_on_resume(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    bridge = _fake_bridge(repository / "bridge.py")
+    corpus_a = repository / "a.txt"
+    corpus_b = repository / "b.txt"
+    corpus_a.write_text("alpha corpus\n", encoding="utf-8")
+    corpus_b.write_text("beta corpus\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "add", "bridge.py", "a.txt", "b.txt"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=SpiralTorch Test",
+            "-c",
+            "user.email=spiraltorch@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=repository,
+        check=True,
+    )
+    root = repository / "runs" / "corpus-study"
+    kwargs = {
+        "study_dir": root,
+        "corpora": {"alpha": corpus_a, "beta": corpus_b},
+        "seeds": [13],
+        "bridge_args": _shared_corpus_bridge_args(),
+        "bridge_script": bridge,
+        "launch_cwd": repository,
+        "min_free_disk_gb": 0.0,
+    }
+
+    first = st.run_hf_zspace_optimizer_polarity_corpus_study(**kwargs)
+    second = st.run_hf_zspace_optimizer_polarity_corpus_study(**kwargs)
+    persisted = json.loads(
+        (root / study.HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert second == first
+    outer_provenance = persisted["git_source_provenance"]
+    assert outer_provenance["dirty"] is False
+    assert outer_provenance["excluded_paths"] == ["runs/corpus-study"]
+    assert all(
+        substudy["plan"]["git_source_provenance"] == outer_provenance
+        for substudy in persisted["substudies"]
+    )
+
+
 def test_factorized_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     bridge = _fake_bridge(tmp_path / "bridge.py")
     status = hf_cli.zspace_optimizer_factorized_study_main(
@@ -683,10 +944,45 @@ def test_polarity_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     assert status == 0
     assert "status=planned" in capsys.readouterr().out
     assert (
-        tmp_path
-        / "polarity-study"
-        / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
+        tmp_path / "polarity-study" / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
     ).is_file()
+
+
+def test_polarity_corpus_study_cli_writes_a_meta_plan(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    corpus_a = tmp_path / "a.txt"
+    corpus_b = tmp_path / "b.txt"
+    corpus_a.write_text("alpha corpus\n", encoding="utf-8")
+    corpus_b.write_text("beta corpus\n", encoding="utf-8")
+    root = tmp_path / "corpus-study"
+
+    status = hf_cli.zspace_optimizer_polarity_corpus_study_main(
+        [
+            "--study-dir",
+            str(root),
+            "--corpus",
+            f"alpha={corpus_a}",
+            "--corpus",
+            f"beta={corpus_b}",
+            "--seed",
+            "13",
+            "--bridge-script",
+            str(bridge),
+            "--launch-cwd",
+            str(tmp_path),
+            "--min-free-disk-gb",
+            "0",
+            "--",
+            *_shared_corpus_bridge_args(),
+        ]
+    )
+
+    assert status == 0
+    assert "status=planned" in capsys.readouterr().out
+    assert (root / study.HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME).is_file()
 
 
 def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
@@ -721,18 +1017,17 @@ def test_feedback_study_plan_seals_one_rust_config_and_shared_trajectory(
     assert [run["arm"] for run in seed_runs] == list(st.HF_ZSPACE_FEEDBACK_STUDY_ARMS)
     assert len({run["trajectory"] for run in seed_runs}) == 1
     assert all(run["command"].count("--logging-steps") == 1 for run in seed_runs)
-    assert all(
-        run["command"].count("--require-eval-dataset") == 1 for run in seed_runs
-    )
+    assert all(run["command"].count("--require-eval-dataset") == 1 for run in seed_runs)
     assert all(
         run["command"][run["command"].index("--logging-steps") + 1] == "1"
         for run in seed_runs
     )
     guarded = seed_runs[-1]
     assert guarded["expected_feedback_mode"] == "loss_guard"
-    assert guarded["expected_feedback_config_id"] == first["scientific_spec"][
-        "feedback_config_id"
-    ]
+    assert (
+        guarded["expected_feedback_config_id"]
+        == first["scientific_spec"]["feedback_config_id"]
+    )
     assert "--zspace-optimizer-feedback-warmup-observations" in guarded["command"]
     assert "--zspace-optimizer-trajectory-json" in guarded["command"]
 
@@ -1021,3 +1316,458 @@ def test_factorized_gain_studies_require_shared_evidence_and_report_response(
     source_report.write_text(source_report.read_text(encoding="utf-8") + "\n")
     with pytest.raises(st.HFZSpaceFactorizedStudyError, match="receipt drifted"):
         st.compare_hf_zspace_optimizer_factorized_gain_studies(directories)
+
+
+def _polarity_corpus_bundle(label: str) -> dict[str, object]:
+    corpus_id = "sha256:" + label * 64
+    shared_evidence = {
+        "trajectory_id": "sha256:" + "3" * 64,
+        "trajectory_policy_id": "sha256:" + "4" * 64,
+        "control_sequence_id": "sha256:" + "5" * 64,
+        "nominal_schedule_sequence_id": "sha256:" + "6" * 64,
+    }
+    rows = []
+    for seed in (13, 17, 23):
+        normalized = 0.002 + seed * 1e-7
+        complement = -0.001 - seed * 1e-7
+        rows.append(
+            {
+                "corpus_id": corpus_id,
+                "seed": seed,
+                "dose_normalized_shape_effect": normalized,
+                "complement_shape_effect": complement,
+                "polarity_effect": complement - normalized,
+            }
+        )
+    return {
+        "label": label,
+        "study_dir": f"/study/{label}",
+        "study_id": "sha256:" + "7" * 64,
+        "corpus_id": corpus_id,
+        "runtime_identity_id": "sha256:" + "2" * 64,
+        "protocol_payload": {"schema": "test.protocol.v1"},
+        "protocol_id": "sha256:" + "1" * 64,
+        "source_args": ["--train-file", f"{label}.txt"],
+        "shared_evidence": shared_evidence,
+        "rows": rows,
+        "seeds": [13, 17, 23],
+        "plan_sha256": "sha256:" + "8" * 64,
+        "summary_sha256": "sha256:" + "9" * 64,
+        "completion_event_id": "sha256:" + "b" * 64,
+        "polarity_report_sha256": "sha256:" + "a" * 64,
+    }
+
+
+def test_polarity_corpus_comparison_delegates_balanced_semantics_to_rust(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+
+    report = st.compare_hf_zspace_optimizer_polarity_studies(
+        {label: Path(f"/study/{label}") for label in bundles}
+    )
+
+    assert report["schema"] == st.HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA
+    assert report["status"] == "ready"
+    assert report["corpus_count"] == 3
+    assert report["seed_count_per_corpus"] == 3
+    assert report["observation_count"] == 9
+    assert report["bounded_polarity_improvement_observed"] is True
+    assert report["efficacy_claim_ready"] is False
+    rust = report["rust_evidence"]
+    assert rust["semantic_owner"] == "st-core::runtime::zspace_evidence"
+    assert (
+        rust["contrasts"]["polarity_effect"][  # type: ignore[index]
+            "corpus_left_arm_win_count"
+        ]
+        == 3
+    )
+    assert report["report_id"].startswith("sha256:")
+    assert report["corpora"][0]["completion_event_id"] == "sha256:" + "b" * 64
+    assert "summary_sha256" not in report["corpora"][0]
+
+
+def test_polarity_corpus_report_ignores_mutable_summary_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+    studies = {label: Path(f"/study/{label}") for label in bundles}
+
+    first = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+    for index, bundle in enumerate(bundles.values()):
+        bundle["summary_sha256"] = "sha256:" + str(index + 1) * 64
+    second = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+
+    assert second == first
+
+
+def test_polarity_corpus_report_id_ignores_presentation_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+    studies = {label: Path(f"/study/{label}") for label in bundles}
+
+    first = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+    for index, bundle in enumerate(bundles.values()):
+        bundle["label"] = f"alias-{index}"
+        bundle["study_dir"] = f"/relocated/{index}"
+        bundle["source_args"] = ["--train-file", f"/relocated/{index}.txt"]
+        bundle["study_id"] = "sha256:" + str(index + 1) * 64
+        bundle["plan_sha256"] = "sha256:" + str(index + 4) * 64
+        bundle["completion_event_id"] = "sha256:" + str(index + 7) * 64
+        bundle["polarity_report_sha256"] = "sha256:" + chr(ord("d") + index) * 64
+    second = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+
+    assert second["corpora"] != first["corpora"]
+    assert second["report_identity"] == first["report_identity"]
+    assert second["report_id"] == first["report_id"]
+    assert all(
+        set(corpus) == {"corpus_id"} for corpus in second["report_identity"]["corpora"]
+    )
+
+
+def test_polarity_corpus_comparison_rejects_protocol_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    bundles["c"]["protocol_id"] = "sha256:" + "f" * 64
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="protocol_id"):
+        st.compare_hf_zspace_optimizer_polarity_studies(
+            {label: Path(f"/study/{label}") for label in bundles}
+        )
+
+
+def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+
+    def execute(run: Mapping[str, object], *, cwd: Path) -> tuple[int, float]:
+        del cwd
+        _write_completed_run(run)
+        return 0, 0.25
+
+    def compare(_paths: list[Path]) -> dict[str, object]:
+        return {
+            "schema": "spiraltorch.hf_zspace_polarity_ablation.v1",
+            "status": "ready",
+            "matched_seed_count": 1,
+            "seeds": [13],
+            "polarity_seeds": [
+                {
+                    "seed": 13,
+                    "status": "ready",
+                    "trajectory_id": "sha256:" + "3" * 64,
+                    "trajectory_policy_id": "sha256:" + "4" * 64,
+                    "control_sequence_id": "sha256:" + "5" * 64,
+                    "nominal_schedule_sequence_id": "sha256:" + "6" * 64,
+                    "contrasts": {
+                        "dose_normalized_shape_effect": 0.002,
+                        "complement_shape_effect": -0.001,
+                        "polarity_effect": -0.003,
+                    },
+                }
+            ],
+            "error_count": 0,
+            "errors": [],
+        }
+
+    monkeypatch.setattr(study, "_execute_run", execute)
+    monkeypatch.setattr(
+        study,
+        "compare_hf_zspace_optimizer_polarity_run_cards",
+        compare,
+    )
+    git_status_id = {"value": "sha256:" + "1" * 64}
+    monkeypatch.setattr(
+        study,
+        "_git_source_provenance",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "head": "a" * 40,
+            "status_id": git_status_id["value"],
+        },
+    )
+    root = tmp_path / "polarity"
+    original_args = _bridge_args()
+    original_model = str(tmp_path / "checkout-a" / "same-model")
+    original_args[original_args.index("local-model")] = original_model
+    original_args.extend(("--tokenizer-name", original_model))
+    summary = st.run_hf_zspace_optimizer_polarity_study(
+        study_dir=root,
+        seeds=[13],
+        bridge_args=original_args,
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+
+    assert summary["status"] == "ready"
+    bundle = study._polarity_corpus_study_bundle("alpha", root)
+    assert bundle["study_id"] == summary["study_id"]
+    assert bundle["protocol_payload"]["corpus_source_flags"] == ["--train-file"]  # type: ignore[index]
+    assert "shared_bridge_args" not in bundle["protocol_payload"]  # type: ignore[operator]
+    assert "git_status_id" not in bundle["protocol_payload"]  # type: ignore[operator]
+    assert len(bundle["protocol_payload"]["training_recipe_runs"]) == 3  # type: ignore[index]
+    data_preparation = bundle["protocol_payload"]["data_preparation_identity"]  # type: ignore[index]
+    assert data_preparation["path_independent"] is True
+    assert data_preparation["identity_id"] == study._sha256_id(
+        data_preparation["identity_payload"]
+    )
+    assert data_preparation["identity_payload"]["tokenization"] == {  # type: ignore[index]
+        "block_size": 128
+    }
+
+    summary_path = root / study.HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
+    stored_summary = study._read_json(summary_path)
+    tampered_summary = dict(stored_summary)
+    tampered_anchor = dict(tampered_summary["identity_anchor"])
+    tampered_anchor["training_input_id"] = "sha256:" + "f" * 64
+    tampered_summary["identity_anchor"] = tampered_anchor
+    study._atomic_write_json(summary_path, tampered_summary)
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="summary identity anchor does not match sealed run evidence",
+    ):
+        study._polarity_corpus_study_bundle("alpha", root)
+    study._atomic_write_json(summary_path, stored_summary)
+
+    relocated_root = tmp_path / "relocated-polarity"
+    relocated_args = _bridge_args()
+    relocated_model = str(tmp_path / "checkout-b" / "same-model")
+    relocated_args[relocated_args.index("local-model")] = relocated_model
+    relocated_args.extend(("--tokenizer-name", relocated_model))
+    git_status_id["value"] = "sha256:" + "2" * 64
+    relocated_summary = st.run_hf_zspace_optimizer_polarity_study(
+        study_dir=relocated_root,
+        seeds=[13],
+        bridge_args=relocated_args,
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+    assert relocated_summary["status"] == "ready"
+    relocated_bundle = study._polarity_corpus_study_bundle(
+        "relocated-alpha", relocated_root
+    )
+    assert relocated_bundle["protocol_payload"] == bundle["protocol_payload"]
+    assert relocated_bundle["protocol_id"] == bundle["protocol_id"]
+    assert (
+        study._read_json(root / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME)[
+            "git_source_provenance"
+        ]["status_id"]
+        != study._read_json(
+            relocated_root / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
+        )["git_source_provenance"]["status_id"]
+    )
+
+    changed_root = tmp_path / "changed-data-preparation"
+    changed_args = _bridge_args()
+    changed_args.extend(("--block-size", "64"))
+    changed_summary = st.run_hf_zspace_optimizer_polarity_study(
+        study_dir=changed_root,
+        seeds=[13],
+        bridge_args=changed_args,
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+    assert changed_summary["status"] == "ready"
+    changed_bundle = study._polarity_corpus_study_bundle("changed", changed_root)
+    assert (
+        changed_bundle["protocol_payload"]["data_preparation_identity"][  # type: ignore[index]
+            "identity_id"
+        ]
+        != data_preparation["identity_id"]
+    )
+    assert changed_bundle["protocol_id"] != bundle["protocol_id"]
+
+    event_path = root / study.HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
+    with event_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="blank row"):
+        study._polarity_corpus_study_bundle("alpha", root)
+
+
+def test_polarity_corpus_compare_cli_parses_labeled_studies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def compare(studies: Mapping[str, Path]) -> dict[str, object]:
+        captured.update(studies)
+        return {
+            "status": "ready",
+            "report_id": "sha256:" + "1" * 64,
+            "corpus_count": 3,
+            "seed_count_per_corpus": 3,
+        }
+
+    monkeypatch.setattr(hf_cli, "compare_hf_zspace_optimizer_polarity_studies", compare)
+    monkeypatch.setattr(
+        hf_cli,
+        "write_hf_zspace_optimizer_polarity_corpus_report",
+        lambda report, path: Path(path).write_text(
+            json.dumps(report), encoding="utf-8"
+        ),
+    )
+    output = tmp_path / "corpus-report.json"
+
+    status = hf_cli.zspace_optimizer_polarity_corpus_compare_main(
+        [
+            "--study",
+            "alpha=/study/a",
+            "--study",
+            "beta=/study/b",
+            "--study",
+            "gamma=/study/c",
+            "--out",
+            str(output),
+        ]
+    )
+
+    assert status == 0
+    assert captured == {
+        "alpha": Path("/study/a"),
+        "beta": Path("/study/b"),
+        "gamma": Path("/study/c"),
+    }
+    assert output.is_file()
+    assert "corpora=3" in capsys.readouterr().out
+
+
+def test_polarity_corpus_runner_reuses_substudy_executor_and_writes_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    corpora = {}
+    for label in ("a", "b", "c"):
+        path = tmp_path / f"{label}.txt"
+        path.write_text(f"{label} corpus\n", encoding="utf-8")
+        corpora[label] = path
+    executed: list[str] = []
+
+    def run_substudy(plan, **_kwargs):
+        label = Path(str(plan["study_dir"])).name
+        executed.append(label)
+        return {
+            "status": "ready",
+            "completed_run_count": 9,
+            "run_count": 9,
+        }
+
+    rust_evidence = {
+        "status": "ready",
+        "evidence_id": "sha256:" + "e" * 64,
+        "evidence_boundary": "bounded test evidence",
+    }
+    aggregate = {
+        "status": "ready",
+        "report_id": "sha256:" + "f" * 64,
+        "rust_evidence": rust_evidence,
+    }
+    monkeypatch.setattr(study, "_run_hf_zspace_optimizer_study_plan", run_substudy)
+    monkeypatch.setattr(
+        study,
+        "compare_hf_zspace_optimizer_polarity_studies",
+        lambda _studies: aggregate,
+    )
+
+    summary = st.run_hf_zspace_optimizer_polarity_corpus_study(
+        study_dir=tmp_path / "corpus-study",
+        corpora=corpora,
+        seeds=[13, 17, 23],
+        bridge_args=_shared_corpus_bridge_args(),
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+
+    assert executed == ["a", "b", "c"]
+    assert summary["status"] == "ready"
+    assert summary["completed_corpus_count"] == 3
+    assert summary["completed_run_count"] == 27
+    assert summary["remaining_run_count"] == 0
+    assert summary["polarity_corpus_report_id"] == aggregate["report_id"]
+    assert summary["rust_evidence_id"] == rust_evidence["evidence_id"]
+    report_path = Path(str(summary["polarity_corpus_report"]))
+    assert json.loads(report_path.read_text(encoding="utf-8")) == aggregate
+
+
+def test_polarity_corpus_runner_rechecks_each_source_before_substudy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    corpora = {}
+    for label in ("a", "b", "c"):
+        path = tmp_path / f"{label}.txt"
+        path.write_text(f"{label} corpus\n", encoding="utf-8")
+        corpora[label] = path
+    executed: list[str] = []
+
+    def run_substudy(plan, **_kwargs):
+        label = Path(str(plan["study_dir"])).name
+        executed.append(label)
+        if label == "a":
+            corpora["b"].write_text("changed corpus\n", encoding="utf-8")
+        return {
+            "status": "ready",
+            "completed_run_count": 9,
+            "run_count": 9,
+        }
+
+    monkeypatch.setattr(study, "_run_hf_zspace_optimizer_study_plan", run_substudy)
+    root = tmp_path / "corpus-study"
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="source changed after the outer plan",
+    ):
+        st.run_hf_zspace_optimizer_polarity_corpus_study(
+            study_dir=root,
+            corpora=corpora,
+            seeds=[13, 17, 23],
+            bridge_args=_shared_corpus_bridge_args(),
+            bridge_script=bridge,
+            launch_cwd=tmp_path,
+            min_free_disk_gb=0.0,
+            execute=True,
+        )
+
+    assert executed == ["a"]
+    summary = json.loads(
+        (root / study.HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["status"] == "failed"
+    assert "source changed after the outer plan" in summary["error"]

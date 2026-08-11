@@ -33,15 +33,25 @@ ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION = (
 ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND = (
     "spiraltorch.zspace_parameter_trajectory_policy"
 )
-ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER = (
-    "st-core::runtime::zspace_optimizer"
-)
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
 ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND = "rust"
 ZSPACE_PARAMETER_TRAJECTORY_POLICIES = ("dose_preserving_complement",)
 ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE = (
     "s_i=1-a*(r_i-r_bar_w),r_bar_w=sum_i(w_i*r_i)/sum_i(w_i),"
     "a=max_safe_in_[0,1],sum_i(w_i*s_i)=sum_i(w_i)"
 )
+ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION = "spiraltorch.zspace_polarity_evidence.v1"
+ZSPACE_POLARITY_EVIDENCE_KIND = "spiraltorch.zspace_polarity_evidence"
+ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER = "st-core::runtime::zspace_evidence"
+ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND = "rust"
+ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE = (
+    "validate balanced (corpus_id,seed) rows; summarize seeds within corpus; "
+    "summarize corpus means with equal corpus weight"
+)
+ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE = (
+    "polarity_effect=complement_shape_effect-dose_normalized_shape_effect"
+)
+ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED = 9_007_199_254_740_991
 ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION = "spiraltorch.zspace_optimizer_feedback.v1"
 ZSPACE_OPTIMIZER_FEEDBACK_KIND = "spiraltorch.zspace_optimizer_feedback"
 ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer_feedback"
@@ -77,6 +87,14 @@ __all__ = [
     "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+    "ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE",
+    "ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION",
+    "ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE",
+    "ZSPACE_POLARITY_EVIDENCE_KIND",
+    "ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED",
+    "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
+    "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
+    "validate_zspace_polarity_evidence",
     "validate_zspace_parameter_trajectory",
     "validate_zspace_parameter_trajectory_policy",
     "zspace_meta_optimizer_init",
@@ -89,6 +107,7 @@ __all__ = [
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
     "zspace_parameter_trajectory_policy",
+    "zspace_polarity_evidence",
 ]
 
 
@@ -304,9 +323,7 @@ def _validate_parameter_trajectory_policy(contract: Mapping[str, Any]) -> None:
     policy_id = contract.get("policy_id")
     source_id = contract.get("source_trajectory_id")
     if not all(
-        isinstance(value, str)
-        and value.startswith("sha256:")
-        and len(value) == 71
+        isinstance(value, str) and value.startswith("sha256:") and len(value) == 71
         for value in (policy_id, source_id)
     ):
         raise RuntimeError(
@@ -326,6 +343,56 @@ def _validate_parameter_trajectory_policy(contract: Mapping[str, Any]) -> None:
     ):
         raise RuntimeError(
             "native Z-space parameter trajectory policy returned invalid dimensions"
+        )
+
+
+def _validate_polarity_evidence(contract: Mapping[str, Any]) -> None:
+    if (
+        contract.get("kind") != ZSPACE_POLARITY_EVIDENCE_KIND
+        or contract.get("contract_version") != ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION
+        or contract.get("semantic_owner") != ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER
+        or contract.get("semantic_backend") != ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND
+        or contract.get("evidence_validated") is not True
+        or contract.get("status") != "ready"
+    ):
+        raise RuntimeError("native Z-space core returned untrusted polarity evidence")
+    evidence_id = contract.get("evidence_id")
+    corpus_count = contract.get("corpus_count")
+    seed_count = contract.get("seed_count_per_corpus")
+    observation_count = contract.get("observation_count")
+    request = contract.get("request")
+    contrasts = contract.get("contrasts")
+    if (
+        not isinstance(evidence_id, str)
+        or not evidence_id.startswith("sha256:")
+        or len(evidence_id) != 71
+        or isinstance(corpus_count, bool)
+        or not isinstance(corpus_count, int)
+        or corpus_count <= 0
+        or isinstance(seed_count, bool)
+        or not isinstance(seed_count, int)
+        or seed_count <= 0
+        or isinstance(observation_count, bool)
+        or not isinstance(observation_count, int)
+        or observation_count != corpus_count * seed_count
+        or not isinstance(request, Mapping)
+        or not isinstance(contrasts, Mapping)
+    ):
+        raise RuntimeError(
+            "native Z-space polarity evidence returned invalid dimensions"
+        )
+    if (
+        contract.get("aggregation_rule") != ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE
+        or contract.get("contrast_rule") != ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE
+        or set(contrasts)
+        != {
+            "dose_normalized_shape_effect",
+            "complement_shape_effect",
+            "polarity_effect",
+        }
+    ):
+        raise RuntimeError(
+            "native Z-space polarity evidence returned unknown semantics"
         )
 
 
@@ -656,5 +723,62 @@ def validate_zspace_parameter_trajectory_policy(
 
     return _parameter_trajectory_policy_operation(
         "_zspace_parameter_trajectory_policy_validate",
+        report,
+    )
+
+
+def _polarity_evidence_operation(
+    name: str,
+    payload: Mapping[str, object],
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space polarity evidence requires the compiled Rust semantic core; "
+            f"rebuild or reinstall SpiralTorch with {name}"
+        )
+    contract = operation(dict(payload))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError(f"native {name} returned a non-mapping payload")
+    result = dict(contract)
+    _validate_polarity_evidence(result)
+    return result
+
+
+def zspace_polarity_evidence(
+    *,
+    protocol_id: str,
+    runtime_identity_id: str,
+    trajectory_id: str,
+    trajectory_policy_id: str,
+    control_sequence_id: str,
+    nominal_schedule_sequence_id: str,
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...],
+) -> dict[str, Any]:
+    """Aggregate balanced matched-study contrasts in the canonical Rust core."""
+
+    return _polarity_evidence_operation(
+        "_zspace_polarity_evidence",
+        {
+            "protocol_id": protocol_id,
+            "runtime_identity_id": runtime_identity_id,
+            "trajectory_id": trajectory_id,
+            "trajectory_policy_id": trajectory_policy_id,
+            "control_sequence_id": control_sequence_id,
+            "nominal_schedule_sequence_id": nominal_schedule_sequence_id,
+            "rows": [dict(row) for row in rows],
+        },
+    )
+
+
+def validate_zspace_polarity_evidence(
+    report: Mapping[str, object],
+) -> dict[str, Any]:
+    """Recompute a serialized cross-corpus aggregate and reject changed fields."""
+
+    return _polarity_evidence_operation(
+        "_zspace_polarity_evidence_validate",
         report,
     )

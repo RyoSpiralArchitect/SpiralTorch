@@ -376,6 +376,114 @@ The frozen provenance anchors are:
 - native library SHA-256 `9ccc426ed9807f09321c3d84aed1154a4313fbe0a61d10714021efe73546fc6f`;
 - trajectory policy ID `sha256:b08588963b97bff33dc59c0bb0f9c830bc054aadc949b97be9324f1286b69553`.
 
+## Cross-corpus polarity study
+
+The single-corpus result above is a hypothesis anchor, not a generality result.
+Use the corpus study runner to repeat the same three-arm, multi-seed protocol on
+content-distinct local corpora without rebuilding aggregation semantics in
+Python:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-corpus-study \
+  --study-dir models/runs/zspace-polarity-multicorpus-64 \
+  --corpus fiction=data/dubliners.txt \
+  --corpus psychology=data/psychology_of_the_unconscious_en.txt \
+  --corpus encyclopedic=data/wiki_33.txt \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Do not pass a dataset source after `--`; the runner owns one `--train-file` per
+corpus. Run the command without `--run` to freeze and inspect all nested plans,
+then repeat it exactly with `--run`. Recovery reuses the existing per-corpus
+plan, hash-chained journal, run-card, trace, and policy receipts.
+
+The final `polarity-corpus-report.json` is computed by the Rust
+`st-core::runtime::zspace_evidence` contract. Rust requires the same seed set in
+every corpus, recomputes `polarity = complement - normalized`, summarizes seeds
+within each corpus, and only then gives every corpus mean equal weight. A
+bounded trend is eligible only at three or more corpora and three or more seeds
+per corpus, and only when every corpus mean has the same direction. The report
+still sets `efficacy_claim_ready` to false: it is a corpus-level trend for one
+model and recipe, not significance or general model superiority.
+
+Existing completed studies can enter the same Rust contract independently:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-corpus-compare \
+  --study fiction=models/runs/polarity-fiction \
+  --study psychology=models/runs/polarity-psychology \
+  --study encyclopedic=models/runs/polarity-encyclopedic \
+  --out models/runs/polarity-corpus-report.json
+```
+
+The comparator recomputes every source report from its run cards and verifies
+the immutable plan, complete hash-chain, per-run card SHA-256, final report
+SHA-256, runtime identity, trajectory, policy, control, and nominal schedule
+before calling Rust. A mutable summary is status metadata only: its identity
+anchor must exactly match the corpus, runtime, and execution identities
+re-derived from those sealed run cards. The scientific protocol likewise uses
+the path-independent execution/runtime identities, one content-addressed
+training-recipe identity per seed and arm, and one path-independent
+data-preparation identity reconstructed from sealed effective settings plus
+materialization/tokenization receipt contracts. Raw model, tokenizer, and
+corpus paths never enter that identity, and local source flag order is
+canonicalized before hashing.
+Per-study Git status and path-bearing receipts remain sealed audit and recovery
+metadata, but do not define cross-study protocol equality; an earlier study's
+output therefore cannot perturb a later standalone comparison. The report
+identity hashes the Rust evidence ID, protocol and runtime identities, and
+content-addressed corpus IDs in canonical order.
+
+### Audited cross-corpus polarity result (2026-08-11)
+
+The checked-in [multi-corpus polarity artifact](benchmarks/hf_zspace_optimizer_polarity_multicorpus_64step_20260811.json)
+records 27 local GPT-2 LoRA runs: three content-distinct corpora, seeds
+13/17/23, and the three matched polarity arms. Each run used 64 optimizer
+updates, CPU float32, rank 4, alpha 8, batch size 2, gradient accumulation 8,
+block size 128, and 16 capped evaluation blocks. The encyclopedic, fiction, and
+psychology corpora supplied 1006, 383, and 212 training blocks respectively.
+
+| Corpus | normalized minus observe | complement minus observe | complement minus normalized |
+| --- | ---: | ---: | ---: |
+| Encyclopedic | +0.000193 | -0.000104 | -0.000296 |
+| Fiction | +0.001537 | -0.000892 | -0.002429 |
+| Psychology | +0.001533 | -0.000877 | -0.002410 |
+| Corpus-equal mean | +0.001087 | -0.000624 | -0.001712 |
+
+Lower validation loss is better. The normalized shape was worse than ordinary
+FT for 9/9 seeds and all 3/3 corpus means. The dose-preserving complement beat
+ordinary FT for 9/9 and beat the normalized shape for 9/9; all three corpus
+means agreed in both comparisons. The independent comparator regenerated the
+same report byte-for-byte, and the Rust validator recomputed evidence ID
+`sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8`.
+
+This advances the earlier single-corpus observation to a balanced corpus-level
+trend, but not to a general efficacy result. It is still one local GPT-2 model,
+one short LoRA recipe, three corpora, and three seeds without a prespecified
+power analysis or independent generation-quality endpoint. Accordingly,
+`efficacy_claim_ready` remains false.
+
+The frozen provenance anchors are:
+
+- outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
+- path- and alias-independent protocol ID `sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f`;
+- path-independent data-preparation ID `sha256:75f83e30bbd86776fee86b91cda4bf36624282cbbc880c1bb8df450a1bbe982f`;
+- path- and alias-independent outer report ID `sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08`;
+- stable outer report SHA-256 `e822f1030c2b447c34ad1d32af008b6afe48f3607386bef26dbc562b72e4c10e`;
+- experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
+- stable aggregation Git commit `c267de02f3612b5df07aedb43c6d575bd7a09906`;
+- runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
+- native library SHA-256 `7a5914318c835bc216a283f7f223e9c1a84b38707a8358e7c8607c61a11eafe1`.
+
 ## Read the contrasts
 
 All contrasts use `left_arm loss change - right_arm loss change`; lower is

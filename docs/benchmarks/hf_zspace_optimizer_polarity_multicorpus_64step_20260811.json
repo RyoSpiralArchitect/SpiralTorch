@@ -1,0 +1,617 @@
+{
+  "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
+  "recorded_at": "2026-08-11T13:23:37Z",
+  "status": "ready",
+  "study": {
+    "model": "gpt2",
+    "model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "finetune_mode": "lora",
+    "lora_rank": 4,
+    "lora_alpha": 8,
+    "lora_dropout": 0.05,
+    "optimizer_updates": 64,
+    "learning_rate": 0.00005,
+    "training_device": "cpu",
+    "model_train_dtype": "float32",
+    "per_device_train_batch_size": 2,
+    "per_device_eval_batch_size": 2,
+    "gradient_accumulation_steps": 8,
+    "block_size": 128,
+    "max_eval_blocks": 16,
+    "validation_fraction": 0.1,
+    "seeds": [
+      13,
+      17,
+      23
+    ],
+    "arms": [
+      "observe",
+      "dose_normalized",
+      "dose_preserving_complement"
+    ],
+    "corpus_count": 3,
+    "run_count": 27
+  },
+  "corpora": [
+    {
+      "label": "encyclopedic",
+      "source_file": "wiki_33.txt",
+      "source_sha256": "sha256:3e8567fdb78754415a04eae6b46bad5fae48143021ea069db475f994a436a190",
+      "source_size_bytes": 1048416,
+      "tokenized_train_blocks": 1006,
+      "tokenized_eval_blocks": 16,
+      "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+      "substudy_id": "sha256:a7c19b61359aaf59fb983a815a4c86ba6a76d6cdfe18d05ba4c4c350bf0d023f",
+      "plan_sha256": "sha256:baed8bb604e3e312f5739b1e73a982b29e2abe5666b7efa1474f24c43bfd0009",
+      "first_ready_completion_event_id": "sha256:a06d16074d8fdaf812b1007cf59e736f468b7911925ce60546b195f8639bbfd1",
+      "polarity_report_sha256": "sha256:5ee6cc0bca862fcea88ff1b6e805c0e2fb38b711cd91f998b0814dfe3e5247c1"
+    },
+    {
+      "label": "fiction",
+      "source_file": "dubliners.txt",
+      "source_sha256": "sha256:d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+      "source_size_bytes": 359634,
+      "tokenized_train_blocks": 383,
+      "tokenized_eval_blocks": 16,
+      "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+      "substudy_id": "sha256:3663c2f7cced8f632c3a5c159c20da1deffaf69f04466fa3366f5ba5958c1da9",
+      "plan_sha256": "sha256:a1bdbefa6fcf744b5f05e2a521df008dbbb4c37862ff747739099acacedd34b7",
+      "first_ready_completion_event_id": "sha256:783bf0cf01f58eb460fb2ea33ee1f373de745c983ec984b862cc919850eaaf26",
+      "polarity_report_sha256": "sha256:f0851903c8ff9e233b82863b273bf8d93937e39edc05a67a28b38117b7744e88"
+    },
+    {
+      "label": "psychology",
+      "source_file": "psychology_of_the_unconscious_en.txt",
+      "source_sha256": "sha256:f38c1154d7ac72d22cc0f70d59d8438eb7886402314d281df5e40fe4734a4746",
+      "source_size_bytes": 133450,
+      "tokenized_train_blocks": 212,
+      "tokenized_eval_blocks": 16,
+      "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+      "substudy_id": "sha256:7f3c1a94391d990136f4cb25476e2743469c4337da225d6ddd8e0e3b37a39bf2",
+      "plan_sha256": "sha256:cb30c2d985e87a7fb6bcbb457ee64c0aec99a3ae83be3ef69d7a064a72082535",
+      "first_ready_completion_event_id": "sha256:873ceca8a36e7b4dcb626a8e3a86aa9b4700dee90a3ec0124b8feccfe6dc37a9",
+      "polarity_report_sha256": "sha256:4582d800da56879159929dcb7388d0fb18e653adc7c85482ea833ff9ed4ba48a"
+    }
+  ],
+  "provenance": {
+    "outer_study_id": "sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec",
+    "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
+    "runtime_source_id": "sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2",
+    "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+    "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
+    "experiment_git_clean": true,
+    "loaded_native_extension_sha256": "sha256:7a5914318c835bc216a283f7f223e9c1a84b38707a8358e7c8607c61a11eafe1",
+    "stable_aggregation_git_commit": "c267de02f3612b5df07aedb43c6d575bd7a09906",
+    "outer_report_id": "sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08",
+    "outer_report_sha256": "sha256:e822f1030c2b447c34ad1d32af008b6afe48f3607386bef26dbc562b72e4c10e",
+    "rust_evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
+    "independent_comparator_byte_match": true,
+    "exact_runner_reuse_completed_runs": 27
+  },
+  "evidence_protocol": {
+    "arms": [
+      "observe",
+      "dose_normalized",
+      "dose_preserving_complement"
+    ],
+    "bridge_sha256": "sha256:e7b9ead58cd8f9fac369bdb7935a9be2cec7885ba2ef676eca3c3e8c60303f4a",
+    "corpus_source_flags": [
+      "--train-file"
+    ],
+    "data_preparation_identity": {
+      "identity_id": "sha256:75f83e30bbd86776fee86b91cda4bf36624282cbbc880c1bb8df450a1bbe982f",
+      "identity_payload": {
+        "corpus_source_flags": [
+          "--train-file"
+        ],
+        "dataset": {
+          "dataset_config": "text",
+          "dataset_format": "text",
+          "dataset_name": "local-files",
+          "dataset_revision": null,
+          "dataset_source": "local_files",
+          "dataset_streaming": false,
+          "eval_split": "validation",
+          "streaming_shuffle_buffer_size": 0,
+          "streaming_validation_samples": 0,
+          "text_column": "text",
+          "train_split": "train",
+          "validation_fraction": 0.1
+        },
+        "receipt_contracts": {
+          "dataset_materialization_identity": {
+            "coverage": "exact_selected_text_rows_in_order",
+            "schema": "spiraltorch.hf_dataset_materialization_identity.v1"
+          },
+          "tokenized_dataset_identity": {
+            "coverage": "exact_tokenized_rows_all_columns_in_order",
+            "schema": "spiraltorch.hf_tokenized_dataset_identity.v1"
+          }
+        },
+        "schema": "spiraltorch.hf_zspace_data_preparation_identity.v1",
+        "selection": {
+          "max_eval_blocks": 16,
+          "max_eval_samples": 512,
+          "max_train_samples": 4096
+        },
+        "tokenization": {
+          "block_size": 128
+        }
+      },
+      "path_independent": true
+    },
+    "execution_identity_id": "sha256:4c134303908d7ca3ba56e6089456e9bf7f0d90b830b7acc32dd2ce2f5bdabb95",
+    "git_head": "bedf582863abc60f72a6957163ea34cb75151ff1",
+    "max_steps": 64,
+    "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+    "runtime_source_id": "sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2",
+    "schema": "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v2",
+    "seeds": [
+      13,
+      17,
+      23
+    ],
+    "training_recipe_runs": [
+      {
+        "arm": "dose_normalized",
+        "seed": 13,
+        "training_recipe_identity_id": "sha256:42cdd5a6eeee0774df3d7004ad43e1babf5f6408ef60f0dfb4c23b5d4334496b"
+      },
+      {
+        "arm": "dose_preserving_complement",
+        "seed": 13,
+        "training_recipe_identity_id": "sha256:4faf1e4e7f8a9b6fc6db0b40211f63eef3d6ae4009130464335734a777819a27"
+      },
+      {
+        "arm": "observe",
+        "seed": 13,
+        "training_recipe_identity_id": "sha256:4967030afed2c01d447ab01a3ff78543e8a3958aedb7a392429e013abde64ddb"
+      },
+      {
+        "arm": "dose_normalized",
+        "seed": 17,
+        "training_recipe_identity_id": "sha256:16b46244bbb054b1f9079c1bca482d6bd227e20cdd763723fe865c58d253abec"
+      },
+      {
+        "arm": "dose_preserving_complement",
+        "seed": 17,
+        "training_recipe_identity_id": "sha256:49e878fd523e59b834785126139c90c8f2958438fbf4aea3b3ee989be714a0dc"
+      },
+      {
+        "arm": "observe",
+        "seed": 17,
+        "training_recipe_identity_id": "sha256:d0d8c2b87fbc58d14e2e6bd9465fd13737a2aabf4a55060a6f7b8c107e1bcd91"
+      },
+      {
+        "arm": "dose_normalized",
+        "seed": 23,
+        "training_recipe_identity_id": "sha256:fed0e098aacabe621a964bb2405f5154583245cc3ed03979ecac27b91f80d7c3"
+      },
+      {
+        "arm": "dose_preserving_complement",
+        "seed": 23,
+        "training_recipe_identity_id": "sha256:699bec84d928535ffd290431e276c2b50b26e2ae60dc19c91033083e7866f542"
+      },
+      {
+        "arm": "observe",
+        "seed": 23,
+        "training_recipe_identity_id": "sha256:07abfdfe5aeaa400ee34224133fa45695ac6ba80740509931258d95621e583c1"
+      }
+    ]
+  },
+  "result_summary": {
+    "lower_validation_loss_is_better": true,
+    "dose_normalized_minus_observe": {
+      "corpus_equal_weight_mean": 0.0010873741573757595,
+      "seed_left_arm_win_count": 0,
+      "seed_right_arm_win_count": 9,
+      "corpus_left_arm_win_count": 0,
+      "corpus_right_arm_win_count": 3
+    },
+    "complement_minus_observe": {
+      "corpus_equal_weight_mean": -0.0006243387858072916,
+      "seed_left_arm_win_count": 9,
+      "seed_right_arm_win_count": 0,
+      "corpus_left_arm_win_count": 3,
+      "corpus_right_arm_win_count": 0
+    },
+    "complement_minus_normalized": {
+      "corpus_equal_weight_mean": -0.0017117129431830512,
+      "seed_left_arm_win_count": 9,
+      "seed_right_arm_win_count": 0,
+      "corpus_left_arm_win_count": 3,
+      "corpus_right_arm_win_count": 0
+    }
+  },
+  "report_identity": {
+    "corpora": [
+      {
+        "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4"
+      },
+      {
+        "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1"
+      },
+      {
+        "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097"
+      }
+    ],
+    "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
+    "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+    "rust_evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
+    "schema": "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
+  },
+  "rust_evidence": {
+    "aggregation_rule": "validate balanced (corpus_id,seed) rows; summarize seeds within corpus; summarize corpus means with equal corpus weight",
+    "bounded_baseline_improvement_observed": true,
+    "bounded_polarity_improvement_observed": true,
+    "contract_version": "spiraltorch.zspace_polarity_evidence.v1",
+    "contrast_rule": "polarity_effect=complement_shape_effect-dose_normalized_shape_effect",
+    "contrasts": {
+      "complement_shape_effect": {
+        "bounded_trend_direction": "left_arm_better",
+        "bounded_trend_ready": true,
+        "corpora": [
+          {
+            "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+            "left_arm_win_count": 3,
+            "mean": -0.0008767445882161459,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.0009312629699707031
+              },
+              {
+                "seed": 17,
+                "value": -0.000911712646484375
+              },
+              {
+                "seed": 23,
+                "value": -0.0007872581481933594
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+            "left_arm_win_count": 3,
+            "mean": -0.000892480214436849,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.000797271728515625
+              },
+              {
+                "seed": 17,
+                "value": -0.0008940696716308594
+              },
+              {
+                "seed": 23,
+                "value": -0.0009860992431640625
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+            "left_arm_win_count": 3,
+            "mean": -0.0001037915547688802,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.00007128715515136719
+              },
+              {
+                "seed": 17,
+                "value": -0.00014328956604003906
+              },
+              {
+                "seed": 23,
+                "value": -0.00009679794311523438
+              }
+            ]
+          }
+        ],
+        "corpus_count": 3,
+        "corpus_equal_weight_mean": -0.0006243387858072916,
+        "corpus_left_arm_win_count": 3,
+        "corpus_mean_maximum": -0.0001037915547688802,
+        "corpus_mean_minimum": -0.000892480214436849,
+        "corpus_mean_population_standard_deviation": 0.0003681385312528038,
+        "corpus_right_arm_win_count": 0,
+        "corpus_tie_count": 0,
+        "left_arm": "dose_preserving_complement",
+        "lower_is_better": true,
+        "observation_count": 9,
+        "pooled_seed_mean": -0.0006243387858072916,
+        "right_arm": "observe",
+        "seed_count_per_corpus": 3,
+        "seed_left_arm_win_count": 9,
+        "seed_right_arm_win_count": 0,
+        "seed_tie_count": 0
+      },
+      "dose_normalized_shape_effect": {
+        "bounded_trend_direction": "right_arm_better",
+        "bounded_trend_ready": true,
+        "corpora": [
+          {
+            "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+            "left_arm_win_count": 0,
+            "mean": 0.0015330314636230469,
+            "right_arm_win_count": 3,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": 0.001514434814453125
+              },
+              {
+                "seed": 17,
+                "value": 0.00164031982421875
+              },
+              {
+                "seed": 23,
+                "value": 0.0014443397521972656
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+            "left_arm_win_count": 0,
+            "mean": 0.0015365282694498699,
+            "right_arm_win_count": 3,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": 0.0014424324035644531
+              },
+              {
+                "seed": 17,
+                "value": 0.0013861656188964844
+              },
+              {
+                "seed": 23,
+                "value": 0.0017809867858886719
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+            "left_arm_win_count": 0,
+            "mean": 0.00019256273905436197,
+            "right_arm_win_count": 3,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": 0.0001361370086669922
+              },
+              {
+                "seed": 17,
+                "value": 0.00026679039001464844
+              },
+              {
+                "seed": 23,
+                "value": 0.0001747608184814453
+              }
+            ]
+          }
+        ],
+        "corpus_count": 3,
+        "corpus_equal_weight_mean": 0.0010873741573757595,
+        "corpus_left_arm_win_count": 0,
+        "corpus_mean_maximum": 0.0015365282694498699,
+        "corpus_mean_minimum": 0.00019256273905436197,
+        "corpus_mean_population_standard_deviation": 0.0006327288322188324,
+        "corpus_right_arm_win_count": 3,
+        "corpus_tie_count": 0,
+        "left_arm": "dose_normalized",
+        "lower_is_better": true,
+        "observation_count": 9,
+        "pooled_seed_mean": 0.0010873741573757595,
+        "right_arm": "observe",
+        "seed_count_per_corpus": 3,
+        "seed_left_arm_win_count": 0,
+        "seed_right_arm_win_count": 9,
+        "seed_tie_count": 0
+      },
+      "polarity_effect": {
+        "bounded_trend_direction": "left_arm_better",
+        "bounded_trend_ready": true,
+        "corpora": [
+          {
+            "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+            "left_arm_win_count": 3,
+            "mean": -0.002409776051839193,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.002445697784423828
+              },
+              {
+                "seed": 17,
+                "value": -0.002552032470703125
+              },
+              {
+                "seed": 23,
+                "value": -0.002231597900390625
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+            "left_arm_win_count": 3,
+            "mean": -0.0024290084838867188,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.002239704132080078
+              },
+              {
+                "seed": 17,
+                "value": -0.0022802352905273438
+              },
+              {
+                "seed": 23,
+                "value": -0.0027670860290527344
+              }
+            ]
+          },
+          {
+            "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+            "left_arm_win_count": 3,
+            "mean": -0.0002963542938232422,
+            "right_arm_win_count": 0,
+            "seed_count": 3,
+            "tie_count": 0,
+            "values": [
+              {
+                "seed": 13,
+                "value": -0.00020742416381835938
+              },
+              {
+                "seed": 17,
+                "value": -0.0004100799560546875
+              },
+              {
+                "seed": 23,
+                "value": -0.0002715587615966797
+              }
+            ]
+          }
+        ],
+        "corpus_count": 3,
+        "corpus_equal_weight_mean": -0.0017117129431830512,
+        "corpus_left_arm_win_count": 3,
+        "corpus_mean_maximum": -0.0002963542938232422,
+        "corpus_mean_minimum": -0.0024290084838867188,
+        "corpus_mean_population_standard_deviation": 0.0010008404972318126,
+        "corpus_right_arm_win_count": 0,
+        "corpus_tie_count": 0,
+        "left_arm": "dose_preserving_complement",
+        "lower_is_better": true,
+        "observation_count": 9,
+        "pooled_seed_mean": -0.0017117129431830512,
+        "right_arm": "dose_normalized",
+        "seed_count_per_corpus": 3,
+        "seed_left_arm_win_count": 9,
+        "seed_right_arm_win_count": 0,
+        "seed_tie_count": 0
+      }
+    },
+    "corpus_count": 3,
+    "corpus_ids": [
+      "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+      "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+      "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097"
+    ],
+    "efficacy_claim_ready": false,
+    "efficacy_claim_requirements": "a prespecified, adequately powered multi-model evaluation with independent held-out quality and stability metrics remains required",
+    "evidence_boundary": "balanced multi-corpus matched contrasts support only a bounded corpus-level trend; corpus means are equally weighted and do not establish statistical significance or general model superiority",
+    "evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
+    "evidence_scope": "multi_corpus_multi_seed_dose_matched_polarity_ablation",
+    "evidence_validated": true,
+    "kind": "spiraltorch.zspace_polarity_evidence",
+    "observation_count": 9,
+    "request": {
+      "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
+      "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
+      "protocol_id": "sha256:39eb32b8f3b9b4039e6ad081e06457ac2c79b1e8352550f10732a3690a1a052f",
+      "rows": [
+        {
+          "complement_shape_effect": -0.0009312629699707031,
+          "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+          "dose_normalized_shape_effect": 0.001514434814453125,
+          "polarity_effect": -0.002445697784423828,
+          "seed": 13
+        },
+        {
+          "complement_shape_effect": -0.000911712646484375,
+          "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+          "dose_normalized_shape_effect": 0.00164031982421875,
+          "polarity_effect": -0.002552032470703125,
+          "seed": 17
+        },
+        {
+          "complement_shape_effect": -0.0007872581481933594,
+          "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
+          "dose_normalized_shape_effect": 0.0014443397521972656,
+          "polarity_effect": -0.002231597900390625,
+          "seed": 23
+        },
+        {
+          "complement_shape_effect": -0.000797271728515625,
+          "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+          "dose_normalized_shape_effect": 0.0014424324035644531,
+          "polarity_effect": -0.002239704132080078,
+          "seed": 13
+        },
+        {
+          "complement_shape_effect": -0.0008940696716308594,
+          "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+          "dose_normalized_shape_effect": 0.0013861656188964844,
+          "polarity_effect": -0.0022802352905273438,
+          "seed": 17
+        },
+        {
+          "complement_shape_effect": -0.0009860992431640625,
+          "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
+          "dose_normalized_shape_effect": 0.0017809867858886719,
+          "polarity_effect": -0.0027670860290527344,
+          "seed": 23
+        },
+        {
+          "complement_shape_effect": -0.00007128715515136719,
+          "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+          "dose_normalized_shape_effect": 0.0001361370086669922,
+          "polarity_effect": -0.00020742416381835938,
+          "seed": 13
+        },
+        {
+          "complement_shape_effect": -0.00014328956604003906,
+          "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+          "dose_normalized_shape_effect": 0.00026679039001464844,
+          "polarity_effect": -0.0004100799560546875,
+          "seed": 17
+        },
+        {
+          "complement_shape_effect": -0.00009679794311523438,
+          "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
+          "dose_normalized_shape_effect": 0.0001747608184814453,
+          "polarity_effect": -0.0002715587615966797,
+          "seed": 23
+        }
+      ],
+      "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+      "trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238",
+      "trajectory_policy_id": "sha256:b08588963b97bff33dc59c0bb0f9c830bc054aadc949b97be9324f1286b69553"
+    },
+    "seed_count_per_corpus": 3,
+    "seeds": [
+      13,
+      17,
+      23
+    ],
+    "semantic_backend": "rust",
+    "semantic_owner": "st-core::runtime::zspace_evidence",
+    "status": "ready"
+  },
+  "efficacy_claim_ready": false,
+  "evidence_boundary": "balanced multi-corpus matched contrasts support only a bounded corpus-level trend; corpus means are equally weighted and do not establish statistical significance or general model superiority"
+}
