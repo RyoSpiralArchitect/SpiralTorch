@@ -1,0 +1,161 @@
+{
+  "schema": "spiraltorch.hf_zspace_pythia70m_polarity_pilot_protocol.v1",
+  "status": "prespecified",
+  "protocol_id": "sha256:d656b19e97559c0298f354c615747e126c61728cb85a1894d98a3c05c16ed24f",
+  "protocol_id_rule": "sha256 of canonical UTF-8 JSON scientific_spec with sorted keys and compact separators",
+  "scientific_spec": {
+    "scope": "single-corpus Pythia-70M model-family-transfer plumbing pilot",
+    "efficacy_claim_ready": false,
+    "implementation": {
+      "generation_evidence_git_commit": "32b552670bde887102420d340a7769d47e451e89",
+      "required_source_state": "exact implementation commit or byte-identical generation-evidence functional paths; the study plan must seal the actual Git head and status",
+      "generation_evidence_contract_version": "spiraltorch.zspace_generation_evidence.v1",
+      "generation_evidence_semantic_owner": "st-core::runtime::zspace_generation_evidence",
+      "generation_evidence_semantic_backend": "rust"
+    },
+    "model": {
+      "hub_id": "EleutherAI/pythia-70m-deduped",
+      "profile": "pythia-70m-local-smoke",
+      "architecture_family": "gpt_neox",
+      "parameter_scale": "70m",
+      "snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--EleutherAI--pythia-70m-deduped/snapshots/e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "snapshot_files": [
+        {
+          "name": "config.json",
+          "size_bytes": 567,
+          "sha256": "002050231a9b1ec3ac77aa6b9b3bbdc4d923f4068a7dd33b8da72a9bd6ad9a43"
+        },
+        {
+          "name": "model.safetensors",
+          "size_bytes": 166029852,
+          "sha256": "3da388330e4549156d76b58d6d268c63cd005e9336b4f4d2d378421e7b7a33fd"
+        },
+        {
+          "name": "special_tokens_map.json",
+          "size_bytes": 99,
+          "sha256": "6f50ab5a5a509a1c309d6171f339b196a900dc9c99ad0408ff23bb615fdae7ad"
+        },
+        {
+          "name": "tokenizer.json",
+          "size_bytes": 2113710,
+          "sha256": "c24618a1b3e6a38167beff1c72cffd126c3a66254347304b50547d12c5f25624"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "size_bytes": 396,
+          "sha256": "70e38394e494931c6f773ba41e19460dd4436526b852207367f04341b4066d3f"
+        }
+      ]
+    },
+    "corpus": {
+      "label": "fiction",
+      "name": "Dubliners",
+      "local_path": "/Users/ryospiralarchitect/SpiralReality/data/dubliners.txt",
+      "size_bytes": 359634,
+      "sha256": "d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+      "validation_fraction": 0.1
+    },
+    "training": {
+      "seeds": [
+        13,
+        17,
+        23
+      ],
+      "arms": [
+        "observe",
+        "dose_normalized",
+        "dose_preserving_complement"
+      ],
+      "run_count": 9,
+      "optimizer_update_count": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "query_key_value",
+          "dense"
+        ]
+      },
+      "learning_rate": 0.00005,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_steps": 250,
+      "eval_steps": 250,
+      "save_total_limit": 1,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "trainer_defaults_boundary": "optimizer, scheduler, weight decay, and warmup remain installed-Transformers defaults because the current bridge does not expose them; the run card training_recipe_identity must seal their effective values, and this pilot must not be compared across runtime drift"
+    },
+    "generation_endpoint": {
+      "report_count": 9,
+      "one_report_per_training_run": true,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "purpose": "measure the trained adapters without confounding the training-arm comparison with inference-time Z-space control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_pilot_prompts.json",
+      "prompt_set_id": "sha256:4a5029e46c21915c4982c7eb005978ff7759cb04901c49f7d0e9f4b6aaaf94ed",
+      "prompt_count": 8,
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as the training run",
+        "continuation_only": true
+      },
+      "primary_metrics": [
+        "aggregate.sample_mean_loop_score",
+        "aggregate.ngrams[order=3].repetition_ratio",
+        "aggregate.periodic_loop_sample_ratio"
+      ],
+      "secondary_metrics": [
+        "aggregate.ngrams[order=2].distinct_ratio",
+        "aggregate.ngrams[order=4].distinct_ratio",
+        "aggregate.empty_sample_count",
+        "aggregate.total_token_count"
+      ]
+    },
+    "acceptance": {
+      "training_study_status": "ready",
+      "required_ready_run_cards": 9,
+      "required_complete_optimizer_horizon": 64,
+      "required_generation_reports": 9,
+      "generation_report_status": "complete",
+      "generation_runs_per_report": 1,
+      "generation_evidence_validation": "all reports must round-trip through validate_zspace_generation_evidence in the Rust semantic core",
+      "identity_requirements": [
+        "one protocol_id across all generation reports",
+        "the prespecified prompt_set_id across all generation reports",
+        "one decoding_config_id per seed shared by all three arms",
+        "one verified base-model/tokenizer runtime_identity_id across all nine reports",
+        "each report records its content-addressed adapter model_artifact_id"
+      ],
+      "stability_requirements": [
+        "no non-finite before-train or after-train evaluation loss",
+        "no failed or partial optimizer trajectory receipt",
+        "no failed, empty, or malformed generation row",
+        "no early termination before 64 optimizer updates"
+      ]
+    },
+    "interpretation": {
+      "allowed_claim": "the Pythia-70M family completed the same audited polarity and held-out token-sequence plumbing",
+      "pilot_rows_reusable_as_final_efficacy_evidence": false,
+      "excluded_claims": [
+        "general Z-space training superiority",
+        "semantic generation-quality improvement",
+        "statistical significance",
+        "multi-model generality"
+      ]
+    }
+  }
+}

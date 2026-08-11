@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -26,6 +27,12 @@ MODEL_CONFIGS = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_finetune_model_configs.example.json"
+)
+PYTHIA_PILOT_PROTOCOL = (
+    Path(__file__).resolve().parents[3]
+    / "docs"
+    / "benchmarks"
+    / "hf_zspace_pythia70m_polarity_pilot_protocol_v1.json"
 )
 
 
@@ -394,3 +401,32 @@ def test_generation_sweep_combines_prompts_with_token_exact_identity() -> None:
         "prompt_id"
     ] == _sha_id("1")
     assert module._summary([first])["max_control_calls"] == 7.0
+
+
+def test_pythia_pilot_protocol_is_prespecified_and_content_addressed() -> None:
+    protocol = json.loads(PYTHIA_PILOT_PROTOCOL.read_text(encoding="utf-8"))
+    prompt_set = json.loads(PYTHIA_PILOT_PROMPTS.read_text(encoding="utf-8"))
+    scientific_spec = protocol["scientific_spec"]
+    encoded = json.dumps(
+        scientific_spec,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    assert protocol["status"] == "prespecified"
+    assert protocol["protocol_id"] == "sha256:" + hashlib.sha256(encoded).hexdigest()
+    assert scientific_spec["implementation"]["generation_evidence_git_commit"] == (
+        "32b552670bde887102420d340a7769d47e451e89"
+    )
+    assert (
+        scientific_spec["generation_endpoint"]["prompt_set_id"]
+        == prompt_set["prompt_set_id"]
+    )
+    assert scientific_spec["efficacy_claim_ready"] is False
+    assert (
+        scientific_spec["interpretation"][
+            "pilot_rows_reusable_as_final_efficacy_evidence"
+        ]
+        is False
+    )
