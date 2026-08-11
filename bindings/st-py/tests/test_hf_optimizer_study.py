@@ -381,6 +381,28 @@ def test_polarity_corpus_study_plan_seals_sources_and_substudies(
             }
         )
 
+    for reserved_label in (
+        "CON",
+        "nul",
+        "Aux",
+        "COM1",
+        "com9",
+        "LPT1",
+        "lpt9",
+        "COM\N{SUPERSCRIPT ONE}",
+        "lpt\N{SUPERSCRIPT THREE}",
+    ):
+        with pytest.raises(
+            st.HFZSpaceFactorizedStudyError,
+            match="reserved Windows device name",
+        ):
+            st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+                **{
+                    **kwargs,
+                    "corpora": {reserved_label: corpus_a},
+                }
+            )
+
 
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
     tmp_path: Path,

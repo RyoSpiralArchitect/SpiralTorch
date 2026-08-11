@@ -539,27 +539,19 @@ fn finite_population_standard_deviation(
     mean: f64,
     field: &str,
 ) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let squared_deviation_sum = values
+    let scale = values
         .iter()
-        .map(|value| (value - mean).powi(2))
-        .sum::<f64>();
-    let standard_deviation = if squared_deviation_sum.is_finite() {
-        (squared_deviation_sum / values.len() as f64).sqrt()
+        .map(|value| value.abs())
+        .fold(mean.abs(), f64::max);
+    let standard_deviation = if scale == 0.0 {
+        0.0
     } else {
-        let scale = values
-            .iter()
-            .map(|value| value.abs())
-            .fold(mean.abs(), f64::max);
-        if scale == 0.0 {
-            0.0
-        } else {
-            let normalized_mean = mean / scale;
-            let normalized_variance = compensated_sum(values.iter().map(|value| {
-                let deviation = value / scale - normalized_mean;
-                deviation * deviation
-            })) / values.len() as f64;
-            scale * normalized_variance.clamp(0.0, 1.0).sqrt()
-        }
+        let normalized_mean = mean / scale;
+        let normalized_variance = compensated_sum(values.iter().map(|value| {
+            let deviation = value / scale - normalized_mean;
+            deviation * deviation
+        })) / values.len() as f64;
+        scale * normalized_variance.clamp(0.0, 1.0).sqrt()
     };
     if standard_deviation.is_finite() {
         Ok(standard_deviation)
@@ -952,6 +944,19 @@ mod tests {
             finite_mean(&values, "subnormal_tie_break").expect("exactly rounded mean"),
             -f64::MAX / 8.0
         );
+    }
+
+    #[test]
+    fn finite_standard_deviation_scales_before_tiny_deviations_underflow() {
+        let values = [1.0e-200, 2.0e-200, 3.0e-200];
+        let mean = finite_mean(&values, "tiny_variance_mean").expect("finite mean");
+        let standard_deviation =
+            finite_population_standard_deviation(&values, mean, "tiny_variance")
+                .expect("finite standard deviation");
+        let expected = (2.0_f64 / 3.0).sqrt() * 1.0e-200;
+
+        assert!(standard_deviation > 0.0);
+        assert!((standard_deviation / expected - 1.0).abs() < 1.0e-15);
     }
 
     #[test]

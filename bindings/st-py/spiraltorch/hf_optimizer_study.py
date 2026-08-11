@@ -107,6 +107,19 @@ _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA = (
 _HF_ZSPACE_POLARITY_CORPUS_PLAN_PROTOCOL_SCHEMA = (
     "spiraltorch.hf_zspace_polarity_corpus_plan_protocol.v1"
 )
+_WINDOWS_RESERVED_CORPUS_LABELS = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {
+        f"{prefix}{suffix}"
+        for prefix in ("com", "lpt")
+        for suffix in (
+            *map(str, range(1, 10)),
+            "\N{SUPERSCRIPT ONE}",
+            "\N{SUPERSCRIPT TWO}",
+            "\N{SUPERSCRIPT THREE}",
+        )
+    }
+)
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
     {
@@ -845,6 +858,10 @@ def _normalized_corpus_label(value: object) -> str:
     ):
         raise HFZSpaceFactorizedStudyError(
             "corpus labels must be 1-64 alphanumeric, underscore, or hyphen characters"
+        )
+    if label.casefold() in _WINDOWS_RESERVED_CORPUS_LABELS:
+        raise HFZSpaceFactorizedStudyError(
+            f"corpus label {label!r} is a reserved Windows device name"
         )
     return label
 

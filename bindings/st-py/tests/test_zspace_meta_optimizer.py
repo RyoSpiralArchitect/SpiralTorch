@@ -716,6 +716,38 @@ def test_polarity_evidence_uses_subnormal_to_break_large_rounding_ties() -> None
     assert normalized["pooled_seed_mean"] == -maximum / 8.0
 
 
+def test_polarity_evidence_preserves_tiny_corpus_variance() -> None:
+    corpus_values = {"a": 1.0e-200, "b": 2.0e-200, "c": 3.0e-200}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    expected = math.sqrt(2.0 / 3.0) * 1.0e-200
+    assert normalized["corpus_mean_population_standard_deviation"] == pytest.approx(
+        expected,
+        rel=1.0e-15,
+    )
+
+
 def test_polarity_evidence_preserves_ulp_residuals_after_prefix_overflow() -> None:
     maximum = float.fromhex("0x1.fffffffffffffp+1023")
     next_down_maximum = math.nextafter(maximum, 0.0)
