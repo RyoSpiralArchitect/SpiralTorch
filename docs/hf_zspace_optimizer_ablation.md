@@ -426,14 +426,16 @@ spiral-hf-zspace-optimizer-polarity-corpus-compare \
 ```
 
 The comparator recomputes every source report from its run cards and verifies
-the immutable plan, summary, complete hash-chain, final report SHA-256, runtime
-identity, protocol, trajectory, policy, control, and nominal schedule before
-calling Rust. These path-bearing receipts remain in the report as audit
-metadata, but do not define its scientific identity. That identity hashes the
-Rust evidence ID, protocol and runtime identities, and content-addressed corpus
-IDs in canonical order. Labels, checkout locations, study directories, local
-source paths, timestamps, and their derived receipt hashes therefore remain
-outside the identity projection.
+the immutable plan, complete hash-chain, per-run card SHA-256, final report
+SHA-256, runtime identity, trajectory, policy, control, and nominal schedule
+before calling Rust. A mutable summary is status metadata only: its identity
+anchor must exactly match the corpus, runtime, and execution identities
+re-derived from those sealed run cards. The scientific protocol likewise uses
+the path-independent execution/runtime identities and one content-addressed
+training-recipe identity per seed and arm, never raw model or tokenizer paths.
+Path-bearing receipts remain in the report as audit metadata, but do not define
+its scientific identity. That identity hashes the Rust evidence ID, protocol
+and runtime identities, and content-addressed corpus IDs in canonical order.
 
 ### Audited cross-corpus polarity result (2026-08-11)
 
@@ -456,7 +458,7 @@ FT for 9/9 seeds and all 3/3 corpus means. The dose-preserving complement beat
 ordinary FT for 9/9 and beat the normalized shape for 9/9; all three corpus
 means agreed in both comparisons. The independent comparator regenerated the
 same report byte-for-byte, and the Rust validator recomputed evidence ID
-`sha256:9a9bc55664bbcc4331a8587760f90c1663f62caaa0b85f68edce6aeadf9b2634`.
+`sha256:124c1aff8c1332f2c05af02d143dec29b8421f9788e83878cfe3bf15040cdbdc`.
 
 This advances the earlier single-corpus observation to a balanced corpus-level
 trend, but not to a general efficacy result. It is still one local GPT-2 model,
@@ -467,10 +469,11 @@ power analysis or independent generation-quality endpoint. Accordingly,
 The frozen provenance anchors are:
 
 - outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
-- path- and alias-independent outer report ID `sha256:64180fc52c324e242ea9e8c279a9f2adf8722fd546159773d767f52957c90c21`;
-- stable outer report SHA-256 `b66ac55f4f2b1a8afbf09cc56f87f4e2156f7e773478205f8238d6835c52bf3c`;
+- path- and alias-independent protocol ID `sha256:d78f640862d85ba1d595aec498892363fe0d4cb888e03c3a69476b39a613c984`;
+- path- and alias-independent outer report ID `sha256:4621feaff530962ce485e41cf2bce77fb2bb049b64f4cc0266748aa5c3841998`;
+- stable outer report SHA-256 `bb797334d77407c7a3184f47d4c13fcc2fdfba5381152f3f4d468bd235126158`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `06dbf8feb3d8b456e228afd005f896bfecbc2e22`;
+- stable aggregation Git commit `f787162b4fa2e45c0100646a1d4d0db04d00eb5a`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
 - native library SHA-256 `f27843531e2599e22126a12b53ea536fd119bfb944ab6e2c3e8f1e5ea7ded4a4`.
 
