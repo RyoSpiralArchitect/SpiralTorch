@@ -445,6 +445,7 @@ where
         / corpus_means.len() as f64)
         .sqrt();
     let direction = evidence_direction(&corpus_means);
+    let bounded_trend_ready = bounded_ready && direction != ZSpacePolarityEvidenceDirection::Mixed;
     let seed_values = rows.iter().map(&value).collect::<Vec<_>>();
 
     ZSpacePolarityContrastSummary {
@@ -468,7 +469,7 @@ where
         corpus_left_arm_win_count: corpus_means.iter().filter(|value| **value < 0.0).count(),
         corpus_right_arm_win_count: corpus_means.iter().filter(|value| **value > 0.0).count(),
         corpus_tie_count: corpus_means.iter().filter(|value| **value == 0.0).count(),
-        bounded_trend_ready: bounded_ready,
+        bounded_trend_ready,
         bounded_trend_direction: direction,
         corpora,
     }
@@ -582,6 +583,30 @@ mod tests {
 
         assert_eq!(report.evidence_scope, "cross_corpus_polarity_diagnostic");
         assert!(!report.contrasts["polarity_effect"].bounded_trend_ready);
+        assert!(!report.bounded_polarity_improvement_observed);
+    }
+
+    #[test]
+    fn mixed_corpus_directions_are_not_trend_ready() {
+        let mut request = request(3, &[13, 17, 23]);
+        let mixed_corpus = id('c');
+        for row in request
+            .rows
+            .iter_mut()
+            .filter(|row| row.corpus_id == mixed_corpus)
+        {
+            row.complement_shape_effect = 0.004;
+            row.polarity_effect = row.complement_shape_effect - row.dose_normalized_shape_effect;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("mixed evidence");
+        let polarity = &report.contrasts["polarity_effect"];
+
+        assert_eq!(
+            polarity.bounded_trend_direction,
+            ZSpacePolarityEvidenceDirection::Mixed
+        );
+        assert!(!polarity.bounded_trend_ready);
         assert!(!report.bounded_polarity_improvement_observed);
     }
 

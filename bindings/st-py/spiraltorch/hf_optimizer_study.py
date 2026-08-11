@@ -96,6 +96,9 @@ HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA = (
 )
 HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME = "polarity-corpus-study-plan.json"
 HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME = "polarity-corpus-study-summary.json"
+_HF_ZSPACE_POLARITY_CORPUS_REPORT_IDENTITY_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
+)
 _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA = (
     "spiraltorch.hf_zspace_polarity_corpus_protocol.v1"
 )
@@ -2562,6 +2565,28 @@ def compare_hf_zspace_optimizer_polarity_studies(
         }
         for bundle in bundles
     ]
+    report_identity = {
+        "schema": _HF_ZSPACE_POLARITY_CORPUS_REPORT_IDENTITY_SCHEMA,
+        "protocol_id": first["protocol_id"],
+        "runtime_identity_id": first["runtime_identity_id"],
+        "rust_evidence_id": rust_evidence["evidence_id"],
+        "corpora": sorted(
+            [
+                {
+                    key: bundle[key]
+                    for key in (
+                        "corpus_id",
+                        "study_id",
+                        "plan_sha256",
+                        "completion_event_id",
+                        "polarity_report_sha256",
+                    )
+                }
+                for bundle in bundles
+            ],
+            key=lambda corpus: str(corpus["corpus_id"]),
+        ),
+    }
     report: dict[str, object] = {
         "schema": HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA,
         "row_type": "hf_zspace_polarity_corpus_report",
@@ -2573,6 +2598,7 @@ def compare_hf_zspace_optimizer_polarity_studies(
         "seed_count_per_corpus": rust_evidence["seed_count_per_corpus"],
         "observation_count": rust_evidence["observation_count"],
         "corpora": corpus_summaries,
+        "report_identity": report_identity,
         "rust_evidence": rust_evidence,
         "evidence_scope": rust_evidence["evidence_scope"],
         "bounded_polarity_improvement_observed": rust_evidence[
@@ -2586,7 +2612,7 @@ def compare_hf_zspace_optimizer_polarity_studies(
         "error_count": 0,
         "errors": [],
     }
-    report["report_id"] = _sha256_id(report)
+    report["report_id"] = _sha256_id(report_identity)
     return report
 
 

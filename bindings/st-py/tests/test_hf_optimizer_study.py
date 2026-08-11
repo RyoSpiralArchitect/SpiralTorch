@@ -1229,6 +1229,33 @@ def test_polarity_corpus_report_ignores_mutable_summary_receipts(
     assert second == first
 
 
+def test_polarity_corpus_report_id_ignores_presentation_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+    studies = {label: Path(f"/study/{label}") for label in bundles}
+
+    first = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+    for index, bundle in enumerate(bundles.values()):
+        bundle["label"] = f"alias-{index}"
+        bundle["study_dir"] = f"/relocated/{index}"
+        bundle["source_args"] = ["--train-file", f"/relocated/{index}.txt"]
+    second = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+
+    assert second["corpora"] != first["corpora"]
+    assert second["report_identity"] == first["report_identity"]
+    assert second["report_id"] == first["report_id"]
+    assert all(
+        "label" not in corpus and "study_dir" not in corpus
+        for corpus in second["report_identity"]["corpora"]
+    )
+
+
 def test_polarity_corpus_comparison_rejects_protocol_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
