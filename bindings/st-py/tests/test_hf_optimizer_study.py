@@ -96,6 +96,15 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
     trainer_trace.write_text('{"event":"trainer"}\n', encoding="utf-8")
     Path(str(run["output_dir"])).mkdir(parents=True, exist_ok=True)
     command = [str(value) for value in run["command"]]  # type: ignore[index]
+
+    def command_value(flag: str, default: str) -> str:
+        for index, argument in enumerate(command):
+            if argument == flag:
+                return command[index + 1]
+            if argument.startswith(f"{flag}="):
+                return argument.split("=", 1)[1]
+        return default
+
     max_steps = int(command[command.index("--max-steps") + 1])
     receipt_arm = str(
         run.get("expected_trajectory_arm", "raw" if arm == "observe" else arm)
@@ -143,6 +152,42 @@ def _write_completed_run(run: Mapping[str, object]) -> None:
             "path_independent": True,
             "observed_input_id": _trajectory_id(102),
         },
+        "dataset_materialization_identity": {
+            "schema": "spiraltorch.hf_dataset_materialization_identity.v1",
+            "status": "ready",
+            "coverage": "exact_selected_text_rows_in_order",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(103),
+        },
+        "tokenized_dataset_identity": {
+            "schema": "spiraltorch.hf_tokenized_dataset_identity.v1",
+            "status": "ready",
+            "coverage": "exact_tokenized_rows_all_columns_in_order",
+            "identity_verified": True,
+            "path_independent": True,
+            "observed_identity_id": _trajectory_id(104),
+        },
+        "dataset_source": "local_files",
+        "dataset_name": "local-files",
+        "dataset_config": command_value("--dataset-format", "text"),
+        "dataset_revision": None,
+        "dataset_format": command_value("--dataset-format", "text"),
+        "dataset_streaming": "--dataset-streaming" in command,
+        "streaming_shuffle_buffer_size": int(
+            command_value("--streaming-shuffle-buffer-size", "0")
+        ),
+        "streaming_validation_samples": int(
+            command_value("--streaming-validation-samples", "0")
+        ),
+        "validation_fraction": float(command_value("--validation-fraction", "0.0")),
+        "train_split": command_value("--train-split", "train"),
+        "eval_split": command_value("--eval-split", "validation"),
+        "text_column": command_value("--text-column", "text"),
+        "max_train_samples": int(command_value("--max-train-samples", "4096")),
+        "max_eval_samples": int(command_value("--max-eval-samples", "512")),
+        "max_eval_blocks": int(command_value("--max-eval-blocks", "0")),
+        "block_size": int(command_value("--block-size", "128")),
         "zspace_optimizer_control_receipt": {
             "status": "ready",
             "mode": expected_mode,
@@ -402,6 +447,34 @@ def test_polarity_corpus_study_plan_seals_sources_and_substudies(
                     "corpora": {reserved_label: corpus_a},
                 }
             )
+
+
+def test_polarity_corpus_source_flags_ignore_distinct_option_order() -> None:
+    _, first_sources = study._split_local_corpus_source_args(
+        [
+            "--train-file",
+            "/corpora/train.txt",
+            "--validation-file",
+            "/corpora/eval.txt",
+        ]
+    )
+    _, second_sources = study._split_local_corpus_source_args(
+        [
+            "--validation-file",
+            "/relocated/eval.txt",
+            "--train-file",
+            "/relocated/train.txt",
+        ]
+    )
+
+    assert study._canonical_corpus_source_flags(first_sources) == [
+        "--train-file",
+        "--validation-file",
+    ]
+    assert study._canonical_corpus_source_flags(second_sources) == [
+        "--train-file",
+        "--validation-file",
+    ]
 
 
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
@@ -1459,6 +1532,14 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
     assert "shared_bridge_args" not in bundle["protocol_payload"]  # type: ignore[operator]
     assert "git_status_id" not in bundle["protocol_payload"]  # type: ignore[operator]
     assert len(bundle["protocol_payload"]["training_recipe_runs"]) == 3  # type: ignore[index]
+    data_preparation = bundle["protocol_payload"]["data_preparation_identity"]  # type: ignore[index]
+    assert data_preparation["path_independent"] is True
+    assert data_preparation["identity_id"] == study._sha256_id(
+        data_preparation["identity_payload"]
+    )
+    assert data_preparation["identity_payload"]["tokenization"] == {  # type: ignore[index]
+        "block_size": 128
+    }
 
     summary_path = root / study.HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
     stored_summary = study._read_json(summary_path)
@@ -1503,6 +1584,28 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
             relocated_root / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
         )["git_source_provenance"]["status_id"]
     )
+
+    changed_root = tmp_path / "changed-data-preparation"
+    changed_args = _bridge_args()
+    changed_args.extend(("--block-size", "64"))
+    changed_summary = st.run_hf_zspace_optimizer_polarity_study(
+        study_dir=changed_root,
+        seeds=[13],
+        bridge_args=changed_args,
+        bridge_script=bridge,
+        launch_cwd=tmp_path,
+        min_free_disk_gb=0.0,
+        execute=True,
+    )
+    assert changed_summary["status"] == "ready"
+    changed_bundle = study._polarity_corpus_study_bundle("changed", changed_root)
+    assert (
+        changed_bundle["protocol_payload"]["data_preparation_identity"][  # type: ignore[index]
+            "identity_id"
+        ]
+        != data_preparation["identity_id"]
+    )
+    assert changed_bundle["protocol_id"] != bundle["protocol_id"]
 
     event_path = root / study.HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
     with event_path.open("a", encoding="utf-8") as handle:

@@ -102,10 +102,13 @@ _HF_ZSPACE_POLARITY_CORPUS_REPORT_IDENTITY_SCHEMA = (
     "spiraltorch.hf_zspace_polarity_corpus_report_identity.v1"
 )
 _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA = (
-    "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v1"
+    "spiraltorch.hf_zspace_polarity_corpus_evidence_protocol.v2"
 )
 _HF_ZSPACE_POLARITY_CORPUS_PLAN_PROTOCOL_SCHEMA = (
     "spiraltorch.hf_zspace_polarity_corpus_plan_protocol.v1"
+)
+_HF_ZSPACE_DATA_PREPARATION_IDENTITY_SCHEMA = (
+    "spiraltorch.hf_zspace_data_preparation_identity.v1"
 )
 _WINDOWS_RESERVED_CORPUS_LABELS = frozenset(
     {"con", "prn", "aux", "nul"}
@@ -1480,6 +1483,109 @@ def _ready_identity_id(
     return value
 
 
+def _data_preparation_settings(card: Mapping[str, object]) -> dict[str, object]:
+    receipt_contracts: dict[str, object] = {}
+    for field, id_field in (
+        ("dataset_materialization_identity", "observed_identity_id"),
+        ("tokenized_dataset_identity", "observed_identity_id"),
+    ):
+        identity = card.get(field)
+        _ready_identity_id(card, field, id_field)
+        assert isinstance(identity, Mapping)
+        schema = identity.get("schema")
+        coverage = identity.get("coverage")
+        if not isinstance(schema, str) or not isinstance(coverage, str):
+            raise HFZSpaceFactorizedStudyError(
+                f"run card has no complete {field} contract"
+            )
+        receipt_contracts[field] = {
+            "schema": schema,
+            "coverage": coverage,
+        }
+
+    required_strings = (
+        "dataset_source",
+        "dataset_name",
+        "train_split",
+        "eval_split",
+        "text_column",
+    )
+    strings: dict[str, str] = {}
+    for field in required_strings:
+        value = card.get(field)
+        if not isinstance(value, str) or not value:
+            raise HFZSpaceFactorizedStudyError(
+                f"run card has no effective data preparation field {field}"
+            )
+        strings[field] = value
+
+    optional_strings: dict[str, str | None] = {}
+    for field in ("dataset_config", "dataset_revision", "dataset_format"):
+        value = card.get(field)
+        if value is not None and not isinstance(value, str):
+            raise HFZSpaceFactorizedStudyError(
+                f"run card has invalid data preparation field {field}"
+            )
+        optional_strings[field] = value
+
+    dataset_streaming = card.get("dataset_streaming")
+    if not isinstance(dataset_streaming, bool):
+        raise HFZSpaceFactorizedStudyError(
+            "run card has no effective data preparation field dataset_streaming"
+        )
+
+    integers: dict[str, int] = {}
+    for field in (
+        "streaming_shuffle_buffer_size",
+        "streaming_validation_samples",
+        "max_train_samples",
+        "max_eval_samples",
+        "max_eval_blocks",
+        "block_size",
+    ):
+        value = card.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HFZSpaceFactorizedStudyError(
+                f"run card has invalid data preparation field {field}"
+            )
+        integers[field] = value
+    if integers["block_size"] == 0:
+        raise HFZSpaceFactorizedStudyError(
+            "run card has invalid data preparation field block_size"
+        )
+
+    validation_fraction = card.get("validation_fraction")
+    if validation_fraction is not None and (
+        isinstance(validation_fraction, bool)
+        or not isinstance(validation_fraction, (int, float))
+        or not math.isfinite(float(validation_fraction))
+        or not 0.0 <= float(validation_fraction) < 1.0
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            "run card has invalid data preparation field validation_fraction"
+        )
+
+    return {
+        "dataset": {
+            **strings,
+            **optional_strings,
+            "dataset_streaming": dataset_streaming,
+            "streaming_shuffle_buffer_size": integers["streaming_shuffle_buffer_size"],
+            "streaming_validation_samples": integers["streaming_validation_samples"],
+            "validation_fraction": (
+                None if validation_fraction is None else float(validation_fraction)
+            ),
+        },
+        "selection": {
+            "max_train_samples": integers["max_train_samples"],
+            "max_eval_samples": integers["max_eval_samples"],
+            "max_eval_blocks": integers["max_eval_blocks"],
+        },
+        "tokenization": {"block_size": integers["block_size"]},
+        "receipt_contracts": receipt_contracts,
+    }
+
+
 def _validate_completed_run_card(
     run: Mapping[str, object],
     card: Mapping[str, object],
@@ -1702,6 +1808,7 @@ def _validate_completed_run_card(
             "observed_input_id",
         ),
         "training_recipe_identity_id": training_recipe_identity_id,
+        "data_preparation_settings": _data_preparation_settings(card),
     }
 
 
@@ -2327,6 +2434,17 @@ def _split_local_corpus_source_args(
     return shared, sources
 
 
+def _canonical_corpus_source_flags(source_args: Sequence[str]) -> list[str]:
+    if len(source_args) % 2 != 0 or any(
+        source_args[index] not in _LOCAL_CORPUS_SOURCE_FLAGS
+        for index in range(0, len(source_args), 2)
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study has malformed local source arguments"
+        )
+    return sorted(str(source_args[index]) for index in range(0, len(source_args), 2))
+
+
 def _sha256_identity(value: object, *, field: str) -> str:
     if (
         not isinstance(value, str)
@@ -2452,6 +2570,7 @@ def _polarity_corpus_study_bundle(
     run_cards: list[Path] = []
     sealed_identity_anchor: dict[str, str] = {}
     training_recipe_runs: list[dict[str, object]] = []
+    data_preparation_settings: dict[str, object] | None = None
     for index, run in enumerate(runs):
         if not isinstance(run, Mapping) or not isinstance(run.get("run_card"), str):
             raise HFZSpaceFactorizedStudyError(
@@ -2493,6 +2612,18 @@ def _polarity_corpus_study_bundle(
                 ),
             }
         )
+        sealed_data_preparation = sealed_facts.get("data_preparation_settings")
+        if not isinstance(sealed_data_preparation, Mapping):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has no sealed data preparation settings"
+            )
+        candidate_data_preparation = dict(sealed_data_preparation)
+        if data_preparation_settings is None:
+            data_preparation_settings = candidate_data_preparation
+        elif data_preparation_settings != candidate_data_preparation:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} changed data preparation settings across runs"
+            )
         card_path = Path(str(run["run_card"])).resolve()
         if not card_path.is_file() or not _path_is_within(card_path, root):
             raise HFZSpaceFactorizedStudyError(
@@ -2516,7 +2647,21 @@ def _polarity_corpus_study_bundle(
             f"polarity corpus {normalized_label} has invalid bridge arguments"
         )
     _, source_args = _split_local_corpus_source_args(bridge_args)
-    source_flags = source_args[::2]
+    source_flags = _canonical_corpus_source_flags(source_args)
+    if data_preparation_settings is None:
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has no sealed data preparation settings"
+        )
+    data_preparation_identity_payload = {
+        "schema": _HF_ZSPACE_DATA_PREPARATION_IDENTITY_SCHEMA,
+        "corpus_source_flags": source_flags,
+        **data_preparation_settings,
+    }
+    data_preparation_identity = {
+        "identity_id": _sha256_id(data_preparation_identity_payload),
+        "identity_payload": data_preparation_identity_payload,
+        "path_independent": True,
+    }
     identity_anchor = summary.get("identity_anchor")
     if not isinstance(identity_anchor, Mapping):
         raise HFZSpaceFactorizedStudyError(
@@ -2596,6 +2741,7 @@ def _polarity_corpus_study_bundle(
         "seeds": seeds,
         "max_steps": scientific_spec.get("max_steps"),
         "corpus_source_flags": source_flags,
+        "data_preparation_identity": data_preparation_identity,
         "bridge_sha256": scientific_spec.get("bridge_sha256"),
         "runtime_source_id": runtime_source.get("source_id"),
         "git_head": git_provenance.get("head"),
