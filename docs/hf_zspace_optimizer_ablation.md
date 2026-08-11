@@ -429,7 +429,48 @@ The comparator recomputes every source report from its run cards and verifies
 the immutable plan, summary, complete hash-chain, final report SHA-256, runtime
 identity, protocol, trajectory, policy, control, and nominal schedule before
 calling Rust. A label or file path is presentation metadata; the corpus key in
-the Rust evidence is the path-independent training-input identity.
+the Rust evidence is the path-independent training-input identity. The outer
+report retains the first ready completion-event ID rather than the mutable
+summary SHA, so a verified reuse can extend the journal without changing the
+scientific report identity.
+
+### Audited cross-corpus polarity result (2026-08-11)
+
+The checked-in [multi-corpus polarity artifact](benchmarks/hf_zspace_optimizer_polarity_multicorpus_64step_20260811.json)
+records 27 local GPT-2 LoRA runs: three content-distinct corpora, seeds
+13/17/23, and the three matched polarity arms. Each run used 64 optimizer
+updates, CPU float32, rank 4, alpha 8, batch size 2, gradient accumulation 8,
+block size 128, and 16 capped evaluation blocks. The encyclopedic, fiction, and
+psychology corpora supplied 1006, 383, and 212 training blocks respectively.
+
+| Corpus | normalized minus observe | complement minus observe | complement minus normalized |
+| --- | ---: | ---: | ---: |
+| Encyclopedic | +0.000193 | -0.000104 | -0.000296 |
+| Fiction | +0.001537 | -0.000892 | -0.002429 |
+| Psychology | +0.001533 | -0.000877 | -0.002410 |
+| Corpus-equal mean | +0.001087 | -0.000624 | -0.001712 |
+
+Lower validation loss is better. The normalized shape was worse than ordinary
+FT for 9/9 seeds and all 3/3 corpus means. The dose-preserving complement beat
+ordinary FT for 9/9 and beat the normalized shape for 9/9; all three corpus
+means agreed in both comparisons. The independent comparator regenerated the
+same report byte-for-byte, and the Rust validator recomputed evidence ID
+`sha256:9a9bc55664bbcc4331a8587760f90c1663f62caaa0b85f68edce6aeadf9b2634`.
+
+This advances the earlier single-corpus observation to a balanced corpus-level
+trend, but not to a general efficacy result. It is still one local GPT-2 model,
+one short LoRA recipe, three corpora, and three seeds without a prespecified
+power analysis or independent generation-quality endpoint. Accordingly,
+`efficacy_claim_ready` remains false.
+
+The frozen provenance anchors are:
+
+- outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
+- stable outer report SHA-256 `5b69fe924ce25322f38f3993b65fb93ddcac942782f857c268ceb3b282aabfa1`;
+- experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
+- stable aggregation Git commit `6f6579adaa0fbdd42cefe04019bc850f002c0558`;
+- runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
+- native library SHA-256 `f27843531e2599e22126a12b53ea536fd119bfb944ab6e2c3e8f1e5ea7ded4a4`.
 
 ## Read the contrasts
 
