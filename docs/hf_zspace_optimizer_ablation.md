@@ -433,9 +433,11 @@ anchor must exactly match the corpus, runtime, and execution identities
 re-derived from those sealed run cards. The scientific protocol likewise uses
 the path-independent execution/runtime identities and one content-addressed
 training-recipe identity per seed and arm, never raw model or tokenizer paths.
-Path-bearing receipts remain in the report as audit metadata, but do not define
-its scientific identity. That identity hashes the Rust evidence ID, protocol
-and runtime identities, and content-addressed corpus IDs in canonical order.
+Per-study Git status and path-bearing receipts remain sealed audit and recovery
+metadata, but do not define cross-study protocol equality; an earlier study's
+output therefore cannot perturb a later standalone comparison. The report
+identity hashes the Rust evidence ID, protocol and runtime identities, and
+content-addressed corpus IDs in canonical order.
 
 ### Audited cross-corpus polarity result (2026-08-11)
 

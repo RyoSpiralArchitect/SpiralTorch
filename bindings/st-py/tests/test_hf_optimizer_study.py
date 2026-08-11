@@ -1405,6 +1405,16 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
         "compare_hf_zspace_optimizer_polarity_run_cards",
         compare,
     )
+    git_status_id = {"value": "sha256:" + "1" * 64}
+    monkeypatch.setattr(
+        study,
+        "_git_source_provenance",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "head": "a" * 40,
+            "status_id": git_status_id["value"],
+        },
+    )
     root = tmp_path / "polarity"
     original_args = _bridge_args()
     original_model = str(tmp_path / "checkout-a" / "same-model")
@@ -1425,6 +1435,7 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
     assert bundle["study_id"] == summary["study_id"]
     assert bundle["protocol_payload"]["corpus_source_flags"] == ["--train-file"]  # type: ignore[index]
     assert "shared_bridge_args" not in bundle["protocol_payload"]  # type: ignore[operator]
+    assert "git_status_id" not in bundle["protocol_payload"]  # type: ignore[operator]
     assert len(bundle["protocol_payload"]["training_recipe_runs"]) == 3  # type: ignore[index]
 
     summary_path = root / study.HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
@@ -1446,6 +1457,7 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
     relocated_model = str(tmp_path / "checkout-b" / "same-model")
     relocated_args[relocated_args.index("local-model")] = relocated_model
     relocated_args.extend(("--tokenizer-name", relocated_model))
+    git_status_id["value"] = "sha256:" + "2" * 64
     relocated_summary = st.run_hf_zspace_optimizer_polarity_study(
         study_dir=relocated_root,
         seeds=[13],
@@ -1461,6 +1473,14 @@ def test_polarity_corpus_bundle_requires_a_sealed_completion_journal(
     )
     assert relocated_bundle["protocol_payload"] == bundle["protocol_payload"]
     assert relocated_bundle["protocol_id"] == bundle["protocol_id"]
+    assert (
+        study._read_json(root / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME)[
+            "git_source_provenance"
+        ]["status_id"]
+        != study._read_json(
+            relocated_root / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
+        )["git_source_provenance"]["status_id"]
+    )
 
     event_path = root / study.HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
     with event_path.open("a", encoding="utf-8") as handle:

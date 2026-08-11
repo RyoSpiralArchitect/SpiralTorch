@@ -501,7 +501,32 @@ where
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
     let count = values.len() as f64;
-    let mean = compensated_sum(values.iter().map(|value| value / count));
+    // Scale only after an unscaled prefix overflows, retaining terms erased by division.
+    let direct_sum = compensated_sum(values.iter().copied());
+    let mean = if direct_sum.is_finite() {
+        direct_sum / count
+    } else {
+        let mut scaled_values = Vec::with_capacity(values.len());
+        let mut division_underflows = Vec::new();
+        for value in values {
+            let scaled = value / count;
+            if scaled == 0.0 && *value != 0.0 {
+                division_underflows.push(*value);
+            } else {
+                scaled_values.push(scaled);
+            }
+        }
+        let scaled_mean = compensated_sum(scaled_values);
+        let underflow_mean = compensated_sum(division_underflows) / count;
+        let recovered_mean = compensated_sum([scaled_mean, underflow_mean]);
+        if recovered_mean.is_finite() {
+            recovered_mean
+        } else {
+            let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+            let normalized_mean = compensated_sum(values.iter().map(|value| value / scale)) / count;
+            scale * normalized_mean.clamp(-1.0, 1.0)
+        }
+    };
     if mean.is_finite() {
         Ok(mean)
     } else {
@@ -824,6 +849,19 @@ mod tests {
         assert_eq!(
             normalized.bounded_trend_direction,
             ZSpacePolarityEvidenceDirection::RightArmBetter
+        );
+    }
+
+    #[test]
+    fn finite_means_preserve_representable_extremes() {
+        let smallest_subnormal = f64::from_bits(1);
+        assert_eq!(
+            finite_mean(&[smallest_subnormal; 3], "smallest_subnormal").expect("subnormal mean"),
+            smallest_subnormal
+        );
+        assert_eq!(
+            finite_mean(&[f64::MAX; 3], "largest_finite").expect("maximum finite mean"),
+            f64::MAX
         );
     }
 

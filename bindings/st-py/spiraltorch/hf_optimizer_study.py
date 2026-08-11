@@ -2582,7 +2582,6 @@ def _polarity_corpus_study_bundle(
         "bridge_sha256": scientific_spec.get("bridge_sha256"),
         "runtime_source_id": runtime_source.get("source_id"),
         "git_head": git_provenance.get("head"),
-        "git_status_id": git_provenance.get("status_id"),
         "execution_identity_id": sealed_identity_anchor["execution_identity_id"],
         "runtime_identity_id": runtime_identity_id,
         "training_recipe_runs": sorted(
