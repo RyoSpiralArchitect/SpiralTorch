@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
-  "recorded_at": "2026-08-11T09:42:00Z",
+  "recorded_at": "2026-08-11T09:59:07Z",
   "status": "ready",
   "study": {
     "model": "gpt2",
@@ -80,10 +80,10 @@
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
-    "loaded_native_extension_sha256": "sha256:f27843531e2599e22126a12b53ea536fd119bfb944ab6e2c3e8f1e5ea7ded4a4",
-    "stable_aggregation_git_commit": "3cec7c019c619ecc06f7fb28bb05b1b1d72232d3",
+    "loaded_native_extension_sha256": "sha256:c909e0fa44c2c69f958c0f1769a0103810413d5a13e5f3b8ecaa96a1b2c1965b",
+    "stable_aggregation_git_commit": "1c516533515d1a0d5e83f62c4abea5bbee939cf1",
     "outer_report_id": "sha256:4621feaff530962ce485e41cf2bce77fb2bb049b64f4cc0266748aa5c3841998",
-    "outer_report_sha256": "sha256:092b30e7cfe605709f07465fda433045e71927d5bda4bc5ba20f8da5c55e429b",
+    "outer_report_sha256": "sha256:a7dc04da140f3c555b2d5d909cad61c30f7117fb9eb819fb29b89320c2525364",
     "rust_evidence_id": "sha256:124c1aff8c1332f2c05af02d143dec29b8421f9788e83878cfe3bf15040cdbdc",
     "independent_comparator_byte_match": true,
     "exact_runner_reuse_completed_runs": 27
@@ -168,14 +168,14 @@
       "corpus_right_arm_win_count": 3
     },
     "complement_minus_observe": {
-      "corpus_equal_weight_mean": -0.0006243387858072916,
+      "corpus_equal_weight_mean": -0.0006243387858072917,
       "seed_left_arm_win_count": 9,
       "seed_right_arm_win_count": 0,
       "corpus_left_arm_win_count": 3,
       "corpus_right_arm_win_count": 0
     },
     "complement_minus_normalized": {
-      "corpus_equal_weight_mean": -0.0017117129431830514,
+      "corpus_equal_weight_mean": -0.0017117129431830512,
       "seed_left_arm_win_count": 9,
       "seed_right_arm_win_count": 0,
       "corpus_left_arm_win_count": 3,
@@ -213,7 +213,7 @@
           {
             "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
             "left_arm_win_count": 3,
-            "mean": -0.0008767445882161458,
+            "mean": -0.0008767445882161459,
             "right_arm_win_count": 0,
             "seed_count": 3,
             "tie_count": 0,
@@ -235,7 +235,7 @@
           {
             "corpus_id": "sha256:1f1f9e5ce9a9278fb879177fc4d793ab9015254ab311bb7063f38122dabce7d1",
             "left_arm_win_count": 3,
-            "mean": -0.0008924802144368489,
+            "mean": -0.000892480214436849,
             "right_arm_win_count": 0,
             "seed_count": 3,
             "tie_count": 0,
@@ -257,7 +257,7 @@
           {
             "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
             "left_arm_win_count": 3,
-            "mean": -0.00010379155476888019,
+            "mean": -0.00010379155476888022,
             "right_arm_win_count": 0,
             "seed_count": 3,
             "tie_count": 0,
@@ -278,11 +278,11 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": -0.0006243387858072916,
+        "corpus_equal_weight_mean": -0.0006243387858072917,
         "corpus_left_arm_win_count": 3,
-        "corpus_mean_maximum": -0.00010379155476888019,
-        "corpus_mean_minimum": -0.0008924802144368489,
-        "corpus_mean_population_standard_deviation": 0.00036813853125280374,
+        "corpus_mean_maximum": -0.00010379155476888022,
+        "corpus_mean_minimum": -0.000892480214436849,
+        "corpus_mean_population_standard_deviation": 0.0003681385312528038,
         "corpus_right_arm_win_count": 0,
         "corpus_tie_count": 0,
         "left_arm": "dose_preserving_complement",
@@ -302,7 +302,7 @@
           {
             "corpus_id": "sha256:18d7bcf0984822df8ea89727a931cb99b492b18c26805bc4fdc76f448ee78fb4",
             "left_arm_win_count": 0,
-            "mean": 0.001533031463623047,
+            "mean": 0.0015330314636230469,
             "right_arm_win_count": 3,
             "seed_count": 3,
             "tie_count": 0,
@@ -435,7 +435,7 @@
           {
             "corpus_id": "sha256:b656bdaf554cbcd770e012f8adbcdb2a3906e376baa91f286701976c58c4c097",
             "left_arm_win_count": 3,
-            "mean": -0.00029635429382324213,
+            "mean": -0.0002963542938232422,
             "right_arm_win_count": 0,
             "seed_count": 3,
             "tie_count": 0,
@@ -456,9 +456,9 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": -0.0017117129431830514,
+        "corpus_equal_weight_mean": -0.0017117129431830512,
         "corpus_left_arm_win_count": 3,
-        "corpus_mean_maximum": -0.00029635429382324213,
+        "corpus_mean_maximum": -0.0002963542938232422,
         "corpus_mean_minimum": -0.0024290084838867188,
         "corpus_mean_population_standard_deviation": 0.0010008404972318126,
         "corpus_right_arm_win_count": 0,
