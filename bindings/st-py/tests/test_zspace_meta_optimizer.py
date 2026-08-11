@@ -782,6 +782,41 @@ def test_polarity_evidence_centers_before_subnormal_mean_rounding() -> None:
     assert normalized["corpus_mean_population_standard_deviation"] == 0.0
 
 
+def test_polarity_evidence_preserves_variance_between_adjacent_maxima() -> None:
+    maximum = float.fromhex("0x1.fffffffffffffp+1023")
+    next_down_maximum = math.nextafter(maximum, 0.0)
+    expected = float.fromhex("0x1.e2b7dddfefa66p+969")
+    corpus_values = {
+        "a": maximum,
+        "b": next_down_maximum,
+        "c": next_down_maximum,
+    }
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, value in corpus_values.items()
+        for seed in (13, 17, 23)
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_mean_population_standard_deviation"] == expected
+
+
 def test_polarity_evidence_preserves_ulp_residuals_after_prefix_overflow() -> None:
     maximum = float.fromhex("0x1.fffffffffffffp+1023")
     next_down_maximum = math.nextafter(maximum, 0.0)

@@ -8,6 +8,7 @@
 use num_bigint::{BigInt, BigUint, Sign};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use thiserror::Error;
@@ -507,20 +508,7 @@ fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenc
     // those integers first lets the final division perform the only rounding.
     let mut exact_sum = BigInt::from(0_u8);
     for value in values {
-        let bits = value.to_bits();
-        let raw_exponent = (bits >> 52) & 0x7ff;
-        let fraction = bits & ((1_u64 << 52) - 1);
-        let (significand, shift) = if raw_exponent == 0 {
-            (fraction, 0)
-        } else {
-            ((1_u64 << 52) | fraction, (raw_exponent - 1) as usize)
-        };
-        let term = BigInt::from(significand) << shift;
-        if bits >> 63 == 0 {
-            exact_sum += term;
-        } else {
-            exact_sum -= term;
-        }
+        exact_sum += finite_binary_units(*value);
     }
     let mean = rounded_binary_mean(exact_sum, values.len());
     if mean.is_finite() {
@@ -537,22 +525,21 @@ fn finite_population_standard_deviation(
     values: &[f64],
     field: &str,
 ) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
-    let standard_deviation = if scale == 0.0 {
-        0.0
-    } else {
-        // Welford centers normalized values before squaring, without a rounded report mean.
-        let mut normalized_mean = 0.0;
-        let mut normalized_m2 = 0.0;
-        for (index, value) in values.iter().enumerate() {
-            let normalized = value / scale;
-            let delta = normalized - normalized_mean;
-            normalized_mean += delta / (index + 1) as f64;
-            normalized_m2 += delta * (normalized - normalized_mean);
-        }
-        let normalized_variance = normalized_m2 / values.len() as f64;
-        scale * normalized_variance.clamp(0.0, 1.0).sqrt()
-    };
+    let mut exact_sum = BigInt::from(0_u8);
+    let mut exact_square_sum = BigUint::from(0_u8);
+    for value in values {
+        let units = finite_binary_units(*value);
+        let magnitude = units.magnitude();
+        exact_square_sum += magnitude * magnitude;
+        exact_sum += units;
+    }
+    let count = BigUint::from(values.len());
+    let weighted_square_sum = exact_square_sum * &count;
+    let exact_sum_magnitude = exact_sum.magnitude();
+    let exact_sum_square = exact_sum_magnitude * exact_sum_magnitude;
+    debug_assert!(weighted_square_sum >= exact_sum_square);
+    let variance_numerator = weighted_square_sum - exact_sum_square;
+    let standard_deviation = rounded_binary_square_root_ratio(variance_numerator, count);
     if standard_deviation.is_finite() {
         Ok(standard_deviation)
     } else {
@@ -560,6 +547,66 @@ fn finite_population_standard_deviation(
             field: field.to_owned(),
             value: standard_deviation,
         })
+    }
+}
+
+fn finite_binary_units(value: f64) -> BigInt {
+    let bits = value.to_bits();
+    let magnitude = positive_binary_units(bits & !(1_u64 << 63));
+    if bits >> 63 == 0 {
+        BigInt::from(magnitude)
+    } else {
+        -BigInt::from(magnitude)
+    }
+}
+
+fn positive_binary_units(bits: u64) -> BigUint {
+    debug_assert_eq!(bits >> 63, 0);
+    let raw_exponent = (bits >> 52) & 0x7ff;
+    debug_assert_ne!(raw_exponent, 0x7ff);
+    let fraction = bits & ((1_u64 << 52) - 1);
+    if raw_exponent == 0 {
+        BigUint::from(fraction)
+    } else {
+        BigUint::from((1_u64 << 52) | fraction) << (raw_exponent - 1) as usize
+    }
+}
+
+fn scaled_binary_units_square(bits: u64, count: &BigUint) -> BigUint {
+    let scaled = positive_binary_units(bits) * count;
+    &scaled * &scaled
+}
+
+fn rounded_binary_square_root_ratio(numerator: BigUint, count: BigUint) -> f64 {
+    if numerator == BigUint::from(0_u8) {
+        return 0.0;
+    }
+
+    let mut lower_bits = 0_u64;
+    let mut upper_bits = f64::MAX.to_bits();
+    while lower_bits < upper_bits {
+        let candidate_bits = lower_bits + (upper_bits - lower_bits) / 2 + 1;
+        if scaled_binary_units_square(candidate_bits, &count) <= numerator {
+            lower_bits = candidate_bits;
+        } else {
+            upper_bits = candidate_bits - 1;
+        }
+    }
+
+    let lower_square = scaled_binary_units_square(lower_bits, &count);
+    if lower_square == numerator || lower_bits == f64::MAX.to_bits() {
+        return f64::from_bits(lower_bits);
+    }
+
+    let upper_bits = lower_bits + 1;
+    let midpoint_units = positive_binary_units(lower_bits) + positive_binary_units(upper_bits);
+    let scaled_midpoint = midpoint_units * count;
+    let midpoint_square = &scaled_midpoint * &scaled_midpoint;
+    match (numerator << 2_usize).cmp(&midpoint_square) {
+        Ordering::Less => f64::from_bits(lower_bits),
+        Ordering::Greater => f64::from_bits(upper_bits),
+        Ordering::Equal if lower_bits & 1 == 0 => f64::from_bits(lower_bits),
+        Ordering::Equal => f64::from_bits(upper_bits),
     }
 }
 
@@ -959,6 +1006,32 @@ mod tests {
                 .expect("reversed subnormal standard deviation")
                 .to_bits(),
             standard_deviation.to_bits()
+        );
+    }
+
+    #[test]
+    fn finite_standard_deviation_preserves_adjacent_maximum_values() {
+        let next_down_maximum = f64::from_bits(f64::MAX.to_bits() - 1);
+        let mut values = [f64::MAX, next_down_maximum, next_down_maximum];
+        let expected = f64::from_bits(0x7c8e_2b7d_ddfe_fa66);
+
+        let standard_deviation =
+            finite_population_standard_deviation(&values, "adjacent_maximum_variance")
+                .expect("finite standard deviation");
+        assert_eq!(standard_deviation.to_bits(), expected.to_bits());
+
+        values.reverse();
+        assert_eq!(
+            finite_population_standard_deviation(&values, "reversed_adjacent_maximum_variance")
+                .expect("reversed finite standard deviation")
+                .to_bits(),
+            expected.to_bits()
+        );
+        assert_eq!(
+            finite_population_standard_deviation(&[f64::MAX, -f64::MAX], "maximum_variance")
+                .expect("maximum finite standard deviation")
+                .to_bits(),
+            f64::MAX.to_bits()
         );
     }
 
