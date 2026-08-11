@@ -501,22 +501,26 @@ where
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
     let count = values.len() as f64;
-    // Scale only after an unscaled prefix overflows, retaining terms erased by division.
+    if values.iter().all(|value| *value == values[0]) {
+        return Ok(values[0]);
+    }
+    // A power-of-two fallback avoids overflow without rounding normal operands first.
     let direct_sum = compensated_sum(values.iter().copied());
     let mean = if direct_sum.is_finite() {
         direct_sum / count
     } else {
+        let divisor = values.len().next_power_of_two() as f64;
         let mut scaled_values = Vec::with_capacity(values.len());
         let mut division_underflows = Vec::new();
         for value in values {
-            let scaled = value / count;
+            let scaled = value / divisor;
             if scaled == 0.0 && *value != 0.0 {
                 division_underflows.push(*value);
             } else {
                 scaled_values.push(scaled);
             }
         }
-        let scaled_mean = compensated_sum(scaled_values);
+        let scaled_mean = (compensated_sum(scaled_values) / count) * divisor;
         let underflow_mean = compensated_sum(division_underflows) / count;
         let recovered_mean = compensated_sum([scaled_mean, underflow_mean]);
         if recovered_mean.is_finite() {
@@ -863,6 +867,19 @@ mod tests {
             finite_mean(&[f64::MAX; 3], "largest_finite").expect("maximum finite mean"),
             f64::MAX
         );
+    }
+
+    #[test]
+    fn finite_means_preserve_ulp_residuals_after_prefix_overflow() {
+        let next_down_maximum = f64::from_bits(f64::MAX.to_bits() - 1);
+        let mut values = vec![f64::MAX; 11];
+        values.extend(std::iter::repeat_n(-f64::MAX, 10));
+        values.extend([-next_down_maximum, -1.0e290]);
+
+        let mean = finite_mean(&values, "ulp_residual").expect("finite residual mean");
+        let expected = ((f64::MAX - next_down_maximum) - 1.0e290) / values.len() as f64;
+        assert!(mean > 0.0);
+        assert!((mean / expected - 1.0).abs() < 1.0e-14);
     }
 
     #[test]
