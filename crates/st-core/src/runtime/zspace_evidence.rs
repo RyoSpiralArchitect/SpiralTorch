@@ -23,8 +23,8 @@ pub const ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE: &str =
 pub const ZSPACE_POLARITY_EVIDENCE_MIN_BOUNDED_CORPORA: usize = 3;
 pub const ZSPACE_POLARITY_EVIDENCE_MIN_BOUNDED_SEEDS: usize = 3;
 pub const ZSPACE_POLARITY_EVIDENCE_MAX_ROWS: usize = 100_000;
+pub const ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED: u64 = 9_007_199_254_740_991;
 
-const MAX_SAFE_SEED: u64 = 9_007_199_254_740_991;
 const CONTRAST_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 const CONTRAST_ABSOLUTE_TOLERANCE: f64 = 1.0e-15;
 
@@ -146,6 +146,8 @@ pub enum ZSpacePolarityEvidenceError {
         field: &'static str,
         value: f64,
     },
+    #[error("aggregate field {field} must be finite, got {value}")]
+    NonFiniteAggregate { field: String, value: f64 },
     #[error(
         "row {index} violates polarity contrast identity: observed {observed}, expected {expected}, tolerance {tolerance}"
     )]
@@ -230,7 +232,7 @@ pub fn summarize_zspace_polarity_evidence(
             "observe",
             bounded_ready,
             |row| row.dose_normalized_shape_effect,
-        ),
+        )?,
     );
     contrasts.insert(
         "complement_shape_effect".to_owned(),
@@ -240,7 +242,7 @@ pub fn summarize_zspace_polarity_evidence(
             "observe",
             bounded_ready,
             |row| row.complement_shape_effect,
-        ),
+        )?,
     );
     contrasts.insert(
         "polarity_effect".to_owned(),
@@ -250,7 +252,7 @@ pub fn summarize_zspace_polarity_evidence(
             "dose_normalized",
             bounded_ready,
             |row| row.polarity_effect,
-        ),
+        )?,
     );
     let polarity = contrasts
         .get("polarity_effect")
@@ -346,11 +348,11 @@ fn validate_request_identities(
 fn validate_rows(rows: &[ZSpacePolarityEvidenceRow]) -> Result<(), ZSpacePolarityEvidenceError> {
     for (index, row) in rows.iter().enumerate() {
         require_sha256_id(&format!("rows[{index}].corpus_id"), &row.corpus_id)?;
-        if row.seed > MAX_SAFE_SEED {
+        if row.seed > ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED {
             return Err(ZSpacePolarityEvidenceError::SeedLimit {
                 index,
                 seed: row.seed,
-                maximum: MAX_SAFE_SEED,
+                maximum: ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED,
             });
         }
         for (field, value) in [
@@ -370,6 +372,13 @@ fn validate_rows(rows: &[ZSpacePolarityEvidenceRow]) -> Result<(), ZSpacePolarit
             }
         }
         let expected = row.complement_shape_effect - row.dose_normalized_shape_effect;
+        if !expected.is_finite() {
+            return Err(ZSpacePolarityEvidenceError::NonFiniteContrast {
+                index,
+                field: "derived_polarity_effect",
+                value: expected,
+            });
+        }
         let tolerance = CONTRAST_ABSOLUTE_TOLERANCE.max(
             CONTRAST_RELATIVE_TOLERANCE * row.polarity_effect.abs().max(expected.abs()).max(1.0),
         );
@@ -407,24 +416,29 @@ fn contrast_summary<F>(
     right_arm: &'static str,
     bounded_ready: bool,
     value: F,
-) -> ZSpacePolarityContrastSummary
+) -> Result<ZSpacePolarityContrastSummary, ZSpacePolarityEvidenceError>
 where
     F: Fn(&ZSpacePolarityEvidenceRow) -> f64,
 {
+    let seed_values = rows.iter().map(&value).collect::<Vec<_>>();
     let mut values_by_corpus: BTreeMap<&str, Vec<ZSpacePolaritySeedContrast>> = BTreeMap::new();
-    for row in rows {
+    for (row, contrast) in rows.iter().zip(&seed_values) {
         values_by_corpus
             .entry(&row.corpus_id)
             .or_default()
             .push(ZSpacePolaritySeedContrast {
                 seed: row.seed,
-                value: value(row),
+                value: *contrast,
             });
     }
     let mut corpora = Vec::with_capacity(values_by_corpus.len());
     for (corpus_id, mut values) in values_by_corpus {
         values.sort_by_key(|item| item.seed);
-        let mean = values.iter().map(|item| item.value).sum::<f64>() / values.len() as f64;
+        let corpus_values = values.iter().map(|item| item.value).collect::<Vec<_>>();
+        let mean = finite_mean(
+            &corpus_values,
+            &format!("{left_arm}_vs_{right_arm}.corpus[{corpus_id}].mean"),
+        )?;
         corpora.push(ZSpacePolarityCorpusContrastSummary {
             corpus_id: corpus_id.to_owned(),
             seed_count: values.len(),
@@ -436,19 +450,23 @@ where
         });
     }
     let corpus_means = corpora.iter().map(|corpus| corpus.mean).collect::<Vec<_>>();
-    let pooled_seed_mean = rows.iter().map(&value).sum::<f64>() / rows.len() as f64;
-    let corpus_equal_weight_mean = corpus_means.iter().sum::<f64>() / corpus_means.len() as f64;
-    let corpus_mean_population_standard_deviation = (corpus_means
-        .iter()
-        .map(|mean| (mean - corpus_equal_weight_mean).powi(2))
-        .sum::<f64>()
-        / corpus_means.len() as f64)
-        .sqrt();
+    let pooled_seed_mean = finite_mean(
+        &seed_values,
+        &format!("{left_arm}_vs_{right_arm}.pooled_seed_mean"),
+    )?;
+    let corpus_equal_weight_mean = finite_mean(
+        &corpus_means,
+        &format!("{left_arm}_vs_{right_arm}.corpus_equal_weight_mean"),
+    )?;
+    let corpus_mean_population_standard_deviation = finite_population_standard_deviation(
+        &corpus_means,
+        corpus_equal_weight_mean,
+        &format!("{left_arm}_vs_{right_arm}.corpus_mean_population_standard_deviation"),
+    )?;
     let direction = evidence_direction(&corpus_means);
     let bounded_trend_ready = bounded_ready && direction != ZSpacePolarityEvidenceDirection::Mixed;
-    let seed_values = rows.iter().map(&value).collect::<Vec<_>>();
 
-    ZSpacePolarityContrastSummary {
+    Ok(ZSpacePolarityContrastSummary {
         left_arm,
         right_arm,
         lower_is_better: true,
@@ -472,7 +490,82 @@ where
         bounded_trend_ready,
         bounded_trend_direction: direction,
         corpora,
+    })
+}
+
+fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
+    let sum = values.iter().sum::<f64>();
+    let mean = if sum.is_finite() {
+        sum / values.len() as f64
+    } else {
+        let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+        if scale == 0.0 {
+            0.0
+        } else {
+            let normalized_sum = compensated_sum(values.iter().map(|value| value / scale));
+            scale * (normalized_sum / values.len() as f64)
+        }
+    };
+    if mean.is_finite() {
+        Ok(mean)
+    } else {
+        Err(ZSpacePolarityEvidenceError::NonFiniteAggregate {
+            field: field.to_owned(),
+            value: mean,
+        })
     }
+}
+
+fn finite_population_standard_deviation(
+    values: &[f64],
+    mean: f64,
+    field: &str,
+) -> Result<f64, ZSpacePolarityEvidenceError> {
+    let squared_deviation_sum = values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>();
+    let standard_deviation = if squared_deviation_sum.is_finite() {
+        (squared_deviation_sum / values.len() as f64).sqrt()
+    } else {
+        let scale = values
+            .iter()
+            .map(|value| value.abs())
+            .fold(mean.abs(), f64::max);
+        if scale == 0.0 {
+            0.0
+        } else {
+            let normalized_mean = mean / scale;
+            let normalized_variance = compensated_sum(values.iter().map(|value| {
+                let deviation = value / scale - normalized_mean;
+                deviation * deviation
+            })) / values.len() as f64;
+            scale * normalized_variance.clamp(0.0, 1.0).sqrt()
+        }
+    };
+    if standard_deviation.is_finite() {
+        Ok(standard_deviation)
+    } else {
+        Err(ZSpacePolarityEvidenceError::NonFiniteAggregate {
+            field: field.to_owned(),
+            value: standard_deviation,
+        })
+    }
+}
+
+fn compensated_sum<I>(values: I) -> f64
+where
+    I: IntoIterator<Item = f64>,
+{
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
+    for value in values {
+        let corrected = value - compensation;
+        let updated = sum + corrected;
+        compensation = (updated - sum) - corrected;
+        sum = updated;
+    }
+    sum
 }
 
 fn evidence_direction(values: &[f64]) -> ZSpacePolarityEvidenceDirection {
@@ -635,6 +728,53 @@ mod tests {
         assert!(matches!(
             summarize_zspace_polarity_evidence(invalid),
             Err(ZSpacePolarityEvidenceError::ContrastInvariant { .. })
+        ));
+    }
+
+    #[test]
+    fn large_finite_contrasts_use_overflow_safe_aggregates() {
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            row.dose_normalized_shape_effect = 5.0e307;
+            row.complement_shape_effect = -5.0e307;
+            row.polarity_effect = -1.0e308;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("finite evidence");
+        for summary in report.contrasts.values() {
+            assert!(summary.pooled_seed_mean.is_finite());
+            assert!(summary.corpus_equal_weight_mean.is_finite());
+            assert!(summary.corpus_mean_minimum.is_finite());
+            assert!(summary.corpus_mean_maximum.is_finite());
+            assert!(summary
+                .corpus_mean_population_standard_deviation
+                .is_finite());
+            assert!(summary.corpora.iter().all(|corpus| corpus.mean.is_finite()));
+        }
+        assert_eq!(
+            report.contrasts["dose_normalized_shape_effect"].corpus_equal_weight_mean,
+            5.0e307
+        );
+        assert_eq!(
+            report.contrasts["polarity_effect"].corpus_equal_weight_mean,
+            -1.0e308
+        );
+        serde_json::to_value(report).expect("finite evidence serializes as JSON numbers");
+    }
+
+    #[test]
+    fn derived_contrast_overflow_fails_closed() {
+        let mut invalid = request(1, &[13]);
+        invalid.rows[0].dose_normalized_shape_effect = f64::MAX;
+        invalid.rows[0].complement_shape_effect = -f64::MAX;
+        invalid.rows[0].polarity_effect = -f64::MAX;
+
+        assert!(matches!(
+            summarize_zspace_polarity_evidence(invalid),
+            Err(ZSpacePolarityEvidenceError::NonFiniteContrast {
+                field: "derived_polarity_effect",
+                ..
+            })
         ));
     }
 

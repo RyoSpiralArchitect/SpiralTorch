@@ -353,6 +353,18 @@ def test_polarity_corpus_study_plan_seals_sources_and_substudies(
             **{**kwargs, "bridge_args": _bridge_args()}
         )
 
+    assert (
+        st._rs.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED
+        == st.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED
+    )
+    with pytest.raises(st.HFZSpaceFactorizedStudyError, match="cross-client maximum"):
+        st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+            **{
+                **kwargs,
+                "seeds": [st.ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED + 1],
+            }
+        )
+
 
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
     tmp_path: Path,
@@ -1304,13 +1316,17 @@ def test_polarity_corpus_report_id_ignores_presentation_aliases(
         bundle["label"] = f"alias-{index}"
         bundle["study_dir"] = f"/relocated/{index}"
         bundle["source_args"] = ["--train-file", f"/relocated/{index}.txt"]
+        bundle["study_id"] = "sha256:" + str(index + 1) * 64
+        bundle["plan_sha256"] = "sha256:" + str(index + 4) * 64
+        bundle["completion_event_id"] = "sha256:" + str(index + 7) * 64
+        bundle["polarity_report_sha256"] = "sha256:" + chr(ord("d") + index) * 64
     second = st.compare_hf_zspace_optimizer_polarity_studies(studies)
 
     assert second["corpora"] != first["corpora"]
     assert second["report_identity"] == first["report_identity"]
     assert second["report_id"] == first["report_id"]
     assert all(
-        "label" not in corpus and "study_dir" not in corpus
+        set(corpus) == {"corpus_id"}
         for corpus in second["report_identity"]["corpora"]
     )
 

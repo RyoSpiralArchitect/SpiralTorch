@@ -4,7 +4,7 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_evidence::{
     summarize_zspace_polarity_evidence, validate_zspace_polarity_evidence_value,
-    ZSpacePolarityEvidenceRequest,
+    ZSpacePolarityEvidenceRequest, ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED,
 };
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
@@ -257,6 +257,10 @@ fn _zspace_optimizer_feedback_control(
 }
 
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    parent.add(
+        "ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED",
+        ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED,
+    )?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_init, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_restore, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_meta_optimizer_step, parent)?)?;

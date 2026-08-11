@@ -30,6 +30,7 @@ from .hf_optimizer_control import (
 from .zspace_optimizer import (
     ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
     ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
+    ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED,
     validate_zspace_polarity_evidence,
     zspace_polarity_evidence,
     zspace_optimizer_feedback_init,
@@ -751,6 +752,11 @@ def _build_hf_zspace_optimizer_polarity_study_plan(
         )
     if any(seed < 0 for seed in normalized_seeds):
         raise HFZSpaceFactorizedStudyError("polarity study seeds must be non-negative")
+    if any(seed > ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED for seed in normalized_seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity study seeds exceed the Rust evidence cross-client maximum "
+            f"{ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED}"
+        )
     if not math.isfinite(min_free_disk_gb) or min_free_disk_gb < 0.0:
         raise HFZSpaceFactorizedStudyError(
             "min_free_disk_gb must be finite and non-negative"
@@ -907,6 +913,15 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
     if not normalized_seeds or len(normalized_seeds) != len(seeds):
         raise HFZSpaceFactorizedStudyError(
             "polarity corpus study seeds must be non-empty and unique"
+        )
+    if any(seed < 0 for seed in normalized_seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study seeds must be non-negative"
+        )
+    if any(seed > ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED for seed in normalized_seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study seeds exceed the Rust evidence cross-client maximum "
+            f"{ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED}"
         )
     runtime_source = _runtime_source_fingerprint()
     git_provenance = _git_source_provenance(
@@ -2600,16 +2615,7 @@ def compare_hf_zspace_optimizer_polarity_studies(
         "rust_evidence_id": rust_evidence["evidence_id"],
         "corpora": sorted(
             [
-                {
-                    key: bundle[key]
-                    for key in (
-                        "corpus_id",
-                        "study_id",
-                        "plan_sha256",
-                        "completion_event_id",
-                        "polarity_report_sha256",
-                    )
-                }
+                {"corpus_id": bundle["corpus_id"]}
                 for bundle in bundles
             ],
             key=lambda corpus: str(corpus["corpus_id"]),

@@ -553,6 +553,31 @@ def test_polarity_evidence_rejects_unbalanced_seed_sets() -> None:
         )
 
 
+def test_polarity_evidence_keeps_large_finite_aggregates_numeric() -> None:
+    rows = _polarity_evidence_rows()
+    for row in rows:
+        row["dose_normalized_shape_effect"] = 5.0e307
+        row["complement_shape_effect"] = -5.0e307
+        row["polarity_effect"] = -1.0e308
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    for summary in report["contrasts"].values():
+        assert math.isfinite(summary["pooled_seed_mean"])
+        assert math.isfinite(summary["corpus_equal_weight_mean"])
+        assert math.isfinite(summary["corpus_mean_population_standard_deviation"])
+        assert all(math.isfinite(corpus["mean"]) for corpus in summary["corpora"])
+    assert st.validate_zspace_polarity_evidence(report) == report
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -584,6 +609,7 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION",
         "ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE",
         "ZSPACE_POLARITY_EVIDENCE_KIND",
+        "ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED",
         "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
         "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
         "validate_zspace_parameter_trajectory",
