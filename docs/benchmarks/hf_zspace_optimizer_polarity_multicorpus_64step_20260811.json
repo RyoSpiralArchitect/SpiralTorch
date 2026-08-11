@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
-  "recorded_at": "2026-08-11T10:33:03Z",
+  "recorded_at": "2026-08-11T10:49:29Z",
   "status": "ready",
   "study": {
     "model": "gpt2",
@@ -80,10 +80,10 @@
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
-    "loaded_native_extension_sha256": "sha256:9b91fab885f041d0af339e6751596cb451f177d529095b9e87e7147bc111dfbd",
-    "stable_aggregation_git_commit": "2d32a4a263e748941ee25d1668992b8cc11c04b1",
+    "loaded_native_extension_sha256": "sha256:3a292e08e8a868266958fe1903463b16f19923004f3f0edbe808d4e67c380f06",
+    "stable_aggregation_git_commit": "1422004ece11ebe2b4942020db2c0b1da3c3afac",
     "outer_report_id": "sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518",
-    "outer_report_sha256": "sha256:9d143429e95c46dbe29991ca94120df2ec24a0bbca28135c42d64c973c861bd5",
+    "outer_report_sha256": "sha256:305042c35fb2662ca1c32330f815fb58dc30ee26517aa8a9419fc1fd15eacb88",
     "rust_evidence_id": "sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2",
     "independent_comparator_byte_match": true,
     "exact_runner_reuse_completed_runs": 27
@@ -167,14 +167,14 @@
       "corpus_right_arm_win_count": 3
     },
     "complement_minus_observe": {
-      "corpus_equal_weight_mean": -0.0006243387858072916,
+      "corpus_equal_weight_mean": -0.0006243387858072917,
       "seed_left_arm_win_count": 9,
       "seed_right_arm_win_count": 0,
       "corpus_left_arm_win_count": 3,
       "corpus_right_arm_win_count": 0
     },
     "complement_minus_normalized": {
-      "corpus_equal_weight_mean": -0.0017117129431830514,
+      "corpus_equal_weight_mean": -0.0017117129431830512,
       "seed_left_arm_win_count": 9,
       "seed_right_arm_win_count": 0,
       "corpus_left_arm_win_count": 3,
@@ -277,7 +277,7 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": -0.0006243387858072916,
+        "corpus_equal_weight_mean": -0.0006243387858072917,
         "corpus_left_arm_win_count": 3,
         "corpus_mean_maximum": -0.0001037915547688802,
         "corpus_mean_minimum": -0.000892480214436849,
@@ -455,7 +455,7 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": -0.0017117129431830514,
+        "corpus_equal_weight_mean": -0.0017117129431830512,
         "corpus_left_arm_win_count": 3,
         "corpus_mean_maximum": -0.0002963542938232422,
         "corpus_mean_minimum": -0.0024290084838867188,
