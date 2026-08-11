@@ -497,17 +497,13 @@ where
 }
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let sum = values.iter().sum::<f64>();
-    let mean = if sum.is_finite() {
-        sum / values.len() as f64
+    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    let mean = if scale == 0.0 {
+        0.0
     } else {
-        let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
-        if scale == 0.0 {
-            0.0
-        } else {
-            let normalized_sum = compensated_sum(values.iter().map(|value| value / scale));
-            scale * (normalized_sum / values.len() as f64)
-        }
+        let normalized_sum = compensated_sum(values.iter().map(|value| value / scale));
+        let normalized_mean = (normalized_sum / values.len() as f64).clamp(-1.0, 1.0);
+        scale * normalized_mean
     };
     if mean.is_finite() {
         Ok(mean)
@@ -563,12 +559,15 @@ where
     let mut sum = 0.0;
     let mut compensation = 0.0;
     for value in values {
-        let corrected = value - compensation;
-        let updated = sum + corrected;
-        compensation = (updated - sum) - corrected;
+        let updated = sum + value;
+        if sum.abs() >= value.abs() {
+            compensation += (sum - updated) + value;
+        } else {
+            compensation += (value - updated) + sum;
+        }
         sum = updated;
     }
-    sum
+    sum + compensation
 }
 
 fn evidence_direction(values: &[f64]) -> ZSpacePolarityEvidenceDirection {
@@ -804,6 +803,31 @@ mod tests {
             -1.0e308
         );
         serde_json::to_value(report).expect("finite evidence serializes as JSON numbers");
+    }
+
+    #[test]
+    fn finite_means_preserve_large_cancellation_residuals() {
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            let value = match row.seed {
+                13 => -1.0e308,
+                17 => 1.0,
+                23 => 1.0e308,
+                _ => unreachable!("fixture contains only the requested seeds"),
+            };
+            row.dose_normalized_shape_effect = value;
+            row.complement_shape_effect = value;
+            row.polarity_effect = 0.0;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("finite evidence");
+        let normalized = &report.contrasts["dose_normalized_shape_effect"];
+        assert!((normalized.corpus_equal_weight_mean - 1.0 / 3.0).abs() < 1.0e-12);
+        assert_eq!(normalized.corpus_right_arm_win_count, 3);
+        assert_eq!(
+            normalized.bounded_trend_direction,
+            ZSpacePolarityEvidenceDirection::RightArmBetter
+        );
     }
 
     #[test]

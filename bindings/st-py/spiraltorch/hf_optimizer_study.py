@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -848,6 +849,10 @@ def _normalized_corpus_label(value: object) -> str:
     return label
 
 
+def _portable_substudy_path_key(path: Path) -> str:
+    return unicodedata.normalize("NFC", os.path.normpath(str(path))).casefold()
+
+
 def build_hf_zspace_optimizer_polarity_corpus_study_plan(
     *,
     study_dir: str | Path,
@@ -886,6 +891,7 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
             + ", ".join(supplied_sources)
         )
     normalized_labels: set[str] = set()
+    substudy_path_labels: dict[str, str] = {}
     corpus_sources: list[dict[str, object]] = []
     for raw_label, raw_path in sorted(corpora.items(), key=lambda item: str(item[0])):
         label = _normalized_corpus_label(raw_label)
@@ -894,6 +900,14 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
                 f"polarity corpus study has duplicate label {label}"
             )
         normalized_labels.add(label)
+        substudy_path = resolved_study_dir / "corpora" / label
+        substudy_path_key = _portable_substudy_path_key(substudy_path)
+        previous_label = substudy_path_labels.setdefault(substudy_path_key, label)
+        if previous_label != label:
+            raise HFZSpaceFactorizedStudyError(
+                "polarity corpus labels "
+                f"{previous_label!r} and {label!r} map to filesystem-equivalent substudy paths"
+            )
         path = Path(raw_path).expanduser().resolve()
         if not path.is_file():
             raise HFZSpaceFactorizedStudyError(
@@ -2492,7 +2506,9 @@ def _polarity_corpus_study_bundle(
             f"polarity corpus {normalized_label} has no identity anchor"
         )
     summary_identity_anchor = {
-        field: _sha256_identity(identity_anchor.get(field), field=field.replace("_", " "))
+        field: _sha256_identity(
+            identity_anchor.get(field), field=field.replace("_", " ")
+        )
         for field in (
             "execution_identity_id",
             "runtime_identity_id",
@@ -2673,10 +2689,7 @@ def compare_hf_zspace_optimizer_polarity_studies(
         "runtime_identity_id": first["runtime_identity_id"],
         "rust_evidence_id": rust_evidence["evidence_id"],
         "corpora": sorted(
-            [
-                {"corpus_id": bundle["corpus_id"]}
-                for bundle in bundles
-            ],
+            [{"corpus_id": bundle["corpus_id"]} for bundle in bundles],
             key=lambda corpus: str(corpus["corpus_id"]),
         ),
     }

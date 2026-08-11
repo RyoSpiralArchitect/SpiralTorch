@@ -597,6 +597,31 @@ def test_polarity_evidence_keeps_large_finite_aggregates_numeric() -> None:
     assert st.validate_zspace_polarity_evidence(report) == report
 
 
+def test_polarity_evidence_preserves_large_cancellation_residuals() -> None:
+    rows = _polarity_evidence_rows()
+    values = {13: -1.0e308, 17: 1.0, 23: 1.0e308}
+    for row in rows:
+        value = values[int(row["seed"])]
+        row["dose_normalized_shape_effect"] = value
+        row["complement_shape_effect"] = value
+        row["polarity_effect"] = 0.0
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_equal_weight_mean"] == pytest.approx(1.0 / 3.0)
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",

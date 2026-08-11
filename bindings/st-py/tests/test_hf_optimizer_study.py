@@ -370,6 +370,17 @@ def test_polarity_corpus_study_plan_seals_sources_and_substudies(
             }
         )
 
+    with pytest.raises(
+        st.HFZSpaceFactorizedStudyError,
+        match="filesystem-equivalent substudy paths",
+    ):
+        st.build_hf_zspace_optimizer_polarity_corpus_study_plan(
+            **{
+                **kwargs,
+                "corpora": {"Fiction": corpus_a, "fiction": corpus_b},
+            }
+        )
+
 
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
     tmp_path: Path,
@@ -1331,8 +1342,7 @@ def test_polarity_corpus_report_id_ignores_presentation_aliases(
     assert second["report_identity"] == first["report_identity"]
     assert second["report_id"] == first["report_id"]
     assert all(
-        set(corpus) == {"corpus_id"}
-        for corpus in second["report_identity"]["corpora"]
+        set(corpus) == {"corpus_id"} for corpus in second["report_identity"]["corpora"]
     )
 
 
