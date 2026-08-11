@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
-  "recorded_at": "2026-08-11T12:26:21Z",
+  "recorded_at": "2026-08-11T13:23:37Z",
   "status": "ready",
   "study": {
     "model": "gpt2",
@@ -80,10 +80,10 @@
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
-    "loaded_native_extension_sha256": "sha256:d26a68e46a2ba30b853857747b48440c6a5b89da82e95e30ae9e0ad142d61300",
-    "stable_aggregation_git_commit": "2b442e8b84271ae95bc1c41f144218508fb8fa9e",
+    "loaded_native_extension_sha256": "sha256:7a5914318c835bc216a283f7f223e9c1a84b38707a8358e7c8607c61a11eafe1",
+    "stable_aggregation_git_commit": "c267de02f3612b5df07aedb43c6d575bd7a09906",
     "outer_report_id": "sha256:5800ac0e07d81dca84bb7528519cac7d05207ea42426b49968f6b5495e786f08",
-    "outer_report_sha256": "sha256:1d020a8d9916614c4ea42cc4dd28b59d55c763452e72923d2fc384d2846708b1",
+    "outer_report_sha256": "sha256:e822f1030c2b447c34ad1d32af008b6afe48f3607386bef26dbc562b72e4c10e",
     "rust_evidence_id": "sha256:ad2b604233dc2d23578c85d9f1e5fcb76026f077c085cd7c0621a6b8569381b8",
     "independent_comparator_byte_match": true,
     "exact_runner_reuse_completed_runs": 27
@@ -202,14 +202,14 @@
   "result_summary": {
     "lower_validation_loss_is_better": true,
     "dose_normalized_minus_observe": {
-      "corpus_equal_weight_mean": 0.0010873741573757597,
+      "corpus_equal_weight_mean": 0.0010873741573757595,
       "seed_left_arm_win_count": 0,
       "seed_right_arm_win_count": 9,
       "corpus_left_arm_win_count": 0,
       "corpus_right_arm_win_count": 3
     },
     "complement_minus_observe": {
-      "corpus_equal_weight_mean": -0.0006243387858072917,
+      "corpus_equal_weight_mean": -0.0006243387858072916,
       "seed_left_arm_win_count": 9,
       "seed_right_arm_win_count": 0,
       "corpus_left_arm_win_count": 3,
@@ -319,11 +319,11 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": -0.0006243387858072917,
+        "corpus_equal_weight_mean": -0.0006243387858072916,
         "corpus_left_arm_win_count": 3,
         "corpus_mean_maximum": -0.0001037915547688802,
         "corpus_mean_minimum": -0.000892480214436849,
-        "corpus_mean_population_standard_deviation": 0.00036813853125280385,
+        "corpus_mean_population_standard_deviation": 0.0003681385312528038,
         "corpus_right_arm_win_count": 0,
         "corpus_tie_count": 0,
         "left_arm": "dose_preserving_complement",
@@ -408,7 +408,7 @@
           }
         ],
         "corpus_count": 3,
-        "corpus_equal_weight_mean": 0.0010873741573757597,
+        "corpus_equal_weight_mean": 0.0010873741573757595,
         "corpus_left_arm_win_count": 0,
         "corpus_mean_maximum": 0.0015365282694498699,
         "corpus_mean_minimum": 0.00019256273905436197,
