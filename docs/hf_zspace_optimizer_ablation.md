@@ -1,4 +1,4 @@
-# HF Z-Space Optimizer Factorized Ablation
+# HF Z-Space Optimizer Ablations
 
 This workflow asks a narrow question: when Z-Space changes a Hugging Face
 Trainer learning-rate trajectory, is an observed loss difference caused by the
@@ -39,6 +39,16 @@ trajectory remains explicit `blocked` evidence and cannot enter the comparator.
 This dose is the sum of parameter-group learning rates over optimizer updates.
 It is not parameter-count weighted and does not claim to measure gradient norm,
 parameter displacement, or useful learning by itself.
+
+The separate `dose_preserving_complement` policy tests trajectory polarity
+without changing that integrated dose. Rust computes the weighted raw center
+`r_bar_w = sum(w_i r_i) / sum(w_i)`, then emits
+`s_i = 1 - a (r_i - r_bar_w)`. It chooses the largest `a` in `[0, 1]` that
+keeps every scale inside the shared `[0.1, 1.25]` bounds. Centering makes
+`sum(w_i s_i) = sum(w_i)` by construction, while the sign reversal makes the
+schedule weaker where the raw trajectory was above its center and stronger
+where it was below. The policy and every step are owned, identified, and
+revalidated by `st-core`; Python and WASM only transport the report.
 
 ## Run one matched seed
 
@@ -301,6 +311,71 @@ The frozen provenance anchors are:
 - runtime source ID `sha256:ab4366caebae6808659177a60f81893571e1d6825a99513d39ccad5b825895e1`;
 - native library SHA-256 `3981319b4d4d55c53c059b9a3cd7dc58884a9a79f8c9a1386645653131a8d908`.
 
+## Run the dose-matched polarity study
+
+The polarity runner executes `observe`, `dose_normalized`, and
+`dose_preserving_complement` in that order for each seed. As with the other
+study runners, omit `--run` first to write and inspect the immutable recovery
+plan, then repeat the exact command with `--run`:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-study \
+  --study-dir models/runs/zspace-polarity-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file README.md \
+  --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+The comparator requires all three arms to share one raw control sequence,
+nominal scheduler sequence, Rust trajectory, before-train loss anchor, and
+path-independent training identities. Both applied arms must match their Rust
+planned dose and intervention count. The complement arm additionally requires
+the policy contract, source trajectory, complete horizon, recipe identity, and
+SHA-256-sealed policy artifact to agree.
+
+### Audited polarity result (2026-08-10)
+
+The checked-in [polarity artifact](benchmarks/hf_zspace_optimizer_polarity_readme_64step_20260810.json)
+records one local GPT-2 LoRA run family over this repository's `README.md`: 64
+optimizer updates, seeds 13/17/23, CPU float32, rank 4, alpha 8, batch size 2,
+gradient accumulation 8, block size 128, 464 training blocks, and 16 capped
+evaluation blocks. All nine run cards were ready and all three seeds shared the
+same trajectory, raw control, nominal scheduler, model/runtime/input identities,
+and exact before-train anchor within each seed.
+
+| Seed | normalized minus observe | complement minus observe | complement minus normalized |
+| ---: | ---: | ---: | ---: |
+| 13 | +0.001717 | -0.000956 | -0.002672 |
+| 17 | +0.001568 | -0.000861 | -0.002429 |
+| 23 | +0.001608 | -0.000905 | -0.002513 |
+| Mean | +0.001631 | -0.000907 | -0.002538 |
+
+Lower validation loss is better. The original normalized shape was worse than
+ordinary FT for 3/3 seeds. Its dose-preserving complement beat the normalized
+shape for 3/3 and ordinary FT for 3/3. The Rust policy used weighted center
+`0.9035117234`, maximal safe gain `0.5669527277`, first/last scales
+`0.9013568801 / 1.25`, and exactly preserved nominal dose `0.00325`; every one
+of its 64 updates was non-identity. This is bounded evidence for schedule
+polarity in one short recipe, not statistical significance or general Z-Space
+superiority, so `efficacy_claim_ready` remains false.
+
+The frozen provenance anchors are:
+
+- study ID `sha256:20bc9a3287cab5f6b5119034f8980a91f905221c3927b363e26edbae58451fdf`;
+- original runner report SHA-256 `c63008dabb8699c2b5a5a45abdb9df6e4681e59fd7f83f29a3866716dd56e1a6`;
+- experiment Git commit `4e3267bd1c97471e217a1552cd1f3f72f0e97ef3`;
+- runtime source ID `sha256:bdb989da733086791143b7cea1a8001da41970d7938deb65e385b42b03ed45c3`;
+- native library SHA-256 `9ccc426ed9807f09321c3d84aed1154a4313fbe0a61d10714021efe73546fc6f`;
+- trajectory policy ID `sha256:b08588963b97bff33dc59c0bb0f9c830bc054aadc949b97be9324f1286b69553`.
+
 ## Read the contrasts
 
 All contrasts use `left_arm loss change - right_arm loss change`; lower is
@@ -331,6 +406,14 @@ assert trajectory["semantic_backend"] == "rust"
 
 validated = st.validate_zspace_parameter_trajectory(trajectory)
 assert validated["trajectory_id"] == trajectory["trajectory_id"]
+
+policy = st.zspace_parameter_trajectory_policy(
+    trajectory,
+    policy="dose_preserving_complement",
+)
+assert policy["semantic_backend"] == "rust"
+assert policy["planned_dose_ratio"] == 1.0
+assert st.validate_zspace_parameter_trajectory_policy(policy) == policy
 ```
 
 Changing any serialized report field causes Rust validation to reject the

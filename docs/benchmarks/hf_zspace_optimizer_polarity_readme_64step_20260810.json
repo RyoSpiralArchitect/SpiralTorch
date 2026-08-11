@@ -1,0 +1,242 @@
+{
+  "bounded_baseline_improvement_observed": true,
+  "bounded_polarity_improvement_observed": true,
+  "contrasts": {
+    "complement_shape_effect": {
+      "bounded_trend_direction": "left_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "dose_preserving_complement",
+      "left_arm_win_count": 3,
+      "lower_is_better": true,
+      "maximum": -0.0008611679077148438,
+      "mean": -0.0009072621663411459,
+      "median": -0.0009050369262695312,
+      "minimum": -0.0009555816650390625,
+      "population_standard_deviation": 0.00003857635858961079,
+      "right_arm": "observe",
+      "sample_standard_deviation": 0.00004724619733958868,
+      "values": [
+        -0.0009555816650390625,
+        -0.0008611679077148438,
+        -0.0009050369262695312
+      ]
+    },
+    "dose_normalized_shape_effect": {
+      "bounded_trend_direction": "right_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "dose_normalized",
+      "left_arm_win_count": 0,
+      "lower_is_better": true,
+      "maximum": 0.00171661376953125,
+      "mean": 0.0016307830810546875,
+      "median": 0.0016078948974609375,
+      "minimum": 0.001567840576171875,
+      "population_standard_deviation": 0.00006285574742616303,
+      "right_arm": "observe",
+      "sample_standard_deviation": 0.00007698225429767824,
+      "values": [
+        0.00171661376953125,
+        0.001567840576171875,
+        0.0016078948974609375
+      ]
+    },
+    "polarity_effect": {
+      "bounded_trend_direction": "left_arm_better",
+      "bounded_trend_ready": true,
+      "count": 3,
+      "left_arm": "dose_preserving_complement",
+      "left_arm_win_count": 3,
+      "lower_is_better": true,
+      "maximum": -0.0024290084838867188,
+      "mean": -0.0025380452473958335,
+      "median": -0.0025129318237304688,
+      "minimum": -0.0026721954345703125,
+      "population_standard_deviation": 0.00010085628812603682,
+      "right_arm": "dose_normalized",
+      "sample_standard_deviation": 0.000123523221629956,
+      "values": [
+        -0.0026721954345703125,
+        -0.0024290084838867188,
+        -0.0025129318237304688
+      ]
+    }
+  },
+  "efficacy_claim_ready": false,
+  "efficacy_claim_requirements": "a prespecified, adequately powered multi-model and multi-corpus evaluation with held-out quality and stability metrics remains required",
+  "error_count": 0,
+  "errors": [],
+  "evidence_boundary": "one local GPT-2 LoRA recipe over one README corpus with three matched seeds supports a bounded dose-matched polarity trend, not statistical significance or general superiority",
+  "evidence_scope": "single_model_single_corpus_multi_seed_dose_matched_polarity_ablation",
+  "matched_evidence": {
+    "control_sequence_id": "sha256:07f6e321eb21bb476e39edee16a7312a995cb952c5c97ce046f5238a93a5e6d2",
+    "identities": {
+      "dataset_materialization": "sha256:63f0d5902d5ce62989e7a72d1a3976a67df94de4d90d5f2c2d1c4c59b3e54675",
+      "execution": "sha256:d78b01378a610b0d05f73ea7db1b59c3b470bf2115d41c9d0dc26590937f584d",
+      "model_runtime": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+      "tokenized_dataset": "sha256:3567ca2d1b7a58713e274ceb6b2ccfc7c0d310330515b865f565621404a468e8",
+      "training_input": "sha256:e1d19915294fc43d8ec8eaf25528a9f2499a19ccd2316d679b04a2c9254c94be"
+    },
+    "matched_seed_count": 3,
+    "nominal_schedule_sequence_id": "sha256:1e498feece33ee3c769b479fb29eabf27b35ab920069c59e9bcf320a23a091cf",
+    "ready_seed_count": 3,
+    "run_card_count": 9,
+    "trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+  },
+  "policy": {
+    "contract_version": "spiraltorch.zspace_parameter_trajectory_policy.v1",
+    "dose_invariant_tolerance": 3.25e-14,
+    "first_planned_learning_rate_scale": 0.9013568801063758,
+    "last_planned_learning_rate_scale": 1.25,
+    "maximum_learning_rate_scale": 1.25,
+    "minimum_learning_rate_scale": 0.1,
+    "nominal_dose": 0.0032500000000000003,
+    "parameter_group_count": 2,
+    "planned_dose": 0.0032500000000000003,
+    "planned_dose_ratio": 1.0,
+    "planned_dose_residual": 0.0,
+    "planned_non_identity_update_count": 64,
+    "planned_saturated_max_count": 1,
+    "planned_saturated_min_count": 0,
+    "policy": "dose_preserving_complement",
+    "policy_artifact_sha256": "sha256:6894d9047c21b6da0e8b2aa897cdc55e10593353857401be377eec488ddbe520",
+    "policy_artifact_size_bytes": 37089,
+    "policy_id": "sha256:b08588963b97bff33dc59c0bb0f9c830bc054aadc949b97be9324f1286b69553",
+    "policy_rule": "s_i=1-a*(r_i-r_bar_w),r_bar_w=sum_i(w_i*r_i)/sum_i(w_i),a=max_safe_in_[0,1],sum_i(w_i*s_i)=sum_i(w_i)",
+    "polarity_gain": 0.5669527276507569,
+    "rust_validation_repeated_for_all_seed_artifacts": true,
+    "semantic_backend": "rust",
+    "semantic_owner": "st-core::runtime::zspace_optimizer",
+    "source_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238",
+    "step_count": 64,
+    "weighted_raw_center": 0.9035117233888463
+  },
+  "recorded_at": "2026-08-11T04:37:25.781720Z",
+  "run_card_count": 9,
+  "schema": "spiraltorch.hf_zspace_polarity_benchmark.v1",
+  "seeds": [
+    {
+      "contrasts": {
+        "complement_shape_effect": -0.0009555816650390625,
+        "dose_normalized_shape_effect": 0.00171661376953125,
+        "polarity_effect": -0.0026721954345703125
+      },
+      "eval_after_losses": {
+        "dose_normalized": 5.456758499145508,
+        "dose_preserving_complement": 5.4540863037109375,
+        "observe": 5.455041885375977
+      },
+      "eval_before_loss": 5.511689186096191,
+      "eval_loss_changes": {
+        "dose_normalized": -0.054930686950683594,
+        "dose_preserving_complement": -0.057602882385253906,
+        "observe": -0.056647300720214844
+      },
+      "polarity_match_id": "sha256:bca3f7d4d590aae735656d74237968432e5c77e1c4173adc59b5a2551c063bb3",
+      "run_card_sha256": {
+        "dose_normalized": "sha256:34d53d823b0c301fb31ed43cd8a7db0207853f1cd8a2a5c304c4810150f1cf82",
+        "dose_preserving_complement": "sha256:1947eeec303597ab68de02c698cbfb248661f225f1c7c491e1136975b1d92d52",
+        "observe": "sha256:cd983087c5b33852c1940794e72f91a54e40122eb5250e9cd4f380fd756027df"
+      },
+      "seed": 13,
+      "status": "ready"
+    },
+    {
+      "contrasts": {
+        "complement_shape_effect": -0.0008611679077148438,
+        "dose_normalized_shape_effect": 0.001567840576171875,
+        "polarity_effect": -0.0024290084838867188
+      },
+      "eval_after_losses": {
+        "dose_normalized": 5.083002090454102,
+        "dose_preserving_complement": 5.080573081970215,
+        "observe": 5.08143424987793
+      },
+      "eval_before_loss": 5.134559631347656,
+      "eval_loss_changes": {
+        "dose_normalized": -0.05155754089355469,
+        "dose_preserving_complement": -0.053986549377441406,
+        "observe": -0.05312538146972656
+      },
+      "polarity_match_id": "sha256:084c9a3fb96bbb73edd3eedac885fba779d0129a6695a162798b9ee6e6e65934",
+      "run_card_sha256": {
+        "dose_normalized": "sha256:b95efbcabf3cb25eaef4d3c0b51bb182118931f0033f5fc692ff6087aa5d927b",
+        "dose_preserving_complement": "sha256:3130abf2928302d0f321b8eb7bf6303b93397a580d004bea706fcbad80cefde4",
+        "observe": "sha256:891eed951bdcc42945bd25b55187215c936b2b5c30b5824cb2c285e62a87001c"
+      },
+      "seed": 17,
+      "status": "ready"
+    },
+    {
+      "contrasts": {
+        "complement_shape_effect": -0.0009050369262695312,
+        "dose_normalized_shape_effect": 0.0016078948974609375,
+        "polarity_effect": -0.0025129318237304688
+      },
+      "eval_after_losses": {
+        "dose_normalized": 5.398917198181152,
+        "dose_preserving_complement": 5.396404266357422,
+        "observe": 5.397309303283691
+      },
+      "eval_before_loss": 5.450508117675781,
+      "eval_loss_changes": {
+        "dose_normalized": -0.051590919494628906,
+        "dose_preserving_complement": -0.054103851318359375,
+        "observe": -0.053198814392089844
+      },
+      "polarity_match_id": "sha256:3bd900470a367abc3cb2305dd10440c4c036d3497e72f9d4fda0b9fddcf22622",
+      "run_card_sha256": {
+        "dose_normalized": "sha256:71eb4d10fd77cb2d16e8f9f34d5cf1ac73960adec0612a646759cbf6d5aaa644",
+        "dose_preserving_complement": "sha256:eb500ded173119c97946567b1c9c50d8e905d27db8c6ffbc59e3880ff555fc70",
+        "observe": "sha256:3bec51e5b238033286a840f8a126528b817f42e3452fca8f3be45c0fd2c0a453"
+      },
+      "seed": 23,
+      "status": "ready"
+    }
+  ],
+  "source_report": {
+    "error_count": 0,
+    "path": "models/runs/hf-zspace-polarity-readme-64step-seeds13-17-23-20260810/polarity-report.json",
+    "regenerated_exactly_from_nine_absolute_run_card_paths": true,
+    "schema": "spiraltorch.hf_zspace_polarity_ablation.v1",
+    "sha256": "sha256:c63008dabb8699c2b5a5a45abdb9df6e4681e59fd7f83f29a3866716dd56e1a6",
+    "status": "ready"
+  },
+  "status": "ready",
+  "study": {
+    "arms": [
+      "observe",
+      "dose_normalized",
+      "dose_preserving_complement"
+    ],
+    "block_size": 128,
+    "bridge_sha256": "sha256:e7b9ead58cd8f9fac369bdb7935a9be2cec7885ba2ef676eca3c3e8c60303f4a",
+    "corpus": "README.md",
+    "eval_blocks": 16,
+    "git_clean": true,
+    "git_head": "4e3267bd1c97471e217a1552cd1f3f72f0e97ef3",
+    "gradient_accumulation_steps": 8,
+    "learning_rate": 0.00005,
+    "lora_alpha": 8,
+    "lora_dropout": 0.05,
+    "lora_rank": 4,
+    "max_steps": 64,
+    "model": "gpt2",
+    "model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "native_extension_sha256": "sha256:9ccc426ed9807f09321c3d84aed1154a4313fbe0a61d10714021efe73546fc6f",
+    "per_device_eval_batch_size": 2,
+    "per_device_train_batch_size": 2,
+    "precision": "float32",
+    "runtime_source_id": "sha256:bdb989da733086791143b7cea1a8001da41970d7938deb65e385b42b03ed45c3",
+    "seeds": [
+      13,
+      17,
+      23
+    ],
+    "study_id": "sha256:20bc9a3287cab5f6b5119034f8980a91f905221c3927b363e26edbae58451fdf",
+    "train_blocks": 464,
+    "training_device": "cpu",
+    "validation_fraction": 0.1
+  }
+}
