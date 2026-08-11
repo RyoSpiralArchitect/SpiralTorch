@@ -968,6 +968,29 @@ mod tests {
     }
 
     #[test]
+    fn finite_means_preserve_subnormal_residuals_after_cancellation() {
+        let smallest_subnormal = f64::from_bits(1);
+        let mut values = vec![
+            f64::MAX,
+            f64::MAX,
+            -f64::MAX,
+            -f64::MAX,
+            smallest_subnormal * 9.0,
+            smallest_subnormal * -4.0,
+        ];
+
+        let mean = finite_mean(&values, "subnormal_residual").expect("subnormal residual mean");
+        assert_eq!(mean, smallest_subnormal);
+
+        values.reverse();
+        assert_eq!(
+            finite_mean(&values, "reversed_subnormal_residual")
+                .expect("reversed subnormal residual mean"),
+            mean
+        );
+    }
+
+    #[test]
     fn finite_means_preserve_ulp_residuals_after_prefix_overflow() {
         let next_down_maximum = f64::from_bits(f64::MAX.to_bits() - 1);
         let mut values = vec![f64::MAX; 11];
