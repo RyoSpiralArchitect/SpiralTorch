@@ -440,15 +440,17 @@ where
             });
     }
     let mut corpora = Vec::with_capacity(values_by_corpus.len());
+    let mut corpus_exact_sums = Vec::with_capacity(values_by_corpus.len());
     let mut corpus_mean_signs = Vec::with_capacity(values_by_corpus.len());
     for (corpus_id, mut values) in values_by_corpus {
         values.sort_by_key(|item| item.seed);
         let corpus_values = values.iter().map(|item| item.value).collect::<Vec<_>>();
-        let (mean, mean_sign) = finite_mean_with_sign(
+        let (mean, exact_sum) = finite_mean_with_sum(
             &corpus_values,
             &format!("{left_arm}_vs_{right_arm}.corpus[{corpus_id}].mean"),
         )?;
-        corpus_mean_signs.push(mean_sign);
+        corpus_mean_signs.push(exact_sum.sign());
+        corpus_exact_sums.push(exact_sum);
         corpora.push(ZSpacePolarityCorpusContrastSummary {
             corpus_id: corpus_id.to_owned(),
             seed_count: values.len(),
@@ -464,14 +466,27 @@ where
         &seed_values,
         &format!("{left_arm}_vs_{right_arm}.pooled_seed_mean"),
     )?;
-    let corpus_equal_weight_mean = finite_mean(
-        &corpus_means,
+    let mut corpus_total_sum = BigInt::from(0_u8);
+    for exact_sum in &corpus_exact_sums {
+        corpus_total_sum += exact_sum;
+    }
+    let corpus_mean_denominator = corpora
+        .len()
+        .checked_mul(corpora[0].seed_count)
+        .expect("validated row limit bounds the corpus mean denominator");
+    debug_assert_eq!(corpus_mean_denominator, seed_values.len());
+    let corpus_equal_weight_mean = finite_mean_from_exact_sum(
+        corpus_total_sum,
+        corpus_mean_denominator,
         &format!("{left_arm}_vs_{right_arm}.corpus_equal_weight_mean"),
     )?;
-    let corpus_mean_population_standard_deviation = finite_population_standard_deviation(
-        &corpus_means,
-        &format!("{left_arm}_vs_{right_arm}.corpus_mean_population_standard_deviation"),
-    )?;
+    debug_assert_eq!(corpus_equal_weight_mean, pooled_seed_mean);
+    let corpus_mean_population_standard_deviation =
+        finite_population_standard_deviation_from_equal_denominator_sums(
+            &corpus_exact_sums,
+            corpora[0].seed_count,
+            &format!("{left_arm}_vs_{right_arm}.corpus_mean_population_standard_deviation"),
+        )?;
     let direction = evidence_direction(&corpus_mean_signs);
     let bounded_trend_ready = bounded_ready && direction != ZSpacePolarityEvidenceDirection::Mixed;
 
@@ -512,34 +527,26 @@ where
 }
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
-    finite_mean_with_sign(values, field).map(|(mean, _)| mean)
+    finite_mean_with_sum(values, field).map(|(mean, _)| mean)
 }
 
-fn finite_mean_with_sign(
+fn finite_mean_with_sum(
     values: &[f64],
     field: &str,
-) -> Result<(f64, Sign), ZSpacePolarityEvidenceError> {
-    if values.iter().all(|value| *value == values[0]) {
-        let value = values[0];
-        let sign = if value < 0.0 {
-            Sign::Minus
-        } else if value > 0.0 {
-            Sign::Plus
-        } else {
-            Sign::NoSign
-        };
-        return Ok((value, sign));
-    }
+) -> Result<(f64, BigInt), ZSpacePolarityEvidenceError> {
     // Every finite f64 is an integer multiple of the minimum subnormal. Summing
     // those integers first lets the final division perform the only rounding.
     let mut exact_sum = BigInt::from(0_u8);
     for value in values {
         exact_sum += finite_binary_units(*value);
     }
-    let sum_sign = exact_sum.sign();
-    let mean = rounded_binary_mean(exact_sum, values.len());
+    let mean = if values.iter().all(|value| *value == values[0]) {
+        values[0]
+    } else {
+        rounded_binary_mean(exact_sum.clone(), values.len())
+    };
     if mean.is_finite() {
-        Ok((mean, sum_sign))
+        Ok((mean, exact_sum))
     } else {
         Err(ZSpacePolarityEvidenceError::NonFiniteAggregate {
             field: field.to_owned(),
@@ -548,25 +555,57 @@ fn finite_mean_with_sign(
     }
 }
 
+fn finite_mean_from_exact_sum(
+    exact_sum: BigInt,
+    denominator: usize,
+    field: &str,
+) -> Result<f64, ZSpacePolarityEvidenceError> {
+    let mean = rounded_binary_mean(exact_sum, denominator);
+    if mean.is_finite() {
+        Ok(mean)
+    } else {
+        Err(ZSpacePolarityEvidenceError::NonFiniteAggregate {
+            field: field.to_owned(),
+            value: mean,
+        })
+    }
+}
+
+#[cfg(test)]
 fn finite_population_standard_deviation(
     values: &[f64],
     field: &str,
 ) -> Result<f64, ZSpacePolarityEvidenceError> {
+    let exact_sums = values
+        .iter()
+        .map(|value| finite_binary_units(*value))
+        .collect::<Vec<_>>();
+    finite_population_standard_deviation_from_equal_denominator_sums(&exact_sums, 1, field)
+}
+
+fn finite_population_standard_deviation_from_equal_denominator_sums(
+    exact_sums: &[BigInt],
+    common_denominator: usize,
+    field: &str,
+) -> Result<f64, ZSpacePolarityEvidenceError> {
+    debug_assert!(!exact_sums.is_empty());
+    debug_assert!(common_denominator > 0);
     let mut exact_sum = BigInt::from(0_u8);
     let mut exact_square_sum = BigUint::from(0_u8);
-    for value in values {
-        let units = finite_binary_units(*value);
+    for units in exact_sums {
         let magnitude = units.magnitude();
         exact_square_sum += magnitude * magnitude;
         exact_sum += units;
     }
-    let count = BigUint::from(values.len());
+    let count = BigUint::from(exact_sums.len());
     let weighted_square_sum = exact_square_sum * &count;
     let exact_sum_magnitude = exact_sum.magnitude();
     let exact_sum_square = exact_sum_magnitude * exact_sum_magnitude;
     debug_assert!(weighted_square_sum >= exact_sum_square);
     let variance_numerator = weighted_square_sum - exact_sum_square;
-    let standard_deviation = rounded_binary_square_root_ratio(variance_numerator, count);
+    let standard_deviation_denominator = count * BigUint::from(common_denominator);
+    let standard_deviation =
+        rounded_binary_square_root_ratio(variance_numerator, standard_deviation_denominator);
     if standard_deviation.is_finite() {
         Ok(standard_deviation)
     } else {
@@ -599,12 +638,12 @@ fn positive_binary_units(bits: u64) -> BigUint {
     }
 }
 
-fn scaled_binary_units_square(bits: u64, count: &BigUint) -> BigUint {
-    let scaled = positive_binary_units(bits) * count;
+fn scaled_binary_units_square(bits: u64, denominator: &BigUint) -> BigUint {
+    let scaled = positive_binary_units(bits) * denominator;
     &scaled * &scaled
 }
 
-fn rounded_binary_square_root_ratio(numerator: BigUint, count: BigUint) -> f64 {
+fn rounded_binary_square_root_ratio(numerator: BigUint, denominator: BigUint) -> f64 {
     if numerator == BigUint::from(0_u8) {
         return 0.0;
     }
@@ -613,21 +652,21 @@ fn rounded_binary_square_root_ratio(numerator: BigUint, count: BigUint) -> f64 {
     let mut upper_bits = f64::MAX.to_bits();
     while lower_bits < upper_bits {
         let candidate_bits = lower_bits + (upper_bits - lower_bits) / 2 + 1;
-        if scaled_binary_units_square(candidate_bits, &count) <= numerator {
+        if scaled_binary_units_square(candidate_bits, &denominator) <= numerator {
             lower_bits = candidate_bits;
         } else {
             upper_bits = candidate_bits - 1;
         }
     }
 
-    let lower_square = scaled_binary_units_square(lower_bits, &count);
+    let lower_square = scaled_binary_units_square(lower_bits, &denominator);
     if lower_square == numerator || lower_bits == f64::MAX.to_bits() {
         return f64::from_bits(lower_bits);
     }
 
     let upper_bits = lower_bits + 1;
     let midpoint_units = positive_binary_units(lower_bits) + positive_binary_units(upper_bits);
-    let scaled_midpoint = midpoint_units * count;
+    let scaled_midpoint = midpoint_units * denominator;
     let midpoint_square = &scaled_midpoint * &scaled_midpoint;
     match (numerator << 2_usize).cmp(&midpoint_square) {
         Ordering::Less => f64::from_bits(lower_bits),
@@ -1025,6 +1064,75 @@ mod tests {
             summarize_zspace_polarity_evidence(reversed_request)
                 .expect("reversed subnormal evidence"),
             report
+        );
+    }
+
+    #[test]
+    fn cross_corpus_mean_uses_exact_rational_corpus_means() {
+        let smallest_subnormal = f64::from_bits(1);
+        let third_corpus = id('c');
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            let units = if row.corpus_id == third_corpus { 3 } else { 1 };
+            let value = if row.seed == 13 {
+                smallest_subnormal * f64::from(units)
+            } else {
+                0.0
+            };
+            row.dose_normalized_shape_effect = value;
+            row.complement_shape_effect = value;
+            row.polarity_effect = 0.0;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("subnormal evidence");
+        let normalized = &report.contrasts["dose_normalized_shape_effect"];
+        assert_eq!(
+            normalized
+                .corpora
+                .iter()
+                .map(|corpus| corpus.mean.to_bits())
+                .collect::<Vec<_>>(),
+            vec![
+                0.0_f64.to_bits(),
+                0.0_f64.to_bits(),
+                smallest_subnormal.to_bits()
+            ]
+        );
+        assert_eq!(normalized.pooled_seed_mean, smallest_subnormal);
+        assert_eq!(normalized.corpus_equal_weight_mean, smallest_subnormal);
+        assert_eq!(normalized.corpus_right_arm_win_count, 3);
+        assert_eq!(
+            normalized.bounded_trend_direction,
+            ZSpacePolarityEvidenceDirection::RightArmBetter
+        );
+    }
+
+    #[test]
+    fn cross_corpus_standard_deviation_uses_exact_rational_corpus_means() {
+        let smallest_subnormal = f64::from_bits(1);
+        let third_corpus = id('c');
+        let mut request = request(3, &[13, 17, 23]);
+        for row in &mut request.rows {
+            let units = if row.corpus_id == third_corpus {
+                36
+            } else {
+                40
+            };
+            let value = if row.seed == 13 {
+                -smallest_subnormal * f64::from(units)
+            } else {
+                0.0
+            };
+            row.dose_normalized_shape_effect = value;
+            row.complement_shape_effect = value;
+            row.polarity_effect = 0.0;
+        }
+
+        let report = summarize_zspace_polarity_evidence(request).expect("subnormal evidence");
+        let normalized = &report.contrasts["dose_normalized_shape_effect"];
+        assert_eq!(
+            normalized.corpus_mean_population_standard_deviation,
+            smallest_subnormal
         );
     }
 

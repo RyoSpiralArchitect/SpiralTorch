@@ -720,6 +720,74 @@ def test_polarity_evidence_uses_exact_corpus_sum_sign_before_mean_rounding() -> 
     assert report["bounded_polarity_improvement_observed"] is True
 
 
+def test_polarity_evidence_uses_exact_rational_corpus_means() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_sum_units = {"a": 1, "b": 1, "c": 3}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, units in corpus_sum_units.items()
+        for seed in (13, 17, 23)
+        for value in [smallest_subnormal * units if seed == 13 else 0.0]
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(rows)),
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert [corpus["mean"] for corpus in normalized["corpora"]] == [
+        0.0,
+        0.0,
+        smallest_subnormal,
+    ]
+    assert normalized["pooled_seed_mean"] == smallest_subnormal
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_right_arm_win_count"] == 3
+    assert normalized["bounded_trend_direction"] == "right_arm_better"
+
+
+def test_polarity_evidence_uses_exact_rational_corpus_variance() -> None:
+    smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
+    corpus_sum_units = {"a": -40, "b": -40, "c": -36}
+    rows = [
+        {
+            "corpus_id": _sha_id(corpus),
+            "seed": seed,
+            "dose_normalized_shape_effect": value,
+            "complement_shape_effect": value,
+            "polarity_effect": 0.0,
+        }
+        for corpus, units in corpus_sum_units.items()
+        for seed in (13, 17, 23)
+        for value in [smallest_subnormal * units if seed == 13 else 0.0]
+    ]
+
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=rows,
+    )
+
+    normalized = report["contrasts"]["dose_normalized_shape_effect"]
+    assert normalized["corpus_mean_population_standard_deviation"] == smallest_subnormal
+
+
 def test_polarity_evidence_uses_subnormal_to_break_large_rounding_ties() -> None:
     maximum = float.fromhex("0x1.fffffffffffffp+1023")
     next_down_maximum = math.nextafter(maximum, 0.0)
