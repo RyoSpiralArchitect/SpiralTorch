@@ -625,9 +625,10 @@ def test_polarity_evidence_preserves_large_cancellation_residuals() -> None:
 def test_polarity_evidence_preserves_smallest_subnormal_means() -> None:
     rows = _polarity_evidence_rows()
     smallest_subnormal = float.fromhex("0x0.0000000000001p-1022")
-    for row in rows:
-        row["dose_normalized_shape_effect"] = smallest_subnormal
-        row["complement_shape_effect"] = smallest_subnormal
+    for index, row in enumerate(rows):
+        value = smallest_subnormal * (index % 3 + 1)
+        row["dose_normalized_shape_effect"] = value
+        row["complement_shape_effect"] = value
         row["polarity_effect"] = 0.0
 
     report = st.zspace_polarity_evidence(
@@ -641,7 +642,7 @@ def test_polarity_evidence_preserves_smallest_subnormal_means() -> None:
     )
 
     normalized = report["contrasts"]["dose_normalized_shape_effect"]
-    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal
+    assert normalized["corpus_equal_weight_mean"] == smallest_subnormal * 2.0
     assert normalized["corpus_right_arm_win_count"] == 3
     assert normalized["bounded_trend_direction"] == "right_arm_better"
 

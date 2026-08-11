@@ -504,33 +504,27 @@ fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenc
     if values.iter().all(|value| *value == values[0]) {
         return Ok(values[0]);
     }
-    // A power-of-two fallback avoids overflow without rounding normal operands first.
-    let direct_sum = compensated_sum(values.iter().copied());
-    let mean = if direct_sum.is_finite() {
-        direct_sum / count
-    } else {
-        let divisor = values.len().next_power_of_two() as f64;
-        let mut scaled_values = Vec::with_capacity(values.len());
-        let mut division_underflows = Vec::new();
-        for value in values {
-            let scaled = value / divisor;
-            if scaled == 0.0 && *value != 0.0 {
-                division_underflows.push(*value);
-            } else {
-                scaled_values.push(scaled);
-            }
-        }
-        let scaled_mean = (compensated_sum(scaled_values) / count) * divisor;
-        let underflow_mean = compensated_sum(division_underflows) / count;
-        let recovered_mean = compensated_sum([scaled_mean, underflow_mean]);
-        if recovered_mean.is_finite() {
-            recovered_mean
+    // Power-of-two scaling is exact for normal operands and bounds every prefix.
+    let divisor = values.len().next_power_of_two() as f64;
+    let mut scaled_values = Vec::with_capacity(values.len());
+    let mut division_underflows = Vec::new();
+    for value in values {
+        let scaled = value / divisor;
+        if *value != 0.0 && !scaled.is_normal() {
+            division_underflows.push(*value);
         } else {
-            let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
-            let normalized_mean = compensated_sum(values.iter().map(|value| value / scale)) / count;
-            scale * normalized_mean.clamp(-1.0, 1.0)
+            scaled_values.push(scaled);
         }
-    };
+    }
+    let scaled_mean = expansion_sum(scaled_values.iter().copied()) * (divisor / count);
+    let underflow_mean = expansion_sum(division_underflows.iter().copied()) / count;
+    let mean = refine_scaled_mean(
+        &scaled_values,
+        &division_underflows,
+        divisor,
+        values.len(),
+        expansion_sum([scaled_mean, underflow_mean]),
+    );
     if mean.is_finite() {
         Ok(mean)
     } else {
@@ -594,6 +588,93 @@ where
         sum = updated;
     }
     sum + compensation
+}
+
+fn expansion_sum<I>(values: I) -> f64
+where
+    I: IntoIterator<Item = f64>,
+{
+    // Keep a non-overlapping expansion, then apply the final half-even correction.
+    let mut partials = Vec::<f64>::new();
+    for mut value in values {
+        let partial_count = partials.len();
+        let mut retained = 0;
+        for index in 0..partial_count {
+            let mut partial = partials[index];
+            if value.abs() < partial.abs() {
+                std::mem::swap(&mut value, &mut partial);
+            }
+            let high = value + partial;
+            let low = partial - (high - value);
+            if low != 0.0 {
+                partials[retained] = low;
+                retained += 1;
+            }
+            value = high;
+        }
+        partials.truncate(retained);
+        if value != 0.0 {
+            partials.push(value);
+        }
+    }
+
+    let Some(mut high) = partials.pop() else {
+        return 0.0;
+    };
+    let mut low = 0.0;
+    while let Some(partial) = partials.pop() {
+        let previous = high;
+        high += partial;
+        low = partial - (high - previous);
+        if low != 0.0 {
+            break;
+        }
+    }
+    if partials
+        .last()
+        .is_some_and(|partial| (low < 0.0 && *partial < 0.0) || (low > 0.0 && *partial > 0.0))
+    {
+        let doubled = low * 2.0;
+        let rounded = high + doubled;
+        if doubled == rounded - high {
+            high = rounded;
+        }
+    }
+    high
+}
+
+fn refine_scaled_mean(
+    scaled_values: &[f64],
+    division_underflows: &[f64],
+    divisor: f64,
+    count: usize,
+    mut mean: f64,
+) -> f64 {
+    let count_f64 = count as f64;
+    for _ in 0..2 {
+        let scaled_mean_term = mean / divisor;
+        if mean != 0.0 && !scaled_mean_term.is_normal() {
+            break;
+        }
+        // Interleave each observation with the candidate contribution so residual
+        // accumulation cannot recreate the large same-sign prefix we scaled away.
+        let residual_terms = scaled_values
+            .iter()
+            .flat_map(|value| [*value, -scaled_mean_term])
+            .chain(std::iter::repeat_n(
+                -scaled_mean_term,
+                count - scaled_values.len(),
+            ));
+        let scaled_residual = expansion_sum(residual_terms) * (divisor / count_f64);
+        let underflow_residual = expansion_sum(division_underflows.iter().copied()) / count_f64;
+        let correction = expansion_sum([scaled_residual, underflow_residual]);
+        let refined = expansion_sum([mean, correction]);
+        if refined == mean {
+            break;
+        }
+        mean = refined;
+    }
+    mean
 }
 
 fn evidence_direction(values: &[f64]) -> ZSpacePolarityEvidenceDirection {
@@ -859,12 +940,29 @@ mod tests {
     #[test]
     fn finite_means_preserve_representable_extremes() {
         let smallest_subnormal = f64::from_bits(1);
+        let next_down_maximum = f64::from_bits(f64::MAX.to_bits() - 1);
         assert_eq!(
-            finite_mean(&[smallest_subnormal; 3], "smallest_subnormal").expect("subnormal mean"),
-            smallest_subnormal
+            finite_mean(
+                &[
+                    smallest_subnormal,
+                    smallest_subnormal * 2.0,
+                    smallest_subnormal * 3.0,
+                ],
+                "smallest_subnormal",
+            )
+            .expect("subnormal mean"),
+            smallest_subnormal * 2.0
         );
         assert_eq!(
             finite_mean(&[f64::MAX; 3], "largest_finite").expect("maximum finite mean"),
+            f64::MAX
+        );
+        assert_eq!(
+            finite_mean(
+                &[f64::MAX, f64::MAX, next_down_maximum],
+                "mixed_largest_finite",
+            )
+            .expect("mixed maximum finite mean"),
             f64::MAX
         );
     }
@@ -880,6 +978,11 @@ mod tests {
         let expected = ((f64::MAX - next_down_maximum) - 1.0e290) / values.len() as f64;
         assert!(mean > 0.0);
         assert!((mean / expected - 1.0).abs() < 1.0e-14);
+
+        values.reverse();
+        let reversed =
+            finite_mean(&values, "reversed_ulp_residual").expect("reversed finite residual mean");
+        assert_eq!(reversed, mean);
     }
 
     #[test]
