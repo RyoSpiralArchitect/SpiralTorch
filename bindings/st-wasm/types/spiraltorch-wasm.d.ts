@@ -2284,6 +2284,99 @@ declare module "spiraltorch-wasm" {
         steps: ZSpaceParameterTrajectoryPolicyStep[];
     };
 
+    export type ZSpacePolarityEvidenceRow = {
+        corpus_id: string;
+        seed: number;
+        dose_normalized_shape_effect: number;
+        complement_shape_effect: number;
+        polarity_effect: number;
+    };
+
+    export type ZSpacePolarityEvidenceRequest = {
+        protocol_id: string;
+        runtime_identity_id: string;
+        trajectory_id: string;
+        trajectory_policy_id: string;
+        control_sequence_id: string;
+        nominal_schedule_sequence_id: string;
+        rows: ZSpacePolarityEvidenceRow[];
+    };
+
+    export type ZSpacePolarityEvidenceDirection =
+        | "left_arm_better"
+        | "right_arm_better"
+        | "no_observed_difference"
+        | "mixed";
+
+    export type ZSpacePolaritySeedContrast = {
+        seed: number;
+        value: number;
+    };
+
+    export type ZSpacePolarityCorpusContrastSummary = {
+        corpus_id: string;
+        seed_count: number;
+        mean: number;
+        left_arm_win_count: number;
+        right_arm_win_count: number;
+        tie_count: number;
+        values: ZSpacePolaritySeedContrast[];
+    };
+
+    export type ZSpacePolarityContrastSummary = {
+        left_arm: string;
+        right_arm: string;
+        lower_is_better: true;
+        observation_count: number;
+        corpus_count: number;
+        seed_count_per_corpus: number;
+        pooled_seed_mean: number;
+        corpus_equal_weight_mean: number;
+        corpus_mean_minimum: number;
+        corpus_mean_maximum: number;
+        corpus_mean_population_standard_deviation: number;
+        seed_left_arm_win_count: number;
+        seed_right_arm_win_count: number;
+        seed_tie_count: number;
+        corpus_left_arm_win_count: number;
+        corpus_right_arm_win_count: number;
+        corpus_tie_count: number;
+        bounded_trend_ready: boolean;
+        bounded_trend_direction: ZSpacePolarityEvidenceDirection;
+        corpora: ZSpacePolarityCorpusContrastSummary[];
+    };
+
+    export type ZSpacePolarityEvidenceReport = {
+        contract_version: "spiraltorch.zspace_polarity_evidence.v1";
+        kind: "spiraltorch.zspace_polarity_evidence";
+        semantic_owner: "st-core::runtime::zspace_evidence";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        evidence_validated: true;
+        evidence_id: string;
+        status: "ready";
+        request: ZSpacePolarityEvidenceRequest;
+        aggregation_rule: string;
+        contrast_rule: string;
+        corpus_count: number;
+        seed_count_per_corpus: number;
+        observation_count: number;
+        corpus_ids: string[];
+        seeds: number[];
+        evidence_scope: string;
+        contrasts: Record<
+            | "dose_normalized_shape_effect"
+            | "complement_shape_effect"
+            | "polarity_effect",
+            ZSpacePolarityContrastSummary
+        >;
+        bounded_polarity_improvement_observed: boolean;
+        bounded_baseline_improvement_observed: boolean;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+        efficacy_claim_requirements: string;
+    };
+
     export type ZSpaceOptimizerFeedbackConfigInput = {
         loss_ema_alpha?: number;
         relative_delta_ema_alpha?: number;
@@ -2980,6 +3073,14 @@ declare module "spiraltorch-wasm" {
     export function zspaceParameterTrajectoryPolicyValidateObject(
         report: ZSpaceParameterTrajectoryPolicyReport,
     ): ZSpaceParameterTrajectoryPolicyReport;
+    export function zspacePolarityEvidenceJson(requestJson: string): string;
+    export function zspacePolarityEvidenceObject(
+        request: ZSpacePolarityEvidenceRequest,
+    ): ZSpacePolarityEvidenceReport;
+    export function zspacePolarityEvidenceValidateJson(reportJson: string): string;
+    export function zspacePolarityEvidenceValidateObject(
+        report: ZSpacePolarityEvidenceReport,
+    ): ZSpacePolarityEvidenceReport;
     export function zspaceOptimizerFeedbackInitJson(configJson: string): string;
     export function zspaceOptimizerFeedbackInitObject(
         config: ZSpaceOptimizerFeedbackConfigInput,

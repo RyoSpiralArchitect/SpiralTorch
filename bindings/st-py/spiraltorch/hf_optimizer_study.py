@@ -30,6 +30,8 @@ from .hf_optimizer_control import (
 from .zspace_optimizer import (
     ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
     ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER,
+    validate_zspace_polarity_evidence,
+    zspace_polarity_evidence,
     zspace_optimizer_feedback_init,
 )
 
@@ -82,6 +84,21 @@ HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME = "polarity-study-plan.json"
 HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME = "polarity-study-events.jsonl"
 HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME = "polarity-study-summary.json"
 HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME = "polarity-report.json"
+HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_report.v1"
+)
+HF_ZSPACE_POLARITY_CORPUS_REPORT_FILENAME = "polarity-corpus-report.json"
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_study.v1"
+)
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_study_summary.v1"
+)
+HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME = "polarity-corpus-study-plan.json"
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME = "polarity-corpus-study-summary.json"
+_HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_corpus_protocol.v1"
+)
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
     {
@@ -138,6 +155,15 @@ _EVENT_RESERVED_FIELDS = frozenset(
     }
 )
 _CONTROL_GAIN_FLAG = "--zspace-optimizer-control-gain"
+_LOCAL_CORPUS_SOURCE_FLAGS = frozenset({"--train-file", "--validation-file"})
+_CORPUS_STUDY_SOURCE_FLAGS = frozenset(
+    {
+        *_LOCAL_CORPUS_SOURCE_FLAGS,
+        "--dataset-name",
+        "--dataset-config",
+        "--dataset-revision",
+    }
+)
 _GAIN_RESPONSE_CONTRASTS = (
     "dose_effect",
     "dose_normalized_shape_effect",
@@ -698,9 +724,7 @@ def build_hf_zspace_optimizer_polarity_study_plan(
             "polarity study seeds must be non-empty and unique"
         )
     if any(seed < 0 for seed in normalized_seeds):
-        raise HFZSpaceFactorizedStudyError(
-            "polarity study seeds must be non-negative"
-        )
+        raise HFZSpaceFactorizedStudyError("polarity study seeds must be non-negative")
     if not math.isfinite(min_free_disk_gb) or min_free_disk_gb < 0.0:
         raise HFZSpaceFactorizedStudyError(
             "min_free_disk_gb must be finite and non-negative"
@@ -768,6 +792,170 @@ def build_hf_zspace_optimizer_polarity_study_plan(
         },
         "run_count": len(runs),
         "runs": runs,
+    }
+
+
+def _normalized_corpus_label(value: object) -> str:
+    label = str(value).strip()
+    if (
+        not label
+        or len(label) > 64
+        or not label[0].isalnum()
+        or any(not (character.isalnum() or character in "_-") for character in label)
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            "corpus labels must be 1-64 alphanumeric, underscore, or hyphen characters"
+        )
+    return label
+
+
+def build_hf_zspace_optimizer_polarity_corpus_study_plan(
+    *,
+    study_dir: str | Path,
+    corpora: Mapping[str, str | Path],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+) -> dict[str, object]:
+    """Build an immutable collection of matched per-corpus polarity studies."""
+
+    if not corpora:
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study requires at least one corpus"
+        )
+    resolved_study_dir = Path(study_dir).expanduser().resolve()
+    resolved_bridge = (
+        Path(bridge_script or _default_bridge_script()).expanduser().resolve()
+    )
+    resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
+    resolved_cwd = Path(launch_cwd or Path.cwd()).expanduser().resolve()
+    normalized_args = tuple(str(argument) for argument in bridge_args)
+    max_steps = _validate_base_args(normalized_args)
+    supplied_sources = sorted(
+        {
+            name
+            for argument in normalized_args
+            if (name := _option_name(argument)) in _CORPUS_STUDY_SOURCE_FLAGS
+        }
+    )
+    if supplied_sources:
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study owns dataset source flags: "
+            + ", ".join(supplied_sources)
+        )
+    normalized_labels: set[str] = set()
+    corpus_sources: list[dict[str, object]] = []
+    for raw_label, raw_path in sorted(corpora.items(), key=lambda item: str(item[0])):
+        label = _normalized_corpus_label(raw_label)
+        if label in normalized_labels:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus study has duplicate label {label}"
+            )
+        normalized_labels.add(label)
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_file():
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus source does not exist: {path}"
+            )
+        corpus_sources.append(
+            {
+                "label": label,
+                "path": str(path),
+                "size_bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        )
+    source_ids = [str(source["sha256"]) for source in corpus_sources]
+    if len(set(source_ids)) != len(source_ids):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study requires content-distinct corpus files"
+        )
+    normalized_seeds = tuple(sorted(set(int(seed) for seed in seeds)))
+    if not normalized_seeds or len(normalized_seeds) != len(seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus study seeds must be non-empty and unique"
+        )
+    runtime_source = _runtime_source_fingerprint()
+    git_provenance = _git_source_provenance(
+        resolved_cwd,
+        excluded_path=resolved_study_dir,
+    )
+    protocol_payload = {
+        "schema": _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA,
+        "arms": list(HF_ZSPACE_POLARITY_STUDY_ARMS),
+        "seeds": list(normalized_seeds),
+        "max_steps": max_steps,
+        "shared_bridge_args": list(normalized_args),
+        "corpus_source_flags": ["--train-file"],
+        "bridge_sha256": _sha256_file(resolved_bridge),
+        "runtime_source_id": runtime_source["source_id"],
+        "git_head": git_provenance.get("head"),
+        "git_status_id": git_provenance.get("status_id"),
+    }
+    protocol_id = _sha256_id(protocol_payload)
+    substudies: list[dict[str, object]] = []
+    for source in corpus_sources:
+        label = str(source["label"])
+        substudy_dir = resolved_study_dir / "corpora" / label
+        plan = build_hf_zspace_optimizer_polarity_study_plan(
+            study_dir=substudy_dir,
+            seeds=normalized_seeds,
+            bridge_args=[*normalized_args, "--train-file", str(source["path"])],
+            bridge_script=resolved_bridge,
+            python_executable=resolved_python,
+            launch_cwd=resolved_cwd,
+            min_free_disk_gb=min_free_disk_gb,
+        )
+        substudies.append(
+            {
+                **source,
+                "study_dir": str(substudy_dir),
+                "study_id": plan["study_id"],
+                "plan": plan,
+            }
+        )
+    scientific_spec = {
+        "schema": HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA,
+        "protocol_id": protocol_id,
+        "protocol": protocol_payload,
+        "corpora": corpus_sources,
+    }
+    study_id = _sha256_id(scientific_spec)
+    run_count = sum(int(substudy["plan"]["run_count"]) for substudy in substudies)  # type: ignore[index]
+    return {
+        "schema": HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA,
+        "row_type": "hf_zspace_polarity_corpus_study_plan",
+        "status": "planned",
+        "study_id": study_id,
+        "study_dir": str(resolved_study_dir),
+        "scientific_spec": scientific_spec,
+        "runtime_source_fingerprint": runtime_source,
+        "git_source_provenance": git_provenance,
+        "execution_policy": {
+            "python_executable": str(resolved_python),
+            "bridge_script": str(resolved_bridge),
+            "min_free_disk_gb": min_free_disk_gb,
+            "run_order": "corpus_then_seed_then_observe_normalized_complement",
+            "resume_policy": "verified_substudy_plan_journal_and_run_card_only",
+            "failure_policy": "preserve_and_fail_closed",
+        },
+        "artifacts": {
+            "plan": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME
+            ),
+            "summary": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME
+            ),
+            "polarity_corpus_report": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_CORPUS_REPORT_FILENAME
+            ),
+        },
+        "corpus_count": len(substudies),
+        "run_count": run_count,
+        "substudies": substudies,
     }
 
 
@@ -2018,6 +2206,557 @@ def run_hf_zspace_optimizer_polarity_study(
     )
 
 
+def _split_local_corpus_source_args(
+    arguments: Sequence[str],
+) -> tuple[list[str], list[str]]:
+    shared: list[str] = []
+    sources: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = str(arguments[index])
+        name = _option_name(argument)
+        if name not in _LOCAL_CORPUS_SOURCE_FLAGS:
+            shared.append(argument)
+            index += 1
+            continue
+        if argument == name:
+            if index + 1 >= len(arguments):
+                raise HFZSpaceFactorizedStudyError(
+                    f"polarity corpus study has no value for {name}"
+                )
+            sources.extend((name, str(arguments[index + 1])))
+            index += 2
+            continue
+        value = argument.split("=", 1)[1]
+        if not value:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus study has no value for {name}"
+            )
+        sources.extend((name, value))
+        index += 1
+    if "--train-file" not in sources:
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus comparison requires local --train-file studies"
+        )
+    return shared, sources
+
+
+def _sha256_identity(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 71
+        or not value.startswith("sha256:")
+        or any(character not in "0123456789abcdef" for character in value[7:])
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus study has no verified {field}"
+        )
+    return value
+
+
+def _polarity_corpus_study_bundle(
+    label: str,
+    study_dir: str | Path,
+) -> dict[str, object]:
+    normalized_label = _normalized_corpus_label(label)
+    root = Path(study_dir).expanduser().resolve()
+    plan_path = root / HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
+    event_path = root / HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
+    summary_path = root / HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
+    report_path = root / HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME
+    for name, path in (
+        ("plan", plan_path),
+        ("journal", event_path),
+        ("summary", summary_path),
+        ("report", report_path),
+    ):
+        if not path.is_file():
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} has no {name}: {path}"
+            )
+    plan = _read_json(plan_path)
+    summary = _read_json(summary_path)
+    stored_report = _read_json(report_path)
+    if plan.get("schema") != HF_ZSPACE_POLARITY_STUDY_SCHEMA:
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has an unknown plan schema"
+        )
+    scientific_spec = plan.get("scientific_spec")
+    runtime_source = plan.get("runtime_source_fingerprint")
+    git_provenance = plan.get("git_source_provenance")
+    artifacts = plan.get("artifacts")
+    runs = plan.get("runs")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (scientific_spec, runtime_source, git_provenance, artifacts)
+    ) or not isinstance(runs, list):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has an incomplete plan"
+        )
+    assert isinstance(scientific_spec, Mapping)
+    assert isinstance(runtime_source, Mapping)
+    assert isinstance(git_provenance, Mapping)
+    study_id = plan.get("study_id")
+    if not isinstance(study_id, str) or study_id != _sha256_id(scientific_spec):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} plan identity is invalid"
+        )
+    assert isinstance(artifacts, Mapping)
+    expected_artifacts = {
+        "plan": plan_path,
+        "events": event_path,
+        "summary": summary_path,
+        "polarity_report": report_path,
+    }
+    if Path(str(plan.get("study_dir"))).resolve() != root or any(
+        Path(str(artifacts.get(field))).resolve() != expected
+        for field, expected in expected_artifacts.items()
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} artifact paths are inconsistent"
+        )
+    run_count = plan.get("run_count")
+    if (
+        isinstance(run_count, bool)
+        or not isinstance(run_count, int)
+        or run_count <= 0
+        or run_count != len(runs)
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} run plan is incomplete"
+        )
+    events = _load_events(
+        event_path,
+        study_id=study_id,
+        event_schema=HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA,
+    )
+    completed_events = [
+        event for event in events if event.get("event_type") == "study_completed"
+    ]
+    report_sha256 = _sha256_file(report_path)
+    if (
+        summary.get("schema") != HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA
+        or summary.get("status") != "ready"
+        or summary.get("study_id") != study_id
+        or summary.get("run_count") != run_count
+        or summary.get("completed_run_count") != run_count
+        or summary.get("remaining_run_count") != 0
+        or summary.get("event_count") != len(events)
+        or summary.get("polarity_status") != "ready"
+        or summary.get("polarity_report_sha256") != report_sha256
+        or not completed_events
+        or completed_events[-1].get("status") != "ready"
+        or completed_events[-1].get("polarity_report_sha256") != report_sha256
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} summary is not ready or sealed"
+        )
+    run_cards: list[Path] = []
+    for index, run in enumerate(runs):
+        if not isinstance(run, Mapping) or not isinstance(run.get("run_card"), str):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run {index} has no run card"
+            )
+        card_path = Path(str(run["run_card"])).resolve()
+        if not card_path.is_file() or not _path_is_within(card_path, root):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} run card escaped its study"
+            )
+        run_cards.append(card_path)
+    if len(set(run_cards)) != run_count:
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} run cards are not unique"
+        )
+    regenerated_report = compare_hf_zspace_optimizer_polarity_run_cards(run_cards)
+    if stored_report != regenerated_report or stored_report.get("status") != "ready":
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} report does not match its run cards"
+        )
+    bridge_args = scientific_spec.get("bridge_args")
+    if not isinstance(bridge_args, list) or not all(
+        isinstance(argument, str) for argument in bridge_args
+    ):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has invalid bridge arguments"
+        )
+    shared_args, source_args = _split_local_corpus_source_args(bridge_args)
+    source_flags = source_args[::2]
+    identity_anchor = summary.get("identity_anchor")
+    if not isinstance(identity_anchor, Mapping):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has no identity anchor"
+        )
+    corpus_id = _sha256_identity(
+        identity_anchor.get("training_input_id"),
+        field="training input identity",
+    )
+    runtime_identity_id = _sha256_identity(
+        identity_anchor.get("runtime_identity_id"),
+        field="runtime identity",
+    )
+    seeds = stored_report.get("seeds")
+    polarity_seeds = stored_report.get("polarity_seeds")
+    if not isinstance(seeds, list) or not all(isinstance(seed, int) for seed in seeds):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has invalid seeds"
+        )
+    if not isinstance(polarity_seeds, list) or len(polarity_seeds) != len(seeds):
+        raise HFZSpaceFactorizedStudyError(
+            f"polarity corpus {normalized_label} has incomplete seed reports"
+        )
+    rows: list[dict[str, object]] = []
+    shared_evidence: dict[str, str] = {}
+    for index, seed_report in enumerate(polarity_seeds):
+        if not isinstance(seed_report, Mapping) or seed_report.get("status") != "ready":
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} seed report {index} is blocked"
+            )
+        seed = seed_report.get("seed")
+        contrasts = seed_report.get("contrasts")
+        if not isinstance(seed, int) or not isinstance(contrasts, Mapping):
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus {normalized_label} seed report {index} is malformed"
+            )
+        for field in (
+            "trajectory_id",
+            "trajectory_policy_id",
+            "control_sequence_id",
+            "nominal_schedule_sequence_id",
+        ):
+            identity = _sha256_identity(seed_report.get(field), field=field)
+            previous = shared_evidence.setdefault(field, identity)
+            if previous != identity:
+                raise HFZSpaceFactorizedStudyError(
+                    f"polarity corpus {normalized_label} changed {field} across seeds"
+                )
+        numeric: dict[str, float] = {}
+        for field in (
+            "dose_normalized_shape_effect",
+            "complement_shape_effect",
+            "polarity_effect",
+        ):
+            value = contrasts.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                raise HFZSpaceFactorizedStudyError(
+                    f"polarity corpus {normalized_label} has invalid {field}"
+                )
+            numeric[field] = float(value)
+        rows.append({"corpus_id": corpus_id, "seed": seed, **numeric})
+    protocol_payload = {
+        "schema": _HF_ZSPACE_POLARITY_CORPUS_PROTOCOL_SCHEMA,
+        "arms": scientific_spec.get("arms"),
+        "seeds": seeds,
+        "max_steps": scientific_spec.get("max_steps"),
+        "shared_bridge_args": shared_args,
+        "corpus_source_flags": source_flags,
+        "bridge_sha256": scientific_spec.get("bridge_sha256"),
+        "runtime_source_id": runtime_source.get("source_id"),
+        "git_head": git_provenance.get("head"),
+        "git_status_id": git_provenance.get("status_id"),
+    }
+    return {
+        "label": normalized_label,
+        "study_dir": str(root),
+        "study_id": study_id,
+        "corpus_id": corpus_id,
+        "runtime_identity_id": runtime_identity_id,
+        "protocol_payload": protocol_payload,
+        "protocol_id": _sha256_id(protocol_payload),
+        "source_args": source_args,
+        "shared_evidence": shared_evidence,
+        "rows": rows,
+        "seeds": seeds,
+        "plan_sha256": _sha256_file(plan_path),
+        "summary_sha256": _sha256_file(summary_path),
+        "polarity_report_sha256": report_sha256,
+    }
+
+
+def compare_hf_zspace_optimizer_polarity_studies(
+    studies: Mapping[str, str | Path],
+) -> dict[str, object]:
+    """Aggregate sealed per-corpus polarity studies through the Rust core."""
+
+    if not studies:
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus comparison requires at least one study"
+        )
+    bundles = [
+        _polarity_corpus_study_bundle(label, path)
+        for label, path in sorted(studies.items(), key=lambda item: str(item[0]))
+    ]
+    corpus_ids = [str(bundle["corpus_id"]) for bundle in bundles]
+    if len(set(corpus_ids)) != len(corpus_ids):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity corpus comparison contains duplicate training input identities"
+        )
+    for field in ("protocol_id", "runtime_identity_id"):
+        values = {str(bundle[field]) for bundle in bundles}
+        if len(values) != 1:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus studies do not share one {field}"
+            )
+    for field in (
+        "trajectory_id",
+        "trajectory_policy_id",
+        "control_sequence_id",
+        "nominal_schedule_sequence_id",
+    ):
+        values = {
+            str(bundle["shared_evidence"][field])  # type: ignore[index]
+            for bundle in bundles
+        }
+        if len(values) != 1:
+            raise HFZSpaceFactorizedStudyError(
+                f"polarity corpus studies do not share one {field}"
+            )
+    rows = [
+        row
+        for bundle in bundles
+        for row in bundle["rows"]  # type: ignore[union-attr]
+    ]
+    first = bundles[0]
+    shared_evidence = first["shared_evidence"]
+    assert isinstance(shared_evidence, Mapping)
+    rust_evidence = zspace_polarity_evidence(
+        protocol_id=str(first["protocol_id"]),
+        runtime_identity_id=str(first["runtime_identity_id"]),
+        trajectory_id=str(shared_evidence["trajectory_id"]),
+        trajectory_policy_id=str(shared_evidence["trajectory_policy_id"]),
+        control_sequence_id=str(shared_evidence["control_sequence_id"]),
+        nominal_schedule_sequence_id=str(
+            shared_evidence["nominal_schedule_sequence_id"]
+        ),
+        rows=rows,
+    )
+    validate_zspace_polarity_evidence(rust_evidence)
+    corpus_summaries = [
+        {
+            key: bundle[key]
+            for key in (
+                "label",
+                "study_dir",
+                "study_id",
+                "corpus_id",
+                "source_args",
+                "plan_sha256",
+                "summary_sha256",
+                "polarity_report_sha256",
+            )
+        }
+        for bundle in bundles
+    ]
+    report: dict[str, object] = {
+        "schema": HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA,
+        "row_type": "hf_zspace_polarity_corpus_report",
+        "status": rust_evidence["status"],
+        "protocol_id": first["protocol_id"],
+        "protocol": first["protocol_payload"],
+        "runtime_identity_id": first["runtime_identity_id"],
+        "corpus_count": rust_evidence["corpus_count"],
+        "seed_count_per_corpus": rust_evidence["seed_count_per_corpus"],
+        "observation_count": rust_evidence["observation_count"],
+        "corpora": corpus_summaries,
+        "rust_evidence": rust_evidence,
+        "evidence_scope": rust_evidence["evidence_scope"],
+        "bounded_polarity_improvement_observed": rust_evidence[
+            "bounded_polarity_improvement_observed"
+        ],
+        "bounded_baseline_improvement_observed": rust_evidence[
+            "bounded_baseline_improvement_observed"
+        ],
+        "efficacy_claim_ready": False,
+        "evidence_boundary": rust_evidence["evidence_boundary"],
+        "error_count": 0,
+        "errors": [],
+    }
+    report["report_id"] = _sha256_id(report)
+    return report
+
+
+def write_hf_zspace_optimizer_polarity_corpus_report(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    """Write one canonical cross-corpus polarity report."""
+
+    output = Path(path).expanduser().resolve()
+    _atomic_write_json(output, report)
+    return str(output)
+
+
+def _write_polarity_corpus_study_summary(
+    path: Path,
+    *,
+    plan: Mapping[str, object],
+    status: str,
+    corpus_statuses: Mapping[str, Mapping[str, object]],
+    report: Mapping[str, object] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    completed_runs = sum(
+        int(summary.get("completed_run_count", 0))
+        for summary in corpus_statuses.values()
+    )
+    run_count = int(plan["run_count"])
+    report_path = Path(
+        str(plan["artifacts"]["polarity_corpus_report"])  # type: ignore[index]
+    )
+    summary: dict[str, object] = {
+        "schema": HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA,
+        "row_type": "hf_zspace_polarity_corpus_study_summary",
+        "recorded_at": _utc_now(),
+        "status": status,
+        "study_id": plan["study_id"],
+        "study_dir": plan["study_dir"],
+        "corpus_count": plan["corpus_count"],
+        "completed_corpus_count": sum(
+            value.get("status") == "ready" for value in corpus_statuses.values()
+        ),
+        "run_count": run_count,
+        "completed_run_count": completed_runs,
+        "remaining_run_count": run_count - completed_runs,
+        "corpus_statuses": dict(corpus_statuses),
+        "polarity_corpus_report": str(report_path),
+        "polarity_corpus_report_sha256": (
+            _sha256_file(report_path) if report_path.is_file() else None
+        ),
+        "polarity_corpus_report_id": (
+            None if report is None else report.get("report_id")
+        ),
+        "rust_evidence_id": (
+            None
+            if report is None or not isinstance(report.get("rust_evidence"), Mapping)
+            else report["rust_evidence"].get("evidence_id")  # type: ignore[union-attr]
+        ),
+        "error": error,
+    }
+    _atomic_write_json(path, summary)
+    return summary
+
+
+def run_hf_zspace_optimizer_polarity_corpus_study(
+    *,
+    study_dir: str | Path,
+    corpora: Mapping[str, str | Path],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+    execute: bool = False,
+    retry_failed: bool = False,
+) -> dict[str, object]:
+    """Plan or execute a resumable balanced cross-corpus polarity study."""
+
+    plan = build_hf_zspace_optimizer_polarity_corpus_study_plan(
+        study_dir=study_dir,
+        corpora=corpora,
+        seeds=seeds,
+        bridge_args=bridge_args,
+        bridge_script=bridge_script,
+        python_executable=python_executable,
+        launch_cwd=launch_cwd,
+        min_free_disk_gb=min_free_disk_gb,
+    )
+    root = Path(str(plan["study_dir"]))
+    study_id = str(plan["study_id"])
+    artifacts = plan["artifacts"]
+    assert isinstance(artifacts, Mapping)
+    summary_path = Path(str(artifacts["summary"]))
+    report_path = Path(str(artifacts["polarity_corpus_report"]))
+    corpus_statuses: dict[str, dict[str, object]] = {}
+    with _study_lock(root, study_id):
+        _persist_plan(plan)
+        if not execute:
+            if summary_path.is_file():
+                summary = _read_json(summary_path)
+                if summary.get("study_id") != study_id:
+                    raise HFZSpaceFactorizedStudyError(
+                        "polarity corpus summary belongs to another immutable plan"
+                    )
+                return summary
+            return _write_polarity_corpus_study_summary(
+                summary_path,
+                plan=plan,
+                status="planned",
+                corpus_statuses=corpus_statuses,
+            )
+        try:
+            substudies = plan.get("substudies")
+            if not isinstance(substudies, list):
+                raise HFZSpaceFactorizedStudyError(
+                    "polarity corpus plan has no substudies"
+                )
+            for raw_substudy in substudies:
+                if not isinstance(raw_substudy, Mapping):
+                    raise HFZSpaceFactorizedStudyError(
+                        "polarity corpus plan contains a malformed substudy"
+                    )
+                label = str(raw_substudy["label"])
+                substudy_plan = raw_substudy.get("plan")
+                if not isinstance(substudy_plan, Mapping):
+                    raise HFZSpaceFactorizedStudyError(
+                        f"polarity corpus {label} has no immutable substudy plan"
+                    )
+                summary = _run_hf_zspace_optimizer_study_plan(
+                    substudy_plan,
+                    execute=True,
+                    retry_failed=retry_failed,
+                    event_schema=HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA,
+                    summary_schema=HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA,
+                    summary_row_type="hf_zspace_polarity_study_summary",
+                    report_artifact_key="polarity_report",
+                    report_prefix="polarity",
+                    compare_cards=compare_hf_zspace_optimizer_polarity_run_cards,
+                    write_report=write_hf_zspace_optimizer_polarity_ablation_report,
+                )
+                corpus_statuses[label] = summary
+                _write_polarity_corpus_study_summary(
+                    summary_path,
+                    plan=plan,
+                    status="running",
+                    corpus_statuses=corpus_statuses,
+                )
+                if summary.get("status") != "ready":
+                    return _write_polarity_corpus_study_summary(
+                        summary_path,
+                        plan=plan,
+                        status="failed",
+                        corpus_statuses=corpus_statuses,
+                        error=f"polarity corpus {label} did not become ready",
+                    )
+            report = compare_hf_zspace_optimizer_polarity_studies(
+                {
+                    str(substudy["label"]): Path(str(substudy["study_dir"]))
+                    for substudy in substudies
+                    if isinstance(substudy, Mapping)
+                }
+            )
+            write_hf_zspace_optimizer_polarity_corpus_report(report, report_path)
+            return _write_polarity_corpus_study_summary(
+                summary_path,
+                plan=plan,
+                status="ready",
+                corpus_statuses=corpus_statuses,
+                report=report,
+            )
+        except Exception as exc:
+            _write_polarity_corpus_study_summary(
+                summary_path,
+                plan=plan,
+                status="failed",
+                corpus_statuses=corpus_statuses,
+                error=str(exc),
+            )
+            raise
+
+
 def _split_control_gain(arguments: Sequence[str]) -> tuple[float, list[str]]:
     gains: list[float] = []
     base_arguments: list[str] = []
@@ -2441,6 +3180,12 @@ __all__ = [
     "HF_ZSPACE_FACTORIZED_STUDY_SCHEMA",
     "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_ARMS",
+    "HF_ZSPACE_POLARITY_CORPUS_REPORT_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME",
     "HF_ZSPACE_POLARITY_STUDY_SCHEMA",
@@ -2448,8 +3193,12 @@ __all__ = [
     "HFZSpaceFactorizedStudyError",
     "build_hf_zspace_optimizer_factorized_study_plan",
     "build_hf_zspace_optimizer_polarity_study_plan",
+    "build_hf_zspace_optimizer_polarity_corpus_study_plan",
     "compare_hf_zspace_optimizer_factorized_gain_studies",
+    "compare_hf_zspace_optimizer_polarity_studies",
     "run_hf_zspace_optimizer_factorized_study",
     "run_hf_zspace_optimizer_polarity_study",
+    "run_hf_zspace_optimizer_polarity_corpus_study",
     "write_hf_zspace_optimizer_factorized_gain_response_report",
+    "write_hf_zspace_optimizer_polarity_corpus_report",
 ]

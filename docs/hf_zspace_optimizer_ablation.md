@@ -376,6 +376,61 @@ The frozen provenance anchors are:
 - native library SHA-256 `9ccc426ed9807f09321c3d84aed1154a4313fbe0a61d10714021efe73546fc6f`;
 - trajectory policy ID `sha256:b08588963b97bff33dc59c0bb0f9c830bc054aadc949b97be9324f1286b69553`.
 
+## Cross-corpus polarity study
+
+The single-corpus result above is a hypothesis anchor, not a generality result.
+Use the corpus study runner to repeat the same three-arm, multi-seed protocol on
+content-distinct local corpora without rebuilding aggregation semantics in
+Python:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-corpus-study \
+  --study-dir models/runs/zspace-polarity-multicorpus-64 \
+  --corpus fiction=data/dubliners.txt \
+  --corpus psychology=data/psychology_of_the_unconscious_en.txt \
+  --corpus encyclopedic=data/wiki_33.txt \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Do not pass a dataset source after `--`; the runner owns one `--train-file` per
+corpus. Run the command without `--run` to freeze and inspect all nested plans,
+then repeat it exactly with `--run`. Recovery reuses the existing per-corpus
+plan, hash-chained journal, run-card, trace, and policy receipts.
+
+The final `polarity-corpus-report.json` is computed by the Rust
+`st-core::runtime::zspace_evidence` contract. Rust requires the same seed set in
+every corpus, recomputes `polarity = complement - normalized`, summarizes seeds
+within each corpus, and only then gives every corpus mean equal weight. A
+bounded trend is eligible only at three or more corpora and three or more seeds
+per corpus, and only when every corpus mean has the same direction. The report
+still sets `efficacy_claim_ready` to false: it is a corpus-level trend for one
+model and recipe, not significance or general model superiority.
+
+Existing completed studies can enter the same Rust contract independently:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-corpus-compare \
+  --study fiction=models/runs/polarity-fiction \
+  --study psychology=models/runs/polarity-psychology \
+  --study encyclopedic=models/runs/polarity-encyclopedic \
+  --out models/runs/polarity-corpus-report.json
+```
+
+The comparator recomputes every source report from its run cards and verifies
+the immutable plan, summary, complete hash-chain, final report SHA-256, runtime
+identity, protocol, trajectory, policy, control, and nominal schedule before
+calling Rust. A label or file path is presentation metadata; the corpus key in
+the Rust evidence is the path-independent training-input identity.
+
 ## Read the contrasts
 
 All contrasts use `left_arm loss change - right_arm loss change`; lower is

@@ -483,6 +483,76 @@ def test_parameter_trajectory_policy_is_rust_owned_and_dose_preserving() -> None
         st.zspace_parameter_trajectory_policy(changed_source)
 
 
+def _sha_id(value: str) -> str:
+    return "sha256:" + value * 64
+
+
+def _polarity_evidence_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for corpus in ("a", "b", "c"):
+        for seed in (13, 17, 23):
+            normalized = 0.002 + seed * 1e-7
+            complement = -0.001 - seed * 1e-7
+            rows.append(
+                {
+                    "corpus_id": _sha_id(corpus),
+                    "seed": seed,
+                    "dose_normalized_shape_effect": normalized,
+                    "complement_shape_effect": complement,
+                    "polarity_effect": complement - normalized,
+                }
+            )
+    return rows
+
+
+def test_polarity_evidence_is_rust_owned_balanced_and_tamper_evident() -> None:
+    report = st.zspace_polarity_evidence(
+        protocol_id=_sha_id("1"),
+        runtime_identity_id=_sha_id("2"),
+        trajectory_id=_sha_id("3"),
+        trajectory_policy_id=_sha_id("4"),
+        control_sequence_id=_sha_id("5"),
+        nominal_schedule_sequence_id=_sha_id("6"),
+        rows=list(reversed(_polarity_evidence_rows())),
+    )
+
+    assert report["contract_version"] == st.ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION
+    assert report["semantic_owner"] == st.ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER
+    assert report["semantic_backend"] == "rust"
+    assert report["corpus_count"] == 3
+    assert report["seed_count_per_corpus"] == 3
+    assert report["observation_count"] == 9
+    assert report["bounded_polarity_improvement_observed"] is True
+    assert report["efficacy_claim_ready"] is False
+    assert (
+        report["contrasts"]["polarity_effect"][  # type: ignore[index]
+            "bounded_trend_direction"
+        ]
+        == "left_arm_better"
+    )
+    assert st.validate_zspace_polarity_evidence(report) == report
+
+    tampered = copy.deepcopy(report)
+    tampered["contrasts"]["polarity_effect"][  # type: ignore[index]
+        "corpus_equal_weight_mean"
+    ] = 0.0
+    with pytest.raises(ValueError, match="canonical Rust evidence aggregate"):
+        st.validate_zspace_polarity_evidence(tampered)
+
+
+def test_polarity_evidence_rejects_unbalanced_seed_sets() -> None:
+    with pytest.raises(ValueError, match="seed set"):
+        st.zspace_polarity_evidence(
+            protocol_id=_sha_id("1"),
+            runtime_identity_id=_sha_id("2"),
+            trajectory_id=_sha_id("3"),
+            trajectory_policy_id=_sha_id("4"),
+            control_sequence_id=_sha_id("5"),
+            nominal_schedule_sequence_id=_sha_id("6"),
+            rows=_polarity_evidence_rows()[:-1],
+        )
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -510,9 +580,17 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+        "ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE",
+        "ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION",
+        "ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE",
+        "ZSPACE_POLARITY_EVIDENCE_KIND",
+        "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
+        "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
         "validate_zspace_parameter_trajectory",
         "validate_zspace_parameter_trajectory_policy",
+        "validate_zspace_polarity_evidence",
         "zspace_parameter_trajectory",
         "zspace_parameter_trajectory_policy",
+        "zspace_polarity_evidence",
     ):
         assert name in st.__all__

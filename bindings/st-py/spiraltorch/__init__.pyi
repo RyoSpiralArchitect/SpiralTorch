@@ -738,6 +738,12 @@ HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME: str
 HF_ZSPACE_FEEDBACK_STUDY_SCHEMA: str
 HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA: str
 HF_ZSPACE_POLARITY_STUDY_ARMS: Tuple[str, ...]
+HF_ZSPACE_POLARITY_CORPUS_REPORT_FILENAME: str
+HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA: str
+HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME: str
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA: str
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME: str
+HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA: str
 HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA: str
 HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME: str
 HF_ZSPACE_POLARITY_STUDY_SCHEMA: str
@@ -774,8 +780,22 @@ def build_hf_zspace_optimizer_polarity_study_plan(
     launch_cwd: str | PathLike[str] | None = ...,
     min_free_disk_gb: float = ...,
 ) -> Dict[str, object]: ...
+def build_hf_zspace_optimizer_polarity_corpus_study_plan(
+    *,
+    study_dir: str | PathLike[str],
+    corpora: Mapping[str, str | PathLike[str]],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+) -> Dict[str, object]: ...
 def compare_hf_zspace_optimizer_factorized_gain_studies(
     study_dirs: Sequence[str | PathLike[str]],
+) -> Dict[str, object]: ...
+def compare_hf_zspace_optimizer_polarity_studies(
+    studies: Mapping[str, str | PathLike[str]],
 ) -> Dict[str, object]: ...
 def run_hf_zspace_optimizer_factorized_study(
     *,
@@ -814,7 +834,24 @@ def run_hf_zspace_optimizer_polarity_study(
     execute: bool = ...,
     retry_failed: bool = ...,
 ) -> Dict[str, object]: ...
+def run_hf_zspace_optimizer_polarity_corpus_study(
+    *,
+    study_dir: str | PathLike[str],
+    corpora: Mapping[str, str | PathLike[str]],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+    execute: bool = ...,
+    retry_failed: bool = ...,
+) -> Dict[str, object]: ...
 def write_hf_zspace_optimizer_factorized_gain_response_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+def write_hf_zspace_optimizer_polarity_corpus_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
@@ -5343,6 +5380,12 @@ ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND: str
 ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER: str
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND: str
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER: str
+ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE: str
+ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION: str
+ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE: str
+ZSPACE_POLARITY_EVIDENCE_KIND: str
+ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND: str
+ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER: str
 
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
@@ -5397,6 +5440,19 @@ def zspace_parameter_trajectory_policy(
     policy: str = ...,
 ) -> Dict[str, object]: ...
 def validate_zspace_parameter_trajectory_policy(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_polarity_evidence(
+    *,
+    protocol_id: str,
+    runtime_identity_id: str,
+    trajectory_id: str,
+    trajectory_policy_id: str,
+    control_sequence_id: str,
+    nominal_schedule_sequence_id: str,
+    rows: Sequence[Mapping[str, object]],
+) -> Dict[str, object]: ...
+def validate_zspace_polarity_evidence(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
@@ -11435,6 +11491,12 @@ __all__ = [
     "HF_ZSPACE_FEEDBACK_STUDY_SCHEMA",
     "HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_ARMS",
+    "HF_ZSPACE_POLARITY_CORPUS_REPORT_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_REPORT_SCHEMA",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SCHEMA",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_FILENAME",
+    "HF_ZSPACE_POLARITY_CORPUS_STUDY_SUMMARY_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA",
     "HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME",
     "HF_ZSPACE_POLARITY_STUDY_SCHEMA",
@@ -11443,11 +11505,15 @@ __all__ = [
     "build_hf_zspace_optimizer_factorized_study_plan",
     "build_hf_zspace_optimizer_feedback_study_plan",
     "build_hf_zspace_optimizer_polarity_study_plan",
+    "build_hf_zspace_optimizer_polarity_corpus_study_plan",
     "compare_hf_zspace_optimizer_factorized_gain_studies",
+    "compare_hf_zspace_optimizer_polarity_studies",
     "run_hf_zspace_optimizer_factorized_study",
     "run_hf_zspace_optimizer_feedback_study",
     "run_hf_zspace_optimizer_polarity_study",
+    "run_hf_zspace_optimizer_polarity_corpus_study",
     "write_hf_zspace_optimizer_factorized_gain_response_report",
+    "write_hf_zspace_optimizer_polarity_corpus_report",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
     "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
@@ -11839,8 +11905,15 @@ __all__ = [
     "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
+    "ZSPACE_POLARITY_EVIDENCE_AGGREGATION_RULE",
+    "ZSPACE_POLARITY_EVIDENCE_CONTRACT_VERSION",
+    "ZSPACE_POLARITY_EVIDENCE_CONTRAST_RULE",
+    "ZSPACE_POLARITY_EVIDENCE_KIND",
+    "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
+    "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
     "validate_zspace_parameter_trajectory",
     "validate_zspace_parameter_trajectory_policy",
+    "validate_zspace_polarity_evidence",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
@@ -11851,6 +11924,7 @@ __all__ = [
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
     "zspace_parameter_trajectory_policy",
+    "zspace_polarity_evidence",
     "zspace_generation_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

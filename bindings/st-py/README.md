@@ -845,6 +845,35 @@ exact command with `--run`. The final `polarity-report.json` compares
 `dose_preserving_complement - dose_normalized`. Three consistent seeds are a
 bounded polarity diagnostic, not a general efficacy claim.
 
+To test whether that polarity survives corpus changes, use one shared recipe
+and let the multi-corpus runner own each local `--train-file`:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-corpus-study \
+  --study-dir models/runs/zspace-polarity-multicorpus-64 \
+  --corpus fiction=data/dubliners.txt \
+  --corpus psychology=data/psychology_of_the_unconscious_en.txt \
+  --corpus encyclopedic=data/wiki_33.txt \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Plan once without `--run`, inspect the nested corpus plans, and repeat the same
+command with `--run`. The resulting Rust-owned evidence requires balanced seed
+sets, aggregates seeds inside each corpus before giving corpus means equal
+weight, and reserves a bounded trend for at least three corpora by three seeds.
+It never upgrades the result to a general efficacy claim. See the
+[ablation guide](../../docs/hf_zspace_optimizer_ablation.md#cross-corpus-polarity-study)
+for the standalone sealed-study comparator and evidence boundary.
+
 After completing three or more otherwise identical control-gain studies, build
 one receipt-checked response curve:
 

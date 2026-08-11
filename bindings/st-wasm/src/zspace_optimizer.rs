@@ -1,6 +1,10 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
+use st_core::runtime::zspace_evidence::{
+    summarize_zspace_polarity_evidence, validate_zspace_polarity_evidence_value,
+    ZSpacePolarityEvidenceRequest,
+};
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
     plan_zspace_parameter_trajectory_policy_from_value, restore_zspace_meta_optimizer,
@@ -130,6 +134,20 @@ pub fn zspace_parameter_trajectory_policy_validate_value(report: Value) -> Resul
     let report = semantic_report_value(report, "Z-space parameter-trajectory policy report")?;
     let report = validate_zspace_parameter_trajectory_policy_value(report)
         .map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_polarity_evidence_value(
+    request: ZSpacePolarityEvidenceRequest,
+) -> Result<Value, String> {
+    let report = summarize_zspace_polarity_evidence(request).map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_polarity_evidence_validate_value(report: Value) -> Result<Value, String> {
+    let report = semantic_report_value(report, "Z-space polarity evidence report")?;
+    let report =
+        validate_zspace_polarity_evidence_value(report).map_err(|error| error.to_string())?;
     response_value(&report)
 }
 
@@ -336,6 +354,42 @@ pub fn zspace_parameter_trajectory_policy_validate_object(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspacePolarityEvidenceJson)]
+pub fn zspace_polarity_evidence_json(request_json: &str) -> Result<String, JsValue> {
+    let request =
+        request_from_json(request_json, "Z-space polarity evidence request").map_err(js_error)?;
+    let payload = zspace_polarity_evidence_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspacePolarityEvidenceObject)]
+pub fn zspace_polarity_evidence_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request =
+        request_from_value(value, "Z-space polarity evidence request").map_err(js_error)?;
+    let payload = zspace_polarity_evidence_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspacePolarityEvidenceValidateJson)]
+pub fn zspace_polarity_evidence_validate_json(report_json: &str) -> Result<String, JsValue> {
+    let report = serde_json::from_str(report_json)
+        .map_err(|error| js_error(format!("invalid Z-space polarity evidence JSON: {error}")))?;
+    let payload = zspace_polarity_evidence_validate_value(report).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspacePolarityEvidenceValidateObject)]
+pub fn zspace_polarity_evidence_validate_object(report: &JsValue) -> Result<JsValue, JsValue> {
+    let report = serde_wasm_bindgen::from_value::<Value>(report.clone()).map_err(js_error)?;
+    let payload = zspace_polarity_evidence_validate_value(report).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = zspaceOptimizerFeedbackInitJson)]
 pub fn zspace_optimizer_feedback_init_json(config_json: &str) -> Result<String, JsValue> {
     let config =
@@ -418,6 +472,9 @@ pub fn zspace_optimizer_feedback_control_object(request: &JsValue) -> Result<JsV
 mod tests {
     use super::*;
     use serde_json::json;
+    use st_core::runtime::zspace_evidence::{
+        ZSpacePolarityEvidenceRequest, ZSpacePolarityEvidenceRow,
+    };
     use st_core::runtime::zspace_optimizer::{
         restore_zspace_meta_optimizer, transition_zspace_meta_optimizer,
         ZSPACE_META_OPTIMIZER_MAX_SAFE_STEP,
@@ -427,6 +484,10 @@ mod tests {
         observe_zspace_optimizer_feedback, ZSpaceOptimizerFeedbackControlRequest,
         ZSpaceOptimizerFeedbackObservation, ZSpaceOptimizerFeedbackObserveRequest,
     };
+
+    fn evidence_id(value: char) -> String {
+        format!("sha256:{}", value.to_string().repeat(64))
+    }
 
     #[test]
     fn wasm_step_matches_the_rust_contract_exactly() {
@@ -556,6 +617,48 @@ mod tests {
         let error = zspace_parameter_trajectory_policy_validate_value(tampered)
             .expect_err("tampered policy must fail");
         assert!(error.contains("canonical Rust trajectory policy"));
+    }
+
+    #[test]
+    fn wasm_polarity_evidence_round_trips_through_the_rust_contract() {
+        let mut rows = Vec::new();
+        for corpus in ['a', 'b', 'c'] {
+            for seed in [13, 17, 23] {
+                rows.push(ZSpacePolarityEvidenceRow {
+                    corpus_id: evidence_id(corpus),
+                    seed,
+                    dose_normalized_shape_effect: 0.002,
+                    complement_shape_effect: -0.001,
+                    polarity_effect: -0.003,
+                });
+            }
+        }
+        let request = ZSpacePolarityEvidenceRequest {
+            protocol_id: evidence_id('1'),
+            runtime_identity_id: evidence_id('2'),
+            trajectory_id: evidence_id('3'),
+            trajectory_policy_id: evidence_id('4'),
+            control_sequence_id: evidence_id('5'),
+            nominal_schedule_sequence_id: evidence_id('6'),
+            rows,
+        };
+
+        let report = zspace_polarity_evidence_value(request).expect("evidence aggregate");
+        assert_eq!(report["semantic_backend"], "rust");
+        assert_eq!(report["execution_client"], "wasm");
+        assert_eq!(report["corpus_count"], 3);
+        assert_eq!(report["seed_count_per_corpus"], 3);
+        assert_eq!(report["bounded_polarity_improvement_observed"], true);
+
+        let validated =
+            zspace_polarity_evidence_validate_value(report.clone()).expect("validated evidence");
+        assert_eq!(validated, report);
+
+        let mut tampered = report;
+        tampered["contrasts"]["polarity_effect"]["corpus_equal_weight_mean"] = json!(0.0);
+        let error = zspace_polarity_evidence_validate_value(tampered)
+            .expect_err("tampered evidence must fail");
+        assert!(error.contains("canonical Rust evidence aggregate"));
     }
 
     #[test]
@@ -702,9 +805,14 @@ mod tests {
             "zspaceOptimizerFeedbackRestoreObject",
             "zspaceOptimizerFeedbackObserveObject",
             "zspaceOptimizerFeedbackControlObject",
+            "ZSpacePolarityEvidenceRequest",
+            "ZSpacePolarityEvidenceReport",
+            "zspacePolarityEvidenceObject",
+            "zspacePolarityEvidenceValidateObject",
         ] {
             assert!(declarations.contains(symbol), "missing {symbol}");
         }
         assert!(declarations.contains("st-core::runtime::zspace_optimizer_feedback"));
+        assert!(declarations.contains("st-core::runtime::zspace_evidence"));
     }
 }

@@ -117,10 +117,13 @@ from .hf_optimizer_control import (
 from .hf_optimizer_study import (
     HFZSpaceFactorizedStudyError,
     compare_hf_zspace_optimizer_factorized_gain_studies,
+    compare_hf_zspace_optimizer_polarity_studies,
     run_hf_zspace_optimizer_factorized_study,
     run_hf_zspace_optimizer_feedback_study,
+    run_hf_zspace_optimizer_polarity_corpus_study,
     run_hf_zspace_optimizer_polarity_study,
     write_hf_zspace_optimizer_factorized_gain_response_report,
+    write_hf_zspace_optimizer_polarity_corpus_report,
 )
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -508,8 +511,7 @@ def adapter_continuation_executor_main(
         "--detach",
         action="store_true",
         help=(
-            "Launch --run in an isolated background process and return after "
-            "handoff."
+            "Launch --run in an isolated background process and return after handoff."
         ),
     )
     parser.add_argument(
@@ -587,17 +589,12 @@ def adapter_continuation_executor_main(
         not math.isfinite(args.detach_handoff_timeout_seconds)
         or args.detach_handoff_timeout_seconds < 0.0
     ):
-        parser.error(
-            "--detach-handoff-timeout-seconds must be finite and non-negative"
-        )
+        parser.error("--detach-handoff-timeout-seconds must be finite and non-negative")
     if args.max_generations <= 0:
         parser.error("--max-generations must be positive")
     if args.max_steps is not None and args.max_steps <= 0:
         parser.error("--max-steps must be positive")
-    if (
-        not math.isfinite(args.max_steps_multiplier)
-        or args.max_steps_multiplier <= 0.0
-    ):
+    if not math.isfinite(args.max_steps_multiplier) or args.max_steps_multiplier <= 0.0:
         parser.error("--max-steps-multiplier must be positive")
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
@@ -684,8 +681,7 @@ def adapter_continuation_executor_main(
         )
     except Exception as exc:
         print(
-            f"hf_adapter_continuation_executor_error "
-            f"{exc.__class__.__name__}: {exc}",
+            f"hf_adapter_continuation_executor_error {exc.__class__.__name__}: {exc}",
             file=sys.stderr,
         )
         return 2
@@ -1050,8 +1046,7 @@ def adapter_continuation_executor_runtime_main(
 ) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Inspect or reconcile the full executor, launcher, and supervisor "
-            "runtime."
+            "Inspect or reconcile the full executor, launcher, and supervisor runtime."
         ),
     )
     parser.add_argument("launch_state", type=Path)
@@ -1085,9 +1080,7 @@ def adapter_continuation_executor_runtime_main(
                 poll_interval_seconds=args.poll_interval_seconds,
                 timeout_seconds=args.timeout_seconds,
                 handoff_timeout_seconds=args.handoff_timeout_seconds,
-                launch_handoff_timeout_seconds=(
-                    args.launch_handoff_timeout_seconds
-                ),
+                launch_handoff_timeout_seconds=(args.launch_handoff_timeout_seconds),
                 supervisor_state_path=args.supervisor_state,
                 supervisor_launch_state_path=args.supervisor_launch_state,
                 command_cwd=Path.cwd(),
@@ -1480,8 +1473,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             print(f"hf_ft_model_profile_launch_plan_out {written['path']}")
             if written.get("lines_path"):
                 print(
-                    "hf_ft_model_profile_launch_plan_lines_out "
-                    f"{written['lines_path']}"
+                    f"hf_ft_model_profile_launch_plan_lines_out {written['lines_path']}"
                 )
             if args.script_out is not None:
                 script_written = write_hf_finetune_model_profile_launch_script(
@@ -1489,10 +1481,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
                     args.script_out,
                     cd=args.script_cd,
                 )
-                print(
-                    "hf_ft_model_profile_launch_script_out "
-                    f"{script_written['path']}"
-                )
+                print(f"hf_ft_model_profile_launch_script_out {script_written['path']}")
             return 0 if plan["runtime_import_preflight_passed"] else 1
         if args.lines_out is not None:
             args.lines_out.parent.mkdir(parents=True, exist_ok=True)
@@ -1504,10 +1493,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
                     args.script_out,
                     cd=args.script_cd,
                 )
-                print(
-                    "hf_ft_model_profile_launch_script_out "
-                    f"{script_written['path']}"
-                )
+                print(f"hf_ft_model_profile_launch_script_out {script_written['path']}")
             return 0 if plan["runtime_import_preflight_passed"] else 1
         if args.script_out is not None:
             script_written = write_hf_finetune_model_profile_launch_script(
@@ -1527,8 +1513,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         )
         lines = _generation_control_profile_config_lines(report)
         payload = (
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n"
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         )
         if args.json:
             print(payload, end="")
@@ -1550,8 +1535,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             args.lines_out.parent.mkdir(parents=True, exist_ok=True)
             args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
             print(
-                "zspace_generation_control_profile_config_lines_out "
-                f"{args.lines_out}"
+                f"zspace_generation_control_profile_config_lines_out {args.lines_out}"
             )
         return 0
     if args.runtime_contract:
@@ -1562,8 +1546,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         )
         lines = hf_finetune_model_profile_runtime_contract_lines(report)
         payload = (
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n"
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         )
         if args.json:
             print(payload, end="")
@@ -1584,10 +1567,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         if args.lines_out is not None:
             args.lines_out.parent.mkdir(parents=True, exist_ok=True)
             args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            print(
-                "hf_ft_model_profile_runtime_contract_lines_out "
-                f"{args.lines_out}"
-            )
+            print(f"hf_ft_model_profile_runtime_contract_lines_out {args.lines_out}")
         return 0
     if args.runtime_contract_artifact is not None:
         report = hf_finetune_model_profile_runtime_contract_from_artifact(
@@ -1596,8 +1576,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         )
         lines = hf_finetune_model_profile_runtime_contract_lines(report)
         payload = (
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n"
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         )
         if args.json:
             print(payload, end="")
@@ -1618,10 +1597,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         if args.lines_out is not None:
             args.lines_out.parent.mkdir(parents=True, exist_ok=True)
             args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            print(
-                "hf_ft_model_profile_runtime_contract_lines_out "
-                f"{args.lines_out}"
-            )
+            print(f"hf_ft_model_profile_runtime_contract_lines_out {args.lines_out}")
         return 0
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
@@ -1916,7 +1892,9 @@ def checkpoint_generation_control_main(argv: Sequence[str] | None = None) -> int
     parser.add_argument("--curve-model-name", default=None)
     parser.add_argument("--curve-dataset-name", default=None)
     parser.add_argument("--curve-dataset-config", default=None)
-    parser.add_argument("--compare-with-sweep", action="append", type=Path, default=None)
+    parser.add_argument(
+        "--compare-with-sweep", action="append", type=Path, default=None
+    )
     parser.add_argument("--compare-with-label", action="append", default=None)
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
@@ -2040,10 +2018,7 @@ def zspace_generation_control_compare_main(argv: Sequence[str] | None = None) ->
         parser.error("sweep artifact does not exist: " + ", ".join(map(str, missing)))
     sources: dict[str, Path] | list[Path]
     if args.label:
-        sources = {
-            str(label): path
-            for label, path in zip(args.label, args.sweeps)
-        }
+        sources = {str(label): path for label, path in zip(args.label, args.sweeps)}
     else:
         sources = list(args.sweeps)
     comparison = compare_zspace_generation_control_sweeps(
@@ -2054,7 +2029,9 @@ def zspace_generation_control_compare_main(argv: Sequence[str] | None = None) ->
         comparison,
         top_n=int(args.top_n),
     )
-    payload = json.dumps(comparison, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    payload = (
+        json.dumps(comparison, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(payload, encoding="utf-8")
@@ -2137,6 +2114,64 @@ def zspace_optimizer_polarity_compare_main(
         print(f"zspace_optimizer_polarity_compare {args.out}")
     else:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if report.get("status") == "ready" else 1
+
+
+def zspace_optimizer_polarity_corpus_compare_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Aggregate sealed per-corpus HF Z-Space polarity studies through "
+            "the Rust-owned balanced evidence contract."
+        ),
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--study",
+        action="append",
+        required=True,
+        metavar="LABEL=DIR",
+        help="Label and directory of one completed polarity study; may be repeated.",
+    )
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    studies: dict[str, Path] = {}
+    for raw in args.study:
+        label, separator, path = str(raw).partition("=")
+        label = label.strip()
+        path = path.strip()
+        if not separator or not label or not path:
+            parser.error("--study must use LABEL=DIR")
+        if label in studies:
+            parser.error(f"duplicate --study label: {label}")
+        studies[label] = Path(path)
+    try:
+        report = compare_hf_zspace_optimizer_polarity_studies(studies)
+        if args.out is not None:
+            write_hf_zspace_optimizer_polarity_corpus_report(report, args.out)
+    except HFZSpaceFactorizedStudyError as exc:
+        print(f"zspace_optimizer_polarity_corpus_compare_error {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(
+            "zspace_optimizer_polarity_corpus_compare_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json or args.out is None:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            "zspace_optimizer_polarity_corpus_compare "
+            f"status={report.get('status')} "
+            f"report_id={report.get('report_id')} "
+            f"corpora={report.get('corpus_count')} "
+            f"seeds_per_corpus={report.get('seed_count_per_corpus')}"
+        )
+        print(f"zspace_optimizer_polarity_corpus_compare_report {args.out}")
     return 0 if report.get("status") == "ready" else 1
 
 
@@ -2395,6 +2430,94 @@ def zspace_optimizer_polarity_study_main(
     return 0 if summary.get("status") in {"planned", "ready"} else 1
 
 
+def zspace_optimizer_polarity_corpus_study_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Plan or run a resumable corpus-balanced HF Z-Space optimizer "
+            "polarity study. Pass shared fine-tune arguments after --."
+        ),
+        allow_abbrev=False,
+    )
+    parser.add_argument("--study-dir", type=Path, required=True)
+    parser.add_argument(
+        "--corpus",
+        action="append",
+        required=True,
+        metavar="LABEL=FILE",
+        help="Label and local training corpus; may be repeated.",
+    )
+    parser.add_argument(
+        "--seed", dest="seeds", type=int, action="append", required=True
+    )
+    parser.add_argument("--bridge-script", type=Path, default=None)
+    parser.add_argument("--python-executable", type=Path, default=None)
+    parser.add_argument("--launch-cwd", type=Path, default=None)
+    parser.add_argument("--min-free-disk-gb", type=float, default=5.0)
+    parser.add_argument("--run", action="store_true")
+    parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("bridge_args", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    corpora: dict[str, Path] = {}
+    for raw in args.corpus:
+        label, separator, path = str(raw).partition("=")
+        label = label.strip()
+        path = path.strip()
+        if not separator or not label or not path:
+            parser.error("--corpus must use LABEL=FILE")
+        if label in corpora:
+            parser.error(f"duplicate --corpus label: {label}")
+        corpora[label] = Path(path)
+    bridge_args = list(args.bridge_args)
+    if bridge_args and bridge_args[0] == "--":
+        bridge_args.pop(0)
+    try:
+        summary = run_hf_zspace_optimizer_polarity_corpus_study(
+            study_dir=args.study_dir,
+            corpora=corpora,
+            seeds=args.seeds,
+            bridge_args=bridge_args,
+            bridge_script=args.bridge_script,
+            python_executable=args.python_executable,
+            launch_cwd=args.launch_cwd,
+            min_free_disk_gb=args.min_free_disk_gb,
+            execute=args.run,
+            retry_failed=args.retry_failed,
+        )
+    except HFZSpaceFactorizedStudyError as exc:
+        print(f"zspace_optimizer_polarity_corpus_study_error {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(
+            "zspace_optimizer_polarity_corpus_study_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            "zspace_optimizer_polarity_corpus_study "
+            f"status={summary.get('status')} "
+            f"study_id={summary.get('study_id')} "
+            f"corpora={summary.get('completed_corpus_count')}/"
+            f"{summary.get('corpus_count')} "
+            f"completed={summary.get('completed_run_count')}/"
+            f"{summary.get('run_count')}"
+        )
+        print(f"zspace_optimizer_polarity_corpus_study_dir {summary.get('study_dir')}")
+        if summary.get("polarity_corpus_report_sha256") is not None:
+            print(
+                "zspace_optimizer_polarity_corpus_study_report "
+                f"path={summary.get('polarity_corpus_report')} "
+                f"sha256={summary.get('polarity_corpus_report_sha256')}"
+            )
+    return 0 if summary.get("status") in {"planned", "ready"} else 1
+
+
 def zspace_optimizer_factorized_gain_compare_main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -2410,9 +2533,7 @@ def zspace_optimizer_factorized_gain_compare_main(
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
-        report = compare_hf_zspace_optimizer_factorized_gain_studies(
-            args.study_dirs
-        )
+        report = compare_hf_zspace_optimizer_factorized_gain_studies(args.study_dirs)
         written = (
             None
             if args.out is None

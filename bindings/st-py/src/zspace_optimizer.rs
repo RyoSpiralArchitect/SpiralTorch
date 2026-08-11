@@ -2,6 +2,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
+use st_core::runtime::zspace_evidence::{
+    summarize_zspace_polarity_evidence, validate_zspace_polarity_evidence_value,
+    ZSpacePolarityEvidenceRequest,
+};
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
     plan_zspace_parameter_trajectory_policy_from_value, restore_zspace_meta_optimizer,
@@ -158,6 +162,28 @@ fn _zspace_parameter_trajectory_policy_validate(
 }
 
 #[pyfunction]
+fn _zspace_polarity_evidence(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space polarity evidence request")?;
+    let request: ZSpacePolarityEvidenceRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space polarity evidence request", error))?;
+    let report = py
+        .allow_threads(|| summarize_zspace_polarity_evidence(request))
+        .map_err(|error| json_error("Z-space polarity evidence aggregation failed", error))?;
+    response_to_py(py, &report, "Z-space polarity evidence encoding failed")
+}
+
+#[pyfunction]
+fn _zspace_polarity_evidence_validate(
+    py: Python<'_>,
+    report: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let report = request_value(report, "Z-space polarity evidence report")?;
+    let report = validate_zspace_polarity_evidence_value(report)
+        .map_err(|error| json_error("Z-space polarity evidence validation failed", error))?;
+    response_to_py(py, &report, "Z-space polarity evidence encoding failed")
+}
+
+#[pyfunction]
 fn _zspace_optimizer_feedback_init(
     py: Python<'_>,
     config: &Bound<'_, PyAny>,
@@ -246,6 +272,11 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
     )?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_parameter_trajectory_policy_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(_zspace_polarity_evidence, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_polarity_evidence_validate,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_zspace_optimizer_feedback_init, parent)?)?;
