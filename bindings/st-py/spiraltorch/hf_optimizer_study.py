@@ -705,6 +705,29 @@ def build_hf_zspace_optimizer_polarity_study_plan(
 ) -> dict[str, object]:
     """Build one immutable dose-matched trajectory-polarity study plan."""
 
+    return _build_hf_zspace_optimizer_polarity_study_plan(
+        study_dir=study_dir,
+        seeds=seeds,
+        bridge_args=bridge_args,
+        bridge_script=bridge_script,
+        python_executable=python_executable,
+        launch_cwd=launch_cwd,
+        min_free_disk_gb=min_free_disk_gb,
+        shared_git_provenance=None,
+    )
+
+
+def _build_hf_zspace_optimizer_polarity_study_plan(
+    *,
+    study_dir: str | Path,
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | Path | None,
+    python_executable: str | Path | None,
+    launch_cwd: str | Path | None,
+    min_free_disk_gb: float,
+    shared_git_provenance: Mapping[str, object] | None,
+) -> dict[str, object]:
     resolved_study_dir = Path(study_dir).expanduser().resolve()
     resolved_bridge = (
         Path(bridge_script or _default_bridge_script()).expanduser().resolve()
@@ -733,9 +756,13 @@ def build_hf_zspace_optimizer_polarity_study_plan(
             "min_free_disk_gb must be finite and non-negative"
         )
     runtime_source = _runtime_source_fingerprint()
-    git_provenance = _git_source_provenance(
-        resolved_cwd,
-        excluded_path=resolved_study_dir,
+    git_provenance = (
+        dict(shared_git_provenance)
+        if shared_git_provenance is not None
+        else _git_source_provenance(
+            resolved_cwd,
+            excluded_path=resolved_study_dir,
+        )
     )
     scientific_spec = {
         "schema": HF_ZSPACE_POLARITY_STUDY_SCHEMA,
@@ -903,7 +930,7 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
     for source in corpus_sources:
         label = str(source["label"])
         substudy_dir = resolved_study_dir / "corpora" / label
-        plan = build_hf_zspace_optimizer_polarity_study_plan(
+        plan = _build_hf_zspace_optimizer_polarity_study_plan(
             study_dir=substudy_dir,
             seeds=normalized_seeds,
             bridge_args=[*normalized_args, "--train-file", str(source["path"])],
@@ -911,6 +938,7 @@ def build_hf_zspace_optimizer_polarity_corpus_study_plan(
             python_executable=resolved_python,
             launch_cwd=resolved_cwd,
             min_free_disk_gb=min_free_disk_gb,
+            shared_git_provenance=git_provenance,
         )
         substudies.append(
             {

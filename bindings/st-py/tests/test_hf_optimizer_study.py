@@ -714,6 +714,65 @@ def test_factorized_study_excludes_its_artifacts_from_git_provenance(
     assert persisted["git_source_provenance"]["excluded_paths"] == ["runs/study"]
 
 
+def test_polarity_corpus_study_reuses_outer_git_provenance_on_resume(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    bridge = _fake_bridge(repository / "bridge.py")
+    corpus_a = repository / "a.txt"
+    corpus_b = repository / "b.txt"
+    corpus_a.write_text("alpha corpus\n", encoding="utf-8")
+    corpus_b.write_text("beta corpus\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "add", "bridge.py", "a.txt", "b.txt"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=SpiralTorch Test",
+            "-c",
+            "user.email=spiraltorch@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=repository,
+        check=True,
+    )
+    root = repository / "runs" / "corpus-study"
+    kwargs = {
+        "study_dir": root,
+        "corpora": {"alpha": corpus_a, "beta": corpus_b},
+        "seeds": [13],
+        "bridge_args": _shared_corpus_bridge_args(),
+        "bridge_script": bridge,
+        "launch_cwd": repository,
+        "min_free_disk_gb": 0.0,
+    }
+
+    first = st.run_hf_zspace_optimizer_polarity_corpus_study(**kwargs)
+    second = st.run_hf_zspace_optimizer_polarity_corpus_study(**kwargs)
+    persisted = json.loads(
+        (root / study.HF_ZSPACE_POLARITY_CORPUS_STUDY_PLAN_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert second == first
+    outer_provenance = persisted["git_source_provenance"]
+    assert outer_provenance["dirty"] is False
+    assert outer_provenance["excluded_paths"] == ["runs/corpus-study"]
+    assert all(
+        substudy["plan"]["git_source_provenance"] == outer_provenance
+        for substudy in persisted["substudies"]
+    )
+
+
 def test_factorized_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     bridge = _fake_bridge(tmp_path / "bridge.py")
     status = hf_cli.zspace_optimizer_factorized_study_main(
