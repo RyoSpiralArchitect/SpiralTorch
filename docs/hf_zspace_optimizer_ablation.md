@@ -475,9 +475,9 @@ The frozen provenance anchors are:
 - path- and alias-independent outer report ID `sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518`;
 - stable outer report SHA-256 `305042c35fb2662ca1c32330f815fb58dc30ee26517aa8a9419fc1fd15eacb88`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `1422004ece11ebe2b4942020db2c0b1da3c3afac`;
+- stable aggregation Git commit `d098579f7d76aa4382abc928651fbc2eb573d66a`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
-- native library SHA-256 `3a292e08e8a868266958fe1903463b16f19923004f3f0edbe808d4e67c380f06`.
+- native library SHA-256 `118a1cc90c5699961f6dbb0f60fd41ab3cb3a7677e6eec505ffb5d92bd3818de`.
 
 ## Read the contrasts
 

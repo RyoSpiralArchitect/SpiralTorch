@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.hf_zspace_polarity_multicorpus_benchmark.v1",
-  "recorded_at": "2026-08-11T10:49:29Z",
+  "recorded_at": "2026-08-11T11:10:26Z",
   "status": "ready",
   "study": {
     "model": "gpt2",
@@ -80,8 +80,8 @@
     "runtime_identity_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
     "experiment_git_commit": "bedf582863abc60f72a6957163ea34cb75151ff1",
     "experiment_git_clean": true,
-    "loaded_native_extension_sha256": "sha256:3a292e08e8a868266958fe1903463b16f19923004f3f0edbe808d4e67c380f06",
-    "stable_aggregation_git_commit": "1422004ece11ebe2b4942020db2c0b1da3c3afac",
+    "loaded_native_extension_sha256": "sha256:118a1cc90c5699961f6dbb0f60fd41ab3cb3a7677e6eec505ffb5d92bd3818de",
+    "stable_aggregation_git_commit": "d098579f7d76aa4382abc928651fbc2eb573d66a",
     "outer_report_id": "sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518",
     "outer_report_sha256": "sha256:305042c35fb2662ca1c32330f815fb58dc30ee26517aa8a9419fc1fd15eacb88",
     "rust_evidence_id": "sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2",
