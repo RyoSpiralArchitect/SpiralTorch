@@ -2,9 +2,12 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use st_core::runtime::zspace_optimizer::{
-    initialize_zspace_meta_optimizer, restore_zspace_meta_optimizer,
-    transition_zspace_meta_optimizer, zspace_parameter_control_from_value,
+    initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
+    plan_zspace_parameter_trajectory_policy_from_value, restore_zspace_meta_optimizer,
+    transition_zspace_meta_optimizer, validate_zspace_parameter_trajectory_policy_value,
+    validate_zspace_parameter_trajectory_value, zspace_parameter_control_from_value,
     ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
+    ZSpaceParameterTrajectoryPolicy, ZSpaceParameterTrajectoryRequest,
 };
 use st_core::runtime::zspace_optimizer_feedback::{
     control_zspace_optimizer_feedback, initialize_zspace_optimizer_feedback,
@@ -45,6 +48,23 @@ fn response_value<T: Serialize>(response: &T) -> Result<Value, String> {
     Ok(value)
 }
 
+fn semantic_report_value(mut report: Value, label: &str) -> Result<Value, String> {
+    let object = report
+        .as_object_mut()
+        .ok_or_else(|| format!("{label} must be an object"))?;
+    if let Some(client) = object.remove("execution_client") {
+        if client != Value::String("wasm".to_owned()) {
+            return Err(format!("{label} has an untrusted execution_client"));
+        }
+    }
+    Ok(report)
+}
+
+fn trajectory_policy_from_name(name: &str) -> Result<ZSpaceParameterTrajectoryPolicy, String> {
+    serde_json::from_value(Value::String(name.trim().to_lowercase()))
+        .map_err(|error| format!("invalid Z-space parameter-trajectory policy: {error}"))
+}
+
 #[cfg(target_arch = "wasm32")]
 fn to_json_compatible_js(value: &Value) -> Result<JsValue, JsValue> {
     value
@@ -79,6 +99,38 @@ pub fn zspace_meta_optimizer_parameter_control_value(report: Value) -> Result<Va
     }
     let control = zspace_parameter_control_from_value(report).map_err(|error| error.to_string())?;
     response_value(&control)
+}
+
+pub fn zspace_parameter_trajectory_value(
+    request: ZSpaceParameterTrajectoryRequest,
+) -> Result<Value, String> {
+    let report = plan_zspace_parameter_trajectory(request).map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_parameter_trajectory_validate_value(report: Value) -> Result<Value, String> {
+    let report = semantic_report_value(report, "Z-space parameter-trajectory report")?;
+    let report =
+        validate_zspace_parameter_trajectory_value(report).map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_parameter_trajectory_policy_value(
+    source_report: Value,
+    policy: ZSpaceParameterTrajectoryPolicy,
+) -> Result<Value, String> {
+    let source_report =
+        semantic_report_value(source_report, "Z-space parameter-trajectory source report")?;
+    let report = plan_zspace_parameter_trajectory_policy_from_value(source_report, policy)
+        .map_err(|error| error.to_string())?;
+    response_value(&report)
+}
+
+pub fn zspace_parameter_trajectory_policy_validate_value(report: Value) -> Result<Value, String> {
+    let report = semantic_report_value(report, "Z-space parameter-trajectory policy report")?;
+    let report = validate_zspace_parameter_trajectory_policy_value(report)
+        .map_err(|error| error.to_string())?;
+    response_value(&report)
 }
 
 pub fn zspace_optimizer_feedback_init_value(
@@ -186,6 +238,100 @@ pub fn zspace_meta_optimizer_parameter_control_object(
 ) -> Result<JsValue, JsValue> {
     let report = serde_wasm_bindgen::from_value::<Value>(report.clone()).map_err(js_error)?;
     let payload = zspace_meta_optimizer_parameter_control_value(report).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryJson)]
+pub fn zspace_parameter_trajectory_json(request_json: &str) -> Result<String, JsValue> {
+    let request = request_from_json(request_json, "Z-space parameter-trajectory request")
+        .map_err(js_error)?;
+    let payload = zspace_parameter_trajectory_value(request).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryObject)]
+pub fn zspace_parameter_trajectory_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let value = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request =
+        request_from_value(value, "Z-space parameter-trajectory request").map_err(js_error)?;
+    let payload = zspace_parameter_trajectory_value(request).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryValidateJson)]
+pub fn zspace_parameter_trajectory_validate_json(report_json: &str) -> Result<String, JsValue> {
+    let report = serde_json::from_str(report_json).map_err(|error| {
+        js_error(format!(
+            "invalid Z-space parameter-trajectory report JSON: {error}"
+        ))
+    })?;
+    let payload = zspace_parameter_trajectory_validate_value(report).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryValidateObject)]
+pub fn zspace_parameter_trajectory_validate_object(report: &JsValue) -> Result<JsValue, JsValue> {
+    let report = serde_wasm_bindgen::from_value::<Value>(report.clone()).map_err(js_error)?;
+    let payload = zspace_parameter_trajectory_validate_value(report).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryPolicyJson)]
+pub fn zspace_parameter_trajectory_policy_json(
+    source_report_json: &str,
+    policy: &str,
+) -> Result<String, JsValue> {
+    let source_report = serde_json::from_str(source_report_json).map_err(|error| {
+        js_error(format!(
+            "invalid Z-space parameter-trajectory source JSON: {error}"
+        ))
+    })?;
+    let policy = trajectory_policy_from_name(policy).map_err(js_error)?;
+    let payload =
+        zspace_parameter_trajectory_policy_value(source_report, policy).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryPolicyObject)]
+pub fn zspace_parameter_trajectory_policy_object(
+    source_report: &JsValue,
+    policy: &str,
+) -> Result<JsValue, JsValue> {
+    let source_report =
+        serde_wasm_bindgen::from_value::<Value>(source_report.clone()).map_err(js_error)?;
+    let policy = trajectory_policy_from_name(policy).map_err(js_error)?;
+    let payload =
+        zspace_parameter_trajectory_policy_value(source_report, policy).map_err(js_error)?;
+    to_json_compatible_js(&payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryPolicyValidateJson)]
+pub fn zspace_parameter_trajectory_policy_validate_json(
+    report_json: &str,
+) -> Result<String, JsValue> {
+    let report = serde_json::from_str(report_json).map_err(|error| {
+        js_error(format!(
+            "invalid Z-space parameter-trajectory policy report JSON: {error}"
+        ))
+    })?;
+    let payload = zspace_parameter_trajectory_policy_validate_value(report).map_err(js_error)?;
+    serde_json::to_string(&payload).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceParameterTrajectoryPolicyValidateObject)]
+pub fn zspace_parameter_trajectory_policy_validate_object(
+    report: &JsValue,
+) -> Result<JsValue, JsValue> {
+    let report = serde_wasm_bindgen::from_value::<Value>(report.clone()).map_err(js_error)?;
+    let payload = zspace_parameter_trajectory_policy_validate_value(report).map_err(js_error)?;
     to_json_compatible_js(&payload)
 }
 
@@ -377,6 +523,39 @@ mod tests {
             .expect_err("tampered report must fail");
 
         assert!(error.contains("invariant"));
+    }
+
+    #[test]
+    fn wasm_trajectory_policy_round_trips_through_the_rust_contract() {
+        let request = ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![1.2, 0.8, 0.5],
+            nominal_learning_rates: vec![vec![0.01], vec![0.005], vec![0.0025]],
+        };
+        let source = zspace_parameter_trajectory_value(request).expect("source trajectory");
+        assert_eq!(source["execution_client"], "wasm");
+
+        let policy = zspace_parameter_trajectory_policy_value(
+            source,
+            ZSpaceParameterTrajectoryPolicy::DosePreservingComplement,
+        )
+        .expect("trajectory policy");
+        assert_eq!(policy["semantic_backend"], "rust");
+        assert_eq!(policy["execution_client"], "wasm");
+        assert_eq!(policy["policy"], "dose_preserving_complement");
+        let dose_ratio = policy["planned_dose_ratio"]
+            .as_f64()
+            .expect("numeric dose ratio");
+        assert!((dose_ratio - 1.0).abs() <= 1.0e-12);
+
+        let validated = zspace_parameter_trajectory_policy_validate_value(policy.clone())
+            .expect("validated policy");
+        assert_eq!(validated, policy);
+
+        let mut tampered = policy;
+        tampered["steps"][0]["planned_learning_rate_scale"] = json!(1.0);
+        let error = zspace_parameter_trajectory_policy_validate_value(tampered)
+            .expect_err("tampered policy must fail");
+        assert!(error.contains("canonical Rust trajectory policy"));
     }
 
     #[test]

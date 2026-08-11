@@ -727,6 +727,51 @@ def test_factorized_trajectory_arms_match_the_intended_integrated_doses(
     )
 
 
+def test_dose_preserving_complement_actuates_and_seals_policy_evidence(
+    tmp_path: Path,
+) -> None:
+    observed, _ = _run_two_steps(tmp_path, mode="observe")
+    trajectory_path = Path(str(observed.receipt()["trajectory_path"]))
+    trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+
+    callback, optimizer = _run_two_steps(
+        tmp_path,
+        mode="apply",
+        trajectory_arm="dose_preserving_complement",
+        trajectory=trajectory_path,
+    )
+    receipt = callback.receipt()
+    policy_path = Path(str(receipt["trajectory_policy_path"]))
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert receipt["status"] == "ready"
+    assert receipt["trajectory_policy_validated"] is True
+    assert receipt["trajectory_policy"] == "dose_preserving_complement"
+    assert receipt["trajectory_policy_id"] == policy["policy_id"]
+    assert receipt["trajectory_policy_source_trajectory_id"] == (
+        trajectory["trajectory_id"]
+    )
+    assert receipt["trajectory_policy_sha256"] == (
+        "sha256:" + hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    )
+    assert receipt["trajectory_policy_size_bytes"] == policy_path.stat().st_size
+    assert receipt["trajectory_policy_planned_dose_ratio"] == pytest.approx(1.0)
+    assert receipt["actuated_learning_rate_dose"] == pytest.approx(
+        trajectory["nominal_dose"]
+    )
+    assert sum(row[0] for row in optimizer.step_learning_rates) == pytest.approx(
+        policy["planned_dose"]
+    )
+    assert [row[0] for row in optimizer.step_learning_rates] == pytest.approx(
+        [
+            step["nominal_weight"] * step["planned_learning_rate_scale"]
+            for step in policy["steps"]
+        ]
+    )
+    assert policy_path.name == st.HF_ZSPACE_OPTIMIZER_TRAJECTORY_POLICY_FILENAME
+    assert st.validate_zspace_parameter_trajectory_policy(policy) == policy
+
+
 def test_planned_trajectory_rejects_scheduler_drift_before_optimizer_step(
     tmp_path: Path,
 ) -> None:
@@ -786,6 +831,13 @@ def test_non_raw_apply_requires_a_rust_trajectory_identity() -> None:
         st.hf_zspace_optimizer_recipe_contract(
             mode="apply",
             trajectory_arm="dose_normalized",
+        )
+
+    with pytest.raises(ValueError, match="trajectory policy identity"):
+        st.hf_zspace_optimizer_recipe_contract(
+            mode="apply",
+            trajectory_arm="dose_preserving_complement",
+            trajectory_id="sha256:" + "0" * 64,
         )
 
 
@@ -1112,13 +1164,16 @@ def test_public_control_surface_is_exported() -> None:
         "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
         "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
         "HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA",
+        "HF_ZSPACE_POLARITY_ABLATION_SCHEMA",
         "compare_hf_zspace_optimizer_factorized_run_cards",
         "compare_hf_zspace_optimizer_feedback_run_cards",
+        "compare_hf_zspace_optimizer_polarity_run_cards",
         "compare_hf_zspace_optimizer_run_cards",
         "hf_zspace_optimizer_control_callback",
         "hf_zspace_optimizer_recipe_contract",
         "write_hf_zspace_optimizer_factorized_ablation_report",
         "write_hf_zspace_optimizer_feedback_ablation_report",
+        "write_hf_zspace_optimizer_polarity_ablation_report",
         "write_hf_zspace_optimizer_matched_ablation_report",
     ):
         assert name in st.__all__
@@ -1189,17 +1244,27 @@ def _factorized_card(
     mode = "observe" if arm == "observe" else "apply"
     trajectory_arm = "raw" if arm == "observe" else arm
     trajectory_id = "sha256:" + "a" * 64
+    trajectory_policy_id = (
+        "sha256:" + "b" * 64
+        if arm == "dose_preserving_complement"
+        else None
+    )
     recipe = st.hf_zspace_optimizer_recipe_contract(
         mode=mode,
         trajectory_arm=trajectory_arm,
         trajectory_id=None if mode == "observe" else trajectory_id,
+        trajectory_policy_id=trajectory_policy_id,
     )
     card = _matched_card(mode=mode, seed=seed, eval_after=eval_after)
     card["zspace_optimizer_control_recipe"] = recipe
     receipt = card["zspace_optimizer_control_receipt"]
     nominal_dose = 1.0
     raw_dose = 0.8
-    actuated_dose = nominal_dose if arm in {"observe", "dose_normalized"} else raw_dose
+    actuated_dose = (
+        nominal_dose
+        if arm in {"observe", "dose_normalized", "dose_preserving_complement"}
+        else raw_dose
+    )
     receipt.update(
         {
             "recipe": recipe,
@@ -1227,6 +1292,22 @@ def _factorized_card(
             + arm.encode().hex().ljust(64, "0")[:64],
         }
     )
+    if arm == "dose_preserving_complement":
+        receipt.update(
+            {
+                "trajectory_policy_id": trajectory_policy_id,
+                "trajectory_policy_contract": (
+                    st.ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION
+                ),
+                "trajectory_policy_validated": True,
+                "trajectory_policy": "dose_preserving_complement",
+                "trajectory_policy_source_trajectory_id": trajectory_id,
+                "trajectory_policy_horizon_complete": True,
+                "trajectory_policy_planned_non_identity_update_count": 4,
+                "trajectory_policy_planned_dose": nominal_dose,
+                "trajectory_policy_planned_dose_ratio": 1.0,
+            }
+        )
     card["training_recipe_identity"]["identity_payload"]["trainer_contract"][
         "zspace_optimizer_control"
     ] = recipe
@@ -1520,6 +1601,64 @@ def test_factorized_ablation_separates_dose_and_shape_contrasts() -> None:
     assert seed["contrasts"]["raw_total_effect"] == pytest.approx(-0.1)
     assert seed["eval_loss_changes"]["dose_normalized"] == pytest.approx(-0.7)
     assert report["efficacy_claim_ready"] is False
+
+
+def test_polarity_ablation_compares_equal_dose_shape_directions() -> None:
+    cards = []
+    for seed in (13, 17, 23):
+        cards.extend(
+            [
+                _factorized_card(arm="observe", seed=seed, eval_after=2.0),
+                _factorized_card(
+                    arm="dose_normalized",
+                    seed=seed,
+                    eval_after=2.1,
+                ),
+                _factorized_card(
+                    arm="dose_preserving_complement",
+                    seed=seed,
+                    eval_after=1.9,
+                ),
+            ]
+        )
+
+    report = st.compare_hf_zspace_optimizer_polarity_run_cards(cards)
+
+    assert report["status"] == "ready"
+    assert report["matched_seed_count"] == 3
+    assert report["efficacy_claim_ready"] is False
+    assert report["bounded_polarity_improvement_observed"] is True
+    assert report["bounded_baseline_improvement_observed"] is True
+    polarity = report["contrasts"]["polarity_effect"]
+    assert polarity["values"] == pytest.approx([-0.2, -0.2, -0.2])
+    assert polarity["bounded_trend_direction"] == "left_arm_better"
+    assert all(
+        row["trajectory_policy_id"] == "sha256:" + "b" * 64
+        for row in report["polarity_seeds"]
+    )
+
+
+def test_polarity_ablation_rejects_policy_identity_drift() -> None:
+    cards = [
+        _factorized_card(arm="observe", seed=13, eval_after=2.0),
+        _factorized_card(arm="dose_normalized", seed=13, eval_after=2.1),
+        _factorized_card(
+            arm="dose_preserving_complement",
+            seed=13,
+            eval_after=1.9,
+        ),
+    ]
+    cards[-1]["zspace_optimizer_control_receipt"]["trajectory_policy_id"] = (
+        "sha256:" + "c" * 64
+    )
+
+    report = st.compare_hf_zspace_optimizer_polarity_run_cards(cards)
+
+    assert report["status"] == "blocked"
+    assert (
+        "complement recipe and receipt policy identities differ"
+        in report["polarity_seeds"][0]["errors"]
+    )
 
 
 def test_factorized_ablation_accepts_identity_dose_matched_constant() -> None:

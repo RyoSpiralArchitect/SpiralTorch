@@ -817,6 +817,34 @@ optimizer horizon, Rust trajectory, trainer/optimizer traces, execution/runtime
 identity, and training input still agree. Use `--retry-failed` only to move
 unverified prior artifacts into the study's quarantine before a fresh attempt.
 
+When a dose-normalized trajectory is directionally wrong, test its Rust-owned
+centered complement without changing integrated LR dose. The policy computes
+`s_i = 1 - a * (r_i - r_bar_w)` with the largest safe gain inside the shared
+scale bounds, then seals the policy identity, complete step table, dose
+invariant, and artifact hash:
+
+```bash
+spiral-hf-zspace-optimizer-polarity-study \
+  --study-dir models/runs/zspace-polarity-64 \
+  --seed 13 --seed 17 --seed 23 \
+  --min-free-disk-gb 5 \
+  -- \
+  --model-name /path/to/local-model \
+  --tokenizer-name /path/to/local-model \
+  --train --train-file data/corpus.txt \
+  --validation-fraction 0.1 \
+  --finetune-mode lora --lora-rank 4 --lora-alpha 8 \
+  --max-steps 64 --learning-rate 0.00005 \
+  --model-train-dtype float32 --training-use-cpu \
+  --eval-before-train --eval-after-train-policy always
+```
+
+Run it once without `--run` to inspect the immutable plan, then repeat the
+exact command with `--run`. The final `polarity-report.json` compares
+`dose_normalized - observe`, `dose_preserving_complement - observe`, and
+`dose_preserving_complement - dose_normalized`. Three consistent seeds are a
+bounded polarity diagnostic, not a general efficacy claim.
+
 After completing three or more otherwise identical control-gain studies, build
 one receipt-checked response curve:
 

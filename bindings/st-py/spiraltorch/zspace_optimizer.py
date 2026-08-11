@@ -27,6 +27,21 @@ ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION = (
 ZSPACE_PARAMETER_TRAJECTORY_KIND = "spiraltorch.zspace_parameter_trajectory"
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer"
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND = "rust"
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION = (
+    "spiraltorch.zspace_parameter_trajectory_policy.v1"
+)
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND = (
+    "spiraltorch.zspace_parameter_trajectory_policy"
+)
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER = (
+    "st-core::runtime::zspace_optimizer"
+)
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND = "rust"
+ZSPACE_PARAMETER_TRAJECTORY_POLICIES = ("dose_preserving_complement",)
+ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE = (
+    "s_i=1-a*(r_i-r_bar_w),r_bar_w=sum_i(w_i*r_i)/sum_i(w_i),"
+    "a=max_safe_in_[0,1],sum_i(w_i*s_i)=sum_i(w_i)"
+)
 ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION = "spiraltorch.zspace_optimizer_feedback.v1"
 ZSPACE_OPTIMIZER_FEEDBACK_KIND = "spiraltorch.zspace_optimizer_feedback"
 ZSPACE_OPTIMIZER_FEEDBACK_SEMANTIC_OWNER = "st-core::runtime::zspace_optimizer_feedback"
@@ -54,9 +69,16 @@ __all__ = [
     "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION",
     "ZSPACE_PARAMETER_TRAJECTORY_KIND",
+    "ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICIES",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
     "validate_zspace_parameter_trajectory",
+    "validate_zspace_parameter_trajectory_policy",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
@@ -66,6 +88,7 @@ __all__ = [
     "zspace_optimizer_feedback_restore",
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
+    "zspace_parameter_trajectory_policy",
 ]
 
 
@@ -261,6 +284,48 @@ def _validate_parameter_trajectory(contract: Mapping[str, Any]) -> None:
     ):
         raise RuntimeError(
             "native Z-space parameter trajectory returned invalid dimensions"
+        )
+
+
+def _validate_parameter_trajectory_policy(contract: Mapping[str, Any]) -> None:
+    if (
+        contract.get("kind") != ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND
+        or contract.get("contract_version")
+        != ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION
+        or contract.get("semantic_owner")
+        != ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER
+        or contract.get("semantic_backend")
+        != ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND
+        or contract.get("policy_validated") is not True
+    ):
+        raise RuntimeError(
+            "native Z-space core returned an untrusted parameter trajectory policy"
+        )
+    policy_id = contract.get("policy_id")
+    source_id = contract.get("source_trajectory_id")
+    if not all(
+        isinstance(value, str)
+        and value.startswith("sha256:")
+        and len(value) == 71
+        for value in (policy_id, source_id)
+    ):
+        raise RuntimeError(
+            "native Z-space parameter trajectory policy returned invalid identity"
+        )
+    step_count = contract.get("step_count")
+    steps = contract.get("steps")
+    request = contract.get("request")
+    if (
+        isinstance(step_count, bool)
+        or not isinstance(step_count, int)
+        or step_count <= 0
+        or not isinstance(steps, list)
+        or len(steps) != step_count
+        or not isinstance(request, Mapping)
+        or contract.get("policy") not in ZSPACE_PARAMETER_TRAJECTORY_POLICIES
+    ):
+        raise RuntimeError(
+            "native Z-space parameter trajectory policy returned invalid dimensions"
         )
 
 
@@ -544,5 +609,52 @@ def validate_zspace_parameter_trajectory(
 
     return _parameter_trajectory_operation(
         "_zspace_parameter_trajectory_validate",
+        report,
+    )
+
+
+def _parameter_trajectory_policy_operation(
+    name: str,
+    payload: Mapping[str, object],
+) -> dict[str, Any]:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space parameter trajectory policies require the compiled Rust "
+            f"semantic core; rebuild or reinstall SpiralTorch with {name}"
+        )
+    contract = operation(dict(payload))
+    if not isinstance(contract, Mapping):
+        raise RuntimeError(f"native {name} returned a non-mapping payload")
+    result = dict(contract)
+    _validate_parameter_trajectory_policy(result)
+    return result
+
+
+def zspace_parameter_trajectory_policy(
+    source_trajectory: Mapping[str, object],
+    *,
+    policy: str = "dose_preserving_complement",
+) -> dict[str, Any]:
+    """Apply a Rust-owned, dose-preserving policy to a validated trajectory."""
+
+    return _parameter_trajectory_policy_operation(
+        "_zspace_parameter_trajectory_policy",
+        {
+            "source_trajectory": dict(source_trajectory),
+            "policy": str(policy).strip().lower(),
+        },
+    )
+
+
+def validate_zspace_parameter_trajectory_policy(
+    report: Mapping[str, object],
+) -> dict[str, Any]:
+    """Recompute a serialized trajectory policy in Rust and reject changes."""
+
+    return _parameter_trajectory_policy_operation(
+        "_zspace_parameter_trajectory_policy_validate",
         report,
     )

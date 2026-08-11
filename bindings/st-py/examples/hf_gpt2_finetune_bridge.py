@@ -1357,6 +1357,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     except ValueError as exc:
         parser.error(f"invalid fine-tune adapter configuration: {exc}")
     args._hf_zspace_optimizer_trajectory_report = None
+    args._hf_zspace_optimizer_trajectory_policy_report = None
     if args.zspace_optimizer_trajectory_json is not None:
         if not args.zspace_optimizer_trajectory_json.is_file():
             parser.error(
@@ -1374,6 +1375,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             )
         except Exception as exc:
             parser.error(f"invalid Z-space optimizer trajectory: {exc}")
+    if (
+        args.zspace_optimizer_trajectory_arm == "dose_preserving_complement"
+        and args._hf_zspace_optimizer_trajectory_report is not None
+    ):
+        try:
+            args._hf_zspace_optimizer_trajectory_policy_report = (
+                st.zspace_parameter_trajectory_policy(
+                    args._hf_zspace_optimizer_trajectory_report,
+                    policy="dose_preserving_complement",
+                )
+            )
+        except Exception as exc:
+            parser.error(f"invalid Z-space optimizer trajectory policy: {exc}")
     try:
         args._hf_zspace_optimizer_recipe_contract = hf_zspace_optimizer_recipe_contract(
             mode=args.zspace_optimizer_control,
@@ -1386,6 +1400,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 None
                 if args._hf_zspace_optimizer_trajectory_report is None
                 else args._hf_zspace_optimizer_trajectory_report["trajectory_id"]
+            ),
+            trajectory_policy_id=(
+                None
+                if args._hf_zspace_optimizer_trajectory_policy_report is None
+                else args._hf_zspace_optimizer_trajectory_policy_report["policy_id"]
             ),
             feedback_mode=args.zspace_optimizer_feedback,
             feedback_config=args._hf_zspace_optimizer_feedback_config,
@@ -3888,6 +3907,28 @@ def _base_run_card(
                 "step_count": args._hf_zspace_optimizer_trajectory_report[
                     "step_count"
                 ],
+            }
+        ),
+        "zspace_optimizer_trajectory_policy_input": (
+            None
+            if args._hf_zspace_optimizer_trajectory_policy_report is None
+            else {
+                "policy_id": args._hf_zspace_optimizer_trajectory_policy_report[
+                    "policy_id"
+                ],
+                "contract_version": (
+                    args._hf_zspace_optimizer_trajectory_policy_report[
+                        "contract_version"
+                    ]
+                ),
+                "policy": args._hf_zspace_optimizer_trajectory_policy_report[
+                    "policy"
+                ],
+                "source_trajectory_id": (
+                    args._hf_zspace_optimizer_trajectory_policy_report[
+                        "source_trajectory_id"
+                    ]
+                ),
             }
         ),
         "adapter_input_identity": (

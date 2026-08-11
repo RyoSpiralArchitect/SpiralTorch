@@ -44,6 +44,15 @@ pub const ZSPACE_PARAMETER_TRAJECTORY_MAX_NOMINAL_RATE_VALUES: usize = 2_000_000
 pub const ZSPACE_PARAMETER_TRAJECTORY_NORMALIZATION_RULE: &str =
     "s_i=clamp(c*r_i,min_scale,max_scale),sum_i(w_i*s_i)=sum_i(w_i)";
 pub const ZSPACE_PARAMETER_TRAJECTORY_CONSTANT_RULE: &str = "s_constant=sum_i(w_i*r_i)/sum_i(w_i)";
+pub const ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION: &str =
+    "spiraltorch.zspace_parameter_trajectory_policy.v1";
+pub const ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND: &str =
+    "spiraltorch.zspace_parameter_trajectory_policy";
+pub const ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER: &str =
+    "st-core::runtime::zspace_optimizer";
+pub const ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND: &str = "rust";
+pub const ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE: &str =
+    "s_i=1-a*(r_i-r_bar_w),r_bar_w=sum_i(w_i*r_i)/sum_i(w_i),a=max_safe_in_[0,1],sum_i(w_i*s_i)=sum_i(w_i)";
 /// Allocation and transform guard for state carried by untrusted clients.
 pub const ZSPACE_META_OPTIMIZER_MAX_DIMENSION: usize = 4_096;
 /// Largest step represented exactly by Python, JSON, and JavaScript clients.
@@ -498,6 +507,70 @@ pub struct ZSpaceParameterTrajectoryReport {
     pub steps: Vec<ZSpaceParameterTrajectoryStep>,
 }
 
+/// Rust-owned policy applied to a validated parameter trajectory.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZSpaceParameterTrajectoryPolicy {
+    /// Reverse the centered raw trajectory while preserving integrated LR dose.
+    DosePreservingComplement,
+}
+
+/// Source identity and values required to reproduce a trajectory policy.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceParameterTrajectoryPolicyRequest {
+    pub source_trajectory_id: String,
+    pub source_request: ZSpaceParameterTrajectoryRequest,
+    pub policy: ZSpaceParameterTrajectoryPolicy,
+}
+
+/// One step of a Rust-owned trajectory policy.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZSpaceParameterTrajectoryPolicyStep {
+    pub index: u64,
+    pub nominal_learning_rates: Vec<f64>,
+    pub nominal_weight: f64,
+    pub raw_learning_rate_scale: f64,
+    pub centered_raw_residual: f64,
+    pub planned_learning_rate_scale: f64,
+    pub planned_weighted_dose: f64,
+    pub planned_saturated_min: bool,
+    pub planned_saturated_max: bool,
+}
+
+/// Canonical evidence for a policy layered over a validated trajectory.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZSpaceParameterTrajectoryPolicyReport {
+    pub contract_version: &'static str,
+    pub kind: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub policy_validated: bool,
+    pub policy_id: String,
+    pub request: ZSpaceParameterTrajectoryPolicyRequest,
+    pub source_trajectory_contract_version: &'static str,
+    pub source_trajectory_id: String,
+    pub policy: ZSpaceParameterTrajectoryPolicy,
+    pub policy_rule: &'static str,
+    pub minimum_learning_rate_scale: f64,
+    pub maximum_learning_rate_scale: f64,
+    pub step_count: usize,
+    pub parameter_group_count: usize,
+    pub identity_relative_tolerance: f64,
+    pub identity_absolute_tolerance: f64,
+    pub weighted_raw_center: f64,
+    pub polarity_gain: f64,
+    pub nominal_dose: f64,
+    pub planned_dose: f64,
+    pub planned_dose_ratio: f64,
+    pub planned_dose_residual: f64,
+    pub dose_invariant_tolerance: f64,
+    pub planned_non_identity_update_count: usize,
+    pub planned_saturated_min_count: usize,
+    pub planned_saturated_max_count: usize,
+    pub steps: Vec<ZSpaceParameterTrajectoryPolicyStep>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ParameterControlReportProof {
     contract_version: String,
@@ -629,6 +702,12 @@ pub enum ZSpaceMetaOptimizerError {
     },
     #[error("malformed Z-space parameter trajectory report: {message}")]
     MalformedParameterTrajectory { message: String },
+    #[error(
+        "parameter trajectory policy source identity mismatch: expected {expected}, received {actual}"
+    )]
+    ParameterTrajectoryPolicySourceMismatch { expected: String, actual: String },
+    #[error("malformed Z-space parameter trajectory policy report: {message}")]
+    MalformedParameterTrajectoryPolicy { message: String },
 }
 
 /// Stateful Rust API for direct use without a language binding.
@@ -1410,11 +1489,186 @@ pub fn validate_zspace_parameter_trajectory_value(
     Ok(canonical)
 }
 
+/// Applies a canonical policy to a source trajectory whose identity is
+/// independently recomputed in Rust.
+pub fn plan_zspace_parameter_trajectory_policy(
+    request: ZSpaceParameterTrajectoryPolicyRequest,
+) -> Result<ZSpaceParameterTrajectoryPolicyReport, ZSpaceMetaOptimizerError> {
+    let source = plan_zspace_parameter_trajectory(request.source_request.clone())?;
+    if source.trajectory_id != request.source_trajectory_id {
+        return Err(
+            ZSpaceMetaOptimizerError::ParameterTrajectoryPolicySourceMismatch {
+                expected: source.trajectory_id,
+                actual: request.source_trajectory_id,
+            },
+        );
+    }
+
+    let weighted_raw_center = source.raw_dose / source.nominal_dose;
+    require_finite("trajectory_policy.weighted_raw_center", weighted_raw_center)?;
+    let mut polarity_gain: f64 = 1.0;
+    for raw_scale in source.request.raw_learning_rate_scales.iter().copied() {
+        let centered = raw_scale - weighted_raw_center;
+        if centered > 0.0 {
+            polarity_gain = polarity_gain
+                .min((1.0 - ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE) / centered);
+        } else if centered < 0.0 {
+            polarity_gain = polarity_gain
+                .min((ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE - 1.0) / -centered);
+        }
+    }
+    polarity_gain = polarity_gain.clamp(0.0, 1.0);
+    require_finite("trajectory_policy.polarity_gain", polarity_gain)?;
+
+    let mut planned_scales = Vec::with_capacity(source.step_count);
+    for raw_scale in source.request.raw_learning_rate_scales.iter().copied() {
+        planned_scales.push(clamp_parameter_trajectory_policy_scale(
+            1.0 - polarity_gain * (raw_scale - weighted_raw_center),
+        )?);
+    }
+    let planned_dose = planned_scales
+        .iter()
+        .copied()
+        .zip(source.steps.iter())
+        .map(|(scale, step)| scale * step.nominal_weight)
+        .sum::<f64>();
+    require_positive("trajectory_policy.planned_dose", planned_dose)?;
+    let planned_dose_residual = planned_dose - source.nominal_dose;
+    verify_parameter_trajectory_invariant(
+        "trajectory_policy.planned_dose",
+        planned_dose_residual,
+        source.dose_invariant_tolerance,
+    )?;
+    let planned_non_identity_update_count = parameter_trajectory_non_identity_update_count(
+        planned_scales.iter().copied(),
+        &source.request.nominal_learning_rates,
+    );
+
+    let mut planned_saturated_min_count = 0;
+    let mut planned_saturated_max_count = 0;
+    let mut steps = Vec::with_capacity(source.step_count);
+    for (source_step, planned_scale) in source.steps.iter().zip(planned_scales) {
+        let planned_saturated_min =
+            planned_scale == ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE;
+        let planned_saturated_max =
+            planned_scale == ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE;
+        planned_saturated_min_count += usize::from(planned_saturated_min);
+        planned_saturated_max_count += usize::from(planned_saturated_max);
+        steps.push(ZSpaceParameterTrajectoryPolicyStep {
+            index: source_step.index,
+            nominal_learning_rates: source_step.nominal_learning_rates.clone(),
+            nominal_weight: source_step.nominal_weight,
+            raw_learning_rate_scale: source_step.raw_learning_rate_scale,
+            centered_raw_residual: source_step.raw_learning_rate_scale - weighted_raw_center,
+            planned_learning_rate_scale: planned_scale,
+            planned_weighted_dose: source_step.nominal_weight * planned_scale,
+            planned_saturated_min,
+            planned_saturated_max,
+        });
+    }
+
+    let policy = request.policy;
+    let policy_rule = match policy {
+        ZSpaceParameterTrajectoryPolicy::DosePreservingComplement => {
+            ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE
+        }
+    };
+    let policy_id = parameter_trajectory_policy_id(&request)?;
+    Ok(ZSpaceParameterTrajectoryPolicyReport {
+        contract_version: ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION,
+        kind: ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND,
+        semantic_owner: ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER,
+        semantic_backend: ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND,
+        policy_validated: true,
+        policy_id,
+        source_trajectory_contract_version: ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION,
+        source_trajectory_id: source.trajectory_id,
+        policy,
+        policy_rule,
+        minimum_learning_rate_scale: ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
+        maximum_learning_rate_scale: ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
+        step_count: source.step_count,
+        parameter_group_count: source.parameter_group_count,
+        identity_relative_tolerance: ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_RELATIVE_TOLERANCE,
+        identity_absolute_tolerance: ZSPACE_PARAMETER_TRAJECTORY_IDENTITY_ABSOLUTE_TOLERANCE,
+        weighted_raw_center,
+        polarity_gain,
+        nominal_dose: source.nominal_dose,
+        planned_dose,
+        planned_dose_ratio: planned_dose / source.nominal_dose,
+        planned_dose_residual,
+        dose_invariant_tolerance: source.dose_invariant_tolerance,
+        planned_non_identity_update_count,
+        planned_saturated_min_count,
+        planned_saturated_max_count,
+        steps,
+        request,
+    })
+}
+
+/// Validates a complete source report before applying the selected policy.
+pub fn plan_zspace_parameter_trajectory_policy_from_value(
+    source_report: serde_json::Value,
+    policy: ZSpaceParameterTrajectoryPolicy,
+) -> Result<ZSpaceParameterTrajectoryPolicyReport, ZSpaceMetaOptimizerError> {
+    let source = validate_zspace_parameter_trajectory_value(source_report)?;
+    plan_zspace_parameter_trajectory_policy(ZSpaceParameterTrajectoryPolicyRequest {
+        source_trajectory_id: source.trajectory_id,
+        source_request: source.request,
+        policy,
+    })
+}
+
+/// Recomputes a serialized policy in Rust and rejects any changed field.
+pub fn validate_zspace_parameter_trajectory_policy_value(
+    report: serde_json::Value,
+) -> Result<ZSpaceParameterTrajectoryPolicyReport, ZSpaceMetaOptimizerError> {
+    let request_value = report.get("request").cloned().ok_or_else(|| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
+            message: "missing request".to_owned(),
+        }
+    })?;
+    let request = serde_json::from_value(request_value).map_err(|error| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
+            message: error.to_string(),
+        }
+    })?;
+    let canonical = plan_zspace_parameter_trajectory_policy(request)?;
+    let canonical_value = serde_json::to_value(&canonical).map_err(|error| {
+        ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
+            message: error.to_string(),
+        }
+    })?;
+    if report != canonical_value {
+        return Err(
+            ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
+                message: "report does not match the canonical Rust trajectory policy".to_owned(),
+            },
+        );
+    }
+    Ok(canonical)
+}
+
 fn bounded_parameter_trajectory_scale(raw_scale: f64, factor: f64) -> f64 {
     (raw_scale * factor).clamp(
         ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE,
         ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE,
     )
+}
+
+fn clamp_parameter_trajectory_policy_scale(scale: f64) -> Result<f64, ZSpaceMetaOptimizerError> {
+    require_finite("trajectory_policy.planned_learning_rate_scale", scale)?;
+    let minimum = ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE;
+    let maximum = ZSPACE_PARAMETER_CONTROL_MAX_LEARNING_RATE_SCALE;
+    let tolerance = DERIVED_TOLERANCE * scale.abs().max(minimum.abs()).max(maximum.abs());
+    if scale < minimum - tolerance || scale > maximum + tolerance {
+        return Err(ZSpaceMetaOptimizerError::ParameterControlScaleOutOfRange {
+            value: scale,
+            minimum,
+            maximum,
+        });
+    }
+    Ok(scale.clamp(minimum, maximum))
 }
 
 fn clamp_derived_parameter_control_scale(scale: f64) -> Result<f64, ZSpaceMetaOptimizerError> {
@@ -1524,6 +1778,28 @@ fn parameter_trajectory_id(
     for byte in digest {
         write!(&mut hex, "{byte:02x}").map_err(|error| {
             ZSpaceMetaOptimizerError::MalformedParameterTrajectory {
+                message: error.to_string(),
+            }
+        })?;
+    }
+    Ok(format!("sha256:{hex}"))
+}
+
+fn parameter_trajectory_policy_id(
+    request: &ZSpaceParameterTrajectoryPolicyRequest,
+) -> Result<String, ZSpaceMetaOptimizerError> {
+    let encoded =
+        serde_json::to_vec(&(ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION, request))
+            .map_err(
+                |error| ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
+                    message: error.to_string(),
+                },
+            )?;
+    let digest = Sha256::digest(encoded);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").map_err(|error| {
+            ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy {
                 message: error.to_string(),
             }
         })?;
@@ -2533,6 +2809,91 @@ mod tests {
         assert!(matches!(
             validate_zspace_parameter_trajectory_value(tampered_identity),
             Err(ZSpaceMetaOptimizerError::MalformedParameterTrajectory { .. })
+        ));
+    }
+
+    #[test]
+    fn trajectory_policy_reverses_centered_shape_and_preserves_dose() {
+        let source = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![1.2, 0.8, 0.5],
+            nominal_learning_rates: vec![vec![1.0], vec![0.5], vec![0.25]],
+        })
+        .expect("valid source trajectory");
+        let request = ZSpaceParameterTrajectoryPolicyRequest {
+            source_trajectory_id: source.trajectory_id.clone(),
+            source_request: source.request.clone(),
+            policy: ZSpaceParameterTrajectoryPolicy::DosePreservingComplement,
+        };
+
+        let report =
+            plan_zspace_parameter_trajectory_policy(request.clone()).expect("valid policy");
+        let repeated = plan_zspace_parameter_trajectory_policy(request).expect("repeat policy");
+
+        assert!(report.policy_validated);
+        assert_eq!(
+            report.contract_version,
+            ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION
+        );
+        assert_eq!(
+            report.source_trajectory_contract_version,
+            ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION
+        );
+        assert_eq!(report.source_trajectory_id, source.trajectory_id);
+        assert_eq!(report.policy_id, repeated.policy_id);
+        assert!(report.policy_id.starts_with("sha256:"));
+        assert!(report.polarity_gain > 0.0 && report.polarity_gain <= 1.0);
+        assert_relative_eq!(
+            report.planned_dose,
+            report.nominal_dose,
+            epsilon = report.dose_invariant_tolerance
+        );
+        assert_relative_eq!(report.planned_dose_ratio, 1.0, epsilon = 1.0e-12);
+        assert!(report.steps[0].planned_learning_rate_scale < 1.0);
+        assert_eq!(report.steps[2].planned_learning_rate_scale, 1.25);
+        assert!(report.steps.windows(2).all(|pair| {
+            pair[0].raw_learning_rate_scale > pair[1].raw_learning_rate_scale
+                && pair[0].planned_learning_rate_scale < pair[1].planned_learning_rate_scale
+        }));
+        assert_eq!(report.planned_saturated_min_count, 0);
+        assert_eq!(report.planned_saturated_max_count, 1);
+    }
+
+    #[test]
+    fn trajectory_policy_validates_source_and_serialized_evidence() {
+        let source = plan_zspace_parameter_trajectory(ZSpaceParameterTrajectoryRequest {
+            raw_learning_rate_scales: vec![1.1, 0.9],
+            nominal_learning_rates: vec![vec![0.01], vec![0.005]],
+        })
+        .expect("valid source trajectory");
+        let source_value = serde_json::to_value(&source).expect("serialized source");
+        let report = plan_zspace_parameter_trajectory_policy_from_value(
+            source_value,
+            ZSpaceParameterTrajectoryPolicy::DosePreservingComplement,
+        )
+        .expect("validated source policy");
+        let encoded = serde_json::to_value(&report).expect("serialized policy");
+
+        assert_eq!(
+            validate_zspace_parameter_trajectory_policy_value(encoded.clone())
+                .expect("canonical policy"),
+            report
+        );
+
+        let mut tampered = encoded;
+        tampered["steps"][0]["planned_learning_rate_scale"] = serde_json::json!(1.0);
+        assert!(matches!(
+            validate_zspace_parameter_trajectory_policy_value(tampered),
+            Err(ZSpaceMetaOptimizerError::MalformedParameterTrajectoryPolicy { .. })
+        ));
+
+        let mismatched = ZSpaceParameterTrajectoryPolicyRequest {
+            source_trajectory_id: "sha256:changed".to_owned(),
+            source_request: source.request,
+            policy: ZSpaceParameterTrajectoryPolicy::DosePreservingComplement,
+        };
+        assert!(matches!(
+            plan_zspace_parameter_trajectory_policy(mismatched),
+            Err(ZSpaceMetaOptimizerError::ParameterTrajectoryPolicySourceMismatch { .. })
         ));
     }
 

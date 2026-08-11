@@ -2179,6 +2179,111 @@ declare module "spiraltorch-wasm" {
         execution_client: "wasm";
     };
 
+    export type ZSpaceParameterTrajectoryRequest = {
+        raw_learning_rate_scales: number[];
+        nominal_learning_rates: number[][];
+    };
+
+    export type ZSpaceParameterTrajectoryStep = {
+        index: number;
+        nominal_learning_rates: number[];
+        nominal_weight: number;
+        raw_learning_rate_scale: number;
+        dose_matched_constant_scale: number;
+        dose_normalized_scale: number;
+        raw_weighted_dose: number;
+        dose_matched_constant_weighted_dose: number;
+        dose_normalized_weighted_dose: number;
+        dose_normalized_saturated_min: boolean;
+        dose_normalized_saturated_max: boolean;
+    };
+
+    export type ZSpaceParameterTrajectoryReport = {
+        contract_version: "spiraltorch.zspace_parameter_trajectory.v1";
+        kind: "spiraltorch.zspace_parameter_trajectory";
+        semantic_owner: "st-core::runtime::zspace_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        trajectory_validated: true;
+        trajectory_id: string;
+        normalization_rule: string;
+        constant_rule: string;
+        minimum_learning_rate_scale: number;
+        maximum_learning_rate_scale: number;
+        request: ZSpaceParameterTrajectoryRequest;
+        step_count: number;
+        parameter_group_count: number;
+        identity_relative_tolerance: number;
+        identity_absolute_tolerance: number;
+        raw_non_identity_update_count: number;
+        dose_matched_constant_non_identity_update_count: number;
+        dose_normalized_non_identity_update_count: number;
+        nominal_dose: number;
+        raw_dose: number;
+        raw_dose_ratio: number;
+        dose_matched_constant_scale: number;
+        dose_matched_constant_dose: number;
+        dose_normalization_factor: number;
+        dose_normalized_dose: number;
+        dose_normalized_dose_ratio: number;
+        dose_normalized_residual: number;
+        dose_invariant_tolerance: number;
+        dose_normalized_saturated_min_count: number;
+        dose_normalized_saturated_max_count: number;
+        steps: ZSpaceParameterTrajectoryStep[];
+    };
+
+    export type ZSpaceParameterTrajectoryPolicy =
+        "dose_preserving_complement";
+
+    export type ZSpaceParameterTrajectoryPolicyStep = {
+        index: number;
+        nominal_learning_rates: number[];
+        nominal_weight: number;
+        raw_learning_rate_scale: number;
+        centered_raw_residual: number;
+        planned_learning_rate_scale: number;
+        planned_weighted_dose: number;
+        planned_saturated_min: boolean;
+        planned_saturated_max: boolean;
+    };
+
+    export type ZSpaceParameterTrajectoryPolicyReport = {
+        contract_version: "spiraltorch.zspace_parameter_trajectory_policy.v1";
+        kind: "spiraltorch.zspace_parameter_trajectory_policy";
+        semantic_owner: "st-core::runtime::zspace_optimizer";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        policy_validated: true;
+        policy_id: string;
+        request: {
+            source_trajectory_id: string;
+            source_request: ZSpaceParameterTrajectoryRequest;
+            policy: ZSpaceParameterTrajectoryPolicy;
+        };
+        source_trajectory_contract_version: "spiraltorch.zspace_parameter_trajectory.v1";
+        source_trajectory_id: string;
+        policy: ZSpaceParameterTrajectoryPolicy;
+        policy_rule: string;
+        minimum_learning_rate_scale: number;
+        maximum_learning_rate_scale: number;
+        step_count: number;
+        parameter_group_count: number;
+        identity_relative_tolerance: number;
+        identity_absolute_tolerance: number;
+        weighted_raw_center: number;
+        polarity_gain: number;
+        nominal_dose: number;
+        planned_dose: number;
+        planned_dose_ratio: number;
+        planned_dose_residual: number;
+        dose_invariant_tolerance: number;
+        planned_non_identity_update_count: number;
+        planned_saturated_min_count: number;
+        planned_saturated_max_count: number;
+        steps: ZSpaceParameterTrajectoryPolicyStep[];
+    };
+
     export type ZSpaceOptimizerFeedbackConfigInput = {
         loss_ema_alpha?: number;
         relative_delta_ema_alpha?: number;
@@ -2853,6 +2958,28 @@ declare module "spiraltorch-wasm" {
     export function zspaceMetaOptimizerParameterControlObject(
         report: ZSpaceMetaOptimizerStepReport,
     ): ZSpaceParameterControl;
+    export function zspaceParameterTrajectoryJson(requestJson: string): string;
+    export function zspaceParameterTrajectoryObject(
+        request: ZSpaceParameterTrajectoryRequest,
+    ): ZSpaceParameterTrajectoryReport;
+    export function zspaceParameterTrajectoryValidateJson(reportJson: string): string;
+    export function zspaceParameterTrajectoryValidateObject(
+        report: ZSpaceParameterTrajectoryReport,
+    ): ZSpaceParameterTrajectoryReport;
+    export function zspaceParameterTrajectoryPolicyJson(
+        sourceReportJson: string,
+        policy: ZSpaceParameterTrajectoryPolicy,
+    ): string;
+    export function zspaceParameterTrajectoryPolicyObject(
+        sourceReport: ZSpaceParameterTrajectoryReport,
+        policy: ZSpaceParameterTrajectoryPolicy,
+    ): ZSpaceParameterTrajectoryPolicyReport;
+    export function zspaceParameterTrajectoryPolicyValidateJson(
+        reportJson: string,
+    ): string;
+    export function zspaceParameterTrajectoryPolicyValidateObject(
+        report: ZSpaceParameterTrajectoryPolicyReport,
+    ): ZSpaceParameterTrajectoryPolicyReport;
     export function zspaceOptimizerFeedbackInitJson(configJson: string): string;
     export function zspaceOptimizerFeedbackInitObject(
         config: ZSpaceOptimizerFeedbackConfigInput,
