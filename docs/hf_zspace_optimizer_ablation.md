@@ -460,7 +460,7 @@ FT for 9/9 seeds and all 3/3 corpus means. The dose-preserving complement beat
 ordinary FT for 9/9 and beat the normalized shape for 9/9; all three corpus
 means agreed in both comparisons. The independent comparator regenerated the
 same report byte-for-byte, and the Rust validator recomputed evidence ID
-`sha256:124c1aff8c1332f2c05af02d143dec29b8421f9788e83878cfe3bf15040cdbdc`.
+`sha256:faf6d2ba5745dd5cdb36f98c528b4b26d50e34e1b4d510c7da6317ff7a3ba5e2`.
 
 This advances the earlier single-corpus observation to a balanced corpus-level
 trend, but not to a general efficacy result. It is still one local GPT-2 model,
@@ -471,13 +471,13 @@ power analysis or independent generation-quality endpoint. Accordingly,
 The frozen provenance anchors are:
 
 - outer study ID `sha256:168487f38863898a1054587750fe6f8f5b18ccaea2c4be277a66791151b939ec`;
-- path- and alias-independent protocol ID `sha256:d78f640862d85ba1d595aec498892363fe0d4cb888e03c3a69476b39a613c984`;
-- path- and alias-independent outer report ID `sha256:4621feaff530962ce485e41cf2bce77fb2bb049b64f4cc0266748aa5c3841998`;
-- stable outer report SHA-256 `a7dc04da140f3c555b2d5d909cad61c30f7117fb9eb819fb29b89320c2525364`;
+- path- and alias-independent protocol ID `sha256:9c3eea0a389e371eba5394c4aa97e119b97e8d60875852ac0f5f87896d7c5449`;
+- path- and alias-independent outer report ID `sha256:8be8122da3431f1e98aead9414dcda188ebf7777de3612c452b1f72538d8e518`;
+- stable outer report SHA-256 `9d143429e95c46dbe29991ca94120df2ec24a0bbca28135c42d64c973c861bd5`;
 - experiment Git commit `bedf582863abc60f72a6957163ea34cb75151ff1`;
-- stable aggregation Git commit `1c516533515d1a0d5e83f62c4abea5bbee939cf1`;
+- stable aggregation Git commit `9830dc193737e90cccd331d20afe8769a1fa6db9`;
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
-- native library SHA-256 `c909e0fa44c2c69f958c0f1769a0103810413d5a13e5f3b8ecaa96a1b2c1965b`.
+- native library SHA-256 `ade7c63313b4808dda78fa4bf386711067647980205cae0271e54a686b71ea8e`.
 
 ## Read the contrasts
 
