@@ -556,9 +556,9 @@ def test_polarity_evidence_rejects_unbalanced_seed_sets() -> None:
 def test_polarity_evidence_rejects_tiny_direction_reversal() -> None:
     rows = _polarity_evidence_rows()
     for row in rows:
-        row["dose_normalized_shape_effect"] = 4.0e-13
-        row["complement_shape_effect"] = -4.0e-13
-        row["polarity_effect"] = 1.0e-13
+        row["dose_normalized_shape_effect"] = 4.0e-16
+        row["complement_shape_effect"] = -4.0e-16
+        row["polarity_effect"] = 1.0e-16
 
     with pytest.raises(ValueError, match="polarity contrast identity"):
         st.zspace_polarity_evidence(
