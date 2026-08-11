@@ -655,6 +655,7 @@ HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_ZSPACE_MATCHED_ABLATION_SCHEMA: str
 HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA: str
 HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA: str
+HF_ZSPACE_POLARITY_ABLATION_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES: Tuple[str, ...]
 HF_ZSPACE_OPTIMIZER_MODES: Tuple[str, ...]
@@ -665,6 +666,7 @@ HF_ZSPACE_OPTIMIZER_TRACE_FILENAME: str
 HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA: str
 HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS: Tuple[str, ...]
 HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME: str
+HF_ZSPACE_OPTIMIZER_TRAJECTORY_POLICY_FILENAME: str
 
 def hf_zspace_optimizer_recipe_contract(
     *,
@@ -675,6 +677,7 @@ def hf_zspace_optimizer_recipe_contract(
     volume_per_step: int = ...,
     trajectory_arm: str = ...,
     trajectory_id: str | None = ...,
+    trajectory_policy_id: str | None = ...,
     feedback_mode: str = ...,
     feedback_config: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
@@ -703,6 +706,9 @@ def compare_hf_zspace_optimizer_factorized_run_cards(
 def compare_hf_zspace_optimizer_feedback_run_cards(
     run_cards: Sequence[str | PathLike[str] | Mapping[str, object]],
 ) -> Dict[str, object]: ...
+def compare_hf_zspace_optimizer_polarity_run_cards(
+    run_cards: Sequence[str | PathLike[str] | Mapping[str, object]],
+) -> Dict[str, object]: ...
 def write_hf_zspace_optimizer_matched_ablation_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
@@ -712,6 +718,10 @@ def write_hf_zspace_optimizer_factorized_ablation_report(
     path: str | PathLike[str],
 ) -> str: ...
 def write_hf_zspace_optimizer_feedback_ablation_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+def write_hf_zspace_optimizer_polarity_ablation_report(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
@@ -727,6 +737,11 @@ HF_ZSPACE_FEEDBACK_STUDY_EVENT_SCHEMA: str
 HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME: str
 HF_ZSPACE_FEEDBACK_STUDY_SCHEMA: str
 HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA: str
+HF_ZSPACE_POLARITY_STUDY_ARMS: Tuple[str, ...]
+HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA: str
+HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME: str
+HF_ZSPACE_POLARITY_STUDY_SCHEMA: str
+HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA: str
 class HFZSpaceFactorizedStudyError(ValueError): ...
 def build_hf_zspace_optimizer_factorized_study_plan(
     *,
@@ -744,6 +759,16 @@ def build_hf_zspace_optimizer_feedback_study_plan(
     seeds: Sequence[int],
     bridge_args: Sequence[str],
     feedback_config: Mapping[str, object] | None = ...,
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+) -> Dict[str, object]: ...
+def build_hf_zspace_optimizer_polarity_study_plan(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
     bridge_script: str | PathLike[str] | None = ...,
     python_executable: str | PathLike[str] | None = ...,
     launch_cwd: str | PathLike[str] | None = ...,
@@ -770,6 +795,18 @@ def run_hf_zspace_optimizer_feedback_study(
     seeds: Sequence[int],
     bridge_args: Sequence[str],
     feedback_config: Mapping[str, object] | None = ...,
+    bridge_script: str | PathLike[str] | None = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    launch_cwd: str | PathLike[str] | None = ...,
+    min_free_disk_gb: float = ...,
+    execute: bool = ...,
+    retry_failed: bool = ...,
+) -> Dict[str, object]: ...
+def run_hf_zspace_optimizer_polarity_study(
+    *,
+    study_dir: str | PathLike[str],
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
     bridge_script: str | PathLike[str] | None = ...,
     python_executable: str | PathLike[str] | None = ...,
     launch_cwd: str | PathLike[str] | None = ...,
@@ -5297,7 +5334,13 @@ ZSPACE_PARAMETER_CONTROL_MIN_LEARNING_RATE_SCALE: float
 ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND: str
 ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER: str
 ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION: str
+ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE: str
 ZSPACE_PARAMETER_TRAJECTORY_KIND: str
+ZSPACE_PARAMETER_TRAJECTORY_POLICIES: tuple[str, ...]
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION: str
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND: str
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND: str
+ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER: str
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND: str
 ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER: str
 
@@ -5346,6 +5389,14 @@ def zspace_parameter_trajectory(
     nominal_learning_rates: Sequence[Sequence[float]],
 ) -> Dict[str, object]: ...
 def validate_zspace_parameter_trajectory(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_parameter_trajectory_policy(
+    source_trajectory: Mapping[str, object],
+    *,
+    policy: str = ...,
+) -> Dict[str, object]: ...
+def validate_zspace_parameter_trajectory_policy(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
@@ -11349,6 +11400,7 @@ __all__ = [
     "HF_ZSPACE_MATCHED_ABLATION_SCHEMA",
     "HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA",
     "HF_ZSPACE_FEEDBACK_ABLATION_SCHEMA",
+    "HF_ZSPACE_POLARITY_ABLATION_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_CONTROL_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_FEEDBACK_MODES",
     "HF_ZSPACE_OPTIMIZER_MODES",
@@ -11359,13 +11411,16 @@ __all__ = [
     "HF_ZSPACE_OPTIMIZER_TRACE_SCHEMA",
     "HF_ZSPACE_OPTIMIZER_TRAJECTORY_ARMS",
     "HF_ZSPACE_OPTIMIZER_TRAJECTORY_FILENAME",
+    "HF_ZSPACE_OPTIMIZER_TRAJECTORY_POLICY_FILENAME",
     "compare_hf_zspace_optimizer_factorized_run_cards",
     "compare_hf_zspace_optimizer_feedback_run_cards",
+    "compare_hf_zspace_optimizer_polarity_run_cards",
     "compare_hf_zspace_optimizer_run_cards",
     "hf_zspace_optimizer_control_callback",
     "hf_zspace_optimizer_recipe_contract",
     "write_hf_zspace_optimizer_factorized_ablation_report",
     "write_hf_zspace_optimizer_feedback_ablation_report",
+    "write_hf_zspace_optimizer_polarity_ablation_report",
     "write_hf_zspace_optimizer_matched_ablation_report",
     "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_FILENAME",
     "HF_ZSPACE_FACTORIZED_GAIN_RESPONSE_SCHEMA",
@@ -11379,12 +11434,19 @@ __all__ = [
     "HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME",
     "HF_ZSPACE_FEEDBACK_STUDY_SCHEMA",
     "HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_ARMS",
+    "HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME",
+    "HF_ZSPACE_POLARITY_STUDY_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA",
     "HFZSpaceFactorizedStudyError",
     "build_hf_zspace_optimizer_factorized_study_plan",
     "build_hf_zspace_optimizer_feedback_study_plan",
+    "build_hf_zspace_optimizer_polarity_study_plan",
     "compare_hf_zspace_optimizer_factorized_gain_studies",
     "run_hf_zspace_optimizer_factorized_study",
     "run_hf_zspace_optimizer_feedback_study",
+    "run_hf_zspace_optimizer_polarity_study",
     "write_hf_zspace_optimizer_factorized_gain_response_report",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
@@ -11768,10 +11830,17 @@ __all__ = [
     "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE",
     "ZSPACE_PARAMETER_TRAJECTORY_KIND",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICIES",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND",
+    "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
     "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
     "validate_zspace_parameter_trajectory",
+    "validate_zspace_parameter_trajectory_policy",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
@@ -11781,6 +11850,7 @@ __all__ = [
     "zspace_optimizer_feedback_restore",
     "zspace_parameter_control",
     "zspace_parameter_trajectory",
+    "zspace_parameter_trajectory_policy",
     "zspace_generation_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

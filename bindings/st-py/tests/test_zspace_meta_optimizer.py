@@ -448,6 +448,41 @@ def test_parameter_trajectory_rejects_invalid_input_and_tampering() -> None:
         st.validate_zspace_parameter_trajectory(tampered)
 
 
+def test_parameter_trajectory_policy_is_rust_owned_and_dose_preserving() -> None:
+    source = st.zspace_parameter_trajectory(
+        raw_learning_rate_scales=[1.2, 0.8, 0.5],
+        nominal_learning_rates=[[1.0], [0.5], [0.25]],
+    )
+
+    policy = st.zspace_parameter_trajectory_policy(source)
+
+    assert policy["contract_version"] == (
+        st.ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION
+    )
+    assert policy["semantic_owner"] == (
+        st.ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER
+    )
+    assert policy["semantic_backend"] == "rust"
+    assert policy["policy"] == "dose_preserving_complement"
+    assert policy["source_trajectory_id"] == source["trajectory_id"]
+    assert policy["planned_dose"] == pytest.approx(policy["nominal_dose"])
+    assert policy["planned_dose_ratio"] == pytest.approx(1.0)
+    assert 0.0 < policy["polarity_gain"] <= 1.0
+    assert policy["steps"][0]["planned_learning_rate_scale"] < 1.0
+    assert policy["steps"][-1]["planned_learning_rate_scale"] == pytest.approx(1.25)
+    assert st.validate_zspace_parameter_trajectory_policy(policy) == policy
+
+    tampered = copy.deepcopy(policy)
+    tampered["steps"][0]["planned_learning_rate_scale"] = 1.0
+    with pytest.raises(ValueError, match="canonical Rust trajectory policy"):
+        st.validate_zspace_parameter_trajectory_policy(tampered)
+
+    changed_source = copy.deepcopy(source)
+    changed_source["trajectory_id"] = "sha256:" + "0" * 64
+    with pytest.raises(ValueError, match="canonical Rust trajectory"):
+        st.zspace_parameter_trajectory_policy(changed_source)
+
+
 def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
     for name in (
         "ZSPACE_META_OBJECTIVE_FORMULA",
@@ -466,10 +501,18 @@ def test_public_optimizer_contract_is_exported_and_stubbed() -> None:
         "ZSPACE_PARAMETER_CONTROL_SEMANTIC_BACKEND",
         "ZSPACE_PARAMETER_CONTROL_SEMANTIC_OWNER",
         "ZSPACE_PARAMETER_TRAJECTORY_CONTRACT_VERSION",
+        "ZSPACE_PARAMETER_TRAJECTORY_DOSE_PRESERVING_COMPLEMENT_RULE",
         "ZSPACE_PARAMETER_TRAJECTORY_KIND",
+        "ZSPACE_PARAMETER_TRAJECTORY_POLICIES",
+        "ZSPACE_PARAMETER_TRAJECTORY_POLICY_CONTRACT_VERSION",
+        "ZSPACE_PARAMETER_TRAJECTORY_POLICY_KIND",
+        "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_BACKEND",
+        "ZSPACE_PARAMETER_TRAJECTORY_POLICY_SEMANTIC_OWNER",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_BACKEND",
         "ZSPACE_PARAMETER_TRAJECTORY_SEMANTIC_OWNER",
         "validate_zspace_parameter_trajectory",
+        "validate_zspace_parameter_trajectory_policy",
         "zspace_parameter_trajectory",
+        "zspace_parameter_trajectory_policy",
     ):
         assert name in st.__all__

@@ -232,6 +232,40 @@ def test_factorized_study_plan_is_deterministic_and_owns_arm_flags(
     assert raw["command"].count("--seed") == 1
 
 
+def test_polarity_study_plan_is_deterministic_and_owns_policy_arm(
+    tmp_path: Path,
+) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    kwargs = {
+        "study_dir": tmp_path / "polarity-study",
+        "seeds": [23, 13],
+        "bridge_args": _bridge_args(),
+        "bridge_script": bridge,
+        "python_executable": sys.executable,
+        "launch_cwd": tmp_path,
+        "min_free_disk_gb": 0.0,
+    }
+
+    first = st.build_hf_zspace_optimizer_polarity_study_plan(**kwargs)
+    second = st.build_hf_zspace_optimizer_polarity_study_plan(**kwargs)
+
+    assert first == second
+    assert first["schema"] == st.HF_ZSPACE_POLARITY_STUDY_SCHEMA
+    assert first["scientific_spec"]["seeds"] == [13, 23]
+    assert first["run_count"] == 6
+    seed_runs = first["runs"][:3]
+    assert [run["arm"] for run in seed_runs] == list(
+        st.HF_ZSPACE_POLARITY_STUDY_ARMS
+    )
+    assert "--zspace-optimizer-trajectory-out" in seed_runs[0]["command"]
+    for run in seed_runs[1:]:
+        assert "--zspace-optimizer-trajectory-json" in run["command"]
+    complement = seed_runs[-1]
+    arm_index = complement["command"].index("--zspace-optimizer-trajectory-arm")
+    assert complement["command"][arm_index + 1] == "dose_preserving_complement"
+    assert first["artifacts"]["polarity_report"].endswith("polarity-report.json")
+
+
 def test_study_runtime_fingerprint_seals_loaded_native_binary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -616,6 +650,34 @@ def test_factorized_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
     assert "status=planned" in capsys.readouterr().out
     assert (
         tmp_path / "study" / study.HF_ZSPACE_FACTORIZED_STUDY_PLAN_FILENAME
+    ).is_file()
+
+
+def test_polarity_study_cli_writes_a_plan(tmp_path: Path, capsys) -> None:
+    bridge = _fake_bridge(tmp_path / "bridge.py")
+    status = hf_cli.zspace_optimizer_polarity_study_main(
+        [
+            "--study-dir",
+            str(tmp_path / "polarity-study"),
+            "--seed",
+            "13",
+            "--bridge-script",
+            str(bridge),
+            "--launch-cwd",
+            str(tmp_path),
+            "--min-free-disk-gb",
+            "0",
+            "--",
+            *_bridge_args(),
+        ]
+    )
+
+    assert status == 0
+    assert "status=planned" in capsys.readouterr().out
+    assert (
+        tmp_path
+        / "polarity-study"
+        / study.HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME
     ).is_file()
 
 

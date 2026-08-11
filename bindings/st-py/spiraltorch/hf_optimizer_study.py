@@ -22,8 +22,10 @@ from .hf_optimizer_control import (
     HF_ZSPACE_FACTORIZED_ABLATION_SCHEMA,
     compare_hf_zspace_optimizer_factorized_run_cards,
     compare_hf_zspace_optimizer_feedback_run_cards,
+    compare_hf_zspace_optimizer_polarity_run_cards,
     write_hf_zspace_optimizer_factorized_ablation_report,
     write_hf_zspace_optimizer_feedback_ablation_report,
+    write_hf_zspace_optimizer_polarity_ablation_report,
 )
 from .zspace_optimizer import (
     ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION,
@@ -66,6 +68,20 @@ HF_ZSPACE_FEEDBACK_STUDY_PLAN_FILENAME = "feedback-study-plan.json"
 HF_ZSPACE_FEEDBACK_STUDY_EVENTS_FILENAME = "feedback-study-events.jsonl"
 HF_ZSPACE_FEEDBACK_STUDY_SUMMARY_FILENAME = "feedback-study-summary.json"
 HF_ZSPACE_FEEDBACK_STUDY_REPORT_FILENAME = "feedback-report.json"
+HF_ZSPACE_POLARITY_STUDY_SCHEMA = "spiraltorch.hf_zspace_polarity_study.v1"
+HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA = "spiraltorch.hf_zspace_polarity_study_event.v1"
+HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA = (
+    "spiraltorch.hf_zspace_polarity_study_summary.v1"
+)
+HF_ZSPACE_POLARITY_STUDY_ARMS = (
+    "observe",
+    "dose_normalized",
+    "dose_preserving_complement",
+)
+HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME = "polarity-study-plan.json"
+HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME = "polarity-study-events.jsonl"
+HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME = "polarity-study-summary.json"
+HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME = "polarity-report.json"
 
 _MANAGED_BRIDGE_FLAGS = frozenset(
     {
@@ -633,6 +649,113 @@ def build_hf_zspace_optimizer_factorized_study_plan(
             ),
             "factorized_report": str(
                 resolved_study_dir / HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME
+            ),
+        },
+        "run_count": len(runs),
+        "runs": runs,
+    }
+
+
+def build_hf_zspace_optimizer_polarity_study_plan(
+    *,
+    study_dir: str | Path,
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+) -> dict[str, object]:
+    """Build one immutable dose-matched trajectory-polarity study plan."""
+
+    resolved_study_dir = Path(study_dir).expanduser().resolve()
+    resolved_bridge = (
+        Path(bridge_script or _default_bridge_script()).expanduser().resolve()
+    )
+    resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
+    resolved_cwd = Path(launch_cwd or Path.cwd()).expanduser().resolve()
+    if not resolved_bridge.is_file():
+        raise HFZSpaceFactorizedStudyError(
+            f"HF fine-tune bridge does not exist: {resolved_bridge}"
+        )
+    if not resolved_python.is_file():
+        raise HFZSpaceFactorizedStudyError(
+            f"Python executable does not exist: {resolved_python}"
+        )
+    normalized_args = tuple(str(argument) for argument in bridge_args)
+    max_steps = _validate_base_args(normalized_args)
+    normalized_seeds = tuple(sorted(set(int(seed) for seed in seeds)))
+    if not normalized_seeds or len(normalized_seeds) != len(seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity study seeds must be non-empty and unique"
+        )
+    if any(seed < 0 for seed in normalized_seeds):
+        raise HFZSpaceFactorizedStudyError(
+            "polarity study seeds must be non-negative"
+        )
+    if not math.isfinite(min_free_disk_gb) or min_free_disk_gb < 0.0:
+        raise HFZSpaceFactorizedStudyError(
+            "min_free_disk_gb must be finite and non-negative"
+        )
+    runtime_source = _runtime_source_fingerprint()
+    git_provenance = _git_source_provenance(
+        resolved_cwd,
+        excluded_path=resolved_study_dir,
+    )
+    scientific_spec = {
+        "schema": HF_ZSPACE_POLARITY_STUDY_SCHEMA,
+        "arms": list(HF_ZSPACE_POLARITY_STUDY_ARMS),
+        "seeds": list(normalized_seeds),
+        "max_steps": max_steps,
+        "bridge_args": list(normalized_args),
+        "bridge_sha256": _sha256_file(resolved_bridge),
+        "launch_cwd": str(resolved_cwd),
+        "runtime_source_id": runtime_source["source_id"],
+        "git_head": git_provenance.get("head"),
+        "git_status_id": git_provenance.get("status_id"),
+    }
+    study_id = _sha256_id(scientific_spec)
+    runs = [
+        _build_run_plan(
+            study_id=study_id,
+            study_dir=resolved_study_dir,
+            seed=seed,
+            arm=arm,
+            python_executable=resolved_python,
+            bridge_script=resolved_bridge,
+            base_args=normalized_args,
+            min_free_disk_gb=min_free_disk_gb,
+        )
+        for seed in normalized_seeds
+        for arm in HF_ZSPACE_POLARITY_STUDY_ARMS
+    ]
+    return {
+        "schema": HF_ZSPACE_POLARITY_STUDY_SCHEMA,
+        "row_type": "hf_zspace_polarity_study_plan",
+        "status": "planned",
+        "study_id": study_id,
+        "study_dir": str(resolved_study_dir),
+        "scientific_spec": scientific_spec,
+        "runtime_source_fingerprint": runtime_source,
+        "git_source_provenance": git_provenance,
+        "execution_policy": {
+            "python_executable": str(resolved_python),
+            "bridge_script": str(resolved_bridge),
+            "min_free_disk_gb": min_free_disk_gb,
+            "run_order": "seed_then_observe_normalized_complement",
+            "resume_policy": "verified_run_card_and_journal_receipt_only",
+            "failure_policy": "preserve_and_fail_closed",
+        },
+        "artifacts": {
+            "plan": str(resolved_study_dir / HF_ZSPACE_POLARITY_STUDY_PLAN_FILENAME),
+            "events": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_STUDY_EVENTS_FILENAME
+            ),
+            "summary": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_STUDY_SUMMARY_FILENAME
+            ),
+            "polarity_report": str(
+                resolved_study_dir / HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME
             ),
         },
         "run_count": len(runs),
@@ -1212,6 +1335,48 @@ def _validate_completed_run_card(
         raise HFZSpaceFactorizedStudyError(
             "run card trajectory identity does not match its artifact"
         )
+    trajectory_policy_id = None
+    if receipt_arm == "dose_preserving_complement":
+        trajectory_policy_id = receipt.get("trajectory_policy_id")
+        policy_path_value = receipt.get("trajectory_policy_path")
+        if (
+            not isinstance(trajectory_policy_id, str)
+            or not trajectory_policy_id.startswith("sha256:")
+            or receipt.get("trajectory_policy_validated") is not True
+            or receipt.get("trajectory_policy_source_trajectory_id") != trajectory_id
+            or not isinstance(policy_path_value, str)
+        ):
+            raise HFZSpaceFactorizedStudyError(
+                "run card has no complete Rust trajectory policy evidence"
+            )
+        policy_path = Path(policy_path_value).resolve()
+        output_path = Path(str(run["output_dir"])).resolve()
+        if not policy_path.is_file() or not policy_path.is_relative_to(output_path):
+            raise HFZSpaceFactorizedStudyError(
+                "run card trajectory policy artifact is missing or misplaced"
+            )
+        if receipt.get("trajectory_policy_sha256") != _sha256_file(policy_path):
+            raise HFZSpaceFactorizedStudyError(
+                "run card trajectory policy artifact differs from its receipt"
+            )
+        policy_size = receipt.get("trajectory_policy_size_bytes")
+        if (
+            isinstance(policy_size, bool)
+            or not isinstance(policy_size, int)
+            or policy_size != policy_path.stat().st_size
+        ):
+            raise HFZSpaceFactorizedStudyError(
+                "run card trajectory policy size differs from its receipt"
+            )
+        policy = _read_json(policy_path)
+        if (
+            policy.get("policy_id") != trajectory_policy_id
+            or policy.get("source_trajectory_id") != trajectory_id
+            or policy.get("policy_validated") is not True
+        ):
+            raise HFZSpaceFactorizedStudyError(
+                "run card trajectory policy identity does not match its artifact"
+            )
     optimizer_trace = Path(str(run["optimizer_trace"]))
     if not optimizer_trace.is_file() or receipt.get("trace_sha256") != _sha256_file(
         optimizer_trace
@@ -1237,6 +1402,7 @@ def _validate_completed_run_card(
         "before_eval_loss": before_loss,
         "after_eval_loss": after_loss,
         "trajectory_id": trajectory_id,
+        "trajectory_policy_id": trajectory_policy_id,
         "feedback_config_id": observed_feedback_config_id,
         "realized_update_count": realized,
         "execution_identity_id": _ready_identity_id(
@@ -1807,6 +1973,43 @@ def run_hf_zspace_optimizer_feedback_study(
     )
 
 
+def run_hf_zspace_optimizer_polarity_study(
+    *,
+    study_dir: str | Path,
+    seeds: Sequence[int],
+    bridge_args: Sequence[str],
+    bridge_script: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    launch_cwd: str | Path | None = None,
+    min_free_disk_gb: float = 5.0,
+    execute: bool = False,
+    retry_failed: bool = False,
+) -> dict[str, object]:
+    """Plan or execute a fail-closed, dose-matched polarity study."""
+
+    plan = build_hf_zspace_optimizer_polarity_study_plan(
+        study_dir=study_dir,
+        seeds=seeds,
+        bridge_args=bridge_args,
+        bridge_script=bridge_script,
+        python_executable=python_executable,
+        launch_cwd=launch_cwd,
+        min_free_disk_gb=min_free_disk_gb,
+    )
+    return _run_hf_zspace_optimizer_study_plan(
+        plan,
+        execute=execute,
+        retry_failed=retry_failed,
+        event_schema=HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA,
+        summary_schema=HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA,
+        summary_row_type="hf_zspace_polarity_study_summary",
+        report_artifact_key="polarity_report",
+        report_prefix="polarity",
+        compare_cards=compare_hf_zspace_optimizer_polarity_run_cards,
+        write_report=write_hf_zspace_optimizer_polarity_ablation_report,
+    )
+
+
 def _split_control_gain(arguments: Sequence[str]) -> tuple[float, list[str]]:
     gains: list[float] = []
     base_arguments: list[str] = []
@@ -2229,9 +2432,16 @@ __all__ = [
     "HF_ZSPACE_FACTORIZED_STUDY_REPORT_FILENAME",
     "HF_ZSPACE_FACTORIZED_STUDY_SCHEMA",
     "HF_ZSPACE_FACTORIZED_STUDY_SUMMARY_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_ARMS",
+    "HF_ZSPACE_POLARITY_STUDY_EVENT_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_REPORT_FILENAME",
+    "HF_ZSPACE_POLARITY_STUDY_SCHEMA",
+    "HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA",
     "HFZSpaceFactorizedStudyError",
     "build_hf_zspace_optimizer_factorized_study_plan",
+    "build_hf_zspace_optimizer_polarity_study_plan",
     "compare_hf_zspace_optimizer_factorized_gain_studies",
     "run_hf_zspace_optimizer_factorized_study",
+    "run_hf_zspace_optimizer_polarity_study",
     "write_hf_zspace_optimizer_factorized_gain_response_report",
 ]

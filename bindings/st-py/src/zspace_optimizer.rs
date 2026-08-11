@@ -4,10 +4,11 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_optimizer::{
     initialize_zspace_meta_optimizer, plan_zspace_parameter_trajectory,
-    restore_zspace_meta_optimizer, transition_zspace_meta_optimizer,
+    plan_zspace_parameter_trajectory_policy_from_value, restore_zspace_meta_optimizer,
+    transition_zspace_meta_optimizer, validate_zspace_parameter_trajectory_policy_value,
     validate_zspace_parameter_trajectory_value, zspace_parameter_control_from_value,
     ZSpaceMetaOptimizerConfig, ZSpaceMetaOptimizerRestoreRequest, ZSpaceMetaOptimizerStepRequest,
-    ZSpaceParameterTrajectoryRequest,
+    ZSpaceParameterTrajectoryPolicy, ZSpaceParameterTrajectoryRequest,
 };
 use st_core::runtime::zspace_optimizer_feedback::{
     control_zspace_optimizer_feedback, initialize_zspace_optimizer_feedback,
@@ -110,6 +111,53 @@ fn _zspace_parameter_trajectory_validate(
 }
 
 #[pyfunction]
+fn _zspace_parameter_trajectory_policy(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = request_value(request, "Z-space parameter-trajectory policy request")?;
+    let source = request
+        .get("source_trajectory")
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err("source_trajectory is required"))?;
+    let policy = request
+        .get("policy")
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err("policy is required"))?;
+    let policy: ZSpaceParameterTrajectoryPolicy = serde_json::from_value(policy)
+        .map_err(|error| json_error("invalid Z-space parameter-trajectory policy", error))?;
+    let report = py
+        .allow_threads(|| plan_zspace_parameter_trajectory_policy_from_value(source, policy))
+        .map_err(|error| {
+            json_error("Z-space parameter-trajectory policy planning failed", error)
+        })?;
+    response_to_py(
+        py,
+        &report,
+        "Z-space parameter-trajectory policy encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_parameter_trajectory_policy_validate(
+    py: Python<'_>,
+    report: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let report = request_value(report, "Z-space parameter-trajectory policy report")?;
+    let report = validate_zspace_parameter_trajectory_policy_value(report).map_err(|error| {
+        json_error(
+            "Z-space parameter-trajectory policy validation failed",
+            error,
+        )
+    })?;
+    response_to_py(
+        py,
+        &report,
+        "Z-space parameter-trajectory policy encoding failed",
+    )
+}
+
+#[pyfunction]
 fn _zspace_optimizer_feedback_init(
     py: Python<'_>,
     config: &Bound<'_, PyAny>,
@@ -190,6 +238,14 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
     parent.add_function(wrap_pyfunction!(_zspace_parameter_trajectory, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_parameter_trajectory_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_parameter_trajectory_policy,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_parameter_trajectory_policy_validate,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(_zspace_optimizer_feedback_init, parent)?)?;
