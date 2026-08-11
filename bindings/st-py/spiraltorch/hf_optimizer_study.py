@@ -2334,6 +2334,12 @@ def _polarity_corpus_study_bundle(
         event for event in events if event.get("event_type") == "study_completed"
     ]
     report_sha256 = _sha256_file(report_path)
+    sealed_completion_events = [
+        event
+        for event in completed_events
+        if event.get("status") == "ready"
+        and event.get("polarity_report_sha256") == report_sha256
+    ]
     if (
         summary.get("schema") != HF_ZSPACE_POLARITY_STUDY_SUMMARY_SCHEMA
         or summary.get("status") != "ready"
@@ -2345,12 +2351,17 @@ def _polarity_corpus_study_bundle(
         or summary.get("polarity_status") != "ready"
         or summary.get("polarity_report_sha256") != report_sha256
         or not completed_events
+        or not sealed_completion_events
         or completed_events[-1].get("status") != "ready"
         or completed_events[-1].get("polarity_report_sha256") != report_sha256
     ):
         raise HFZSpaceFactorizedStudyError(
             f"polarity corpus {normalized_label} summary is not ready or sealed"
         )
+    completion_event_id = _sha256_identity(
+        sealed_completion_events[0].get("event_id"),
+        field="completion event identity",
+    )
     run_cards: list[Path] = []
     for index, run in enumerate(runs):
         if not isinstance(run, Mapping) or not isinstance(run.get("run_card"), str):
@@ -2472,6 +2483,7 @@ def _polarity_corpus_study_bundle(
         "seeds": seeds,
         "plan_sha256": _sha256_file(plan_path),
         "summary_sha256": _sha256_file(summary_path),
+        "completion_event_id": completion_event_id,
         "polarity_report_sha256": report_sha256,
     }
 
@@ -2544,7 +2556,7 @@ def compare_hf_zspace_optimizer_polarity_studies(
                 "corpus_id",
                 "source_args",
                 "plan_sha256",
-                "summary_sha256",
+                "completion_event_id",
                 "polarity_report_sha256",
             )
         }

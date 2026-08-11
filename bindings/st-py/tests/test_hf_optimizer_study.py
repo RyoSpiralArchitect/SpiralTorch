@@ -1171,6 +1171,7 @@ def _polarity_corpus_bundle(label: str) -> dict[str, object]:
         "seeds": [13, 17, 23],
         "plan_sha256": "sha256:" + "8" * 64,
         "summary_sha256": "sha256:" + "9" * 64,
+        "completion_event_id": "sha256:" + "b" * 64,
         "polarity_report_sha256": "sha256:" + "a" * 64,
     }
 
@@ -1205,6 +1206,27 @@ def test_polarity_corpus_comparison_delegates_balanced_semantics_to_rust(
         == 3
     )
     assert report["report_id"].startswith("sha256:")
+    assert report["corpora"][0]["completion_event_id"] == "sha256:" + "b" * 64
+    assert "summary_sha256" not in report["corpora"][0]
+
+
+def test_polarity_corpus_report_ignores_mutable_summary_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = {label: _polarity_corpus_bundle(label) for label in ("a", "b", "c")}
+    monkeypatch.setattr(
+        study,
+        "_polarity_corpus_study_bundle",
+        lambda label, _path: bundles[label],
+    )
+    studies = {label: Path(f"/study/{label}") for label in bundles}
+
+    first = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+    for index, bundle in enumerate(bundles.values()):
+        bundle["summary_sha256"] = "sha256:" + str(index + 1) * 64
+    second = st.compare_hf_zspace_optimizer_polarity_studies(studies)
+
+    assert second == first
 
 
 def test_polarity_corpus_comparison_rejects_protocol_drift(
