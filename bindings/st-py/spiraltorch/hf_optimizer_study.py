@@ -186,6 +186,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     return {str(key): value for key, value in payload.items()}
 
 
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
 def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
@@ -1351,7 +1359,7 @@ def _validate_completed_run_card(
             )
         policy_path = Path(policy_path_value).resolve()
         output_path = Path(str(run["output_dir"])).resolve()
-        if not policy_path.is_file() or not policy_path.is_relative_to(output_path):
+        if not policy_path.is_file() or not _path_is_within(policy_path, output_path):
             raise HFZSpaceFactorizedStudyError(
                 "run card trajectory policy artifact is missing or misplaced"
             )

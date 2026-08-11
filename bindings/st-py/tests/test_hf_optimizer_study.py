@@ -38,6 +38,14 @@ def _trajectory_id(seed: int) -> str:
     return f"sha256:{seed + 1:064x}"
 
 
+def test_path_is_within_is_python_38_compatible(tmp_path: Path) -> None:
+    parent = (tmp_path / "parent").resolve()
+
+    assert study._path_is_within(parent / "child" / "artifact.json", parent)
+    assert study._path_is_within(parent, parent)
+    assert not study._path_is_within(tmp_path / "sibling" / "artifact.json", parent)
+
+
 def _feedback_config() -> dict[str, object]:
     return {
         "loss_ema_alpha": 0.2,
