@@ -5,6 +5,7 @@
 //! Clients collect matched run-card contrasts, while this module owns the
 //! balanced cross-corpus validation and corpus-equal-weight summaries.
 
+use num_bigint::{BigInt, BigUint, Sign};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -500,31 +501,29 @@ where
 }
 
 fn finite_mean(values: &[f64], field: &str) -> Result<f64, ZSpacePolarityEvidenceError> {
-    let count = values.len() as f64;
     if values.iter().all(|value| *value == values[0]) {
         return Ok(values[0]);
     }
-    // Power-of-two scaling is exact for normal operands and bounds every prefix.
-    let divisor = values.len().next_power_of_two() as f64;
-    let mut scaled_values = Vec::with_capacity(values.len());
-    let mut division_underflows = Vec::new();
+    // Every finite f64 is an integer multiple of the minimum subnormal. Summing
+    // those integers first lets the final division perform the only rounding.
+    let mut exact_sum = BigInt::from(0_u8);
     for value in values {
-        let scaled = value / divisor;
-        if *value != 0.0 && !scaled.is_normal() {
-            division_underflows.push(*value);
+        let bits = value.to_bits();
+        let raw_exponent = (bits >> 52) & 0x7ff;
+        let fraction = bits & ((1_u64 << 52) - 1);
+        let (significand, shift) = if raw_exponent == 0 {
+            (fraction, 0)
         } else {
-            scaled_values.push(scaled);
+            ((1_u64 << 52) | fraction, (raw_exponent - 1) as usize)
+        };
+        let term = BigInt::from(significand) << shift;
+        if bits >> 63 == 0 {
+            exact_sum += term;
+        } else {
+            exact_sum -= term;
         }
     }
-    let scaled_mean = expansion_sum(scaled_values.iter().copied()) * (divisor / count);
-    let underflow_mean = expansion_sum(division_underflows.iter().copied()) / count;
-    let mean = refine_scaled_mean(
-        &scaled_values,
-        &division_underflows,
-        divisor,
-        values.len(),
-        expansion_sum([scaled_mean, underflow_mean]),
-    );
+    let mean = rounded_binary_mean(exact_sum, values.len());
     if mean.is_finite() {
         Ok(mean)
     } else {
@@ -590,91 +589,43 @@ where
     sum + compensation
 }
 
-fn expansion_sum<I>(values: I) -> f64
-where
-    I: IntoIterator<Item = f64>,
-{
-    // Keep a non-overlapping expansion, then apply the final half-even correction.
-    let mut partials = Vec::<f64>::new();
-    for mut value in values {
-        let partial_count = partials.len();
-        let mut retained = 0;
-        for index in 0..partial_count {
-            let mut partial = partials[index];
-            if value.abs() < partial.abs() {
-                std::mem::swap(&mut value, &mut partial);
-            }
-            let high = value + partial;
-            let low = partial - (high - value);
-            if low != 0.0 {
-                partials[retained] = low;
-                retained += 1;
-            }
-            value = high;
-        }
-        partials.truncate(retained);
-        if value != 0.0 {
-            partials.push(value);
-        }
-    }
-
-    let Some(mut high) = partials.pop() else {
+fn rounded_binary_mean(exact_sum: BigInt, count: usize) -> f64 {
+    let (sign, numerator) = exact_sum.into_parts();
+    if sign == Sign::NoSign {
         return 0.0;
-    };
-    let mut low = 0.0;
-    while let Some(partial) = partials.pop() {
-        let previous = high;
-        high += partial;
-        low = partial - (high - previous);
-        if low != 0.0 {
-            break;
-        }
     }
-    if partials
-        .last()
-        .is_some_and(|partial| (low < 0.0 && *partial < 0.0) || (low > 0.0 && *partial > 0.0))
-    {
-        let doubled = low * 2.0;
-        let rounded = high + doubled;
-        if doubled == rounded - high {
-            high = rounded;
-        }
-    }
-    high
-}
 
-fn refine_scaled_mean(
-    scaled_values: &[f64],
-    division_underflows: &[f64],
-    divisor: f64,
-    count: usize,
-    mut mean: f64,
-) -> f64 {
-    let count_f64 = count as f64;
-    for _ in 0..2 {
-        let scaled_mean_term = mean / divisor;
-        if mean != 0.0 && !scaled_mean_term.is_normal() {
-            break;
-        }
-        // Interleave each observation with the candidate contribution so residual
-        // accumulation cannot recreate the large same-sign prefix we scaled away.
-        let residual_terms = scaled_values
-            .iter()
-            .flat_map(|value| [*value, -scaled_mean_term])
-            .chain(std::iter::repeat_n(
-                -scaled_mean_term,
-                count - scaled_values.len(),
-            ));
-        let scaled_residual = expansion_sum(residual_terms) * (divisor / count_f64);
-        let underflow_residual = expansion_sum(division_underflows.iter().copied()) / count_f64;
-        let correction = expansion_sum([scaled_residual, underflow_residual]);
-        let refined = expansion_sum([mean, correction]);
-        if refined == mean {
-            break;
-        }
-        mean = refined;
+    let count = BigUint::from(count);
+    // Keep at most 53 significant bits; shift zero also covers subnormals.
+    let integer_bits = (&numerator / &count).bits();
+    let mut shift = integer_bits.saturating_sub(53) as usize;
+    let denominator = &count << shift;
+    let quotient = &numerator / &denominator;
+    let remainder = &numerator % &denominator;
+    let digits = quotient.to_u64_digits();
+    debug_assert!(digits.len() <= 1);
+    let mut significand = digits.first().copied().unwrap_or(0);
+    // Round the exact rational quotient to nearest, breaking ties toward even.
+    let doubled_remainder = remainder << 1_usize;
+    if doubled_remainder > denominator || (doubled_remainder == denominator && significand & 1 == 1)
+    {
+        significand += 1;
     }
-    mean
+    if significand == 1_u64 << 53 {
+        significand >>= 1;
+        shift += 1;
+    }
+
+    let magnitude_bits = if significand < 1_u64 << 52 {
+        debug_assert_eq!(shift, 0);
+        significand
+    } else {
+        let raw_exponent = shift as u64 + 1;
+        debug_assert!(raw_exponent < 0x7ff);
+        (raw_exponent << 52) | (significand - (1_u64 << 52))
+    };
+    let sign_bit = if sign == Sign::Minus { 1_u64 << 63 } else { 0 };
+    f64::from_bits(sign_bit | magnitude_bits)
 }
 
 fn evidence_direction(values: &[f64]) -> ZSpacePolarityEvidenceDirection {
@@ -987,6 +938,19 @@ mod tests {
             finite_mean(&values, "reversed_subnormal_residual")
                 .expect("reversed subnormal residual mean"),
             mean
+        );
+    }
+
+    #[test]
+    fn finite_means_use_subnormals_to_break_large_rounding_ties() {
+        let smallest_subnormal = f64::from_bits(1);
+        let next_down_maximum = f64::from_bits(f64::MAX.to_bits() - 1);
+        let mut values = vec![-f64::MAX, -next_down_maximum, -smallest_subnormal];
+        values.resize(16, 0.0);
+
+        assert_eq!(
+            finite_mean(&values, "subnormal_tie_break").expect("exactly rounded mean"),
+            -f64::MAX / 8.0
         );
     }
 
