@@ -484,6 +484,159 @@ The frozen provenance anchors are:
 - runtime source ID `sha256:ce31b284d9b88c15d6083ef5e16cbbb167d1df18684705dd99b3260b1a7ccbc2`;
 - native library SHA-256 `7a5914318c835bc216a283f7f223e9c1a84b38707a8358e7c8607c61a11eafe1`.
 
+## Pythia-70M model-family-transfer pilot
+
+The next step changes model family without promoting the prior GPT-2 trend to
+an efficacy claim. The checked-in [pilot protocol](benchmarks/hf_zspace_pythia70m_polarity_pilot_protocol_v1.json)
+freezes one Pythia-70M snapshot, the fiction corpus, three seeds, three polarity
+arms, and an independent eight-prompt generation endpoint. The generation
+endpoint uses the Rust-owned token-sequence evidence contract and deliberately
+disables inference-time Z-Space control, so it measures the trained adapters
+rather than a mixture of training and decoding interventions.
+
+The protocol pins generation-evidence behavior to commit
+`32b552670bde887102420d340a7769d47e451e89`. A later checkout is acceptable
+only when the functional paths are byte-identical; the study plan still seals
+the actual Git head and status. Verify the model and corpus hashes in the
+protocol before planning.
+
+```bash
+MODEL_CONFIGS="$PWD/bindings/st-py/examples/hf_finetune_model_configs.example.json"
+PYTHIA_SNAPSHOT="/Users/ryospiralarchitect/.hf_home/hub/models--EleutherAI--pythia-70m-deduped/snapshots/e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+CORPUS="/Users/ryospiralarchitect/SpiralReality/data/dubliners.txt"
+PROMPTS="$PWD/bindings/st-py/examples/hf_generation_evidence_pythia70m_pilot_prompts.json"
+STUDY_DIR="$PWD/models/runs/hf-zspace-pythia70m-polarity-pilot-v1"
+
+git diff --exit-code 32b552670bde887102420d340a7769d47e451e89 -- \
+  crates/st-core/src/runtime/zspace_generation_evidence.rs \
+  bindings/st-py/src/zspace_generation_evidence.rs \
+  bindings/st-py/spiraltorch/generation_evidence.py \
+  bindings/st-py/examples/hf_gpt2_zspace_generation_control_sweep.py \
+  bindings/st-py/examples/hf_generation_evidence_pythia70m_pilot_prompts.json
+
+STUDY_ARGS=(
+  --study-dir "$STUDY_DIR"
+  --seed 13 --seed 17 --seed 23
+  --min-free-disk-gb 5
+)
+
+BRIDGE_ARGS=(
+  --
+  --model-configs "$MODEL_CONFIGS"
+  --model-profile pythia-70m-local-smoke
+  --model-name "$PYTHIA_SNAPSHOT"
+  --tokenizer-name "$PYTHIA_SNAPSHOT"
+  --train-file "$CORPUS"
+  --validation-fraction 0.1
+  --train
+  --finetune-mode lora
+  --lora-rank 4
+  --lora-alpha 8
+  --lora-dropout 0.05
+  --lora-bias none
+  --lora-target-module query_key_value
+  --lora-target-module dense
+  --max-steps 64
+  --learning-rate 0.00005
+  --model-train-dtype float32
+  --training-use-cpu
+  --per-device-train-batch-size 2
+  --per-device-eval-batch-size 2
+  --gradient-accumulation-steps 8
+  --logging-steps 8
+  --block-size 128
+  --max-eval-blocks 16
+  --save-steps 250
+  --eval-steps 250
+  --save-total-limit 1
+  --dataloader-num-workers 0
+  --dataloader-pin-memory false
+  --eval-before-train
+  --eval-after-train-policy always
+)
+
+# Freeze and inspect the immutable nine-run plan first.
+spiral-hf-zspace-optimizer-polarity-study \
+  "${STUDY_ARGS[@]}" "${BRIDGE_ARGS[@]}"
+
+# Execute only after study-plan.json and all input hashes are accepted.
+spiral-hf-zspace-optimizer-polarity-study \
+  "${STUDY_ARGS[@]}" --run "${BRIDGE_ARGS[@]}"
+```
+
+After all nine run cards are ready, collect one greedy, baseline-only generation
+report per adapter. Reusing the training seed makes the decoding identity
+matched across the three arms within each seed; greedy decoding itself remains
+deterministic.
+
+```bash
+for SEED in 13 17 23; do
+  for ARM in observe dose_normalized dose_preserving_complement; do
+    RUN_DIR="$STUDY_DIR/runs/s${SEED}/${ARM}"
+    spiral-hf-zspace-generation-control-sweep \
+      --model-configs "$MODEL_CONFIGS" \
+      --model-profile pythia-70m-local-smoke \
+      --model-name "$RUN_DIR/output" \
+      --tokenizer-name "$PYTHIA_SNAPSHOT" \
+      --model-artifact-kind peft-adapter \
+      --prompt-set "$PROMPTS" \
+      --baseline-only \
+      --no-do-sample \
+      --max-new-tokens 96 \
+      --seed "$SEED" \
+      --out "$RUN_DIR/generation-evidence.json"
+  done
+done
+```
+
+Every report must have status `complete`, exactly one baseline run, the fixed
+prompt-set identity, and a report that round-trips through
+`validate_zspace_generation_evidence()`. These nine pilot rows demonstrate
+cross-family execution only; they are explicitly excluded from a later
+prespecified efficacy analysis.
+
+```bash
+STUDY_DIR="$STUDY_DIR" python3 - <<'PY'
+import json
+import os
+from collections import defaultdict
+from pathlib import Path
+
+import spiraltorch as st
+
+root = Path(os.environ["STUDY_DIR"])
+paths = sorted(root.glob("runs/s*/*/generation-evidence.json"))
+assert len(paths) == 9, f"expected 9 generation reports, found {len(paths)}"
+
+protocol_ids = set()
+prompt_set_ids = set()
+runtime_ids = set()
+decoding_ids_by_seed = defaultdict(set)
+for path in paths:
+    report = json.loads(path.read_text(encoding="utf-8"))
+    assert report["status"] == "complete" and report["run_count"] == 1
+    row = report["runs"][0]
+    assert row["status"] == "ok"
+    evidence = row["generation_evidence"]
+    assert st.validate_zspace_generation_evidence(evidence) == evidence
+    request = evidence["request"]
+    seed = int(path.parents[1].name.removeprefix("s"))
+    protocol_ids.add(request["protocol_id"])
+    prompt_set_ids.add(request["prompt_set_id"])
+    runtime_ids.add(request["runtime_identity_id"])
+    decoding_ids_by_seed[seed].add(request["decoding_config_id"])
+
+assert len(protocol_ids) == 1
+assert prompt_set_ids == {
+    "sha256:4a5029e46c21915c4982c7eb005978ff7759cb04901c49f7d0e9f4b6aaaf94ed"
+}
+assert len(runtime_ids) == 1
+assert set(decoding_ids_by_seed) == {13, 17, 23}
+assert all(len(ids) == 1 for ids in decoding_ids_by_seed.values())
+print("pythia70m_generation_evidence_ready", len(paths))
+PY
+```
+
 ## Read the contrasts
 
 All contrasts use `left_arm loss change - right_arm loss change`; lower is

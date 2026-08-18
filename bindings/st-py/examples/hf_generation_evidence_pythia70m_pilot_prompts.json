@@ -1,0 +1,39 @@
+{
+  "schema": "spiraltorch.hf_generation_prompt_set.v1",
+  "prompt_set_id": "sha256:4a5029e46c21915c4982c7eb005978ff7759cb04901c49f7d0e9f4b6aaaf94ed",
+  "scope": "Fixed independent English continuation prompts for the Pythia-70M architecture-transfer pilot; not a semantic-quality gold set.",
+  "prompts": [
+    {
+      "label": "quiet-evening",
+      "text": "The evening had grown quiet when"
+    },
+    {
+      "label": "opened-letter",
+      "text": "She opened the letter and found"
+    },
+    {
+      "label": "city-edge",
+      "text": "At the edge of the city, the"
+    },
+    {
+      "label": "winter-memory",
+      "text": "He remembered the winter morning when"
+    },
+    {
+      "label": "smaller-room",
+      "text": "The room seemed smaller after"
+    },
+    {
+      "label": "silent-table",
+      "text": "No one at the table spoke until"
+    },
+    {
+      "label": "window-light",
+      "text": "Beyond the window, a faint light"
+    },
+    {
+      "label": "return-promise",
+      "text": "They had promised to return before"
+    }
+  ]
+}
