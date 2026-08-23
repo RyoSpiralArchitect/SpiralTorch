@@ -24,6 +24,7 @@ HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA = (
     "spiraltorch.hf_repetition_unlikelihood_receipt.v2"
 )
 HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY = "_spiraltorch_repetition_unlikelihood_plan"
+_MODEL_TOPK_MAX_FLOAT_BYTES = 32 * 1024 * 1024
 
 __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
@@ -424,27 +425,41 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
         if target_coordinates:
             torch = __import__("torch")
             device = logits.device
-            sequence_tensor = torch.tensor(
-                sequence_indices, device=device, dtype=torch.long
+            max_chunk_rows = max(
+                1,
+                _MODEL_TOPK_MAX_FLOAT_BYTES // (vocabulary_size * 4),
             )
-            prediction_tensor = torch.tensor(
-                prediction_indices, device=device, dtype=torch.long
-            )
+            proposal_rows: list[list[int]] = []
             with torch.no_grad():
-                active_logits = (
-                    logits[sequence_tensor, prediction_tensor].detach().float()
-                )
-                proposal_rows = (
-                    torch.topk(
+                for chunk_start in range(
+                    0, len(target_coordinates), max_chunk_rows
+                ):
+                    chunk_end = min(
+                        chunk_start + max_chunk_rows,
+                        len(target_coordinates),
+                    )
+                    sequence_tensor = torch.tensor(
+                        sequence_indices[chunk_start:chunk_end],
+                        device=device,
+                        dtype=torch.long,
+                    )
+                    prediction_tensor = torch.tensor(
+                        prediction_indices[chunk_start:chunk_end],
+                        device=device,
+                        dtype=torch.long,
+                    )
+                    active_logits = (
+                        logits[sequence_tensor, prediction_tensor].detach().float()
+                    )
+                    chunk_proposals = torch.topk(
                         active_logits,
                         k=proposal_top_k,
                         dim=-1,
                         largest=True,
                         sorted=True,
-                    )
-                    .indices.cpu()
-                    .tolist()
-                )
+                    ).indices.cpu().tolist()
+                    proposal_rows.extend(chunk_proposals)
+                    del active_logits
             for (sequence_index, target_index), proposals in zip(
                 target_coordinates, proposal_rows, strict=True
             ):

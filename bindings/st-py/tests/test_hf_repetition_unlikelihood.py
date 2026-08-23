@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 import spiraltorch as st
+import spiraltorch.hf_repetition_unlikelihood as hf_repetition_unlikelihood
 
 
 torch = pytest.importorskip("torch")
@@ -242,6 +243,46 @@ def test_hf_trainer_materializes_model_topk_history_after_forward() -> None:
     assert receipt["active_position_ratio"] == 1.0
     assert receipt["proposal_count"] == 1
     assert receipt["candidate_count"] == 1
+
+
+def test_hf_trainer_chunks_model_topk_proposals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _Model()
+    trainer_class = st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)
+    trainer = trainer_class(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_recipe(
+            candidate_source="model_topk_history",
+            proposal_top_k=1,
+        ),
+    )
+    sequence = {
+        "token_ids": [1, 2, 3, 1, 2, 4],
+        "token_mask": [True] * 6,
+        "label_mask": [False, True, True, True, True, True],
+    }
+    observed_chunk_rows: list[int] = []
+    original_topk = torch.topk
+
+    def recording_topk(values: Any, *args: Any, **kwargs: Any) -> Any:
+        observed_chunk_rows.append(int(values.shape[0]))
+        return original_topk(values, *args, **kwargs)
+
+    monkeypatch.setattr(
+        hf_repetition_unlikelihood,
+        "_MODEL_TOPK_MAX_FLOAT_BYTES",
+        2 * int(model.logits.shape[-1]) * 4,
+    )
+    monkeypatch.setattr(torch, "topk", recording_topk)
+
+    plan = trainer._spiraltorch_materialize_plan(
+        model.logits,
+        st.HfRepetitionUnlikelihoodBatchPlan(None, (sequence,)),
+    )
+
+    assert observed_chunk_rows == [2, 2, 1]
+    assert plan["aggregate"]["eligible_target_count"] == 5  # type: ignore[index]
 
 
 def test_hf_trainer_keeps_evaluation_loss_as_plain_causal_lm_loss() -> None:
