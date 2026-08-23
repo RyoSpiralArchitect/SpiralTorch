@@ -429,18 +429,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--zspace-repetition-unlikelihood-candidate-source",
-        choices=("prior-continuation", "model-topk-history"),
+        choices=(
+            "prior-continuation",
+            "model-topk-history",
+            "model-topk-periodic",
+        ),
         default="prior-continuation",
         help=(
-            "Select the Rust-owned candidate contract. model-topk-history "
-            "filters detached model proposals against bounded token history."
+            "Select the Rust-owned candidate contract. model-topk-history and "
+            "model-topk-periodic filter detached model proposals in Rust; periodic "
+            "retains only proposals completing a bounded repeated suffix."
         ),
     )
     parser.add_argument(
         "--zspace-repetition-unlikelihood-proposal-top-k",
         type=int,
         default=8,
-        help="Detached model proposals per supervised position for model-topk-history.",
+        help=(
+            "Detached model proposals per supervised position for model-topk-history "
+            "or model-topk-periodic."
+        ),
     )
     parser.add_argument(
         "--zspace-repetition-unlikelihood-context-window",
