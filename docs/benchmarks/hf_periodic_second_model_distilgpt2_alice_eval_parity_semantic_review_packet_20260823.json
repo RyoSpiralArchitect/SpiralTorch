@@ -1,0 +1,668 @@
+{
+  "schema": "spiraltorch.hf_blinded_semantic_review_packet.v1",
+  "status": "ready_for_blinded_review",
+  "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+  "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+  "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+  "group_count": 36,
+  "candidate_count": 108,
+  "instructions": "Score each candidate without consulting training arms, token-loop metrics, held-out loss, or the separate unblinding map. Return one review row per group and candidate plus one preference per group.",
+  "rubric": {
+    "fluency": "integer 1 through 5",
+    "prompt_relevance": "integer 1 through 5",
+    "local_coherence": "integer 1 through 5",
+    "non_repetition": "integer 1 through 5",
+    "preference": "A, B, C, or tie"
+  },
+  "groups": [
+    {
+      "group_id": "sha256:2307769ebd7583a4408c34f4d5b4d88e6b12f157b13e70f2c712fe1420a2eb79",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:119613e6be1b9d71287c3f59b2c205da570ec8516a62d12ff8d178f4ebfd27fa",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:ce303c31f56060e82f24dc7c8adb8b87b75577213955f4a847fc5f8afce9f008",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:5c3b7624204406c05e46f0870c013e5a2e29da927769a3d05956be4e3fdbbca3",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:24957d6bf33e559230b0de5287e7666fae4f3894ba98f621e2522c45a9ca70c9",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:b5a25d2f7d91201f3e9f48244800bdfaea9272eee21001963ed1cc8e46344330",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:b1a00c8aad75cb394574bcf5a6730452d5c2435ec71a7c2778af532af93f9903",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:e8b11356a500a18344626320d9e0a2c482b1583d668f5fa2d4f7e9ee83cab1bb",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:6823df242ff3c2087f0fd0714e97028d0625785b3dee3304a5e57ea3e71868d5",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:cbc73484aa2a3df07e2f5bf27c8144165c55757b2569813db1653ef449b2753c",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:5731d10e02936a2d3449f73d4fea0ae869bcec9d7f4184967a2026ae1987aa47",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:33d37c84512197ff64639f91718e7dc3cb8ec4c3afd67db5ee4a52afb2949e98",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:a96f3562eaf8ad59e645971067461cc011efc92637eaa576b8b88990e8dff5c0",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:b053a5993262196ab3567c15dbb9959dbacd96624d25ef276c5834121e525f6e",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:774a7321401cdc44fc5820b6edaccef1a4fef30937049f8f36e017d377d78a57",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:00b2242167751286fb0e4bc33b18cc980fa5f5a3bf848017b702005704223c0d",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:143830dcdf9d54b5f69f8250a0932aa208576dd54c4a9c0dd3454aacd8460b19",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:b162f2c3a53282e7d8cbbe769be8db953cdacce9e0f7eae5bc11222b9ae397f1",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:409afb4727d8182ac44c48b4b8b9853965d741465d2bc42eecf5fc8a8d32c6cd",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:ae59d0893f0b03ade8a12e17f3c8d683ebc1c795a6ec1ccf0fbdca0bebbd2c05",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:50d6782d70f1dedf946f3eae6d03f5ebd03e8479c159d38c18561360cc3535f3",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:339a12ab69b193f5344c6a99567c6e855fd76306c1885b7236e9d189d0560109",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had arrested a man who had been arrested for allegedly carrying a suitcase with a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:8eba48d02b5e2efc3384422b647b484bf35c1d1162cca0ad3565017b2a909a66",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:a3dd4a023ab4e25fb2cc169b6fdd2681e9ba5fa18fec1d85deff8cafc93b8acb",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:20af2f2db673158fbb894ac19b1a537885e878b9f1086ef1d2b937cea3e04118",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:7ba463de9b723877ea94f4d0c603dba16e6cf2143887b9edafe715fc91e6fc97",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:d13492a94865588faccb95fafab290f97239d8bec1eb3274812b4e80e6f3b833",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:305be819920e6ca3c95c53e4e2f89c38fec5a7143677a23afac842718fe2b958",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:36224e30792b0a22c1aa347888e30bd0eac4b028ca4fdcd2c4944d505b7a66af",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:0b4872836591d8b5b2f8d877c2cdf853e6baf8b0f2a159cd6527b471f9e97789",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:7af5ae315b261b6d6c088e1b6e870af29800d02181af9c199f9fad4c30e017bb",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:1092e1ddaea38ec40c43b57169854790ff7199be03c2b622bd079bb43fe168bd",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:9ec5e8ffec62a11f4b9dfeab9ead4068e43f768824f1c30b2e587e62ce8de54c",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:0bf190f7fd56b54475bb6d47fba3ad1b50f209991f55dac8628582c1e9ea2405",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:2e9e313f5eeac5d744be8c8d728108d2754221bf60cfbf7ede3eafe1d81f7994",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:2510a331efe7a7b962aa174af37ef76facdc1cf4809e93691cbd74cace80b187",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+        }
+      ]
+    }
+  ],
+  "packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82"
+}
