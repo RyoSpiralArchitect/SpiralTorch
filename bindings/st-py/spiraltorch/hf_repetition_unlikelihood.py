@@ -84,7 +84,7 @@ def hf_repetition_unlikelihood_recipe_contract(
     canonical_config = dict(config)
     enabled = float(canonical_config["strength"]) > 0.0
     return {
-        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v3",
+        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v4",
         "enabled": enabled,
         "semantic_owner": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
         "semantic_backend": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
@@ -94,6 +94,10 @@ def hf_repetition_unlikelihood_recipe_contract(
         "proposal_rule": ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
         "objective_rule": ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
         "evaluation_loss": "causal_lm_loss_only",
+        "evaluation_loss_normalization": (
+            "preserve_base_trainer_loss_kwargs" if enabled else None
+        ),
+        "evaluation_num_items_in_batch": ("preserve_base_trainer" if enabled else None),
         "gradient_accumulation_normalization": (
             "trainer_divides_the_combined_microbatch_mean" if enabled else None
         ),
@@ -351,9 +355,26 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             self._zspace_repetition_unlikelihood_recipe
         )
         super().__init__(*args, **kwargs)
+        self._spiraltorch_base_model_accepts_loss_kwargs = bool(
+            getattr(self, "model_accepts_loss_kwargs", False)
+        )
         # Otherwise Transformers token-normalizes only the model loss across an
         # accumulation group, multiplying this per-microbatch auxiliary term.
         self.model_accepts_loss_kwargs = False
+
+    def _get_num_items_in_batch(self, batch_samples: Any, device: Any) -> Any:
+        base_accepts = getattr(
+            self, "_spiraltorch_base_model_accepts_loss_kwargs", False
+        )
+        model = getattr(self, "model", None)
+        if model is None or model.training or not base_accepts:
+            return super()._get_num_items_in_batch(batch_samples, device)
+
+        self.model_accepts_loss_kwargs = True
+        try:
+            return super()._get_num_items_in_batch(batch_samples, device)
+        finally:
+            self.model_accepts_loss_kwargs = False
 
     def _spiraltorch_base_compute_loss(
         self,
@@ -365,7 +386,17 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
         kwargs: dict[str, Any] = {"return_outputs": True}
         if self._spiraltorch_base_compute_loss_accepts_num_items:
             kwargs["num_items_in_batch"] = num_items_in_batch
-        return super().compute_loss(model, inputs, **kwargs)
+        if model.training or not self._spiraltorch_base_model_accepts_loss_kwargs:
+            return super().compute_loss(model, inputs, **kwargs)
+
+        # Preserve the base Trainer's causal-LM normalization during evaluation.
+        # Training still keeps this disabled so the auxiliary microbatch mean is
+        # scaled together with the model loss under gradient accumulation.
+        self.model_accepts_loss_kwargs = True
+        try:
+            return super().compute_loss(model, inputs, **kwargs)
+        finally:
+            self.model_accepts_loss_kwargs = False
 
     def _spiraltorch_materialize_plan(
         self,
@@ -444,9 +475,7 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             )
             proposal_rows: list[list[int]] = []
             with torch.no_grad():
-                for chunk_start in range(
-                    0, len(target_coordinates), max_chunk_rows
-                ):
+                for chunk_start in range(0, len(target_coordinates), max_chunk_rows):
                     chunk_end = min(
                         chunk_start + max_chunk_rows,
                         len(target_coordinates),
@@ -464,13 +493,17 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
                     active_logits = (
                         logits[sequence_tensor, prediction_tensor].detach().float()
                     )
-                    chunk_proposals = torch.topk(
-                        active_logits,
-                        k=proposal_top_k,
-                        dim=-1,
-                        largest=True,
-                        sorted=True,
-                    ).indices.cpu().tolist()
+                    chunk_proposals = (
+                        torch.topk(
+                            active_logits,
+                            k=proposal_top_k,
+                            dim=-1,
+                            largest=True,
+                            sorted=True,
+                        )
+                        .indices.cpu()
+                        .tolist()
+                    )
                     proposal_rows.extend(chunk_proposals)
                     del active_logits
             for (sequence_index, target_index), proposals in zip(

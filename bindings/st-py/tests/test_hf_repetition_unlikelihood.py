@@ -160,6 +160,29 @@ class _BaseTrainer:
         return (loss, outputs) if return_outputs else loss
 
 
+class _LossKwargAwareBaseTrainer:
+    def __init__(self, *, model: Any, **_kwargs: Any) -> None:
+        self.model = model
+        self.model_accepts_loss_kwargs = True
+        self.observed_loss_kwarg_modes: list[bool] = []
+
+    def _get_num_items_in_batch(self, _batch_samples: Any, _device: Any) -> Any:
+        return 6 if self.model_accepts_loss_kwargs else None
+
+    def compute_loss(
+        self,
+        model: Any,
+        inputs: dict[str, Any],
+        return_outputs: bool = False,
+        num_items_in_batch: Any = None,
+    ) -> Any:
+        del num_items_in_batch
+        self.observed_loss_kwarg_modes.append(self.model_accepts_loss_kwargs)
+        outputs = model(**inputs)
+        loss = outputs["loss"] + (0.0 if self.model_accepts_loss_kwargs else 1.0)
+        return (loss, outputs) if return_outputs else loss
+
+
 class _Model(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -351,6 +374,30 @@ def test_hf_trainer_keeps_evaluation_loss_as_plain_causal_lm_loss() -> None:
     )
 
 
+def test_hf_trainer_preserves_base_loss_kwarg_semantics_during_evaluation() -> None:
+    model = _Model()
+    trainer_class = st.hf_repetition_unlikelihood_trainer_class(
+        _LossKwargAwareBaseTrainer
+    )
+    trainer = trainer_class(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_recipe(),
+    )
+    model.eval()
+
+    num_items = trainer._get_num_items_in_batch([_inputs()], "cpu")
+    loss = trainer.compute_loss(model, _inputs(), num_items_in_batch=num_items)
+
+    assert num_items == 6
+    assert float(loss.detach()) == pytest.approx(2.0)
+    assert trainer.observed_loss_kwarg_modes == [True]
+    assert trainer.model_accepts_loss_kwargs is False
+
+    model.train()
+    assert trainer._get_num_items_in_batch([_inputs()], "cpu") is None
+    assert trainer.model_accepts_loss_kwargs is False
+
+
 def test_hf_trainer_rejects_a_plan_from_another_recipe() -> None:
     trainer, model = _trainer(strength=0.1)
     model.train()
@@ -386,6 +433,9 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
         "spiraltorch.HfRepetitionUnlikelihoodCollator"
     )
     objective = contract["zspace_repetition_unlikelihood"]
+    assert objective["schema"] == (  # type: ignore[index]
+        "spiraltorch.hf_repetition_unlikelihood_recipe.v4"
+    )
     assert objective["enabled"] is True  # type: ignore[index]
     assert objective["config"]["strength"] == 0.1  # type: ignore[index]
     assert objective["config"]["candidate_source"] == {  # type: ignore[index]
@@ -394,6 +444,12 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
     }
     assert objective["proposal_materialization"] == (  # type: ignore[index]
         "after_model_forward_from_detached_logits"
+    )
+    assert objective["evaluation_loss_normalization"] == (  # type: ignore[index]
+        "preserve_base_trainer_loss_kwargs"
+    )
+    assert objective["evaluation_num_items_in_batch"] == (  # type: ignore[index]
+        "preserve_base_trainer"
     )
 
 
