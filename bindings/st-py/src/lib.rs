@@ -50,6 +50,7 @@ mod zpulse;
 mod zspace;
 mod zspace_generation_evidence;
 mod zspace_optimizer;
+mod zspace_repetition_unlikelihood;
 
 #[cfg(not(feature = "nn"))]
 mod psi_synchro {
@@ -283,6 +284,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace::register(py, m)?;
     zspace_generation_evidence::register(py, m)?;
     zspace_optimizer::register(py, m)?;
+    zspace_repetition_unlikelihood::register(py, m)?;
     elliptic::register(py, m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;

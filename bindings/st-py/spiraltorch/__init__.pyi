@@ -5400,6 +5400,55 @@ ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: int
 ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: int
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND: str
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER: str
+ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE: str
+ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION: str
+ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER: str
+ZSPACE_REPETITION_UNLIKELIHOOD_KIND: str
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH: float
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER: int
+ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE: str
+ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON: float
+ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND: str
+ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER: str
+HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY: str
+HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA: str
+
+class HfRepetitionUnlikelihoodBatchPlan:
+    report: Mapping[str, object]
+
+class HfRepetitionUnlikelihoodCollator:
+    config: Dict[str, object]
+    def __init__(
+        self,
+        base_collator: Callable[..., Mapping[str, object]],
+        *,
+        strength: float,
+        ngram_order: int,
+        context_window: int,
+        max_candidates_per_position: int,
+        planner: Callable[..., Dict[str, object]] = ...,
+    ) -> None: ...
+    def __call__(
+        self, features: List[Dict[str, object]]
+    ) -> Dict[str, object]: ...
+
+def hf_repetition_unlikelihood_recipe_contract(
+    *,
+    strength: float,
+    ngram_order: int,
+    context_window: int,
+    max_candidates_per_position: int,
+) -> Dict[str, object]: ...
+def hf_repetition_unlikelihood_trainer_class(
+    base_trainer_class: type[Any],
+) -> type[Any]: ...
 
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
@@ -5480,6 +5529,17 @@ def zspace_generation_evidence(
 ) -> Dict[str, object]: ...
 def validate_zspace_generation_evidence(
     report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_repetition_unlikelihood_plan(
+    *,
+    sequences: Sequence[Mapping[str, object]],
+    strength: float = ...,
+    ngram_order: int = ...,
+    context_window: int = ...,
+    max_candidates_per_position: int = ...,
+) -> Dict[str, object]: ...
+def validate_zspace_repetition_unlikelihood_plan(
+    plan: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
 def step_many(
@@ -11951,10 +12011,34 @@ __all__ = [
     "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS",
     "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND",
     "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_KIND",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
+    "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
+    "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
+    "HfRepetitionUnlikelihoodBatchPlan",
+    "HfRepetitionUnlikelihoodCollator",
+    "hf_repetition_unlikelihood_recipe_contract",
+    "hf_repetition_unlikelihood_trainer_class",
     "validate_zspace_parameter_trajectory",
     "validate_zspace_parameter_trajectory_policy",
     "validate_zspace_polarity_evidence",
     "validate_zspace_generation_evidence",
+    "validate_zspace_repetition_unlikelihood_plan",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
@@ -11968,6 +12052,7 @@ __all__ = [
     "zspace_polarity_evidence",
     "zspace_generation_control",
     "zspace_generation_evidence",
+    "zspace_repetition_unlikelihood_plan",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
     "inference_to_mapping",

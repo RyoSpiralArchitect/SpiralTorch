@@ -18,3 +18,4 @@ pub mod zspace_evidence;
 pub mod zspace_generation_evidence;
 pub mod zspace_optimizer;
 pub mod zspace_optimizer_feedback;
+pub mod zspace_repetition_unlikelihood;
