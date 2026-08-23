@@ -1,0 +1,173 @@
+{
+  "schema": "spiraltorch.hf_model_topk_history_unlikelihood_protocol.v1",
+  "status": "prespecified",
+  "prespecified_at": "2026-08-23T02:05:45Z",
+  "protocol_id": "sha256:ed5058248632b92d9e4c62140a576c9a79b74d0967a5788f447ea795de477272",
+  "protocol_id_rule": "sha256 of canonical UTF-8 JSON scientific_spec with sorted keys and compact separators",
+  "scientific_spec": {
+    "classification": "prespecified_bounded_followup_pilot",
+    "scope": "single-model single-corpus matched multi-seed Pythia-70M LoRA study",
+    "study_question": "Does model-top-k history unlikelihood reduce held-out greedy-generation loops relative to a strength-zero matched baseline without material held-out causal-LM loss regression?",
+    "implementation": {
+      "objective_git_commit": "e91e491bbf3136cf5640df2162048c202389e6a2",
+      "required_source_state": "objective execution must use this exact commit; the protocol and prompt-set commit may be a clean descendant containing only evidence specification files",
+      "objective_contract_version": "spiraltorch.zspace_repetition_unlikelihood.v2",
+      "objective_semantic_owner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "objective_semantic_backend": "rust",
+      "proposal_owner": "model-client-no-grad",
+      "differentiation_owner": "model-client-autograd",
+      "generation_evidence_contract_version": "spiraltorch.zspace_generation_evidence.v1",
+      "generation_evidence_semantic_owner": "st-core::runtime::zspace_generation_evidence"
+    },
+    "model": {
+      "hub_id": "EleutherAI/pythia-70m-deduped",
+      "profile": "pythia-70m-local-smoke",
+      "architecture_family": "gpt_neox",
+      "parameter_scale": "70m",
+      "snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--EleutherAI--pythia-70m-deduped/snapshots/e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626"
+    },
+    "corpus": {
+      "name": "Dubliners",
+      "source_path": "/Users/ryospiralarchitect/SpiralReality/data/dubliners.txt",
+      "size_bytes": 359634,
+      "sha256": "d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+      "validation_fraction": 0.1
+    },
+    "training": {
+      "seeds": [
+        13,
+        17,
+        23
+      ],
+      "arms": [
+        {
+          "name": "baseline",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 6,
+      "optimizer_update_count": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "query_key_value",
+          "dense"
+        ]
+      },
+      "learning_rate": 0.00005,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_steps": 250,
+      "eval_steps": 250,
+      "save_total_limit": 1,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "candidate_source": {
+          "kind": "model_topk_history",
+          "proposal_top_k": 8
+        },
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "gradient_accumulation_normalization": "trainer_divides_the_combined_microbatch_mean"
+      },
+      "no_retuning_rule": "Do not change strength, proposal_top_k, context_window, candidate cap, seeds, prompt set, horizon, or acceptance thresholds after any study run begins."
+    },
+    "generation_endpoint": {
+      "report_count": 6,
+      "one_report_per_training_run": true,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_repetition_v2_prompts.json",
+      "prompt_set_file_sha256": "d491e5b5034df8182b72c7f1fd6770ba5323f11573ca79ad0c189dccf81de703",
+      "prompt_set_id": "sha256:4c0efe2e3ae7c1f1a8654f1f2607d01684a75a2cf9a1578e3fff72e35e71aae1",
+      "prompt_count": 12,
+      "prompt_provenance": "fresh independent prompts fixed before training and not selected from prior or current model outputs",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as the training run",
+        "continuation_only": true
+      }
+    },
+    "metrics": {
+      "primary_generation_metric": "generation_evidence.aggregate.sample_mean_loop_score",
+      "primary_effect": "model_topk_history_minus_baseline paired by seed, lower is better",
+      "primary_aggregate": "arithmetic mean of the three paired seed effects",
+      "safety_metric": "eval_after_train.eval_loss paired by seed",
+      "secondary_generation_metrics": [
+        "generation_evidence.aggregate.periodic_loop_sample_ratio",
+        "generation_evidence.aggregate.ngrams[order=3].repetition_ratio",
+        "generation_evidence.aggregate.ngrams[order=2].distinct_ratio",
+        "generation_evidence.aggregate.ngrams[order=4].distinct_ratio"
+      ],
+      "objective_execution_metrics": [
+        "zspace_repetition_unlikelihood_receipt.active_position_ratio",
+        "zspace_repetition_unlikelihood_receipt.mean_candidates_per_active_position",
+        "zspace_repetition_unlikelihood_receipt.mean_auxiliary_loss",
+        "zspace_repetition_unlikelihood_receipt.mean_weighted_auxiliary_loss"
+      ]
+    },
+    "acceptance": {
+      "required_ready_run_cards": 6,
+      "required_complete_optimizer_horizon": 64,
+      "required_generation_reports": 6,
+      "generation_evidence_validation": "every report must round-trip through validate_zspace_generation_evidence in the Rust semantic core",
+      "identity_requirements": [
+        "verified model runtime, execution, corpus materialization, tokenized dataset, training recipe, and finetune replay identities",
+        "one prompt_set_id across all six generation reports",
+        "one decoding_config_id per seed shared by both arms",
+        "content-addressed adapter identity for every generation report"
+      ],
+      "stability_requirements": [
+        "no non-finite before-train or after-train evaluation loss",
+        "no failed or partial optimizer trajectory receipt",
+        "no failed, empty, or malformed generation row",
+        "no early termination before 64 optimizer updates",
+        "objective receipts ready for all three model_topk_history runs"
+      ],
+      "primary_success_rule": {
+        "mean_loop_score_delta_less_than": 0.0,
+        "minimum_seed_win_count": 2
+      },
+      "safety_gate": {
+        "mean_eval_loss_delta_at_most": 0.02,
+        "maximum_individual_seed_eval_loss_delta_at_most": 0.05
+      },
+      "decision_rule": "Pass only if all readiness and stability requirements, both primary success conditions, and both safety thresholds hold. Otherwise record the study as ready-but-negative or blocked without retuning this study."
+    },
+    "interpretation": {
+      "efficacy_claim_ready_even_if_passed": false,
+      "allowed_positive_claim": "Within this prespecified bounded Pythia-70M/Dubliners pilot, the model-top-k history objective reduced the selected loop metric with the required seed direction and without material held-out CE regression.",
+      "allowed_negative_claim": "This frozen objective recipe did not satisfy the prespecified bounded pilot gate.",
+      "promotion_if_passed": "run a separately prespecified multi-model and multi-corpus study with semantic-quality evaluation",
+      "excluded_claims": [
+        "general language-quality superiority",
+        "statistical significance",
+        "multi-model or multi-corpus generality",
+        "Z-space training superiority"
+      ]
+    }
+  }
+}
