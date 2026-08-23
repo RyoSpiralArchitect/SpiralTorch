@@ -470,6 +470,40 @@ model profile (`causal-lm-local-smoke`) and records its model/tokenizer/family
 metadata. Pass `model_name=...` for a one-off override, or `model_configs=` plus
 `model_profile=` to pin another config-driven route.
 
+## Blinded semantic review
+
+Held-out generation packets can be reviewed without rebuilding scoring or
+unblinding semantics in Python. Rust validates the packet commitment, partial
+draft coverage, 1-through-5 score bounds, complete-response receipt, sealed
+map, and arm/seed aggregation. Python only presents groups and atomically saves
+the last fully validated draft.
+
+```bash
+PACKET=docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json
+
+# reviewer-id is a pseudonymous lowercase sha256:<64 hex> identity.
+spiral-hf-semantic-review inspect "$PACKET" --output packet-receipt.json
+spiral-hf-semantic-review review "$PACKET" \
+  --draft semantic-review-draft.json \
+  --reviewer-id 'sha256:<64 lowercase hex>'
+
+# Resume without repeating reviewer identity. Exit status 2 means incomplete.
+spiral-hf-semantic-review review "$PACKET" \
+  --draft semantic-review-draft.json
+
+# Supply the separately held map only after the complete response is sealed.
+spiral-hf-semantic-review unblind "$PACKET" \
+  semantic-review-draft.json blinding-map.json \
+  --output semantic-review-unblind.json
+spiral-hf-semantic-review validate-report semantic-review-unblind.json
+```
+
+The corresponding Python surface is
+`validate_zspace_semantic_review_packet()`,
+`summarize_zspace_semantic_review_draft()`, and
+`unblind_zspace_semantic_review()`. A structurally valid report does not prove
+that the reviewer remained blind and does not establish model superiority.
+
 ## Building wheels
 
 The binding mirrors the Rust feature flags. Pick the backend(s) you need

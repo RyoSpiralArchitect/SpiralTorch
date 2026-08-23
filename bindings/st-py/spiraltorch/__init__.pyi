@@ -5404,6 +5404,26 @@ ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: int
 ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: int
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND: str
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER: str
+ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS: tuple[str, str, str]
+ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION: str
+ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND: str
+ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA: str
+ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY: str
+ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA: str
+ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS: int
+ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION: str
+ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE: str
+ZSPACE_SEMANTIC_REVIEW_PACKET_KIND: str
+ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA: str
+ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES: tuple[str, str, str, str]
+ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION: str
+ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS: tuple[str, str, str, str]
+ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM: int
+ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM: int
+ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND: str
+ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER: str
+ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION: str
+ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND: str
 ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE: str
 ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION: str
 ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER: str
@@ -5542,6 +5562,36 @@ def zspace_generation_evidence(
     samples: Sequence[Mapping[str, object]],
 ) -> Dict[str, object]: ...
 def validate_zspace_generation_evidence(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_packet(
+    packet: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_packet_receipt(
+    receipt: Mapping[str, object],
+) -> Dict[str, object]: ...
+def new_zspace_semantic_review_draft(
+    *,
+    packet_id: str,
+    reviewer_id: str,
+    review_session_id: str,
+    responses: Sequence[Mapping[str, object]] = ...,
+) -> Dict[str, object]: ...
+def summarize_zspace_semantic_review_draft(
+    *,
+    packet: Mapping[str, object],
+    draft: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_draft_receipt(
+    receipt: Mapping[str, object],
+) -> Dict[str, object]: ...
+def unblind_zspace_semantic_review(
+    *,
+    packet: Mapping[str, object],
+    draft: Mapping[str, object],
+    blinding_map: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_unblind(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def zspace_repetition_unlikelihood_plan(
@@ -12061,6 +12111,33 @@ __all__ = [
     "validate_zspace_parameter_trajectory_policy",
     "validate_zspace_polarity_evidence",
     "validate_zspace_generation_evidence",
+    "ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS",
+    "ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",
+    "ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_KIND",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES",
+    "ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS",
+    "ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM",
+    "ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM",
+    "ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND",
+    "ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER",
+    "ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND",
+    "new_zspace_semantic_review_draft",
+    "summarize_zspace_semantic_review_draft",
+    "unblind_zspace_semantic_review",
+    "validate_zspace_semantic_review_draft_receipt",
+    "validate_zspace_semantic_review_packet",
+    "validate_zspace_semantic_review_packet_receipt",
+    "validate_zspace_semantic_review_unblind",
     "validate_zspace_repetition_unlikelihood_plan",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
