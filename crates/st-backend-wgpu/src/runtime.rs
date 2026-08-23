@@ -602,6 +602,8 @@ pub fn read_buffer<T: Pod>(
     queue.submit(Some(encoder.finish()));
 
     let mapped = map_read_bytes_with_timeout(device, &staging, 0..size, READBACK_TIMEOUT, label)?;
+    // Stable Rust cannot use size_of::<T>() as an as_chunks const argument.
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let output = mapped
         .chunks_exact(size_of::<T>())
         .map(bytemuck::pod_read_unaligned)
