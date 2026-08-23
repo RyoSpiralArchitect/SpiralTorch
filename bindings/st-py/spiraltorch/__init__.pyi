@@ -5411,6 +5411,7 @@ ZSPACE_REPETITION_UNLIKELIHOOD_KIND: str
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER: int
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH: float
@@ -5419,13 +5420,16 @@ ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS: int
 ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER: int
 ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE: str
 ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON: float
+ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER: str
+ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE: str
 ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND: str
 ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER: str
 HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY: str
 HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA: str
 
 class HfRepetitionUnlikelihoodBatchPlan:
-    report: Mapping[str, object]
+    report: Mapping[str, object] | None
+    sequences: tuple[Mapping[str, object], ...] | None
 
 class HfRepetitionUnlikelihoodCollator:
     config: Dict[str, object]
@@ -5437,6 +5441,8 @@ class HfRepetitionUnlikelihoodCollator:
         ngram_order: int,
         context_window: int,
         max_candidates_per_position: int,
+        candidate_source: str | Mapping[str, object] = ...,
+        proposal_top_k: int = ...,
         planner: Callable[..., Dict[str, object]] = ...,
     ) -> None: ...
     def __call__(
@@ -5449,6 +5455,8 @@ def hf_repetition_unlikelihood_recipe_contract(
     ngram_order: int,
     context_window: int,
     max_candidates_per_position: int,
+    candidate_source: str | Mapping[str, object] = ...,
+    proposal_top_k: int = ...,
 ) -> Dict[str, object]: ...
 def hf_repetition_unlikelihood_trainer_class(
     base_trainer_class: type[Any],
@@ -5538,7 +5546,9 @@ def zspace_repetition_unlikelihood_plan(
     *,
     sequences: Sequence[Mapping[str, object]],
     strength: float = ...,
+    candidate_source: str | Mapping[str, object] = ...,
     ngram_order: int = ...,
+    proposal_top_k: int = ...,
     context_window: int = ...,
     max_candidates_per_position: int = ...,
 ) -> Dict[str, object]: ...
@@ -12024,6 +12034,7 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH",
@@ -12032,6 +12043,8 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND",
     "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
     "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
