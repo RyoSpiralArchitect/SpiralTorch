@@ -1,0 +1,861 @@
+{
+  "schema": "spiraltorch.hf_periodic_baseline_replication_benchmark.v1",
+  "row_type": "hf_periodic_baseline_replication_benchmark",
+  "status": "passed",
+  "decision": "passed_prespecified_gate",
+  "study_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
+  "recorded_at": "2026-08-23T20:09:05.729823+00:00",
+  "protocol": {
+    "path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_64step_prespec_20260822.json",
+    "file_sha256": "sha256:bac502de3b70cfa82026f771113511019d12065ac9f9a8bc9149c052b5549541",
+    "protocol_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
+    "implementation_git_commit": "a1fa9da134b2dce65e3d6e6b48a911655b7b0529",
+    "prespec_git_commit": "c971b3cfa339462a1b88055c5098b7c3d4dc238c",
+    "training_source_git_commit": "c971b3cfa339462a1b88055c5098b7c3d4dc238c",
+    "tracked_source_clean_at_training_start": true,
+    "no_retuning_observed": true
+  },
+  "study_spec": {
+    "classification": "prespecified_three_arm_fresh_corpus_replication",
+    "model": "EleutherAI/pythia-70m-deduped",
+    "model_snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+    "corpus": "Alice's Adventures in Wonderland",
+    "corpus_sha256": "sha256:7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+    "seeds": [
+      53,
+      59,
+      61
+    ],
+    "arms": [
+      {
+        "name": "causal_lm_baseline",
+        "candidate_source": "none",
+        "repetition_unlikelihood_strength": 0.0
+      },
+      {
+        "name": "model_topk_history",
+        "candidate_source": "model_topk_history",
+        "repetition_unlikelihood_strength": 0.1
+      },
+      {
+        "name": "model_topk_periodic",
+        "candidate_source": "model_topk_periodic",
+        "repetition_unlikelihood_strength": 0.1
+      }
+    ],
+    "optimizer_update_count": 64,
+    "gradient_accumulation_steps": 8,
+    "generation": {
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "sha256:04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "strategy": "greedy",
+      "max_new_tokens": 96,
+      "control_mode": "baseline_only_no_zspace_inference_control"
+    },
+    "semantic_review": {
+      "packet_path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
+      "packet_file_sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
+      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "group_count": 36,
+      "candidate_count": 108,
+      "human_review_status": "pending"
+    }
+  },
+  "provenance": {
+    "source_artifact_root": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1",
+    "source_artifacts_ignored_by_git": true,
+    "source_artifacts": [
+      {
+        "seed": 53,
+        "arm": "causal_lm_baseline",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/causal_lm_baseline/run-card.json",
+          "sha256": "sha256:02ff6e8ee8514cbc8c8c9327fcab3210b326f6f6acfdfcd5caea1eb0b8fc0d15"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s53/causal_lm_baseline.json",
+          "sha256": "sha256:5ea13836a403c833d92e0addd8a0e7ac5dc09e8364c560e6328c8f039917cc02",
+          "evidence_id": "sha256:b020bb6dac3a1fda75e7a95a188817d4a2198b8412d238e565850c1b1ce5f0e8",
+          "generated_continuation_set_id": "sha256:9caf56dc21379ad1e0123f570a16eb48fb1ff9f0b23079cb7ebe9236cff8d942"
+        },
+        "adapter": {
+          "adapter_id": "sha256:a8f3ae273470835f499c044741b828a4fa8a52a066e8fe1417c0e9a74181b7ff",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/causal_lm_baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:24b8d51cf0c0287f130357d59067968adb93fd3e203bd2765dd8a73edbf3800c",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/causal_lm_baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:762ff04e733fcc0bfecd0da701b91812aa581bf6d7759e7ff058cca0a0b6d472",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 53,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_history/run-card.json",
+          "sha256": "sha256:7e8c7ad85e1a7f8bd1b13718e2abd87a7ace9cdd33303c0f4475ec9354974314"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s53/model_topk_history.json",
+          "sha256": "sha256:9b9ff4c4ea38671844d315051c9e39deaefe48710ee16cc41c4572fb7b8a6e2e",
+          "evidence_id": "sha256:0bfed891621a739e71a5f7905f9df48dcc3cc8906defb204e6e479ad3754a150",
+          "generated_continuation_set_id": "sha256:793d5a00d1d4450e34e3b5f236afaa4d86096fdd916f9c4e434404aa80bb2426"
+        },
+        "adapter": {
+          "adapter_id": "sha256:9c95ff5492bb05a2645ffe2f4820cf437e445f7ae7d7be2572168771b86b9ddd",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:2e56cde2bd842c3e44ed71350e23a46e16f68ad9f353777612227319b388c439",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:0d7368e5b7b5fe1dbae721ca351060a398447bd58d4bf8d8f864c712e2e07cde",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 53,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_periodic/run-card.json",
+          "sha256": "sha256:0ee15d5f4c5c7aa6428823687d8d533627a4d87e129f3a39ca401502322ba43e"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s53/model_topk_periodic.json",
+          "sha256": "sha256:c1e93aee9f3bf5d00f57542c2a69aaeab5722cf6997c6f456c75ad0096d0093d",
+          "evidence_id": "sha256:dd5b07818e33501a74c82a774116e656f930c494dacaa90f35c03e2204c0560d",
+          "generated_continuation_set_id": "sha256:15cc96ea87428c946f2ad300b9676c82f13302d64c00754913cc4ee6469dd42f"
+        },
+        "adapter": {
+          "adapter_id": "sha256:f172a72761e7ef5dc75091016c9598c98f19afcc18251d04a0316eaf6a97844c",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:ddfe2f8b088a578358bccc63dbde878262993455da81d78b195ebcdf00980d94",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s53/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:7ccae6617874c0df5a207abe493eeff7eea1f20e6513e89bda1775410445b6e7",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 59,
+        "arm": "causal_lm_baseline",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/causal_lm_baseline/run-card.json",
+          "sha256": "sha256:46b70877dc998f920e73cdd180fb7178b545383dcf708c0e10fdc6691f22262a"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s59/causal_lm_baseline.json",
+          "sha256": "sha256:49a182803cebcf1b12712c87a946fe6165a27c8f06d477d1978f4bcc06812616",
+          "evidence_id": "sha256:bca6b00e4ca7b2cde3419b82aa584b1891da6f4eaf8484920f6a010a2e66b302",
+          "generated_continuation_set_id": "sha256:7567b0d2ffc7729eb35ab9f8abbf1c260a83772112ae7f10a2105f7f96249a0b"
+        },
+        "adapter": {
+          "adapter_id": "sha256:2bf992d6fde8392ae8ba1e8ff09e47b7da7e28912f22ebb34273dfeef37665e1",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/causal_lm_baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:68f4d29f8de4e7a15da4c51e321bc46a050f752a129da008795700da944f8f04",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/causal_lm_baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:ab34017e9c446a79407759df13b61dfc05caba98e3af4ec0700d5b7053191806",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 59,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_history/run-card.json",
+          "sha256": "sha256:4742fee8b711ed8fb922b87a89928c182a0618dd2888844cd30eff648dadb6d5"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s59/model_topk_history.json",
+          "sha256": "sha256:8cf39790c693d394d54c126b3f0a2cc70cafa8172cc19ca6ccc9de076f6b30fd",
+          "evidence_id": "sha256:3fc6a4542f773cd56eda1eec9a3caf4da41d1f57f1ce3ba9cb1a0b2d70d5ce93",
+          "generated_continuation_set_id": "sha256:4dd2e84d0df800ea05c23e98cdd1cc8d750b6388db75b0795206980d8d8b020c"
+        },
+        "adapter": {
+          "adapter_id": "sha256:fe6c773cd255675f021d938df187a3bd3a5a936e51ef41f0903bd394b769463b",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:ce0132dc5f46f8bf08092681ef07725e678c55b8225898e44d7632cdb4ac2045",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:99022b371e1564e0e8a50720d7934ddfa8bd9fe478f731753be8658cac2a728d",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 59,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_periodic/run-card.json",
+          "sha256": "sha256:2f245a8b31e7a0dad50134b7e305c0b30992dc014abbae16b1dd7776833a7b81"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s59/model_topk_periodic.json",
+          "sha256": "sha256:fb9a6fbab4f37abc87ac39195bd2cef4ff0cb56fc86a0fca8be8017357714ba9",
+          "evidence_id": "sha256:d910d71a92beeba291a55a6e27c6445a6fb0afb21ac65ca485ac56753a320091",
+          "generated_continuation_set_id": "sha256:9451292a0037b35e67f4606ba2c0fcac1e9243674a45e3542402be1b87a3185b"
+        },
+        "adapter": {
+          "adapter_id": "sha256:0dd156d76b13beca6314bc6603fca2e82d5057469aeb1baa3a5880bed5a87d67",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:4420dbc4b0acf8d2ffe065e890ba3bf3011ce51a377886d747d826563daad0e3",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s59/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:682e66ef4e075b8dcd2affd6351b245ac9e4a17e313c926902ef0117b5a5c2fb",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 61,
+        "arm": "causal_lm_baseline",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/causal_lm_baseline/run-card.json",
+          "sha256": "sha256:e6652b78291531993eff5fd2878671ee747c19ed7d9d7effbd408f33206699ee"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s61/causal_lm_baseline.json",
+          "sha256": "sha256:1d66939676537215b8bac549c91e32ce13ce429cc71f9e7679f4e2b2ec2d5ba5",
+          "evidence_id": "sha256:c20f21fdefc1779f83bc10f1a2f6bfd37005defb1b7ea210bfedc8561ed769df",
+          "generated_continuation_set_id": "sha256:8282ee447d73698db9d9e2bfde68bc6777c0aaf19c84e83e01072269980e5a60"
+        },
+        "adapter": {
+          "adapter_id": "sha256:adaff48dc0a0e1228eb5969aa5a78cf1ed9aa794c0aa905ee6c50ebc2c9b0273",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/causal_lm_baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:618a9a7cf4fb1a07b6cfd01ee11c57ee1469ab799b0066f4e93187ee313717b7",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/causal_lm_baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:d755953eb963aebbce753907d4d5881ad26da7a35de52fb7d5b7db33ed8e1330",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 61,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_history/run-card.json",
+          "sha256": "sha256:c4014f598e886f7074d926c8f1a1b1c85d9d3e78eb50e11cf6a9b403379dc6dd"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s61/model_topk_history.json",
+          "sha256": "sha256:1cd744b01cd8a83beaa17b8a9a26206de04fe9f2df5c9984f2f24d79d40d7d61",
+          "evidence_id": "sha256:3cc72840afeb8143ba53a84d6d242f2c019a383d0bc3523e5cf4197748c53106",
+          "generated_continuation_set_id": "sha256:880bb66833fabb50adb21aefc858dcbf14aa97a8425c0c9de28bfb4b0aa0a776"
+        },
+        "adapter": {
+          "adapter_id": "sha256:048b144aee9d02c155fd2419794f0026cfb1f0862dc9c504f81658ed863dd75a",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:f8e8006c744210c50e4cf9595c25c0ff4d7863448050db4dc59de7d5af8aaae1",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:d955485c3c7f092074d90c261eb97cbf3a2eb330c67c1085b5537b3c68da4ae0",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      },
+      {
+        "seed": 61,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_periodic/run-card.json",
+          "sha256": "sha256:4a0fc75e73881e752074ad22abf8d254b146f1eb342ffb59f0f5b11876c8de1e"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/generations/s61/model_topk_periodic.json",
+          "sha256": "sha256:2eb592f22cf4ca0b6767a2ef4b0c8dfdaca1cb18719d4991449bf6a91cb665f9",
+          "evidence_id": "sha256:a07fa8f100b53955b5a747c6cc7174e188ba647d1956d31020b005c42f65fc8b",
+          "generated_continuation_set_id": "sha256:169097bbb05c26ce7d43fb702717cee05f1796913f52001fd90bef1647dec0db"
+        },
+        "adapter": {
+          "adapter_id": "sha256:5a490b02d6753a7868b191ad41a4da42d6f2cc8a3dafb6db46865c7a16dac03d",
+          "weights_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:608050a936cda0095fb234c283997a585c00f3bdf5d7d39b09b5ce1c54c76217",
+          "config_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/runs/s61/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        },
+        "trainer_trace_lineage_id": "sha256:76e85f4ecac840d388296bddfd41619be1be9b52dd91339838e61987816da6fd",
+        "optimizer_trajectory_id": "sha256:4f9198f8522fc32cc95e11a05f2140c72ead246402d67e8a1b00544e6e49c238"
+      }
+    ],
+    "excluded_attempts": [
+      {
+        "seed": 61,
+        "arm": "causal_lm_baseline",
+        "status": "interrupted",
+        "receipt_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/attempts/s61/causal_lm_baseline_interrupted_1/interruption-receipt.json",
+        "receipt_sha256": "sha256:fcb2fd1cd51bb00728672610c62b718e52ddcc0296b70e3b5bcc929c5c7f1547",
+        "last_logged_global_step": 24,
+        "result_use": "none"
+      },
+      {
+        "seed": 61,
+        "arm": "causal_lm_baseline",
+        "status": "completed_but_misrouted",
+        "receipt_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/attempts/s61/causal_lm_baseline_misrouted_2/routing-error-receipt.json",
+        "receipt_sha256": "sha256:c988e271841e379a5dcaf08a8e594e835c492af4794a3a282f996e47e2e496c9",
+        "manifest_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/attempts/s61/causal_lm_baseline_misrouted_2/SHA256SUMS",
+        "manifest_sha256": "sha256:b40c3b2667f0884e9507b6ec9cc85318e32883f6c17983c3c23b6d5b252dfa69",
+        "result_use": "none"
+      }
+    ],
+    "recovery_reproducibility_observation": {
+      "canonical_seed61_baseline_adapter_id": "sha256:adaff48dc0a0e1228eb5969aa5a78cf1ed9aa794c0aa905ee6c50ebc2c9b0273",
+      "excluded_misrouted_adapter_id": "sha256:adaff48dc0a0e1228eb5969aa5a78cf1ed9aa794c0aa905ee6c50ebc2c9b0273",
+      "content_addressed_adapter_match": true,
+      "interpretation": "The frozen rerun reproduced identical adapter bytes after the misrouted completion; this is recovery evidence and is not counted as an extra study run."
+    },
+    "blinding": {
+      "packet_path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
+      "packet_sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
+      "map_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/review/blinding-map.json",
+      "map_sha256": "sha256:67acbd63450940a43ce69e0a0f753533d627121fa04d5259f3b512e163fa643e",
+      "map_ignored_by_git": true,
+      "key_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/review/blinding-key.json",
+      "key_sha256_commitment": "8ac4834e78cb378d5d5def4d5f5df21fc1565eebdec1f5e32956ab9f3c17c1e3",
+      "key_ignored_by_git": true
+    },
+    "tracked_source_hashes": [
+      {
+        "role": "corpus",
+        "path": "/Users/ryospiralarchitect/SpiralReality/data/alices_adventure_in_wonderland.txt",
+        "sha256": "sha256:7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+        "size_bytes": 169226
+      },
+      {
+        "role": "model_configs",
+        "path": "bindings/st-py/examples/hf_finetune_model_configs.example.json",
+        "sha256": "sha256:13767771e56732a18b6f1bd031ea537ba4c6efff8a2c12b736290c76c0b9b3f9",
+        "size_bytes": 13841
+      },
+      {
+        "role": "prompt_set",
+        "path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+        "sha256": "sha256:04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+        "size_bytes": 1545
+      },
+      {
+        "role": "prespecification",
+        "path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_64step_prespec_20260822.json",
+        "sha256": "sha256:bac502de3b70cfa82026f771113511019d12065ac9f9a8bc9149c052b5549541",
+        "size_bytes": 12192
+      },
+      {
+        "role": "semantic_review_packet",
+        "path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
+        "sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
+        "size_bytes": 54537
+      }
+    ]
+  },
+  "identity_gates": {
+    "run_card_count": 9,
+    "generation_report_count": 9,
+    "all_failure_fields_null": true,
+    "all_before_and_after_eval_status_ok": true,
+    "all_optimizer_receipts_ready": true,
+    "all_runs_reached_64_optimizer_updates": true,
+    "all_trainer_trace_lineages_sealed": true,
+    "all_adapter_lineages_ready": true,
+    "all_required_training_identities_ready_and_verified": true,
+    "all_generation_reports_complete": true,
+    "all_generation_rows_nonempty_and_full_horizon": true,
+    "all_generation_model_artifact_ids_match_adapter_lineage": true,
+    "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+    "generation_protocol_id": "sha256:a2396fa18c4bd3fe00b6214a139ed37a42cc266291513269dd5911a2ad9c787b",
+    "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+    "execution_identity_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+    "training_input_identity_id": "sha256:b309710a67efbc6e6b972f598b1e5e0dfded0e4a532086a3d6bab9ad1303d0bf",
+    "paired_decoding_config_ids": [
+      {
+        "seed": 53,
+        "decoding_config_id": "sha256:a47f596ce705f5da3e888a841803a7427ea1f09d0ff82c5ad790f5e22f8e109f"
+      },
+      {
+        "seed": 59,
+        "decoding_config_id": "sha256:3b5bcc5e51660e220567b69c82a85812572b5774a2eaccc7ae8f6fd74c39bef4"
+      },
+      {
+        "seed": 61,
+        "decoding_config_id": "sha256:2abda6bf336e4165aa0744eb9572138fad3c3296d8d729822a7c36da8f55600e"
+      }
+    ],
+    "rust_generation_evidence_validation": {
+      "status": "ready",
+      "file_count": 9,
+      "canonical_round_trip_count": 9,
+      "all_equal": true
+    },
+    "semantic_review_packet": {
+      "status": "ready_for_blinded_review",
+      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "group_count": 36,
+      "candidate_count": 108,
+      "arm_and_seed_fields_hidden": true,
+      "unblinding_map_sealed_and_git_ignored": true
+    }
+  },
+  "results": {
+    "arm_metrics": [
+      {
+        "seed": 53,
+        "arm": "causal_lm_baseline",
+        "eval_before": 5.038674354553223,
+        "eval_after": 4.914317607879639,
+        "loop_score": 1.3801780048525571,
+        "periodic_loop_sample_ratio": 0.75,
+        "periodic_suffix_repeated_token_ratio": 0.578125,
+        "ngram3_repetition_ratio": 0.7783687943262412,
+        "ngram2_distinct_ratio": 0.2,
+        "ngram4_distinct_ratio": 0.24193548387096775
+      },
+      {
+        "seed": 53,
+        "arm": "model_topk_history",
+        "eval_before": 5.038674354553223,
+        "eval_after": 4.914128303527832,
+        "loop_score": 1.3542109929078014,
+        "periodic_loop_sample_ratio": 0.6666666666666666,
+        "periodic_suffix_repeated_token_ratio": 0.5104166666666666,
+        "ngram3_repetition_ratio": 0.8271276595744681,
+        "ngram2_distinct_ratio": 0.156140350877193,
+        "ngram4_distinct_ratio": 0.1881720430107527
+      },
+      {
+        "seed": 53,
+        "arm": "model_topk_periodic",
+        "eval_before": 5.038674354553223,
+        "eval_after": 4.915043830871582,
+        "loop_score": 1.2856985660072167,
+        "periodic_loop_sample_ratio": 0.5,
+        "periodic_suffix_repeated_token_ratio": 0.4357638888888889,
+        "ngram3_repetition_ratio": 0.8271276595744681,
+        "ngram2_distinct_ratio": 0.15789473684210525,
+        "ngram4_distinct_ratio": 0.1863799283154122
+      },
+      {
+        "seed": 59,
+        "arm": "causal_lm_baseline",
+        "eval_before": 4.992867946624756,
+        "eval_after": 4.871140003204346,
+        "loop_score": 1.5196219438223217,
+        "periodic_loop_sample_ratio": 0.75,
+        "periodic_suffix_repeated_token_ratio": 0.6536458333333334,
+        "ngram3_repetition_ratio": 0.851063829787234,
+        "ngram2_distinct_ratio": 0.13771929824561405,
+        "ngram4_distinct_ratio": 0.1586021505376344
+      },
+      {
+        "seed": 59,
+        "arm": "model_topk_history",
+        "eval_before": 4.992867946624756,
+        "eval_after": 4.871120452880859,
+        "loop_score": 1.4691452423167848,
+        "periodic_loop_sample_ratio": 0.75,
+        "periodic_suffix_repeated_token_ratio": 0.6085069444444444,
+        "ngram3_repetition_ratio": 0.8439716312056738,
+        "ngram2_distinct_ratio": 0.14473684210526316,
+        "ngram4_distinct_ratio": 0.16487455197132617
+      },
+      {
+        "seed": 59,
+        "arm": "model_topk_periodic",
+        "eval_before": 4.992867946624756,
+        "eval_after": 4.872124671936035,
+        "loop_score": 1.3468050111982084,
+        "periodic_loop_sample_ratio": 0.5833333333333334,
+        "periodic_suffix_repeated_token_ratio": 0.5260416666666666,
+        "ngram3_repetition_ratio": 0.8058510638297872,
+        "ngram2_distinct_ratio": 0.1780701754385965,
+        "ngram4_distinct_ratio": 0.2060931899641577
+      },
+      {
+        "seed": 61,
+        "arm": "causal_lm_baseline",
+        "eval_before": 5.046167373657227,
+        "eval_after": 4.940118789672852,
+        "loop_score": 1.1383781650491478,
+        "periodic_loop_sample_ratio": 0.5833333333333334,
+        "periodic_suffix_repeated_token_ratio": 0.3585069444444444,
+        "ngram3_repetition_ratio": 0.7544326241134752,
+        "ngram2_distinct_ratio": 0.21578947368421053,
+        "ngram4_distinct_ratio": 0.26971326164874554
+      },
+      {
+        "seed": 61,
+        "arm": "model_topk_history",
+        "eval_before": 5.046167373657227,
+        "eval_after": 4.940130710601807,
+        "loop_score": 1.2730385638297872,
+        "periodic_loop_sample_ratio": 0.5833333333333334,
+        "periodic_suffix_repeated_token_ratio": 0.4505208333333333,
+        "ngram3_repetition_ratio": 0.8058510638297872,
+        "ngram2_distinct_ratio": 0.1736842105263158,
+        "ngram4_distinct_ratio": 0.21057347670250895
+      },
+      {
+        "seed": 61,
+        "arm": "model_topk_periodic",
+        "eval_before": 5.046167373657227,
+        "eval_after": 4.942744731903076,
+        "loop_score": 1.2194493047779023,
+        "periodic_loop_sample_ratio": 0.5,
+        "periodic_suffix_repeated_token_ratio": 0.4244791666666667,
+        "ngram3_repetition_ratio": 0.7721631205673759,
+        "ngram2_distinct_ratio": 0.20087719298245615,
+        "ngram4_distinct_ratio": 0.25
+      }
+    ],
+    "evaluation_loss": {
+      "direction": "lower_is_better",
+      "paired_rows": [
+        {
+          "seed": 53,
+          "eval_before_shared": 5.038674354553223,
+          "causal_lm_baseline_eval_after": 4.914317607879639,
+          "model_topk_history_eval_after": 4.914128303527832,
+          "model_topk_periodic_eval_after": 4.915043830871582,
+          "model_topk_history_minus_baseline": -0.00018930435180664062,
+          "model_topk_periodic_minus_baseline": 0.0007262229919433594
+        },
+        {
+          "seed": 59,
+          "eval_before_shared": 4.992867946624756,
+          "causal_lm_baseline_eval_after": 4.871140003204346,
+          "model_topk_history_eval_after": 4.871120452880859,
+          "model_topk_periodic_eval_after": 4.872124671936035,
+          "model_topk_history_minus_baseline": -1.9550323486328125e-05,
+          "model_topk_periodic_minus_baseline": 0.0009846687316894531
+        },
+        {
+          "seed": 61,
+          "eval_before_shared": 5.046167373657227,
+          "causal_lm_baseline_eval_after": 4.940118789672852,
+          "model_topk_history_eval_after": 4.940130710601807,
+          "model_topk_periodic_eval_after": 4.942744731903076,
+          "model_topk_history_minus_baseline": 1.1920928955078125e-05,
+          "model_topk_periodic_minus_baseline": 0.0026259422302246094
+        }
+      ],
+      "treatment_minus_baseline_aggregates": {
+        "model_topk_history": {
+          "mean_delta": -6.56445821126302e-05,
+          "maximum_individual_delta": 1.1920928955078125e-05,
+          "mean_threshold": 0.02,
+          "maximum_individual_threshold": 0.05,
+          "mean_gate_passed": true,
+          "maximum_individual_gate_passed": true,
+          "safety_gate_passed": true
+        },
+        "model_topk_periodic": {
+          "mean_delta": 0.0014456113179524739,
+          "maximum_individual_delta": 0.0026259422302246094,
+          "mean_threshold": 0.02,
+          "maximum_individual_threshold": 0.05,
+          "mean_gate_passed": true,
+          "maximum_individual_gate_passed": true,
+          "safety_gate_passed": true
+        }
+      },
+      "safety_gate_passed": true
+    },
+    "objective_execution": {
+      "receipts": [
+        {
+          "seed": 53,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:6c621dda3c0ecebc303ce8ce08a3b8c986d667147f9a8d9f418650218596b7f6",
+          "training_batch_count": 509,
+          "active_position_count": 101673,
+          "eligible_target_count": 128905,
+          "active_position_ratio": 0.7887436484232574,
+          "proposal_count": 1031240,
+          "candidate_count": 282489,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.778407246761677,
+          "mean_auxiliary_loss": 0.0821588858962059,
+          "mean_weighted_auxiliary_loss": 0.008215888589620591
+        },
+        {
+          "seed": 53,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:623137389fedc0b7a9afd4b76e4c6a16779d11432bb12e1bb3e5f4531fdf9c47",
+          "training_batch_count": 509,
+          "active_position_count": 30,
+          "eligible_target_count": 128905,
+          "active_position_ratio": 0.00023272952949846787,
+          "proposal_count": 1031240,
+          "candidate_count": 30,
+          "periodic_candidate_count": 30,
+          "excluded_non_periodic_proposal_count": 282561,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.02564418502151966,
+          "mean_weighted_auxiliary_loss": 0.0025644185021519664
+        },
+        {
+          "seed": 59,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:dacb487129e00d44f78b9af105155012d5b448475e4a5162ccb079a4ab01cd49",
+          "training_batch_count": 506,
+          "active_position_count": 101472,
+          "eligible_target_count": 128524,
+          "active_position_ratio": 0.7895179110516324,
+          "proposal_count": 1028192,
+          "candidate_count": 282698,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.785970514033428,
+          "mean_auxiliary_loss": 0.08428516983985901,
+          "mean_weighted_auxiliary_loss": 0.008428516983985902
+        },
+        {
+          "seed": 59,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:277788af2355c10bbd7c1894d90975269cb47b5454553cae7d53463ce84c7089",
+          "training_batch_count": 506,
+          "active_position_count": 32,
+          "eligible_target_count": 128524,
+          "active_position_ratio": 0.00024898073511562044,
+          "proposal_count": 1028192,
+          "candidate_count": 32,
+          "periodic_candidate_count": 32,
+          "excluded_non_periodic_proposal_count": 282798,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.03369922935962677,
+          "mean_weighted_auxiliary_loss": 0.003369922935962677
+        },
+        {
+          "seed": 61,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:566f5b5a3fc0d7650701f2baa550c2cf87ef742882f66d7fac036a2004b4d601",
+          "training_batch_count": 509,
+          "active_position_count": 101707,
+          "eligible_target_count": 128905,
+          "active_position_ratio": 0.789007408556689,
+          "proposal_count": 1031240,
+          "candidate_count": 282051,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.7731719547327125,
+          "mean_auxiliary_loss": 0.08279512077569962,
+          "mean_weighted_auxiliary_loss": 0.008279512077569962
+        },
+        {
+          "seed": 61,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:1a525550d884930e0604006ff29628e3a9a1872303066d033ef5929f6f8b11e9",
+          "training_batch_count": 509,
+          "active_position_count": 37,
+          "eligible_target_count": 128905,
+          "active_position_ratio": 0.0002870330863814437,
+          "proposal_count": 1031240,
+          "candidate_count": 37,
+          "periodic_candidate_count": 37,
+          "excluded_non_periodic_proposal_count": 282007,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.031446900218725204,
+          "mean_weighted_auxiliary_loss": 0.0031446900218725206
+        }
+      ],
+      "baseline_disabled_run_count": 3,
+      "total_history_candidate_count": 847238,
+      "total_periodic_candidate_count": 99,
+      "total_excluded_non_periodic_proposal_count": 847366,
+      "mechanism_gate_passed": true
+    },
+    "held_out_greedy_generation": {
+      "replication_effect_periodic_minus_history": {
+        "control_arm": "model_topk_history",
+        "direction": "lower_loop_score_is_better",
+        "paired_rows": [
+          {
+            "seed": 53,
+            "model_topk_history_loop_score": 1.3542109929078014,
+            "model_topk_periodic_loop_score": 1.2856985660072167,
+            "loop_score_delta": -0.06851242690058479,
+            "model_topk_periodic_win": true,
+            "prompt_win_count": 2,
+            "prompt_loss_count": 2,
+            "prompt_tie_count": 8,
+            "periodic_loop_ratio_delta": -0.16666666666666663,
+            "periodic_suffix_repeated_token_ratio_delta": -0.07465277777777773,
+            "ngram3_repetition_ratio_delta": 0.0,
+            "ngram2_distinct_ratio_delta": 0.0017543859649122584,
+            "ngram4_distinct_ratio_delta": -0.001792114695340491
+          },
+          {
+            "seed": 59,
+            "model_topk_history_loop_score": 1.4691452423167848,
+            "model_topk_periodic_loop_score": 1.3468050111982084,
+            "loop_score_delta": -0.12234023111857639,
+            "model_topk_periodic_win": true,
+            "prompt_win_count": 3,
+            "prompt_loss_count": 2,
+            "prompt_tie_count": 7,
+            "periodic_loop_ratio_delta": -0.16666666666666663,
+            "periodic_suffix_repeated_token_ratio_delta": -0.08246527777777779,
+            "ngram3_repetition_ratio_delta": -0.03812056737588654,
+            "ngram2_distinct_ratio_delta": 0.033333333333333326,
+            "ngram4_distinct_ratio_delta": 0.04121863799283154
+          },
+          {
+            "seed": 61,
+            "model_topk_history_loop_score": 1.2730385638297872,
+            "model_topk_periodic_loop_score": 1.2194493047779023,
+            "loop_score_delta": -0.05358925905188494,
+            "model_topk_periodic_win": true,
+            "prompt_win_count": 5,
+            "prompt_loss_count": 3,
+            "prompt_tie_count": 4,
+            "periodic_loop_ratio_delta": -0.08333333333333337,
+            "periodic_suffix_repeated_token_ratio_delta": -0.02604166666666663,
+            "ngram3_repetition_ratio_delta": -0.03368794326241131,
+            "ngram2_distinct_ratio_delta": 0.027192982456140352,
+            "ngram4_distinct_ratio_delta": 0.03942652329749105
+          }
+        ],
+        "mean_loop_score_delta": -0.08148063902368204,
+        "model_topk_periodic_win_count": 3,
+        "control_win_count": 0,
+        "seed_tie_count": 0,
+        "total_prompt_win_count": 10,
+        "total_prompt_loss_count": 7,
+        "total_prompt_tie_count": 19,
+        "mean_periodic_loop_ratio_delta": -0.13888888888888887,
+        "mean_periodic_suffix_repeated_token_ratio_delta": -0.06105324074074072,
+        "mean_ngram3_repetition_ratio_delta": -0.02393617021276595,
+        "mean_ngram2_distinct_ratio_delta": 0.020760233918128645,
+        "mean_ngram4_distinct_ratio_delta": 0.026284348864994034
+      },
+      "absolute_control_effect_periodic_minus_baseline": {
+        "control_arm": "causal_lm_baseline",
+        "direction": "lower_loop_score_is_better",
+        "paired_rows": [
+          {
+            "seed": 53,
+            "causal_lm_baseline_loop_score": 1.3801780048525571,
+            "model_topk_periodic_loop_score": 1.2856985660072167,
+            "loop_score_delta": -0.09447943884534049,
+            "model_topk_periodic_win": true,
+            "prompt_win_count": 4,
+            "prompt_loss_count": 3,
+            "prompt_tie_count": 5,
+            "periodic_loop_ratio_delta": -0.25,
+            "periodic_suffix_repeated_token_ratio_delta": -0.1423611111111111,
+            "ngram3_repetition_ratio_delta": 0.048758865248226924,
+            "ngram2_distinct_ratio_delta": -0.04210526315789476,
+            "ngram4_distinct_ratio_delta": -0.05555555555555555
+          },
+          {
+            "seed": 59,
+            "causal_lm_baseline_loop_score": 1.5196219438223217,
+            "model_topk_periodic_loop_score": 1.3468050111982084,
+            "loop_score_delta": -0.17281693262411335,
+            "model_topk_periodic_win": true,
+            "prompt_win_count": 5,
+            "prompt_loss_count": 1,
+            "prompt_tie_count": 6,
+            "periodic_loop_ratio_delta": -0.16666666666666663,
+            "periodic_suffix_repeated_token_ratio_delta": -0.12760416666666674,
+            "ngram3_repetition_ratio_delta": -0.04521276595744683,
+            "ngram2_distinct_ratio_delta": 0.04035087719298244,
+            "ngram4_distinct_ratio_delta": 0.0474910394265233
+          },
+          {
+            "seed": 61,
+            "causal_lm_baseline_loop_score": 1.1383781650491478,
+            "model_topk_periodic_loop_score": 1.2194493047779023,
+            "loop_score_delta": 0.08107113972875446,
+            "model_topk_periodic_win": false,
+            "prompt_win_count": 3,
+            "prompt_loss_count": 6,
+            "prompt_tie_count": 3,
+            "periodic_loop_ratio_delta": -0.08333333333333337,
+            "periodic_suffix_repeated_token_ratio_delta": 0.06597222222222227,
+            "ngram3_repetition_ratio_delta": 0.01773049645390068,
+            "ngram2_distinct_ratio_delta": -0.014912280701754377,
+            "ngram4_distinct_ratio_delta": -0.01971326164874554
+          }
+        ],
+        "mean_loop_score_delta": -0.06207507724689979,
+        "model_topk_periodic_win_count": 2,
+        "control_win_count": 1,
+        "seed_tie_count": 0,
+        "total_prompt_win_count": 12,
+        "total_prompt_loss_count": 10,
+        "total_prompt_tie_count": 14,
+        "mean_periodic_loop_ratio_delta": -0.16666666666666666,
+        "mean_periodic_suffix_repeated_token_ratio_delta": -0.06799768518518519,
+        "mean_ngram3_repetition_ratio_delta": 0.007092198581560257,
+        "mean_ngram2_distinct_ratio_delta": -0.005555555555555564,
+        "mean_ngram4_distinct_ratio_delta": -0.009259259259259264
+      }
+    },
+    "semantic_review": {
+      "status": "packet_ready_human_review_pending",
+      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "group_count": 36,
+      "candidate_count": 108,
+      "scores_available": false,
+      "evidence_boundary": "No semantic-quality claim is made before blinded human judgments are completed and unblinded."
+    }
+  },
+  "acceptance": {
+    "readiness_and_stability_gate_passed": true,
+    "mechanism_gate_passed": true,
+    "review_packet_gate_passed": true,
+    "replication_mean_loop_score_delta_threshold": 0.0,
+    "replication_mean_loop_score_delta": -0.08148063902368204,
+    "replication_mean_gate_passed": true,
+    "replication_minimum_seed_win_count": 2,
+    "replication_observed_seed_win_count": 3,
+    "replication_seed_direction_gate_passed": true,
+    "absolute_control_mean_loop_score_delta_threshold": 0.0,
+    "absolute_control_mean_loop_score_delta": -0.06207507724689979,
+    "absolute_control_mean_gate_passed": true,
+    "absolute_control_minimum_seed_non_loss_count": 2,
+    "absolute_control_observed_seed_non_loss_count": 2,
+    "absolute_control_seed_direction_gate_passed": true,
+    "ce_safety_gate_passed": true,
+    "overall_gate_passed": true,
+    "failed_gate": null,
+    "decision_basis": "All frozen readiness, identity, stability, mechanism, review-packet, periodic-versus-history, periodic-versus-baseline, and CE-safety requirements passed."
+  },
+  "diagnosis": {
+    "execution_result": "The Rust-owned periodic planner selected 99 loop-completing candidates and excluded 847366 non-periodic proposals across all three periodic runs.",
+    "replication_result": "Periodic filtering reduced loop score against history in 3 of 3 seeds with mean delta -0.081481.",
+    "absolute_control_result": "Periodic filtering reduced loop score against ordinary fine-tuning in 2 of 3 seeds with mean delta -0.062075.",
+    "safety_result": "Periodic-minus-baseline held-out CE changed by 0.001446 on average and at worst 0.002626.",
+    "heterogeneity_result": "The periodic arm lost to ordinary fine-tuning for seed 61 and prompt-local outcomes included wins, losses, and ties, so the result remains bounded.",
+    "semantic_result": "A 36-group, 108-candidate blinded packet is ready, but no human semantic scores have been collected or unblinded."
+  },
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "Under a frozen three-seed Pythia-70M/Alice protocol, periodic model-top-k unlikelihood executed end-to-end, preserved held-out CE, beat broad history candidates in all three seeds, beat ordinary fine-tuning in two of three seeds, and passed both prespecified mean loop-score gates.",
+    "observed_result": "Periodic-minus-history mean loop-score delta was -0.081481; periodic-minus-baseline was -0.062075.",
+    "excluded_claims": [
+      "statistical significance",
+      "semantic or language-quality superiority",
+      "multi-model generality",
+      "optimal periodic-objective strength",
+      "general Z-space training superiority"
+    ],
+    "evidence_boundary": "This is a prespecified bounded replication on one 70M model, a second literary corpus, three seeds, and greedy decoding. Human semantic review and a second model remain required for promotion."
+  },
+  "next_prespecified_experiment": {
+    "status": "proposed_not_run",
+    "current_study_retuning_allowed": false,
+    "recommended_question": "Does the periodic advantage survive on a second model architecture and under completed blinded semantic review?",
+    "requirements": [
+      "complete and unblind the frozen 36-group semantic review without regenerating outputs",
+      "freeze a second-model protocol and fresh seeds before training",
+      "retain ordinary fine-tuning and model-top-k history controls",
+      "retain exact replay, adapter, optimizer, generation, and review identities",
+      "do not tune periodic strength on the Alice generation results"
+    ]
+  }
+}
