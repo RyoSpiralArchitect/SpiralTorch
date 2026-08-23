@@ -1,0 +1,247 @@
+{
+  "schema": "spiraltorch.hf_periodic_baseline_replication_protocol.v1",
+  "status": "prespecified",
+  "prespecified_at": "2026-08-23T04:15:31Z",
+  "protocol_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
+  "protocol_id_rule": "sha256 of canonical UTF-8 JSON scientific_spec with sorted keys and compact separators",
+  "scientific_spec": {
+    "classification": "prespecified_three_arm_fresh_corpus_replication",
+    "scope": "single-model fresh-corpus matched three-arm multi-seed Pythia-70M LoRA study",
+    "study_question": "On a fresh corpus, does periodic model-top-k unlikelihood retain its advantage over broad history unlikelihood and also avoid underperforming ordinary causal-LM fine-tuning?",
+    "implementation": {
+      "objective_git_commit": "a1fa9da134b2dce65e3d6e6b48a911655b7b0529",
+      "required_source_state": "objective execution must use a clean descendant of the objective commit containing only the prior bounded pilot evidence, this prespecification, and its frozen prompt set",
+      "objective_contract_version": "spiraltorch.zspace_repetition_unlikelihood.v3",
+      "objective_semantic_owner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "objective_semantic_backend": "rust",
+      "proposal_owner": "model-client-no-grad",
+      "differentiation_owner": "model-client-autograd",
+      "periodicity_kernel": "st-core::runtime::zspace_periodicity",
+      "periodic_suffix_max_period": 16,
+      "periodic_suffix_min_repetitions": 3,
+      "generation_evidence_contract_version": "spiraltorch.zspace_generation_evidence.v1",
+      "generation_evidence_semantic_owner": "st-core::runtime::zspace_generation_evidence"
+    },
+    "model": {
+      "hub_id": "EleutherAI/pythia-70m-deduped",
+      "profile": "pythia-70m-local-smoke",
+      "architecture_family": "gpt_neox",
+      "parameter_scale": "70m",
+      "snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--EleutherAI--pythia-70m-deduped/snapshots/e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626"
+    },
+    "corpus": {
+      "name": "Alice's Adventures in Wonderland",
+      "source_path": "/Users/ryospiralarchitect/SpiralReality/data/alices_adventure_in_wonderland.txt",
+      "size_bytes": 169226,
+      "sha256": "7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+      "validation_fraction": 0.1,
+      "freshness": "not used by the tracked repetition-unlikelihood pilot specifications"
+    },
+    "training": {
+      "seeds": [
+        53,
+        59,
+        61
+      ],
+      "seed_provenance": "fresh prime seeds not used in the tracked repetition-unlikelihood benchmark specifications",
+      "arms": [
+        {
+          "name": "causal_lm_baseline",
+          "candidate_source": "none",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "candidate_source": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        },
+        {
+          "name": "model_topk_periodic",
+          "candidate_source": "model_topk_periodic",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 9,
+      "optimizer_update_count": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "query_key_value",
+          "dense"
+        ]
+      },
+      "learning_rate": 0.00005,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "runtime_environment": {
+        "HF_HOME": "/Users/ryospiralarchitect/.hf_home",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "PYTHONHASHSEED": "0",
+        "SPIRALTON_MAGIC": "0",
+        "SPIRALTON_TORCH": "0",
+        "SPIRALTON_MODEL_PATCHES": "0",
+        "SPIRALTON_NUMPY": "0"
+      },
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_steps": 250,
+      "eval_steps": 250,
+      "save_total_limit": 1,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "gradient_accumulation_normalization": "trainer_divides_the_combined_microbatch_mean",
+        "supervised_target_is_never_a_negative_candidate": true
+      },
+      "single_factor_rule": "The objective treatment is the only intended arm difference: no auxiliary objective, broad model-top-k history, or periodic-filtered model-top-k history.",
+      "no_retuning_rule": "Do not change objective strength, proposal_top_k, context_window, candidate cap, seeds, prompt set, horizon, or acceptance thresholds after any study run begins."
+    },
+    "generation_endpoint": {
+      "report_count": 9,
+      "one_report_per_training_run": true,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "prompt_provenance": "fresh independent prompts fixed before training and not selected from corpus text or prior/current model outputs",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as the training run",
+        "continuation_only": true
+      }
+    },
+    "semantic_review": {
+      "packet_required": true,
+      "packet_group_count": 36,
+      "grouping": "one group per seed and prompt with all three arm continuations",
+      "arm_labels": "deterministically shuffled opaque labels using a pre-run key whose SHA-256 commitment is frozen below",
+      "blinding_key_sha256": "8ac4834e78cb378d5d5def4d5f5df21fc1565eebdec1f5e32956ab9f3c17c1e3",
+      "reviewer_visible_fields": [
+        "group_id",
+        "prompt",
+        "candidate_label",
+        "continuation"
+      ],
+      "hidden_fields": [
+        "arm",
+        "seed",
+        "loop metrics",
+        "held-out loss",
+        "training receipt metrics"
+      ],
+      "rubric": {
+        "fluency": "integer 1 through 5",
+        "prompt_relevance": "integer 1 through 5",
+        "local_coherence": "integer 1 through 5",
+        "non_repetition": "integer 1 through 5",
+        "preference": "one opaque candidate label or tie"
+      },
+      "gate_role": "review readiness is required for this run; completed human judgments are required before semantic-quality promotion but are not post-hoc substituted for the frozen token-loop gate"
+    },
+    "metrics": {
+      "primary_generation_metric": "generation_evidence.aggregate.sample_mean_loop_score",
+      "replication_effect": "model_topk_periodic_minus_model_topk_history paired by seed, lower is better",
+      "absolute_control_effect": "model_topk_periodic_minus_causal_lm_baseline paired by seed, lower is better",
+      "primary_aggregate": "arithmetic mean of the three paired seed effects",
+      "safety_metric": "eval_after_train.eval_loss paired by seed against causal_lm_baseline",
+      "secondary_generation_metrics": [
+        "generation_evidence.aggregate.periodic_loop_sample_ratio",
+        "generation_evidence.aggregate.periodic_suffix_repeated_token_ratio",
+        "generation_evidence.aggregate.ngrams[order=3].repetition_ratio",
+        "generation_evidence.aggregate.ngrams[order=2].distinct_ratio",
+        "generation_evidence.aggregate.ngrams[order=4].distinct_ratio"
+      ],
+      "objective_execution_metrics": [
+        "zspace_repetition_unlikelihood_receipt.active_position_ratio",
+        "zspace_repetition_unlikelihood_receipt.mean_candidates_per_active_position",
+        "zspace_repetition_unlikelihood_receipt.periodic_candidate_count",
+        "zspace_repetition_unlikelihood_receipt.excluded_non_periodic_proposal_count",
+        "zspace_repetition_unlikelihood_receipt.mean_auxiliary_loss",
+        "zspace_repetition_unlikelihood_receipt.mean_weighted_auxiliary_loss"
+      ]
+    },
+    "acceptance": {
+      "required_ready_run_cards": 9,
+      "required_complete_optimizer_horizon": 64,
+      "required_generation_reports": 9,
+      "required_blinded_review_packet_groups": 36,
+      "generation_evidence_validation": "every report must round-trip through validate_zspace_generation_evidence in the Rust semantic core",
+      "identity_requirements": [
+        "verified model runtime, execution, corpus materialization, tokenized dataset, training recipe, and finetune replay identities",
+        "one prompt_set_id across all nine generation reports",
+        "one decoding_config_id per seed shared by all three arms",
+        "content-addressed adapter identity for every generation report"
+      ],
+      "stability_requirements": [
+        "no non-finite before-train or after-train evaluation loss",
+        "no failed or partial optimizer trajectory receipt",
+        "no failed, empty, or malformed generation row",
+        "no early termination before 64 optimizer updates",
+        "objective receipts ready for all six objective-bearing runs"
+      ],
+      "mechanism_requirements": [
+        "the baseline recipe must be disabled and must not add auxiliary loss",
+        "periodic_candidate_count must be positive in every model_topk_periodic run",
+        "excluded_non_periodic_proposal_count must be positive in every model_topk_periodic run",
+        "periodic_candidate_count must be zero in every model_topk_history run",
+        "candidate_count must be positive in every model_topk_history run"
+      ],
+      "replication_success_rule": {
+        "mean_periodic_minus_history_loop_score_less_than": 0.0,
+        "minimum_periodic_history_seed_win_count": 2
+      },
+      "absolute_control_success_rule": {
+        "mean_periodic_minus_baseline_loop_score_at_most": 0.0,
+        "minimum_periodic_baseline_seed_non_loss_count": 2
+      },
+      "safety_gate": {
+        "mean_treatment_minus_baseline_eval_loss_at_most": 0.02,
+        "maximum_individual_treatment_minus_baseline_eval_loss_at_most": 0.05,
+        "applies_to": [
+          "model_topk_history",
+          "model_topk_periodic"
+        ]
+      },
+      "decision_rule": "Pass only if all readiness, stability, identity, mechanism, replication, absolute-control, and CE-safety requirements hold. Record ready-but-negative if execution is ready but a frozen efficacy or safety gate fails; record blocked if a readiness or mechanism requirement fails."
+    },
+    "interpretation": {
+      "efficacy_claim_ready_even_if_passed": false,
+      "allowed_positive_claim": "Within this prespecified bounded Pythia-70M/Alice replication, periodic filtering improved the selected loop metric relative to broad history and did not underperform ordinary fine-tuning, while preserving held-out CE.",
+      "allowed_negative_claim": "This frozen three-arm periodic recipe did not satisfy the prespecified bounded replication gate.",
+      "promotion_if_passed": "complete the blinded semantic review, then run a separately prespecified second-model study",
+      "excluded_claims": [
+        "general language-quality superiority",
+        "statistical significance",
+        "multi-model generality",
+        "optimal periodic-objective strength",
+        "general Z-space training superiority"
+      ]
+    }
+  }
+}
