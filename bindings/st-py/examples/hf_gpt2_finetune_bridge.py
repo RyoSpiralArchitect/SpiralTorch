@@ -3937,6 +3937,7 @@ def _base_run_card(
         "model_dtype_report": None,
         "finetune_mode": args.finetune_mode,
         "adapter_config": dict(args._hf_finetune_adapter_config),
+        "adapter_config_canonicalization": None,
         "model_prepare_report": None,
         "model_artifact_kind": artifact_report.get("artifact_kind"),
         "model_artifact_report": summarize_hf_causal_lm_artifact(
@@ -5830,6 +5831,10 @@ def _main_with_runtime_access(
             )
         train_result = trainer.train(**_trainer_train_kwargs(args))
         trainer.save_model(str(args.output_dir))
+        if args.finetune_mode == "lora":
+            card["adapter_config_canonicalization"] = (
+                st.canonicalize_hf_adapter_configs(args.output_dir)
+            )
         card["zspace_optimizer_control_receipt"] = (
             zspace_optimizer_callback.receipt()
         )

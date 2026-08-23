@@ -1066,6 +1066,7 @@ from .hf_input_identity import (
 
 from . import hf_adapter as hf_adapter
 from .hf_adapter import (
+    HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA,
     HF_ADAPTER_LINEAGE_FILENAME,
     HF_ADAPTER_LINEAGE_SCHEMA,
     HF_ADAPTER_PROMOTION_FILENAME,
@@ -1075,6 +1076,7 @@ from .hf_adapter import (
     HF_ADAPTER_CONTINUATION_POLICY_FILENAME,
     HF_ADAPTER_CONTINUATION_POLICY_SCHEMA,
     HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+    canonicalize_hf_adapter_configs,
     hf_adapter_continuation_policy_lines,
     hf_adapter_continuation_policy_report,
     hf_adapter_fingerprint,
@@ -1548,6 +1550,7 @@ _EXTRAS = [
     "hf_adapter_continuation_executor_status_report",
     "hf_adapter_continuation_policy_lines",
     "hf_adapter_continuation_policy_report",
+    "canonicalize_hf_adapter_configs",
     "hf_adapter_fingerprint",
     "hf_adapter_input_identity_lines",
     "hf_adapter_input_identity_report",
@@ -1569,6 +1572,7 @@ _EXTRAS = [
     "hf_adapter_promotion_chain_report",
     "hf_adapter_promotion_lines",
     "hf_adapter_promotion_report",
+    "HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA",
     "load_hf_adapter_promotion_chain",
     "load_hf_adapter_continuation_policy",
     "load_hf_adapter_continuation_executor_stop_request",

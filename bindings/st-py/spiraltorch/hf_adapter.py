@@ -22,6 +22,7 @@ from .hf_ft import (
 from .hf_peft import hf_causal_lm_artifact_report
 
 __all__ = [
+    "HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA",
     "HF_ADAPTER_LINEAGE_FILENAME",
     "HF_ADAPTER_LINEAGE_SCHEMA",
     "HF_ADAPTER_PROMOTION_FILENAME",
@@ -31,6 +32,7 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
     "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
     "HF_ADAPTER_INPUT_IDENTITY_SCHEMA",
+    "canonicalize_hf_adapter_configs",
     "hf_adapter_continuation_policy_lines",
     "hf_adapter_continuation_policy_report",
     "hf_adapter_fingerprint",
@@ -53,6 +55,9 @@ __all__ = [
 ]
 
 
+HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA = (
+    "spiraltorch.hf_adapter_config_canonicalization.v1"
+)
 HF_ADAPTER_LINEAGE_SCHEMA = "spiraltorch.hf_adapter_lineage.v1"
 HF_ADAPTER_LINEAGE_FILENAME = "spiraltorch-hf-adapter-lineage.json"
 HF_ADAPTER_PROMOTION_SCHEMA = "spiraltorch.hf_adapter_promotion.v1"
@@ -66,6 +71,12 @@ HF_ADAPTER_CONTINUATION_POLICY_FILENAME = (
     "spiraltorch-hf-adapter-continuation-policy.json"
 )
 HF_ADAPTER_INPUT_IDENTITY_SCHEMA = "spiraltorch.hf_adapter_input_identity.v1"
+_HF_ADAPTER_CONFIG_SET_FIELDS = (
+    "exclude_modules",
+    "modules_to_save",
+    "target_modules",
+    "target_parameters",
+)
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -131,6 +142,56 @@ def _artifact_directory(value: str | Path) -> Path:
     if not path.is_dir():
         raise ValueError(f"adapter directory does not exist: {path}")
     return path.resolve()
+
+
+def canonicalize_hf_adapter_configs(adapter_root: str | Path) -> dict[str, object]:
+    """Stabilize PEFT config serialization before fingerprinting an adapter."""
+
+    root = _artifact_directory(adapter_root)
+    config_paths = sorted(root.rglob("adapter_config.json"))
+    if not config_paths:
+        raise ValueError(f"adapter directory has no adapter_config.json: {root}")
+    files: list[dict[str, object]] = []
+    for config_path in config_paths:
+        resolved = config_path.resolve()
+        try:
+            relative_path = resolved.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise ValueError(
+                f"adapter config resolves outside its root: {config_path}"
+            ) from exc
+        config, _ = _json_mapping(resolved)
+        before_sha256 = _sha256_file(resolved)
+        sorted_fields: list[str] = []
+        for field in _HF_ADAPTER_CONFIG_SET_FIELDS:
+            value = config.get(field)
+            if not isinstance(value, list):
+                continue
+            canonical = sorted(value, key=_canonical_json_bytes)
+            if canonical != value:
+                sorted_fields.append(field)
+            config[field] = canonical
+        _atomic_write_json(resolved, config)
+        after_sha256 = _sha256_file(resolved)
+        files.append(
+            {
+                "relative_path": relative_path,
+                "sha256_before": before_sha256,
+                "sha256_after": after_sha256,
+                "bytes_changed": before_sha256 != after_sha256,
+                "sorted_fields": sorted_fields,
+            }
+        )
+    return {
+        "row_type": "hf_adapter_config_canonicalization",
+        "schema": HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA,
+        "status": "ready",
+        "adapter_root": str(root),
+        "file_count": len(files),
+        "changed_file_count": sum(bool(row["bytes_changed"]) for row in files),
+        "set_fields": list(_HF_ADAPTER_CONFIG_SET_FIELDS),
+        "files": files,
+    }
 
 
 def _adapter_config(report: Mapping[str, object]) -> dict[str, object]:

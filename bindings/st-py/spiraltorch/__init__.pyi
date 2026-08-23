@@ -1040,6 +1040,10 @@ def hf_finetune_replay_identity_report(
 def hf_finetune_replay_identity_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
+HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA: str
+def canonicalize_hf_adapter_configs(
+    adapter_root: str | PathLike[str],
+) -> Dict[str, object]: ...
 def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
 def hf_adapter_input_identity_report(
     adapter: str | PathLike[str],
@@ -11663,6 +11667,8 @@ __all__ = [
     "hf_finetune_execution_identity_report",
     "hf_finetune_input_identity_lines",
     "hf_finetune_input_identity_report",
+    "HF_ADAPTER_CONFIG_CANONICALIZATION_SCHEMA",
+    "canonicalize_hf_adapter_configs",
     "hf_adapter_fingerprint",
     "hf_adapter_input_identity_lines",
     "hf_adapter_input_identity_report",
