@@ -292,6 +292,63 @@ def test_generation_sweep_plan_freezes_seed_prompt_and_decoding_ids() -> None:
     assert first["decoding_config_ids"] == second["decoding_config_ids"]
 
 
+def test_generation_sweep_binds_a_prespecified_protocol_id() -> None:
+    module = _load_generation_sweep_example()
+    protocol_id = _sha_id("f")
+    args = module.parse_args(
+        [
+            "--dry-run",
+            "--prompt",
+            "SpiralTorch is",
+            "--generation-evidence-protocol-id",
+            protocol_id,
+        ]
+    )
+
+    plan = module._generation_evidence_plan(args, module.build_control_runs(args))
+
+    assert plan["protocol_id"] == protocol_id
+    assert plan["protocol_binding"] == "prespecified_cli_override"
+
+    with pytest.raises(SystemExit):
+        module.parse_args(
+            [
+                "--dry-run",
+                "--prompt",
+                "SpiralTorch is",
+                "--generation-evidence-protocol-id",
+                "sha256:not-a-digest",
+            ]
+        )
+
+
+def test_generation_sweep_remote_adapter_identity_requires_a_pinned_revision() -> None:
+    module = _load_generation_sweep_example()
+    summary = {
+        "artifact_kind": "peft_adapter",
+        "base_model_name_or_path": "org/base",
+        "base_model_revision": None,
+        "base_model_commit": "a" * 40,
+    }
+    first_args = SimpleNamespace(
+        model_name="org/adapter",
+        adapter_revision="b" * 40,
+    )
+    second_args = SimpleNamespace(
+        model_name="org/adapter",
+        adapter_revision="c" * 40,
+    )
+
+    first = module._model_artifact_id(first_args, summary, _sha_id("d"))
+    second = module._model_artifact_id(second_args, summary, _sha_id("d"))
+
+    assert first != second
+    assert module._adapter_loader_kwargs(first_args) == {"revision": "b" * 40}
+    first_args.adapter_revision = None
+    with pytest.raises(RuntimeError, match="requires --adapter-revision"):
+        module._model_artifact_id(first_args, summary, _sha_id("d"))
+
+
 def test_generation_sweep_validates_fixed_prompt_set_identity(tmp_path: Path) -> None:
     module = _load_generation_sweep_example()
     args = module.parse_args(
