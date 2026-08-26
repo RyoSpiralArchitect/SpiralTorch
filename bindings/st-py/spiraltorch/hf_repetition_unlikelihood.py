@@ -17,6 +17,7 @@ from .repetition_unlikelihood import (
     ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
+    validate_zspace_repetition_unlikelihood_plan,
     zspace_repetition_unlikelihood_plan,
 )
 
@@ -555,7 +556,9 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
         logits = (
             outputs.get("logits") if isinstance(outputs, Mapping) else outputs.logits
         )
-        plan = self._spiraltorch_materialize_plan(logits, batch_plan)
+        plan = validate_zspace_repetition_unlikelihood_plan(
+            self._spiraltorch_materialize_plan(logits, batch_plan)
+        )
         request = plan.get("request")
         observed_config = (
             request.get("config") if isinstance(request, Mapping) else None
