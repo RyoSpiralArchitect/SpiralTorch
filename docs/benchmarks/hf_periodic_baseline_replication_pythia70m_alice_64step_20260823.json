@@ -5,6 +5,20 @@
   "decision": "passed_prespecified_gate",
   "study_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
   "recorded_at": "2026-08-23T20:09:05.729823+00:00",
+  "artifact_migrations": [
+    {
+      "recorded_at": "2026-08-26T15:44:22Z",
+      "reason": "Bind the exact pre-review candidate-to-arm assignments inside the packet commitment before human scoring.",
+      "candidate_and_prompt_content_unchanged": true,
+      "previous_packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "previous_packet_file_sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
+      "previous_map_file_sha256": "sha256:67acbd63450940a43ce69e0a0f753533d627121fa04d5259f3b512e163fa643e",
+      "packet_id": "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+      "packet_file_sha256": "sha256:1f0b53fe29e8ccfb71a33fb80659fd7354582cb10c6bbd70398be30bad3bc2dd",
+      "map_file_sha256": "sha256:4b62b29006e8522768c669660447a29e319296f98297c898aed96a356acc9c03",
+      "blinding_map_id": "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec"
+    }
+  ],
   "protocol": {
     "path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_64step_prespec_20260822.json",
     "file_sha256": "sha256:bac502de3b70cfa82026f771113511019d12065ac9f9a8bc9149c052b5549541",
@@ -56,8 +70,9 @@
     },
     "semantic_review": {
       "packet_path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
-      "packet_file_sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
-      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "packet_file_sha256": "sha256:1f0b53fe29e8ccfb71a33fb80659fd7354582cb10c6bbd70398be30bad3bc2dd",
+      "packet_id": "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+      "blinding_map_id": "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
       "group_count": 36,
       "candidate_count": 108,
       "human_review_status": "pending"
@@ -304,9 +319,10 @@
     },
     "blinding": {
       "packet_path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
-      "packet_sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
+      "packet_sha256": "sha256:1f0b53fe29e8ccfb71a33fb80659fd7354582cb10c6bbd70398be30bad3bc2dd",
       "map_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/review/blinding-map.json",
-      "map_sha256": "sha256:67acbd63450940a43ce69e0a0f753533d627121fa04d5259f3b512e163fa643e",
+      "map_sha256": "sha256:4b62b29006e8522768c669660447a29e319296f98297c898aed96a356acc9c03",
+      "blinding_map_id": "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
       "map_ignored_by_git": true,
       "key_path": "models/runs/hf-periodic-baseline-replication-pythia70m-alice-v1/review/blinding-key.json",
       "key_sha256_commitment": "8ac4834e78cb378d5d5def4d5f5df21fc1565eebdec1f5e32956ab9f3c17c1e3",
@@ -340,8 +356,8 @@
       {
         "role": "semantic_review_packet",
         "path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json",
-        "sha256": "sha256:31306801bf15317fa4b88ea2eaac81952e84d763b67a6251c22d0aaa8c119a7d",
-        "size_bytes": 54537
+        "sha256": "sha256:1f0b53fe29e8ccfb71a33fb80659fd7354582cb10c6bbd70398be30bad3bc2dd",
+        "size_bytes": 54633
       }
     ]
   },
@@ -385,7 +401,8 @@
     },
     "semantic_review_packet": {
       "status": "ready_for_blinded_review",
-      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "packet_id": "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+      "blinding_map_id": "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
       "group_count": 36,
       "candidate_count": 108,
       "arm_and_seed_fields_hidden": true,
@@ -797,7 +814,8 @@
     },
     "semantic_review": {
       "status": "packet_ready_human_review_pending",
-      "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+      "packet_id": "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+      "blinding_map_id": "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
       "group_count": 36,
       "candidate_count": 108,
       "scores_available": false,

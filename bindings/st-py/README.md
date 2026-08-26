@@ -473,10 +473,10 @@ metadata. Pass `model_name=...` for a one-off override, or `model_configs=` plus
 ## Blinded semantic review
 
 Held-out generation packets can be reviewed without rebuilding scoring or
-unblinding semantics in Python. Rust validates the packet commitment, partial
-draft coverage, 1-through-5 score bounds, complete-response receipt, sealed
-map, and arm/seed aggregation. Python only presents groups and atomically saves
-the last fully validated draft.
+unblinding semantics in Python. Rust validates the packet and pre-review map
+commitments, partial draft coverage, 1-through-5 score bounds,
+complete-response receipt, and arm/seed aggregation. Python only presents
+groups and atomically saves the last fully validated draft.
 
 ```bash
 PACKET=docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json
@@ -500,6 +500,7 @@ spiral-hf-semantic-review validate-report semantic-review-unblind.json
 
 The corresponding Python surface is
 `validate_zspace_semantic_review_packet()`,
+`zspace_semantic_review_map_id()`,
 `summarize_zspace_semantic_review_draft()`, and
 `unblind_zspace_semantic_review()`. A structurally valid report does not prove
 that the reviewer remained blind and does not establish model superiority.

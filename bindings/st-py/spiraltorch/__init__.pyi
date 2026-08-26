@@ -5409,6 +5409,8 @@ ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION: str
 ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND: str
 ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA: str
 ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY: str
+ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION: str
+ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE: str
 ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA: str
 ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS: int
 ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION: str
@@ -5567,6 +5569,9 @@ def validate_zspace_generation_evidence(
 def validate_zspace_semantic_review_packet(
     packet: Mapping[str, object],
 ) -> Dict[str, object]: ...
+def zspace_semantic_review_map_id(
+    entries: Sequence[Mapping[str, object]],
+) -> str: ...
 def validate_zspace_semantic_review_packet_receipt(
     receipt: Mapping[str, object],
 ) -> Dict[str, object]: ...
@@ -12116,6 +12121,8 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA",
     "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
     "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
@@ -12138,6 +12145,7 @@ __all__ = [
     "validate_zspace_semantic_review_packet",
     "validate_zspace_semantic_review_packet_receipt",
     "validate_zspace_semantic_review_unblind",
+    "zspace_semantic_review_map_id",
     "validate_zspace_repetition_unlikelihood_plan",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",

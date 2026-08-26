@@ -674,6 +674,8 @@ from .semantic_review import (
     ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND,
     ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA,
     ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY,
+    ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION,
+    ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE,
     ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
     ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
     ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION,
@@ -696,6 +698,7 @@ from .semantic_review import (
     validate_zspace_semantic_review_packet,
     validate_zspace_semantic_review_packet_receipt,
     validate_zspace_semantic_review_unblind,
+    zspace_semantic_review_map_id,
 )
 from .hf_repetition_unlikelihood import (
     HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY,
@@ -8608,6 +8611,8 @@ _EXTRAS.extend(
         "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",
         "ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA",
         "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
+        "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
+        "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
         "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
         "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
         "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
@@ -8630,6 +8635,7 @@ _EXTRAS.extend(
         "validate_zspace_semantic_review_packet",
         "validate_zspace_semantic_review_packet_receipt",
         "validate_zspace_semantic_review_unblind",
+        "zspace_semantic_review_map_id",
         "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
         "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
         "HfRepetitionUnlikelihoodBatchPlan",
