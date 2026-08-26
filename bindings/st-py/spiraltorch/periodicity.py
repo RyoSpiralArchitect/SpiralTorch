@@ -35,9 +35,9 @@ ZSPACE_PERIODICITY_SEMANTIC_BACKEND = str(
 ZSPACE_PERIODICITY_RULE = str(
     _native_constant(
         "ZSPACE_PERIODICITY_RULE",
-        "longest trailing suffix formed by complete repetitions with "
-        "period<=maximum_period and repetitions>=minimum_repetitions; maximize "
-        "repeated_token_count, then suffix token_count, then prefer the smaller period",
+        "trailing periodic run with period<=maximum_period and "
+        "token_count>=period*minimum_repetitions; the run may start mid-cycle; "
+        "select by maximum repeated_token_count, then token_count, then smaller period",
     )
 )
 ZSPACE_PERIODICITY_ANALYSIS_ID_RULE = str(

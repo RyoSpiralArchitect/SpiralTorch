@@ -21,7 +21,7 @@ pub const ZSPACE_PERIODICITY_SEMANTIC_OWNER: &str = "st-core::runtime::zspace_pe
 pub const ZSPACE_PERIODICITY_SEMANTIC_BACKEND: &str = "rust";
 /// Default maximum period shared by training and generation evidence.
 pub const ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD: usize = 16;
-/// Default minimum complete repetitions shared by training and generation evidence.
+/// Default minimum full-period span shared by training and generation evidence.
 pub const ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS: usize = 3;
 /// Maximum number of observed plus appended tokens accepted by the public contract.
 pub const ZSPACE_PERIODICITY_MAX_TOKENS: usize = 1_000_000;
@@ -35,7 +35,7 @@ pub const ZSPACE_PERIODICITY_MAX_COMPARISON_WORK: usize = 16_777_216;
 pub const ZSPACE_PERIODICITY_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Canonical periodic-suffix and tie-breaking semantics.
 pub const ZSPACE_PERIODICITY_RULE: &str =
-    "longest trailing suffix formed by complete repetitions with period<=maximum_period and repetitions>=minimum_repetitions; maximize repeated_token_count, then suffix token_count, then prefer the smaller period";
+    "trailing periodic run with period<=maximum_period and token_count>=period*minimum_repetitions; the run may start mid-cycle; select by maximum repeated_token_count, then token_count, then smaller period";
 /// Content identity rule for the canonical request.
 pub const ZSPACE_PERIODICITY_ANALYSIS_ID_RULE: &str =
     "sha256 of UTF-8 JSON for [contract_version, canonical request] with no insignificant whitespace";
@@ -49,7 +49,7 @@ pub const ZSPACE_PERIODICITY_EVIDENCE_BOUNDARY: &str =
 pub struct ZSpacePeriodicityConfig {
     /// Largest candidate period inspected by the suffix kernel.
     pub maximum_period: usize,
-    /// Minimum number of complete repetitions required for a match.
+    /// Minimum full-period span required for a match.
     pub minimum_repetitions: usize,
 }
 
@@ -86,7 +86,7 @@ pub struct PeriodicSuffix {
     pub token_count: usize,
     /// Tokens after the first period that repeat an earlier token.
     pub repeated_token_count: usize,
-    /// Number of complete periods in the selected suffix.
+    /// Number of complete periods contained in the selected run.
     pub repetition_count: usize,
 }
 
@@ -420,6 +420,18 @@ mod tests {
             longest_periodic_suffix(&[7, 7, 7], 16, 3).unwrap().period,
             1
         );
+    }
+
+    #[test]
+    fn periodic_run_may_begin_mid_cycle_without_overstating_repetition_count() {
+        let suffix = longest_periodic_suffix(&[1, 2, 1, 2, 1, 2, 1], 16, 3)
+            .expect("seven-token periodic run");
+
+        assert_eq!(suffix.period, 2);
+        assert_eq!(suffix.token_count, 7);
+        assert_eq!(suffix.repeated_token_count, 5);
+        assert_eq!(suffix.repetition_count, 3);
+        assert!(ZSPACE_PERIODICITY_RULE.contains("may start mid-cycle"));
     }
 
     #[test]
