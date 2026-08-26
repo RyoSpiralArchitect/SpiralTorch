@@ -13,6 +13,8 @@ from .repetition_unlikelihood import (
     ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
     ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
+    ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER,
+    ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
     validate_zspace_repetition_unlikelihood_plan,
@@ -20,9 +22,10 @@ from .repetition_unlikelihood import (
 )
 
 HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA = (
-    "spiraltorch.hf_repetition_unlikelihood_receipt.v1"
+    "spiraltorch.hf_repetition_unlikelihood_receipt.v2"
 )
 HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY = "_spiraltorch_repetition_unlikelihood_plan"
+_MODEL_TOPK_MAX_FLOAT_BYTES = 32 * 1024 * 1024
 
 __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
@@ -38,7 +41,8 @@ __all__ = [
 class HfRepetitionUnlikelihoodBatchPlan:
     """Opaque metadata kept off Trainer's recursive device-transfer path."""
 
-    report: Mapping[str, Any]
+    report: Mapping[str, Any] | None
+    sequences: tuple[Mapping[str, Any], ...] | None = None
 
 
 def hf_repetition_unlikelihood_recipe_contract(
@@ -47,19 +51,29 @@ def hf_repetition_unlikelihood_recipe_contract(
     ngram_order: int,
     context_window: int,
     max_candidates_per_position: int,
+    candidate_source: str | Mapping[str, object] = "prior_continuation",
+    proposal_top_k: int = 8,
 ) -> dict[str, object]:
     """Return the exact objective recipe embedded in training identity."""
 
+    source_kind = (
+        candidate_source.get("kind")
+        if isinstance(candidate_source, Mapping)
+        else candidate_source
+    )
+    validation_sequence: dict[str, object] = {
+        "token_ids": [0],
+        "token_mask": [True],
+        "label_mask": [True],
+    }
+    if source_kind == "model_topk_history":
+        validation_sequence["proposal_token_ids"] = [[]]
     validation_plan = zspace_repetition_unlikelihood_plan(
-        sequences=[
-            {
-                "token_ids": [0],
-                "token_mask": [True],
-                "label_mask": [True],
-            }
-        ],
+        sequences=[validation_sequence],
         strength=strength,
+        candidate_source=candidate_source,
         ngram_order=ngram_order,
+        proposal_top_k=proposal_top_k,
         context_window=context_window,
         max_candidates_per_position=max_candidates_per_position,
     )
@@ -70,18 +84,27 @@ def hf_repetition_unlikelihood_recipe_contract(
     canonical_config = dict(config)
     enabled = float(canonical_config["strength"]) > 0.0
     return {
-        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v1",
+        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v2",
         "enabled": enabled,
         "semantic_owner": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
         "semantic_backend": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
         "contract_version": ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
         "differentiation_owner": ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
+        "proposal_owner": ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER,
+        "proposal_rule": ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
         "objective_rule": ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
         "evaluation_loss": "causal_lm_loss_only",
         "gradient_accumulation_normalization": (
             "trainer_divides_the_combined_microbatch_mean" if enabled else None
         ),
         "model_accepts_loss_kwargs": False if enabled else None,
+        "proposal_materialization": (
+            "after_model_forward_from_detached_logits"
+            if enabled and source_kind == "model_topk_history"
+            else "in_data_collator"
+            if enabled
+            else None
+        ),
         "config": canonical_config,
         "data_collator": (
             "spiraltorch.HfRepetitionUnlikelihoodCollator" if enabled else None
@@ -101,6 +124,8 @@ class HfRepetitionUnlikelihoodCollator:
         ngram_order: int,
         context_window: int,
         max_candidates_per_position: int,
+        candidate_source: str | Mapping[str, object] = "prior_continuation",
+        proposal_top_k: int = 8,
         planner: Callable[..., dict[str, Any]] = zspace_repetition_unlikelihood_plan,
     ) -> None:
         self.base_collator = base_collator
@@ -109,6 +134,8 @@ class HfRepetitionUnlikelihoodCollator:
             ngram_order=ngram_order,
             context_window=context_window,
             max_candidates_per_position=max_candidates_per_position,
+            candidate_source=candidate_source,
+            proposal_top_k=proposal_top_k,
         )
         self.config = dict(recipe["config"])
         self._planner = planner
@@ -160,10 +187,18 @@ class HfRepetitionUnlikelihoodCollator:
                 token_rows, label_rows, attention_rows, strict=True
             )
         ]
-        plan = self._planner(sequences=sequences, **self.config)
-        batch[HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY] = (
-            HfRepetitionUnlikelihoodBatchPlan(plan)
-        )
+        source = self.config.get("candidate_source")
+        source_kind = source.get("kind") if isinstance(source, Mapping) else None
+        if source_kind == "model_topk_history":
+            metadata = HfRepetitionUnlikelihoodBatchPlan(
+                report=None,
+                sequences=tuple(sequences),
+            )
+        else:
+            metadata = HfRepetitionUnlikelihoodBatchPlan(
+                self._planner(sequences=sequences, **self.config)
+            )
+        batch[HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY] = metadata
         return batch
 
 
@@ -174,6 +209,10 @@ class _RepetitionUnlikelihoodReceipt:
         self.active_batch_count = 0
         self.active_position_count = 0
         self.candidate_count = 0
+        self.eligible_target_count = 0
+        self.proposal_count = 0
+        self.excluded_target_proposal_count = 0
+        self.excluded_out_of_history_proposal_count = 0
         self._plan_stream = hashlib.sha256()
         self._base_loss_sum: Any = None
         self._auxiliary_loss_sum: Any = None
@@ -195,10 +234,19 @@ class _RepetitionUnlikelihoodReceipt:
             raise RuntimeError("Rust repetition-unlikelihood plan is missing plan_id")
         active_positions = int(aggregate.get("active_position_count", 0))
         candidates = int(aggregate.get("candidate_count", 0))
+        eligible_targets = int(aggregate.get("eligible_target_count", 0))
         self.training_batch_count += 1
         self.active_batch_count += int(active_positions > 0)
         self.active_position_count += active_positions
         self.candidate_count += candidates
+        self.eligible_target_count += eligible_targets
+        self.proposal_count += int(aggregate.get("proposal_count", 0))
+        self.excluded_target_proposal_count += int(
+            aggregate.get("excluded_target_proposal_count", 0)
+        )
+        self.excluded_out_of_history_proposal_count += int(
+            aggregate.get("excluded_out_of_history_proposal_count", 0)
+        )
         self._plan_stream.update(plan_id.encode("ascii"))
         self._plan_stream.update(b"\n")
         for name, value in (
@@ -241,6 +289,17 @@ class _RepetitionUnlikelihoodReceipt:
             "active_batch_count": self.active_batch_count,
             "active_position_count": self.active_position_count,
             "candidate_count": self.candidate_count,
+            "eligible_target_count": self.eligible_target_count,
+            "active_position_ratio": (
+                None
+                if self.eligible_target_count == 0
+                else self.active_position_count / self.eligible_target_count
+            ),
+            "proposal_count": self.proposal_count,
+            "excluded_target_proposal_count": self.excluded_target_proposal_count,
+            "excluded_out_of_history_proposal_count": (
+                self.excluded_out_of_history_proposal_count
+            ),
             "mean_candidates_per_active_position": (
                 None
                 if self.active_position_count == 0
@@ -295,6 +354,124 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
         if self._spiraltorch_base_compute_loss_accepts_num_items:
             kwargs["num_items_in_batch"] = num_items_in_batch
         return super().compute_loss(model, inputs, **kwargs)
+
+    def _spiraltorch_materialize_plan(
+        self,
+        logits: Any,
+        batch_plan: HfRepetitionUnlikelihoodBatchPlan,
+    ) -> Mapping[str, Any]:
+        if isinstance(batch_plan.report, Mapping):
+            if batch_plan.sequences is not None:
+                raise RuntimeError(
+                    "Rust repetition-unlikelihood metadata mixes eager and deferred plans"
+                )
+            return batch_plan.report
+        if batch_plan.report is not None or batch_plan.sequences is None:
+            raise RuntimeError(
+                "training batch has malformed deferred repetition metadata"
+            )
+        expected_config = self._zspace_repetition_unlikelihood_recipe.get("config")
+        if not isinstance(expected_config, Mapping):
+            raise RuntimeError("repetition-unlikelihood recipe is missing config")
+        source = expected_config.get("candidate_source")
+        source_kind = source.get("kind") if isinstance(source, Mapping) else None
+        if source_kind != "model_topk_history":
+            raise RuntimeError("only model_topk_history may defer repetition planning")
+        proposal_top_k = int(source.get("proposal_top_k", 0))
+        if getattr(logits, "ndim", None) != 3:
+            raise RuntimeError("causal-LM logits must have rank 3")
+        batch_size, sequence_width, vocabulary_size = map(int, logits.shape)
+        if len(batch_plan.sequences) != batch_size:
+            raise RuntimeError(
+                "deferred repetition metadata does not match the logits batch"
+            )
+        if proposal_top_k > vocabulary_size:
+            raise RuntimeError(
+                "model vocabulary is smaller than repetition proposal_top_k"
+            )
+
+        materialized_sequences: list[dict[str, object]] = []
+        sequence_indices: list[int] = []
+        prediction_indices: list[int] = []
+        target_coordinates: list[tuple[int, int]] = []
+        for sequence_index, sequence in enumerate(batch_plan.sequences):
+            token_ids = list(sequence.get("token_ids", []))
+            token_mask = list(sequence.get("token_mask", []))
+            label_mask = list(sequence.get("label_mask", []))
+            if not (
+                len(token_ids) == len(token_mask) == len(label_mask) == sequence_width
+            ):
+                raise RuntimeError(
+                    "deferred repetition metadata does not match logits sequence width"
+                )
+            proposal_rows: list[list[int]] = [[] for _ in token_ids]
+            materialized_sequences.append(
+                {
+                    "token_ids": token_ids,
+                    "token_mask": token_mask,
+                    "label_mask": label_mask,
+                    "proposal_token_ids": proposal_rows,
+                }
+            )
+            for target_index in range(1, len(token_ids)):
+                if (
+                    bool(label_mask[target_index])
+                    and bool(token_mask[target_index])
+                    and bool(token_mask[target_index - 1])
+                ):
+                    sequence_indices.append(sequence_index)
+                    prediction_indices.append(target_index - 1)
+                    target_coordinates.append((sequence_index, target_index))
+
+        if target_coordinates:
+            torch = __import__("torch")
+            device = logits.device
+            max_chunk_rows = max(
+                1,
+                _MODEL_TOPK_MAX_FLOAT_BYTES // (vocabulary_size * 4),
+            )
+            proposal_rows: list[list[int]] = []
+            with torch.no_grad():
+                for chunk_start in range(
+                    0, len(target_coordinates), max_chunk_rows
+                ):
+                    chunk_end = min(
+                        chunk_start + max_chunk_rows,
+                        len(target_coordinates),
+                    )
+                    sequence_tensor = torch.tensor(
+                        sequence_indices[chunk_start:chunk_end],
+                        device=device,
+                        dtype=torch.long,
+                    )
+                    prediction_tensor = torch.tensor(
+                        prediction_indices[chunk_start:chunk_end],
+                        device=device,
+                        dtype=torch.long,
+                    )
+                    active_logits = (
+                        logits[sequence_tensor, prediction_tensor].detach().float()
+                    )
+                    chunk_proposals = torch.topk(
+                        active_logits,
+                        k=proposal_top_k,
+                        dim=-1,
+                        largest=True,
+                        sorted=True,
+                    ).indices.cpu().tolist()
+                    proposal_rows.extend(chunk_proposals)
+                    del active_logits
+            for (sequence_index, target_index), proposals in zip(
+                target_coordinates, proposal_rows, strict=True
+            ):
+                materialized_sequences[sequence_index]["proposal_token_ids"][  # type: ignore[index]
+                    target_index
+                ] = proposals
+
+        return zspace_repetition_unlikelihood_plan(
+            sequences=materialized_sequences,
+            **dict(expected_config),
+        )
 
     @staticmethod
     def _spiraltorch_auxiliary_loss(
@@ -375,8 +552,13 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             raise RuntimeError(
                 "training batch is missing its Rust repetition-unlikelihood plan"
             )
-        plan = validate_zspace_repetition_unlikelihood_plan(batch_plan.report)
         expected_config = self._zspace_repetition_unlikelihood_recipe.get("config")
+        logits = (
+            outputs.get("logits") if isinstance(outputs, Mapping) else outputs.logits
+        )
+        plan = validate_zspace_repetition_unlikelihood_plan(
+            self._spiraltorch_materialize_plan(logits, batch_plan)
+        )
         request = plan.get("request")
         observed_config = (
             request.get("config") if isinstance(request, Mapping) else None
@@ -385,9 +567,6 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             raise RuntimeError(
                 "Rust repetition-unlikelihood plan does not match the training recipe"
             )
-        logits = (
-            outputs.get("logits") if isinstance(outputs, Mapping) else outputs.logits
-        )
         auxiliary_loss = self._spiraltorch_auxiliary_loss(logits, plan)
         strength = float(dict(expected_config or {}).get("strength", 0.0))
         total_loss = base_loss + strength * auxiliary_loss

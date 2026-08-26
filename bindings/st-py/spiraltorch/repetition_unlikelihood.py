@@ -18,7 +18,7 @@ def _native_constant(name: str, fallback: object) -> object:
 ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION = str(
     _native_constant(
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
-        "spiraltorch.zspace_repetition_unlikelihood.v1",
+        "spiraltorch.zspace_repetition_unlikelihood.v2",
     )
 )
 ZSPACE_REPETITION_UNLIKELIHOOD_KIND = str(
@@ -41,6 +41,15 @@ ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER = str(
         "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
         "model-client-autograd",
     )
+)
+ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER = str(
+    _native_constant(
+        "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER",
+        "model-client-no-grad",
+    )
+)
+ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE = str(
+    _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE", "")
 )
 ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE = str(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE", "")
@@ -66,6 +75,9 @@ ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW = int(
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION = int(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION", 64)
 )
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K = int(
+    _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K", 64)
+)
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES = int(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES", 4_096)
 )
@@ -89,6 +101,7 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH",
@@ -97,6 +110,8 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND",
     "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
     "validate_zspace_repetition_unlikelihood_plan",
@@ -134,9 +149,11 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
         != ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND
         or plan.get("differentiation_owner")
         != ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER
+        or plan.get("proposal_owner") != ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER
         or plan.get("plan_validated") is not True
         or plan.get("status") != "ready"
         or plan.get("candidate_rule") != ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE
+        or plan.get("proposal_rule") != ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE
         or plan.get("objective_rule") != ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE
         or plan.get("probability_epsilon")
         != ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON
@@ -187,15 +204,43 @@ def _normalized_sequences(
             value = row.get(key)
             if isinstance(value, tuple):
                 row[key] = list(value)
+        proposals = row.get("proposal_token_ids")
+        if isinstance(proposals, tuple):
+            proposals = list(proposals)
+            row["proposal_token_ids"] = proposals
+        if isinstance(proposals, list):
+            row["proposal_token_ids"] = [
+                list(proposal_row) if isinstance(proposal_row, tuple) else proposal_row
+                for proposal_row in proposals
+            ]
         normalized.append(row)
     return normalized
+
+
+def _candidate_source_payload(
+    candidate_source: str | Mapping[str, object],
+    *,
+    ngram_order: int,
+    proposal_top_k: int,
+) -> dict[str, object]:
+    if isinstance(candidate_source, Mapping):
+        return dict(candidate_source)
+    if candidate_source == "prior_continuation":
+        return {"kind": candidate_source, "ngram_order": ngram_order}
+    if candidate_source == "model_topk_history":
+        return {"kind": candidate_source, "proposal_top_k": proposal_top_k}
+    raise ValueError(
+        "candidate_source must be prior_continuation or model_topk_history"
+    )
 
 
 def zspace_repetition_unlikelihood_plan(
     *,
     sequences: Sequence[Mapping[str, object]],
     strength: float = 0.1,
+    candidate_source: str | Mapping[str, object] = "prior_continuation",
     ngram_order: int = 3,
+    proposal_top_k: int = 8,
     context_window: int = 128,
     max_candidates_per_position: int = 8,
 ) -> dict[str, Any]:
@@ -206,7 +251,11 @@ def zspace_repetition_unlikelihood_plan(
         {
             "config": {
                 "strength": strength,
-                "ngram_order": ngram_order,
+                "candidate_source": _candidate_source_payload(
+                    candidate_source,
+                    ngram_order=ngram_order,
+                    proposal_top_k=proposal_top_k,
+                ),
                 "context_window": context_window,
                 "max_candidates_per_position": max_candidates_per_position,
             },

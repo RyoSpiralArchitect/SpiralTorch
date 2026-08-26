@@ -1,0 +1,55 @@
+{
+  "schema": "spiraltorch.hf_generation_prompt_set.v1",
+  "prompt_set_id": "sha256:4c0efe2e3ae7c1f1a8654f1f2607d01684a75a2cf9a1578e3fff72e35e71aae1",
+  "scope": "Fresh independent English continuation prompts prespecified for the model-top-k history unlikelihood pilot; not a semantic-quality gold set and not selected from model outputs.",
+  "prompts": [
+    {
+      "label": "last-train",
+      "text": "By dawn, the last train had"
+    },
+    {
+      "label": "old-map",
+      "text": "The old map showed a road that"
+    },
+    {
+      "label": "rain-stopped",
+      "text": "When the rain finally stopped, they"
+    },
+    {
+      "label": "back-door",
+      "text": "A knock at the back door interrupted"
+    },
+    {
+      "label": "empty-station",
+      "text": "From the empty station came"
+    },
+    {
+      "label": "brass-key",
+      "text": "The child kept the small brass key because"
+    },
+    {
+      "label": "three-days-sea",
+      "text": "After three days at sea, the crew"
+    },
+    {
+      "label": "under-bridge",
+      "text": "Under the bridge, someone had left"
+    },
+    {
+      "label": "doctor-looked",
+      "text": "Before answering, the doctor looked toward"
+    },
+    {
+      "label": "market-closed",
+      "text": "The market closed early whenever"
+    },
+    {
+      "label": "notebook-page",
+      "text": "On the notebook's final page, there was"
+    },
+    {
+      "label": "field-bells",
+      "text": "Across the field, the bells began"
+    }
+  ]
+}

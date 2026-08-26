@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 import spiraltorch as st
+import spiraltorch.hf_repetition_unlikelihood as hf_repetition_unlikelihood
 
 
 torch = pytest.importorskip("torch")
@@ -26,12 +27,19 @@ def _load_bridge() -> Any:
     return module
 
 
-def _recipe(strength: float = 0.1) -> dict[str, object]:
+def _recipe(
+    strength: float = 0.1,
+    *,
+    candidate_source: str = "prior_continuation",
+    proposal_top_k: int = 8,
+) -> dict[str, object]:
     return st.hf_repetition_unlikelihood_recipe_contract(
         strength=strength,
         ngram_order=3,
         context_window=16,
         max_candidates_per_position=8,
+        candidate_source=candidate_source,
+        proposal_top_k=proposal_top_k,
     )
 
 
@@ -85,6 +93,43 @@ def test_hf_repetition_unlikelihood_collator_plans_from_cpu_labels() -> None:
     ]
     metadata = batch[st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY]
     assert isinstance(metadata, st.HfRepetitionUnlikelihoodBatchPlan)
+    assert metadata.report is not None
+    assert metadata.sequences is None
+
+
+def test_hf_repetition_unlikelihood_collator_defers_model_proposals() -> None:
+    def base_collator(_features: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "input_ids": torch.tensor([[1, 2, 3, 0]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 0]]),
+            "labels": torch.tensor([[-100, -100, 3, -100]]),
+        }
+
+    def planner(**_kwargs: Any) -> dict[str, object]:
+        raise AssertionError("deferred source must not plan before model forward")
+
+    collator = st.HfRepetitionUnlikelihoodCollator(
+        base_collator,
+        strength=0.1,
+        ngram_order=3,
+        context_window=16,
+        max_candidates_per_position=8,
+        candidate_source="model_topk_history",
+        proposal_top_k=2,
+        planner=planner,
+    )
+
+    batch = collator([{"input_ids": [1, 2, 3, 0]}])
+    metadata = batch[st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY]
+    assert isinstance(metadata, st.HfRepetitionUnlikelihoodBatchPlan)
+    assert metadata.report is None
+    assert metadata.sequences == (
+        {
+            "token_ids": [1, 2, 3, 0],
+            "token_mask": [True, True, True, False],
+            "label_mask": [False, False, True, False],
+        },
+    )
 
 
 class _BaseTrainer:
@@ -155,6 +200,83 @@ def test_hf_trainer_adds_position_balanced_unlikelihood_during_training() -> Non
     assert receipt["efficacy_claim_ready"] is False
 
 
+def test_hf_trainer_materializes_model_topk_history_after_forward() -> None:
+    model = _Model()
+    trainer_class = st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)
+    trainer = trainer_class(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_recipe(
+            candidate_source="model_topk_history",
+            proposal_top_k=1,
+        ),
+    )
+    model.train()
+    sequence = {
+        "token_ids": [1, 2, 3, 1, 2, 4],
+        "token_mask": [True] * 6,
+        "label_mask": [False, False, False, False, False, True],
+    }
+    inputs = {
+        "labels": torch.tensor([[-100, -100, -100, -100, -100, 4]]),
+        st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY: (
+            st.HfRepetitionUnlikelihoodBatchPlan(None, (sequence,))
+        ),
+    }
+
+    loss = trainer.compute_loss(model, inputs)
+    expected_auxiliary = -math.log(1.0 - 3.0 / 7.0)
+
+    assert float(loss.detach()) == pytest.approx(2.0 + 0.1 * expected_auxiliary)
+    loss.backward()
+    assert float(model.logits.grad[0, 4, 3]) > 0.0
+    receipt = trainer.zspace_repetition_unlikelihood_receipt()
+    assert receipt["active_position_count"] == 1
+    assert receipt["eligible_target_count"] == 1
+    assert receipt["active_position_ratio"] == 1.0
+    assert receipt["proposal_count"] == 1
+    assert receipt["candidate_count"] == 1
+
+
+def test_hf_trainer_chunks_model_topk_proposals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _Model()
+    trainer_class = st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)
+    trainer = trainer_class(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_recipe(
+            candidate_source="model_topk_history",
+            proposal_top_k=1,
+        ),
+    )
+    sequence = {
+        "token_ids": [1, 2, 3, 1, 2, 4],
+        "token_mask": [True] * 6,
+        "label_mask": [False, True, True, True, True, True],
+    }
+    observed_chunk_rows: list[int] = []
+    original_topk = torch.topk
+
+    def recording_topk(values: Any, *args: Any, **kwargs: Any) -> Any:
+        observed_chunk_rows.append(int(values.shape[0]))
+        return original_topk(values, *args, **kwargs)
+
+    monkeypatch.setattr(
+        hf_repetition_unlikelihood,
+        "_MODEL_TOPK_MAX_FLOAT_BYTES",
+        2 * int(model.logits.shape[-1]) * 4,
+    )
+    monkeypatch.setattr(torch, "topk", recording_topk)
+
+    plan = trainer._spiraltorch_materialize_plan(
+        model.logits,
+        st.HfRepetitionUnlikelihoodBatchPlan(None, (sequence,)),
+    )
+
+    assert observed_chunk_rows == [2, 2, 1]
+    assert plan["aggregate"]["eligible_target_count"] == 5  # type: ignore[index]
+
+
 def test_hf_trainer_keeps_evaluation_loss_as_plain_causal_lm_loss() -> None:
     trainer, model = _trainer()
     model.eval()
@@ -198,6 +320,10 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
             "0.1",
             "--zspace-repetition-unlikelihood-ngram-order",
             "3",
+            "--zspace-repetition-unlikelihood-candidate-source",
+            "model-topk-history",
+            "--zspace-repetition-unlikelihood-proposal-top-k",
+            "8",
             "--zspace-repetition-unlikelihood-context-window",
             "128",
             "--zspace-repetition-unlikelihood-max-candidates",
@@ -214,6 +340,13 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
     objective = contract["zspace_repetition_unlikelihood"]
     assert objective["enabled"] is True  # type: ignore[index]
     assert objective["config"]["strength"] == 0.1  # type: ignore[index]
+    assert objective["config"]["candidate_source"] == {  # type: ignore[index]
+        "kind": "model_topk_history",
+        "proposal_top_k": 8,
+    }
+    assert objective["proposal_materialization"] == (  # type: ignore[index]
+        "after_model_forward_from_detached_logits"
+    )
 
 
 def test_hf_bridge_preserves_the_stock_trainer_when_disabled() -> None:

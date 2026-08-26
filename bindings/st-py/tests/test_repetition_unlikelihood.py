@@ -57,6 +57,46 @@ def test_repetition_unlikelihood_excludes_the_supervised_target() -> None:
     assert aggregate["candidate_count"] == 0  # type: ignore[index]
 
 
+def test_repetition_unlikelihood_filters_model_topk_against_history() -> None:
+    plan = st.zspace_repetition_unlikelihood_plan(
+        strength=0.1,
+        candidate_source="model_topk_history",
+        proposal_top_k=4,
+        context_window=16,
+        max_candidates_per_position=8,
+        sequences=[
+            {
+                "token_ids": [7, 2, 3, 2, 4],
+                "token_mask": [True] * 5,
+                "label_mask": [False, False, False, False, True],
+                "proposal_token_ids": [[], [], [], [], [2, 3, 4, 9]],
+            }
+        ],
+    )
+
+    assert plan["proposal_owner"] == "model-client-no-grad"
+    position = plan["positions"][0]  # type: ignore[index]
+    assert position["candidates"] == [  # type: ignore[index]
+        {
+            "token_id": 2,
+            "occurrence_count": 2,
+            "most_recent_distance": 1,
+            "proposal_rank": 0,
+        },
+        {
+            "token_id": 3,
+            "occurrence_count": 1,
+            "most_recent_distance": 2,
+            "proposal_rank": 1,
+        },
+    ]
+    aggregate = plan["aggregate"]
+    assert aggregate["proposal_count"] == 4  # type: ignore[index]
+    assert aggregate["excluded_target_proposal_count"] == 1  # type: ignore[index]
+    assert aggregate["excluded_out_of_history_proposal_count"] == 1  # type: ignore[index]
+    assert st.validate_zspace_repetition_unlikelihood_plan(plan) == plan
+
+
 def test_repetition_unlikelihood_rejects_invalid_masks() -> None:
     with pytest.raises(ValueError, match="label 1 is supervised but masked as invalid"):
         st.zspace_repetition_unlikelihood_plan(
@@ -74,6 +114,7 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     expected = {
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
         "ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE",
         "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
         "validate_zspace_repetition_unlikelihood_plan",
         "zspace_repetition_unlikelihood_plan",

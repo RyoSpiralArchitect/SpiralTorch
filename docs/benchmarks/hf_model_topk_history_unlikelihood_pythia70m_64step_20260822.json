@@ -1,0 +1,431 @@
+{
+  "schema": "spiraltorch.hf_model_topk_history_unlikelihood_benchmark.v1",
+  "row_type": "hf_model_topk_history_unlikelihood_benchmark",
+  "status": "ready_but_negative",
+  "decision": "did_not_pass_prespecified_gate",
+  "study_id": "sha256:ed5058248632b92d9e4c62140a576c9a79b74d0967a5788f447ea795de477272",
+  "recorded_at": "2026-08-23T02:30:32Z",
+  "protocol": {
+    "path": "docs/benchmarks/hf_model_topk_history_unlikelihood_pythia70m_64step_prespec_20260822.json",
+    "file_sha256": "sha256:a4f5eb179139dbbbb77d006abebfe5b9319c74c8c0875b5ab3957885023842c3",
+    "protocol_id": "sha256:ed5058248632b92d9e4c62140a576c9a79b74d0967a5788f447ea795de477272",
+    "objective_git_commit": "e91e491bbf3136cf5640df2162048c202389e6a2",
+    "prespec_git_commit": "04bb5c4add525e6968ffffe894375caebd431857",
+    "no_retuning_observed": true
+  },
+  "study_spec": {
+    "classification": "prespecified_bounded_followup_pilot",
+    "model": "EleutherAI/pythia-70m-deduped",
+    "model_snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+    "corpus": "Dubliners",
+    "corpus_sha256": "sha256:d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+    "seeds": [
+      13,
+      17,
+      23
+    ],
+    "arms": [
+      {
+        "name": "baseline",
+        "strength": 0.0
+      },
+      {
+        "name": "model_topk_history",
+        "strength": 0.1,
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8
+      }
+    ],
+    "optimizer_update_count": 64,
+    "gradient_accumulation_steps": 8,
+    "generation": {
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_repetition_v2_prompts.json",
+      "prompt_set_file_sha256": "sha256:d491e5b5034df8182b72c7f1fd6770ba5323f11573ca79ad0c189dccf81de703",
+      "prompt_set_id": "sha256:4c0efe2e3ae7c1f1a8654f1f2607d01684a75a2cf9a1578e3fff72e35e71aae1",
+      "prompt_count": 12,
+      "strategy": "greedy",
+      "max_new_tokens": 96,
+      "control_mode": "baseline_only_no_zspace_inference_control"
+    }
+  },
+  "provenance": {
+    "source_artifact_root": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1",
+    "source_artifacts_ignored_by_git": true,
+    "source_artifacts": [
+      {
+        "seed": 13,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/baseline/run-card.json",
+          "sha256": "sha256:057f7376b5c9f8a3daad39e9ce74c0c03f80182ec428bf5d7902dfbd4df7aa12"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/baseline/generation-evidence.json",
+          "sha256": "sha256:50ec5cc2a20c65a2b1a24714ea781cdc4d9918025d0771647c799330b6b06ebc",
+          "evidence_id": "sha256:9b655d02ca45c82b3b8987040c01120f75043cac2edf6099a83be6bcd2b195bd",
+          "generated_continuation_set_id": "sha256:b19c518aa940d6d467d89c7560fff9790ce756684669370812859af29839680c"
+        },
+        "adapter": {
+          "adapter_id": "sha256:7b809fa70119999bfe5d8cdace920d221f591df29c653b7854781a6e74599a2a",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:fe75c66fee0a1437826967be5a68f9afc66bcce9978ab03c917ce0b08dbfaf48",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 13,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/model_topk_history/run-card.json",
+          "sha256": "sha256:382d2a57f68a5eddd2c3e593ce7436dcba4efb5206c5be5202cc53a7fc2fdd5e"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/model_topk_history/generation-evidence.json",
+          "sha256": "sha256:4acecba9b00dbd99f8f404d89e7412ec0144cde89634b3dbe361234a0d3a91d8",
+          "evidence_id": "sha256:d13879e82b96e4ae74fd76529508a07b79d448a18dbe285aaceec2392491fdab",
+          "generated_continuation_set_id": "sha256:52371cb7d3c95b8819fe95a3381c11132ce7d9a5961334083b8aa55c7dc73b0b"
+        },
+        "adapter": {
+          "adapter_id": "sha256:713adaf8c9c37048f3cf0305c471b249a72eca8513de26caefbdd01fc09dd0ef",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:27371127c67ebe07ac5529ede954c26230b127e68a3f7eefdad96e15b3c4ac94",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s13/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 17,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/baseline/run-card.json",
+          "sha256": "sha256:17e01e287331b79d1eba57c0e75a6a2e70d993a52d22a978d1866ec69f772b1b"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/baseline/generation-evidence.json",
+          "sha256": "sha256:8d588520c74a899ea214443d0a6e15b02a314caff6645de39269bb47c997400f",
+          "evidence_id": "sha256:67555033eb63af09c09c2aee4a0399ebba2c692347b72d3e5de5f5e94c030fa0",
+          "generated_continuation_set_id": "sha256:5d981c2c961c16260a62eecb7d6f031c16095b17adb38ee92fba3b90050aaafd"
+        },
+        "adapter": {
+          "adapter_id": "sha256:f36ba1e5fc5985f1cdd6b953a4ad32220fc40467efbbf8ef0e8e37f6afdb7352",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:4fbb35e666b0f64da1ffedcba865e11781ea0c2e6f773f858813c9bcd0b3bf32",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 17,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/model_topk_history/run-card.json",
+          "sha256": "sha256:b69b2dd1d268359c8ed85f946a984fcc25b3e72db705d1a3aea0c080710de1e1"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/model_topk_history/generation-evidence.json",
+          "sha256": "sha256:f99df02c6d53539d17162ca4260ab27d1488b192c3ec6ba35a7b2753a206c9a7",
+          "evidence_id": "sha256:3f210989d8f51d29bc53b4133ca77f827a4ab5c2e312f36ac077450164dcd945",
+          "generated_continuation_set_id": "sha256:c947f922f1f711db18c4c2ab664c2ba3eebecfa0753c9d45bc0ddfb8226dc49a"
+        },
+        "adapter": {
+          "adapter_id": "sha256:c9e7d84aa600f626005e183e059785215bc89100afb4f9fff42ed653f358e4e7",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:7cbb2cbaf93539911e06f7a1cc9dcfe6daf33a143eda1ff6cd44a73c82a59dfb",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s17/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 23,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/baseline/run-card.json",
+          "sha256": "sha256:c6b9022629a449c4b08ea12f262ca0c98cfd3af454182885bc9ffc9a94646b81"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/baseline/generation-evidence.json",
+          "sha256": "sha256:4049bdb78e75c444bbc1a26cd20c9de878ab688b822b63ff95fc1dc9d32bb85f",
+          "evidence_id": "sha256:48c4d3f431fc9d2d2a1e95834656dde093105f9e71c3f791d8941321373da431",
+          "generated_continuation_set_id": "sha256:d159848677dc3c52510da5ad486880d642f3075d7a3bedb565e34d0c644796b4"
+        },
+        "adapter": {
+          "adapter_id": "sha256:3db3c99e220ffcf86aff3dd97ebd0fc175851db954c688f5cb0b226c112e5838",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:55d531ae9203dd256c5b286b6cc79a49489449475c90248e617a3a821d51287f",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 23,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/model_topk_history/run-card.json",
+          "sha256": "sha256:352daab2bd4dd939a9a93b1f6773d3141431def0b6febccd3881f8fb0776f6fe"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/model_topk_history/generation-evidence.json",
+          "sha256": "sha256:661bb188430171603378b8e3211319317b8bac77336981369128ff00a03cf0f5",
+          "evidence_id": "sha256:6f426ad01bc5dda0539e613186fcca0d5da9f69fdef36218a4381649ba5ca058",
+          "generated_continuation_set_id": "sha256:6d20fef5e0c30b3ec792640a61c683ae82d94d2f89401c0155f377bf34942b19"
+        },
+        "adapter": {
+          "adapter_id": "sha256:dbdc031fea57127f337d7abcbdf605ec1c1426177faf206aee401b55e9b18830",
+          "weights_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:0718670b6c62b54ceb77177a7c260909ac6a1fe6926c697b919dfe19c33aca3f",
+          "config_path": "models/runs/hf-model-topk-history-unlikelihood-pythia70m-pilot-v1/runs/s23/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      }
+    ]
+  },
+  "identity_gates": {
+    "run_card_count": 6,
+    "generation_report_count": 6,
+    "all_failure_fields_null": true,
+    "all_before_and_after_eval_status_ok": true,
+    "all_optimizer_receipts_ready": true,
+    "all_runs_reached_64_optimizer_updates": true,
+    "all_adapter_lineages_ready": true,
+    "all_required_training_identities_ready_and_verified": true,
+    "all_generation_reports_complete": true,
+    "all_generation_rows_nonempty": true,
+    "all_generation_model_artifact_ids_match_adapter_lineage": true,
+    "generation_protocol_id": "sha256:a2396fa18c4bd3fe00b6214a139ed37a42cc266291513269dd5911a2ad9c787b",
+    "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+    "execution_identity_id": "sha256:f01737daaddf7fd0f524a83b1f432f04c4e88a4ac70309c1f5148f5a8727a390",
+    "training_input_identity_id": "sha256:f914a47da20c6c063ce5687c50f3825b4d122d000587ba859a1ec40c332316d3",
+    "paired_decoding_config_ids": [
+      {
+        "seed": 13,
+        "decoding_config_id": "sha256:c86f793b2643a2818b5818165d9b0644308746e2496b5546a8471367cba5637e"
+      },
+      {
+        "seed": 17,
+        "decoding_config_id": "sha256:e97c6e4a1ce7eb656ccc77f43352a84a98ad62b91c8c86da545f8d42e78036db"
+      },
+      {
+        "seed": 23,
+        "decoding_config_id": "sha256:5dbec660e07c0aaaa43d085b79e7a8c08fe79cb51f3407ccf3263e021b6d55b7"
+      }
+    ],
+    "rust_generation_evidence_validation": {
+      "status": "ready",
+      "file_count": 6,
+      "canonical_round_trip_count": 6,
+      "failed_count": 0,
+      "sample_count_per_file": 12,
+      "total_token_count_per_file": 1152,
+      "empty_sample_count": 0
+    },
+    "readiness_gate_passed": true
+  },
+  "results": {
+    "evaluation_loss": {
+      "direction": "lower_is_better",
+      "paired_rows": [
+        {
+          "seed": 13,
+          "eval_before_shared": 5.1940016746521,
+          "baseline_eval_after": 5.096063613891602,
+          "model_topk_history_eval_after": 5.0961503982543945,
+          "model_topk_history_minus_baseline": 0.00008678436279296875
+        },
+        {
+          "seed": 17,
+          "eval_before_shared": 5.190589904785156,
+          "baseline_eval_after": 5.102051734924316,
+          "model_topk_history_eval_after": 5.102092266082764,
+          "model_topk_history_minus_baseline": 0.000040531158447265625
+        },
+        {
+          "seed": 23,
+          "eval_before_shared": 5.150523662567139,
+          "baseline_eval_after": 5.039955139160156,
+          "model_topk_history_eval_after": 5.040177345275879,
+          "model_topk_history_minus_baseline": 0.00022220611572265625
+        }
+      ],
+      "mean_model_topk_history_minus_baseline": 0.00011650721232096355,
+      "maximum_individual_model_topk_history_minus_baseline": 0.00022220611572265625,
+      "mean_safety_threshold": 0.02,
+      "maximum_individual_safety_threshold": 0.05,
+      "mean_safety_gate_passed": true,
+      "maximum_individual_safety_gate_passed": true,
+      "safety_gate_passed": true
+    },
+    "objective_execution": {
+      "receipts": [
+        {
+          "seed": 13,
+          "status": "ready",
+          "plan_stream_id": "sha256:0222ac3651c3e8015ae29c2d4a3939cea3362f6d8a8e78b5a3d1da9dcb34f5a7",
+          "training_batch_count": 508,
+          "active_position_count": 100344,
+          "eligible_target_count": 128778,
+          "active_position_ratio": 0.7792014163909985,
+          "proposal_count": 1030224,
+          "candidate_count": 282833,
+          "mean_candidates_per_active_position": 2.818633899386112,
+          "mean_auxiliary_loss": 0.08466723561286926,
+          "mean_weighted_auxiliary_loss": 0.008466723561286927
+        },
+        {
+          "seed": 17,
+          "status": "ready",
+          "plan_stream_id": "sha256:2e4620432184a94caaa4126c7495d5549be2d23c07adb54cbdcdd2ada9f676ce",
+          "training_batch_count": 504,
+          "active_position_count": 98958,
+          "eligible_target_count": 127762,
+          "active_position_ratio": 0.7745495530752493,
+          "proposal_count": 1022096,
+          "candidate_count": 281929,
+          "mean_candidates_per_active_position": 2.8489763333939653,
+          "mean_auxiliary_loss": 0.08558396995067596,
+          "mean_weighted_auxiliary_loss": 0.008558396995067597
+        },
+        {
+          "seed": 23,
+          "status": "ready",
+          "plan_stream_id": "sha256:3662ba72e9c130cbcafbd7a187f9ebca5eae3f760300a0bc3cb96c9281c43b48",
+          "training_batch_count": 504,
+          "active_position_count": 99460,
+          "eligible_target_count": 128016,
+          "active_position_ratio": 0.7769341332333458,
+          "proposal_count": 1024128,
+          "candidate_count": 281153,
+          "mean_candidates_per_active_position": 2.826794691333199,
+          "mean_auxiliary_loss": 0.08561193943023682,
+          "mean_weighted_auxiliary_loss": 0.008561193943023682
+        }
+      ],
+      "all_receipts_ready": true,
+      "total_training_batch_count": 1516,
+      "total_active_position_count": 298762,
+      "total_eligible_target_count": 384556,
+      "pooled_active_position_ratio": 0.7769011535381063,
+      "total_proposal_count": 3076448,
+      "total_candidate_count": 845915,
+      "pooled_candidates_per_active_position": 2.8314009144402568,
+      "mean_auxiliary_loss_across_seeds": 0.08528771499792735,
+      "mean_weighted_auxiliary_loss_across_seeds": 0.008528771499792734
+    },
+    "held_out_greedy_generation": {
+      "direction": "lower_loop_score_is_better",
+      "paired_rows": [
+        {
+          "seed": 13,
+          "baseline_loop_score": 1.4685703620754011,
+          "model_topk_history_loop_score": 1.2951252799552069,
+          "loop_score_delta": -0.17344508212019427,
+          "model_topk_history_win": true,
+          "baseline_periodic_loop_sample_ratio": 0.9166666666666666,
+          "model_topk_history_periodic_loop_sample_ratio": 0.6666666666666666,
+          "periodic_loop_ratio_delta": -0.25,
+          "baseline_ngram3_repetition_ratio": 0.7641843971631206,
+          "model_topk_history_ngram3_repetition_ratio": 0.7712765957446809,
+          "ngram3_repetition_ratio_delta": 0.007092198581560294,
+          "ngram2_distinct_ratio_delta": -0.004385964912280715,
+          "ngram4_distinct_ratio_delta": -0.008960573476702482
+        },
+        {
+          "seed": 17,
+          "baseline_loop_score": 1.4483659558915016,
+          "model_topk_history_loop_score": 1.457018127099664,
+          "loop_score_delta": 0.008652171208162418,
+          "model_topk_history_win": false,
+          "baseline_periodic_loop_sample_ratio": 0.8333333333333334,
+          "model_topk_history_periodic_loop_sample_ratio": 0.8333333333333334,
+          "periodic_loop_ratio_delta": 0.0,
+          "baseline_ngram3_repetition_ratio": 0.7987588652482269,
+          "model_topk_history_ngram3_repetition_ratio": 0.7943262411347518,
+          "ngram3_repetition_ratio_delta": -0.004432624113475114,
+          "ngram2_distinct_ratio_delta": 0.0052631578947368585,
+          "ngram4_distinct_ratio_delta": 0.0035842293906810097
+        },
+        {
+          "seed": 23,
+          "baseline_loop_score": 1.3011194320019908,
+          "model_topk_history_loop_score": 1.3825220464725643,
+          "loop_score_delta": 0.08140261447057351,
+          "model_topk_history_win": false,
+          "baseline_periodic_loop_sample_ratio": 0.5833333333333334,
+          "model_topk_history_periodic_loop_sample_ratio": 0.75,
+          "periodic_loop_ratio_delta": 0.16666666666666663,
+          "baseline_ngram3_repetition_ratio": 0.8129432624113475,
+          "model_topk_history_ngram3_repetition_ratio": 0.800531914893617,
+          "ngram3_repetition_ratio_delta": -0.012411347517730542,
+          "ngram2_distinct_ratio_delta": 0.011403508771929832,
+          "ngram4_distinct_ratio_delta": 0.013440860215053752
+        }
+      ],
+      "mean_loop_score_delta": -0.027796765480486114,
+      "model_topk_history_win_count": 1,
+      "baseline_win_count": 2,
+      "tie_count": 0,
+      "mean_periodic_loop_ratio_delta": -0.02777777777777779,
+      "mean_ngram3_repetition_ratio_delta": -0.003250591016548454,
+      "mean_ngram2_distinct_ratio_delta": 0.004093567251461992,
+      "mean_ngram4_distinct_ratio_delta": 0.0026881720430107594
+    }
+  },
+  "acceptance": {
+    "readiness_and_stability_gate_passed": true,
+    "mean_loop_score_delta_threshold": 0.0,
+    "mean_loop_score_delta": -0.027796765480486114,
+    "mean_loop_score_gate_passed": true,
+    "minimum_seed_win_count": 2,
+    "observed_seed_win_count": 1,
+    "seed_direction_gate_passed": false,
+    "mean_eval_loss_delta_threshold": 0.02,
+    "mean_eval_loss_delta": 0.00011650721232096355,
+    "mean_eval_loss_safety_gate_passed": true,
+    "maximum_individual_eval_loss_delta_threshold": 0.05,
+    "maximum_individual_eval_loss_delta": 0.00022220611572265625,
+    "maximum_individual_eval_loss_safety_gate_passed": true,
+    "overall_gate_passed": false,
+    "failed_gate": "minimum_seed_win_count",
+    "decision_basis": "The mean primary effect was negative and both CE safety thresholds passed, but only one of three seeds improved; the prespecified rule required at least two seed wins."
+  },
+  "diagnosis": {
+    "execution_result": "The Rust-owned model-top-k history planner was active in every objective microbatch and covered 77.69% of eligible positions across the three objective runs.",
+    "safety_result": "Held-out causal-LM loss changed by only +0.0001165 on average, far inside both frozen safety thresholds.",
+    "efficacy_result": "The primary loop score improved strongly for seed 13 but slightly worsened for seed 17 and materially worsened for seed 23, so the directional replication gate failed.",
+    "secondary_metric_result": "Mean n-gram repetition and distinctness moved in the intended direction, while periodic-loop incidence was mixed; the primary loop-score gain was not seed-stable.",
+    "interpretation": "The objective is technically viable and safe at this bounded scale, but this frozen candidate rule and strength are not ready for efficacy promotion."
+  },
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "The Rust-owned model-top-k history objective executed end-to-end through audited 64-step LoRA training with high active-position coverage, complete replay identities, canonical Rust generation evidence, and negligible held-out CE regression.",
+    "observed_result": "This frozen prespecified Pythia-70M/Dubliners recipe did not satisfy the required two-of-three seed direction gate.",
+    "excluded_claims": [
+      "reliable repetition reduction",
+      "language-quality superiority",
+      "statistical significance",
+      "multi-model or multi-corpus generality",
+      "Z-space training superiority"
+    ],
+    "evidence_boundary": "This is a single-model single-corpus bounded pilot. Its negative gate result must not be converted into a positive claim by post-hoc threshold changes or retuning on these prompts."
+  },
+  "next_prespecified_experiment": {
+    "status": "proposed_not_run",
+    "current_study_retuning_allowed": false,
+    "recommended_question": "Can the seed variance be reduced by separating short n-gram diversity from periodic-loop suppression under a fresh matched protocol?",
+    "factorized_controls": [
+      "model-top-k history candidate source held fixed",
+      "periodic-loop-aware candidate or loss term as a separate factor",
+      "objective strength",
+      "held-out CE",
+      "semantic-quality evaluation"
+    ],
+    "requirements": [
+      "use fresh prompts and a new protocol ID",
+      "retain matched strength-zero baselines and at least three seeds",
+      "do not reuse this pilot as confirmatory evidence",
+      "keep Rust as semantic owner for every candidate and metric contract",
+      "promote to another model or corpus only after seed-direction stability is demonstrated"
+    ]
+  }
+}

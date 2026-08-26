@@ -428,6 +428,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=3,
     )
     parser.add_argument(
+        "--zspace-repetition-unlikelihood-candidate-source",
+        choices=("prior-continuation", "model-topk-history"),
+        default="prior-continuation",
+        help=(
+            "Select the Rust-owned candidate contract. model-topk-history "
+            "filters detached model proposals against bounded token history."
+        ),
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-proposal-top-k",
+        type=int,
+        default=8,
+        help="Detached model proposals per supervised position for model-topk-history.",
+    )
+    parser.add_argument(
         "--zspace-repetition-unlikelihood-context-window",
         type=int,
         default=128,
@@ -1446,6 +1461,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             st.hf_repetition_unlikelihood_recipe_contract(
                 strength=args.zspace_repetition_unlikelihood_strength,
                 ngram_order=args.zspace_repetition_unlikelihood_ngram_order,
+                candidate_source=(
+                    args.zspace_repetition_unlikelihood_candidate_source.replace(
+                        "-", "_"
+                    )
+                ),
+                proposal_top_k=(
+                    args.zspace_repetition_unlikelihood_proposal_top_k
+                ),
                 context_window=args.zspace_repetition_unlikelihood_context_window,
                 max_candidates_per_position=(
                     args.zspace_repetition_unlikelihood_max_candidates
@@ -5557,10 +5580,13 @@ def _main_with_runtime_access(
     collator = base_collator
     if repetition_enabled:
         repetition_config = dict(repetition_recipe["config"])
+        candidate_source = dict(repetition_config["candidate_source"])
         collator = st.HfRepetitionUnlikelihoodCollator(
             base_collator,
             strength=repetition_config["strength"],
-            ngram_order=repetition_config["ngram_order"],
+            ngram_order=int(candidate_source.get("ngram_order", 3)),
+            candidate_source=candidate_source,
+            proposal_top_k=int(candidate_source.get("proposal_top_k", 8)),
             context_window=repetition_config["context_window"],
             max_candidates_per_position=(
                 repetition_config["max_candidates_per_position"]
