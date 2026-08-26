@@ -72,6 +72,7 @@ def _packet() -> dict[str, object]:
             },
         ],
     }
+    packet["blinding_map_id"] = st.zspace_semantic_review_map_id(_map_entries(packet))
     encoded = json.dumps(
         packet,
         ensure_ascii=False,
@@ -120,56 +121,63 @@ def _draft(packet: dict[str, object], *, complete: bool) -> dict[str, object]:
     )
 
 
-def _map(packet: dict[str, object]) -> dict[str, object]:
+def _map_entries(packet: dict[str, object]) -> list[dict[str, object]]:
     groups = packet["groups"]
     assert isinstance(groups, list)
+    return [
+        {
+            "group_id": groups[1]["group_id"],
+            "seed": 17,
+            "prompt_id": _identity("4"),
+            "candidate_to_arm": {
+                "A": "periodic",
+                "B": "baseline",
+                "C": "history",
+            },
+        },
+        {
+            "group_id": groups[0]["group_id"],
+            "seed": 13,
+            "prompt_id": _identity("3"),
+            "candidate_to_arm": {
+                "A": "baseline",
+                "B": "history",
+                "C": "periodic",
+            },
+        },
+    ]
+
+
+def _map(packet: dict[str, object]) -> dict[str, object]:
     return {
         "schema": st.ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
         "status": "sealed_pending_review",
         "protocol_id": packet["protocol_id"],
         "packet_id": packet["packet_id"],
         "blinding_key_sha256": packet["blinding_key_sha256"],
-        "entries": [
-            {
-                "group_id": groups[1]["group_id"],
-                "seed": 17,
-                "prompt_id": _identity("4"),
-                "candidate_to_arm": {
-                    "A": "periodic",
-                    "B": "baseline",
-                    "C": "history",
-                },
-            },
-            {
-                "group_id": groups[0]["group_id"],
-                "seed": 13,
-                "prompt_id": _identity("3"),
-                "candidate_to_arm": {
-                    "A": "baseline",
-                    "B": "history",
-                    "C": "periodic",
-                },
-            },
-        ],
+        "entries": _map_entries(packet),
     }
 
 
 @pytest.mark.parametrize(
-    ("packet_path", "expected_packet_id"),
+    ("packet_path", "expected_packet_id", "expected_blinding_map_id"),
     [
         (
             TRACKED_ALICE_PACKET,
-            "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5",
+            "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+            "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
         ),
         (
             TRACKED_DISTILGPT2_PACKET,
-            "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+            "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+            "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
         ),
     ],
 )
 def test_tracked_packets_match_rust_commitment(
     packet_path: Path,
     expected_packet_id: str,
+    expected_blinding_map_id: str,
 ) -> None:
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
     expected_exports = {
@@ -180,6 +188,7 @@ def test_tracked_packets_match_rust_commitment(
         "validate_zspace_semantic_review_packet",
         "validate_zspace_semantic_review_packet_receipt",
         "validate_zspace_semantic_review_unblind",
+        "zspace_semantic_review_map_id",
     }
 
     receipt = st.validate_zspace_semantic_review_packet(packet)
@@ -189,6 +198,7 @@ def test_tracked_packets_match_rust_commitment(
     assert receipt["group_count"] == 36
     assert receipt["candidate_count"] == 108
     assert receipt["semantic_backend"] == "rust"
+    assert receipt["blinding_map_id"] == expected_blinding_map_id
     assert receipt["human_review_complete"] is False
     assert st.validate_zspace_semantic_review_packet_receipt(receipt) == receipt
 
@@ -276,6 +286,26 @@ def test_unblind_requires_complete_review_and_aggregates_arm_and_seed_scores() -
     assert baseline["mean_scores"]["fluency"] == 3.5
     assert baseline["preference_win_count"] == 1
     assert st.validate_zspace_semantic_review_unblind(report) == report
+
+
+def test_unblind_rejects_a_valid_but_post_review_assignment_swap() -> None:
+    packet = _packet()
+    blinding_map = _map(packet)
+    entries = blinding_map["entries"]
+    assert isinstance(entries, list)
+    candidate_to_arm = entries[0]["candidate_to_arm"]
+    assert isinstance(candidate_to_arm, dict)
+    candidate_to_arm["A"], candidate_to_arm["B"] = (
+        candidate_to_arm["B"],
+        candidate_to_arm["A"],
+    )
+
+    with pytest.raises(ValueError, match="pre-review commitment"):
+        st.unblind_zspace_semantic_review(
+            packet=packet,
+            draft=_draft(packet, complete=True),
+            blinding_map=blinding_map,
+        )
 
 
 def test_resumable_cli_saves_only_complete_validated_groups(

@@ -57,6 +57,12 @@ ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION = str(
         "spiraltorch.zspace_semantic_review_response.v1",
     )
 )
+ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION = str(
+    _native_constant(
+        "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
+        "spiraltorch.zspace_semantic_review_map_commitment.v1",
+    )
+)
 ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION = str(
     _native_constant(
         "ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION",
@@ -98,12 +104,21 @@ ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE = str(
         "whitespace",
     )
 )
+ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE = str(
+    _native_constant(
+        "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
+        "sha256 of UTF-8 canonical JSON for [map commitment version, map entries "
+        "sorted by group_id]; object keys sorted lexicographically, no "
+        "insignificant whitespace",
+    )
+)
 ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY = str(
     _native_constant(
         "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
-        "the contract verifies packet commitment, structural blinding inputs, "
-        "score bounds, coverage, and deterministic aggregation; it cannot prove "
-        "that a reviewer remained blind or establish statistical or model superiority",
+        "the contract verifies packet and pre-review map-content commitments, "
+        "structural blinding inputs, score bounds, coverage, and deterministic "
+        "aggregation; it cannot prove that a reviewer remained blind or establish "
+        "statistical or model superiority",
     )
 )
 ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS = tuple(
@@ -141,6 +156,8 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA",
     "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
     "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
@@ -163,6 +180,7 @@ __all__ = [
     "validate_zspace_semantic_review_packet",
     "validate_zspace_semantic_review_packet_receipt",
     "validate_zspace_semantic_review_unblind",
+    "zspace_semantic_review_map_id",
 ]
 
 
@@ -181,11 +199,28 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
     return dict(result)
 
 
+def _native_identity_operation(name: str, payload: Mapping[str, object]) -> str:
+    package = sys.modules.get(__package__ or "spiraltorch")
+    native = getattr(package, "_rs", None)
+    operation = getattr(native, name, None)
+    if not callable(operation):
+        raise RuntimeError(
+            "Z-space semantic review requires the compiled Rust semantic core; "
+            f"rebuild or reinstall SpiralTorch with {name}"
+        )
+    result = operation(dict(payload))
+    if not _sha256_identity(result):
+        raise RuntimeError(f"native {name} returned an invalid identity")
+    return result
+
+
 def _sha256_identity(value: object) -> bool:
     if not isinstance(value, str) or not value.startswith("sha256:"):
         return False
     digest = value[len("sha256:") :]
-    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
+    )
 
 
 def _validate_base(
@@ -202,10 +237,11 @@ def _validate_base(
         or contract.get("semantic_backend") != ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND
         or contract.get(validated_field) is not True
         or contract.get("efficacy_claim_ready") is not False
-        or contract.get("evidence_boundary")
-        != ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY
+        or contract.get("evidence_boundary") != ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY
     ):
-        raise RuntimeError("native Z-space core returned untrusted semantic review evidence")
+        raise RuntimeError(
+            "native Z-space core returned untrusted semantic review evidence"
+        )
 
 
 def _validate_packet_receipt(contract: Mapping[str, Any]) -> None:
@@ -234,10 +270,13 @@ def _validate_packet_receipt(contract: Mapping[str, Any]) -> None:
         or tuple(contract.get("preference_values") or ())
         != ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES
         or contract.get("packet_id_rule") != ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE
+        or contract.get("blinding_map_id_rule") != ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE
+        or not _sha256_identity(contract.get("blinding_map_id"))
         or contract.get("human_review_complete") is not False
         or contract.get("unblind_ready") is not False
         or not isinstance(packet, Mapping)
         or packet.get("packet_id") != contract.get("packet_id")
+        or packet.get("blinding_map_id") != contract.get("blinding_map_id")
     ):
         raise RuntimeError("native Z-space core returned an invalid packet receipt")
 
@@ -284,7 +323,9 @@ def _validate_draft_receipt(contract: Mapping[str, Any]) -> None:
             or not _sha256_identity(response_id)
             or remaining != 0
         ):
-            raise RuntimeError("native Z-space core returned an invalid complete response")
+            raise RuntimeError(
+                "native Z-space core returned an invalid complete response"
+            )
     elif (
         contract.get("status") != "in_progress"
         or contract.get("unblind_ready") is not False
@@ -332,6 +373,17 @@ def validate_zspace_semantic_review_packet(
     result = _native_operation("_zspace_semantic_review_packet", packet)
     _validate_packet_receipt(result)
     return result
+
+
+def zspace_semantic_review_map_id(
+    entries: Sequence[Mapping[str, object]],
+) -> str:
+    """Commit the exact pre-review candidate-to-arm assignments in Rust."""
+
+    return _native_identity_operation(
+        "_zspace_semantic_review_map_id",
+        {"entries": [dict(entry) for entry in entries]},
+    )
 
 
 def validate_zspace_semantic_review_packet_receipt(
@@ -463,7 +515,11 @@ def _bounded_score(prompt: str) -> int:
             score = int(value)
         except ValueError:
             score = 0
-        if ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM <= score <= ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM:
+        if (
+            ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM
+            <= score
+            <= ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM
+        ):
             return score
         print(
             f"Enter an integer from {ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM} "
@@ -490,9 +546,7 @@ def _terminal_text(value: str) -> str:
         else:
             codepoint = ord(character)
             output.append(
-                f"\\u{codepoint:04x}"
-                if codepoint <= 0xFFFF
-                else f"\\U{codepoint:08x}"
+                f"\\u{codepoint:04x}" if codepoint <= 0xFFFF else f"\\U{codepoint:08x}"
             )
     return "".join(output)
 
@@ -501,8 +555,14 @@ def _review_group(group: Mapping[str, object]) -> dict[str, object]:
     group_id = group.get("group_id")
     prompt = group.get("prompt")
     candidates = group.get("candidates")
-    if not isinstance(group_id, str) or not isinstance(prompt, str) or not isinstance(candidates, list):
-        raise RuntimeError("validated packet group has an invalid Python representation")
+    if (
+        not isinstance(group_id, str)
+        or not isinstance(prompt, str)
+        or not isinstance(candidates, list)
+    ):
+        raise RuntimeError(
+            "validated packet group has an invalid Python representation"
+        )
     print(f"\nGroup {group_id}\nPrompt: {_terminal_text(prompt)}")
     scores: list[dict[str, object]] = []
     for candidate in candidates:
@@ -526,7 +586,10 @@ def _review_command(args: argparse.Namespace) -> int:
     canonical_packet = dict(packet_receipt["packet"])
     if args.draft.exists():
         draft = _read_mapping(args.draft, "draft")
-        if args.reviewer_id is not None and draft.get("reviewer_id") != args.reviewer_id:
+        if (
+            args.reviewer_id is not None
+            and draft.get("reviewer_id") != args.reviewer_id
+        ):
             raise ValueError("--reviewer-id does not match the existing draft")
         if (
             args.review_session_id is not None
@@ -541,7 +604,9 @@ def _review_command(args: argparse.Namespace) -> int:
             reviewer_id=args.reviewer_id,
             review_session_id=args.review_session_id or _new_session_id(),
         )
-    receipt = summarize_zspace_semantic_review_draft(packet=canonical_packet, draft=draft)
+    receipt = summarize_zspace_semantic_review_draft(
+        packet=canonical_packet, draft=draft
+    )
     canonical_draft = dict(receipt["request"]["draft"])
     _write_json_atomic(args.draft, canonical_draft)
     groups = {
@@ -591,7 +656,9 @@ def _parser() -> argparse.ArgumentParser:
     status_parser.add_argument("draft", type=Path)
     status_parser.add_argument("--output", type=Path)
 
-    review_parser = subparsers.add_parser("review", help="review or resume blinded groups")
+    review_parser = subparsers.add_parser(
+        "review", help="review or resume blinded groups"
+    )
     review_parser.add_argument("packet", type=Path)
     review_parser.add_argument("--draft", type=Path, required=True)
     review_parser.add_argument("--reviewer-id")

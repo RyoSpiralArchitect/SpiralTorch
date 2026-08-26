@@ -23,6 +23,8 @@ pub const ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_semantic_review_draft.v1";
 pub const ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_semantic_review_response.v1";
+pub const ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION: &str =
+    "spiraltorch.zspace_semantic_review_map_commitment.v1";
 pub const ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_semantic_review_unblind.v1";
 pub const ZSPACE_SEMANTIC_REVIEW_PACKET_KIND: &str = "spiraltorch.zspace_semantic_review_packet";
@@ -49,8 +51,10 @@ pub const ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS: [&str; 4] = [
 pub const ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES: [&str; 4] = ["A", "B", "C", "tie"];
 pub const ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE: &str =
     "sha256 of UTF-8 canonical JSON for the packet without packet_id; object keys sorted lexicographically, arrays preserved, no insignificant whitespace";
+pub const ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE: &str =
+    "sha256 of UTF-8 canonical JSON for [map commitment version, map entries sorted by group_id]; object keys sorted lexicographically, no insignificant whitespace";
 pub const ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY: &str =
-    "the contract verifies packet commitment, structural blinding inputs, score bounds, coverage, and deterministic aggregation; it cannot prove that a reviewer remained blind or establish statistical or model superiority";
+    "the contract verifies packet and pre-review map-content commitments, structural blinding inputs, score bounds, coverage, and deterministic aggregation; it cannot prove that a reviewer remained blind or establish statistical or model superiority";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +79,7 @@ pub struct ZSpaceSemanticReviewPacket {
     pub protocol_id: String,
     pub prompt_set_id: String,
     pub blinding_key_sha256: String,
+    pub blinding_map_id: String,
     pub group_count: usize,
     pub candidate_count: usize,
     pub instructions: String,
@@ -143,6 +148,7 @@ pub struct ZSpaceSemanticReviewPacketReceipt {
     pub protocol_id: String,
     pub prompt_set_id: String,
     pub blinding_key_sha256: String,
+    pub blinding_map_id: String,
     pub group_count: usize,
     pub candidate_count: usize,
     pub candidate_labels: [&'static str; 3],
@@ -151,6 +157,7 @@ pub struct ZSpaceSemanticReviewPacketReceipt {
     pub score_maximum: u8,
     pub preference_values: [&'static str; 4],
     pub packet_id_rule: &'static str,
+    pub blinding_map_id_rule: &'static str,
     pub human_review_complete: bool,
     pub unblind_ready: bool,
     pub efficacy_claim_ready: bool,
@@ -307,6 +314,8 @@ pub enum ZSpaceSemanticReviewError {
     IncompleteDraft { remaining: usize },
     #[error("blinding map {field} does not match the packet")]
     MapPacketMismatch { field: String },
+    #[error("blinding map content does not match the packet's pre-review commitment")]
+    MapIdentityMismatch,
     #[error("blinding map contains duplicate entry for group {group_id}")]
     DuplicateMapEntry { group_id: String },
     #[error("blinding map is missing group {group_id}")]
@@ -440,10 +449,7 @@ pub fn unblind_zspace_semantic_review(
         .expect("complete drafts always carry a response identity");
     let ZSpaceSemanticReviewDraftRequest { packet, draft } = draft_receipt.request;
     let blinding_map = normalize_and_validate_map(&packet, blinding_map)?;
-    let blinding_map_id = semantic_identity(
-        ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION,
-        &blinding_map,
-    )?;
+    let blinding_map_id = packet.blinding_map_id.clone();
     let entry_by_group = blinding_map
         .entries
         .iter()
@@ -579,6 +585,7 @@ fn packet_receipt(packet: ZSpaceSemanticReviewPacket) -> ZSpaceSemanticReviewPac
         protocol_id: packet.protocol_id.clone(),
         prompt_set_id: packet.prompt_set_id.clone(),
         blinding_key_sha256: packet.blinding_key_sha256.clone(),
+        blinding_map_id: packet.blinding_map_id.clone(),
         group_count: packet.groups.len(),
         candidate_count: packet.candidate_count,
         candidate_labels: ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS,
@@ -587,6 +594,7 @@ fn packet_receipt(packet: ZSpaceSemanticReviewPacket) -> ZSpaceSemanticReviewPac
         score_maximum: ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM,
         preference_values: ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES,
         packet_id_rule: ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE,
+        blinding_map_id_rule: ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE,
         human_review_complete: false,
         unblind_ready: false,
         efficacy_claim_ready: false,
@@ -609,6 +617,7 @@ fn validate_packet(packet: &ZSpaceSemanticReviewPacket) -> Result<(), ZSpaceSema
     require_sha256_id("protocol_id", &packet.protocol_id)?;
     require_sha256_id("prompt_set_id", &packet.prompt_set_id)?;
     require_digest("blinding_key_sha256", &packet.blinding_key_sha256)?;
+    require_sha256_id("blinding_map_id", &packet.blinding_map_id)?;
     require_sha256_id("packet_id", &packet.packet_id)?;
     if packet.groups.is_empty() {
         return Err(ZSpaceSemanticReviewError::EmptyPacket);
@@ -770,59 +779,24 @@ fn normalize_and_validate_draft(
     Ok((draft, missing))
 }
 
-fn normalize_and_validate_map(
-    packet: &ZSpaceSemanticReviewPacket,
-    mut blinding_map: ZSpaceSemanticReviewMap,
-) -> Result<ZSpaceSemanticReviewMap, ZSpaceSemanticReviewError> {
-    require_value(
-        "blinding_map.schema",
-        &blinding_map.schema,
-        ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
-    )?;
-    require_value(
-        "blinding_map.status",
-        &blinding_map.status,
-        ZSPACE_SEMANTIC_REVIEW_MAP_STATUS,
-    )?;
-    for (field, matches) in [
-        (
-            "protocol_id",
-            blinding_map.protocol_id == packet.protocol_id,
-        ),
-        ("packet_id", blinding_map.packet_id == packet.packet_id),
-        (
-            "blinding_key_sha256",
-            blinding_map.blinding_key_sha256 == packet.blinding_key_sha256,
-        ),
-    ] {
-        if !matches {
-            return Err(ZSpaceSemanticReviewError::MapPacketMismatch {
-                field: field.to_owned(),
-            });
-        }
-    }
-    if blinding_map.entries.len() != packet.groups.len() {
-        return Err(ZSpaceSemanticReviewError::CountMismatch {
-            field: "blinding_map.entries".to_owned(),
-            declared: blinding_map.entries.len(),
-            actual: packet.groups.len(),
-        });
-    }
-    let positions = packet
-        .groups
-        .iter()
-        .enumerate()
-        .map(|(index, group)| (group.group_id.as_str(), index))
-        .collect::<BTreeMap<_, _>>();
+pub fn zspace_semantic_review_map_id(
+    entries: Vec<ZSpaceSemanticReviewMapEntry>,
+) -> Result<String, ZSpaceSemanticReviewError> {
+    let entries = normalize_and_validate_map_entries(entries)?;
+    semantic_identity(ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION, &entries)
+}
+
+fn normalize_and_validate_map_entries(
+    mut entries: Vec<ZSpaceSemanticReviewMapEntry>,
+) -> Result<Vec<ZSpaceSemanticReviewMapEntry>, ZSpaceSemanticReviewError> {
     let mut seen_groups = BTreeSet::new();
     let mut seen_samples = BTreeSet::new();
     let mut expected_arms = None::<BTreeSet<String>>;
-    for (index, entry) in blinding_map.entries.iter().enumerate() {
-        if !positions.contains_key(entry.group_id.as_str()) {
-            return Err(ZSpaceSemanticReviewError::UnknownMapGroup {
-                group_id: entry.group_id.clone(),
-            });
-        }
+    for (index, entry) in entries.iter().enumerate() {
+        require_sha256_id(
+            &format!("blinding_map.entries[{index}].group_id"),
+            &entry.group_id,
+        )?;
         if !seen_groups.insert(entry.group_id.clone()) {
             return Err(ZSpaceSemanticReviewError::DuplicateMapEntry {
                 group_id: entry.group_id.clone(),
@@ -880,19 +854,85 @@ fn normalize_and_validate_map(
             expected_arms = Some(arms);
         }
     }
+    entries.sort_by(|left, right| left.group_id.cmp(&right.group_id));
+    Ok(entries)
+}
+
+fn normalize_and_validate_map(
+    packet: &ZSpaceSemanticReviewPacket,
+    mut blinding_map: ZSpaceSemanticReviewMap,
+) -> Result<ZSpaceSemanticReviewMap, ZSpaceSemanticReviewError> {
+    require_value(
+        "blinding_map.schema",
+        &blinding_map.schema,
+        ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
+    )?;
+    require_value(
+        "blinding_map.status",
+        &blinding_map.status,
+        ZSPACE_SEMANTIC_REVIEW_MAP_STATUS,
+    )?;
+    for (field, matches) in [
+        (
+            "protocol_id",
+            blinding_map.protocol_id == packet.protocol_id,
+        ),
+        ("packet_id", blinding_map.packet_id == packet.packet_id),
+        (
+            "blinding_key_sha256",
+            blinding_map.blinding_key_sha256 == packet.blinding_key_sha256,
+        ),
+    ] {
+        if !matches {
+            return Err(ZSpaceSemanticReviewError::MapPacketMismatch {
+                field: field.to_owned(),
+            });
+        }
+    }
+    if blinding_map.entries.len() != packet.groups.len() {
+        return Err(ZSpaceSemanticReviewError::CountMismatch {
+            field: "blinding_map.entries".to_owned(),
+            declared: blinding_map.entries.len(),
+            actual: packet.groups.len(),
+        });
+    }
+    let positions = packet
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| (group.group_id.as_str(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = normalize_and_validate_map_entries(blinding_map.entries)?;
+    let seen_groups = entries
+        .iter()
+        .map(|entry| entry.group_id.as_str())
+        .collect::<BTreeSet<_>>();
+    for entry in &entries {
+        if !positions.contains_key(entry.group_id.as_str()) {
+            return Err(ZSpaceSemanticReviewError::UnknownMapGroup {
+                group_id: entry.group_id.clone(),
+            });
+        }
+    }
     for group in &packet.groups {
-        if !seen_groups.contains(&group.group_id) {
+        if !seen_groups.contains(group.group_id.as_str()) {
             return Err(ZSpaceSemanticReviewError::MissingMapEntry {
                 group_id: group.group_id.clone(),
             });
         }
     }
-    blinding_map.entries.sort_by_key(|entry| {
+    let observed_map_id =
+        semantic_identity(ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION, &entries)?;
+    if observed_map_id != packet.blinding_map_id {
+        return Err(ZSpaceSemanticReviewError::MapIdentityMismatch);
+    }
+    entries.sort_by_key(|entry| {
         positions
             .get(entry.group_id.as_str())
             .copied()
             .expect("map groups were validated")
     });
+    blinding_map.entries = entries;
     Ok(blinding_map)
 }
 
@@ -1159,6 +1199,7 @@ mod tests {
             protocol_id: identity('a'),
             prompt_set_id: identity('b'),
             blinding_key_sha256: "c".repeat(64),
+            blinding_map_id: identity('9'),
             group_count: 2,
             candidate_count: 6,
             instructions: "Score while blind.".to_owned(),
@@ -1181,6 +1222,8 @@ mod tests {
             groups: vec![group('1', "A prompt"), group('2', "Another prompt")],
             packet_id: identity('0'),
         };
+        packet.blinding_map_id = zspace_semantic_review_map_id(blinding_map(&packet).entries)
+            .expect("blinding map identity");
         packet.packet_id = packet_identity(&packet).expect("packet identity");
         packet
     }
@@ -1394,6 +1437,22 @@ mod tests {
             validate_zspace_semantic_review_draft_receipt_value(value),
             Err(ZSpaceSemanticReviewError::MalformedArtifact { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_a_structurally_valid_post_review_assignment_swap() {
+        let packet = packet();
+        let mut map = blinding_map(&packet);
+        let entry = &mut map.entries[0].candidate_to_arm;
+        let arm_a = entry["A"].clone();
+        let arm_b = entry["B"].clone();
+        entry.insert("A".to_owned(), arm_b);
+        entry.insert("B".to_owned(), arm_a);
+
+        assert_eq!(
+            unblind_zspace_semantic_review(packet.clone(), draft(&packet, true), map),
+            Err(ZSpaceSemanticReviewError::MapIdentityMismatch)
+        );
     }
 
     #[test]

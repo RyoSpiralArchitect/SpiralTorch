@@ -4,6 +4,7 @@
   "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
   "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
   "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+  "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
   "group_count": 36,
   "candidate_count": 108,
   "instructions": "Score each candidate without consulting training arms, token-loop metrics, held-out loss, or the separate unblinding map. Return one review row per group and candidate plus one preference per group.",
@@ -664,5 +665,5 @@
       ]
     }
   ],
-  "packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82"
+  "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191"
 }
