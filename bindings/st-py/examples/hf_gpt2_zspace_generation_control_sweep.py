@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import math
+import operator
 import os
 import sys
-from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,13 @@ from spiraltorch.hf_generation import (
 from spiraltorch.hf_peft import (
     load_hf_causal_lm_artifact,
     summarize_hf_causal_lm_artifact,
+)
+from spiraltorch.hf_adapter import hf_adapter_fingerprint
+from spiraltorch.generation_evidence import (
+    ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE,
+    ZSPACE_GENERATION_EVIDENCE_METRIC_RULE,
+    ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
+    zspace_generation_evidence,
 )
 
 
@@ -214,7 +222,11 @@ def _apply_model_profile_defaults(
         "--max-new-tokens",
         caster=_profile_int,
     )
-    if "do_sample" in generation and not _argv_has_option(raw_argv, "--do-sample"):
+    if "do_sample" in generation and not _argv_has_option(
+        raw_argv,
+        "--do-sample",
+        "--no-do-sample",
+    ):
         args.do_sample = bool(generation.get("do_sample"))
     set_scalar_if_missing(
         "temperature",
@@ -337,6 +349,73 @@ def _apply_model_profile_defaults(
     )
 
 
+def _load_generation_prompt_rows(
+    *,
+    prompt: object,
+    prompt_set: Path | None,
+) -> list[dict[str, str]]:
+    if prompt_set is None:
+        text = str(prompt or "")
+        if not text:
+            raise ValueError("--prompt must not be empty")
+        return [
+            {
+                "label": "prompt-0001",
+                "text": text,
+                "prompt_id": _sha256_id(
+                    {
+                        "schema": "spiraltorch.hf_generation_prompt.v1",
+                        "text": text,
+                    }
+                ),
+            }
+        ]
+    path = prompt_set.expanduser().resolve()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"unable to read --prompt-set {path}: {error}") from error
+    if not isinstance(payload, Mapping):
+        raise ValueError("--prompt-set must contain a JSON object")
+    if payload.get("schema") != "spiraltorch.hf_generation_prompt_set.v1":
+        raise ValueError("--prompt-set uses an unsupported schema")
+    raw_prompts = payload.get("prompts")
+    if not isinstance(raw_prompts, list) or not raw_prompts:
+        raise ValueError("--prompt-set prompts must be a non-empty list")
+    rows: list[dict[str, str]] = []
+    labels: set[str] = set()
+    prompt_ids: set[str] = set()
+    for index, raw in enumerate(raw_prompts):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"--prompt-set prompt {index} must be a mapping")
+        label = str(raw.get("label") or f"prompt-{index + 1:04d}").strip()
+        text = str(raw.get("text") or "")
+        if not label or len(label) > 64:
+            raise ValueError(f"--prompt-set prompt {index} has an invalid label")
+        if not text:
+            raise ValueError(f"--prompt-set prompt {index} has empty text")
+        prompt_id = _sha256_id(
+            {"schema": "spiraltorch.hf_generation_prompt.v1", "text": text}
+        )
+        if label in labels:
+            raise ValueError(f"--prompt-set has duplicate label {label!r}")
+        if prompt_id in prompt_ids:
+            raise ValueError("--prompt-set contains duplicate prompt text")
+        labels.add(label)
+        prompt_ids.add(prompt_id)
+        rows.append({"label": label, "text": text, "prompt_id": prompt_id})
+    expected_set_id = _sha256_id(
+        {
+            "schema": "spiraltorch.hf_generation_prompt_set.v1",
+            "prompt_ids": [row["prompt_id"] for row in rows],
+        }
+    )
+    supplied_set_id = payload.get("prompt_set_id")
+    if supplied_set_id is not None and supplied_set_id != expected_set_id:
+        raise ValueError("--prompt-set prompt_set_id does not match its prompt texts")
+    return rows
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -361,42 +440,122 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "detects local adapter_config.json artifacts."
         ),
     )
-    parser.add_argument("--prompt", required=True)
-    parser.add_argument("--out", type=Path, default=Path("runs/hf-gpt2-zspace-generation-control-sweep.json"))
+    parser.add_argument("--prompt", default=None)
+    parser.add_argument("--prompt-set", type=Path, default=None)
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("runs/hf-gpt2-zspace-generation-control-sweep.json"),
+    )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--generation-evidence-protocol-id",
+        default=None,
+        help=(
+            "Optional prespecified sha256 protocol identity. When omitted, the "
+            "generic generation-metric protocol is used."
+        ),
+    )
+    parser.add_argument(
+        "--adapter-revision",
+        default=None,
+        help=(
+            "Pinned 40-character Hub commit for a remote PEFT adapter. Remote "
+            "adapter evidence is rejected when this is omitted."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-baseline", action="store_true")
+    parser.add_argument("--baseline-only", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=32)
-    parser.add_argument("--do-sample", action="store_true")
+    sampling = parser.add_mutually_exclusive_group()
+    sampling.add_argument("--do-sample", dest="do_sample", action="store_true")
+    sampling.add_argument("--no-do-sample", dest="do_sample", action="store_false")
+    parser.set_defaults(do_sample=False)
     parser.add_argument("--sample-temperature", type=float, default=1.0)
     parser.add_argument("--sample-top-k", type=int, default=0)
-    parser.add_argument("--zspace-top-k-values", type=_positive_int_values, default=[64])
-    parser.add_argument("--zspace-curvature-values", type=_negative_float_values, default=[-0.04])
-    parser.add_argument("--zspace-temperature-values", type=_positive_float_values, default=[1.0])
-    parser.add_argument("--zspace-entropy-target-values", type=_optional_float_values, default=[None, 3.0])
-    parser.add_argument("--zspace-entropy-gain-values", type=_non_negative_float_values, default=[0.5])
+    parser.add_argument("--seed", type=int, default=13)
+    parser.add_argument(
+        "--zspace-top-k-values", type=_positive_int_values, default=[64]
+    )
+    parser.add_argument(
+        "--zspace-curvature-values", type=_negative_float_values, default=[-0.04]
+    )
+    parser.add_argument(
+        "--zspace-temperature-values", type=_positive_float_values, default=[1.0]
+    )
+    parser.add_argument(
+        "--zspace-entropy-target-values",
+        type=_optional_float_values,
+        default=[None, 3.0],
+    )
+    parser.add_argument(
+        "--zspace-entropy-gain-values", type=_non_negative_float_values, default=[0.5]
+    )
     parser.add_argument("--zspace-entropy-tolerance", type=float, default=1.0e-4)
     parser.add_argument("--zspace-min-temperature", type=float, default=0.7)
     parser.add_argument("--zspace-max-temperature", type=float, default=2.4)
-    parser.add_argument("--repression-window-values", type=_positive_int_values, default=[16])
-    parser.add_argument("--repression-strength-values", type=_non_negative_float_values, default=[0.0, 1.0])
-    parser.add_argument("--last-token-repression-values", type=_non_negative_float_values, default=[0.0, 1.0])
-    parser.add_argument("--ngram-size-values", type=_non_negative_int_values, default=[0])
-    parser.add_argument("--ngram-window-values", type=_non_negative_int_values, default=[0])
-    parser.add_argument("--ngram-repression-strength-values", type=_non_negative_float_values, default=[0.0])
-    parser.add_argument("--ngram-decay-values", type=_unit_interval_float_values, default=[1.0])
+    parser.add_argument(
+        "--repression-window-values", type=_positive_int_values, default=[16]
+    )
+    parser.add_argument(
+        "--repression-strength-values",
+        type=_non_negative_float_values,
+        default=[0.0, 1.0],
+    )
+    parser.add_argument(
+        "--last-token-repression-values",
+        type=_non_negative_float_values,
+        default=[0.0, 1.0],
+    )
+    parser.add_argument(
+        "--ngram-size-values", type=_non_negative_int_values, default=[0]
+    )
+    parser.add_argument(
+        "--ngram-window-values", type=_non_negative_int_values, default=[0]
+    )
+    parser.add_argument(
+        "--ngram-repression-strength-values",
+        type=_non_negative_float_values,
+        default=[0.0],
+    )
+    parser.add_argument(
+        "--ngram-decay-values", type=_unit_interval_float_values, default=[1.0]
+    )
     parser.add_argument("--keep-non-top-k", action="store_true")
     parser.add_argument("--zspace-no-native", action="store_true")
     parser.add_argument("--report-limit", type=int, default=64)
     args = parser.parse_args(argv)
     _apply_model_profile_defaults(args, raw_argv)
+    if (args.prompt is None) == (args.prompt_set is None):
+        parser.error("pass exactly one of --prompt or --prompt-set")
+    if args.no_baseline and args.baseline_only:
+        parser.error("--no-baseline and --baseline-only cannot be combined")
+    try:
+        args._generation_evidence_prompts = _load_generation_prompt_rows(
+            prompt=args.prompt,
+            prompt_set=args.prompt_set,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     if args.max_new_tokens <= 0:
         parser.error("--max-new-tokens must be positive")
     if args.sample_temperature <= 0.0 or not math.isfinite(args.sample_temperature):
         parser.error("--sample-temperature must be finite and positive")
     if args.sample_top_k < 0:
         parser.error("--sample-top-k must be non-negative")
+    if args.seed < 0 or args.seed > 9_007_199_254_740_991:
+        parser.error("--seed must be a non-negative cross-client safe integer")
+    if (
+        args.generation_evidence_protocol_id is not None
+        and not _is_sha256_id(args.generation_evidence_protocol_id)
+    ):
+        parser.error("--generation-evidence-protocol-id must be a lowercase sha256 ID")
+    if args.adapter_revision is not None and not _is_pinned_hub_revision(
+        args.adapter_revision
+    ):
+        parser.error("--adapter-revision must be a lowercase 40-character Hub commit")
     if args.zspace_entropy_tolerance < 0.0 or not math.isfinite(
         args.zspace_entropy_tolerance
     ):
@@ -439,6 +598,14 @@ def _loader_kwargs(args: argparse.Namespace) -> dict[str, object]:
     return kwargs
 
 
+def _adapter_loader_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return (
+        {}
+        if args.adapter_revision is None
+        else {"revision": str(args.adapter_revision)}
+    )
+
+
 def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
     runs: list[dict[str, object]] = []
     if not args.no_baseline:
@@ -449,6 +616,8 @@ def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
                 "config": {},
             }
         )
+    if args.baseline_only:
+        return runs
     grid = product(
         args.zspace_top_k_values,
         args.zspace_curvature_values,
@@ -529,9 +698,7 @@ def _generation_control_grid(args: argparse.Namespace) -> dict[str, object]:
         "last_token_repression_values": list(args.last_token_repression_values),
         "ngram_size_values": list(args.ngram_size_values),
         "ngram_window_values": list(args.ngram_window_values),
-        "ngram_repression_strength_values": list(
-            args.ngram_repression_strength_values
-        ),
+        "ngram_repression_strength_values": list(args.ngram_repression_strength_values),
         "ngram_decay_values": list(args.ngram_decay_values),
         "mask_non_top_k": not bool(args.keep_non_top_k),
         "use_native_zspace": not bool(args.zspace_no_native),
@@ -587,10 +754,7 @@ def _move_to_device(value: Any, device: Any | None) -> Any:
         except (TypeError, RuntimeError, ValueError):
             return value
     if isinstance(value, Mapping):
-        return {
-            key: _move_to_device(item, device)
-            for key, item in value.items()
-        }
+        return {key: _move_to_device(item, device) for key, item in value.items()}
     return value
 
 
@@ -611,35 +775,307 @@ def _last_dim(value: Any) -> int | None:
         return None
 
 
-def text_repetition_report(text: object, *, ngram_size: int = 3) -> dict[str, object]:
-    words = str(text or "").split()
-    if ngram_size <= 0:
-        raise ValueError("ngram_size must be positive")
-    ngrams = [
-        tuple(words[index : index + ngram_size])
-        for index in range(0, max(0, len(words) - ngram_size + 1))
-    ]
-    counts = Counter(ngrams)
-    repeated_ngram_total = sum(count - 1 for count in counts.values() if count > 1)
-    max_ngram_repetition = max(counts.values(), default=0)
-    consecutive_repeated_tokens = sum(
-        1 for before, after in zip(words, words[1:]) if before == after
+def _sha256_id(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_sha256_id(value: object) -> bool:
+    if not isinstance(value, str) or not value.startswith("sha256:"):
+        return False
+    digest = value.removeprefix("sha256:")
+    return len(digest) == 64 and all(
+        character in "0123456789abcdef" for character in digest
     )
-    unique_word_ratio = None if not words else len(set(words)) / len(words)
-    loop_score = (
-        float(repeated_ngram_total)
-        + float(max(0, max_ngram_repetition - 1))
-        + float(consecutive_repeated_tokens)
+
+
+def _is_pinned_hub_revision(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 40 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _local_full_model_artifact_id(directory: Path) -> str:
+    resolved = directory.expanduser().resolve()
+    weight_suffixes = (".safetensors", ".bin", ".pt", ".pth")
+    weight_paths = sorted(
+        path
+        for path in resolved.rglob("*")
+        if path.is_file() and path.name.endswith(weight_suffixes)
+    )
+    if not weight_paths:
+        raise RuntimeError(
+            f"local full-model generation evidence found no weight files in {resolved}"
+        )
+    config_path = resolved / "config.json"
+    return _sha256_id(
+        {
+            "schema": "spiraltorch.hf_full_model_artifact_identity.v1",
+            "config_sha256": (
+                _sha256_file(config_path) if config_path.is_file() else None
+            ),
+            "weights": [
+                {
+                    "name": path.relative_to(resolved).as_posix(),
+                    "size_bytes": path.stat().st_size,
+                    "sha256": _sha256_file(path),
+                }
+                for path in weight_paths
+            ],
+        }
+    )
+
+
+def _model_artifact_id(
+    args: argparse.Namespace,
+    artifact_summary: Mapping[str, object],
+    runtime_identity_id: str,
+) -> str:
+    source = Path(str(args.model_name)).expanduser()
+    artifact_kind = artifact_summary.get("artifact_kind")
+    if source.is_dir() and artifact_kind == "peft_adapter":
+        adapter_id = hf_adapter_fingerprint(source).get("adapter_id")
+        if _is_sha256_id(adapter_id):
+            return str(adapter_id)
+        raise RuntimeError(
+            "local PEFT adapter fingerprint did not return an adapter_id"
+        )
+    if source.is_dir():
+        return _local_full_model_artifact_id(source)
+    if artifact_kind == "peft_adapter":
+        if not _is_pinned_hub_revision(args.adapter_revision):
+            raise RuntimeError(
+                "remote PEFT generation evidence requires --adapter-revision "
+                "with an exact 40-character Hub commit"
+            )
+        return _sha256_id(
+            {
+                "schema": "spiraltorch.hf_remote_peft_adapter_identity.v1",
+                "artifact_source": str(args.model_name),
+                "adapter_revision": str(args.adapter_revision),
+                "base_model_name_or_path": artifact_summary.get(
+                    "base_model_name_or_path"
+                ),
+                "base_model_revision": artifact_summary.get("base_model_revision"),
+                "base_model_commit": artifact_summary.get("base_model_commit"),
+                "runtime_identity_id": runtime_identity_id,
+            }
+        )
+    return _sha256_id(
+        {
+            "schema": "spiraltorch.hf_resolved_model_artifact_identity.v1",
+            "artifact_source": str(args.model_name),
+            "artifact_kind": artifact_kind,
+            "base_model_name_or_path": artifact_summary.get("base_model_name_or_path"),
+            "base_model_revision": artifact_summary.get("base_model_revision"),
+            "base_model_commit": artifact_summary.get("base_model_commit"),
+            "runtime_identity_id": runtime_identity_id,
+        }
+    )
+
+
+def _sequence_token_ids(value: Any) -> list[int]:
+    current = value
+    for operation_name in ("detach", "cpu"):
+        operation = getattr(current, operation_name, None)
+        if callable(operation):
+            current = operation()
+    tolist = getattr(current, "tolist", None)
+    if callable(tolist):
+        current = tolist()
+    if not isinstance(current, (list, tuple)):
+        try:
+            current = list(current)
+        except TypeError as error:
+            raise TypeError("generated token sequence is not iterable") from error
+    if current and isinstance(current[0], (list, tuple)):
+        current = current[0]
+    token_ids: list[int] = []
+    for token in current:
+        if isinstance(token, bool):
+            raise TypeError("generated token IDs must be integers")
+        try:
+            token_id = operator.index(token)
+        except TypeError as error:
+            raise TypeError("generated token IDs must be integers") from error
+        if token_id < 0:
+            raise ValueError("generated token IDs must be non-negative")
+        token_ids.append(token_id)
+    return token_ids
+
+
+def _generation_evidence_protocol_id() -> str:
+    return _sha256_id(
+        {
+            "schema": "spiraltorch.hf_generation_evidence_protocol.v1",
+            "metric_rule": ZSPACE_GENERATION_EVIDENCE_METRIC_RULE,
+            "loop_score_rule": ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE,
+            "sample_unit": "model_artifact_prompt_seed_control",
+            "continuation_only": True,
+        }
+    )
+
+
+def _resolved_generation_evidence_protocol_id(args: argparse.Namespace) -> str:
+    supplied = args.generation_evidence_protocol_id
+    return str(supplied) if supplied is not None else _generation_evidence_protocol_id()
+
+
+def _decoding_config_id(
+    args: argparse.Namespace,
+    run: Mapping[str, object],
+) -> str:
+    return _sha256_id(
+        {
+            "schema": "spiraltorch.hf_generation_decoding_config.v1",
+            "max_new_tokens": int(args.max_new_tokens),
+            "do_sample": bool(args.do_sample),
+            "sample_temperature": (
+                float(args.sample_temperature) if args.do_sample else None
+            ),
+            "sample_top_k": int(args.sample_top_k) if args.do_sample else None,
+            "seed": int(args.seed),
+            "run_kind": run.get("kind"),
+            "control_config": dict(run.get("config") or {}),
+        }
+    )
+
+
+def _generation_evidence_plan(
+    args: argparse.Namespace,
+    runs: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    prompt_rows = list(args._generation_evidence_prompts)
+    prompt_ids = [str(row["prompt_id"]) for row in prompt_rows]
+    return {
+        "schema": "spiraltorch.hf_generation_evidence_plan.v1",
+        "semantic_owner": ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
+        "protocol_id": _resolved_generation_evidence_protocol_id(args),
+        "protocol_binding": (
+            "prespecified_cli_override"
+            if args.generation_evidence_protocol_id is not None
+            else "generic_metric_protocol"
+        ),
+        "prompt_count": len(prompt_rows),
+        "prompts": prompt_rows,
+        "prompt_set_id": _sha256_id(
+            {
+                "schema": "spiraltorch.hf_generation_prompt_set.v1",
+                "prompt_ids": prompt_ids,
+            }
+        ),
+        "seed": int(args.seed),
+        "continuation_only": True,
+        "decoding_config_ids": {
+            str(run.get("name")): _decoding_config_id(args, run) for run in runs
+        },
+    }
+
+
+def _compatibility_repetition_report(
+    evidence: Mapping[str, object],
+    *,
+    ngram_size: int = 3,
+) -> dict[str, object]:
+    samples = evidence.get("samples")
+    aggregate = evidence.get("aggregate")
+    if (
+        not isinstance(samples, list)
+        or not samples
+        or not isinstance(aggregate, Mapping)
+    ):
+        raise RuntimeError("generation evidence compatibility projection is malformed")
+    ngrams = aggregate.get("ngrams")
+    if not isinstance(ngrams, list):
+        raise RuntimeError("generation evidence n-gram metrics are malformed")
+    selected = next(
+        (
+            row
+            for row in ngrams
+            if isinstance(row, Mapping) and row.get("order") == ngram_size
+        ),
+        None,
+    )
+    if not isinstance(selected, Mapping):
+        raise ValueError("ngram_size must be one of the Rust evidence orders 1,2,3,4")
+    unigram = next(
+        (row for row in ngrams if isinstance(row, Mapping) and row.get("order") == 1),
+        {},
     )
     return {
-        "word_count": len(words),
-        "unique_word_ratio": unique_word_ratio,
+        "metric_backend": "rust",
+        "generation_evidence_id": evidence.get("evidence_id"),
+        "word_count": None,
+        "sample_count": aggregate.get("sample_count"),
+        "token_count": aggregate.get("total_token_count"),
+        "unique_word_ratio": None,
+        "distinct_token_ratio": unigram.get("distinct_ratio"),
         "ngram_size": ngram_size,
-        "repeated_ngram_total": repeated_ngram_total,
-        "max_ngram_repetition": max_ngram_repetition,
-        "consecutive_repeated_tokens": consecutive_repeated_tokens,
-        "loop_score": loop_score,
+        "repeated_ngram_total": selected.get("repeated_occurrence_count"),
+        "max_ngram_repetition": selected.get("maximum_occurrence_count"),
+        "consecutive_repeated_tokens": aggregate.get(
+            "consecutive_repeated_token_count"
+        ),
+        "periodic_loop_detected": bool(aggregate.get("periodic_loop_sample_count")),
+        "periodic_loop_sample_count": aggregate.get("periodic_loop_sample_count"),
+        "periodic_loop_sample_ratio": aggregate.get("periodic_loop_sample_ratio"),
+        "periodic_suffix_period": (
+            samples[0].get("periodic_suffix_period")
+            if len(samples) == 1 and isinstance(samples[0], Mapping)
+            else None
+        ),
+        "periodic_suffix_repeated_token_count": aggregate.get(
+            "periodic_suffix_repeated_token_count"
+        ),
+        "loop_score": aggregate.get("sample_mean_loop_score"),
+        "maximum_loop_score": aggregate.get("maximum_loop_score"),
+        "loop_score_rule": evidence.get("loop_score_rule"),
     }
+
+
+def text_repetition_report(text: object, *, ngram_size: int = 3) -> dict[str, object]:
+    words = str(text or "").split()
+    vocabulary: dict[str, int] = {}
+    token_ids = [vocabulary.setdefault(word, len(vocabulary)) for word in words]
+    text_id = _sha256_id(
+        {"schema": "spiraltorch.whitespace_token_probe.v1", "words": words}
+    )
+    evidence = zspace_generation_evidence(
+        protocol_id=_generation_evidence_protocol_id(),
+        runtime_identity_id=_sha256_id("whitespace-token-probe-runtime"),
+        model_artifact_id=_sha256_id("whitespace-token-probe-model"),
+        prompt_set_id=text_id,
+        decoding_config_id=_sha256_id(
+            {
+                "schema": "spiraltorch.whitespace_token_probe.decode.v1",
+                "ngram_size": ngram_size,
+            }
+        ),
+        samples=[
+            {
+                "prompt_id": text_id,
+                "seed": 0,
+                "continuation_token_ids": token_ids,
+            }
+        ],
+    )
+    report = _compatibility_repetition_report(evidence, ngram_size=ngram_size)
+    report["word_count"] = len(words)
+    report["unique_word_ratio"] = report["distinct_token_ratio"]
+    return report
 
 
 def _processor_for_run(run: Mapping[str, object]) -> Any | None:
@@ -661,6 +1097,16 @@ def _processor_list(processor: Any, transformers: Any) -> Any:
 _prepare_special_tokens_batch_size_compat = hf_generation_batch_size_compat
 
 
+def _reset_generation_seed(torch: Any, seed: int) -> None:
+    manual_seed = getattr(torch, "manual_seed", None)
+    if callable(manual_seed):
+        manual_seed(seed)
+    cuda = getattr(torch, "cuda", None)
+    manual_seed_all = getattr(cuda, "manual_seed_all", None)
+    if callable(manual_seed_all):
+        manual_seed_all(seed)
+
+
 def _generate_one(
     *,
     run: Mapping[str, object],
@@ -670,6 +1116,9 @@ def _generate_one(
     model: Any,
     encoded: Mapping[str, Any],
     args: argparse.Namespace,
+    evidence_context: Mapping[str, str],
+    prompt: str,
+    prompt_label: str,
 ) -> dict[str, object]:
     processor = _processor_for_run(run)
     batch = _move_to_device(encoded, _model_device(model))
@@ -692,20 +1141,25 @@ def _generate_one(
     if processor is not None:
         generate_kwargs["logits_processor"] = _processor_list(processor, transformers)
 
+    _reset_generation_seed(torch, int(args.seed))
     with torch.no_grad():
         with _prepare_special_tokens_batch_size_compat(model):
             output_ids = model.generate(**batch, **generate_kwargs)
     first_output = _first_sequence(output_ids)
     text = tokenizer.decode(first_output, skip_special_tokens=True)
-    continuation = text[len(args.prompt) :] if text.startswith(args.prompt) else text
+    continuation = text[len(prompt) :] if text.startswith(prompt) else text
     input_token_count = _last_dim(encoded.get("input_ids"))
     output_token_count = _last_dim(first_output)
+    output_token_ids = _sequence_token_ids(first_output)
+    if input_token_count is None or not 0 <= input_token_count <= len(output_token_ids):
+        raise RuntimeError("unable to isolate generated continuation token IDs")
+    continuation_token_ids = output_token_ids[input_token_count:]
     control = None
     if processor is not None:
         control = processor.report(limit=int(args.report_limit))
     generation = hf_finetune_generation_report(
         stage=str(run.get("name") or "generation"),
-        prompt=args.prompt,
+        prompt=prompt,
         generated_text=text,
         generated_continuation_text=continuation,
         input_token_count=input_token_count,
@@ -718,13 +1172,86 @@ def _generate_one(
         ),
         generation_control=control,
     )
+    generation_evidence = zspace_generation_evidence(
+        protocol_id=evidence_context["protocol_id"],
+        runtime_identity_id=evidence_context["runtime_identity_id"],
+        model_artifact_id=evidence_context["model_artifact_id"],
+        prompt_set_id=evidence_context["prompt_set_id"],
+        decoding_config_id=_decoding_config_id(args, run),
+        samples=[
+            {
+                "prompt_id": evidence_context["prompt_id"],
+                "seed": int(args.seed),
+                "continuation_token_ids": continuation_token_ids,
+            }
+        ],
+    )
     return {
         "name": run.get("name"),
         "kind": run.get("kind"),
         "config": run.get("config"),
+        "prompt_label": prompt_label,
+        "prompt_id": evidence_context["prompt_id"],
         "status": generation.get("status"),
         "generation": generation,
-        "repetition": text_repetition_report(continuation),
+        "generation_evidence": generation_evidence,
+        "repetition": _compatibility_repetition_report(generation_evidence),
+    }
+
+
+def _combine_prompt_generations(
+    *,
+    run: Mapping[str, object],
+    generations: Sequence[Mapping[str, object]],
+    args: argparse.Namespace,
+    evidence_context: Mapping[str, str],
+) -> dict[str, object]:
+    if not generations:
+        raise RuntimeError("generation prompt suite produced no rows")
+    evidence_samples: list[Mapping[str, object]] = []
+    for row in generations:
+        if row.get("status") != "ok":
+            raise RuntimeError("generation prompt row did not complete successfully")
+        evidence = row.get("generation_evidence")
+        request = evidence.get("request") if isinstance(evidence, Mapping) else None
+        samples = request.get("samples") if isinstance(request, Mapping) else None
+        if not isinstance(samples, list) or len(samples) != 1:
+            raise RuntimeError("generation prompt row has invalid Rust evidence")
+        evidence_samples.append(samples[0])
+    generation_evidence = zspace_generation_evidence(
+        protocol_id=evidence_context["protocol_id"],
+        runtime_identity_id=evidence_context["runtime_identity_id"],
+        model_artifact_id=evidence_context["model_artifact_id"],
+        prompt_set_id=evidence_context["prompt_set_id"],
+        decoding_config_id=_decoding_config_id(args, run),
+        samples=evidence_samples,
+    )
+    canonical_request = generation_evidence.get("request")
+    canonical_samples = (
+        canonical_request.get("samples")
+        if isinstance(canonical_request, Mapping)
+        else None
+    )
+    if not isinstance(canonical_samples, list):
+        raise RuntimeError("combined Rust generation evidence has no canonical samples")
+    first = generations[0]
+    return {
+        "name": run.get("name"),
+        "kind": run.get("kind"),
+        "config": run.get("config"),
+        "status": "ok",
+        "prompt_count": len(generations),
+        "generation": first.get("generation"),
+        "generations": [dict(row) for row in generations],
+        "generated_continuation_set_id": _sha256_id(
+            {
+                "schema": "spiraltorch.hf_generated_continuation_set.v1",
+                "prompt_set_id": evidence_context["prompt_set_id"],
+                "samples": canonical_samples,
+            }
+        ),
+        "generation_evidence": generation_evidence,
+        "repetition": _compatibility_repetition_report(generation_evidence),
     }
 
 
@@ -732,16 +1259,24 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
     baseline = next((row for row in runs if row.get("kind") == "baseline"), None)
     baseline_hash = None
     if isinstance(baseline, Mapping):
-        generation = baseline.get("generation")
-        if isinstance(generation, Mapping):
-            baseline_hash = generation.get("generated_continuation_sha256")
+        baseline_hash = baseline.get("generated_continuation_set_id")
+        if baseline_hash is None:
+            generation = baseline.get("generation")
+            if isinstance(generation, Mapping):
+                baseline_hash = generation.get("generated_continuation_sha256")
     completed = [row for row in runs if row.get("status") == "ok"]
     changed_from_baseline = 0
     for row in completed:
-        generation = row.get("generation")
-        if not isinstance(generation, Mapping) or row.get("kind") == "baseline":
+        if row.get("kind") == "baseline":
             continue
-        row_hash = generation.get("generated_continuation_sha256")
+        row_hash = row.get("generated_continuation_set_id")
+        if row_hash is None:
+            generation = row.get("generation")
+            row_hash = (
+                generation.get("generated_continuation_sha256")
+                if isinstance(generation, Mapping)
+                else None
+            )
         if baseline_hash and row_hash and row_hash != baseline_hash:
             changed_from_baseline += 1
 
@@ -763,11 +1298,17 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
     control_ngram_repressed_totals = []
     control_max_ngram_repressions = []
     for row in completed:
-        generation = row.get("generation")
-        if not isinstance(generation, Mapping):
-            continue
-        control = generation.get("generation_control")
-        if isinstance(control, Mapping):
+        prompt_rows = row.get("generations")
+        candidate_rows = prompt_rows if isinstance(prompt_rows, list) else [row]
+        for candidate in candidate_rows:
+            if not isinstance(candidate, Mapping):
+                continue
+            generation = candidate.get("generation")
+            if not isinstance(generation, Mapping):
+                continue
+            control = generation.get("generation_control")
+            if not isinstance(control, Mapping):
+                continue
             value = control.get("top_token_changed_count")
             if isinstance(value, (int, float)):
                 control_changed_counts.append(float(value))
@@ -835,7 +1376,9 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
 
 def run_sweep(args: argparse.Namespace) -> dict[str, object]:
     runs = build_control_runs(args)
+    prompt_rows = list(args._generation_evidence_prompts)
     generation_control_plan = _generation_control_plan(args, runs)
+    generation_evidence_plan = _generation_evidence_plan(args, runs)
     report: dict[str, object] = {
         "row_type": "hf_gpt2_zspace_generation_control_sweep",
         "status": "planned" if args.dry_run else "running",
@@ -852,11 +1395,17 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         ),
         "allow_remote": bool(args.allow_remote),
         "trust_remote_code": bool(args.trust_remote_code),
-        "prompt": args.prompt,
+        "prompt": prompt_rows[0]["text"] if len(prompt_rows) == 1 else None,
+        "prompt_count": len(prompt_rows),
+        "prompt_set": {
+            "prompt_set_id": generation_evidence_plan["prompt_set_id"],
+            "prompts": prompt_rows,
+        },
         "max_new_tokens": args.max_new_tokens,
         "do_sample": bool(args.do_sample),
         "sample_temperature": args.sample_temperature,
         "sample_top_k": args.sample_top_k,
+        "seed": args.seed,
         "dry_run": bool(args.dry_run),
         "run_count": len(runs),
         "generation_control_profile_config": generation_control_plan[
@@ -866,12 +1415,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
             "resolved_config"
         ],
         "generation_control_grid": generation_control_plan["grid"],
-        "generation_control_sweep_cli_args": generation_control_plan[
-            "sweep_cli_args"
-        ],
+        "generation_control_sweep_cli_args": generation_control_plan["sweep_cli_args"],
         "generation_control_bridge_cli_args": generation_control_plan[
             "bridge_cli_args"
         ],
+        "generation_evidence_plan": generation_evidence_plan,
         "runs": runs,
     }
     if args.dry_run:
@@ -882,43 +1430,72 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
     import torch  # type: ignore
 
     with _hf_remote_access(args.allow_remote):
-        model, tokenizer, _config, model_artifact_report = (
-            load_hf_causal_lm_artifact(
-                args.model_name,
-                tokenizer_name_or_path=args.tokenizer_name,
-                artifact_kind=args.model_artifact_kind,
-                transformers_module=transformers,
-                loader_kwargs=_loader_kwargs(args),
-            )
+        model, tokenizer, _config, model_artifact_report = load_hf_causal_lm_artifact(
+            args.model_name,
+            tokenizer_name_or_path=args.tokenizer_name,
+            artifact_kind=args.model_artifact_kind,
+            transformers_module=transformers,
+            loader_kwargs=_loader_kwargs(args),
+            adapter_kwargs=_adapter_loader_kwargs(args),
         )
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = getattr(tokenizer, "eos_token", None)
-    report["model_artifact_report"] = summarize_hf_causal_lm_artifact(
-        model_artifact_report
-    )
+    artifact_summary = summarize_hf_causal_lm_artifact(model_artifact_report)
+    report["model_artifact_report"] = artifact_summary
     report["model_artifact_kind"] = model_artifact_report.get("artifact_kind")
     report["model_adapter_loaded"] = model_artifact_report.get("adapter_loaded")
-    report["tokenizer_name"] = model_artifact_report.get(
-        "resolved_tokenizer_source"
-    )
+    report["tokenizer_name"] = model_artifact_report.get("resolved_tokenizer_source")
+    runtime_identity_id = artifact_summary.get("runtime_identity_observed_id")
+    if not _is_sha256_id(runtime_identity_id):
+        raise RuntimeError(
+            "generation evidence requires a verified model/tokenizer runtime identity"
+        )
+    evidence_context = {
+        "protocol_id": str(generation_evidence_plan["protocol_id"]),
+        "runtime_identity_id": str(runtime_identity_id),
+        "model_artifact_id": _model_artifact_id(
+            args,
+            artifact_summary,
+            str(runtime_identity_id),
+        ),
+        "prompt_set_id": str(generation_evidence_plan["prompt_set_id"]),
+    }
+    report["generation_evidence_context"] = evidence_context
     if getattr(tokenizer, "pad_token_id", None) is not None:
         model.config.pad_token_id = tokenizer.pad_token_id
     eval_model = getattr(model, "eval", None)
     if callable(eval_model):
         eval_model()
-    encoded = tokenizer(args.prompt, return_tensors="pt")
     completed_runs = []
     for run in runs:
         try:
+            prompt_generations = []
+            for prompt_row in prompt_rows:
+                prompt = str(prompt_row["text"])
+                encoded = tokenizer(prompt, return_tensors="pt")
+                prompt_generations.append(
+                    _generate_one(
+                        run=run,
+                        transformers=transformers,
+                        torch=torch,
+                        tokenizer=tokenizer,
+                        model=model,
+                        encoded=encoded,
+                        args=args,
+                        evidence_context={
+                            **evidence_context,
+                            "prompt_id": str(prompt_row["prompt_id"]),
+                        },
+                        prompt=prompt,
+                        prompt_label=str(prompt_row["label"]),
+                    )
+                )
             completed_runs.append(
-                _generate_one(
+                _combine_prompt_generations(
                     run=run,
-                    transformers=transformers,
-                    torch=torch,
-                    tokenizer=tokenizer,
-                    model=model,
-                    encoded=encoded,
+                    generations=prompt_generations,
                     args=args,
+                    evidence_context=evidence_context,
                 )
             )
         except Exception as exc:

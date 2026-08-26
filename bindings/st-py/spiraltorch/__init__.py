@@ -651,6 +651,23 @@ from .zspace_optimizer import (
     zspace_polarity_evidence,
 )
 from .generation_control import zspace_generation_control
+from .generation_evidence import (
+    ZSPACE_GENERATION_EVIDENCE_CONTRACT_VERSION,
+    ZSPACE_GENERATION_EVIDENCE_KIND,
+    ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE,
+    ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER,
+    ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES,
+    ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE,
+    ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS,
+    ZSPACE_GENERATION_EVIDENCE_METRIC_RULE,
+    ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS,
+    ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD,
+    ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS,
+    ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND,
+    ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
+    validate_zspace_generation_evidence,
+    zspace_generation_evidence,
+)
 from .imaginary_time_schrodinger import zspace_imaginary_time_schrodinger
 from .temperature_control import zspace_temperature_control
 
@@ -8504,6 +8521,21 @@ _EXTRAS.extend(
         "zspace_parameter_trajectory_policy",
         "zspace_polarity_evidence",
         "zspace_generation_control",
+        "ZSPACE_GENERATION_EVIDENCE_CONTRACT_VERSION",
+        "ZSPACE_GENERATION_EVIDENCE_KIND",
+        "ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE",
+        "ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER",
+        "ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES",
+        "ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE",
+        "ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS",
+        "ZSPACE_GENERATION_EVIDENCE_METRIC_RULE",
+        "ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS",
+        "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD",
+        "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS",
+        "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND",
+        "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER",
+        "validate_zspace_generation_evidence",
+        "zspace_generation_evidence",
         "zspace_imaginary_time_schrodinger",
         "zspace_temperature_control",
         "inference_to_mapping",

@@ -5387,6 +5387,19 @@ ZSPACE_POLARITY_EVIDENCE_KIND: str
 ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED: int
 ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND: str
 ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER: str
+ZSPACE_GENERATION_EVIDENCE_CONTRACT_VERSION: str
+ZSPACE_GENERATION_EVIDENCE_KIND: str
+ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE: str
+ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER: int
+ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES: int
+ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE: int
+ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS: int
+ZSPACE_GENERATION_EVIDENCE_METRIC_RULE: str
+ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS: tuple[int, int, int, int]
+ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: int
+ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: int
+ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND: str
+ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER: str
 
 def zspace_meta_optimizer_init(
     config: Mapping[str, object],
@@ -5454,6 +5467,18 @@ def zspace_polarity_evidence(
     rows: Sequence[Mapping[str, object]],
 ) -> Dict[str, object]: ...
 def validate_zspace_polarity_evidence(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_generation_evidence(
+    *,
+    protocol_id: str,
+    runtime_identity_id: str,
+    model_artifact_id: str,
+    prompt_set_id: str,
+    decoding_config_id: str,
+    samples: Sequence[Mapping[str, object]],
+) -> Dict[str, object]: ...
+def validate_zspace_generation_evidence(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 
@@ -11913,9 +11938,23 @@ __all__ = [
     "ZSPACE_POLARITY_EVIDENCE_MAX_SAFE_SEED",
     "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_BACKEND",
     "ZSPACE_POLARITY_EVIDENCE_SEMANTIC_OWNER",
+    "ZSPACE_GENERATION_EVIDENCE_CONTRACT_VERSION",
+    "ZSPACE_GENERATION_EVIDENCE_KIND",
+    "ZSPACE_GENERATION_EVIDENCE_LOOP_SCORE_RULE",
+    "ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER",
+    "ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES",
+    "ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE",
+    "ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS",
+    "ZSPACE_GENERATION_EVIDENCE_METRIC_RULE",
+    "ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS",
+    "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD",
+    "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS",
+    "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND",
+    "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER",
     "validate_zspace_parameter_trajectory",
     "validate_zspace_parameter_trajectory_policy",
     "validate_zspace_polarity_evidence",
+    "validate_zspace_generation_evidence",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",
@@ -11928,6 +11967,7 @@ __all__ = [
     "zspace_parameter_trajectory_policy",
     "zspace_polarity_evidence",
     "zspace_generation_control",
+    "zspace_generation_evidence",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
     "inference_to_mapping",
