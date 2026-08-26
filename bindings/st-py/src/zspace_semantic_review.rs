@@ -6,19 +6,27 @@ use st_core::runtime::zspace_semantic_review::{
     summarize_zspace_semantic_review_draft, unblind_zspace_semantic_review,
     validate_zspace_semantic_review_draft_receipt_value, validate_zspace_semantic_review_packet,
     validate_zspace_semantic_review_packet_receipt_value,
-    validate_zspace_semantic_review_unblind_value, ZSpaceSemanticReviewDraftRequest,
-    ZSpaceSemanticReviewPacket, ZSpaceSemanticReviewUnblindRequest,
-    ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS, ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION,
-    ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND, ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA,
-    ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY, ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
-    ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS, ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION,
-    ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE, ZSPACE_SEMANTIC_REVIEW_PACKET_KIND,
-    ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA, ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES,
-    ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS,
-    ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM, ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM,
-    ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND, ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER,
-    ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
+    validate_zspace_semantic_review_unblind_value, zspace_semantic_review_map_id,
+    ZSpaceSemanticReviewDraftRequest, ZSpaceSemanticReviewMapEntry, ZSpaceSemanticReviewPacket,
+    ZSpaceSemanticReviewUnblindRequest, ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS,
+    ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND,
+    ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA, ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY,
+    ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION, ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE,
+    ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA, ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
+    ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE,
+    ZSPACE_SEMANTIC_REVIEW_PACKET_KIND, ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA,
+    ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES, ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION,
+    ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS, ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM,
+    ZSPACE_SEMANTIC_REVIEW_SCORE_MINIMUM, ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND,
+    ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER, ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION,
+    ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
 };
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZSpaceSemanticReviewMapIdRequest {
+    entries: Vec<ZSpaceSemanticReviewMapEntry>,
+}
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -39,6 +47,24 @@ fn response_to_py<T: serde::Serialize>(
 ) -> PyResult<PyObject> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
+}
+
+#[pyfunction]
+fn _zspace_semantic_review_map_id(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let request = mapping_value(request, "Z-space semantic review map commitment request")?;
+    let request: ZSpaceSemanticReviewMapIdRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid Z-space semantic review map commitment", error))?;
+    let map_id = py
+        .allow_threads(|| zspace_semantic_review_map_id(request.entries))
+        .map_err(|error| json_error("Z-space semantic review map commitment failed", error))?;
+    response_to_py(
+        py,
+        &map_id,
+        "Z-space semantic review map commitment encoding failed",
+    )
 }
 
 #[pyfunction]
@@ -177,6 +203,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
             ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION,
         ),
         (
+            "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
+            ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION,
+        ),
+        (
             "ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION",
             ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION,
         ),
@@ -203,6 +233,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
         (
             "ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE",
             ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE,
+        ),
+        (
+            "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
+            ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE,
         ),
         (
             "ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY",
@@ -235,6 +269,7 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
         "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
         ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
     )?;
+    parent.add_function(wrap_pyfunction!(_zspace_semantic_review_map_id, parent)?)?;
     parent.add_function(wrap_pyfunction!(_zspace_semantic_review_packet, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_semantic_review_packet_validate,

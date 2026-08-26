@@ -44,27 +44,19 @@ def _recipe(
 
 
 def _batch_plan(strength: float = 0.1) -> dict[str, object]:
-    return {
-        "plan_id": "sha256:" + "a" * 64,
-        "request": {"config": dict(_recipe(strength)["config"])},
-        "positions": [
+    return st.zspace_repetition_unlikelihood_plan(
+        sequences=[
             {
-                "sequence_index": 0,
-                "prediction_index": 4,
-                "target_index": 5,
-                "target_token_id": 4,
-                "prefix_token_ids": [1, 2],
-                "candidates": [
-                    {
-                        "token_id": 3,
-                        "occurrence_count": 1,
-                        "most_recent_distance": 3,
-                    }
-                ],
+                "token_ids": [1, 2, 3, 1, 2, 4],
+                "token_mask": [True] * 6,
+                "label_mask": [True] * 6,
             }
         ],
-        "aggregate": {"active_position_count": 1, "candidate_count": 1},
-    }
+        strength=strength,
+        ngram_order=3,
+        context_window=16,
+        max_candidates_per_position=8,
+    )
 
 
 def test_hf_repetition_unlikelihood_collator_plans_from_cpu_labels() -> None:
@@ -404,6 +396,20 @@ def test_hf_trainer_rejects_a_plan_from_another_recipe() -> None:
 
     with pytest.raises(RuntimeError, match="does not match the training recipe"):
         trainer.compute_loss(model, _inputs(strength=0.2))
+
+
+def test_hf_trainer_revalidates_an_injected_plan_in_rust() -> None:
+    trainer, model = _trainer()
+    model.train()
+    inputs = _inputs()
+    plan = dict(inputs[st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY].report)
+    plan["positions"] = []
+    inputs[st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY] = (
+        st.HfRepetitionUnlikelihoodBatchPlan(plan)
+    )
+
+    with pytest.raises(ValueError, match="canonical Rust plan"):
+        trainer.compute_loss(model, inputs)
 
 
 def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:

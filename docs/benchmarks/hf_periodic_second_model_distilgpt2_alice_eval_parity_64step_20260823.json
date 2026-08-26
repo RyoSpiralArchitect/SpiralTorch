@@ -4,6 +4,20 @@
   "status": "ready_but_negative",
   "recorded_at": "2026-08-23T22:33:04.480196+00:00",
   "study_id": "sha256:98a334676749ef532c7c38e1fe9b04b1efa887fc6966451ef3b71014af2538f3",
+  "artifact_migrations": [
+    {
+      "recorded_at": "2026-08-26T15:49:18Z",
+      "reason": "Bind the exact pre-review candidate-to-arm assignments inside the packet commitment before human scoring.",
+      "candidate_and_prompt_content_unchanged": true,
+      "previous_packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+      "previous_packet_file_sha256": "sha256:9987c553e8fe4ef817cb182819206be2c7e17ebce8d2783f2376e01e0e42dd2b",
+      "previous_map_file_sha256": "sha256:fb7d9bd3a92845d629affca384a3ddb9ca4e84a3bc61afcf6723b21a756a389b",
+      "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+      "packet_file_sha256": "sha256:53a834ce52bf66dfe5865ae777a17a357d2801281feb0bcd1837c7e0b444caa6",
+      "map_file_sha256": "sha256:56c8f95642ff42e1de1cfd6b231d71b3b4c0ef133e67a0743977aa8c7d863bd5",
+      "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8"
+    }
+  ],
   "protocol": {
     "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
     "prespec_path": "docs/benchmarks/hf_periodic_second_model_distilgpt2_alice_eval_parity_64step_prespec_20260823.json",
@@ -685,9 +699,12 @@
   },
   "semantic_review": {
     "packet_path": "docs/benchmarks/hf_periodic_second_model_distilgpt2_alice_eval_parity_semantic_review_packet_20260823.json",
-    "packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+    "packet_file_sha256": "sha256:53a834ce52bf66dfe5865ae777a17a357d2801281feb0bcd1837c7e0b444caa6",
+    "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+    "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
     "packet_receipt": {
       "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+      "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
       "candidate_count": 108,
       "candidate_labels": [
         "A",
@@ -696,12 +713,13 @@
       ],
       "contract_version": "spiraltorch.zspace_semantic_review_packet.v1",
       "efficacy_claim_ready": false,
-      "evidence_boundary": "the contract verifies packet commitment, structural blinding inputs, score bounds, coverage, and deterministic aggregation; it cannot prove that a reviewer remained blind or establish statistical or model superiority",
+      "evidence_boundary": "the contract verifies packet and pre-review map-content commitments, structural blinding inputs, score bounds, coverage, and deterministic aggregation; it cannot prove that a reviewer remained blind or establish statistical or model superiority",
       "group_count": 36,
       "human_review_complete": false,
       "kind": "spiraltorch.zspace_semantic_review_packet",
       "packet": {
         "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+        "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
         "candidate_count": 108,
         "group_count": 36,
         "groups": [
@@ -1355,7 +1373,7 @@
           }
         ],
         "instructions": "Score each candidate without consulting training arms, token-loop metrics, held-out loss, or the separate unblinding map. Return one review row per group and candidate plus one preference per group.",
-        "packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+        "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
         "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
         "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
         "rubric": {
@@ -1368,8 +1386,9 @@
         "schema": "spiraltorch.hf_blinded_semantic_review_packet.v1",
         "status": "ready_for_blinded_review"
       },
-      "packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+      "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
       "packet_id_rule": "sha256 of UTF-8 canonical JSON for the packet without packet_id; object keys sorted lexicographically, arrays preserved, no insignificant whitespace",
+      "blinding_map_id_rule": "sha256 of UTF-8 canonical JSON for [map commitment version, map entries sorted by group_id]; object keys sorted lexicographically, no insignificant whitespace",
       "packet_validated": true,
       "preference_values": [
         "A",
@@ -1393,7 +1412,9 @@
       "unblind_ready": false
     },
     "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+    "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
     "sealed_map_path": "models/runs/hf-periodic-distilgpt2-alice-eval-parity-v2/review/blinding-map.json",
+    "sealed_map_file_sha256": "sha256:56c8f95642ff42e1de1cfd6b231d71b3b4c0ef133e67a0743977aa8c7d863bd5",
     "status": "ready_for_blinded_review",
     "human_review_complete": false
   },
