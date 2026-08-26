@@ -1,0 +1,1838 @@
+{
+  "schema": "spiraltorch.hf_periodic_long_horizon_benchmark.v1",
+  "row_type": "hf_periodic_gpt2_pride_full_corpus_256step_benchmark",
+  "status": "ready_but_negative",
+  "decision": "ready_but_negative_prespecified_gate",
+  "recorded_at": "2026-08-24T00:34:03.202881+00:00",
+  "study_id": "sha256:3e1846f0418cc7f644ce092fa67a4af2ea00fe9a80fe13c89080c47155826d43",
+  "protocol": {
+    "protocol_id": "sha256:1270acc1a14a0783ea1b168f0f8b33df84e82296b22fcc36c392d1501c5a8a9c",
+    "design_id": "sha256:723cdad1896b5a1a1a805661e33832067136d7dc00e5f988e339d80372e904ed",
+    "prespec_path": "docs/benchmarks/hf_periodic_gpt2_pride_full_corpus_256step_prespec_20260823.json",
+    "prespec_commit": "6ea5e8fa18b47660cece9271cf3ad151f5aabd26",
+    "objective_commit": "18e3673474318bc581434edc021b257a12e8108c",
+    "retuned_after_prespec": false
+  },
+  "study_spec": {
+    "study_question": "On a larger complete novel and a larger GPT-2-family model, does Rust-planned periodic model-top-k unlikelihood reduce greedy continuation loops relative to broad history unlikelihood without sacrificing held-out causal-LM loss?",
+    "evidence_class": "prespecified matched multi-seed long-horizon LoRA fine-tuning",
+    "prior_evidence_boundary": {
+      "distilgpt2_protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+      "distilgpt2_result": "ready_but_negative",
+      "use": "The exposed 64-step result motivates a larger corpus and horizon but is not pooled into this study or used to tune its objective strength, seeds, prompts, or thresholds."
+    },
+    "semantic_ownership": {
+      "candidate_planner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "periodicity_kernel": "st-core::runtime::zspace_periodicity",
+      "generation_evidence": "st-core::runtime::zspace_generation_evidence",
+      "python_role": "HF orchestration, tensor/autograd execution, artifact transport, and sealed receipt assembly",
+      "efficacy_owner": "matched held-out and generation evidence; no runtime receipt alone is an efficacy claim"
+    },
+    "model": {
+      "hub_id": "gpt2",
+      "profile": "gpt2-local-smoke",
+      "architecture_family": "gpt2",
+      "parameter_scale": "124m",
+      "local_snapshot_commit": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--gpt2/snapshots/607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "smoke_model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998"
+    },
+    "corpus": {
+      "name": "Pride and Prejudice",
+      "path": "/Users/ryospiralarchitect/SpiralReality/data/pride_and_prejudice.txt",
+      "size_bytes": 709597,
+      "sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+      "source_form": "English Project Gutenberg text present before this study",
+      "validation_fraction": 0.1,
+      "selection": "all rows after the deterministic seed-paired train/eval split; max_train_samples=0 and max_eval_samples=0 disable profile truncation",
+      "selection_boundary": "corpus and split policy fixed before any protocol training or generation"
+    },
+    "training": {
+      "seeds": [
+        109,
+        113,
+        127
+      ],
+      "seed_provenance": "Fresh prime seeds not used by the preceding Pythia-70M, DistilGPT-2, or local MPS smoke outcomes.",
+      "arms": [
+        {
+          "name": "causal_lm_baseline",
+          "candidate_source": "none",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "candidate_source": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        },
+        {
+          "name": "model_topk_periodic",
+          "candidate_source": "model_topk_periodic",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 9,
+      "optimizer_update_count": 256,
+      "milestone_steps": [
+        64,
+        128,
+        192,
+        256
+      ],
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "c_attn",
+          "c_proj"
+        ]
+      },
+      "learning_rate": 5e-05,
+      "scheduler": "linear",
+      "model_train_dtype": "float32",
+      "torch_training_device": "mps",
+      "device_fallback": "blocked; do not silently mix CPU and MPS within this protocol",
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "effective_sequences_per_update": 16,
+      "block_size": 128,
+      "max_train_samples": 0,
+      "max_eval_samples": 0,
+      "max_eval_blocks": 16,
+      "logging_steps": 16,
+      "save_steps": 64,
+      "eval_steps": 64,
+      "save_total_limit": 4,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "supervised_target_is_never_a_negative_candidate": true
+      },
+      "runtime_environment": {
+        "HF_HOME": "/Users/ryospiralarchitect/.hf_home",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "PYTHONHASHSEED": "0",
+        "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "1.7",
+        "PYTORCH_MPS_LOW_WATERMARK_RATIO": "1.4",
+        "SPIRALTON_MAGIC": "0",
+        "SPIRALTON_TORCH": "0",
+        "SPIRALTON_MODEL_PATCHES": "0",
+        "SPIRALTON_NUMPY": "0"
+      },
+      "single_factor_rule": "Within each seed, objective treatment is the only intended arm difference.",
+      "resume_rule": "A failed segment may resume only from a validated Trainer checkpoint in the same run, preserving trace and optimizer lineage; never restart into a populated run directory."
+    },
+    "generation": {
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "prompt_role": "Previously frozen independent prompts reused without inspecting GPT-2/Pride outputs.",
+      "milestones": [
+        64,
+        128,
+        192,
+        256
+      ],
+      "report_count": 36,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as training run",
+        "continuation_only": true
+      }
+    },
+    "metrics": {
+      "primary_final_metric": "generation_evidence.aggregate.sample_mean_loop_score at step 256",
+      "primary_effect": "model_topk_periodic minus model_topk_history paired by seed; lower is better",
+      "absolute_control_effect": "model_topk_periodic minus causal_lm_baseline paired by seed; lower is better",
+      "learning_curve_diagnostic": "paired arm effects at steps 64, 128, 192, and 256; descriptive and not a checkpoint-selection rule",
+      "safety_metric": "eval_after_train.eval_loss paired by seed against causal_lm_baseline",
+      "training_sanity_metric": "eval_after_train.eval_loss minus eval_before_train.eval_loss in the baseline arm",
+      "mechanism_metrics": [
+        "zspace_repetition_unlikelihood_receipt.active_position_ratio",
+        "zspace_repetition_unlikelihood_receipt.periodic_candidate_count",
+        "zspace_repetition_unlikelihood_receipt.excluded_non_periodic_proposal_count",
+        "zspace_repetition_unlikelihood_receipt.mean_weighted_auxiliary_loss"
+      ]
+    },
+    "acceptance": {
+      "required_ready_run_cards": 9,
+      "required_complete_optimizer_horizon": 256,
+      "required_checkpoint_steps": [
+        64,
+        128,
+        192,
+        256
+      ],
+      "required_generation_reports": 36,
+      "before_train_eval_parity_maximum_absolute_delta": 1e-07,
+      "training_sanity": {
+        "all_baseline_runs_must_improve_heldout_loss": true,
+        "mean_baseline_eval_loss_delta_at_most": -0.05
+      },
+      "mechanism": {
+        "history_candidate_count_positive_every_run": true,
+        "periodic_candidate_count_positive_every_run": true,
+        "periodic_excluded_non_periodic_count_positive_every_run": true
+      },
+      "replication_success": {
+        "mean_periodic_minus_history_final_loop_score_less_than": 0.0,
+        "minimum_periodic_history_seed_win_count": 2
+      },
+      "absolute_control": {
+        "mean_periodic_minus_baseline_final_loop_score_at_most": 0.0,
+        "minimum_periodic_baseline_seed_non_loss_count": 2
+      },
+      "ce_safety": {
+        "mean_treatment_minus_baseline_eval_loss_at_most": 0.02,
+        "maximum_individual_treatment_minus_baseline_eval_loss_at_most": 0.05
+      },
+      "decision_rule": "Pass only if readiness, identity, comparability, horizon, training-sanity, mechanism, final replication, absolute-control, and CE-safety gates all hold. Learning-curve milestones describe dynamics but cannot replace the frozen final endpoint."
+    },
+    "interpretation": {
+      "allowed_positive_claim": "Within this prespecified GPT-2/Pride and Prejudice 256-step LoRA study, periodic filtering improved the frozen greedy-loop endpoint relative to broad history and did not underperform ordinary fine-tuning while preserving held-out CE.",
+      "allowed_negative_claim": "This frozen GPT-2/Pride and Prejudice long-horizon recipe did not satisfy its prespecified bounded gate.",
+      "excluded_claims": [
+        "general language-quality superiority",
+        "statistical significance",
+        "optimal objective strength",
+        "general Z-space training superiority",
+        "semantic-quality improvement before blinded review"
+      ]
+    }
+  },
+  "provenance": {
+    "training_root": "models/runs/hf-gpt2-pride-256step-v1",
+    "run_card_count": 9,
+    "checkpoint_count": 36,
+    "generation_report_count": 36,
+    "generation_sample_count": 432,
+    "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+    "generation_evidence_semantic_backend": "rust",
+    "generation_evidence_metric_protocol_id": "sha256:a2396fa18c4bd3fe00b6214a139ed37a42cc266291513269dd5911a2ad9c787b",
+    "generation_evidence_inner_protocol_bound_to_study": false,
+    "generation_evidence_study_binding_scope": "The frozen v1 Rust metric receipts predate the study-protocol override. Their study binding is supplied by the content-addressed bundle protocol and each entry's seed, arm, step, and model artifact identity.",
+    "generation_evidence_bundle_path": "docs/benchmarks/hf_periodic_gpt2_pride_full_corpus_256step_generation_evidence_20260823.json",
+    "generation_evidence_bundle_id": "sha256:4f0d21baa623f294cd6c42605904d1024411fd4a43bb7b2ba06d14bcf8d5e06a",
+    "semantic_review_status": "not_opened"
+  },
+  "identity_gates": {
+    "preflight_identity_match": true,
+    "content_addressed_final_adapter_count": 9,
+    "content_addressed_checkpoint_artifact_count": 36,
+    "generation_evidence_roundtrip_count": 36,
+    "prompt_set_identity_count": 1,
+    "decoding_identity_counts_by_seed": {
+      "109": 1,
+      "113": 1,
+      "127": 1
+    },
+    "passed": true
+  },
+  "results": {
+    "training_runs": [
+      {
+        "seed": 109,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:9edb90b77ab4a51cb226bee11f1f8b10e0970d9160cd9f217b3c2f2de841c369",
+          "tokenized_dataset_id": "sha256:761e761029cb96b6c8502e294a8325e161f9027a81c9a5f342c706ef4cb6610d",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:4fd5b7e8908fb565151349ac21b963bb85ae0070d4b9fb9e960199175f88fee1",
+          "finetune_replay_id": "sha256:7f81d9af921ac49bf3536165ecbd15d6ede4072dcaed035559552cb63668cef1"
+        },
+        "final_adapter_id": "sha256:ec526958e89e7bd61ac03e1c11588f0138b917e9988109814ac4f16875908635",
+        "loss": {
+          "eval_before_train": 5.039541244506836,
+          "eval_after_train": 4.701498031616211,
+          "train": 4.881388038396835,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 5.039541244506836
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.9106879234313965
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.770739555358887
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.716304779052734
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.701498031616211
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "training_batch_count": 0,
+          "active_batch_count": 0,
+          "active_batch_ratio": null,
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        }
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:9edb90b77ab4a51cb226bee11f1f8b10e0970d9160cd9f217b3c2f2de841c369",
+          "tokenized_dataset_id": "sha256:761e761029cb96b6c8502e294a8325e161f9027a81c9a5f342c706ef4cb6610d",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:ca62917fd81a05d29845d64f6cd75ab892bad567a771fd2763745c26b80566da",
+          "finetune_replay_id": "sha256:9835c68ed38b9d2a6491597d1ec48388e34662d60b7d8dd042a5407498c7c3c4"
+        },
+        "final_adapter_id": "sha256:76feeccffffcaa32d0bd7f56db95d9a30a49257db4dc14fe5709243f78e2f9c2",
+        "loss": {
+          "eval_before_train": 5.039541244506836,
+          "eval_after_train": 4.702053070068359,
+          "train": 4.9275639951229095,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 5.039541244506836
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.911123275756836
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.771484375
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.716922760009766
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.702053070068359
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2027,
+          "active_batch_count": 2027,
+          "active_batch_ratio": 1.0,
+          "candidate_count": 1262146,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8042159197293234,
+          "mean_candidates_per_active_position": 3.048242150235354,
+          "mean_auxiliary_loss": 0.07475315779447556,
+          "mean_weighted_auxiliary_loss": 0.007475315779447556
+        }
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:9edb90b77ab4a51cb226bee11f1f8b10e0970d9160cd9f217b3c2f2de841c369",
+          "tokenized_dataset_id": "sha256:761e761029cb96b6c8502e294a8325e161f9027a81c9a5f342c706ef4cb6610d",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:305bf7cbd8aec8c2a70de451b4d06039dffa8c781acba7b2567e11cb12d2fb9e",
+          "finetune_replay_id": "sha256:91d140f45bdce3b525ad2b27b07cc99e20896d1e4d6ce32587f0258a78ae1e94"
+        },
+        "final_adapter_id": "sha256:be7b7744c0db162af2ec91cbc22071acbd7cef13de14226d79268c5a88f64477",
+        "loss": {
+          "eval_before_train": 5.039541244506836,
+          "eval_after_train": 4.733135223388672,
+          "train": 4.961775094270706,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 5.039541244506836
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.942070960998535
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.807318687438965
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.749354362487793
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.733135223388672
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2027,
+          "active_batch_count": 1427,
+          "active_batch_ratio": 0.7039960532807104,
+          "candidate_count": 2432,
+          "periodic_candidate_count": 2432,
+          "excluded_non_periodic_proposal_count": 1269656,
+          "active_position_ratio": 0.004723632535572915,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.14097860455513,
+          "mean_weighted_auxiliary_loss": 0.014097860455513
+        }
+      },
+      {
+        "seed": 113,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:8ec2467724d2275c5d9922c77281363270e15208d1b327662fdea4f8a5fe8133",
+          "tokenized_dataset_id": "sha256:ead1dfcc34024b0ab7170dc543825058a5666e10c59fc9d420e2b5e819c879f6",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:9f50cc12c88e492c50ebda092c8ddf9688d5f7a65087024ed6d50b8293caa11f",
+          "finetune_replay_id": "sha256:8829c256e98466a8f4b0f430467f97e65054ae8d18a24f920b8959df33a306e0"
+        },
+        "final_adapter_id": "sha256:a7ddb79eed068b9b02467fa69ea7538b972ed71c7debed23fd646136f88a1387",
+        "loss": {
+          "eval_before_train": 4.93247652053833,
+          "eval_after_train": 4.599353313446045,
+          "train": 4.874912440776825,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.93247652053833
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.80128288269043
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.668435096740723
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.614160060882568
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.599353313446045
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "training_batch_count": 0,
+          "active_batch_count": 0,
+          "active_batch_ratio": null,
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        }
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:8ec2467724d2275c5d9922c77281363270e15208d1b327662fdea4f8a5fe8133",
+          "tokenized_dataset_id": "sha256:ead1dfcc34024b0ab7170dc543825058a5666e10c59fc9d420e2b5e819c879f6",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:9b655f02bdca922a6342635b497a9c99d62c184199007ffcdfd76c98fb951ae5",
+          "finetune_replay_id": "sha256:c5ac0c31e48f48841d1e3b8325b818c6ec658dc724aaf89216dcf12dda7a395b"
+        },
+        "final_adapter_id": "sha256:c1568a9bd9800f6d1ee077c1d61e1b2e6e98bdc75d26a37a89c2b24410866ff0",
+        "loss": {
+          "eval_before_train": 4.93247652053833,
+          "eval_after_train": 4.600237846374512,
+          "train": 4.921030044555664,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.93247652053833
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.801962852478027
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.6694841384887695
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.61508846282959
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.600237846374512
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2048,
+          "active_batch_count": 2048,
+          "active_batch_ratio": 1.0,
+          "candidate_count": 1267425,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8028823972687008,
+          "mean_candidates_per_active_position": 3.0346364086933413,
+          "mean_auxiliary_loss": 0.07481735944747925,
+          "mean_weighted_auxiliary_loss": 0.0074817359447479255
+        }
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:8ec2467724d2275c5d9922c77281363270e15208d1b327662fdea4f8a5fe8133",
+          "tokenized_dataset_id": "sha256:ead1dfcc34024b0ab7170dc543825058a5666e10c59fc9d420e2b5e819c879f6",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:aa19a833d62319193435e7d7a4e25832d74da5fda4d971fb6b4a7aed80fbe68e",
+          "finetune_replay_id": "sha256:b05b7cef3cd12e3c0e0bf5fa6fd382e0652dbb513ab313eb6310ef3a2a4c54be"
+        },
+        "final_adapter_id": "sha256:3e89387c06cb10b009ab566ef826d92c438c3bd0007db5ced4093cc075780a93",
+        "loss": {
+          "eval_before_train": 4.93247652053833,
+          "eval_after_train": 4.636816501617432,
+          "train": 4.957089722156525,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.93247652053833
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.835298538208008
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.710164546966553
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.652170181274414
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.636816501617432
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2048,
+          "active_batch_count": 1426,
+          "active_batch_ratio": 0.6962890625,
+          "candidate_count": 2427,
+          "periodic_candidate_count": 2427,
+          "excluded_non_periodic_proposal_count": 1274250,
+          "active_position_ratio": 0.0046655850147637795,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.1505725383758545,
+          "mean_weighted_auxiliary_loss": 0.01505725383758545
+        }
+      },
+      {
+        "seed": 127,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:ee9c02bdffa0536f51150091569296caa64e54ba2a675e539499133440adc1ed",
+          "tokenized_dataset_id": "sha256:366486bae29680fd9c20d81b7728d3338fe9d86b6e89158c3a4c03b1a6d25a61",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:eb9154cd6961b829c8823a090b9925d32065eff6fb18269192e9177b63fd5880",
+          "finetune_replay_id": "sha256:e22ccbd7d21ed4c8e653b9ab3987562d3301f810212c0dd31b0af4f492f8122e"
+        },
+        "final_adapter_id": "sha256:7d96770f9df4259e3a3a1c65688712222c97aa916cb533c10a73c6c871a2a5f2",
+        "loss": {
+          "eval_before_train": 4.991821765899658,
+          "eval_after_train": 4.689391613006592,
+          "train": 4.885338664054871,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.991821765899658
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.879014015197754
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.755241394042969
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.703769683837891
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.689391613006592
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "training_batch_count": 0,
+          "active_batch_count": 0,
+          "active_batch_ratio": null,
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        }
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:ee9c02bdffa0536f51150091569296caa64e54ba2a675e539499133440adc1ed",
+          "tokenized_dataset_id": "sha256:366486bae29680fd9c20d81b7728d3338fe9d86b6e89158c3a4c03b1a6d25a61",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:c70808c79bffff07353775b2f7de6f03f5cad23af71ec375383b61e27bfc625c",
+          "finetune_replay_id": "sha256:c16029f94a26ae32972309a20d7b58e1c0dd07b202665f879bcc0828cd2ac829"
+        },
+        "final_adapter_id": "sha256:b72d3cf2e0876799dbfa45df52e86da385139806eaa7fafb9342309be6ea1af0",
+        "loss": {
+          "eval_before_train": 4.991821765899658,
+          "eval_after_train": 4.690256595611572,
+          "train": 4.931320339441299,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.991821765899658
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.879000186920166
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.7559709548950195
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.704612731933594
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.690256595611572
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2045,
+          "active_batch_count": 2045,
+          "active_batch_ratio": 1.0,
+          "candidate_count": 1272070,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8048168184355928,
+          "mean_candidates_per_active_position": 3.0428948010506023,
+          "mean_auxiliary_loss": 0.07447598874568939,
+          "mean_weighted_auxiliary_loss": 0.0074475988745689396
+        }
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 256,
+        "training_identities": {
+          "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+          "dataset_materialization_id": "sha256:ee9c02bdffa0536f51150091569296caa64e54ba2a675e539499133440adc1ed",
+          "tokenized_dataset_id": "sha256:366486bae29680fd9c20d81b7728d3338fe9d86b6e89158c3a4c03b1a6d25a61",
+          "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+          "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+          "training_recipe_id": "sha256:96c2c923384fdb9d80f7d4627ca4f97da47e74d9ec78a9d7c39f1c077e353fc8",
+          "finetune_replay_id": "sha256:579711e09338c7c328854e9925df45c04c8a1ba5b9440ce4b377540f886ab390"
+        },
+        "final_adapter_id": "sha256:481e5d6d94afd2749efe8bca3c4f61d1cc647ef11c997c7f0183c7a4da46a061",
+        "loss": {
+          "eval_before_train": 4.991821765899658,
+          "eval_after_train": 4.722845077514648,
+          "train": 4.964838236570358,
+          "eval_curve": [
+            {
+              "step": 0,
+              "eval_loss": 4.991821765899658
+            },
+            {
+              "step": 64,
+              "eval_loss": 4.90922737121582
+            },
+            {
+              "step": 128,
+              "eval_loss": 4.7927937507629395
+            },
+            {
+              "step": 192,
+              "eval_loss": 4.738191604614258
+            },
+            {
+              "step": 256,
+              "eval_loss": 4.722845077514648
+            }
+          ]
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "training_batch_count": 2045,
+          "active_batch_count": 1401,
+          "active_batch_ratio": 0.6850855745721272,
+          "candidate_count": 2354,
+          "periodic_candidate_count": 2354,
+          "excluded_non_periodic_proposal_count": 1280441,
+          "active_position_ratio": 0.00453189072637314,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.14390723407268524,
+          "mean_weighted_auxiliary_loss": 0.014390723407268526
+        }
+      }
+    ],
+    "generation_milestones": [
+      {
+        "seed": 109,
+        "arm": "causal_lm_baseline",
+        "step": 64,
+        "model_artifact_id": "sha256:ba187d275b614038d25db894992cc3c5d9059a474a218bcf8ac27d06531d6244",
+        "generated_continuation_set_id": "sha256:3cbc0a943ee901179d1ec0847270a1e21e2ef21a483ad61f814109819dda3301",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:c9118d1a0036e055a46c9b74e2dc94357acdb8d35ed18b04ce83d0ff66bfbd3a",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9322240108249346,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.2552083333333333,
+        "trigram_repetition_ratio": 0.649822695035461,
+        "bigram_distinct_ratio": 0.31666666666666665,
+        "fourgram_distinct_ratio": 0.3736559139784946
+      },
+      {
+        "seed": 109,
+        "arm": "causal_lm_baseline",
+        "step": 128,
+        "model_artifact_id": "sha256:490f573337f7d7fe5c94f0573716546638a0ac0b4e759975bc3da5d1550fd339",
+        "generated_continuation_set_id": "sha256:154e238c96a8f8740a636abeed0094ece3d9d404ccaf6fb227c4ce6147b66719",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:8cbe9192a0a9819e7876a68cac6813c7b552d9133588218a45bf887cd3a5af3e",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7718283407988055,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.171875,
+        "trigram_repetition_ratio": 0.5789007092198581,
+        "bigram_distinct_ratio": 0.38421052631578945,
+        "fourgram_distinct_ratio": 0.44623655913978494
+      },
+      {
+        "seed": 109,
+        "arm": "causal_lm_baseline",
+        "step": 192,
+        "model_artifact_id": "sha256:9bc6825e215932514941c339cb1c4064f9d9ca6b61481e75b9e3ed4553fa96e7",
+        "generated_continuation_set_id": "sha256:d5e7ef08617c612a9472dfa946e4b9d7119129866fe9e021c349885b0572753d",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:d5e6c9f681aa89f6da0fb50f615961a0c4d431e00a01cb0431fd2ad9a06b6226",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6474932344158268,
+        "periodic_loop_sample_ratio": 0.08333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.057291666666666664,
+        "trigram_repetition_ratio": 0.5691489361702128,
+        "bigram_distinct_ratio": 0.39210526315789473,
+        "fourgram_distinct_ratio": 0.45340501792114696
+      },
+      {
+        "seed": 109,
+        "arm": "causal_lm_baseline",
+        "step": 256,
+        "model_artifact_id": "sha256:ec526958e89e7bd61ac03e1c11588f0138b917e9988109814ac4f16875908635",
+        "generated_continuation_set_id": "sha256:16b54416351890fa42ce6e05813c25897682ddc00b33f124b47b961c32a4a5d1",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:a0a88f55afafe035ffae5769d030b72a54a4165519bbcf998bc2ab15c24afe27",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6924013546721414,
+        "periodic_loop_sample_ratio": 0.16666666666666666,
+        "periodic_suffix_repeated_token_ratio": 0.11371527777777778,
+        "trigram_repetition_ratio": 0.5585106382978723,
+        "bigram_distinct_ratio": 0.40350877192982454,
+        "fourgram_distinct_ratio": 0.4668458781362007
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_history",
+        "step": 64,
+        "model_artifact_id": "sha256:3a426983325524d81e5ee117682aba6dd370af999a4923cb26d37b88614e3603",
+        "generated_continuation_set_id": "sha256:3cbc0a943ee901179d1ec0847270a1e21e2ef21a483ad61f814109819dda3301",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:c3677706cc1370ebaa26e755c5eb021986e98f78756dc6967f01fa4bd825a856",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9322240108249346,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.2552083333333333,
+        "trigram_repetition_ratio": 0.649822695035461,
+        "bigram_distinct_ratio": 0.31666666666666665,
+        "fourgram_distinct_ratio": 0.3736559139784946
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_history",
+        "step": 128,
+        "model_artifact_id": "sha256:c633ed64108dd2b5f92d4dfca8366f29ae88c12b968e46d1fccd36e0096a7ccc",
+        "generated_continuation_set_id": "sha256:7a5ec79b8a80a12925b97611b64bbcec31d6cc9742d8252c03b272e84b78f893",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:37f73b71ebce8eab0b92cdb4699c5ea283c0b27c8a3e1e82618f002cae452055",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8830500730994152,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.23524305555555555,
+        "trigram_repetition_ratio": 0.625,
+        "bigram_distinct_ratio": 0.34649122807017546,
+        "fourgram_distinct_ratio": 0.3951612903225806
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_history",
+        "step": 192,
+        "model_artifact_id": "sha256:26303d89ab92f64d886fff6295566f1b094ae087b96415f963d36a399b7586b1",
+        "generated_continuation_set_id": "sha256:5f8d0bfb52c5b89ab9f92aca9ffe47520680312e1fbb4e03f223f3a4373dc5ae",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:ad5be6cafcf46027afe9e6bc3166fc3a3c5922a55713d2110869533f6543e8f1",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.5928611422172453,
+        "periodic_loop_sample_ratio": 0.0,
+        "periodic_suffix_repeated_token_ratio": 0.0,
+        "trigram_repetition_ratio": 0.5718085106382979,
+        "bigram_distinct_ratio": 0.39035087719298245,
+        "fourgram_distinct_ratio": 0.45161290322580644
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_history",
+        "step": 256,
+        "model_artifact_id": "sha256:76feeccffffcaa32d0bd7f56db95d9a30a49257db4dc14fe5709243f78e2f9c2",
+        "generated_continuation_set_id": "sha256:321a093d874764af7f4f7eeaaf96674fc6571955c859622f0a56654c7f24e14a",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:449b1b6a216af9a8d5f2015a51688ac67e62470e2bcfa1c84f7e84cbc1f17833",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6977018399278339,
+        "periodic_loop_sample_ratio": 0.16666666666666666,
+        "periodic_suffix_repeated_token_ratio": 0.11371527777777778,
+        "trigram_repetition_ratio": 0.5620567375886525,
+        "bigram_distinct_ratio": 0.40350877192982454,
+        "fourgram_distinct_ratio": 0.4614695340501792
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_periodic",
+        "step": 64,
+        "model_artifact_id": "sha256:00315582accf113137a789d9a3381ea649824c0cb39c7acc17248acb5919e0b1",
+        "generated_continuation_set_id": "sha256:69c2de83d54b82db5040d37b29c1fdef67bc24dc5b1d2dbd4e550be20faccfd5",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:3ffb47b81b1e948b757c8c19394df713b2bafee46b6ea8417b533e1f6d2535fa",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6603095449172577,
+        "periodic_loop_sample_ratio": 0.08333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.07378472222222222,
+        "trigram_repetition_ratio": 0.5531914893617021,
+        "bigram_distinct_ratio": 0.40789473684210525,
+        "fourgram_distinct_ratio": 0.471326164874552
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_periodic",
+        "step": 128,
+        "model_artifact_id": "sha256:ea9c0e349b9d57778b024856a6c3807f284f7a92219a0bbe5f7986e90bf758b8",
+        "generated_continuation_set_id": "sha256:90755d87884f7e754335bdf71b6c3f1901a710ddc23abd20ecd964befd716125",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:e1b041e38a108582370093dc2d0b690a563df68ec2ff95867185ae5f37fa87c0",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8128859104765461,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1605902777777778,
+        "trigram_repetition_ratio": 0.6347517730496454,
+        "bigram_distinct_ratio": 0.3350877192982456,
+        "fourgram_distinct_ratio": 0.38620071684587814
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_periodic",
+        "step": 192,
+        "model_artifact_id": "sha256:0b985df1366102634f3200b02ad91672ef79b1a2e40c1ac11f2e252d31324969",
+        "generated_continuation_set_id": "sha256:21a0a66a33c43107f037434f4d6fcd67179f4a62e1b8a62b78a532b33c214fc3",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:a8274bca45ee573100ba1c36fae82364ad2cd143eafa1d20f1f67bef84a8c4f1",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.779705580440463,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.17708333333333334,
+        "trigram_repetition_ratio": 0.5824468085106383,
+        "bigram_distinct_ratio": 0.37894736842105264,
+        "fourgram_distinct_ratio": 0.44265232974910396
+      },
+      {
+        "seed": 109,
+        "arm": "model_topk_periodic",
+        "step": 256,
+        "model_artifact_id": "sha256:be7b7744c0db162af2ec91cbc22071acbd7cef13de14226d79268c5a88f64477",
+        "generated_continuation_set_id": "sha256:d286f7858be11a2c3a7f775733b2d8c0d49a64fe48ee50d65f8a52ab657772d0",
+        "decoding_config_id": "sha256:0216c37431d8df50fee53e3756f5d733d28dc169191c33bb08f98c06952f7a71",
+        "evidence_id": "sha256:66af95aaf7cec5ddcecba89bd9f89577d13c7270361005a02f5c42d7667319ad",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.847894309132761,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2647569444444444,
+        "trigram_repetition_ratio": 0.5647163120567376,
+        "bigram_distinct_ratio": 0.3912280701754386,
+        "fourgram_distinct_ratio": 0.460573476702509
+      },
+      {
+        "seed": 113,
+        "arm": "causal_lm_baseline",
+        "step": 64,
+        "model_artifact_id": "sha256:c5cf763b913d08acc9b5485d612431b96bc062e4da7d463db953538c316d3bdb",
+        "generated_continuation_set_id": "sha256:09146dd424628ababda8782c7de5078c6d7f1fd06a757852b08fbc7c32baf892",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:887ad563fdd0f3e19074d032f061957db8530b3ee9dab8b15f0ac807031c2550",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9752297965658827,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.3177083333333333,
+        "trigram_repetition_ratio": 0.6312056737588653,
+        "bigram_distinct_ratio": 0.33771929824561403,
+        "fourgram_distinct_ratio": 0.38799283154121866
+      },
+      {
+        "seed": 113,
+        "arm": "causal_lm_baseline",
+        "step": 128,
+        "model_artifact_id": "sha256:4e34f7b4df85b90b8b84915ca36307ed297a5577b63da6d5f8faff0d8e8d8389",
+        "generated_continuation_set_id": "sha256:7e9736ee31fb466b19860ef8b503a69f37539a2cfae660e15fe84733d2237157",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:d358c17425668e28ac4ba75a14f74f0269b5acdd658b5d8c4d95e64ca0465aaf",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9153810112604203,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2595486111111111,
+        "trigram_repetition_ratio": 0.6374113475177305,
+        "bigram_distinct_ratio": 0.3368421052631579,
+        "fourgram_distinct_ratio": 0.38082437275985664
+      },
+      {
+        "seed": 113,
+        "arm": "causal_lm_baseline",
+        "step": 192,
+        "model_artifact_id": "sha256:d733d731ff4790eee016edea2f0acde1d794b19b71a58feb69a567424c851d6e",
+        "generated_continuation_set_id": "sha256:019bc0eae65fe62f3d391a43576801d720606a6d526a3da5f150f197d0b15186",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:45fd8d2bf45ddeefb47eb3ff0f51d684e5db2e204c0a4547e5a387e6f4377b75",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6451289738086351,
+        "periodic_loop_sample_ratio": 0.16666666666666666,
+        "periodic_suffix_repeated_token_ratio": 0.0842013888888889,
+        "trigram_repetition_ratio": 0.5381205673758865,
+        "bigram_distinct_ratio": 0.4201754385964912,
+        "fourgram_distinct_ratio": 0.4883512544802867
+      },
+      {
+        "seed": 113,
+        "arm": "causal_lm_baseline",
+        "step": 256,
+        "model_artifact_id": "sha256:a7ddb79eed068b9b02467fa69ea7538b972ed71c7debed23fd646136f88a1387",
+        "generated_continuation_set_id": "sha256:68fc2687b0c641620bbb35deee443ce37df657c112a49db9df84a1ab69956d8f",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:af85034cb50e027247adac16fad628651fd3ff8adbada02f349ca737e9abb989",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7171037078511883,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1597222222222222,
+        "trigram_repetition_ratio": 0.5345744680851063,
+        "bigram_distinct_ratio": 0.4280701754385965,
+        "fourgram_distinct_ratio": 0.49014336917562723
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_history",
+        "step": 64,
+        "model_artifact_id": "sha256:775ab1e3bd519002f8d7dbf47d13efb27532e00de3ca89f83455a43692424307",
+        "generated_continuation_set_id": "sha256:09146dd424628ababda8782c7de5078c6d7f1fd06a757852b08fbc7c32baf892",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:76e4e3fc63436be17a80aa2891f7a07871e3e219ac0c05f6d83e43da3f156d6a",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9752297965658827,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.3177083333333333,
+        "trigram_repetition_ratio": 0.6312056737588653,
+        "bigram_distinct_ratio": 0.33771929824561403,
+        "fourgram_distinct_ratio": 0.38799283154121866
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_history",
+        "step": 128,
+        "model_artifact_id": "sha256:b1b217cab2cd577bccbe9a82bc52258f376059bb14c41d5d66be429d60ea3822",
+        "generated_continuation_set_id": "sha256:81db335ceda6aed87013780335420908c8b256e5c90f7665e8db4e22bd4da0ac",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:f2e246db08e35b69af2593114a58ebbf8a34979fcbf852412d39d20f69628352",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9425769099166353,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2725694444444444,
+        "trigram_repetition_ratio": 0.650709219858156,
+        "bigram_distinct_ratio": 0.32456140350877194,
+        "fourgram_distinct_ratio": 0.3673835125448029
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_history",
+        "step": 192,
+        "model_artifact_id": "sha256:5c805cec2ea7e636a200b9e5ac913167aa1d8ac3169f199aa82046802223d29b",
+        "generated_continuation_set_id": "sha256:6c1596d924fd921cd268f3cef4ed5c353aadfacd9e2b41c3dedde13fba574a51",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:9c1b780bd8499ac3675a9589dcabc2bcc899802770763308833afe8432dee4d9",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7123294995023018,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1345486111111111,
+        "trigram_repetition_ratio": 0.5558510638297872,
+        "bigram_distinct_ratio": 0.4087719298245614,
+        "fourgram_distinct_ratio": 0.46774193548387094
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_history",
+        "step": 256,
+        "model_artifact_id": "sha256:c1568a9bd9800f6d1ee077c1d61e1b2e6e98bdc75d26a37a89c2b24410866ff0",
+        "generated_continuation_set_id": "sha256:2e316efdb0c61cb7cbf03006470c5da1f4b4271674a8d884d14320a6e3aa41e1",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:76fbbdfda4e9d11aad438259bd514e7e894d44c1db5fb88c2bfe07b14254c2e9",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6959933355107628,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1519097222222222,
+        "trigram_repetition_ratio": 0.5212765957446809,
+        "bigram_distinct_ratio": 0.43859649122807015,
+        "fourgram_distinct_ratio": 0.503584229390681
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_periodic",
+        "step": 64,
+        "model_artifact_id": "sha256:f9259ea6921d5796095f7ab3b60ded110eca05268da17b1c0b2afee0b49dbb22",
+        "generated_continuation_set_id": "sha256:dfe75afe684c00953b97f213fd3d936a1bedfd302e0a0e0f5ccd2b429c8566cb",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:56bfef1e10793f3805b2289a73ecb94803592d62bac079868b3cf13d1d612440",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7926885031728257,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1875,
+        "trigram_repetition_ratio": 0.5762411347517731,
+        "bigram_distinct_ratio": 0.3850877192982456,
+        "fourgram_distinct_ratio": 0.4453405017921147
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_periodic",
+        "step": 128,
+        "model_artifact_id": "sha256:1eb4e16916e662423380b513ec23ded96bd65ddd220661a2cd717eeaea8f7a46",
+        "generated_continuation_set_id": "sha256:a3b60ed9a1475831bd1081e88479c755ce2be56cb31222067d5b1d99896b83f7",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:1eea4e406e63309d1cd98418177292a312336a116b9730772767140fe79660c8",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9117334282070423,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.2230902777777778,
+        "trigram_repetition_ratio": 0.6710992907801419,
+        "bigram_distinct_ratio": 0.30701754385964913,
+        "fourgram_distinct_ratio": 0.3467741935483871
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_periodic",
+        "step": 192,
+        "model_artifact_id": "sha256:6a40674a02e622289ae84b4253b69576b049634e00aafe14e85d63cab7504ab6",
+        "generated_continuation_set_id": "sha256:03edc7783d492202880d80f22014bfd4fee6a9a40e0eb0ad0e78c624166b8c5e",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:b2048b928cb048525f0ba91b4aab3c5a5b13a253145dbc5bd1c84a450216a766",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7590936838994651,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1449652777777778,
+        "trigram_repetition_ratio": 0.5921985815602837,
+        "bigram_distinct_ratio": 0.36578947368421055,
+        "fourgram_distinct_ratio": 0.4336917562724014
+      },
+      {
+        "seed": 113,
+        "arm": "model_topk_periodic",
+        "step": 256,
+        "model_artifact_id": "sha256:3e89387c06cb10b009ab566ef826d92c438c3bd0007db5ced4093cc075780a93",
+        "generated_continuation_set_id": "sha256:0a477803e273af48fe99ddc2a915751a8589c0ddebfddd38cae6efd748fbbc41",
+        "decoding_config_id": "sha256:7a49f2722ead4dca5415855fa798773025f31ac10bc61584ebeb61d6d5a41f96",
+        "evidence_id": "sha256:f3f171508439fd8408cdfd9269771d47b362effa68ab434f36b5d2a5083a2343",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7034553082617893,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1362847222222222,
+        "trigram_repetition_ratio": 0.5478723404255319,
+        "bigram_distinct_ratio": 0.4052631578947368,
+        "fourgram_distinct_ratio": 0.482078853046595
+      },
+      {
+        "seed": 127,
+        "arm": "causal_lm_baseline",
+        "step": 64,
+        "model_artifact_id": "sha256:017a5410f042e401b442e436dedb9fe551bc50201762af7e2372a9a465f4f923",
+        "generated_continuation_set_id": "sha256:024eeed916e78fb01095f618de9bbeb4439df9b838be35dafed86c003f2c1807",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:38b50e9934ed92917add5605b22deb6283c53efb3bcfe85405768712353c497e",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.94197578387458,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.2552083333333333,
+        "trigram_repetition_ratio": 0.6595744680851063,
+        "bigram_distinct_ratio": 0.3105263157894737,
+        "fourgram_distinct_ratio": 0.3602150537634409
+      },
+      {
+        "seed": 127,
+        "arm": "causal_lm_baseline",
+        "step": 128,
+        "model_artifact_id": "sha256:337cd77063fe0c33aacfa5eadf4de848f0e2d8c9ee8ec5c0970d0c95c9ec2aaf",
+        "generated_continuation_set_id": "sha256:ea55de83758b452bac9a7e76f42b4e4efdcb69822e03aa6a3d5e6a01eeb2dcdf",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:18ab5ab24f55ac3eb3a89dc375fe56bb4f5d21f897694b3dcc37d9ea38fdd321",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9309504090456638,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2769097222222222,
+        "trigram_repetition_ratio": 0.6338652482269503,
+        "bigram_distinct_ratio": 0.3412280701754386,
+        "fourgram_distinct_ratio": 0.38530465949820786
+      },
+      {
+        "seed": 127,
+        "arm": "causal_lm_baseline",
+        "step": 192,
+        "model_artifact_id": "sha256:3416036a870210a91749d119c676c2765bde9aa8066ab81e5155b4ee7654b7eb",
+        "generated_continuation_set_id": "sha256:a9ebac75e2ccf4a629b57b92aec5d7511216ea277e9e0c0b3ef1d5fc41a548b3",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:b8e7a8ef1635de9879cdd5adc3c7791e39bef2dea0c53d4e6cbda72c164aac02",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.7415758756376757,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.1362847222222222,
+        "trigram_repetition_ratio": 0.5859929078014184,
+        "bigram_distinct_ratio": 0.37719298245614036,
+        "fourgram_distinct_ratio": 0.43727598566308246
+      },
+      {
+        "seed": 127,
+        "arm": "causal_lm_baseline",
+        "step": 256,
+        "model_artifact_id": "sha256:7d96770f9df4259e3a3a1c65688712222c97aa916cb533c10a73c6c871a2a5f2",
+        "generated_continuation_set_id": "sha256:533769fc4d817cf192d335e437b47b01b52dabb5e161a57c9d2471890f982a08",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:aee675b0f523b157d0e05ee67a96f4470d8d40e436dacb7a6368a4a6172616d5",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8939848513126788,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2673611111111111,
+        "trigram_repetition_ratio": 0.6125886524822695,
+        "bigram_distinct_ratio": 0.3570175438596491,
+        "fourgram_distinct_ratio": 0.4068100358422939
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_history",
+        "step": 64,
+        "model_artifact_id": "sha256:f29f8043adab2d3bd9744b2d27a61caf322fa4e549ce2c8b8f7f47e96455ac83",
+        "generated_continuation_set_id": "sha256:024eeed916e78fb01095f618de9bbeb4439df9b838be35dafed86c003f2c1807",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:7d13409c21d864a373bc66e270b7cf050a3422e1ea7090e3dc636659dea95d4b",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.94197578387458,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.2552083333333333,
+        "trigram_repetition_ratio": 0.6595744680851063,
+        "bigram_distinct_ratio": 0.3105263157894737,
+        "fourgram_distinct_ratio": 0.3602150537634409
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_history",
+        "step": 128,
+        "model_artifact_id": "sha256:a7a12564f0be34e902a99e973666e2200d108a7052111b0b5219c309db9f6874",
+        "generated_continuation_set_id": "sha256:dd529e8463291929c7a02f1aa31f5929b9c6d7104efbc7e07e0beea4f2d8ccf6",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:43de97885a57b98b841434a0f7d9ba05915ec13213ad867895cd96aa0ee42946",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.9894612417568744,
+        "periodic_loop_sample_ratio": 0.5,
+        "periodic_suffix_repeated_token_ratio": 0.3194444444444444,
+        "trigram_repetition_ratio": 0.651595744680851,
+        "bigram_distinct_ratio": 0.32456140350877194,
+        "fourgram_distinct_ratio": 0.3655913978494624
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_history",
+        "step": 192,
+        "model_artifact_id": "sha256:079881b77be1a0a6c226e26eb1b5d9b919874fb7a0a32feb803fc16fad9b435e",
+        "generated_continuation_set_id": "sha256:5c36adac723e03a217994acd76d74b8bc067e4dd0b259e1297ba5778b0f0aa8d",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:03d9d41eb8483722067648b828bbc8c9de5d1a833d5a966bac20f860d1cea490",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.6971938378748289,
+        "periodic_loop_sample_ratio": 0.16666666666666666,
+        "periodic_suffix_repeated_token_ratio": 0.0954861111111111,
+        "trigram_repetition_ratio": 0.5789007092198581,
+        "bigram_distinct_ratio": 0.3798245614035088,
+        "fourgram_distinct_ratio": 0.4489247311827957
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_history",
+        "step": 256,
+        "model_artifact_id": "sha256:b72d3cf2e0876799dbfa45df52e86da385139806eaa7fafb9342309be6ea1af0",
+        "generated_continuation_set_id": "sha256:c436edab8fc2472284653fa52006e8372eb05e91e2f4d0cd8c7b1e1892d29fcd",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:51afdb48e6dfe5f87feffe48e02e9b635e3ed6b5b5f3c1bf967b21606cbe3abd",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8365913120567375,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.21354166666666666,
+        "trigram_repetition_ratio": 0.6063829787234043,
+        "bigram_distinct_ratio": 0.36140350877192984,
+        "fourgram_distinct_ratio": 0.41487455197132617
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_periodic",
+        "step": 64,
+        "model_artifact_id": "sha256:c3fe6bcca5c00ea438407b3e5a4f2807cafbd75a0724d586cddb3d6b79336398",
+        "generated_continuation_set_id": "sha256:aac0a295f045fc897134ebc8e24e809e23af3a7eac75aa149b7370337b90f443",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:d7d0a5f5d0f78a91780629c93be8196a6a5707f59d11ffc0c3dd2625b3a9e4f2",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8694372511509268,
+        "periodic_loop_sample_ratio": 0.25,
+        "periodic_suffix_repeated_token_ratio": 0.20399305555555555,
+        "trigram_repetition_ratio": 0.6338652482269503,
+        "bigram_distinct_ratio": 0.3298245614035088,
+        "fourgram_distinct_ratio": 0.3924731182795699
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_periodic",
+        "step": 128,
+        "model_artifact_id": "sha256:01c038950d173904124c87fed8c7e13e37a62f7c5cfc5b7730c0b527dbf55529",
+        "generated_continuation_set_id": "sha256:881c2b6cb5ad167cc96e614d0e2da2904738df12fc1d5690d5762cdfe1219c37",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:638adbb6bb04490f104ecb77251bed09638b46b2cd9f13753496c8e996b7758d",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8094593753888267,
+        "periodic_loop_sample_ratio": 0.3333333333333333,
+        "periodic_suffix_repeated_token_ratio": 0.19444444444444445,
+        "trigram_repetition_ratio": 0.5930851063829787,
+        "bigram_distinct_ratio": 0.3684210526315789,
+        "fourgram_distinct_ratio": 0.4381720430107527
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_periodic",
+        "step": 192,
+        "model_artifact_id": "sha256:5a95a04f95d85bd70b52bda225dda2dc1f946b0965f8fb03f644b072340c4a5c",
+        "generated_continuation_set_id": "sha256:7e53770cd351da5d01b75b262f8aace43a64ffe1b7d6739f752e3b43020332b1",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:4afff4f2d6b614915d0d134ee8dd3757736de3f7f2a049bf48c96c12d2f7f724",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8954899993778773,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2795138888888889,
+        "trigram_repetition_ratio": 0.601063829787234,
+        "bigram_distinct_ratio": 0.3587719298245614,
+        "fourgram_distinct_ratio": 0.42473118279569894
+      },
+      {
+        "seed": 127,
+        "arm": "model_topk_periodic",
+        "step": 256,
+        "model_artifact_id": "sha256:481e5d6d94afd2749efe8bca3c4f61d1cc647ef11c997c7f0183c7a4da46a061",
+        "generated_continuation_set_id": "sha256:f41d8f2fde7da48e67c0fa5844d29ce67bd830ca87a70e5a21325a70fb1e2ada",
+        "decoding_config_id": "sha256:6bc9f0dbe656bd85526caa6dbcc2609985ff078bd4f04975b52e623eb2bfcb01",
+        "evidence_id": "sha256:cb2da159f5f3d7d5c0ec6bd8ed327e4f0cfbda96b787d1d0cb47252a2a7bca5b",
+        "evidence_validated": true,
+        "sample_count": 12,
+        "empty_sample_count": 0,
+        "sample_mean_loop_score": 0.8667700945626476,
+        "periodic_loop_sample_ratio": 0.4166666666666667,
+        "periodic_suffix_repeated_token_ratio": 0.2534722222222222,
+        "trigram_repetition_ratio": 0.5966312056737588,
+        "bigram_distinct_ratio": 0.3631578947368421,
+        "fourgram_distinct_ratio": 0.4265232974910394
+      }
+    ],
+    "before_train_evaluation_parity": [
+      {
+        "seed": 109,
+        "eval_losses": {
+          "causal_lm_baseline": 5.039541244506836,
+          "model_topk_history": 5.039541244506836,
+          "model_topk_periodic": 5.039541244506836
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      },
+      {
+        "seed": 113,
+        "eval_losses": {
+          "causal_lm_baseline": 4.93247652053833,
+          "model_topk_history": 4.93247652053833,
+          "model_topk_periodic": 4.93247652053833
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      },
+      {
+        "seed": 127,
+        "eval_losses": {
+          "causal_lm_baseline": 4.991821765899658,
+          "model_topk_history": 4.991821765899658,
+          "model_topk_periodic": 4.991821765899658
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      }
+    ],
+    "training_sanity": {
+      "paired_eval_loss_deltas": [
+        {
+          "seed": 109,
+          "after_minus_before": -0.338043212890625
+        },
+        {
+          "seed": 113,
+          "after_minus_before": -0.33312320709228516
+        },
+        {
+          "seed": 127,
+          "after_minus_before": -0.3024301528930664
+        }
+      ],
+      "all_baselines_improved": true,
+      "mean_after_minus_before": -0.3245321909586589,
+      "mean_gate_at_most": -0.05,
+      "passed": true
+    },
+    "generation_learning_curve": [
+      {
+        "step": 64,
+        "periodic_vs_history": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": -0.27191446590767687
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": -0.18254129339305702
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": -0.07253853272365318
+            }
+          ],
+          "mean_periodic_minus_control": -0.17566476400812903,
+          "periodic_seed_win_count": 3,
+          "periodic_seed_non_loss_count": 3
+        },
+        "periodic_vs_baseline": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": -0.27191446590767687
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": -0.18254129339305702
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": -0.07253853272365318
+            }
+          ],
+          "mean_periodic_minus_control": -0.17566476400812903,
+          "periodic_seed_win_count": 3,
+          "periodic_seed_non_loss_count": 3
+        }
+      },
+      {
+        "step": 128,
+        "periodic_vs_history": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": -0.07016416262286906
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": -0.030843481709593057
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": -0.1800018663680477
+            }
+          ],
+          "mean_periodic_minus_control": -0.09366983690016994,
+          "periodic_seed_win_count": 3,
+          "periodic_seed_non_loss_count": 3
+        },
+        "periodic_vs_baseline": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": 0.04105756967774066
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": -0.0036475830533779785
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": -0.12149103365683711
+            }
+          ],
+          "mean_periodic_minus_control": -0.02802701567749148,
+          "periodic_seed_win_count": 2,
+          "periodic_seed_non_loss_count": 2
+        }
+      },
+      {
+        "step": 192,
+        "periodic_vs_history": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": 0.18684443822321772
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": 0.04676418439716323
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": 0.1982961615030484
+            }
+          ],
+          "mean_periodic_minus_control": 0.14396826137447646,
+          "periodic_seed_win_count": 0,
+          "periodic_seed_non_loss_count": 0
+        },
+        "periodic_vs_baseline": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": 0.13221234602463616
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": 0.11396471009082998
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": 0.15391412374020164
+            }
+          ],
+          "mean_periodic_minus_control": 0.13336372661855592,
+          "periodic_seed_win_count": 0,
+          "periodic_seed_non_loss_count": 0
+        }
+      },
+      {
+        "step": 256,
+        "periodic_vs_history": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": 0.15019246920492713
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": 0.007461972751026447
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": 0.030178782505910107
+            }
+          ],
+          "mean_periodic_minus_control": 0.06261107482062123,
+          "periodic_seed_win_count": 0,
+          "periodic_seed_non_loss_count": 0
+        },
+        "periodic_vs_baseline": {
+          "paired_effects": [
+            {
+              "seed": 109,
+              "periodic_minus_control": 0.15549295446061961
+            },
+            {
+              "seed": 113,
+              "periodic_minus_control": -0.013648399589399007
+            },
+            {
+              "seed": 127,
+              "periodic_minus_control": -0.027214756750031155
+            }
+          ],
+          "mean_periodic_minus_control": 0.03820993270706315,
+          "periodic_seed_win_count": 2,
+          "periodic_seed_non_loss_count": 2
+        }
+      }
+    ],
+    "held_out_ce_safety": {
+      "model_topk_history": {
+        "paired_eval_loss_deltas": [
+          {
+            "seed": 109,
+            "treatment_minus_baseline": 0.0005550384521484375
+          },
+          {
+            "seed": 113,
+            "treatment_minus_baseline": 0.0008845329284667969
+          },
+          {
+            "seed": 127,
+            "treatment_minus_baseline": 0.0008649826049804688
+          }
+        ],
+        "mean_treatment_minus_baseline": 0.0007681846618652344,
+        "maximum_treatment_minus_baseline": 0.0008845329284667969,
+        "mean_gate_at_most": 0.02,
+        "individual_gate_at_most": 0.05,
+        "passed": true
+      },
+      "model_topk_periodic": {
+        "paired_eval_loss_deltas": [
+          {
+            "seed": 109,
+            "treatment_minus_baseline": 0.03163719177246094
+          },
+          {
+            "seed": 113,
+            "treatment_minus_baseline": 0.03746318817138672
+          },
+          {
+            "seed": 127,
+            "treatment_minus_baseline": 0.03345346450805664
+          }
+        ],
+        "mean_treatment_minus_baseline": 0.03418461481730143,
+        "maximum_treatment_minus_baseline": 0.03746318817138672,
+        "mean_gate_at_most": 0.02,
+        "individual_gate_at_most": 0.05,
+        "passed": false
+      }
+    },
+    "continuation_changes": [
+      {
+        "seed": 109,
+        "step": 64,
+        "periodic_vs_history_changed_prompt_count": 4,
+        "periodic_vs_baseline_changed_prompt_count": 4,
+        "history_vs_baseline_changed_prompt_count": 0
+      },
+      {
+        "seed": 109,
+        "step": 128,
+        "periodic_vs_history_changed_prompt_count": 5,
+        "periodic_vs_baseline_changed_prompt_count": 6,
+        "history_vs_baseline_changed_prompt_count": 2
+      },
+      {
+        "seed": 109,
+        "step": 192,
+        "periodic_vs_history_changed_prompt_count": 6,
+        "periodic_vs_baseline_changed_prompt_count": 5,
+        "history_vs_baseline_changed_prompt_count": 3
+      },
+      {
+        "seed": 109,
+        "step": 256,
+        "periodic_vs_history_changed_prompt_count": 9,
+        "periodic_vs_baseline_changed_prompt_count": 9,
+        "history_vs_baseline_changed_prompt_count": 1
+      },
+      {
+        "seed": 113,
+        "step": 64,
+        "periodic_vs_history_changed_prompt_count": 3,
+        "periodic_vs_baseline_changed_prompt_count": 3,
+        "history_vs_baseline_changed_prompt_count": 0
+      },
+      {
+        "seed": 113,
+        "step": 128,
+        "periodic_vs_history_changed_prompt_count": 5,
+        "periodic_vs_baseline_changed_prompt_count": 5,
+        "history_vs_baseline_changed_prompt_count": 1
+      },
+      {
+        "seed": 113,
+        "step": 192,
+        "periodic_vs_history_changed_prompt_count": 8,
+        "periodic_vs_baseline_changed_prompt_count": 7,
+        "history_vs_baseline_changed_prompt_count": 2
+      },
+      {
+        "seed": 113,
+        "step": 256,
+        "periodic_vs_history_changed_prompt_count": 4,
+        "periodic_vs_baseline_changed_prompt_count": 4,
+        "history_vs_baseline_changed_prompt_count": 3
+      },
+      {
+        "seed": 127,
+        "step": 64,
+        "periodic_vs_history_changed_prompt_count": 2,
+        "periodic_vs_baseline_changed_prompt_count": 2,
+        "history_vs_baseline_changed_prompt_count": 0
+      },
+      {
+        "seed": 127,
+        "step": 128,
+        "periodic_vs_history_changed_prompt_count": 8,
+        "periodic_vs_baseline_changed_prompt_count": 7,
+        "history_vs_baseline_changed_prompt_count": 1
+      },
+      {
+        "seed": 127,
+        "step": 192,
+        "periodic_vs_history_changed_prompt_count": 9,
+        "periodic_vs_baseline_changed_prompt_count": 10,
+        "history_vs_baseline_changed_prompt_count": 5
+      },
+      {
+        "seed": 127,
+        "step": 256,
+        "periodic_vs_history_changed_prompt_count": 6,
+        "periodic_vs_baseline_changed_prompt_count": 5,
+        "history_vs_baseline_changed_prompt_count": 2
+      }
+    ]
+  },
+  "acceptance": {
+    "readiness_passed": true,
+    "identity_passed": true,
+    "complete_optimizer_horizon_passed": true,
+    "before_train_comparability_passed": true,
+    "training_sanity_passed": true,
+    "mechanism_passed": true,
+    "held_out_ce_safety_passed": false,
+    "periodic_vs_history_replication_passed": false,
+    "periodic_vs_baseline_absolute_control_passed": false,
+    "all_prespecified_gates_passed": false
+  },
+  "diagnosis": {
+    "failed_gates": [
+      "held_out_ce_safety",
+      "periodic_vs_history_replication",
+      "periodic_vs_baseline_absolute_control"
+    ],
+    "final_periodic_vs_history_changed_prompt_groups": 19,
+    "final_periodic_vs_baseline_changed_prompt_groups": 18,
+    "final_prompt_group_count": 36,
+    "milestone_crossover": {
+      "periodic_history_mean_effects": [
+        {
+          "step": 64,
+          "mean_periodic_minus_history": -0.17566476400812903,
+          "periodic_seed_win_count": 3
+        },
+        {
+          "step": 128,
+          "mean_periodic_minus_history": -0.09366983690016994,
+          "periodic_seed_win_count": 3
+        },
+        {
+          "step": 192,
+          "mean_periodic_minus_history": 0.14396826137447646,
+          "periodic_seed_win_count": 0
+        },
+        {
+          "step": 256,
+          "mean_periodic_minus_history": 0.06261107482062123,
+          "periodic_seed_win_count": 0
+        }
+      ],
+      "early_all_seed_win_steps": [
+        64,
+        128
+      ],
+      "first_all_seed_loss_step": 192
+    },
+    "posthoc_objective_budget_diagnostic": {
+      "model_topk_history": {
+        "mean_active_batch_ratio": 1.0,
+        "mean_active_position_ratio": 0.8039717118112056,
+        "mean_weighted_auxiliary_loss": 0.007468216866254807
+      },
+      "model_topk_periodic": {
+        "mean_active_batch_ratio": 0.6951235634509457,
+        "mean_active_position_ratio": 0.004640369425569945,
+        "mean_weighted_auxiliary_loss": 0.014515279233455658
+      },
+      "periodic_to_history_weighted_auxiliary_loss_ratio": 1.9436070876627933,
+      "normalization_observation": "The differentiable auxiliary loss averages over active positions before applying strength, so equal nominal strength does not equalize objective energy across candidate sources."
+    },
+    "posthoc_mechanism_hypothesis": "The cross-seed early benefit, later reversal, and roughly doubled periodic weighted auxiliary term are consistent with cumulative over-application. This does not establish causality or semantic quality.",
+    "bounded_reading": "The frozen GPT-2/Pride long-horizon recipe completed with valid Rust-owned evidence but did not satisfy every prespecified gate."
+  },
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "This frozen GPT-2/Pride and Prejudice long-horizon recipe did not satisfy its prespecified bounded gate.",
+    "observed_result": "At step 256, periodic-minus-history mean loop-score delta was 0.062611 with 0 strict wins; periodic-minus-baseline mean delta was 0.038210.",
+    "excluded_claims": [
+      "general language-quality superiority",
+      "statistical significance",
+      "optimal objective strength",
+      "general Z-space training superiority",
+      "semantic-quality improvement before blinded review"
+    ],
+    "evidence_boundary": "The token-loop endpoint and held-out CE are prespecified and ready; no blinded human semantic review was part of this automated acceptance."
+  },
+  "next_prespecified_experiment": {
+    "classification": "posthoc_recommendation_not_part_of_this_gate",
+    "recommended_factor": "Periodic objective budget over optimizer time: compare the frozen constant treatment with one prespecified strength-decay or active-position-budgeted treatment while retaining the ordinary fine-tuning baseline.",
+    "controls": "Use fresh seeds, the same model/corpus/prompts/256-step horizon, causal-LM-only evaluation, and no checkpoint selection.",
+    "implementation_boundary": "Add schedule or objective-budget semantics to the shared training contract before exposing another Python recipe."
+  }
+}

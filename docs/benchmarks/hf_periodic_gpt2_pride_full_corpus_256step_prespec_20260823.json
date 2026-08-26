@@ -1,0 +1,269 @@
+{
+  "schema": "spiraltorch.hf_periodic_long_horizon_protocol.v1",
+  "row_type": "hf_periodic_gpt2_pride_full_corpus_prespec",
+  "status": "sealed_before_training",
+  "prespecified_at_utc": "2026-08-23T23:02:31Z",
+  "design_id": "sha256:723cdad1896b5a1a1a805661e33832067136d7dc00e5f988e339d80372e904ed",
+  "protocol_id": "sha256:1270acc1a14a0783ea1b168f0f8b33df84e82296b22fcc36c392d1501c5a8a9c",
+  "design_prespec_commit": "3e5873347e34ccfc4a89b59be8926a8f7f5cdc7f",
+  "scientific_design": {
+    "study_question": "On a larger complete novel and a larger GPT-2-family model, does Rust-planned periodic model-top-k unlikelihood reduce greedy continuation loops relative to broad history unlikelihood without sacrificing held-out causal-LM loss?",
+    "evidence_class": "prespecified matched multi-seed long-horizon LoRA fine-tuning",
+    "prior_evidence_boundary": {
+      "distilgpt2_protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+      "distilgpt2_result": "ready_but_negative",
+      "use": "The exposed 64-step result motivates a larger corpus and horizon but is not pooled into this study or used to tune its objective strength, seeds, prompts, or thresholds."
+    },
+    "semantic_ownership": {
+      "candidate_planner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "periodicity_kernel": "st-core::runtime::zspace_periodicity",
+      "generation_evidence": "st-core::runtime::zspace_generation_evidence",
+      "python_role": "HF orchestration, tensor/autograd execution, artifact transport, and sealed receipt assembly",
+      "efficacy_owner": "matched held-out and generation evidence; no runtime receipt alone is an efficacy claim"
+    },
+    "model": {
+      "hub_id": "gpt2",
+      "profile": "gpt2-local-smoke",
+      "architecture_family": "gpt2",
+      "parameter_scale": "124m",
+      "local_snapshot_commit": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--gpt2/snapshots/607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "smoke_model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998"
+    },
+    "corpus": {
+      "name": "Pride and Prejudice",
+      "path": "/Users/ryospiralarchitect/SpiralReality/data/pride_and_prejudice.txt",
+      "size_bytes": 709597,
+      "sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+      "source_form": "English Project Gutenberg text present before this study",
+      "validation_fraction": 0.1,
+      "selection": "all rows after the deterministic seed-paired train/eval split; max_train_samples=0 and max_eval_samples=0 disable profile truncation",
+      "selection_boundary": "corpus and split policy fixed before any protocol training or generation"
+    },
+    "training": {
+      "seeds": [109, 113, 127],
+      "seed_provenance": "Fresh prime seeds not used by the preceding Pythia-70M, DistilGPT-2, or local MPS smoke outcomes.",
+      "arms": [
+        {
+          "name": "causal_lm_baseline",
+          "candidate_source": "none",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "candidate_source": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        },
+        {
+          "name": "model_topk_periodic",
+          "candidate_source": "model_topk_periodic",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 9,
+      "optimizer_update_count": 256,
+      "milestone_steps": [64, 128, 192, 256],
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": ["c_attn", "c_proj"]
+      },
+      "learning_rate": 0.00005,
+      "scheduler": "linear",
+      "model_train_dtype": "float32",
+      "torch_training_device": "mps",
+      "device_fallback": "blocked; do not silently mix CPU and MPS within this protocol",
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "effective_sequences_per_update": 16,
+      "block_size": 128,
+      "max_train_samples": 0,
+      "max_eval_samples": 0,
+      "max_eval_blocks": 16,
+      "logging_steps": 16,
+      "save_steps": 64,
+      "eval_steps": 64,
+      "save_total_limit": 4,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "supervised_target_is_never_a_negative_candidate": true
+      },
+      "runtime_environment": {
+        "HF_HOME": "/Users/ryospiralarchitect/.hf_home",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "PYTHONHASHSEED": "0",
+        "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "1.7",
+        "PYTORCH_MPS_LOW_WATERMARK_RATIO": "1.4",
+        "SPIRALTON_MAGIC": "0",
+        "SPIRALTON_TORCH": "0",
+        "SPIRALTON_MODEL_PATCHES": "0",
+        "SPIRALTON_NUMPY": "0"
+      },
+      "single_factor_rule": "Within each seed, objective treatment is the only intended arm difference.",
+      "resume_rule": "A failed segment may resume only from a validated Trainer checkpoint in the same run, preserving trace and optimizer lineage; never restart into a populated run directory."
+    },
+    "generation": {
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "prompt_role": "Previously frozen independent prompts reused without inspecting GPT-2/Pride outputs.",
+      "milestones": [64, 128, 192, 256],
+      "report_count": 36,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as training run",
+        "continuation_only": true
+      }
+    },
+    "metrics": {
+      "primary_final_metric": "generation_evidence.aggregate.sample_mean_loop_score at step 256",
+      "primary_effect": "model_topk_periodic minus model_topk_history paired by seed; lower is better",
+      "absolute_control_effect": "model_topk_periodic minus causal_lm_baseline paired by seed; lower is better",
+      "learning_curve_diagnostic": "paired arm effects at steps 64, 128, 192, and 256; descriptive and not a checkpoint-selection rule",
+      "safety_metric": "eval_after_train.eval_loss paired by seed against causal_lm_baseline",
+      "training_sanity_metric": "eval_after_train.eval_loss minus eval_before_train.eval_loss in the baseline arm",
+      "mechanism_metrics": [
+        "zspace_repetition_unlikelihood_receipt.active_position_ratio",
+        "zspace_repetition_unlikelihood_receipt.periodic_candidate_count",
+        "zspace_repetition_unlikelihood_receipt.excluded_non_periodic_proposal_count",
+        "zspace_repetition_unlikelihood_receipt.mean_weighted_auxiliary_loss"
+      ]
+    },
+    "acceptance": {
+      "required_ready_run_cards": 9,
+      "required_complete_optimizer_horizon": 256,
+      "required_checkpoint_steps": [64, 128, 192, 256],
+      "required_generation_reports": 36,
+      "before_train_eval_parity_maximum_absolute_delta": 0.0000001,
+      "training_sanity": {
+        "all_baseline_runs_must_improve_heldout_loss": true,
+        "mean_baseline_eval_loss_delta_at_most": -0.05
+      },
+      "mechanism": {
+        "history_candidate_count_positive_every_run": true,
+        "periodic_candidate_count_positive_every_run": true,
+        "periodic_excluded_non_periodic_count_positive_every_run": true
+      },
+      "replication_success": {
+        "mean_periodic_minus_history_final_loop_score_less_than": 0.0,
+        "minimum_periodic_history_seed_win_count": 2
+      },
+      "absolute_control": {
+        "mean_periodic_minus_baseline_final_loop_score_at_most": 0.0,
+        "minimum_periodic_baseline_seed_non_loss_count": 2
+      },
+      "ce_safety": {
+        "mean_treatment_minus_baseline_eval_loss_at_most": 0.02,
+        "maximum_individual_treatment_minus_baseline_eval_loss_at_most": 0.05
+      },
+      "decision_rule": "Pass only if readiness, identity, comparability, horizon, training-sanity, mechanism, final replication, absolute-control, and CE-safety gates all hold. Learning-curve milestones describe dynamics but cannot replace the frozen final endpoint."
+    },
+    "interpretation": {
+      "allowed_positive_claim": "Within this prespecified GPT-2/Pride and Prejudice 256-step LoRA study, periodic filtering improved the frozen greedy-loop endpoint relative to broad history and did not underperform ordinary fine-tuning while preserving held-out CE.",
+      "allowed_negative_claim": "This frozen GPT-2/Pride and Prejudice long-horizon recipe did not satisfy its prespecified bounded gate.",
+      "excluded_claims": [
+        "general language-quality superiority",
+        "statistical significance",
+        "optimal objective strength",
+        "general Z-space training superiority",
+        "semantic-quality improvement before blinded review"
+      ]
+    }
+  },
+  "preflight_commitment": {
+    "status": "sealed_before_training",
+    "design_prespec_commit": "3e5873347e34ccfc4a89b59be8926a8f7f5cdc7f",
+    "runtime_source": {
+      "source_commit": "18e3673474318bc581434edc021b257a12e8108c",
+      "bridge_sha256": "e7b9ead58cd8f9fac369bdb7935a9be2cec7885ba2ef676eca3c3e8c60303f4a",
+      "native_extension_sha256": "a9842e6714d009763e91d527204f5df0133bdebeafbd25f026bb19fc0a6de862",
+      "native_extension_role": "prebuilt local binding for the exact source commit; not tracked in the study branch"
+    },
+    "common": {
+      "training_input_id": "sha256:8a721fef7f5d70f614e512c05a82f6f27e716ebc17aac084ec4f93d91301441c",
+      "model_runtime_id": "sha256:123d45af6dfdcc4ae6c4d0cee97478795a471670200d23ba0ba65fbadd4a2998",
+      "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f"
+    },
+    "by_seed": [
+      {
+        "seed": 109,
+        "dataset_materialization_id": "sha256:9edb90b77ab4a51cb226bee11f1f8b10e0970d9160cd9f217b3c2f2de841c369",
+        "tokenized_dataset_id": "sha256:761e761029cb96b6c8502e294a8325e161f9027a81c9a5f342c706ef4cb6610d",
+        "arms": {
+          "causal_lm_baseline": {
+            "training_recipe_id": "sha256:4fd5b7e8908fb565151349ac21b963bb85ae0070d4b9fb9e960199175f88fee1",
+            "finetune_replay_id": "sha256:7f81d9af921ac49bf3536165ecbd15d6ede4072dcaed035559552cb63668cef1"
+          },
+          "model_topk_history": {
+            "training_recipe_id": "sha256:ca62917fd81a05d29845d64f6cd75ab892bad567a771fd2763745c26b80566da",
+            "finetune_replay_id": "sha256:9835c68ed38b9d2a6491597d1ec48388e34662d60b7d8dd042a5407498c7c3c4"
+          },
+          "model_topk_periodic": {
+            "training_recipe_id": "sha256:305bf7cbd8aec8c2a70de451b4d06039dffa8c781acba7b2567e11cb12d2fb9e",
+            "finetune_replay_id": "sha256:91d140f45bdce3b525ad2b27b07cc99e20896d1e4d6ce32587f0258a78ae1e94"
+          }
+        }
+      },
+      {
+        "seed": 113,
+        "dataset_materialization_id": "sha256:8ec2467724d2275c5d9922c77281363270e15208d1b327662fdea4f8a5fe8133",
+        "tokenized_dataset_id": "sha256:ead1dfcc34024b0ab7170dc543825058a5666e10c59fc9d420e2b5e819c879f6",
+        "arms": {
+          "causal_lm_baseline": {
+            "training_recipe_id": "sha256:9f50cc12c88e492c50ebda092c8ddf9688d5f7a65087024ed6d50b8293caa11f",
+            "finetune_replay_id": "sha256:8829c256e98466a8f4b0f430467f97e65054ae8d18a24f920b8959df33a306e0"
+          },
+          "model_topk_history": {
+            "training_recipe_id": "sha256:9b655f02bdca922a6342635b497a9c99d62c184199007ffcdfd76c98fb951ae5",
+            "finetune_replay_id": "sha256:c5ac0c31e48f48841d1e3b8325b818c6ec658dc724aaf89216dcf12dda7a395b"
+          },
+          "model_topk_periodic": {
+            "training_recipe_id": "sha256:aa19a833d62319193435e7d7a4e25832d74da5fda4d971fb6b4a7aed80fbe68e",
+            "finetune_replay_id": "sha256:b05b7cef3cd12e3c0e0bf5fa6fd382e0652dbb513ab313eb6310ef3a2a4c54be"
+          }
+        }
+      },
+      {
+        "seed": 127,
+        "dataset_materialization_id": "sha256:ee9c02bdffa0536f51150091569296caa64e54ba2a675e539499133440adc1ed",
+        "tokenized_dataset_id": "sha256:366486bae29680fd9c20d81b7728d3338fe9d86b6e89158c3a4c03b1a6d25a61",
+        "arms": {
+          "causal_lm_baseline": {
+            "training_recipe_id": "sha256:eb9154cd6961b829c8823a090b9925d32065eff6fb18269192e9177b63fd5880",
+            "finetune_replay_id": "sha256:e22ccbd7d21ed4c8e653b9ab3987562d3301f810212c0dd31b0af4f492f8122e"
+          },
+          "model_topk_history": {
+            "training_recipe_id": "sha256:c70808c79bffff07353775b2f7de6f03f5cad23af71ec375383b61e27bfc625c",
+            "finetune_replay_id": "sha256:c16029f94a26ae32972309a20d7b58e1c0dd07b202665f879bcc0828cd2ac829"
+          },
+          "model_topk_periodic": {
+            "training_recipe_id": "sha256:96c2c923384fdb9d80f7d4627ca4f97da47e74d9ec78a9d7c39f1c077e353fc8",
+            "finetune_replay_id": "sha256:579711e09338c7c328854e9925df45c04c8a1ba5b9440ce4b377540f886ab390"
+          }
+        }
+      }
+    ]
+  }
+}
