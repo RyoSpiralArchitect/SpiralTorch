@@ -90,6 +90,7 @@ spiral-zspace-inference-distortion-sweep = "spiraltorch.hf_cli:zspace_inference_
 spiral-hf-generation-curve = "spiraltorch.hf_cli:finetune_generation_curve_main"
 spiral-hf-run-artifacts = "spiraltorch.hf_cli:finetune_run_artifacts_main"
 spiral-hf-run-ops = "spiraltorch.hf_cli:finetune_run_ops_main"
+spiral-hf-semantic-review = "spiraltorch.semantic_review:main"
 
 [project.optional-dependencies]
 hf-runtime = [
