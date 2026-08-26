@@ -1,0 +1,55 @@
+{
+  "schema": "spiraltorch.hf_generation_prompt_set.v1",
+  "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+  "scope": "Fresh independent English continuation prompts prespecified for the three-arm Alice replication; not selected from corpus text or model outputs and not a semantic-quality gold set.",
+  "prompts": [
+    {
+      "label": "observatory-signal",
+      "text": "Before dawn, the observatory received a signal"
+    },
+    {
+      "label": "market-bell",
+      "text": "When the market bell rang for the third time"
+    },
+    {
+      "label": "glass-map",
+      "text": "The map beneath the glass showed"
+    },
+    {
+      "label": "empty-platform",
+      "text": "On the empty platform, a suitcase"
+    },
+    {
+      "label": "mountain-radio",
+      "text": "High above the snow line, the radio"
+    },
+    {
+      "label": "kitchen-key",
+      "text": "She found the brass key beside"
+    },
+    {
+      "label": "courthouse-shadow",
+      "text": "Across the courthouse wall, a shadow"
+    },
+    {
+      "label": "submarine-log",
+      "text": "The final entry in the submarine log"
+    },
+    {
+      "label": "desert-well",
+      "text": "At noon, the old desert well"
+    },
+    {
+      "label": "violin-case",
+      "text": "Inside the borrowed violin case lay"
+    },
+    {
+      "label": "lighthouse-door",
+      "text": "No one had opened the lighthouse door since"
+    },
+    {
+      "label": "paper-bird",
+      "text": "He folded the last page into a bird and"
+    }
+  ]
+}

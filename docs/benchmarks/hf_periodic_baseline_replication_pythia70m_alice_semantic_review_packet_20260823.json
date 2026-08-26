@@ -1,0 +1,668 @@
+{
+  "schema": "spiraltorch.hf_blinded_semantic_review_packet.v1",
+  "status": "ready_for_blinded_review",
+  "protocol_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
+  "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+  "blinding_key_sha256": "8ac4834e78cb378d5d5def4d5f5df21fc1565eebdec1f5e32956ab9f3c17c1e3",
+  "group_count": 36,
+  "candidate_count": 108,
+  "instructions": "Score each candidate without consulting training arms, token-loop metrics, held-out loss, or the separate unblinding map. Return one review row per group and candidate plus one preference per group.",
+  "rubric": {
+    "fluency": "integer 1 through 5",
+    "prompt_relevance": "integer 1 through 5",
+    "local_coherence": "integer 1 through 5",
+    "non_repetition": "integer 1 through 5",
+    "preference": "A, B, C, or tie"
+  },
+  "groups": [
+    {
+      "group_id": "sha256:a36837af7537d5329ba6f60a6780ca97f2daf523008d79623749a6a43ea0d433",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:8fac87feff8f870f2ed0a10ca93fd63c0a1e7c87775acc4a2519fe410443e66b",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass key, and the brass"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door, and she was sure that the brass key was in the back of the door. She was sure that the brass key was in the back of the door, and she was sure that the brass key was in the back of the door.\n\n\"I'm going to go in there,\" she said, and she was sure that the brass key was in the back of the door.\n\n\"I'm going to go in there,\" she said.\n\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:92f81cd899128dbc40cdadee87a225add82f70947c0241dba1a45763d5bfca7c",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "y, dark-haired, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "y, dark-haired, dark-haired, dark-haired, and a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older than me, a little older"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "y, dark-haired, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:6d925d4704594b329fd486d142c00efa262c776ee748bf363b0555cb36fefd34",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:fe180906fcc064b7ed0d88039a5f3a4756c0ec41ee230da7cc1c5ee373f522fd",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the first of the two-hour submarine, the second of the two-hour submarine, the third of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the first of the two-hour, the second, the third, the fourth, the fifth, and the sixth.\n\nThe first, the third, the fourth, the fourth, the fifth, the fourth, the fifth, the fifth, the sixth, the fifth, the sixth, the fifth, the fifth, the sixth, the fifth, the fifth, the fifth, the sixth, the fifth, the fifth, the sixth, the fifth, the sixth,"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the first of the two-hour, the second, the third, the fourth, the fourth, the fourth, the fifth, the fourth, the fourth, the fifth, the fourth, the fourth, the fifth, the fourth, the fifth, the fourth, the fifth, the fourth, the fifth, the fifth, the fourth, the fifth, the fifth, the fifth, the fifth, the sixth, the fifth, the sixth, the fifth, the sixth,"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:c7a1251e79f3b18e2d22b410f136a54a9bee34893e0e2b3fc500c63760f45845",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "y, dark-haired, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "y, dark-haired, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "y, dark-haired, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a little, and a"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:4b6b4fcf8142da77b908f8c52a969bf12635f6df43f152efdbc310add96367b9",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the first time he had been in the room.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said,"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the first time the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm not sure I can,\" she said, and the door was open."
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the first time the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and he was not sure what to say.\n\n\"I'm sorry, I'm not sure I can,\" she said.\n\n\"I'm sorry, I'm not sure I can,\" he said.\n\n\"I'm sorry, I'm not sure I can,\" she said.\n\n\"I'm sorry, I'm not sure"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:2ee3a72d9590752d0923ce3027b80db04a9cb4a0d019a49b36c2c4284ab550c8",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man in the world, the first time a man"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the company was in the midst of a long, long, and unforeseen period.\n\nThe company was not a very good company, and the company was not a very good company, and the company was not a very good company, and the company was not a very good company, and the company was not a very good company, and the company was not a very good company, and the company was not a very good company, and the company was not a"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the company was in the midst of a long and intense battle.\n\nThe company was not only a great success, it was a great success, and it was a great success.\n\nThe company was a great success, and it was a great success.\n\nThe company was a great success, and it was a great success.\n\nThe company was a great success, and it was a great success.\n\nThe company was a great success, and"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:3a2681f126fea696bac08dd3397e0391039c5c90986a7d953da5845ef3037e85",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man. \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man. \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:850b082ac6384fad8cf94a395dda730167196352847b76e8c7db49118586abbb",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the company was in the process of making a new one.\n\nThe company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and the company is now a new one, and"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the company was in the process of making a new product.\n\nThe company was not only a new product, but it was a new product.\n\nThe company was not only a new product, it was a new product, and it was a new product.\n\nThe company was not only a new product, it was a new product, and it was a new product.\n\nThe company was not only a new product, it was a new product,"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the company was in the midst of a long, long, and long, and the company was in the midst of a long, long, and long, and the company was in the midst of a long, long, and long, and the company was in the midst of a long, long, and long, and the company was in the midst of a long, long, and long, and the company was in the midst of a long, long, and long,"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:4fa47586aebd70759bbf188be3224bf74c8c9d12879ecca9aa1a49e6ef3d4be8",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " is a high-speed radio, and the radio is a high-speed radio.\n\nThe radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " is a high-speed radio, and the radio is a high-speed radio.\n\nThe radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " is a high-speed radio, and the radio is a high-speed radio.\n\nThe radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed radio, and the radio is a high-speed"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:7a2fa7f38692b05353ab5a49855e53fd1c3a22724d196b26f3dab8fb1e8b58b9",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " a new, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-loved, more-l"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:09c18e5c438408924c48f9650a58ea6f3980a7f05b78345cedaffbc7bb000fb7",
+      "prompt": "Across the courthouse wall, a shadow",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "y, dark, and a few of the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important, the most important,"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "y, but not a sign of a man.\n\n\"I'm not a man,\" he said. \"I'm a man.\"\n\n\"I'm a man,\" said the man. \"I'm a man.\"\n\n\"I'm a man,\" said the man.\n\n\"I'm a man,\" said the man.\n\n\"I'm a man,\" said the man.\n\n\"I'm a man,\" said the man.\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "y, unlit, and a little bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit of a bit"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:c7a8f691c3e40b2b698b0d32a29fc64320c4dc6f06e37f62f208cc6c59580f43",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door, and she was in the room. She was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door, and she was in the room. She was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was in the room, and she was"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door.\n\n\"I'm sorry,\" she said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said, \"I'm sorry.\"\n\n\""
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:cfea13ff327802de771ed76b529ae8bda347909a16feb33c0eefd137c6795c36",
+      "prompt": "She found the brass key beside",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door, and she was afraid of the door. She was afraid of the door, and she was afraid of the door.\n\n\"I'm sorry,\" she said, and she was afraid of the door.\n\n\"I'm sorry,\" she said, and she was afraid of the door.\n\n\"I'm sorry,\" she said, and she was afraid of the door.\n\n\"I'm sorry,\" she said, and she was afraid of the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door, and she was sure she was not. She was not sure she was going to be able to get the key, but she was not sure she was going to be able to get it.\n\n\"I'm not sure I can get it.\"\n\n\"I'm not sure I can get it.\"\n\n\"I'm not sure I can get it.\"\n\n\"I'm not sure I can get it.\"\n\n\"I'm not sure"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door, and she was afraid of the sound of the door. She was afraid of the sound of the door, and she was afraid of the sound of the door.\n\n\"I'm afraid of the sound of the door,\" she said, and she was afraid of the sound of the door.\n\n\"I'm afraid of the sound of the door,\" she said, and she was afraid of the sound of the door.\n\n\"I'm afraid of"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:eeda819bd2096f3d184ded8a40be97087999bd7fa09c83a1214f92577938806f",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:599a3dd5c4b8267dd13d8ef86458f5ac376389f84b7b8486ac0f03ee091a5339",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", a small suitcase, a small suitcase, a small suitcase, a small suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:182ded816d063cbeb0fb0275247f459723af8f4d6974505a7abd55e8cb64143d",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:2b884fc80439385e3c756afa0086e75c604198c1be5db02ad708f5707efd66e8",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the United States, the United States, and the United States.\n\nThe observatory was a part of the observatory, and the observatory was a part of the observatory.\n\nThe observatory was a part of the observatory, and the observatory was a part of the observatory.\n\nThe observatory was a part of the observatory, and the observatory was a part of the observatory.\n\nThe observatory was a"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " from the State.\n\nThe first-ever observatory, the observatory, was a small, uninhabited, and a small, uninhabited area, with a small, uninhabited area. The observatory was a small, uninhabited area, with a small, uninhabited area, with a small, uninhabited area, with a small, uninhabited area, with a small, uninhab"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " from the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:64f948e4a3c658c9021e6849061916529eab9fa14744eb11f91bac311fed5b1c",
+      "prompt": "When the market bell rang for the third time",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the first time the market bell rang for the fourth time.\n\nThe first time the market bell rang for the fourth time, the second time the market bell rang for the fourth time, the third time the market bell rang for the fourth time, the fourth time the market bell rang for the fourth time, the fourth time the market bell rang for the fourth time, the fourth time the market bell rang for the fourth time, the fourth time the market bell rang for the"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the company was in a state of panic.\n\n\"I'm not going to be able to get the bell to go to the other side of the market,\" said the company.\n\n\"I'm not going to be able to get the bell to go to the other side of the market,\" said the company.\n\n\"I'm not going to be able to get the bell to go to the other side of the market,\" said the company.\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the first time the market bell rang for the fourth time, the second time the market bell rang for the fourth time.\n\nThe first time the market bell rang for the fourth time, the second time the market bell rang for the fourth time, the third time the market bell rang for the fourth time, the fourth time the market bell rang for the fourth time, the fourth time the market bell rang for the fourth time, the fourth time the market bell rang for the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:1529e53cd85bd3acd9ed5b85f816ac9b3b2c12e5c5f9145c3b854e003667f761",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the first time he had been in the room.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said,"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the first time he had been in the room, and the door was open, and the door was open.\n\n\"I'm sorry,\" he said, and the door was open, and the door was open.\n\n\"I'm sorry,\" she said, and the door was open, and the door was open.\n\n\"I'm sorry,\" he said, and the door was open, and the door was open.\n\n\"I'm sorry,\" she"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the first time he had been in the room.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" he said, and the door was open.\n\n\"I'm sorry, I'm not sure I can,\" she said,"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:acb3a58672a66b79b69d1de4a5ccc9ee7b17f7001ef43e44f4d71a12697cebde",
+      "prompt": "He folded the last page into a bird and",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" I said.\n\n\"I'm not going to be able to do that,\" I said.\n\n\"I'm not going to be able to do that,\" I said.\n\n\"I'm not going to be able to do that,\" I said.\n\n\"I'm not going to be able to do that,\""
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " said, \"I'm not going to be able to do that.\"\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able to do that,\" said the man.\n\n\"I'm not going to be able"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:f8ba6631f5cf2cdbffdd7aa3fb2db2517158cc541a4b8e09bff36338b63277cc",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:5bf65446ec7789d9d76ac0f2f141139c4df3738d4040cafb19f521a21f8d9644",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the National Guard.\n\nThe observatory was a part of the National Guard, and the observatory was a part of the National Guard.\n\nThe observatory was a part of the National Guard.\n\nThe observatory was a part of the National Guard.\n\nThe observatory was a part of the National Guard.\n\nThe observatory was a part of the National Guard.\n\nThe observatory was a part of the National Guard.\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence of the presence"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:5ff4a5fd458f4e2b22bd63eb2710aa0536f66ec561a6b51c3f1f3c510ef0260f",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:8d7dbd7f0396889a4140bc6b66bad5103ed04a172af072475099c6522a0a6b55",
+      "prompt": "High above the snow line, the radio",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " is a high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-speed, high-"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:11dfa62f8fce98909816fd1363b0e75367891658fd64e91659797adc5c3892b3",
+      "prompt": "No one had opened the lighthouse door since",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the door was open.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the door was open.\n\n\"I'm sorry,\" he said, \"I'm sorry.\"\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry,\" I said.\n\n\"I'm sorry"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the door was open.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" he said.\n\n\"I'm sorry,\" she said.\n"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:cad3349bcaca5f2661539f63f7862152a37404df3166a4c15bd027473546f872",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, and the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but it was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but it was a little more than a few hundred"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, and the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, and the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, and the map was a little more than a"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the same pattern.\n\nThe map below the map was the same pattern as the map above, but the map above was different.\n\nThe map above the map was the same pattern as the map above, but the map above the map was different.\n\nThe map above the map was the same pattern as the map above, but the map above the map was different.\n\nThe map above the map was the same pattern as the map above, but the map"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:566946d0bc3a7b7ce4bdb537e42f8e552b453a7b29eb72a0fe54a14cb04275ff",
+      "prompt": "Inside the borrowed violin case lay",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " a small piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood, a piece of wood,"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " a small, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " a small, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and-white, black-and"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:add8f20c8cad4ba9f20e2cb9c4f5af199529a34395539a76dff30b9697248d8d",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the first of the two-hour boat, the second of the two-hour boat, the third of the two-hour boat, the fourth of the two-hour boat, the fourth of the two-hour boat, the fifth of the two-hour boat, the sixth of the two-hour boat, the fifth of the two-hour boat, the sixth of the two-hour boat, the fifth of the two-hour boat, the sixth of the two"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the first of the two-hour submarine, the second of the two-hour submarine, the third of the two-hour submarine, the fourth of the two-hour submarine, the fourth of the two-hour submarine, the fifth of the two-hour submarine, the sixth of the two-hour submarine, the seventh of the two-hour submarine, the eighth of the two-hour submarine, the seventh of the two-hour submarine, the eighth of the two"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the first of the two-hour submarine, the second of the two-hour submarine, the third of the two-hour submarine, the fourth of the two-hour submarine, the fifth of the two-hour submarine, the fourth of the two-hour submarine, the fifth of the two-hour submarine, the fifth of the two-hour submarine, the fifth of the two-hour submarine, the sixth of the two-hour submarine, the fifth of the two"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:7f9c05d88b2a123f7f0abc3f93d6c897aed8741226502ae0343e7094cb016909",
+      "prompt": "On the empty platform, a suitcase",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " was placed on the table, and a small piece of paper was placed on the table.\n\nThe suitcase was placed on the table, and the suitcase was placed on the table.\n\nThe suitcase was placed on the table, and the suitcase was placed on the table.\n\nThe suitcase was placed on the table, and the suitcase was placed on the table.\n\nThe suitcase was placed on the table, and the suitcase was placed on the table.\n\n"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase, a suitcase"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:b32bb22b91c178ec5371501c6bb225617316457b4fd920dacd76970f4a00024c",
+      "prompt": "Before dawn, the observatory received a signal",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " from the National Museum of the New York State Museum, which is the museum's \"Bible of the New York State Museum.\"\n\nThe observatory was designed to be a \"Bible of the New York State Museum\" and to be a \"Bible of the New York State Museum\" and to be a \"Bible of the New York State Museum\" and to be a \"Bible of the New York State Museum\" and to be a \"Bible of"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " from the National Museum of Natural History, the National Museum of Natural History, and the National Museum of Natural History.\n\nThe observatory is a part of the National Museum of Natural History, and the National Museum of Natural History, the National Museum of Natural History, and the National Museum of Natural History, the National Museum of Natural History, and the National Museum of Natural History, the National Museum of Natural History, the National Museum of Natural History, the National Museum of Natural"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " from the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part of the National Park Service, which was a part of the National Park Service.\n\nThe observatory was a part"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:1c5d29eb567dfc01e7aba9bbf470c3bb4de42c553c2769df80876d2baa66cac7",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:c662184b99d23605e1e925ca3612933fd66218e4fded723bded2da13e88f80ef",
+      "prompt": "The final entry in the submarine log",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": ", the first of the submarine, the second, the third, the fourth, the fifth, the fourth, the fifth, the fourth, the fifth, the sixth, the fifth, the sixth, the fifth, the sixth, the sixth, the sixth, the seventh, the eighth, the seventh, the eighth, the seventh, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": ", the first of the two-hour boat, the second of the two-hour boat, the third-of-the-day boat, the fourth-of-the-day boat, the fifth-of-the-day boat, the sixth-of-the-day boat, the fifth-of-the-day boat, the sixth-of-the-day boat, the seventh-of-the-day boat, the eighth-of-the-"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": ", the first of the submarine log, the second, the third, the fourth, the fourth, the fifth, the sixth, the fifth, the sixth, the fifth, the sixth, the seventh, the sixth, the seventh, the eighth, the seventh, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the eighth, the"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:33216f9e5d4198bed13aaf0fb8eba342072980ed72b79e2789a881d97e093121",
+      "prompt": "The map beneath the glass showed",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a few hundred yards from the city.\n\nThe map was a little more than a few hundred yards from the city, but the map was a little more than a"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": " the same pattern.\n\nThe map was a little more than a few hundred feet away, but the map was a little more than a few hundred feet away.\n\n\"I'm not going to go,\" I said, and then I said, \"I'm going to go to the other side of the world.\"\n\n\"I'm not going to go to the other side,\" I said, \"I'm not going to go to the other side of the world"
+        }
+      ]
+    },
+    {
+      "group_id": "sha256:506c0b2434e57a2275b9cf19bc80d3fa9d48965d6d8bf350d790401bb051bcd3",
+      "prompt": "At noon, the old desert well",
+      "candidates": [
+        {
+          "candidate_label": "A",
+          "continuation": "-dressed, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old, the old"
+        },
+        {
+          "candidate_label": "B",
+          "continuation": "-lit, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the"
+        },
+        {
+          "candidate_label": "C",
+          "continuation": "-lit, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the old desert, the"
+        }
+      ]
+    }
+  ],
+  "packet_id": "sha256:1da36f6fde782b246d5bd7518f4b6ec9e46955a9967edb7429ba9bd1adc136a5"
+}
