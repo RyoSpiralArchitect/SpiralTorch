@@ -97,7 +97,12 @@ def test_hf_repetition_unlikelihood_collator_plans_from_cpu_labels() -> None:
     assert metadata.sequences is None
 
 
-def test_hf_repetition_unlikelihood_collator_defers_model_proposals() -> None:
+@pytest.mark.parametrize(
+    "candidate_source", ["model_topk_history", "model_topk_periodic"]
+)
+def test_hf_repetition_unlikelihood_collator_defers_model_proposals(
+    candidate_source: str,
+) -> None:
     def base_collator(_features: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "input_ids": torch.tensor([[1, 2, 3, 0]]),
@@ -114,7 +119,7 @@ def test_hf_repetition_unlikelihood_collator_defers_model_proposals() -> None:
         ngram_order=3,
         context_window=16,
         max_candidates_per_position=8,
-        candidate_source="model_topk_history",
+        candidate_source=candidate_source,
         proposal_top_k=2,
         planner=planner,
     )
@@ -237,6 +242,55 @@ def test_hf_trainer_materializes_model_topk_history_after_forward() -> None:
     assert receipt["candidate_count"] == 1
 
 
+def test_hf_trainer_backpropagates_model_topk_periodic_candidates() -> None:
+    class PeriodicModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            logits = torch.zeros(1, 7, 10)
+            logits[0, 5, 2] = math.log(3.0)
+            self.logits = torch.nn.Parameter(logits)
+
+        def forward(self, **_inputs: Any) -> dict[str, Any]:
+            return {
+                "loss": self.logits.sum() * 0.0 + 2.0,
+                "logits": self.logits,
+            }
+
+    model = PeriodicModel()
+    trainer_class = st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)
+    trainer = trainer_class(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_recipe(
+            candidate_source="model_topk_periodic",
+            proposal_top_k=1,
+        ),
+    )
+    model.train()
+    sequence = {
+        "token_ids": [9, 1, 2, 1, 2, 1, 7],
+        "token_mask": [True] * 7,
+        "label_mask": [False, False, False, False, False, False, True],
+    }
+    inputs = {
+        "labels": torch.tensor([[-100, -100, -100, -100, -100, -100, 7]]),
+        st.HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY: (
+            st.HfRepetitionUnlikelihoodBatchPlan(None, (sequence,))
+        ),
+    }
+
+    loss = trainer.compute_loss(model, inputs)
+    expected_auxiliary = -math.log(1.0 - 0.25)
+
+    assert float(loss.detach()) == pytest.approx(2.0 + 0.1 * expected_auxiliary)
+    loss.backward()
+    assert float(model.logits.grad[0, 5, 2]) > 0.0
+    receipt = trainer.zspace_repetition_unlikelihood_receipt()
+    assert receipt["active_position_count"] == 1
+    assert receipt["candidate_count"] == 1
+    assert receipt["periodic_candidate_count"] == 1
+    assert receipt["excluded_non_periodic_proposal_count"] == 0
+
+
 def test_hf_trainer_chunks_model_topk_proposals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -321,7 +375,7 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
             "--zspace-repetition-unlikelihood-ngram-order",
             "3",
             "--zspace-repetition-unlikelihood-candidate-source",
-            "model-topk-history",
+            "model-topk-periodic",
             "--zspace-repetition-unlikelihood-proposal-top-k",
             "8",
             "--zspace-repetition-unlikelihood-context-window",
@@ -341,7 +395,7 @@ def test_hf_bridge_seals_the_objective_in_training_recipe_identity() -> None:
     assert objective["enabled"] is True  # type: ignore[index]
     assert objective["config"]["strength"] == 0.1  # type: ignore[index]
     assert objective["config"]["candidate_source"] == {  # type: ignore[index]
-        "kind": "model_topk_history",
+        "kind": "model_topk_periodic",
         "proposal_top_k": 8,
     }
     assert objective["proposal_materialization"] == (  # type: ignore[index]

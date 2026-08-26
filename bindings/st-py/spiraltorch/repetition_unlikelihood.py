@@ -18,7 +18,7 @@ def _native_constant(name: str, fallback: object) -> object:
 ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION = str(
     _native_constant(
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
-        "spiraltorch.zspace_repetition_unlikelihood.v2",
+        "spiraltorch.zspace_repetition_unlikelihood.v3",
     )
 )
 ZSPACE_REPETITION_UNLIKELIHOOD_KIND = str(
@@ -78,6 +78,14 @@ ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION = int(
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K = int(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K", 64)
 )
+ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD = int(
+    _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD", 16)
+)
+ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS = int(
+    _native_constant(
+        "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS", 3
+    )
+)
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES = int(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES", 4_096)
 )
@@ -109,6 +117,8 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS",
     "ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON",
     "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE",
@@ -157,6 +167,10 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
         or plan.get("objective_rule") != ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE
         or plan.get("probability_epsilon")
         != ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON
+        or plan.get("periodic_suffix_max_period")
+        != ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD
+        or plan.get("periodic_suffix_min_repetitions")
+        != ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS
         or plan.get("efficacy_claim_ready") is not False
     ):
         raise RuntimeError(
@@ -227,10 +241,11 @@ def _candidate_source_payload(
         return dict(candidate_source)
     if candidate_source == "prior_continuation":
         return {"kind": candidate_source, "ngram_order": ngram_order}
-    if candidate_source == "model_topk_history":
+    if candidate_source in {"model_topk_history", "model_topk_periodic"}:
         return {"kind": candidate_source, "proposal_top_k": proposal_top_k}
     raise ValueError(
-        "candidate_source must be prior_continuation or model_topk_history"
+        "candidate_source must be prior_continuation, model_topk_history, or "
+        "model_topk_periodic"
     )
 
 

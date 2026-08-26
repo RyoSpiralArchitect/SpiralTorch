@@ -22,10 +22,11 @@ from .repetition_unlikelihood import (
 )
 
 HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA = (
-    "spiraltorch.hf_repetition_unlikelihood_receipt.v2"
+    "spiraltorch.hf_repetition_unlikelihood_receipt.v3"
 )
 HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY = "_spiraltorch_repetition_unlikelihood_plan"
 _MODEL_TOPK_MAX_FLOAT_BYTES = 32 * 1024 * 1024
+_MODEL_TOPK_SOURCE_KINDS = frozenset({"model_topk_history", "model_topk_periodic"})
 
 __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
@@ -66,7 +67,7 @@ def hf_repetition_unlikelihood_recipe_contract(
         "token_mask": [True],
         "label_mask": [True],
     }
-    if source_kind == "model_topk_history":
+    if source_kind in _MODEL_TOPK_SOURCE_KINDS:
         validation_sequence["proposal_token_ids"] = [[]]
     validation_plan = zspace_repetition_unlikelihood_plan(
         sequences=[validation_sequence],
@@ -84,7 +85,7 @@ def hf_repetition_unlikelihood_recipe_contract(
     canonical_config = dict(config)
     enabled = float(canonical_config["strength"]) > 0.0
     return {
-        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v2",
+        "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v3",
         "enabled": enabled,
         "semantic_owner": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
         "semantic_backend": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
@@ -100,7 +101,7 @@ def hf_repetition_unlikelihood_recipe_contract(
         "model_accepts_loss_kwargs": False if enabled else None,
         "proposal_materialization": (
             "after_model_forward_from_detached_logits"
-            if enabled and source_kind == "model_topk_history"
+            if enabled and source_kind in _MODEL_TOPK_SOURCE_KINDS
             else "in_data_collator"
             if enabled
             else None
@@ -189,7 +190,7 @@ class HfRepetitionUnlikelihoodCollator:
         ]
         source = self.config.get("candidate_source")
         source_kind = source.get("kind") if isinstance(source, Mapping) else None
-        if source_kind == "model_topk_history":
+        if source_kind in _MODEL_TOPK_SOURCE_KINDS:
             metadata = HfRepetitionUnlikelihoodBatchPlan(
                 report=None,
                 sequences=tuple(sequences),
@@ -213,6 +214,8 @@ class _RepetitionUnlikelihoodReceipt:
         self.proposal_count = 0
         self.excluded_target_proposal_count = 0
         self.excluded_out_of_history_proposal_count = 0
+        self.excluded_non_periodic_proposal_count = 0
+        self.periodic_candidate_count = 0
         self._plan_stream = hashlib.sha256()
         self._base_loss_sum: Any = None
         self._auxiliary_loss_sum: Any = None
@@ -246,6 +249,12 @@ class _RepetitionUnlikelihoodReceipt:
         )
         self.excluded_out_of_history_proposal_count += int(
             aggregate.get("excluded_out_of_history_proposal_count", 0)
+        )
+        self.excluded_non_periodic_proposal_count += int(
+            aggregate.get("excluded_non_periodic_proposal_count", 0)
+        )
+        self.periodic_candidate_count += int(
+            aggregate.get("periodic_candidate_count", 0)
         )
         self._plan_stream.update(plan_id.encode("ascii"))
         self._plan_stream.update(b"\n")
@@ -300,6 +309,10 @@ class _RepetitionUnlikelihoodReceipt:
             "excluded_out_of_history_proposal_count": (
                 self.excluded_out_of_history_proposal_count
             ),
+            "excluded_non_periodic_proposal_count": (
+                self.excluded_non_periodic_proposal_count
+            ),
+            "periodic_candidate_count": self.periodic_candidate_count,
             "mean_candidates_per_active_position": (
                 None
                 if self.active_position_count == 0
@@ -375,8 +388,8 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             raise RuntimeError("repetition-unlikelihood recipe is missing config")
         source = expected_config.get("candidate_source")
         source_kind = source.get("kind") if isinstance(source, Mapping) else None
-        if source_kind != "model_topk_history":
-            raise RuntimeError("only model_topk_history may defer repetition planning")
+        if source_kind not in _MODEL_TOPK_SOURCE_KINDS:
+            raise RuntimeError("only model-top-k sources may defer repetition planning")
         proposal_top_k = int(source.get("proposal_top_k", 0))
         if getattr(logits, "ndim", None) != 3:
             raise RuntimeError("causal-LM logits must have rank 3")

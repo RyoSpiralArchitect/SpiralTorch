@@ -6,6 +6,10 @@
 //! tokenizer-agnostic repetition and diversity semantics applied to continuation
 //! token IDs, together with canonical ordering, identity, and validation.
 
+use super::zspace_periodicity::{
+    longest_periodic_suffix as shared_longest_periodic_suffix, PeriodicSuffix,
+    ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD, ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,8 +31,10 @@ pub const ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE: usize = 16_384;
 pub const ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS: usize = 1_000_000;
 pub const ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS: [usize; 4] = [1, 2, 3, 4];
-pub const ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: usize = 16;
-pub const ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: usize = 3;
+pub const ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: usize =
+    ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD;
+pub const ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: usize =
+    ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -393,52 +399,12 @@ fn summarize_ngrams(tokens: &[u64], order: usize) -> ZSpaceGenerationNgramEviden
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct PeriodicSuffix {
-    period: usize,
-    token_count: usize,
-    repeated_token_count: usize,
-    repetition_count: usize,
-}
-
 fn longest_periodic_suffix(tokens: &[u64]) -> Option<PeriodicSuffix> {
-    let maximum_period = ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD
-        .min(tokens.len() / ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS);
-    let mut best: Option<PeriodicSuffix> = None;
-    for period in 1..=maximum_period {
-        let mut repeated_token_count = 0usize;
-        while repeated_token_count + period < tokens.len()
-            && tokens[tokens.len() - 1 - repeated_token_count]
-                == tokens[tokens.len() - 1 - repeated_token_count - period]
-        {
-            repeated_token_count += 1;
-        }
-        let token_count = repeated_token_count + period;
-        if token_count < period * ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS {
-            continue;
-        }
-        let candidate = PeriodicSuffix {
-            period,
-            token_count,
-            repeated_token_count,
-            repetition_count: token_count / period,
-        };
-        let replace = best.is_none_or(|current| {
-            (
-                candidate.repeated_token_count,
-                candidate.token_count,
-                usize::MAX - candidate.period,
-            ) > (
-                current.repeated_token_count,
-                current.token_count,
-                usize::MAX - current.period,
-            )
-        });
-        if replace {
-            best = Some(candidate);
-        }
-    }
-    best
+    shared_longest_periodic_suffix(
+        tokens,
+        ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD,
+        ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS,
+    )
 }
 
 fn summarize_aggregate(

@@ -1,0 +1,55 @@
+{
+  "schema": "spiraltorch.hf_generation_prompt_set.v1",
+  "prompt_set_id": "sha256:9e6112847322aaa92436c0f6309646d5ec17a825105322eb6ea87039f44007ac",
+  "scope": "Fresh independent English continuation prompts prespecified for the model-top-k periodic unlikelihood pilot; not a semantic-quality gold set and not selected from model outputs.",
+  "prompts": [
+    {
+      "label": "orchard-lantern",
+      "text": "At the edge of the orchard, a lantern"
+    },
+    {
+      "label": "nameless-letter",
+      "text": "The letter arrived without a name, but"
+    },
+    {
+      "label": "midnight-river",
+      "text": "Near midnight, the river changed its"
+    },
+    {
+      "label": "upstairs-footsteps",
+      "text": "She counted the footsteps above her until"
+    },
+    {
+      "label": "garden-gate",
+      "text": "Beyond the locked garden gate stood"
+    },
+    {
+      "label": "mechanic-oil",
+      "text": "The mechanic wiped the oil away and"
+    },
+    {
+      "label": "village-memory",
+      "text": "No one in the village remembered why"
+    },
+    {
+      "label": "theater-curtain",
+      "text": "Inside the abandoned theater, the curtain"
+    },
+    {
+      "label": "opened-window",
+      "text": "He opened the window just as"
+    },
+    {
+      "label": "weather-report",
+      "text": "The captain folded the weather report and"
+    },
+    {
+      "label": "library-floor",
+      "text": "Beneath the library floor they discovered"
+    },
+    {
+      "label": "winter-clock",
+      "text": "Every winter, the clock in the tower"
+    }
+  ]
+}

@@ -1,0 +1,493 @@
+{
+  "schema": "spiraltorch.hf_model_topk_periodic_unlikelihood_benchmark.v1",
+  "row_type": "hf_model_topk_periodic_unlikelihood_benchmark",
+  "status": "passed",
+  "decision": "passed_prespecified_gate",
+  "study_id": "sha256:e0d182ce3bce5dd3e0d8d51018bd091648970432eacae19dcd716aa21fe1b250",
+  "recorded_at": "2026-08-23T03:48:50Z",
+  "protocol": {
+    "path": "docs/benchmarks/hf_model_topk_periodic_unlikelihood_pythia70m_64step_prespec_20260822.json",
+    "file_sha256": "sha256:85192bc2d8019de066debd5ed4651581653c59c8032b0159f2fd72e7bcb9c91d",
+    "protocol_id": "sha256:e0d182ce3bce5dd3e0d8d51018bd091648970432eacae19dcd716aa21fe1b250",
+    "implementation_git_commit": "a1fa9da134b2dce65e3d6e6b48a911655b7b0529",
+    "prespec_git_commit": "7c1b6c6d595e3b2725c763b9e0dabfb46d42c748",
+    "runtime_freeze_git_commit": "ce7d2b2716d38c4a921533b5cef550630d34ce30",
+    "no_retuning_observed": true
+  },
+  "study_spec": {
+    "classification": "prespecified_bounded_candidate_factorization_pilot",
+    "model": "EleutherAI/pythia-70m-deduped",
+    "model_snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+    "corpus": "Dubliners",
+    "corpus_sha256": "sha256:d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+    "seeds": [
+      41,
+      43,
+      47
+    ],
+    "arms": [
+      {
+        "name": "model_topk_history",
+        "candidate_source": "model_topk_history",
+        "repetition_unlikelihood_strength": 0.1
+      },
+      {
+        "name": "model_topk_periodic",
+        "candidate_source": "model_topk_periodic",
+        "repetition_unlikelihood_strength": 0.1
+      }
+    ],
+    "optimizer_update_count": 64,
+    "gradient_accumulation_steps": 8,
+    "single_factor_rule": "The candidate_source kind is the only intended difference between paired arms.",
+    "generation": {
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_periodic_v3_prompts.json",
+      "prompt_set_file_sha256": "sha256:f9a33b3c871fc66e805cdb2949fda40463d3ef442118411d7fb7c46e07ed663c",
+      "prompt_set_id": "sha256:9e6112847322aaa92436c0f6309646d5ec17a825105322eb6ea87039f44007ac",
+      "prompt_count": 12,
+      "strategy": "greedy",
+      "max_new_tokens": 96,
+      "control_mode": "baseline_only_no_zspace_inference_control"
+    }
+  },
+  "provenance": {
+    "source_artifact_root": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1",
+    "source_artifacts_ignored_by_git": true,
+    "source_artifacts": [
+      {
+        "seed": 41,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_history/run-card.json",
+          "sha256": "sha256:d2d6a9173e9d7d2cc00fc490145bc69c4e6a813ccad447f84ae13cf7f98938b0"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s41/model_topk_history.json",
+          "sha256": "sha256:ca6a9ffaaf6d9e6d8728c72d4d4c6fcf03d5c23b7c273f9c5ec4452a1ddf0865",
+          "evidence_id": "sha256:8d5d81ba8218b52fbd6bf52135f68ad7bff396cfb955f256a7c33f00dce41dbe",
+          "generated_continuation_set_id": "sha256:5b37ee18cf93d6a437636a4a424388c3ecd237a0707b6e431f6e53a244217c99"
+        },
+        "adapter": {
+          "adapter_id": "sha256:947e6d6cb34a5b2c92be1dcec2493531a6dc5f67cacf36fb921fb77850a19d71",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:423c429babdd7282863a924b44b1ef08b42a50e218c80550a61dfb7fadd0c764",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 41,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_periodic/run-card.json",
+          "sha256": "sha256:d9cf639ac308ba04898968de9e3db3ab4a2228e8f90e4f682c1348d7395e6775"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s41/model_topk_periodic.json",
+          "sha256": "sha256:6c832d600d583e9d670c31bde88bd6824275d4dd7d18f0c63be75101038cefe4",
+          "evidence_id": "sha256:b7f2c9be6f7e29f34d4f1aafd7c26d618ac1ed8247bd9369171f4e855557f023",
+          "generated_continuation_set_id": "sha256:03ef11bb951822444df1ca69c35b26999992ab6b552ad6466f5b6a542edc632d"
+        },
+        "adapter": {
+          "adapter_id": "sha256:94a52ff45b51ad0eeeca9d407763f3657f490b5972fb98d7a2ebc8d3488ab4b5",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:9fafb797a6d89cf5782b66bfa7a66156e1a0eb217fcd457189d94d16d8f5a117",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s41/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 43,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_history/run-card.json",
+          "sha256": "sha256:9b7a95d7cdef3c4d67e7bf909cab7cb7e99752d6b9874370ba37a984f5ab0fc1"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s43/model_topk_history.json",
+          "sha256": "sha256:ff1d8d08127a487665ba0b1675af7f76f44ca31808e2f6e4c9624289a534f8b4",
+          "evidence_id": "sha256:d67a50131d48b3fff2ac2db581dea2b183f7a51982585e836b747645f5e93f31",
+          "generated_continuation_set_id": "sha256:85e2149f106e868162a871b9890795ee2522db755faa920d751781815f4738a5"
+        },
+        "adapter": {
+          "adapter_id": "sha256:3b4b1358993433af7128c03ac85464788dabd9029ce9b8a589d6388ae2bac941",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:8001a7cffd551dbdca1c7fc58fdde95e5c2f31f76ad51bb0f681cbff055039ff",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 43,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_periodic/run-card.json",
+          "sha256": "sha256:7d60e881f9e8fe55de23fbdd81bb9f06ced97a65de93720d7e70792451a6ea3b"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s43/model_topk_periodic.json",
+          "sha256": "sha256:6179aa0636a63c81952a8aa9bb06080b0a2286d4829ba917eb66e88fc62d3c41",
+          "evidence_id": "sha256:86d62a949c9d344ff7f488b8d948d9bbcaf9d77163867e5b0a17a47aa72a1b2b",
+          "generated_continuation_set_id": "sha256:7ea05d9ac88806004e44a4bd7c33b51b190a7aae82b9c0e398524741fe1f8957"
+        },
+        "adapter": {
+          "adapter_id": "sha256:c50e58d7f167ec460e22ae9ab575503c04f1c83136164758aa12b27b24a8f8d8",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:6d9531973173752ab25b019c2a97f2453bfbf121f5540fb073203d89b18e7862",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s43/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 47,
+        "arm": "model_topk_history",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_history/run-card.json",
+          "sha256": "sha256:5356202441235ff46518d056ff70180bc0f8dc570cc8edc38414075113ba3ae9"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s47/model_topk_history.json",
+          "sha256": "sha256:df1a36272af851034e85ae65d160dc37248673df450b5fbab39fafd133b57ad6",
+          "evidence_id": "sha256:36f7cb908071c3203853e14dc69892ea6bfc1542bd72818509dd07d4a87b9ff5",
+          "generated_continuation_set_id": "sha256:6875d38987a62283f11caa734ff0335480454ae0a0e0cfcc71309609c3577fea"
+        },
+        "adapter": {
+          "adapter_id": "sha256:96dbd891816aab2a04edb8fa78a6df73493551bac6a0d873e013c1f307b54964",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_history/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:d22c960acad04bd02bb88c0a111918b5e0e390cb8b4f1b439969e9fb18c63d80",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_history/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      },
+      {
+        "seed": 47,
+        "arm": "model_topk_periodic",
+        "run_card": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_periodic/run-card.json",
+          "sha256": "sha256:5affd4b5ebd494815f5d0de686245758f2bf0df02148225c3b149e68b92b744b"
+        },
+        "generation_report": {
+          "path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/generations/s47/model_topk_periodic.json",
+          "sha256": "sha256:72caab1c980fea3de1c65323ca5d77b4158c0fe299c707a26d9a0f1a71bdf1ff",
+          "evidence_id": "sha256:358641c8e5bd5853eec3ecbe11a2be3f97dc5c4d4feefba4ef022b8d2d3712fb",
+          "generated_continuation_set_id": "sha256:6a9fbb8a6f99dec4b09a41d5585fcff5d91461b202bc6a9990d7432f78410592"
+        },
+        "adapter": {
+          "adapter_id": "sha256:d4e2aee66ac0883bd5b6468d32e27d936e60bb6ddf3d5b94dedf08c7358f2e72",
+          "weights_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_periodic/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:b73c5100967869b3ef42f2c39a6199fe8b4a8fc2bbae59d2d11bb56e6681ee1c",
+          "config_path": "models/runs/hf-model-topk-periodic-unlikelihood-pythia70m-pilot-v1/runs/s47/model_topk_periodic/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155"
+        }
+      }
+    ]
+  },
+  "identity_gates": {
+    "run_card_count": 6,
+    "generation_report_count": 6,
+    "all_failure_fields_null": true,
+    "all_before_and_after_eval_status_ok": true,
+    "all_optimizer_receipts_ready": true,
+    "all_runs_reached_64_optimizer_updates": true,
+    "all_trainer_trace_lineages_sealed": true,
+    "all_adapter_lineages_ready": true,
+    "all_required_training_identities_ready_and_verified": true,
+    "all_generation_reports_complete": true,
+    "all_generation_rows_nonempty_and_full_horizon": true,
+    "all_generation_model_artifact_ids_match_adapter_lineage": true,
+    "prompt_set_id": "sha256:9e6112847322aaa92436c0f6309646d5ec17a825105322eb6ea87039f44007ac",
+    "generation_protocol_id": "sha256:a2396fa18c4bd3fe00b6214a139ed37a42cc266291513269dd5911a2ad9c787b",
+    "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+    "execution_identity_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f",
+    "training_input_identity_id": "sha256:f914a47da20c6c063ce5687c50f3825b4d122d000587ba859a1ec40c332316d3",
+    "paired_decoding_config_ids": [
+      {
+        "seed": 41,
+        "decoding_config_id": "sha256:1194020030eaa8d900cf064c9269dee3b0b9e5d2171ef99359dfc2998745a3a9"
+      },
+      {
+        "seed": 43,
+        "decoding_config_id": "sha256:3e994a40c3eaece5402570c2dd3372c5d41108bb5f2e498c6d6d855fb2fc3030"
+      },
+      {
+        "seed": 47,
+        "decoding_config_id": "sha256:9862c8311c251060167515dba16451ad17975ee589c6383a83dfc9a150fca166"
+      }
+    ],
+    "rust_generation_evidence_validation": {
+      "status": "ready",
+      "file_count": 6,
+      "canonical_round_trip_count": 6,
+      "failed_count": 0,
+      "sample_count_per_file": 12,
+      "total_token_count_per_file": 1152,
+      "empty_sample_count": 0
+    },
+    "readiness_gate_passed": true
+  },
+  "results": {
+    "evaluation_loss": {
+      "direction": "lower_is_better",
+      "paired_rows": [
+        {
+          "seed": 41,
+          "eval_before_shared": 5.312110424041748,
+          "model_topk_history_eval_after": 5.199935436248779,
+          "model_topk_periodic_eval_after": 5.199702262878418,
+          "model_topk_periodic_minus_model_topk_history": -0.00023317337036132812
+        },
+        {
+          "seed": 43,
+          "eval_before_shared": 5.1428632736206055,
+          "model_topk_history_eval_after": 5.046084403991699,
+          "model_topk_periodic_eval_after": 5.046151638031006,
+          "model_topk_periodic_minus_model_topk_history": 6.723403930664062e-05
+        },
+        {
+          "seed": 47,
+          "eval_before_shared": 5.247003555297852,
+          "model_topk_history_eval_after": 5.1482954025268555,
+          "model_topk_periodic_eval_after": 5.146400451660156,
+          "model_topk_periodic_minus_model_topk_history": -0.0018949508666992188
+        }
+      ],
+      "mean_model_topk_periodic_minus_model_topk_history": -0.0006869633992513021,
+      "maximum_individual_model_topk_periodic_minus_model_topk_history": 6.723403930664062e-05,
+      "mean_safety_threshold": 0.02,
+      "maximum_individual_safety_threshold": 0.05,
+      "mean_safety_gate_passed": true,
+      "maximum_individual_safety_gate_passed": true,
+      "safety_gate_passed": true
+    },
+    "objective_execution": {
+      "receipts": [
+        {
+          "seed": 41,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:0b15f7016cb188015545b3e684d219ad88163185447eaace61be0a9a3f86ec82",
+          "training_batch_count": 504,
+          "active_position_count": 99574,
+          "eligible_target_count": 127762,
+          "active_position_ratio": 0.7793710179865688,
+          "proposal_count": 1022096,
+          "candidate_count": 281432,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.826360294856087,
+          "mean_auxiliary_loss": 0.08526536822319031,
+          "mean_weighted_auxiliary_loss": 0.008526536822319032
+        },
+        {
+          "seed": 41,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:9dd1863f1a6b3f9b67b06c4d238da88554496de8b7b82e787c053bca318ebebf",
+          "training_batch_count": 504,
+          "active_position_count": 11,
+          "eligible_target_count": 127762,
+          "active_position_ratio": 8.609758770213365e-05,
+          "proposal_count": 1022096,
+          "candidate_count": 11,
+          "periodic_candidate_count": 11,
+          "excluded_non_periodic_proposal_count": 281503,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.005508400034159422,
+          "mean_weighted_auxiliary_loss": 0.0005508400034159423
+        },
+        {
+          "seed": 43,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:c384c99948083a36fcf728c86cfee1bcfa0945d8bdca8cdfb3f3ce8e5a0f0f46",
+          "training_batch_count": 508,
+          "active_position_count": 100002,
+          "eligible_target_count": 128778,
+          "active_position_ratio": 0.7765456832688813,
+          "proposal_count": 1030224,
+          "candidate_count": 283502,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.8349633007339854,
+          "mean_auxiliary_loss": 0.08526322990655899,
+          "mean_weighted_auxiliary_loss": 0.008526322990655899
+        },
+        {
+          "seed": 43,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:f3ded90e68e5bacabb1030f9cf0171fdea731c73ab91f88112b99331179fc39d",
+          "training_batch_count": 508,
+          "active_position_count": 5,
+          "eligible_target_count": 128778,
+          "active_position_ratio": 3.8826507633291404e-05,
+          "proposal_count": 1030224,
+          "candidate_count": 5,
+          "periodic_candidate_count": 5,
+          "excluded_non_periodic_proposal_count": 283630,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.002630040515214205,
+          "mean_weighted_auxiliary_loss": 0.0002630040515214205
+        },
+        {
+          "seed": 47,
+          "arm": "model_topk_history",
+          "status": "ready",
+          "plan_stream_id": "sha256:b9dc8b40418a80246c245531bdde0e4eaa455722993495e403a84476308c993c",
+          "training_batch_count": 506,
+          "active_position_count": 100496,
+          "eligible_target_count": 128524,
+          "active_position_ratio": 0.7819239986306059,
+          "proposal_count": 1028192,
+          "candidate_count": 283910,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "mean_candidates_per_active_position": 2.825087565674256,
+          "mean_auxiliary_loss": 0.08642051368951797,
+          "mean_weighted_auxiliary_loss": 0.008642051368951797
+        },
+        {
+          "seed": 47,
+          "arm": "model_topk_periodic",
+          "status": "ready",
+          "plan_stream_id": "sha256:47156f9ee0ca42a8490ce8a657599fd00c1f230e4d970a3970fdcfad5ee54d66",
+          "training_batch_count": 506,
+          "active_position_count": 5,
+          "eligible_target_count": 128524,
+          "active_position_ratio": 3.890323986181569e-05,
+          "proposal_count": 1028192,
+          "candidate_count": 5,
+          "periodic_candidate_count": 5,
+          "excluded_non_periodic_proposal_count": 283992,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.0027131473179906607,
+          "mean_weighted_auxiliary_loss": 0.0002713147317990661
+        }
+      ],
+      "all_receipts_ready": true,
+      "total_history_candidate_count": 848844,
+      "total_periodic_candidate_count": 21,
+      "total_excluded_non_periodic_proposal_count": 849125,
+      "mechanism_gate_passed": true
+    },
+    "held_out_greedy_generation": {
+      "direction": "lower_loop_score_is_better",
+      "paired_rows": [
+        {
+          "seed": 41,
+          "model_topk_history_loop_score": 1.3013785849819586,
+          "model_topk_periodic_loop_score": 1.2341603676745054,
+          "loop_score_delta": -0.06721821730745314,
+          "model_topk_periodic_win": true,
+          "prompt_win_count": 6,
+          "prompt_loss_count": 3,
+          "prompt_tie_count": 3,
+          "model_topk_history_periodic_loop_sample_ratio": 0.6666666666666666,
+          "model_topk_periodic_periodic_loop_sample_ratio": 0.6666666666666666,
+          "periodic_loop_ratio_delta": 0.0,
+          "periodic_suffix_repeated_token_ratio_delta": -0.046006944444444475,
+          "ngram3_repetition_ratio_delta": -0.01507092198581561,
+          "ngram2_distinct_ratio_delta": 0.011403508771929832,
+          "ngram4_distinct_ratio_delta": 0.01971326164874551
+        },
+        {
+          "seed": 43,
+          "model_topk_history_loop_score": 1.4203579927211647,
+          "model_topk_periodic_loop_score": 1.2662580098295386,
+          "loop_score_delta": -0.15409998289162607,
+          "model_topk_periodic_win": true,
+          "prompt_win_count": 5,
+          "prompt_loss_count": 1,
+          "prompt_tie_count": 6,
+          "model_topk_history_periodic_loop_sample_ratio": 0.8333333333333334,
+          "model_topk_periodic_periodic_loop_sample_ratio": 0.6666666666666666,
+          "periodic_loop_ratio_delta": -0.16666666666666674,
+          "periodic_suffix_repeated_token_ratio_delta": -0.13975694444444448,
+          "ngram3_repetition_ratio_delta": -0.0292553191489362,
+          "ngram2_distinct_ratio_delta": 0.022807017543859665,
+          "ngram4_distinct_ratio_delta": 0.031362007168458744
+        },
+        {
+          "seed": 47,
+          "model_topk_history_loop_score": 1.3023014650989173,
+          "model_topk_periodic_loop_score": 1.3835487433121816,
+          "loop_score_delta": 0.08124727821326427,
+          "model_topk_periodic_win": false,
+          "prompt_win_count": 5,
+          "prompt_loss_count": 5,
+          "prompt_tie_count": 2,
+          "model_topk_history_periodic_loop_sample_ratio": 0.75,
+          "model_topk_periodic_periodic_loop_sample_ratio": 0.8333333333333334,
+          "periodic_loop_ratio_delta": 0.08333333333333337,
+          "periodic_suffix_repeated_token_ratio_delta": 0.10243055555555558,
+          "ngram3_repetition_ratio_delta": -0.012411347517730542,
+          "ngram2_distinct_ratio_delta": 0.007894736842105288,
+          "ngram4_distinct_ratio_delta": 0.008064516129032279
+        }
+      ],
+      "mean_loop_score_delta": -0.046690307328604984,
+      "model_topk_periodic_win_count": 2,
+      "model_topk_history_win_count": 1,
+      "seed_tie_count": 0,
+      "total_prompt_win_count": 16,
+      "total_prompt_loss_count": 9,
+      "total_prompt_tie_count": 11,
+      "mean_periodic_loop_ratio_delta": -0.02777777777777779,
+      "mean_periodic_suffix_repeated_token_ratio_delta": -0.02777777777777779,
+      "mean_ngram3_repetition_ratio_delta": -0.01891252955082745,
+      "mean_ngram2_distinct_ratio_delta": 0.014035087719298261,
+      "mean_ngram4_distinct_ratio_delta": 0.01971326164874551
+    }
+  },
+  "acceptance": {
+    "readiness_and_stability_gate_passed": true,
+    "mechanism_gate_passed": true,
+    "mean_loop_score_delta_threshold": 0.0,
+    "mean_loop_score_delta": -0.046690307328604984,
+    "mean_loop_score_gate_passed": true,
+    "minimum_seed_win_count": 2,
+    "observed_seed_win_count": 2,
+    "seed_direction_gate_passed": true,
+    "mean_eval_loss_delta_threshold": 0.02,
+    "mean_eval_loss_delta": -0.0006869633992513021,
+    "mean_eval_loss_safety_gate_passed": true,
+    "maximum_individual_eval_loss_delta_threshold": 0.05,
+    "maximum_individual_eval_loss_delta": 6.723403930664062e-05,
+    "maximum_individual_eval_loss_safety_gate_passed": true,
+    "overall_gate_passed": true,
+    "failed_gate": null,
+    "decision_basis": "All readiness, stability, identity, mechanism, CE safety, mean loop-score, and two-of-three seed-direction requirements passed under the frozen protocol."
+  },
+  "diagnosis": {
+    "execution_result": "The Rust-owned periodic planner selected 21 loop-completing candidates across the three periodic runs and excluded 849125 non-periodic history proposals; every periodic seed activated the mechanism.",
+    "safety_result": "Held-out causal-LM loss changed by -0.000687 on average and the worst seed changed by +0.000067, far inside both frozen safety thresholds.",
+    "efficacy_result": "The periodic arm reduced the primary loop score for seeds 41 and 43, increased it for seed 47, and improved the three-seed mean by 0.046690.",
+    "secondary_metric_result": "Mean trigram repetition and periodic-loop incidence moved in the intended direction, while prompt-local and seed-local outcomes remained heterogeneous.",
+    "interpretation": "The factorized periodic candidate rule passed this bounded single-model single-corpus pilot and is ready for fresh replication, not general efficacy promotion."
+  },
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "Under a frozen three-seed Pythia-70M/Dubliners protocol, the Rust-owned periodic model-top-k objective executed end-to-end, preserved held-out CE, reduced mean held-out greedy loop score, and satisfied the prespecified two-of-three seed gate.",
+    "observed_result": "The periodic-minus-history mean loop-score delta was -0.046690 with two of three seed wins; the result is bounded and one seed moved in the opposite direction.",
+    "excluded_claims": [
+      "statistical significance",
+      "semantic or language-quality superiority",
+      "multi-model or multi-corpus generality",
+      "optimal periodic-objective strength",
+      "general Z-space training superiority"
+    ],
+    "evidence_boundary": "This is a prespecified bounded pilot on one 70M model, one literary corpus, three seeds, and greedy decoding. Passing its gate authorizes replication, not a broad efficacy claim."
+  },
+  "next_prespecified_experiment": {
+    "status": "proposed_not_run",
+    "current_study_retuning_allowed": false,
+    "recommended_question": "Does the periodic candidate advantage replicate on a fresh model or corpus while preserving CE and human-reviewed semantic quality?",
+    "requirements": [
+      "freeze a new protocol ID, prompt set, and seeds before any run",
+      "retain model-top-k history as the matched control and candidate source as the only training factor",
+      "add blinded semantic-quality review beside Rust token-loop evidence",
+      "retain exact replay, adapter, optimizer, and generation identities",
+      "treat the sparse 21-candidate activation as a measured mechanism property rather than retuning on this prompt set"
+    ]
+  }
+}

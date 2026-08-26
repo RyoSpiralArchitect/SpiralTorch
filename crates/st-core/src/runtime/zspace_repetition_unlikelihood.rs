@@ -6,6 +6,10 @@
 //! identity. Model clients retain the differentiable tensor operation described
 //! by [`ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE`].
 
+use super::zspace_periodicity::{
+    longest_periodic_suffix_with_appended_token, PeriodicSuffix, ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD,
+    ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,7 +17,7 @@ use std::fmt::Write;
 use thiserror::Error;
 
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_repetition_unlikelihood.v2";
+    "spiraltorch.zspace_repetition_unlikelihood.v3";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_KIND: &str =
     "spiraltorch.zspace_repetition_unlikelihood_plan";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER: &str =
@@ -22,9 +26,9 @@ pub const ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND: &str = "rust";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER: &str = "model-client-autograd";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER: &str = "model-client-no-grad";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE: &str =
-    "for model_topk_history, the model client submits torch.topk token IDs from detached float logits in returned rank order; Rust commits the received proposal stream but does not claim to reproduce model logits or backend tie behavior";
+    "for model_topk_history and model_topk_periodic, the model client submits torch.topk token IDs from detached float logits in returned rank order; Rust commits the received proposal stream but does not claim to reproduce model logits or backend tie behavior";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE: &str =
-    "prior_continuation matches the preceding n-1 token prefix and ranks prior alternative next tokens by occurrence count descending, most-recent distance ascending, then token ID ascending; model_topk_history preserves received proposal rank and retains non-target proposals occurring in bounded valid-token history, then caps the canonical candidate list";
+    "prior_continuation matches the preceding n-1 token prefix and ranks prior alternative next tokens by occurrence count descending, most-recent distance ascending, then token ID ascending; model_topk_history preserves received proposal rank and retains non-target proposals occurring in bounded valid-token history; model_topk_periodic additionally retains only proposals that complete a contiguous valid periodic suffix with period<=16 and >=3 repetitions; all sources cap the canonical candidate list";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE: &str =
     "position_loss=mean(-log(1-p(candidate))) over Rust-planned candidates; auxiliary_loss=mean(position_loss) over active positions; training_loss=causal_lm_loss+strength*auxiliary_loss; evaluation_loss remains causal_lm_loss";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON: f64 = 1.0e-6;
@@ -34,6 +38,10 @@ pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER: usize = 8;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW: usize = 16_384;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION: usize = 64;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K: usize = 64;
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD: usize =
+    ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD;
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS: usize =
+    ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES: usize = 4_096;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE: usize = 16_384;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS: usize = 1_000_000;
@@ -53,6 +61,7 @@ pub struct ZSpaceRepetitionUnlikelihoodConfig {
 pub enum ZSpaceRepetitionUnlikelihoodCandidateSource {
     PriorContinuation { ngram_order: usize },
     ModelTopkHistory { proposal_top_k: usize },
+    ModelTopkPeriodic { proposal_top_k: usize },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -79,6 +88,14 @@ pub struct ZSpaceRepetitionUnlikelihoodCandidate {
     pub most_recent_distance: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proposal_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodic_suffix_period: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodic_suffix_token_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodic_suffix_repeated_token_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodic_suffix_repetition_count: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -103,6 +120,8 @@ pub struct ZSpaceRepetitionUnlikelihoodAggregate {
     pub proposal_count: usize,
     pub excluded_target_proposal_count: usize,
     pub excluded_out_of_history_proposal_count: usize,
+    pub excluded_non_periodic_proposal_count: usize,
+    pub periodic_candidate_count: usize,
     pub truncated_candidate_count: usize,
     pub maximum_candidates_per_active_position: usize,
     pub active_position_ratio: Option<f64>,
@@ -125,6 +144,8 @@ pub struct ZSpaceRepetitionUnlikelihoodPlan {
     pub candidate_rule: &'static str,
     pub objective_rule: &'static str,
     pub probability_epsilon: f64,
+    pub periodic_suffix_max_period: usize,
+    pub periodic_suffix_min_repetitions: usize,
     pub positions: Vec<ZSpaceRepetitionUnlikelihoodPosition>,
     pub aggregate: ZSpaceRepetitionUnlikelihoodAggregate,
     pub efficacy_claim_ready: bool,
@@ -186,7 +207,7 @@ pub enum ZSpaceRepetitionUnlikelihoodError {
         "sequence {sequence_index} must not provide proposal_token_ids for prior_continuation"
     )]
     UnexpectedProposalRows { sequence_index: usize },
-    #[error("sequence {sequence_index} must provide proposal_token_ids for model_topk_history")]
+    #[error("sequence {sequence_index} must provide proposal_token_ids for a model-top-k candidate source")]
     MissingProposalRows { sequence_index: usize },
     #[error(
         "sequence {sequence_index} proposal row count {count} does not match token count {tokens}"
@@ -246,6 +267,7 @@ pub fn plan_zspace_repetition_unlikelihood(
     let mut proposal_count = 0usize;
     let mut excluded_target_proposal_count = 0usize;
     let mut excluded_out_of_history_proposal_count = 0usize;
+    let mut excluded_non_periodic_proposal_count = 0usize;
     let mut truncated_candidate_count = 0usize;
 
     for (sequence_index, sequence) in request.sequences.iter().enumerate() {
@@ -299,6 +321,10 @@ pub fn plan_zspace_repetition_unlikelihood(
                                 occurrence_count,
                                 most_recent_distance: target_index - most_recent_index,
                                 proposal_rank: None,
+                                periodic_suffix_period: None,
+                                periodic_suffix_token_count: None,
+                                periodic_suffix_repeated_token_count: None,
+                                periodic_suffix_repetition_count: None,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -329,7 +355,12 @@ pub fn plan_zspace_repetition_unlikelihood(
                     });
                 }
             }
-            ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { .. } => {
+            ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { .. }
+            | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { .. } => {
+                let periodic_only = matches!(
+                    &request.config.candidate_source,
+                    ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { .. }
+                );
                 let proposal_rows = sequence
                     .proposal_token_ids
                     .as_ref()
@@ -364,11 +395,32 @@ pub fn plan_zspace_repetition_unlikelihood(
                             excluded_out_of_history_proposal_count += 1;
                             continue;
                         };
+                        let periodic_suffix = periodic_only
+                            .then(|| {
+                                periodic_suffix_for_proposal(
+                                    sequence,
+                                    history_start,
+                                    target_index,
+                                    token_id,
+                                )
+                            })
+                            .flatten();
+                        if periodic_only && periodic_suffix.is_none() {
+                            excluded_non_periodic_proposal_count += 1;
+                            continue;
+                        }
                         candidates.push(ZSpaceRepetitionUnlikelihoodCandidate {
                             token_id,
                             occurrence_count,
                             most_recent_distance: target_index - most_recent_index,
                             proposal_rank: Some(proposal_rank),
+                            periodic_suffix_period: periodic_suffix.map(|value| value.period),
+                            periodic_suffix_token_count: periodic_suffix
+                                .map(|value| value.token_count),
+                            periodic_suffix_repeated_token_count: periodic_suffix
+                                .map(|value| value.repeated_token_count),
+                            periodic_suffix_repetition_count: periodic_suffix
+                                .map(|value| value.repetition_count),
                         });
                     }
                     truncate_candidates(
@@ -397,6 +449,11 @@ pub fn plan_zspace_repetition_unlikelihood(
         .map(|position| position.candidates.len())
         .sum();
     let active_position_count = positions.len();
+    let periodic_candidate_count = positions
+        .iter()
+        .flat_map(|position| &position.candidates)
+        .filter(|candidate| candidate.periodic_suffix_period.is_some())
+        .count();
     let aggregate = ZSpaceRepetitionUnlikelihoodAggregate {
         sequence_count: request.sequences.len(),
         total_token_count,
@@ -407,6 +464,8 @@ pub fn plan_zspace_repetition_unlikelihood(
         proposal_count,
         excluded_target_proposal_count,
         excluded_out_of_history_proposal_count,
+        excluded_non_periodic_proposal_count,
+        periodic_candidate_count,
         truncated_candidate_count,
         maximum_candidates_per_active_position: positions
             .iter()
@@ -433,6 +492,10 @@ pub fn plan_zspace_repetition_unlikelihood(
         candidate_rule: ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE,
         objective_rule: ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
         probability_epsilon: ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
+        periodic_suffix_max_period:
+            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD,
+        periodic_suffix_min_repetitions:
+            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
         positions,
         aggregate,
         efficacy_claim_ready: false,
@@ -459,6 +522,24 @@ fn eligible_model_proposal_target(
         && sequence.label_mask[target_index]
         && sequence.token_mask[target_index]
         && sequence.token_mask[target_index - 1]
+}
+
+fn periodic_suffix_for_proposal(
+    sequence: &ZSpaceRepetitionUnlikelihoodSequence,
+    bounded_history_start: usize,
+    target_index: usize,
+    proposal_token_id: u64,
+) -> Option<PeriodicSuffix> {
+    let contiguous_history_start = (bounded_history_start..target_index)
+        .rev()
+        .find(|&index| !sequence.token_mask[index])
+        .map_or(bounded_history_start, |index| index + 1);
+    longest_periodic_suffix_with_appended_token(
+        &sequence.token_ids[contiguous_history_start..target_index],
+        proposal_token_id,
+        ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD,
+        ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
+    )
 }
 
 pub fn validate_zspace_repetition_unlikelihood_value(
@@ -526,7 +607,8 @@ fn validate_config(
                 });
             }
         }
-        ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k } => {
+        ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k }
+        | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { proposal_top_k } => {
             if !(1..=ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K).contains(&proposal_top_k) {
                 return Err(ZSpaceRepetitionUnlikelihoodError::InvalidProposalTopK {
                     value: proposal_top_k,
@@ -620,7 +702,8 @@ fn validate_sequences(
                     });
                 }
             }
-            ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k } => {
+            ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k }
+            | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { proposal_top_k } => {
                 validate_model_proposals(sequence_index, sequence, *proposal_top_k)?;
             }
         }
@@ -733,6 +816,17 @@ mod tests {
         }
     }
 
+    fn periodic_config(proposal_top_k: usize) -> ZSpaceRepetitionUnlikelihoodConfig {
+        ZSpaceRepetitionUnlikelihoodConfig {
+            strength: 0.1,
+            candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic {
+                proposal_top_k,
+            },
+            context_window: 16,
+            max_candidates_per_position: 8,
+        }
+    }
+
     fn sequence(token_ids: &[u64]) -> ZSpaceRepetitionUnlikelihoodSequence {
         ZSpaceRepetitionUnlikelihoodSequence {
             token_ids: token_ids.to_vec(),
@@ -764,6 +858,16 @@ mod tests {
             config: model_config(proposals.len()),
             sequences: vec![value],
         }
+    }
+
+    fn periodic_request(
+        token_ids: &[u64],
+        target_index: usize,
+        proposals: &[u64],
+    ) -> ZSpaceRepetitionUnlikelihoodRequest {
+        let mut request = model_request(token_ids, target_index, proposals);
+        request.config = periodic_config(proposals.len());
+        request
     }
 
     #[test]
@@ -851,6 +955,50 @@ mod tests {
         assert_eq!(plan.positions[0].candidates.len(), 1);
         assert_eq!(plan.positions[0].candidates[0].token_id, 3);
         assert_eq!(plan.aggregate.excluded_out_of_history_proposal_count, 1);
+    }
+
+    #[test]
+    fn model_topk_periodic_retains_only_proposals_completing_a_periodic_suffix() {
+        let plan = plan_zspace_repetition_unlikelihood(periodic_request(
+            &[9, 1, 2, 1, 2, 1, 7],
+            6,
+            &[2, 1, 7, 8],
+        ))
+        .expect("plan");
+
+        assert_eq!(plan.positions.len(), 1);
+        let candidates = &plan.positions[0].candidates;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].token_id, 2);
+        assert_eq!(candidates[0].proposal_rank, Some(0));
+        assert_eq!(candidates[0].periodic_suffix_period, Some(2));
+        assert_eq!(candidates[0].periodic_suffix_token_count, Some(6));
+        assert_eq!(candidates[0].periodic_suffix_repeated_token_count, Some(4));
+        assert_eq!(candidates[0].periodic_suffix_repetition_count, Some(3));
+        assert_eq!(plan.aggregate.proposal_count, 4);
+        assert_eq!(plan.aggregate.excluded_target_proposal_count, 1);
+        assert_eq!(plan.aggregate.excluded_out_of_history_proposal_count, 1);
+        assert_eq!(plan.aggregate.excluded_non_periodic_proposal_count, 1);
+        assert_eq!(plan.aggregate.periodic_candidate_count, 1);
+        assert_eq!(
+            plan.periodic_suffix_max_period,
+            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD
+        );
+        assert_eq!(
+            plan.periodic_suffix_min_repetitions,
+            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS
+        );
+    }
+
+    #[test]
+    fn model_topk_periodic_does_not_bridge_invalid_token_gaps() {
+        let mut request = periodic_request(&[1, 2, 1, 2, 1, 9], 5, &[2]);
+        request.sequences[0].token_mask[2] = false;
+        let plan = plan_zspace_repetition_unlikelihood(request).expect("plan");
+
+        assert!(plan.positions.is_empty());
+        assert_eq!(plan.aggregate.excluded_non_periodic_proposal_count, 1);
+        assert_eq!(plan.aggregate.periodic_candidate_count, 0);
     }
 
     #[test]
