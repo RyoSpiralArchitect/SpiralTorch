@@ -449,6 +449,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--generation-evidence-protocol-id",
+        default=None,
+        help=(
+            "Optional prespecified sha256 protocol identity. When omitted, the "
+            "generic generation-metric protocol is used."
+        ),
+    )
+    parser.add_argument(
+        "--adapter-revision",
+        default=None,
+        help=(
+            "Pinned 40-character Hub commit for a remote PEFT adapter. Remote "
+            "adapter evidence is rejected when this is omitted."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-baseline", action="store_true")
     parser.add_argument("--baseline-only", action="store_true")
@@ -531,6 +547,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--sample-top-k must be non-negative")
     if args.seed < 0 or args.seed > 9_007_199_254_740_991:
         parser.error("--seed must be a non-negative cross-client safe integer")
+    if (
+        args.generation_evidence_protocol_id is not None
+        and not _is_sha256_id(args.generation_evidence_protocol_id)
+    ):
+        parser.error("--generation-evidence-protocol-id must be a lowercase sha256 ID")
+    if args.adapter_revision is not None and not _is_pinned_hub_revision(
+        args.adapter_revision
+    ):
+        parser.error("--adapter-revision must be a lowercase 40-character Hub commit")
     if args.zspace_entropy_tolerance < 0.0 or not math.isfinite(
         args.zspace_entropy_tolerance
     ):
@@ -571,6 +596,14 @@ def _loader_kwargs(args: argparse.Namespace) -> dict[str, object]:
     if args.trust_remote_code:
         kwargs["trust_remote_code"] = True
     return kwargs
+
+
+def _adapter_loader_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    return (
+        {}
+        if args.adapter_revision is None
+        else {"revision": str(args.adapter_revision)}
+    )
 
 
 def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
@@ -769,6 +802,12 @@ def _is_sha256_id(value: object) -> bool:
     )
 
 
+def _is_pinned_hub_revision(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 40 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 def _local_full_model_artifact_id(directory: Path) -> str:
     resolved = directory.expanduser().resolve()
     weight_suffixes = (".safetensors", ".bin", ".pt", ".pth")
@@ -816,9 +855,29 @@ def _model_artifact_id(
         )
     if source.is_dir():
         return _local_full_model_artifact_id(source)
+    if artifact_kind == "peft_adapter":
+        if not _is_pinned_hub_revision(args.adapter_revision):
+            raise RuntimeError(
+                "remote PEFT generation evidence requires --adapter-revision "
+                "with an exact 40-character Hub commit"
+            )
+        return _sha256_id(
+            {
+                "schema": "spiraltorch.hf_remote_peft_adapter_identity.v1",
+                "artifact_source": str(args.model_name),
+                "adapter_revision": str(args.adapter_revision),
+                "base_model_name_or_path": artifact_summary.get(
+                    "base_model_name_or_path"
+                ),
+                "base_model_revision": artifact_summary.get("base_model_revision"),
+                "base_model_commit": artifact_summary.get("base_model_commit"),
+                "runtime_identity_id": runtime_identity_id,
+            }
+        )
     return _sha256_id(
         {
             "schema": "spiraltorch.hf_resolved_model_artifact_identity.v1",
+            "artifact_source": str(args.model_name),
             "artifact_kind": artifact_kind,
             "base_model_name_or_path": artifact_summary.get("base_model_name_or_path"),
             "base_model_revision": artifact_summary.get("base_model_revision"),
@@ -870,6 +929,11 @@ def _generation_evidence_protocol_id() -> str:
     )
 
 
+def _resolved_generation_evidence_protocol_id(args: argparse.Namespace) -> str:
+    supplied = args.generation_evidence_protocol_id
+    return str(supplied) if supplied is not None else _generation_evidence_protocol_id()
+
+
 def _decoding_config_id(
     args: argparse.Namespace,
     run: Mapping[str, object],
@@ -899,7 +963,12 @@ def _generation_evidence_plan(
     return {
         "schema": "spiraltorch.hf_generation_evidence_plan.v1",
         "semantic_owner": ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
-        "protocol_id": _generation_evidence_protocol_id(),
+        "protocol_id": _resolved_generation_evidence_protocol_id(args),
+        "protocol_binding": (
+            "prespecified_cli_override"
+            if args.generation_evidence_protocol_id is not None
+            else "generic_metric_protocol"
+        ),
         "prompt_count": len(prompt_rows),
         "prompts": prompt_rows,
         "prompt_set_id": _sha256_id(
@@ -1367,6 +1436,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
             artifact_kind=args.model_artifact_kind,
             transformers_module=transformers,
             loader_kwargs=_loader_kwargs(args),
+            adapter_kwargs=_adapter_loader_kwargs(args),
         )
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = getattr(tokenizer, "eos_token", None)
