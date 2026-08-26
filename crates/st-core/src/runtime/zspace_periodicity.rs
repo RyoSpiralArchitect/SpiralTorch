@@ -255,7 +255,7 @@ pub fn analyze_zspace_periodicity(
 
 /// Recompute a persisted report and reject any non-canonical field.
 pub fn validate_zspace_periodicity_value(
-    report: serde_json::Value,
+    mut report: serde_json::Value,
 ) -> Result<ZSpacePeriodicityReport, ZSpacePeriodicityError> {
     let request = report
         .get("request")
@@ -265,12 +265,29 @@ pub fn validate_zspace_periodicity_value(
     let canonical = analyze_zspace_periodicity(request)?;
     let canonical_value =
         serde_json::to_value(&canonical).map_err(|error| malformed(error.to_string()))?;
+    normalize_persisted_ratio_numbers(&mut report);
     if report != canonical_value {
         return Err(malformed(
             "report does not match the canonical Rust periodicity analysis",
         ));
     }
     Ok(canonical)
+}
+
+fn normalize_persisted_ratio_numbers(report: &mut serde_json::Value) {
+    for field in [
+        "periodic_suffix_token_ratio",
+        "periodic_suffix_repeated_token_ratio",
+    ] {
+        let Some(value) = report.get_mut(field) else {
+            continue;
+        };
+        match value.as_u64() {
+            Some(0) => *value = serde_json::json!(0.0),
+            Some(1) => *value = serde_json::json!(1.0),
+            _ => {}
+        }
+    }
 }
 
 fn validate_config(config: ZSpacePeriodicityConfig) -> Result<(), ZSpacePeriodicityError> {
@@ -593,6 +610,45 @@ mod tests {
 
         value["periodic_loop_detected"] = serde_json::Value::Bool(false);
         let error = validate_zspace_periodicity_value(value).expect_err("tamper must fail");
+        assert!(matches!(
+            error,
+            ZSpacePeriodicityError::MalformedReport { .. }
+        ));
+    }
+
+    #[test]
+    fn validator_accepts_javascript_json_integer_spelling_for_exact_ratios() {
+        let full_periodic = analyze_zspace_periodicity(ZSpacePeriodicityRequest {
+            token_ids: vec![1, 1, 1],
+            appended_token_id: None,
+            config: ZSpacePeriodicityConfig::default(),
+        })
+        .expect("fully periodic report");
+        let mut stored = serde_json::to_value(&full_periodic).expect("serialized report");
+        stored["periodic_suffix_token_ratio"] = serde_json::json!(1);
+        assert_eq!(
+            validate_zspace_periodicity_value(stored).expect("JavaScript 1 is numeric 1.0"),
+            full_periodic
+        );
+
+        let non_periodic = analyze_zspace_periodicity(ZSpacePeriodicityRequest {
+            token_ids: vec![1, 2, 3],
+            appended_token_id: None,
+            config: ZSpacePeriodicityConfig::default(),
+        })
+        .expect("non-periodic report");
+        let mut stored = serde_json::to_value(&non_periodic).expect("serialized report");
+        stored["periodic_suffix_token_ratio"] = serde_json::json!(0);
+        stored["periodic_suffix_repeated_token_ratio"] = serde_json::json!(0);
+        assert_eq!(
+            validate_zspace_periodicity_value(stored).expect("JavaScript 0 is numeric 0.0"),
+            non_periodic
+        );
+
+        let mut tampered = serde_json::to_value(&non_periodic).expect("serialized report");
+        tampered["periodic_suffix_token_ratio"] = serde_json::json!(1);
+        let error = validate_zspace_periodicity_value(tampered)
+            .expect_err("numeric normalization must not accept a changed ratio");
         assert!(matches!(
             error,
             ZSpacePeriodicityError::MalformedReport { .. }

@@ -147,6 +147,21 @@ mod tests {
     }
 
     #[test]
+    fn wasm_periodicity_validator_accepts_javascript_json_number_spelling() {
+        let request = request_from_json(r#"{"token_ids":[1,1,1]}"#).expect("valid request");
+        let canonical = zspace_periodicity_value(request).expect("valid analysis");
+        let mut stored = canonical.clone();
+        stored["periodic_suffix_token_ratio"] = json!(1);
+        let stored_json = serde_json::to_string(&stored).expect("stored browser JSON");
+        let parsed = report_from_json(&stored_json).expect("reloaded browser JSON");
+
+        assert_eq!(
+            validate_zspace_periodicity_report_value(parsed).expect("numeric JSON round-trip"),
+            canonical
+        );
+    }
+
+    #[test]
     fn wasm_periodicity_ingress_fails_closed_on_contract_drift() {
         let unknown = request_from_json(r#"{"token_ids":[],"max_period":4}"#)
             .expect_err("unknown request fields must fail closed");
