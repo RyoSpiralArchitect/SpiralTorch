@@ -1,0 +1,354 @@
+{
+  "schema": "spiraltorch.hf_periodic_baseline_replication_protocol.v1",
+  "status": "prespecified",
+  "prespecified_at": "2026-08-23T21:57:49Z",
+  "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+  "protocol_id_rule": "sha256 of canonical UTF-8 JSON scientific_spec with sorted keys and compact separators",
+  "scientific_spec": {
+    "classification": "prespecified_three_arm_second_architecture_replication_post_eval_parity_fix",
+    "scope": "second-model matched three-arm multi-seed DistilGPT-2 LoRA study after evaluation-loss normalization repair",
+    "study_question": "On the same Alice corpus and held-out prompts, does periodic model-top-k unlikelihood retain its bounded advantage over broad history unlikelihood and ordinary causal-LM fine-tuning on a GPT-2-family architecture?",
+    "implementation": {
+      "objective_git_commit": "3dc78420e41fab84d27ded897dd164edadda7166",
+      "required_source_state": "objective execution must use a clean descendant of the objective commit containing only this prespecification before any study training begins",
+      "objective_contract_version": "spiraltorch.zspace_repetition_unlikelihood.v3",
+      "hf_integration_recipe_schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v4",
+      "objective_semantic_owner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "objective_semantic_backend": "rust",
+      "proposal_owner": "model-client-no-grad",
+      "differentiation_owner": "model-client-autograd",
+      "evaluation_loss": "causal_lm_loss_only",
+      "evaluation_loss_normalization": "preserve_base_trainer_loss_kwargs",
+      "evaluation_num_items_in_batch": "preserve_base_trainer",
+      "training_model_accepts_loss_kwargs": false,
+      "periodicity_kernel": "st-core::runtime::zspace_periodicity",
+      "periodic_suffix_max_period": 16,
+      "periodic_suffix_min_repetitions": 3,
+      "generation_evidence_contract_version": "spiraltorch.zspace_generation_evidence.v1",
+      "generation_evidence_semantic_owner": "st-core::runtime::zspace_generation_evidence",
+      "semantic_review_contract_version": "spiraltorch.zspace_semantic_review_packet.v1",
+      "semantic_review_semantic_owner": "st-core::runtime::zspace_semantic_review"
+    },
+    "superseded_protocol": {
+      "protocol_id": "sha256:38a1cc16267003817b10919e6e75d4292b0ac4b88b09b8d830086528c635d317",
+      "status": "blocked_before_full_execution",
+      "observed_seeds": [
+        67,
+        71
+      ],
+      "block_reason": "The objective Trainer disabled model_accepts_loss_kwargs for training normalization, which also disabled the base GPT-2 evaluation num_items_in_batch path. Identical seed and dataset therefore produced non-comparable before-train evaluation losses across arms.",
+      "diagnostic_only": true,
+      "retuning_from_diagnostics": false
+    },
+    "model": {
+      "hub_id": "distilgpt2",
+      "profile": "distilgpt2-local-smoke",
+      "architecture_family": "gpt2",
+      "parameter_scale": "82m",
+      "parameter_count": 81912576,
+      "snapshot_revision": "2290a62682d06624634c1f46a6ad5be0f47f38aa",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--distilgpt2/snapshots/2290a62682d06624634c1f46a6ad5be0f47f38aa",
+      "runtime_identity_id": "sha256:d7d30b0b9d7e8f435b555ad563113e36634736137c7c95b6f284a97e6c6f6472",
+      "execution_identity_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f"
+    },
+    "corpus": {
+      "name": "Alice's Adventures in Wonderland",
+      "source_path": "/Users/ryospiralarchitect/SpiralReality/data/alices_adventure_in_wonderland.txt",
+      "size_bytes": 169226,
+      "sha256": "7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+      "validation_fraction": 0.1,
+      "role": "held fixed from the Pythia-70M replication to isolate model architecture",
+      "selection_boundary": "the corpus and split policy were fixed before any DistilGPT-2 training or generation"
+    },
+    "training": {
+      "seeds": [
+        79,
+        83,
+        89
+      ],
+      "seed_provenance": "fresh prime seeds selected after seeds 67 and 71 were exposed by evaluation-parity diagnostics; none of 79, 83, or 89 was used to inspect treatment outcomes before this prespecification",
+      "arms": [
+        {
+          "name": "causal_lm_baseline",
+          "candidate_source": "none",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "candidate_source": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        },
+        {
+          "name": "model_topk_periodic",
+          "candidate_source": "model_topk_periodic",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 9,
+      "optimizer_update_count": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "c_attn",
+          "c_proj"
+        ],
+        "target_difference_reason": "architecture-required GPT-2 module names; rank, alpha, dropout, and bias remain matched to the Pythia-70M study"
+      },
+      "learning_rate": 0.00005,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "runtime_environment": {
+        "HF_HOME": "/Users/ryospiralarchitect/.hf_home",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "PYTHONHASHSEED": "0",
+        "SPIRALTON_MAGIC": "0",
+        "SPIRALTON_TORCH": "0",
+        "SPIRALTON_MODEL_PATCHES": "0",
+        "SPIRALTON_NUMPY": "0"
+      },
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_steps": 250,
+      "eval_steps": 250,
+      "save_total_limit": 1,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "gradient_accumulation_normalization": "trainer_divides_the_combined_microbatch_mean",
+        "supervised_target_is_never_a_negative_candidate": true
+      },
+      "single_factor_rule": "within each seed the objective treatment is the only intended arm difference; across the prior model study the intended scientific difference is the frozen model architecture and required LoRA target-module names",
+      "no_retuning_rule": "Do not change objective strength, proposal_top_k, context_window, candidate cap, seeds, corpus, prompt set, horizon, or acceptance thresholds after this prespecification is committed."
+    },
+    "preflight_identities": {
+      "common": {
+        "training_input_id": "sha256:b309710a67efbc6e6b972f598b1e5e0dfded0e4a532086a3d6bab9ad1303d0bf",
+        "model_runtime_id": "sha256:d7d30b0b9d7e8f435b555ad563113e36634736137c7c95b6f284a97e6c6f6472",
+        "execution_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f"
+      },
+      "by_seed": [
+        {
+          "seed": 79,
+          "dataset_materialization_id": "sha256:494520712eeb63748feaa8046d603ed47bf88a8e819a15c04ce14988e0742007",
+          "tokenized_dataset_id": "sha256:3eee1c0be19f55ec3838037515506d01349175122fbc6ac771bee00a43d59bbd",
+          "arms": {
+            "causal_lm_baseline": {
+              "training_recipe_id": "sha256:604ffbdb564e3995d1a7914a9272bca29cd88eca2022422d3bc21c7b3543a16c",
+              "finetune_replay_id": "sha256:6028da7f7bd91145ec03e8c3abfb14f570bf630a32e90a8be8ba736cf8dd2422"
+            },
+            "model_topk_history": {
+              "training_recipe_id": "sha256:7118c77b5e877e2a78a6ea00cda3a24646864d351b80f4803936b53dfd0c7222",
+              "finetune_replay_id": "sha256:83894aaa89d6b018cd210fb42d7538cf68f5cf18fb6c63c5471833ba3a5028f5"
+            },
+            "model_topk_periodic": {
+              "training_recipe_id": "sha256:0b5a54754d661ed6be85739fc706a304410c0cd7f2789d87cf893008ec270fe1",
+              "finetune_replay_id": "sha256:c1f0093ab34d05762c13c407b13b04e53b542f99a0b5994fd1c74a8053c944f1"
+            }
+          }
+        },
+        {
+          "seed": 83,
+          "dataset_materialization_id": "sha256:192a1611c2cc8e51d803f87d603994a649063b00c992aa5dcfb6befcd5918d76",
+          "tokenized_dataset_id": "sha256:df4da7b49ee7c23ec36e5c8b816be04d019a03747a0f96ba6ade303f1c7a6a25",
+          "arms": {
+            "causal_lm_baseline": {
+              "training_recipe_id": "sha256:d1a1cb6a237049f957c3f40fe2e471704aa5191d752491fcfead1f2faec44a6b",
+              "finetune_replay_id": "sha256:134cc65522117d4d9a3c1f59f131d12f26c7a8f2eb2a7f9fee6811a505b3963a"
+            },
+            "model_topk_history": {
+              "training_recipe_id": "sha256:9a230eae2ee1ef4f8674e7d606ed7b514667a4e336d25c9d886c7c352c8df397",
+              "finetune_replay_id": "sha256:fa8766bba046dce68c1d2e543bcbc0d8bfb1adb398f218e3d93b0bb7eb638985"
+            },
+            "model_topk_periodic": {
+              "training_recipe_id": "sha256:fa147e0110199c11a72386bed93726795e3466bd8922d70955a339c14c5e9e79",
+              "finetune_replay_id": "sha256:9bc8858ada38892c65d3cc159a62e0ae19ffda48c138034bb6bedb020d469be3"
+            }
+          }
+        },
+        {
+          "seed": 89,
+          "dataset_materialization_id": "sha256:8ee5a64d41abc6972cc548a6ec72d436b39d4ed1a915fd2492c5d2a7d93ddc5b",
+          "tokenized_dataset_id": "sha256:cea9fc2ae0ea32fa04c726f2af48123354d39d8a36590712ef9eda9cdb311b96",
+          "arms": {
+            "causal_lm_baseline": {
+              "training_recipe_id": "sha256:0f3c81ce5d55c38afdffe338d742f3384de4e90ad4d7d3a89e33acda8c791ce9",
+              "finetune_replay_id": "sha256:ad69f98a66be3063f4f638a41da5da32c9e6b8073d8894d9f53f0f77f23404ec"
+            },
+            "model_topk_history": {
+              "training_recipe_id": "sha256:ac1792c3573c0cd49c89f1c9581192b697464320467641e78ef1df0960fbf37a",
+              "finetune_replay_id": "sha256:e36513f3aa0fc94ac06e63ddd7182a8c7b186b3b4dfd39f873703c7e68b4df56"
+            },
+            "model_topk_periodic": {
+              "training_recipe_id": "sha256:6d9688074d6f73b038e25aed6af4a83ab925a5228c87e9d1b7a4c18a2b3a9183",
+              "finetune_replay_id": "sha256:a81dff7d0f8fc34643d580bea7a76b81384e3adba63d3ded88a61b1b0e869c60"
+            }
+          }
+        }
+      ]
+    },
+    "generation_endpoint": {
+      "report_count": 9,
+      "one_report_per_training_run": true,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "prompt_role": "held fixed from the Pythia-70M replication to isolate architecture; not selected from DistilGPT-2 outputs",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as the training run",
+        "continuation_only": true
+      }
+    },
+    "semantic_review": {
+      "packet_required": true,
+      "packet_group_count": 36,
+      "grouping": "one group per seed and prompt with all three arm continuations",
+      "arm_labels": "deterministically shuffled opaque labels using a pre-run key whose SHA-256 commitment is frozen below",
+      "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+      "reviewer_visible_fields": [
+        "group_id",
+        "prompt",
+        "candidate_label",
+        "continuation"
+      ],
+      "hidden_fields": [
+        "arm",
+        "seed",
+        "model architecture",
+        "loop metrics",
+        "held-out loss",
+        "training receipt metrics"
+      ],
+      "rubric": {
+        "fluency": "integer 1 through 5",
+        "prompt_relevance": "integer 1 through 5",
+        "local_coherence": "integer 1 through 5",
+        "non_repetition": "integer 1 through 5",
+        "preference": "one opaque candidate label or tie"
+      },
+      "gate_role": "packet readiness is required for this run; completed blinded judgments are required before semantic-quality or cross-model promotion"
+    },
+    "metrics": {
+      "primary_generation_metric": "generation_evidence.aggregate.sample_mean_loop_score",
+      "replication_effect": "model_topk_periodic_minus_model_topk_history paired by seed, lower is better",
+      "absolute_control_effect": "model_topk_periodic_minus_causal_lm_baseline paired by seed, lower is better",
+      "primary_aggregate": "arithmetic mean of the three paired seed effects",
+      "safety_metric": "eval_after_train.eval_loss paired by seed against causal_lm_baseline",
+      "before_train_comparability_metric": "maximum absolute within-seed difference among the three eval_before_train.eval_loss values",
+      "secondary_generation_metrics": [
+        "generation_evidence.aggregate.periodic_loop_sample_ratio",
+        "generation_evidence.aggregate.periodic_suffix_repeated_token_ratio",
+        "generation_evidence.aggregate.ngrams[order=3].repetition_ratio",
+        "generation_evidence.aggregate.ngrams[order=2].distinct_ratio",
+        "generation_evidence.aggregate.ngrams[order=4].distinct_ratio"
+      ],
+      "objective_execution_metrics": [
+        "zspace_repetition_unlikelihood_receipt.active_position_ratio",
+        "zspace_repetition_unlikelihood_receipt.mean_candidates_per_active_position",
+        "zspace_repetition_unlikelihood_receipt.periodic_candidate_count",
+        "zspace_repetition_unlikelihood_receipt.excluded_non_periodic_proposal_count",
+        "zspace_repetition_unlikelihood_receipt.mean_auxiliary_loss",
+        "zspace_repetition_unlikelihood_receipt.mean_weighted_auxiliary_loss"
+      ]
+    },
+    "acceptance": {
+      "required_ready_run_cards": 9,
+      "required_complete_optimizer_horizon": 64,
+      "required_generation_reports": 9,
+      "required_blinded_review_packet_groups": 36,
+      "generation_evidence_validation": "every report must round-trip through validate_zspace_generation_evidence in the Rust semantic core",
+      "before_train_evaluation_parity_gate": {
+        "applies_within_each_seed_to": [
+          "causal_lm_baseline",
+          "model_topk_history",
+          "model_topk_periodic"
+        ],
+        "maximum_absolute_eval_loss_delta_at_most": 1e-7,
+        "failure_classification": "blocked_non_comparable"
+      },
+      "identity_requirements": [
+        "verified model runtime, execution, corpus materialization, tokenized dataset, training recipe, and finetune replay identities exactly matching the frozen preflight identities",
+        "one prompt_set_id across all nine generation reports",
+        "one decoding_config_id per seed shared by all three arms",
+        "content-addressed adapter identity for every generation report"
+      ],
+      "stability_requirements": [
+        "no non-finite before-train or after-train evaluation loss",
+        "before-train evaluation parity gate passes for every seed before the next seed is launched",
+        "no failed or partial optimizer trajectory receipt",
+        "no failed, empty, or malformed generation row",
+        "no early termination before 64 optimizer updates",
+        "objective receipts ready for all six objective-bearing runs"
+      ],
+      "mechanism_requirements": [
+        "the baseline recipe must be disabled and must not add auxiliary loss",
+        "periodic_candidate_count must be positive in every model_topk_periodic run",
+        "excluded_non_periodic_proposal_count must be positive in every model_topk_periodic run",
+        "periodic_candidate_count must be zero in every model_topk_history run",
+        "candidate_count must be positive in every model_topk_history run"
+      ],
+      "replication_success_rule": {
+        "mean_periodic_minus_history_loop_score_less_than": 0.0,
+        "minimum_periodic_history_seed_win_count": 2
+      },
+      "absolute_control_success_rule": {
+        "mean_periodic_minus_baseline_loop_score_at_most": 0.0,
+        "minimum_periodic_baseline_seed_non_loss_count": 2
+      },
+      "safety_gate": {
+        "mean_treatment_minus_baseline_eval_loss_at_most": 0.02,
+        "maximum_individual_treatment_minus_baseline_eval_loss_at_most": 0.05,
+        "applies_to": [
+          "model_topk_history",
+          "model_topk_periodic"
+        ]
+      },
+      "decision_rule": "Pass only if all comparability, readiness, stability, identity, mechanism, replication, absolute-control, and CE-safety requirements hold. Record ready-but-negative if execution is ready but a frozen efficacy or safety gate fails; record blocked if comparability, readiness, or mechanism fails."
+    },
+    "cross_model_context": {
+      "prior_model": "EleutherAI/pythia-70m-deduped",
+      "prior_architecture_family": "gpt_neox",
+      "prior_protocol_id": "sha256:79cc6f371f4245ffb4764eabbf7393cd8feb2c530c0c6f58bc8b3ae197f5bb38",
+      "prior_result_path": "docs/benchmarks/hf_periodic_baseline_replication_pythia70m_alice_64step_20260823.json",
+      "joint_promotion_rule": "both model studies must independently pass their frozen quantitative gates and both frozen blinded packets must receive completed semantic review before any cross-model semantic promotion"
+    },
+    "interpretation": {
+      "efficacy_claim_ready_even_if_passed": false,
+      "allowed_positive_claim": "Within this prespecified bounded DistilGPT-2/Alice replication, periodic filtering improved the selected loop metric relative to broad history and did not underperform ordinary fine-tuning while preserving held-out CE.",
+      "allowed_negative_claim": "This frozen three-arm periodic recipe did not satisfy the prespecified bounded second-model gate.",
+      "promotion_if_passed": "complete and unblind both frozen semantic-review packets, then assess the joint cross-model evidence without retuning either study",
+      "excluded_claims": [
+        "general language-quality superiority",
+        "statistical significance",
+        "optimal periodic-objective strength",
+        "broad architecture generality",
+        "general Z-space training superiority"
+      ]
+    }
+  }
+}

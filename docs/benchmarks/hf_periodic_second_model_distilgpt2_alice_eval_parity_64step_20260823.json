@@ -1,0 +1,1447 @@
+{
+  "schema": "spiraltorch.hf_periodic_baseline_replication_benchmark.v1",
+  "row_type": "hf_periodic_second_model_distilgpt2_replication_benchmark",
+  "status": "ready_but_negative",
+  "recorded_at": "2026-08-23T22:33:04.480196+00:00",
+  "study_id": "sha256:98a334676749ef532c7c38e1fe9b04b1efa887fc6966451ef3b71014af2538f3",
+  "artifact_migrations": [
+    {
+      "recorded_at": "2026-08-26T15:49:18Z",
+      "reason": "Bind the exact pre-review candidate-to-arm assignments inside the packet commitment before human scoring.",
+      "candidate_and_prompt_content_unchanged": true,
+      "previous_packet_id": "sha256:bbde82251fa696ef5139d23a1ce674479776db4bec9f912e35a0e1e0d6787d82",
+      "previous_packet_file_sha256": "sha256:9987c553e8fe4ef817cb182819206be2c7e17ebce8d2783f2376e01e0e42dd2b",
+      "previous_map_file_sha256": "sha256:fb7d9bd3a92845d629affca384a3ddb9ca4e84a3bc61afcf6723b21a756a389b",
+      "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+      "packet_file_sha256": "sha256:53a834ce52bf66dfe5865ae777a17a357d2801281feb0bcd1837c7e0b444caa6",
+      "map_file_sha256": "sha256:56c8f95642ff42e1de1cfd6b231d71b3b4c0ef133e67a0743977aa8c7d863bd5",
+      "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8"
+    }
+  ],
+  "protocol": {
+    "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+    "prespec_path": "docs/benchmarks/hf_periodic_second_model_distilgpt2_alice_eval_parity_64step_prespec_20260823.json",
+    "prespec_commit": "5012bb1e7853583629d2f3fc63a0222a6b16f9e5",
+    "objective_commit": "3dc78420e41fab84d27ded897dd164edadda7166",
+    "superseded_protocol": {
+      "protocol_id": "sha256:38a1cc16267003817b10919e6e75d4292b0ac4b88b09b8d830086528c635d317",
+      "status": "blocked_before_full_execution",
+      "observed_seeds": [
+        67,
+        71
+      ],
+      "block_reason": "The objective Trainer disabled model_accepts_loss_kwargs for training normalization, which also disabled the base GPT-2 evaluation num_items_in_batch path. Identical seed and dataset therefore produced non-comparable before-train evaluation losses across arms.",
+      "diagnostic_only": true,
+      "retuning_from_diagnostics": false
+    },
+    "retuned_after_prespec": false
+  },
+  "study_spec": {
+    "model": {
+      "hub_id": "distilgpt2",
+      "profile": "distilgpt2-local-smoke",
+      "architecture_family": "gpt2",
+      "parameter_scale": "82m",
+      "parameter_count": 81912576,
+      "snapshot_revision": "2290a62682d06624634c1f46a6ad5be0f47f38aa",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--distilgpt2/snapshots/2290a62682d06624634c1f46a6ad5be0f47f38aa",
+      "runtime_identity_id": "sha256:d7d30b0b9d7e8f435b555ad563113e36634736137c7c95b6f284a97e6c6f6472",
+      "execution_identity_id": "sha256:cb60f3c0b433d87a9268d86a121e39c6f393882c2f3b61e7f07e67f20c304b9f"
+    },
+    "corpus": {
+      "name": "Alice's Adventures in Wonderland",
+      "source_path": "/Users/ryospiralarchitect/SpiralReality/data/alices_adventure_in_wonderland.txt",
+      "size_bytes": 169226,
+      "sha256": "7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+      "validation_fraction": 0.1,
+      "role": "held fixed from the Pythia-70M replication to isolate model architecture",
+      "selection_boundary": "the corpus and split policy were fixed before any DistilGPT-2 training or generation"
+    },
+    "training": {
+      "seeds": [
+        79,
+        83,
+        89
+      ],
+      "seed_provenance": "fresh prime seeds selected after seeds 67 and 71 were exposed by evaluation-parity diagnostics; none of 79, 83, or 89 was used to inspect treatment outcomes before this prespecification",
+      "arms": [
+        {
+          "name": "causal_lm_baseline",
+          "candidate_source": "none",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "model_topk_history",
+          "candidate_source": "model_topk_history",
+          "repetition_unlikelihood_strength": 0.1
+        },
+        {
+          "name": "model_topk_periodic",
+          "candidate_source": "model_topk_periodic",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "paired_by_seed": true,
+      "run_count": 9,
+      "optimizer_update_count": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "c_attn",
+          "c_proj"
+        ],
+        "target_difference_reason": "architecture-required GPT-2 module names; rank, alpha, dropout, and bias remain matched to the Pythia-70M study"
+      },
+      "learning_rate": 5e-05,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "runtime_environment": {
+        "HF_HOME": "/Users/ryospiralarchitect/.hf_home",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "PYTHONHASHSEED": "0",
+        "SPIRALTON_MAGIC": "0",
+        "SPIRALTON_TORCH": "0",
+        "SPIRALTON_MODEL_PATCHES": "0",
+        "SPIRALTON_NUMPY": "0"
+      },
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_steps": 250,
+      "eval_steps": 250,
+      "save_total_limit": 1,
+      "dataloader_num_workers": 0,
+      "dataloader_pin_memory": false,
+      "eval_before_train": true,
+      "eval_after_train_policy": "always",
+      "zspace_optimizer_control": "observe",
+      "repetition_unlikelihood": {
+        "proposal_top_k": 8,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "gradient_accumulation_normalization": "trainer_divides_the_combined_microbatch_mean",
+        "supervised_target_is_never_a_negative_candidate": true
+      },
+      "single_factor_rule": "within each seed the objective treatment is the only intended arm difference; across the prior model study the intended scientific difference is the frozen model architecture and required LoRA target-module names",
+      "no_retuning_rule": "Do not change objective strength, proposal_top_k, context_window, candidate cap, seeds, corpus, prompt set, horizon, or acceptance thresholds after this prespecification is committed."
+    },
+    "generation_endpoint": {
+      "report_count": 9,
+      "one_report_per_training_run": true,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+      "prompt_set_file_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "prompt_count": 12,
+      "prompt_role": "held fixed from the Pythia-70M replication to isolate architecture; not selected from DistilGPT-2 outputs",
+      "decoding": {
+        "strategy": "greedy",
+        "do_sample": false,
+        "max_new_tokens": 96,
+        "seed": "same seed as the training run",
+        "continuation_only": true
+      }
+    }
+  },
+  "provenance": {
+    "training_root": "models/runs/hf-periodic-distilgpt2-alice-eval-parity-v2",
+    "run_card_count": 9,
+    "generation_report_count": 9,
+    "generation_sample_count": 108,
+    "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+    "generation_evidence_semantic_backend": "rust",
+    "semantic_review_semantic_backend": "rust"
+  },
+  "identity_gates": {
+    "preflight_identity_match": true,
+    "content_addressed_adapter_count": 9,
+    "content_addressed_generation_artifact_count": 9,
+    "generation_evidence_roundtrip_count": 9,
+    "prompt_set_identity_count": 1,
+    "decoding_identity_count_per_seed": 1,
+    "passed": true
+  },
+  "results": {
+    "runs": [
+      {
+        "seed": 79,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:494520712eeb63748feaa8046d603ed47bf88a8e819a15c04ce14988e0742007",
+          "tokenized_dataset_id": "sha256:3eee1c0be19f55ec3838037515506d01349175122fbc6ac771bee00a43d59bbd",
+          "training_recipe_id": "sha256:604ffbdb564e3995d1a7914a9272bca29cd88eca2022422d3bc21c7b3543a16c",
+          "finetune_replay_id": "sha256:6028da7f7bd91145ec03e8c3abfb14f570bf630a32e90a8be8ba736cf8dd2422",
+          "adapter_id": "sha256:90ae02a5746010c32f5c5f959b06d3e19fd4f4071b82d00c6163fae8619a0b2e"
+        },
+        "loss": {
+          "eval_before_train": 4.547915458679199,
+          "eval_after_train": 4.494116306304932,
+          "train": 4.642324864864349
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        },
+        "generation": {
+          "model_artifact_id": "sha256:90ae02a5746010c32f5c5f959b06d3e19fd4f4071b82d00c6163fae8619a0b2e",
+          "generated_continuation_set_id": "sha256:f727849521cc3297ccd7f612ff813b64b397524d266ea115512f7b62eceb24aa",
+          "decoding_config_id": "sha256:3bedfa4bf860d0fc3e8fa7fb51dd56503a0a02cffc9425651f7013ee74f58249",
+          "evidence_id": "sha256:dd3903f9a087589ea25c1d89d8611a4350edd4fe5d0762cdc21a6fb2bdfa06d9",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 79,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:494520712eeb63748feaa8046d603ed47bf88a8e819a15c04ce14988e0742007",
+          "tokenized_dataset_id": "sha256:3eee1c0be19f55ec3838037515506d01349175122fbc6ac771bee00a43d59bbd",
+          "training_recipe_id": "sha256:7118c77b5e877e2a78a6ea00cda3a24646864d351b80f4803936b53dfd0c7222",
+          "finetune_replay_id": "sha256:83894aaa89d6b018cd210fb42d7538cf68f5cf18fb6c63c5471833ba3a5028f5",
+          "adapter_id": "sha256:3eab77ea38aa6717b7ff38ad7f1e7c28a499502a10fc8258da8c42c8c0fb52cc"
+        },
+        "loss": {
+          "eval_before_train": 4.547915458679199,
+          "eval_after_train": 4.494170188903809,
+          "train": 4.689058423042297
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 301382,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8328094363698609,
+          "mean_candidates_per_active_position": 2.8157068649800068,
+          "mean_auxiliary_loss": 0.10153209418058395,
+          "mean_weighted_auxiliary_loss": 0.010153209418058397
+        },
+        "generation": {
+          "model_artifact_id": "sha256:3eab77ea38aa6717b7ff38ad7f1e7c28a499502a10fc8258da8c42c8c0fb52cc",
+          "generated_continuation_set_id": "sha256:f727849521cc3297ccd7f612ff813b64b397524d266ea115512f7b62eceb24aa",
+          "decoding_config_id": "sha256:3bedfa4bf860d0fc3e8fa7fb51dd56503a0a02cffc9425651f7013ee74f58249",
+          "evidence_id": "sha256:6f07678001d54415d9e4fc5ce8be8ad3b19c9095a4bc23c9c244e2ca8f495c51",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 79,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:494520712eeb63748feaa8046d603ed47bf88a8e819a15c04ce14988e0742007",
+          "tokenized_dataset_id": "sha256:3eee1c0be19f55ec3838037515506d01349175122fbc6ac771bee00a43d59bbd",
+          "training_recipe_id": "sha256:0b5a54754d661ed6be85739fc706a304410c0cd7f2789d87cf893008ec270fe1",
+          "finetune_replay_id": "sha256:c1f0093ab34d05762c13c407b13b04e53b542f99a0b5994fd1c74a8053c944f1",
+          "adapter_id": "sha256:d09fb6d348f8dc28905b86b54f4e41a9749c195ef539375281b86ff616e4ff22"
+        },
+        "loss": {
+          "eval_before_train": 4.547915458679199,
+          "eval_after_train": 4.499660015106201,
+          "train": 4.719607293605804
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 443,
+          "periodic_candidate_count": 443,
+          "excluded_non_periodic_proposal_count": 300260,
+          "active_position_ratio": 0.0034468270517568705,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.37432149052619934,
+          "mean_weighted_auxiliary_loss": 0.037432149052619934
+        },
+        "generation": {
+          "model_artifact_id": "sha256:d09fb6d348f8dc28905b86b54f4e41a9749c195ef539375281b86ff616e4ff22",
+          "generated_continuation_set_id": "sha256:f727849521cc3297ccd7f612ff813b64b397524d266ea115512f7b62eceb24aa",
+          "decoding_config_id": "sha256:3bedfa4bf860d0fc3e8fa7fb51dd56503a0a02cffc9425651f7013ee74f58249",
+          "evidence_id": "sha256:014d7968d5feba7cc3d26dd72486d3c49e963191dcebe9523ade38210f66c8a8",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 83,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:192a1611c2cc8e51d803f87d603994a649063b00c992aa5dcfb6befcd5918d76",
+          "tokenized_dataset_id": "sha256:df4da7b49ee7c23ec36e5c8b816be04d019a03747a0f96ba6ade303f1c7a6a25",
+          "training_recipe_id": "sha256:d1a1cb6a237049f957c3f40fe2e471704aa5191d752491fcfead1f2faec44a6b",
+          "finetune_replay_id": "sha256:134cc65522117d4d9a3c1f59f131d12f26c7a8f2eb2a7f9fee6811a505b3963a",
+          "adapter_id": "sha256:9b4941537b1cbe3d91ac35b7080831402ae815e978a508b39f0c7b63afcf93aa"
+        },
+        "loss": {
+          "eval_before_train": 4.639670372009277,
+          "eval_after_train": 4.584465026855469,
+          "train": 4.655155003070831
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        },
+        "generation": {
+          "model_artifact_id": "sha256:9b4941537b1cbe3d91ac35b7080831402ae815e978a508b39f0c7b63afcf93aa",
+          "generated_continuation_set_id": "sha256:2cb0abb4a3daae5bf3bacb6aee0693ecf42058d327fcf92da117e383ba6bac59",
+          "decoding_config_id": "sha256:48584063c4bc1d70b6755a0aa43a8f11e7aff8d0692e067c4c036c88da7d2d87",
+          "evidence_id": "sha256:bec14e1de499a2ece78324ed2e4532134014fc8f4ae3bded365e1086763d8ee7",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 83,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:192a1611c2cc8e51d803f87d603994a649063b00c992aa5dcfb6befcd5918d76",
+          "tokenized_dataset_id": "sha256:df4da7b49ee7c23ec36e5c8b816be04d019a03747a0f96ba6ade303f1c7a6a25",
+          "training_recipe_id": "sha256:9a230eae2ee1ef4f8674e7d606ed7b514667a4e336d25c9d886c7c352c8df397",
+          "finetune_replay_id": "sha256:fa8766bba046dce68c1d2e543bcbc0d8bfb1adb398f218e3d93b0bb7eb638985",
+          "adapter_id": "sha256:c93e35751bfa5792ee8df956ccc1bd5566f236dbc82ac70644a695ce11e8f4d3"
+        },
+        "loss": {
+          "eval_before_train": 4.639670372009277,
+          "eval_after_train": 4.584485054016113,
+          "train": 4.702176868915558
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 300974,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8325152368837939,
+          "mean_candidates_per_active_position": 2.8212521442431173,
+          "mean_auxiliary_loss": 0.10165713727474213,
+          "mean_weighted_auxiliary_loss": 0.010165713727474213
+        },
+        "generation": {
+          "model_artifact_id": "sha256:c93e35751bfa5792ee8df956ccc1bd5566f236dbc82ac70644a695ce11e8f4d3",
+          "generated_continuation_set_id": "sha256:2cb0abb4a3daae5bf3bacb6aee0693ecf42058d327fcf92da117e383ba6bac59",
+          "decoding_config_id": "sha256:48584063c4bc1d70b6755a0aa43a8f11e7aff8d0692e067c4c036c88da7d2d87",
+          "evidence_id": "sha256:290492fd68a646ef1dc6a69e3718a5a5fce451f1c0c2145be33abe82f3bdf765",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 83,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:192a1611c2cc8e51d803f87d603994a649063b00c992aa5dcfb6befcd5918d76",
+          "tokenized_dataset_id": "sha256:df4da7b49ee7c23ec36e5c8b816be04d019a03747a0f96ba6ade303f1c7a6a25",
+          "training_recipe_id": "sha256:fa147e0110199c11a72386bed93726795e3466bd8922d70955a339c14c5e9e79",
+          "finetune_replay_id": "sha256:9bc8858ada38892c65d3cc159a62e0ae19ffda48c138034bb6bedb020d469be3",
+          "adapter_id": "sha256:d2c563a963d32f456d42e5e1ad268b5874315a16c25031c18f69985bce6ba3e7"
+        },
+        "loss": {
+          "eval_before_train": 4.639670372009277,
+          "eval_after_train": 4.5921244621276855,
+          "train": 4.735185265541077
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 446,
+          "periodic_candidate_count": 446,
+          "excluded_non_periodic_proposal_count": 299666,
+          "active_position_ratio": 0.003480486643827599,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.3992486596107483,
+          "mean_weighted_auxiliary_loss": 0.039924865961074835
+        },
+        "generation": {
+          "model_artifact_id": "sha256:d2c563a963d32f456d42e5e1ad268b5874315a16c25031c18f69985bce6ba3e7",
+          "generated_continuation_set_id": "sha256:b4a4f39c1adc49bfaa2c8520460bda1b3fb51479b2468c320553d38a83f98291",
+          "decoding_config_id": "sha256:48584063c4bc1d70b6755a0aa43a8f11e7aff8d0692e067c4c036c88da7d2d87",
+          "evidence_id": "sha256:1e2811e10df5744041d1b0e0c14cbdeb9d4c23a3338bbe698de022b3fb04aaa1",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.433697663929327,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4600694444444444,
+          "trigram_repetition_ratio": 0.7446808510638298,
+          "bigram_distinct_ratio": 0.23596491228070177,
+          "fourgram_distinct_ratio": 0.267921146953405
+        }
+      },
+      {
+        "seed": 89,
+        "arm": "causal_lm_baseline",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:8ee5a64d41abc6972cc548a6ec72d436b39d4ed1a915fd2492c5d2a7d93ddc5b",
+          "tokenized_dataset_id": "sha256:cea9fc2ae0ea32fa04c726f2af48123354d39d8a36590712ef9eda9cdb311b96",
+          "training_recipe_id": "sha256:0f3c81ce5d55c38afdffe338d742f3384de4e90ad4d7d3a89e33acda8c791ce9",
+          "finetune_replay_id": "sha256:ad69f98a66be3063f4f638a41da5da32c9e6b8073d8894d9f53f0f77f23404ec",
+          "adapter_id": "sha256:58dcc4aa0eb273a0f768f69ac8f4bf29027ce70e05e1c3e15f86295ed39e352f"
+        },
+        "loss": {
+          "eval_before_train": 4.491426944732666,
+          "eval_after_train": 4.439252853393555,
+          "train": 4.6597113609313965
+        },
+        "objective_receipt": {
+          "status": "not_applicable",
+          "candidate_count": 0,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": null,
+          "mean_candidates_per_active_position": null,
+          "mean_auxiliary_loss": null,
+          "mean_weighted_auxiliary_loss": null
+        },
+        "generation": {
+          "model_artifact_id": "sha256:58dcc4aa0eb273a0f768f69ac8f4bf29027ce70e05e1c3e15f86295ed39e352f",
+          "generated_continuation_set_id": "sha256:26ca3b3170c95d1450bfce89d60dd3f3a6ac16120290ae63be2d1c53c57a4bc9",
+          "decoding_config_id": "sha256:67241d39152acf76360621c6df7ab0b5a7bcb782eef4f2bac80392279129d796",
+          "evidence_id": "sha256:b957e9e68bed9484ad163939f47cd151970924ba9794eaf3b05bb50c9663ff08",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 89,
+        "arm": "model_topk_history",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:8ee5a64d41abc6972cc548a6ec72d436b39d4ed1a915fd2492c5d2a7d93ddc5b",
+          "tokenized_dataset_id": "sha256:cea9fc2ae0ea32fa04c726f2af48123354d39d8a36590712ef9eda9cdb311b96",
+          "training_recipe_id": "sha256:ac1792c3573c0cd49c89f1c9581192b697464320467641e78ef1df0960fbf37a",
+          "finetune_replay_id": "sha256:e36513f3aa0fc94ac06e63ddd7182a8c7b186b3b4dfd39f873703c7e68b4df56",
+          "adapter_id": "sha256:021145e16c465b826cd9136b2ae4b475462a2645ec15cc82be4848ff4bee63bb"
+        },
+        "loss": {
+          "eval_before_train": 4.491426944732666,
+          "eval_after_train": 4.439287185668945,
+          "train": 4.706295013427734
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 300137,
+          "periodic_candidate_count": 0,
+          "excluded_non_periodic_proposal_count": 0,
+          "active_position_ratio": 0.8290347502399663,
+          "mean_candidates_per_active_position": 2.8252176777898055,
+          "mean_auxiliary_loss": 0.10017887502908707,
+          "mean_weighted_auxiliary_loss": 0.010017887502908707
+        },
+        "generation": {
+          "model_artifact_id": "sha256:021145e16c465b826cd9136b2ae4b475462a2645ec15cc82be4848ff4bee63bb",
+          "generated_continuation_set_id": "sha256:26ca3b3170c95d1450bfce89d60dd3f3a6ac16120290ae63be2d1c53c57a4bc9",
+          "decoding_config_id": "sha256:67241d39152acf76360621c6df7ab0b5a7bcb782eef4f2bac80392279129d796",
+          "evidence_id": "sha256:a30f8f03ca8d181339ee5f2b658b3cd3ce375ed82599fddb9062ea9992550bd1",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      },
+      {
+        "seed": 89,
+        "arm": "model_topk_periodic",
+        "optimizer_horizon": 64,
+        "training_identities": {
+          "dataset_materialization_id": "sha256:8ee5a64d41abc6972cc548a6ec72d436b39d4ed1a915fd2492c5d2a7d93ddc5b",
+          "tokenized_dataset_id": "sha256:cea9fc2ae0ea32fa04c726f2af48123354d39d8a36590712ef9eda9cdb311b96",
+          "training_recipe_id": "sha256:6d9688074d6f73b038e25aed6af4a83ab925a5228c87e9d1b7a4c18a2b3a9183",
+          "finetune_replay_id": "sha256:a81dff7d0f8fc34643d580bea7a76b81384e3adba63d3ded88a61b1b0e869c60",
+          "adapter_id": "sha256:3eee8625ce7188fccf622b4597c74778f7e9d8c7ae7b1948fd2f9e0b25f103bc"
+        },
+        "loss": {
+          "eval_before_train": 4.491426944732666,
+          "eval_after_train": 4.446325302124023,
+          "train": 4.736715853214264
+        },
+        "objective_receipt": {
+          "status": "ready",
+          "candidate_count": 381,
+          "periodic_candidate_count": 381,
+          "excluded_non_periodic_proposal_count": 299202,
+          "active_position_ratio": 0.002973240832507433,
+          "mean_candidates_per_active_position": 1.0,
+          "mean_auxiliary_loss": 0.38105976581573486,
+          "mean_weighted_auxiliary_loss": 0.03810597658157349
+        },
+        "generation": {
+          "model_artifact_id": "sha256:3eee8625ce7188fccf622b4597c74778f7e9d8c7ae7b1948fd2f9e0b25f103bc",
+          "generated_continuation_set_id": "sha256:26ca3b3170c95d1450bfce89d60dd3f3a6ac16120290ae63be2d1c53c57a4bc9",
+          "decoding_config_id": "sha256:67241d39152acf76360621c6df7ab0b5a7bcb782eef4f2bac80392279129d796",
+          "evidence_id": "sha256:87ff92c4887260414ce2c96c1007bd02083f9b0d7cb1edf7f3dbaed0b153e507",
+          "evidence_validated": true,
+          "sample_count": 12,
+          "sample_mean_loop_score": 1.4495442951350006,
+          "periodic_loop_sample_ratio": 0.5833333333333334,
+          "periodic_suffix_repeated_token_ratio": 0.4652777777777778,
+          "trigram_repetition_ratio": 0.7553191489361702,
+          "bigram_distinct_ratio": 0.22543859649122808,
+          "fourgram_distinct_ratio": 0.25806451612903225
+        }
+      }
+    ],
+    "before_train_evaluation_parity": [
+      {
+        "seed": 79,
+        "eval_losses": {
+          "causal_lm_baseline": 4.547915458679199,
+          "model_topk_history": 4.547915458679199,
+          "model_topk_periodic": 4.547915458679199
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      },
+      {
+        "seed": 83,
+        "eval_losses": {
+          "causal_lm_baseline": 4.639670372009277,
+          "model_topk_history": 4.639670372009277,
+          "model_topk_periodic": 4.639670372009277
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      },
+      {
+        "seed": 89,
+        "eval_losses": {
+          "causal_lm_baseline": 4.491426944732666,
+          "model_topk_history": 4.491426944732666,
+          "model_topk_periodic": 4.491426944732666
+        },
+        "maximum_absolute_delta": 0.0,
+        "tolerance": 1e-07,
+        "status": "pass"
+      }
+    ],
+    "generation_comparisons": {
+      "model_topk_history": {
+        "paired_effects": [
+          {
+            "seed": 79,
+            "periodic_minus_control": 0.0
+          },
+          {
+            "seed": 83,
+            "periodic_minus_control": -0.015846631205673534
+          },
+          {
+            "seed": 89,
+            "periodic_minus_control": 0.0
+          }
+        ],
+        "mean_periodic_minus_control": -0.005282210401891178,
+        "periodic_seed_win_count": 1,
+        "periodic_seed_non_loss_count": 3
+      },
+      "causal_lm_baseline": {
+        "paired_effects": [
+          {
+            "seed": 79,
+            "periodic_minus_control": 0.0
+          },
+          {
+            "seed": 83,
+            "periodic_minus_control": -0.015846631205673534
+          },
+          {
+            "seed": 89,
+            "periodic_minus_control": 0.0
+          }
+        ],
+        "mean_periodic_minus_control": -0.005282210401891178,
+        "periodic_seed_win_count": 1,
+        "periodic_seed_non_loss_count": 3
+      }
+    },
+    "held_out_ce_safety": {
+      "model_topk_history": {
+        "paired_eval_loss_deltas": [
+          {
+            "seed": 79,
+            "treatment_minus_baseline": 5.3882598876953125e-05
+          },
+          {
+            "seed": 83,
+            "treatment_minus_baseline": 2.002716064453125e-05
+          },
+          {
+            "seed": 89,
+            "treatment_minus_baseline": 3.4332275390625e-05
+          }
+        ],
+        "mean_treatment_minus_baseline": 3.608067830403646e-05,
+        "maximum_treatment_minus_baseline": 5.3882598876953125e-05,
+        "mean_gate_at_most": 0.02,
+        "individual_gate_at_most": 0.05,
+        "passed": true
+      },
+      "model_topk_periodic": {
+        "paired_eval_loss_deltas": [
+          {
+            "seed": 79,
+            "treatment_minus_baseline": 0.005543708801269531
+          },
+          {
+            "seed": 83,
+            "treatment_minus_baseline": 0.007659435272216797
+          },
+          {
+            "seed": 89,
+            "treatment_minus_baseline": 0.00707244873046875
+          }
+        ],
+        "mean_treatment_minus_baseline": 0.006758530934651692,
+        "maximum_treatment_minus_baseline": 0.007659435272216797,
+        "mean_gate_at_most": 0.02,
+        "individual_gate_at_most": 0.05,
+        "passed": true
+      }
+    },
+    "continuation_changes": [
+      {
+        "seed": 79,
+        "periodic_vs_history_changed_prompt_count": 0,
+        "periodic_vs_baseline_changed_prompt_count": 0,
+        "history_vs_baseline_changed_prompt_count": 0
+      },
+      {
+        "seed": 83,
+        "periodic_vs_history_changed_prompt_count": 1,
+        "periodic_vs_baseline_changed_prompt_count": 1,
+        "history_vs_baseline_changed_prompt_count": 0
+      },
+      {
+        "seed": 89,
+        "periodic_vs_history_changed_prompt_count": 0,
+        "periodic_vs_baseline_changed_prompt_count": 0,
+        "history_vs_baseline_changed_prompt_count": 0
+      }
+    ]
+  },
+  "acceptance": {
+    "readiness_passed": true,
+    "identity_passed": true,
+    "before_train_comparability_passed": true,
+    "mechanism_passed": true,
+    "held_out_ce_safety_passed": true,
+    "periodic_vs_history_replication_passed": false,
+    "periodic_vs_baseline_absolute_control_passed": true,
+    "semantic_packet_ready": true,
+    "human_semantic_review_complete": false
+  },
+  "semantic_review": {
+    "packet_path": "docs/benchmarks/hf_periodic_second_model_distilgpt2_alice_eval_parity_semantic_review_packet_20260823.json",
+    "packet_file_sha256": "sha256:53a834ce52bf66dfe5865ae777a17a357d2801281feb0bcd1837c7e0b444caa6",
+    "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+    "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
+    "packet_receipt": {
+      "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+      "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
+      "candidate_count": 108,
+      "candidate_labels": [
+        "A",
+        "B",
+        "C"
+      ],
+      "contract_version": "spiraltorch.zspace_semantic_review_packet.v1",
+      "efficacy_claim_ready": false,
+      "evidence_boundary": "the contract verifies packet and pre-review map-content commitments, structural blinding inputs, score bounds, coverage, and deterministic aggregation; it cannot prove that a reviewer remained blind or establish statistical or model superiority",
+      "group_count": 36,
+      "human_review_complete": false,
+      "kind": "spiraltorch.zspace_semantic_review_packet",
+      "packet": {
+        "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+        "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
+        "candidate_count": 108,
+        "group_count": 36,
+        "groups": [
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              }
+            ],
+            "group_id": "sha256:2307769ebd7583a4408c34f4d5b4d88e6b12f157b13e70f2c712fe1420a2eb79",
+            "prompt": "She found the brass key beside"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              }
+            ],
+            "group_id": "sha256:119613e6be1b9d71287c3f59b2c205da570ec8516a62d12ff8d178f4ebfd27fa",
+            "prompt": "He folded the last page into a bird and"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:ce303c31f56060e82f24dc7c8adb8b87b75577213955f4a847fc5f8afce9f008",
+            "prompt": "The map beneath the glass showed"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:5c3b7624204406c05e46f0870c013e5a2e29da927769a3d05956be4e3fdbbca3",
+            "prompt": "The final entry in the submarine log"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              }
+            ],
+            "group_id": "sha256:24957d6bf33e559230b0de5287e7666fae4f3894ba98f621e2522c45a9ca70c9",
+            "prompt": "Before dawn, the observatory received a signal"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              }
+            ],
+            "group_id": "sha256:b5a25d2f7d91201f3e9f48244800bdfaea9272eee21001963ed1cc8e46344330",
+            "prompt": "High above the snow line, the radio"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              }
+            ],
+            "group_id": "sha256:b1a00c8aad75cb394574bcf5a6730452d5c2435ec71a7c2778af532af93f9903",
+            "prompt": "Before dawn, the observatory received a signal"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              }
+            ],
+            "group_id": "sha256:e8b11356a500a18344626320d9e0a2c482b1583d668f5fa2d4f7e9ee83cab1bb",
+            "prompt": "He folded the last page into a bird and"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              }
+            ],
+            "group_id": "sha256:6823df242ff3c2087f0fd0714e97028d0625785b3dee3304a5e57ea3e71868d5",
+            "prompt": "Across the courthouse wall, a shadow"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              }
+            ],
+            "group_id": "sha256:cbc73484aa2a3df07e2f5bf27c8144165c55757b2569813db1653ef449b2753c",
+            "prompt": "Across the courthouse wall, a shadow"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              }
+            ],
+            "group_id": "sha256:5731d10e02936a2d3449f73d4fea0ae869bcec9d7f4184967a2026ae1987aa47",
+            "prompt": "On the empty platform, a suitcase"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              }
+            ],
+            "group_id": "sha256:33d37c84512197ff64639f91718e7dc3cb8ec4c3afd67db5ee4a52afb2949e98",
+            "prompt": "She found the brass key beside"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              }
+            ],
+            "group_id": "sha256:a96f3562eaf8ad59e645971067461cc011efc92637eaa576b8b88990e8dff5c0",
+            "prompt": "No one had opened the lighthouse door since"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:b053a5993262196ab3567c15dbb9959dbacd96624d25ef276c5834121e525f6e",
+            "prompt": "The map beneath the glass showed"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall of a wall"
+              }
+            ],
+            "group_id": "sha256:774a7321401cdc44fc5820b6edaccef1a4fef30937049f8f36e017d377d78a57",
+            "prompt": "Across the courthouse wall, a shadow"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              }
+            ],
+            "group_id": "sha256:00b2242167751286fb0e4bc33b18cc980fa5f5a3bf848017b702005704223c0d",
+            "prompt": "On the empty platform, a suitcase"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the door.\n\n\"I'm not sure what happened to the other two, but I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way.\"\n\"I'm sure they were just trying to get the keys out of the way,\" she said.\n\"I'm sure they were just trying to get the keys out of the way,\" she said"
+              }
+            ],
+            "group_id": "sha256:143830dcdf9d54b5f69f8250a0932aa208576dd54c4a9c0dd3454aacd8460b19",
+            "prompt": "She found the brass key beside"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              }
+            ],
+            "group_id": "sha256:b162f2c3a53282e7d8cbbe769be8db953cdacce9e0f7eae5bc11222b9ae397f1",
+            "prompt": "No one had opened the lighthouse door since"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              }
+            ],
+            "group_id": "sha256:409afb4727d8182ac44c48b4b8b9853965d741465d2bc42eecf5fc8a8d32c6cd",
+            "prompt": "High above the snow line, the radio"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:ae59d0893f0b03ade8a12e17f3c8d683ebc1c795a6ec1ccf0fbdca0bebbd2c05",
+            "prompt": "When the market bell rang for the third time"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              }
+            ],
+            "group_id": "sha256:50d6782d70f1dedf946f3eae6d03f5ebd03e8479c159d38c18561360cc3535f3",
+            "prompt": "Inside the borrowed violin case lay"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had arrested a man who had been arrested for allegedly carrying a suitcase with a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase containing a suitcase"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " was found in the middle of the street.\n\n\n\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said they had found the suitcase in the middle of the street.\nThe police said"
+              }
+            ],
+            "group_id": "sha256:339a12ab69b193f5344c6a99567c6e855fd76306c1885b7236e9d189d0560109",
+            "prompt": "On the empty platform, a suitcase"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              }
+            ],
+            "group_id": "sha256:8eba48d02b5e2efc3384422b647b484bf35c1d1162cca0ad3565017b2a909a66",
+            "prompt": "Inside the borrowed violin case lay"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              }
+            ],
+            "group_id": "sha256:a3dd4a023ab4e25fb2cc169b6fdd2681e9ba5fa18fec1d85deff8cafc93b8acb",
+            "prompt": "At noon, the old desert well"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the first time.\n\n“I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“ I“m not sure if I“m going to be able to see the lighthouse,“"
+              }
+            ],
+            "group_id": "sha256:20af2f2db673158fbb894ac19b1a537885e878b9f1086ef1d2b937cea3e04118",
+            "prompt": "No one had opened the lighthouse door since"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " the number of people who were killed in the attack.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:7ba463de9b723877ea94f4d0c603dba16e6cf2143887b9edafe715fc91e6fc97",
+            "prompt": "The map beneath the glass showed"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:d13492a94865588faccb95fafab290f97239d8bec1eb3274812b4e80e6f3b833",
+            "prompt": "The final entry in the submarine log"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " from the sky.\n\n\n\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\nThe observatory's mission was to observe the sun's rays, and to observe the sun's rays.\n"
+              }
+            ],
+            "group_id": "sha256:305be819920e6ca3c95c53e4e2f89c38fec5a7143677a23afac842718fe2b958",
+            "prompt": "Before dawn, the observatory received a signal"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " waves are coming from the east.\n\n\n\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming from the east.\nThe radio waves are coming"
+              }
+            ],
+            "group_id": "sha256:36224e30792b0a22c1aa347888e30bd0eac4b028ca4fdcd2c4944d505b7a66af",
+            "prompt": "High above the snow line, the radio"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              }
+            ],
+            "group_id": "sha256:0b4872836591d8b5b2f8d877c2cdf853e6baf8b0f2a159cd6527b471f9e97789",
+            "prompt": "At noon, the old desert well"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in the middle of the room.\n\n\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do.\"\n\"I'm not sure what to do,\" she said. \"I'm not sure what to do"
+              }
+            ],
+            "group_id": "sha256:7af5ae315b261b6d6c088e1b6e870af29800d02181af9c199f9fad4c30e017bb",
+            "prompt": "Inside the borrowed violin case lay"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:1092e1ddaea38ec40c43b57169854790ff7199be03c2b622bd079bb43fe168bd",
+            "prompt": "When the market bell rang for the third time"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " in a row, the price of a car was up by a whopping $1,000.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:9ec5e8ffec62a11f4b9dfeab9ead4068e43f768824f1c30b2e587e62ce8de54c",
+            "prompt": "When the market bell rang for the third time"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "book is the first of the three-part series.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+              }
+            ],
+            "group_id": "sha256:0bf190f7fd56b54475bb6d47fba3ad1b50f209991f55dac8628582c1e9ea2405",
+            "prompt": "The final entry in the submarine log"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": "-known as the \"Mountain of the Mountain\" was being restored to its original shape.\n\n\n\nThe new mountain was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the British and French, and was built in the late 19th century by the"
+              }
+            ],
+            "group_id": "sha256:2e9e313f5eeac5d744be8c8d728108d2754221bf60cfbf7ede3eafe1d81f7994",
+            "prompt": "At noon, the old desert well"
+          },
+          {
+            "candidates": [
+              {
+                "candidate_label": "A",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "B",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              },
+              {
+                "candidate_label": "C",
+                "continuation": " then put it back in the back of the house.”\n\n“I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. “I“m not sure what I“m doing,” he said. �"
+              }
+            ],
+            "group_id": "sha256:2510a331efe7a7b962aa174af37ef76facdc1cf4809e93691cbd74cace80b187",
+            "prompt": "He folded the last page into a bird and"
+          }
+        ],
+        "instructions": "Score each candidate without consulting training arms, token-loop metrics, held-out loss, or the separate unblinding map. Return one review row per group and candidate plus one preference per group.",
+        "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+        "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+        "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+        "rubric": {
+          "fluency": "integer 1 through 5",
+          "local_coherence": "integer 1 through 5",
+          "non_repetition": "integer 1 through 5",
+          "preference": "A, B, C, or tie",
+          "prompt_relevance": "integer 1 through 5"
+        },
+        "schema": "spiraltorch.hf_blinded_semantic_review_packet.v1",
+        "status": "ready_for_blinded_review"
+      },
+      "packet_id": "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+      "packet_id_rule": "sha256 of UTF-8 canonical JSON for the packet without packet_id; object keys sorted lexicographically, arrays preserved, no insignificant whitespace",
+      "blinding_map_id_rule": "sha256 of UTF-8 canonical JSON for [map commitment version, map entries sorted by group_id]; object keys sorted lexicographically, no insignificant whitespace",
+      "packet_validated": true,
+      "preference_values": [
+        "A",
+        "B",
+        "C",
+        "tie"
+      ],
+      "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
+      "protocol_id": "sha256:630cc634d4e8823e685b531ac3971012e5135e44cbc9c99ad4b0f5c1c8c4f036",
+      "score_dimensions": [
+        "fluency",
+        "prompt_relevance",
+        "local_coherence",
+        "non_repetition"
+      ],
+      "score_maximum": 5,
+      "score_minimum": 1,
+      "semantic_backend": "rust",
+      "semantic_owner": "st-core::runtime::zspace_semantic_review",
+      "status": "ready",
+      "unblind_ready": false
+    },
+    "blinding_key_sha256": "262433ee3152bfd7c040f140f8e668d0ae86fef21a175b69f1074f73b34e4a80",
+    "blinding_map_id": "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
+    "sealed_map_path": "models/runs/hf-periodic-distilgpt2-alice-eval-parity-v2/review/blinding-map.json",
+    "sealed_map_file_sha256": "sha256:56c8f95642ff42e1de1cfd6b231d71b3b4c0ef133e67a0743977aa8c7d863bd5",
+    "status": "ready_for_blinded_review",
+    "human_review_complete": false
+  },
+  "diagnosis": {
+    "primary_gate_failure": "periodic improved the mean loop score but achieved a strict win in only one of three seeds; the frozen replication gate required two",
+    "observed_changed_prompt_groups": 1,
+    "total_prompt_groups": 36,
+    "history_vs_baseline_changed_prompt_groups": 0,
+    "bounded_reading": "At 64 CPU optimizer updates, the selective periodic objective executed and preserved held-out CE, but it rarely moved greedy continuations and did not replicate the required multi-seed win pattern on DistilGPT-2."
+  },
+  "decision": "ready_but_negative_prespecified_gate",
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "Under a frozen three-seed DistilGPT-2/Alice protocol, periodic model-top-k unlikelihood executed end-to-end, preserved held-out CE, and lowered the mean selected loop metric through one changed seed, but failed the prespecified two-seed replication threshold.",
+    "observed_result": "Periodic-minus-history and periodic-minus-baseline mean loop-score deltas were -0.005282; strict periodic wins were 1 of 3.",
+    "excluded_claims": [
+      "general language-quality superiority",
+      "statistical significance",
+      "optimal periodic-objective strength",
+      "broad architecture generality",
+      "general Z-space training superiority"
+    ],
+    "evidence_boundary": "Token-loop metrics are ready, but semantic review is unopened and 35 of 36 greedy prompt groups were unchanged across periodic and history arms."
+  },
+  "next_prespecified_experiment": {
+    "classification": "not_selected_by_this_report",
+    "constraint": "Treat the weak greedy-output movement as a power and optimization-horizon question, not as evidence to retune this completed protocol post hoc.",
+    "recommended_factorization": "Prespecify a longer-horizon matched study that changes one factor at a time and retains baseline, history, periodic, held-out CE, multi-seed pairing, and blinded semantic review."
+  }
+}

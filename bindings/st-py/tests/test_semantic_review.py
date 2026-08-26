@@ -18,6 +18,18 @@ TRACKED_ALICE_PACKET = (
     / "benchmarks"
     / "hf_periodic_baseline_replication_pythia70m_alice_semantic_review_packet_20260823.json"
 )
+TRACKED_DISTILGPT2_PACKET = (
+    Path(__file__).resolve().parents[3]
+    / "docs"
+    / "benchmarks"
+    / "hf_periodic_second_model_distilgpt2_alice_eval_parity_semantic_review_packet_20260823.json"
+)
+TRACKED_DISTILGPT2_REPORT = (
+    Path(__file__).resolve().parents[3]
+    / "docs"
+    / "benchmarks"
+    / "hf_periodic_second_model_distilgpt2_alice_eval_parity_64step_20260823.json"
+)
 
 
 def _identity(character: str) -> str:
@@ -147,8 +159,27 @@ def _map(packet: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_tracked_alice_packet_matches_rust_commitment() -> None:
-    packet = json.loads(TRACKED_ALICE_PACKET.read_text(encoding="utf-8"))
+@pytest.mark.parametrize(
+    ("packet_path", "expected_packet_id", "expected_blinding_map_id"),
+    [
+        (
+            TRACKED_ALICE_PACKET,
+            "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83",
+            "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec",
+        ),
+        (
+            TRACKED_DISTILGPT2_PACKET,
+            "sha256:a19f0c5ecf948edbe1df30d99ab6ab1e803f3d7dd51c98383447ac7312446191",
+            "sha256:79d7da15d41cfe04d2528e142c52d2f874fc04d22d9e08b11b8fe03b71198bf8",
+        ),
+    ],
+)
+def test_tracked_packets_match_rust_commitment(
+    packet_path: Path,
+    expected_packet_id: str,
+    expected_blinding_map_id: str,
+) -> None:
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
     expected_exports = {
         "new_zspace_semantic_review_draft",
         "summarize_zspace_semantic_review_draft",
@@ -163,17 +194,34 @@ def test_tracked_alice_packet_matches_rust_commitment() -> None:
     receipt = st.validate_zspace_semantic_review_packet(packet)
 
     assert expected_exports <= set(st.__all__)
-    assert receipt["packet_id"] == (
-        "sha256:0ab7cc9853886e895074bce4cfb5338be8087521971b2a92346cdab6f8924f83"
-    )
+    assert receipt["packet_id"] == expected_packet_id
     assert receipt["group_count"] == 36
     assert receipt["candidate_count"] == 108
     assert receipt["semantic_backend"] == "rust"
-    assert receipt["blinding_map_id"] == (
-        "sha256:4b696e405b0db68a870613065c9516da953adac73bc17c086dbebf77e3ca8aec"
-    )
+    assert receipt["blinding_map_id"] == expected_blinding_map_id
     assert receipt["human_review_complete"] is False
     assert st.validate_zspace_semantic_review_packet_receipt(receipt) == receipt
+
+
+def test_tracked_distilgpt2_report_preserves_bounded_negative_decision() -> None:
+    packet = json.loads(TRACKED_DISTILGPT2_PACKET.read_text(encoding="utf-8"))
+    report = json.loads(TRACKED_DISTILGPT2_REPORT.read_text(encoding="utf-8"))
+    receipt = st.validate_zspace_semantic_review_packet(packet)
+
+    assert report["status"] == "ready_but_negative"
+    assert report["decision"] == "ready_but_negative_prespecified_gate"
+    assert report["semantic_review"]["packet_receipt"] == receipt
+    assert report["acceptance"] == {
+        "readiness_passed": True,
+        "identity_passed": True,
+        "before_train_comparability_passed": True,
+        "mechanism_passed": True,
+        "held_out_ce_safety_passed": True,
+        "periodic_vs_history_replication_passed": False,
+        "periodic_vs_baseline_absolute_control_passed": True,
+        "semantic_packet_ready": True,
+        "human_semantic_review_complete": False,
+    }
 
 
 def test_draft_progress_only_seals_complete_review_and_is_order_independent() -> None:
