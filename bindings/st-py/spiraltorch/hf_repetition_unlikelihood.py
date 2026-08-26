@@ -15,6 +15,7 @@ from .repetition_unlikelihood import (
     ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
+    validate_zspace_repetition_unlikelihood_plan,
     zspace_repetition_unlikelihood_plan,
 )
 
@@ -374,7 +375,7 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             raise RuntimeError(
                 "training batch is missing its Rust repetition-unlikelihood plan"
             )
-        plan = batch_plan.report
+        plan = validate_zspace_repetition_unlikelihood_plan(batch_plan.report)
         expected_config = self._zspace_repetition_unlikelihood_recipe.get("config")
         request = plan.get("request")
         observed_config = (
