@@ -229,6 +229,9 @@
     "generation_sample_count": 432,
     "prompt_set_id": "sha256:e613ebc3e029082a5e276489283530cdf1b41ab45ad8b76c6fde8d3f8b19f0df",
     "generation_evidence_semantic_backend": "rust",
+    "generation_evidence_metric_protocol_id": "sha256:a2396fa18c4bd3fe00b6214a139ed37a42cc266291513269dd5911a2ad9c787b",
+    "generation_evidence_inner_protocol_bound_to_study": false,
+    "generation_evidence_study_binding_scope": "The frozen v1 Rust metric receipts predate the study-protocol override. Their study binding is supplied by the content-addressed bundle protocol and each entry's seed, arm, step, and model artifact identity.",
     "generation_evidence_bundle_path": "docs/benchmarks/hf_periodic_gpt2_pride_full_corpus_256step_generation_evidence_20260823.json",
     "generation_evidence_bundle_id": "sha256:4f0d21baa623f294cd6c42605904d1024411fd4a43bb7b2ba06d14bcf8d5e06a",
     "semantic_review_status": "not_opened"
