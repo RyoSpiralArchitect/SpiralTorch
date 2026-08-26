@@ -1,0 +1,528 @@
+{
+  "schema": "spiraltorch.hf_repetition_unlikelihood_benchmark.v1",
+  "row_type": "hf_repetition_unlikelihood_benchmark",
+  "recorded_at": "2026-08-23T00:57:20.948125Z",
+  "status": "ready",
+  "study_id": "sha256:e011e571819d4c293e755cac724d83f1b9cc089c281eb7fbb49cb3ef2b17ee6a",
+  "study_id_rule": "sha256 of canonical UTF-8 JSON study_spec with sorted keys and compact separators",
+  "study_spec": {
+    "classification": "exploratory_post_implementation_pilot",
+    "prespecified": false,
+    "study_question": "Does a Rust-planned repeated-prefix unlikelihood auxiliary objective execute deterministically and reduce held-out greedy-generation loops in a small matched Pythia-70M LoRA pilot?",
+    "implementation": {
+      "objective_git_commit": "97b51c76f3898f8a89cb12855ea614caaa176119",
+      "adapter_config_canonicalization_git_commit": "f8da3c1bae48cb63f8a7e0678430d0a0fac6f168",
+      "objective_contract_version": "spiraltorch.zspace_repetition_unlikelihood.v1",
+      "objective_semantic_owner": "st-core::runtime::zspace_repetition_unlikelihood",
+      "objective_semantic_backend": "rust",
+      "differentiation_owner": "model-client-autograd",
+      "generation_evidence_contract_version": "spiraltorch.zspace_generation_evidence.v1",
+      "generation_evidence_semantic_owner": "st-core::runtime::zspace_generation_evidence"
+    },
+    "model": {
+      "hub_id": "EleutherAI/pythia-70m-deduped",
+      "profile": "pythia-70m-local-smoke",
+      "architecture_family": "gpt_neox",
+      "parameter_scale": "70m",
+      "snapshot_revision": "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "local_snapshot_path": "/Users/ryospiralarchitect/.hf_home/hub/models--EleutherAI--pythia-70m-deduped/snapshots/e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
+      "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626"
+    },
+    "corpus": {
+      "name": "Dubliners",
+      "source_path": "/Users/ryospiralarchitect/SpiralReality/data/dubliners.txt",
+      "size_bytes": 359634,
+      "sha256": "sha256:d3a95d7ea5b30f4569575116eb27865a66f9e765965f1fc28c41aeee75e54406",
+      "validation_fraction": 0.1
+    },
+    "training": {
+      "seeds": [
+        13,
+        17,
+        23
+      ],
+      "arms": [
+        {
+          "name": "baseline",
+          "repetition_unlikelihood_strength": 0.0
+        },
+        {
+          "name": "unlikelihood",
+          "repetition_unlikelihood_strength": 0.1
+        }
+      ],
+      "run_count": 6,
+      "optimizer_updates": 64,
+      "finetune_mode": "lora",
+      "lora": {
+        "rank": 4,
+        "alpha": 8.0,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "dense",
+          "query_key_value"
+        ]
+      },
+      "learning_rate": 5e-05,
+      "model_train_dtype": "float32",
+      "device": "cpu",
+      "per_device_train_batch_size": 2,
+      "per_device_eval_batch_size": 2,
+      "gradient_accumulation_steps": 8,
+      "block_size": 128,
+      "max_eval_blocks": 16,
+      "logging_steps": 8,
+      "save_total_limit": 1,
+      "repetition_unlikelihood": {
+        "ngram_order": 3,
+        "context_window": 128,
+        "max_candidates_per_position": 8,
+        "evaluation_loss": "causal_lm_loss_only",
+        "gradient_accumulation_normalization": "trainer_divides_the_combined_microbatch_mean"
+      }
+    },
+    "generation": {
+      "report_count": 6,
+      "control_mode": "baseline_only_no_zspace_inference_control",
+      "prompt_set_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_pilot_prompts.json",
+      "prompt_set_sha256": "sha256:79a5738ff48f85acf0da4b71c7e0eeb028338f108fdfed32b430adae7457a6b4",
+      "prompt_set_id": "sha256:4a5029e46c21915c4982c7eb005978ff7759cb04901c49f7d0e9f4b6aaaf94ed",
+      "prompt_count": 8,
+      "strategy": "greedy",
+      "do_sample": false,
+      "max_new_tokens": 96,
+      "seed": "matched_to_training_seed",
+      "continuation_only": true
+    },
+    "comparison": {
+      "paired_by_seed": true,
+      "primary_training_metric": "eval_after_train.eval_loss",
+      "primary_generation_metric": "generation_evidence.aggregate.sample_mean_loop_score",
+      "secondary_generation_metric": "generation_evidence.aggregate.periodic_loop_sample_ratio",
+      "lower_is_better": true
+    }
+  },
+  "provenance": {
+    "source_artifact_root": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3",
+    "source_artifacts_ignored_by_git": true,
+    "source_artifacts": [
+      {
+        "seed": 13,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/baseline/run-card.json",
+          "sha256": "sha256:fbbbfec61213bb7d24108c54b15a95b67b9d6498f4098ede3309bec230e97834"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/baseline/generation-evidence.json",
+          "sha256": "sha256:68a99982ea742af6e6454d1c0ce32f62bd6fe31da9d919c33e3b0f25f030e18c",
+          "evidence_id": "sha256:1b3c1f1ef04313d924279bcf8eb54889528b8d0aa5f6f787891773e589214108",
+          "generated_continuation_set_id": "sha256:9bf70f9aa27560c4fc7c5b998382cf4992a8150c1fcdb5e72186b40680383dba"
+        },
+        "adapter": {
+          "adapter_id": "sha256:7b809fa70119999bfe5d8cdace920d221f591df29c653b7854781a6e74599a2a",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:fe75c66fee0a1437826967be5a68f9afc66bcce9978ab03c917ce0b08dbfaf48",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:15b1f1288df350039b15e6087617dbe890e1bcb858cb3370f97678e0295f79c5",
+          "finetune_replay_id": "sha256:786110f53a437dc9695e28aed67219fa999df1ac57919b4c1ab839decbfd22d2",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:34043eaea6af0207ab5da521a3372afe571df8b4a182546bb4e82555ea8d58b9",
+          "tokenized_dataset_id": "sha256:e971a427df8e61c09370ec233156d5238303dab91e79e2619226652ff916b78f"
+        }
+      },
+      {
+        "seed": 13,
+        "arm": "unlikelihood",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/unlikelihood/run-card.json",
+          "sha256": "sha256:514232be15eb4cd7193cb0e36ea19da7d609256956d0cf3f0362b54bb860cd6f"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/unlikelihood/generation-evidence.json",
+          "sha256": "sha256:845372c767890da9c6e41ac9ea1faaf75de9914fc8141a14bc0cf9fbfc65a488",
+          "evidence_id": "sha256:c06cfaff7513690a1733a600e32afc8136de63b6bfb9922aa0d4a8a53315e0b9",
+          "generated_continuation_set_id": "sha256:04b1a06ac2d316e7b3649ad58600aa87d6772fb54f3c500e51878423d9980f3a"
+        },
+        "adapter": {
+          "adapter_id": "sha256:e74414051ce6e57f0516d0b8855a669cb0a326485e078779bce4b62e9fd28fdf",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/unlikelihood/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:ad6900b38e35b281beb72ecb0b8d111292149b0073ea13dac617af7e90eddfb9",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s13/unlikelihood/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:71ecaa66419f237731f0991d7a52b2f10044dc44f71094a09ebfc963286c45cc",
+          "finetune_replay_id": "sha256:141f000c51acdd8b45e76635a4a609223e06222161c681bb8bbe946fc768b08f",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:34043eaea6af0207ab5da521a3372afe571df8b4a182546bb4e82555ea8d58b9",
+          "tokenized_dataset_id": "sha256:e971a427df8e61c09370ec233156d5238303dab91e79e2619226652ff916b78f"
+        }
+      },
+      {
+        "seed": 17,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/baseline/run-card.json",
+          "sha256": "sha256:b614fe3b9bb137c1c65e9ce48e06a254543d153996835b5f23d3a70b174a66da"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/baseline/generation-evidence.json",
+          "sha256": "sha256:617ed36807109ec4dfbd87c52c3221b2b5d2318f8571572d7f29caee007473d3",
+          "evidence_id": "sha256:95c5e479b8128206852cd36d27eb56b87ef511aaf48c971d054fd8ccd8554198",
+          "generated_continuation_set_id": "sha256:0656941838728ff8f2d183a492c19617a4048cd424b19caa7ac80acc0ad09471"
+        },
+        "adapter": {
+          "adapter_id": "sha256:f36ba1e5fc5985f1cdd6b953a4ad32220fc40467efbbf8ef0e8e37f6afdb7352",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:4fbb35e666b0f64da1ffedcba865e11781ea0c2e6f773f858813c9bcd0b3bf32",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:997b1505912b0674c972192c5043c3b7f6815823c6ae7d8556cc0d7179c9fad6",
+          "finetune_replay_id": "sha256:cde82edc33c9fa9bc8724d9aa0188d1a2f1cc13601123f031e37110982f31c3f",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:567257d1b754511b9324e76c673f0b63555609f25d9e4825b465c8a9cf07b2d2",
+          "tokenized_dataset_id": "sha256:d181acc8d1ef072a0367498a8102a5b3e7dbec8194ddb7b25cecf56b4026f461"
+        }
+      },
+      {
+        "seed": 17,
+        "arm": "unlikelihood",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/unlikelihood/run-card.json",
+          "sha256": "sha256:337818f4eef90db3a7bec83e08543b14ae4567fe7efdde554ea48ff9644a08ce"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/unlikelihood/generation-evidence.json",
+          "sha256": "sha256:2bbda98dbbcb5b45cf8904df166b8991c7d6c2b2e097d86aff416740242d0f55",
+          "evidence_id": "sha256:b4a8ad5015acfc99afb0237300ab979ed0ec3905d06ee89737e77e837df59d65",
+          "generated_continuation_set_id": "sha256:053a96d368a97fd8ab7ebeee9afb88fdb5059f4941b60158b39a19b18e28ea46"
+        },
+        "adapter": {
+          "adapter_id": "sha256:4a62e0f96813922a3c7a1e53798f013f391fe946226db317acb64fe0222f3cf5",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/unlikelihood/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:f873bcb653a22db58acc0befa396c0e12984270fd926320304cb02b02682182b",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s17/unlikelihood/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:c24fc23d42aabfa68c4eca189548ca51b5ce74cbac097ded50d823fb15eae1c7",
+          "finetune_replay_id": "sha256:f913cecffd6e62cfb4a3433572af4d53212ca0df1b69c730e2fe15a3b490cb74",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:567257d1b754511b9324e76c673f0b63555609f25d9e4825b465c8a9cf07b2d2",
+          "tokenized_dataset_id": "sha256:d181acc8d1ef072a0367498a8102a5b3e7dbec8194ddb7b25cecf56b4026f461"
+        }
+      },
+      {
+        "seed": 23,
+        "arm": "baseline",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/baseline/run-card.json",
+          "sha256": "sha256:4fab51180f1824d1d53037d40666152ffa74ddcec5ed1f5bad1b034f5f05afb7"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/baseline/generation-evidence.json",
+          "sha256": "sha256:dab93ca5dfcd4340aedcc440e8310a812e4d5be1903b0417976ad108dc9fb3ff",
+          "evidence_id": "sha256:b3efc6fd147e75e06fcac81e6beb01bf4bb4dc717401e08ef61b8b53dbc77858",
+          "generated_continuation_set_id": "sha256:10ed4a323870bdfd6952b159cf9388d3806b6d88579d5fe330f7f714da700c1f"
+        },
+        "adapter": {
+          "adapter_id": "sha256:3db3c99e220ffcf86aff3dd97ebd0fc175851db954c688f5cb0b226c112e5838",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/baseline/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:55d531ae9203dd256c5b286b6cc79a49489449475c90248e617a3a821d51287f",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/baseline/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:90d9537d68715492f24ef15f8af3813bd9ea8f63017fcdc2ff3440a3e5b22460",
+          "finetune_replay_id": "sha256:737a6076d024aa8fea8170ed984377437ae54870edfc1d7cf2033f3a918f4433",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:1f536f6836d7c0e5eeeaf52c4d58c73804a114849db104b30aa0ab709e7aadf9",
+          "tokenized_dataset_id": "sha256:9108edc286fbf8ba52e7365dc3d4b5642043ba176f272a935bdd4d65277b21ee"
+        }
+      },
+      {
+        "seed": 23,
+        "arm": "unlikelihood",
+        "run_card": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/unlikelihood/run-card.json",
+          "sha256": "sha256:51f2f3a340816a107a636df39939f193ea4fc7fee50b4eef331e2ce9bc4aa2cc"
+        },
+        "generation_evidence": {
+          "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/unlikelihood/generation-evidence.json",
+          "sha256": "sha256:a952769606319f2f4cd2eb7046b7a237a4293882e03dc23493441823187523fc",
+          "evidence_id": "sha256:33c618b7b8b05c4464c326580a847f65ce42203b8603e05c4f699a1679dea193",
+          "generated_continuation_set_id": "sha256:c4258a87f13c501f7dca780c7bf8f32ca0515b074604eaf5f4073bdbb5b8eec8"
+        },
+        "adapter": {
+          "adapter_id": "sha256:cbbb154e919e61b96c61d30f831b505be0af93f7b36eb23ce7666b2885edde2d",
+          "weights_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/unlikelihood/output/adapter_model.safetensors",
+          "weights_sha256": "sha256:2580b33a0b9cdecd669829f49ebc9c618d13042011926007538c62adbdb0e56b",
+          "config_path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v3/runs/s23/unlikelihood/output/adapter_config.json",
+          "config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+          "weights_exact_match_against_v2": true
+        },
+        "identities": {
+          "training_recipe_id": "sha256:95893568e50e1b744ec173f6141ef12f00922652efbd79aa967333458d5627af",
+          "finetune_replay_id": "sha256:cf90b5b1a4868d1551eea5962ffa66a59204934f084155702aa64239bf3fcfe5",
+          "runtime_identity_id": "sha256:a1fe68e003464add72c28c9dc8daddf523863435f4c2d5fd6b0a19af34ba9626",
+          "execution_identity_id": "sha256:7a6884e408cb42101c0ff41f25ebfc64e752774430c7a834c50b18c328d3e132",
+          "dataset_materialization_id": "sha256:1f536f6836d7c0e5eeeaf52c4d58c73804a114849db104b30aa0ab709e7aadf9",
+          "tokenized_dataset_id": "sha256:9108edc286fbf8ba52e7365dc3d4b5642043ba176f272a935bdd4d65277b21ee"
+        }
+      }
+    ],
+    "accumulation_smoke": {
+      "path": "models/runs/hf-loop-unlikelihood-accumulation-smoke-v3/run-card.json",
+      "sha256": "sha256:0e9e77b410003bef9215f4ebdbfc01dd0124ad9f5617684466106409939b5aa9",
+      "status": "ready",
+      "gradient_accumulation_steps": 8,
+      "training_batch_count": 8,
+      "mean_base_training_loss": 5.085848808288574,
+      "mean_auxiliary_loss": 0.18610483407974243,
+      "mean_weighted_auxiliary_loss": 0.018610483407974245,
+      "mean_total_training_loss": 5.104459285736084,
+      "trainer_reported_train_loss": 5.104459285736084,
+      "trainer_reported_equals_receipt_mean_total": true
+    },
+    "invalidated_predecessor": {
+      "path": "models/runs/hf-repetition-unlikelihood-pythia70m-pilot-v0-invalid-accumulation/INVALIDATED.json",
+      "sha256": "sha256:b182f9c8f92f88f1d9f11c60b1e35285a1562e0673b4415a34185ecafc153591",
+      "status": "invalidated",
+      "invalidated_at": "2026-08-22",
+      "reason": "Transformers 5.13 token-normalized the causal-LM loss across each gradient-accumulation group while the auxiliary loss remained a microbatch mean, making strength 0.1 approximately eight times too large when gradient_accumulation_steps was 8.",
+      "scope": "all unlikelihood arms; baseline artifacts are preserved only as failed-study provenance",
+      "replacement": "hf-repetition-unlikelihood-pythia70m-pilot-v1"
+    },
+    "artifact_config_canonicalization": {
+      "schema": "spiraltorch.hf_adapter_config_canonicalization.v1",
+      "status": "ready",
+      "set_like_fields": [
+        "exclude_modules",
+        "modules_to_save",
+        "target_modules",
+        "target_parameters"
+      ],
+      "canonical_target_modules": [
+        "dense",
+        "query_key_value"
+      ],
+      "canonical_adapter_config_sha256": "sha256:82662adf78838595410eedf8f6cd5d674e1b6ce38cd95a300c132f331429b155",
+      "canonicalized_config_file_count": 12,
+      "changed_config_file_count": 12,
+      "discovered_failure": "PEFT serialized set-like target_modules in process-dependent order, changing adapter and generation evidence identities despite byte-identical adapter weights.",
+      "fixed_by_git_commit": "f8da3c1bae48cb63f8a7e0678430d0a0fac6f168",
+      "adapter_weight_exact_match_against_v2_count": 6,
+      "adapter_weight_exact_match_against_v2_required": 6,
+      "continuation_set_exact_match_against_v2_count": 6,
+      "continuation_set_exact_match_against_v2_required": 6
+    }
+  },
+  "identity_gates": {
+    "run_card_count": 6,
+    "generation_report_count": 6,
+    "all_run_load_status_ok": true,
+    "all_before_and_after_eval_status_ok": true,
+    "all_identity_contracts_ready_and_verified": true,
+    "all_trace_lineages_ready": true,
+    "all_adapter_lineages_ready": true,
+    "all_adapter_configs_canonicalized": true,
+    "all_v3_adapter_weights_exact_against_v2": true,
+    "all_v3_continuation_sets_exact_against_v2": true,
+    "rust_generation_evidence_validation": {
+      "status": "ready",
+      "file_count": 6,
+      "aggregate_contract_count": 6,
+      "prompt_local_contract_count": 48,
+      "validated_contract_count": 54,
+      "failed_contract_count": 0
+    }
+  },
+  "results": {
+    "evaluation_loss": {
+      "direction": "lower_is_better",
+      "paired_rows": [
+        {
+          "seed": 13,
+          "eval_before_shared": 5.1940016746521,
+          "baseline_eval_after": 5.096063613891602,
+          "unlikelihood_eval_after": 5.095087051391602,
+          "unlikelihood_minus_baseline": -0.0009765625
+        },
+        {
+          "seed": 17,
+          "eval_before_shared": 5.190589904785156,
+          "baseline_eval_after": 5.102051734924316,
+          "unlikelihood_eval_after": 5.102560520172119,
+          "unlikelihood_minus_baseline": 0.0005087852478027344
+        },
+        {
+          "seed": 23,
+          "eval_before_shared": 5.150523662567139,
+          "baseline_eval_after": 5.039955139160156,
+          "unlikelihood_eval_after": 5.039056777954102,
+          "unlikelihood_minus_baseline": -0.0008983612060546875
+        }
+      ],
+      "mean_unlikelihood_minus_baseline": -0.0004553794860839844,
+      "unlikelihood_win_count": 2,
+      "baseline_win_count": 1,
+      "tie_count": 0,
+      "interpretation": "The mean change is a tiny mixed-seed decrease and is not evidence of a meaningful efficacy gain."
+    },
+    "objective_execution": {
+      "receipts": [
+        {
+          "seed": 13,
+          "status": "ready",
+          "plan_stream_id": "sha256:ff513b8b079269e16fbbadefba0dfbc716d4018b0aaf0bb7f869666a8a42e7a2",
+          "training_batch_count": 508,
+          "active_batch_count": 495,
+          "active_position_count": 1898,
+          "candidate_count": 2082,
+          "mean_candidates_per_active_position": 1.0969441517386722,
+          "mean_base_training_loss": 5.113306999206543,
+          "mean_auxiliary_loss": 0.09528522938489914,
+          "mean_weighted_auxiliary_loss": 0.009528522938489915,
+          "mean_total_training_loss": 5.1228346824646,
+          "trainer_reported_train_loss": 5.1226500272750854,
+          "trainer_reported_minus_receipt_mean_total": -0.00018465518951416016
+        },
+        {
+          "seed": 17,
+          "status": "ready",
+          "plan_stream_id": "sha256:0dc8dcbb14ab2709ca731b4f5c5cace3b06a3f547a1144eabd70210b148bd51d",
+          "training_batch_count": 504,
+          "active_batch_count": 488,
+          "active_position_count": 1851,
+          "candidate_count": 2075,
+          "mean_candidates_per_active_position": 1.1210156672069151,
+          "mean_base_training_loss": 5.1458330154418945,
+          "mean_auxiliary_loss": 0.0713132917881012,
+          "mean_weighted_auxiliary_loss": 0.00713132917881012,
+          "mean_total_training_loss": 5.1529622077941895,
+          "trainer_reported_train_loss": 5.15284138917923,
+          "trainer_reported_minus_receipt_mean_total": -0.0001208186149597168
+        },
+        {
+          "seed": 23,
+          "status": "ready",
+          "plan_stream_id": "sha256:cd35d46e09c1c421add1796c66893f43672aa875a2b35e75d44446f88c5dfa26",
+          "training_batch_count": 504,
+          "active_batch_count": 486,
+          "active_position_count": 1991,
+          "candidate_count": 2232,
+          "mean_candidates_per_active_position": 1.1210447011551985,
+          "mean_base_training_loss": 5.125101089477539,
+          "mean_auxiliary_loss": 0.08936019241809845,
+          "mean_weighted_auxiliary_loss": 0.008936019241809845,
+          "mean_total_training_loss": 5.1340413093566895,
+          "trainer_reported_train_loss": 5.133870184421539,
+          "trainer_reported_minus_receipt_mean_total": -0.00017112493515014648
+        }
+      ],
+      "total_training_batch_count": 1516,
+      "total_active_batch_count": 1469,
+      "total_active_position_count": 5740,
+      "total_candidate_count": 6389,
+      "all_receipts_ready": true
+    },
+    "held_out_greedy_generation": {
+      "direction": "lower_is_better",
+      "paired_rows": [
+        {
+          "seed": 13,
+          "baseline_loop_score": 1.0929565019596865,
+          "unlikelihood_loop_score": 1.215851297125793,
+          "loop_score_unlikelihood_minus_baseline": 0.12289479516610657,
+          "baseline_periodic_loop_sample_ratio": 0.375,
+          "unlikelihood_periodic_loop_sample_ratio": 0.5,
+          "periodic_loop_ratio_unlikelihood_minus_baseline": 0.125,
+          "baseline_evidence_id": "sha256:1b3c1f1ef04313d924279bcf8eb54889528b8d0aa5f6f787891773e589214108",
+          "unlikelihood_evidence_id": "sha256:c06cfaff7513690a1733a600e32afc8136de63b6bfb9922aa0d4a8a53315e0b9"
+        },
+        {
+          "seed": 17,
+          "baseline_loop_score": 1.2758028298805526,
+          "unlikelihood_loop_score": 1.39503866881299,
+          "loop_score_unlikelihood_minus_baseline": 0.1192358389324375,
+          "baseline_periodic_loop_sample_ratio": 0.75,
+          "unlikelihood_periodic_loop_sample_ratio": 0.875,
+          "periodic_loop_ratio_unlikelihood_minus_baseline": 0.125,
+          "baseline_evidence_id": "sha256:95c5e479b8128206852cd36d27eb56b87ef511aaf48c971d054fd8ccd8554198",
+          "unlikelihood_evidence_id": "sha256:b4a8ad5015acfc99afb0237300ab979ed0ec3905d06ee89737e77e837df59d65"
+        },
+        {
+          "seed": 23,
+          "baseline_loop_score": 1.2936712625979843,
+          "unlikelihood_loop_score": 1.2661604143337066,
+          "loop_score_unlikelihood_minus_baseline": -0.027510848264277632,
+          "baseline_periodic_loop_sample_ratio": 0.75,
+          "unlikelihood_periodic_loop_sample_ratio": 0.75,
+          "periodic_loop_ratio_unlikelihood_minus_baseline": 0.0,
+          "baseline_evidence_id": "sha256:b3efc6fd147e75e06fcac81e6beb01bf4bb4dc717401e08ef61b8b53dbc77858",
+          "unlikelihood_evidence_id": "sha256:33c618b7b8b05c4464c326580a847f65ce42203b8603e05c4f699a1679dea193"
+        }
+      ],
+      "mean_loop_score_unlikelihood_minus_baseline": 0.07153992861142215,
+      "unlikelihood_loop_score_win_count": 1,
+      "baseline_loop_score_win_count": 2,
+      "mean_periodic_loop_ratio_unlikelihood_minus_baseline": 0.08333333333333333,
+      "interpretation": "Loop score worsened in two of three seeds and on average; periodic-loop incidence also increased on average."
+    }
+  },
+  "claims": {
+    "efficacy_claim_ready": false,
+    "allowed_claim": "The Rust-owned repeated-prefix candidate planner and differentiable HF objective executed through audited 64-step LoRA training, produced deterministic adapter weights, and emitted replayable training and generation evidence.",
+    "observed_result": "This candidate rule at strength 0.1 did not reduce held-out greedy-generation loops in the exploratory Pythia-70M pilot.",
+    "excluded_claims": [
+      "repetition reduction",
+      "language-quality superiority",
+      "statistical significance",
+      "multi-model or multi-corpus generality",
+      "Z-space training superiority"
+    ],
+    "evidence_boundary": "This is an exploratory implementation pilot, not a prespecified efficacy experiment; the same 24 paired prompt-seed rows must not be reused to tune and then claim confirmation."
+  },
+  "diagnosis": {
+    "current_candidate_rule": "For each supervised target, Rust finds earlier matching n-1 prefixes in bounded valid-token history, selects their next tokens, excludes the current ground-truth target, and sorts by frequency, recency, then token ID.",
+    "observed_limitation": "Because the current ground-truth target is excluded, exact repeated continuations are not directly penalized under teacher forcing; only prior alternative continuations become negative candidates, and active coverage is sparse.",
+    "artifact_reproducibility_bug_closed": true
+  },
+  "next_prespecified_experiment": {
+    "status": "proposed_not_run",
+    "candidate_source_options": [
+      "generated-negative continuations from a frozen baseline checkpoint",
+      "history-token candidates that directly include repeated continuation tokens under an explicit target-handling rule"
+    ],
+    "factorized_controls": [
+      "candidate source",
+      "objective strength",
+      "active-position coverage",
+      "baseline causal-LM loss"
+    ],
+    "requirements": [
+      "freeze the protocol, candidate rules, strengths, seeds, corpus split identities, and stop criteria before training",
+      "use a fresh held-out prompt set not selected from these 24 exploratory prompt-seed rows",
+      "retain a strength-zero matched baseline and report both CE and generation-loop metrics",
+      "require Rust validation of every aggregate and prompt-local generation evidence contract"
+    ],
+    "promotion_gate": "Promote only if loop score improves with consistent seed direction without material held-out CE regression; otherwise retain the objective as executed-but-not-effective evidence."
+  }
+}

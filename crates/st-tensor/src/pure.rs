@@ -11306,9 +11306,7 @@ impl AmegaRealgrad {
 
     /// Reset the accumulated gradient to zero.
     pub fn reset(&mut self) {
-        for value in &mut self.gradient {
-            *value = 0.0;
-        }
+        self.gradient.fill(0.0);
     }
 
     /// Accumulate an Euclidean tensor into the tape.
@@ -11585,7 +11583,11 @@ fn fused_axpy(dst: &mut [f32], rhs: &[f32], scale: f32) {
     let (dst_head, dst_tail) = dst.split_at_mut(chunk_len);
     let (rhs_head, rhs_tail) = rhs.split_at(chunk_len);
 
-    for (dst_chunk, rhs_chunk) in dst_head.chunks_exact_mut(4).zip(rhs_head.chunks_exact(4)) {
+    let (dst_chunks, dst_remainder) = dst_head.as_chunks_mut::<4>();
+    let (rhs_chunks, rhs_remainder) = rhs_head.as_chunks::<4>();
+    debug_assert!(dst_remainder.is_empty());
+    debug_assert!(rhs_remainder.is_empty());
+    for (dst_chunk, rhs_chunk) in dst_chunks.iter_mut().zip(rhs_chunks) {
         dst_chunk[0] += scale * rhs_chunk[0];
         dst_chunk[1] += scale * rhs_chunk[1];
         dst_chunk[2] += scale * rhs_chunk[2];
@@ -12512,7 +12514,7 @@ mod tests {
         ));
         assert_eq!(output.shape(), (2, 3));
         let expected = [gelu(bias[0]), gelu(bias[1]), gelu(bias[2])];
-        for row in output.data().chunks_exact(3) {
+        for row in output.data().as_chunks::<3>().0 {
             for (observed, expected) in row.iter().zip(expected.iter()) {
                 assert!((observed - expected).abs() < 1.0e-6);
             }

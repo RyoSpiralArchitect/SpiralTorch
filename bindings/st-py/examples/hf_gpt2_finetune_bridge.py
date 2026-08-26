@@ -414,6 +414,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     parser.add_argument("--trainer-trace-run-id", default=None)
     parser.add_argument(
+        "--zspace-repetition-unlikelihood-strength",
+        type=float,
+        default=0.0,
+        help=(
+            "Add a Rust-planned repetition-unlikelihood term to training loss. "
+            "The default 0 preserves plain causal-LM training."
+        ),
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-ngram-order",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-context-window",
+        type=int,
+        default=128,
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-max-candidates",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
         "--zspace-optimizer-control",
         choices=("off", "observe", "apply"),
         default="off",
@@ -1122,6 +1146,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
+    if args.zspace_repetition_unlikelihood_strength > 0.0 and not (
+        args.train or args.training_recipe_only
+    ):
+        parser.error(
+            "active repetition unlikelihood requires --train or --training-recipe-only"
+        )
     if not 0.0 <= args.zspace_optimizer_control_gain <= 1.0 or not math.isfinite(
         args.zspace_optimizer_control_gain
     ):
@@ -1411,6 +1441,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     except Exception as exc:
         parser.error(f"invalid Z-space optimizer control recipe: {exc}")
+    try:
+        args._hf_repetition_unlikelihood_recipe = (
+            st.hf_repetition_unlikelihood_recipe_contract(
+                strength=args.zspace_repetition_unlikelihood_strength,
+                ngram_order=args.zspace_repetition_unlikelihood_ngram_order,
+                context_window=args.zspace_repetition_unlikelihood_context_window,
+                max_candidates_per_position=(
+                    args.zspace_repetition_unlikelihood_max_candidates
+                ),
+            )
+        )
+    except Exception as exc:
+        parser.error(f"invalid Z-space repetition-unlikelihood recipe: {exc}")
     args._hf_finetune_launch_command = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -3271,10 +3314,21 @@ def _tokenized_dataset_identity_report(
 
 def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, object]:
     trace_enabled = not bool(args.no_trainer_trace)
+    repetition_recipe = dict(args._hf_repetition_unlikelihood_recipe)
+    repetition_enabled = repetition_recipe.get("enabled") is True
     return {
-        "trainer": "transformers.Trainer",
+        "trainer": (
+            "spiraltorch.HfRepetitionUnlikelihoodTrainer"
+            if repetition_enabled
+            else "transformers.Trainer"
+        ),
         "data_collator": {
-            "class": "transformers.DataCollatorForLanguageModeling",
+            "class": (
+                "spiraltorch.HfRepetitionUnlikelihoodCollator"
+                if repetition_enabled
+                else "transformers.DataCollatorForLanguageModeling"
+            ),
+            "base_class": "transformers.DataCollatorForLanguageModeling",
             "mlm": False,
         },
         "trainer_train": {
@@ -3297,6 +3351,7 @@ def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, obj
         "zspace_optimizer_control": dict(
             args._hf_zspace_optimizer_recipe_contract
         ),
+        "zspace_repetition_unlikelihood": repetition_recipe,
     }
 
 
@@ -3882,6 +3937,7 @@ def _base_run_card(
         "model_dtype_report": None,
         "finetune_mode": args.finetune_mode,
         "adapter_config": dict(args._hf_finetune_adapter_config),
+        "adapter_config_canonicalization": None,
         "model_prepare_report": None,
         "model_artifact_kind": artifact_report.get("artifact_kind"),
         "model_artifact_report": summarize_hf_causal_lm_artifact(
@@ -3893,6 +3949,10 @@ def _base_run_card(
             args._hf_zspace_optimizer_recipe_contract
         ),
         "zspace_optimizer_control_receipt": None,
+        "zspace_repetition_unlikelihood_recipe": dict(
+            args._hf_repetition_unlikelihood_recipe
+        ),
+        "zspace_repetition_unlikelihood_receipt": None,
         "zspace_optimizer_trajectory_input": (
             None
             if args._hf_zspace_optimizer_trajectory_report is None
@@ -5488,10 +5548,24 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
-    collator = transformers.DataCollatorForLanguageModeling(
+    base_collator = transformers.DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,
     )
+    repetition_recipe = dict(args._hf_repetition_unlikelihood_recipe)
+    repetition_enabled = repetition_recipe.get("enabled") is True
+    collator = base_collator
+    if repetition_enabled:
+        repetition_config = dict(repetition_recipe["config"])
+        collator = st.HfRepetitionUnlikelihoodCollator(
+            base_collator,
+            strength=repetition_config["strength"],
+            ngram_order=repetition_config["ngram_order"],
+            context_window=repetition_config["context_window"],
+            max_candidates_per_position=(
+                repetition_config["max_candidates_per_position"]
+            ),
+        )
     training_args_cls = transformers.TrainingArguments
     raw_training_kwargs = _raw_training_arguments_kwargs(
         args,
@@ -5731,14 +5805,23 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    trainer = None
     try:
-        trainer = transformers.Trainer(
+        trainer_class = transformers.Trainer
+        trainer_kwargs: dict[str, object] = {}
+        if repetition_enabled:
+            trainer_class = st.hf_repetition_unlikelihood_trainer_class(
+                transformers.Trainer
+            )
+            trainer_kwargs["zspace_repetition_unlikelihood_recipe"] = repetition_recipe
+        trainer = trainer_class(
             model=model,
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=collator,
             callbacks=callbacks,
+            **trainer_kwargs,
         )
         if args.eval_before_train:
             card["eval_before_train"] = _trainer_eval_report(
@@ -5748,14 +5831,27 @@ def _main_with_runtime_access(
             )
         train_result = trainer.train(**_trainer_train_kwargs(args))
         trainer.save_model(str(args.output_dir))
+        if args.finetune_mode == "lora":
+            card["adapter_config_canonicalization"] = (
+                st.canonicalize_hf_adapter_configs(args.output_dir)
+            )
         card["zspace_optimizer_control_receipt"] = (
             zspace_optimizer_callback.receipt()
         )
+        if repetition_enabled:
+            card["zspace_repetition_unlikelihood_receipt"] = (
+                trainer.zspace_repetition_unlikelihood_receipt()
+            )
     except Exception as exc:
         if zspace_optimizer_callback is not None:
             zspace_optimizer_callback.abort(exc)
             card["zspace_optimizer_control_receipt"] = (
                 zspace_optimizer_callback.receipt()
+            )
+        if repetition_enabled and trainer is not None:
+            trainer.abort_zspace_repetition_unlikelihood(exc)
+            card["zspace_repetition_unlikelihood_receipt"] = (
+                trainer.zspace_repetition_unlikelihood_receipt()
             )
         card.update(
             {

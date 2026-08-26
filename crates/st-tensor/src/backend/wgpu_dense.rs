@@ -2345,7 +2345,7 @@ impl GpuContext {
         let mut sum_above = 0.0;
         let mut sum_here = 0.0;
         let mut sum_swirl = 0.0;
-        for chunk in values.chunks_exact(4) {
+        for chunk in values.as_chunks::<4>().0 {
             sum_focus += chunk[0].max(0.0);
             sum_above += chunk[1].clamp(0.0, 1.0);
             sum_here += chunk[2].clamp(0.0, 1.0);
@@ -3625,7 +3625,12 @@ mod tests {
         let logits = vec![-1.5, 0.0, 0.75, 2.0, 4.0, -0.5, 1.25, 0.25];
         let softmax = row_softmax(&logits, 2, 4, Layout::RowMajor)
             .expect("lazy softmax pipeline should execute");
-        for (input_row, output_row) in logits.chunks_exact(4).zip(softmax.chunks_exact(4)) {
+        for (input_row, output_row) in logits
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(softmax.as_chunks::<4>().0)
+        {
             let max = input_row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let denominator = input_row
                 .iter()
@@ -9127,7 +9132,7 @@ pub fn row_softmax_hardmax_spiral(
         let mut total_hardmass = 0.0_f64;
         let mut total_enrichment = 0.0_f64;
         let mut total_coherence = 0.0_f64;
-        for chunk in metrics.chunks_exact(4) {
+        for chunk in metrics.as_chunks::<4>().0 {
             let entropy = if chunk[0].is_finite() {
                 f64::from(chunk[0].max(0.0))
             } else {

@@ -1239,7 +1239,7 @@ impl ColorVectorField {
         }
 
         let mut out = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+        for chunk in spectrum.as_chunks::<{ Self::FFT_INTERLEAVED_STRIDE }>().0 {
             let mapped = map(chunk);
             out.extend_from_slice(&mapped);
         }
@@ -1308,7 +1308,7 @@ impl ColorVectorField {
 
         let mut magnitudes = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
         let mut phases = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+        for chunk in spectrum.as_chunks::<{ Self::FFT_INTERLEAVED_STRIDE }>().0 {
             let (re_energy, im_energy) = (chunk[0], chunk[1]);
             let (re_chroma_r, im_chroma_r) = (chunk[2], chunk[3]);
             let (re_chroma_g, im_chroma_g) = (chunk[4], chunk[5]);
@@ -1406,7 +1406,7 @@ impl ColorVectorField {
         let mut linear = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
         let mut decibel = Vec::with_capacity(expected_pairs * Self::FFT_CHANNELS);
 
-        for chunk in spectrum.chunks_exact(Self::FFT_INTERLEAVED_STRIDE) {
+        for chunk in spectrum.as_chunks::<{ Self::FFT_INTERLEAVED_STRIDE }>().0 {
             for value in Self::power_channels_from_interleaved_chunk(chunk) {
                 linear.push(value);
                 decibel.push(Self::map_power_to_db(value));
@@ -3236,7 +3236,7 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let spectrum = unwrap_ok(field.fft_rows_interleaved(false));
         assert_eq!(spectrum.len(), 32);
-        for chunk in spectrum.chunks_exact(8) {
+        for chunk in spectrum.as_chunks::<8>().0 {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
             assert!(chunk[1].abs() < 1e-6);
             for value in &chunk[2..] {
@@ -3251,7 +3251,7 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let spectrum = unwrap_ok(field.fft_cols_interleaved(false));
         assert_eq!(spectrum.len(), 32);
-        for chunk in spectrum.chunks_exact(8) {
+        for chunk in spectrum.as_chunks::<8>().0 {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
             assert!(chunk[1].abs() < 1e-6);
             for value in &chunk[2..] {
@@ -3266,7 +3266,7 @@ mod tests {
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
         let spectrum = unwrap_ok(field.fft_2d_interleaved(false));
         assert_eq!(spectrum.len(), 2 * 2 * 8);
-        for chunk in spectrum.chunks_exact(8) {
+        for chunk in spectrum.as_chunks::<8>().0 {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
             assert!(chunk[1].abs() < 1e-6);
             for value in &chunk[2..] {

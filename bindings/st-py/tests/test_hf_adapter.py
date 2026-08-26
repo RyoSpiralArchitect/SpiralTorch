@@ -407,6 +407,43 @@ def test_adapter_fingerprint_is_path_independent_and_weight_sensitive(
     assert first_report["base_model_name_or_path"] == "org/base"
 
 
+def test_adapter_config_canonicalization_stabilizes_set_fields(
+    tmp_path: Path,
+) -> None:
+    first = _write_adapter(tmp_path / "first", b"adapter")
+    second = _write_adapter(tmp_path / "second", b"adapter")
+    for adapter, targets in (
+        (first, ["query_key_value", "dense"]),
+        (second, ["dense", "query_key_value"]),
+    ):
+        config_path = adapter / "adapter_config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["target_modules"] = targets
+        config["modules_to_save"] = ["z", "a"]
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        checkpoint = adapter / "checkpoint-1"
+        checkpoint.mkdir()
+        (checkpoint / "adapter_config.json").write_text(
+            json.dumps(config),
+            encoding="utf-8",
+        )
+
+    first_report = st.canonicalize_hf_adapter_configs(first)
+    second_report = st.canonicalize_hf_adapter_configs(second)
+    first_config = json.loads(
+        (first / "adapter_config.json").read_text(encoding="utf-8")
+    )
+
+    assert first_report["status"] == "ready"
+    assert first_report["file_count"] == 2
+    assert second_report["file_count"] == 2
+    assert first_config["target_modules"] == ["dense", "query_key_value"]
+    assert first_config["modules_to_save"] == ["a", "z"]
+    assert st.hf_adapter_fingerprint(first)["adapter_id"] == (
+        st.hf_adapter_fingerprint(second)["adapter_id"]
+    )
+
+
 def test_adapter_fingerprint_includes_shards_referenced_by_index(
     tmp_path: Path,
 ) -> None:
