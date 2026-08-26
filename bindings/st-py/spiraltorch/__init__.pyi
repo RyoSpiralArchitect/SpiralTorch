@@ -5404,6 +5404,20 @@ ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: int
 ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS: int
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND: str
 ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER: str
+ZSPACE_PERIODICITY_ANALYSIS_ID_RULE: str
+ZSPACE_PERIODICITY_CONTRACT_VERSION: str
+ZSPACE_PERIODICITY_EVIDENCE_BOUNDARY: str
+ZSPACE_PERIODICITY_KIND: str
+ZSPACE_PERIODICITY_MAX_COMPARISON_WORK: int
+ZSPACE_PERIODICITY_MAX_MINIMUM_REPETITIONS: int
+ZSPACE_PERIODICITY_MAX_PERIOD: int
+ZSPACE_PERIODICITY_MAX_SAFE_INTEGER: int
+ZSPACE_PERIODICITY_MAX_TOKENS: int
+ZSPACE_PERIODICITY_RULE: str
+ZSPACE_PERIODICITY_SEMANTIC_BACKEND: str
+ZSPACE_PERIODICITY_SEMANTIC_OWNER: str
+ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD: int
+ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS: int
 ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS: tuple[str, str, str]
 ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION: str
 ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND: str
@@ -5564,6 +5578,16 @@ def zspace_generation_evidence(
     samples: Sequence[Mapping[str, object]],
 ) -> Dict[str, object]: ...
 def validate_zspace_generation_evidence(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def zspace_periodicity(
+    token_ids: Sequence[int],
+    *,
+    appended_token_id: Optional[int] = ...,
+    maximum_period: int = ...,
+    minimum_repetitions: int = ...,
+) -> Dict[str, object]: ...
+def validate_zspace_periodicity(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet(
@@ -12084,6 +12108,20 @@ __all__ = [
     "ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MIN_REPETITIONS",
     "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND",
     "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER",
+    "ZSPACE_PERIODICITY_ANALYSIS_ID_RULE",
+    "ZSPACE_PERIODICITY_CONTRACT_VERSION",
+    "ZSPACE_PERIODICITY_EVIDENCE_BOUNDARY",
+    "ZSPACE_PERIODICITY_KIND",
+    "ZSPACE_PERIODICITY_MAX_COMPARISON_WORK",
+    "ZSPACE_PERIODICITY_MAX_MINIMUM_REPETITIONS",
+    "ZSPACE_PERIODICITY_MAX_PERIOD",
+    "ZSPACE_PERIODICITY_MAX_SAFE_INTEGER",
+    "ZSPACE_PERIODICITY_MAX_TOKENS",
+    "ZSPACE_PERIODICITY_RULE",
+    "ZSPACE_PERIODICITY_SEMANTIC_BACKEND",
+    "ZSPACE_PERIODICITY_SEMANTIC_OWNER",
+    "ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD",
+    "ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS",
     "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
@@ -12116,6 +12154,7 @@ __all__ = [
     "validate_zspace_parameter_trajectory_policy",
     "validate_zspace_polarity_evidence",
     "validate_zspace_generation_evidence",
+    "validate_zspace_periodicity",
     "ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS",
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",
@@ -12160,6 +12199,7 @@ __all__ = [
     "zspace_polarity_evidence",
     "zspace_generation_control",
     "zspace_generation_evidence",
+    "zspace_periodicity",
     "zspace_repetition_unlikelihood_plan",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
