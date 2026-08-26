@@ -483,7 +483,7 @@ mod tests {
         );
         assert_eq!(report.input_token_count, 6);
         assert_eq!(report.effective_token_count, 7);
-        assert_eq!(report.periodic_loop_detected, true);
+        assert!(report.periodic_loop_detected);
         assert_eq!(
             report.periodic_suffix,
             longest_periodic_suffix_with_appended_token(&[9, 1, 2, 1, 2, 1], 2, 16, 3)
