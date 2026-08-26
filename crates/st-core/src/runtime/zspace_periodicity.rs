@@ -435,6 +435,39 @@ mod tests {
     }
 
     #[test]
+    fn appended_token_kernel_matches_allocated_reference_exhaustively() {
+        for prefix_len in 0..=8 {
+            for bits in 0usize..(1usize << prefix_len) {
+                let prefix = (0..prefix_len)
+                    .map(|index| ((bits >> index) & 1) as u64)
+                    .collect::<Vec<_>>();
+                for appended_token in [0, 1] {
+                    let mut allocated = prefix.clone();
+                    allocated.push(appended_token);
+                    for maximum_period in 1..=4 {
+                        for minimum_repetitions in 2..=4 {
+                            assert_eq!(
+                                longest_periodic_suffix_with_appended_token(
+                                    &prefix,
+                                    appended_token,
+                                    maximum_period,
+                                    minimum_repetitions,
+                                ),
+                                longest_periodic_suffix(
+                                    &allocated,
+                                    maximum_period,
+                                    minimum_repetitions,
+                                ),
+                                "prefix={prefix:?} appended={appended_token} period={maximum_period} repetitions={minimum_repetitions}",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn public_report_uses_defaults_and_matches_the_appended_kernel() {
         let request: ZSpacePeriodicityRequest = serde_json::from_value(serde_json::json!({
             "token_ids": [9, 1, 2, 1, 2, 1],
