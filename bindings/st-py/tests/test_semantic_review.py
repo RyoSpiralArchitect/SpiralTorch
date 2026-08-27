@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -300,15 +300,28 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
     with pytest.raises(ValueError, match="count exceeds maximum 1"):
         semantic_review._bounded_mapping_sequence([{}, {}], maximum=1, label="test row")
 
-    class OversizedMapping(Mapping[str, object]):
-        def __getitem__(self, key: str) -> object:
-            return None
+    class ActiveMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
 
-        def __iter__(self) -> Iterator[str]:
-            return (f"field_{index}" for index in range(66))
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
 
         def __len__(self) -> int:
-            return 66
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class ActiveSequence(Sequence[Mapping[str, object]]):
+        def __getitem__(self, _index: int) -> Mapping[str, object]:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
 
     class AdversarialDict(dict[str, object]):
         def __len__(self) -> int:
@@ -320,8 +333,15 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
         def items(self) -> object:
             raise AssertionError("overridden items must not run")
 
-    with pytest.raises(ValueError, match="field count exceeds maximum 64"):
-        st.validate_zspace_semantic_review_packet(OversizedMapping())
+    class AdversarialList(list[Mapping[str, object]]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_semantic_review_packet(ActiveMapping())
     with pytest.raises(ValueError, match="field count exceeds maximum 64"):
         st.validate_zspace_semantic_review_packet(
             {f"field_{index}": None for index in range(65)}
@@ -337,6 +357,33 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
             maximum=1,
             label="adversarial dict",
         )
+    assert semantic_review._bounded_mapping_sequence(
+        AdversarialList([{"field": "safe"}]),
+        maximum=1,
+        label="adversarial list",
+    ) == [{"field": "safe"}]
+    with pytest.raises(TypeError, match="list or tuple for bounded admission"):
+        st.zspace_semantic_review_map_id(ActiveSequence())
+    with pytest.raises(TypeError, match="list or tuple for passive admission"):
+        st.zspace_semantic_review_map_id_trusted_legacy_replay(ActiveSequence())
+    assert st.zspace_semantic_review_map_id_trusted_legacy_replay(
+        AdversarialList(
+            [
+                {
+                    "group_id": _identity("1"),
+                    "seed": 13,
+                    "prompt_id": _identity("2"),
+                    "candidate_to_arm": {
+                        "A": "baseline",
+                        "B": "history",
+                        "C": "periodic",
+                    },
+                }
+            ]
+        )
+    ).startswith("sha256:")
+    with pytest.raises(ValueError, match="payload must be JSON-like"):
+        st.zspace_semantic_review_map_id_trusted_legacy_replay([ActiveMapping()])
 
     packet = _packet()
     draft = st.new_zspace_semantic_review_draft(
@@ -349,9 +396,9 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
             packet={**packet, "unexpected": None},
             draft=draft,
         )
-    with pytest.raises(ValueError, match="packet field count exceeds maximum 12"):
+    with pytest.raises(TypeError, match="dict-backed mapping"):
         st.summarize_zspace_semantic_review_draft(
-            packet=OversizedMapping(),
+            packet=ActiveMapping(),
             draft=draft,
         )
     with pytest.raises(ValueError, match="draft field count exceeds maximum 5"):
@@ -359,11 +406,11 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
             packet=packet,
             draft={**draft, "unexpected": None},
         )
-    with pytest.raises(ValueError, match="blinding map field count exceeds maximum 6"):
+    with pytest.raises(TypeError, match="dict-backed mapping"):
         st.unblind_zspace_semantic_review(
             packet=packet,
             draft=draft,
-            blinding_map=OversizedMapping(),
+            blinding_map=ActiveMapping(),
         )
 
     response = {"group_id": _identity("1")}

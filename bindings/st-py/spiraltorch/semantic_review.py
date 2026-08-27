@@ -247,19 +247,11 @@ def _bounded_mapping_snapshot(
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if isinstance(value, dict):
-        if dict.__len__(value) > maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return dict.copy(value)
-
-    snapshot: dict[str, object] = {}
-    for index, (key, item) in enumerate(value.items()):
-        if index >= maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        if not isinstance(key, str):
-            raise ValueError(f"{label} keys must be strings")
-        snapshot[key] = item
-    return snapshot
+    if not isinstance(value, dict):
+        raise TypeError(f"{label} must be a dict-backed mapping for bounded admission")
+    if dict.__len__(value) > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
 
 
 def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
@@ -311,10 +303,19 @@ def _bounded_mapping_sequence(
     label: str,
     maximum_fields: int = 8,
 ) -> list[dict[str, object]]:
+    if isinstance(values, list):
+        value_count = list.__len__(values)
+        value_iterator = list.__iter__(values)
+    elif isinstance(values, tuple):
+        value_count = tuple.__len__(values)
+        value_iterator = tuple.__iter__(values)
+    else:
+        raise TypeError(f"{label} must be a list or tuple for bounded admission")
+    if value_count > maximum:
+        raise ValueError(f"{label} count exceeds maximum {maximum}")
+
     rows: list[dict[str, object]] = []
-    for index, value in enumerate(values):
-        if index >= maximum:
-            raise ValueError(f"{label} count exceeds maximum {maximum}")
+    for index, value in enumerate(value_iterator):
         rows.append(
             _bounded_mapping_snapshot(
                 value,
@@ -565,9 +566,15 @@ def zspace_semantic_review_map_id_trusted_legacy_replay(
     Never pass untrusted or remotely supplied input to this opt-in path.
     """
 
+    if not isinstance(entries, (list, tuple)):
+        raise TypeError(
+            "trusted legacy semantic review entries must be a list or tuple for "
+            "passive admission"
+        )
+
     return _native_identity_operation(
         "_zspace_semantic_review_map_id_trusted_legacy_replay",
-        {"entries": [dict(entry) for entry in entries]},
+        {"entries": entries},
     )
 
 

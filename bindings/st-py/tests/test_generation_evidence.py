@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -53,7 +54,7 @@ def _sha_id(character: str) -> str:
 
 
 def _report(
-    samples: list[dict[str, object]] | None = None,
+    samples: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     return st.zspace_generation_evidence(
         protocol_id=_sha_id("a"),
@@ -222,6 +223,52 @@ def test_generation_evidence_dict_subclasses_cannot_bypass_snapshot_bounds() -> 
         ]
     )
     assert st.validate_zspace_generation_evidence(HostileDict(report)) == report
+
+
+def test_generation_evidence_rejects_active_container_hooks() -> None:
+    class ActiveMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class ActiveSequence(Sequence[Mapping[str, object]]):
+        def __getitem__(self, _index: int) -> Mapping[str, object]:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+    class HostileList(list[Mapping[str, object]]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+    sample = {
+        "prompt_id": _sha_id("1"),
+        "seed": 13,
+        "continuation_token_ids": [1, 2],
+    }
+    assert _report(HostileList([sample]))["sample_count"] == 1
+
+    with pytest.raises(TypeError, match="list or tuple for bounded admission"):
+        _report(ActiveSequence())
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        _report([ActiveMapping()])
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_generation_evidence(ActiveMapping())
 
 
 def test_generation_evidence_public_surface_is_exported() -> None:

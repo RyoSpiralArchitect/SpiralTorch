@@ -21,9 +21,12 @@
 - Make both normal and release wheel workflows run the installed wheel through
   the catalog and all three protocol lifecycles before artifacts can be
   uploaded or published.
-- Bound generation and repetition Python ingress before serde materialization,
-  including shallow facade snapshots that preserve tuple inputs without
-  copying complete token trees.
+- Bound normal generation, repetition, and semantic-review Python ingress
+  before serde materialization. Facade snapshots accept passive
+  `dict`/`list`/`tuple` containers, bypass subclass overrides, reject arbitrary
+  mapping/sequence enumeration hooks, and preserve tuple inputs without
+  copying complete token trees. Trusted legacy replay retains its historical
+  budget semantics without enumerating active outer containers.
 
 ## 0.4.14
 

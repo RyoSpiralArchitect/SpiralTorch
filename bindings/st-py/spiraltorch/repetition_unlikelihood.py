@@ -160,21 +160,11 @@ def _bounded_mapping_snapshot(
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{label} must be a mapping")
-    if isinstance(value, dict):
-        if dict.__len__(value) > maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return dict.copy(value)
-
-    snapshot: dict[str, object] = {}
-    for index, (key, item) in enumerate(value.items()):
-        if index >= maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        if not isinstance(key, str):
-            raise ValueError(f"{label} keys must be strings")
-        snapshot[key] = item
-    return snapshot
+    if not isinstance(value, dict):
+        raise TypeError(f"{label} must be a dict-backed mapping for bounded admission")
+    if dict.__len__(value) > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
 
 
 def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
@@ -265,13 +255,25 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
 def _bounded_sequences(
     sequences: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
+    if isinstance(sequences, list):
+        sequence_count = list.__len__(sequences)
+        sequence_iterator = list.__iter__(sequences)
+    elif isinstance(sequences, tuple):
+        sequence_count = tuple.__len__(sequences)
+        sequence_iterator = tuple.__iter__(sequences)
+    else:
+        raise TypeError(
+            "repetition-unlikelihood sequences must be a list or tuple for bounded "
+            "admission"
+        )
+    if sequence_count > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES:
+        raise ValueError(
+            "repetition-unlikelihood sequence count exceeds maximum "
+            f"{ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES}"
+        )
+
     snapshot: list[dict[str, object]] = []
-    for index, sequence in enumerate(sequences):
-        if index >= ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES:
-            raise ValueError(
-                "repetition-unlikelihood sequence count exceeds maximum "
-                f"{ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES}"
-            )
+    for index, sequence in enumerate(sequence_iterator):
         snapshot.append(
             _bounded_mapping_snapshot(
                 sequence,

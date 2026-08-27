@@ -88,3 +88,34 @@ def test_runtime_protocol_catalog_public_surface_is_typed_and_exported() -> None
     stub = (Path(st.__file__).with_name("__init__.pyi")).read_text(encoding="utf-8")
     for symbol in expected:
         assert symbol in stub
+
+
+def test_runtime_protocol_catalog_rejects_active_mapping_hooks_in_rust() -> None:
+    class ActiveMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class HostileDict(dict[str, object]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+        def items(self):
+            raise AssertionError("overridden items must not run")
+
+    with pytest.raises(ValueError, match="payload must be JSON-like"):
+        st.validate_zspace_runtime_protocol_catalog(ActiveMapping())
+
+    catalog = st.zspace_runtime_protocol_catalog()
+    assert st.validate_zspace_runtime_protocol_catalog(HostileDict(catalog)) == catalog

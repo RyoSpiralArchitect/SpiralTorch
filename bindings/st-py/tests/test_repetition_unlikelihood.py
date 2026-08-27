@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -269,6 +270,60 @@ def test_repetition_dict_subclasses_cannot_override_bounded_snapshot() -> None:
         ]
     )
     assert st.validate_zspace_repetition_unlikelihood_plan(HostileDict(plan)) == plan
+
+
+def test_repetition_facade_rejects_active_container_hooks() -> None:
+    class ActiveMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class ActiveSequence(Sequence[Mapping[str, object]]):
+        def __getitem__(self, _index: int) -> Mapping[str, object]:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+    class HostileList(list[Mapping[str, object]]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+    sequence = {
+        "token_ids": [1, 2, 3],
+        "token_mask": [True, True, True],
+        "label_mask": [True, True, True],
+    }
+    plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=HostileList([sequence])
+    )
+    assert plan["plan_validated"] is True
+
+    with pytest.raises(TypeError, match="list or tuple for bounded admission"):
+        st.zspace_repetition_unlikelihood_plan(sequences=ActiveSequence())
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.zspace_repetition_unlikelihood_plan(sequences=[ActiveMapping()])
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.zspace_repetition_unlikelihood_plan(
+            sequences=[sequence],
+            candidate_source=ActiveMapping(),
+        )
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_repetition_unlikelihood_plan(ActiveMapping())
 
 
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:

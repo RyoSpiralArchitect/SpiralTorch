@@ -101,6 +101,14 @@ catalog entries expose only byte/node/depth-bounded JSON routes. WASM object
 helpers remain trusted-local convenience transports and are intentionally not
 certified as hostile-input boundaries.
 
+Normal catalogued Python routes admit `dict`-backed mappings and `list`/`tuple`
+sequences, including subclasses through base-container operations. Arbitrary
+`Mapping` or `Sequence` implementations are rejected before their Python
+enumeration hooks can run; Rust then applies the protocol byte/node/depth and
+semantic admission budgets. Opt-in trusted-legacy replay keeps its documented
+historical budget exemptions, but still rejects active outer containers and
+remains unsuitable for remote input.
+
 `describe_runtime_devices()` and HF preflight orchestrate observations in Python, but committed
 SpiralTorch probes are validated and projected into route evidence only by
 `st-core::backend::runtime_route`. In particular, an MPS placeholder can remain honestly

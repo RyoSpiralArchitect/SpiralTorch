@@ -107,21 +107,11 @@ def _bounded_mapping_snapshot(
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{label} must be a mapping")
-    if isinstance(value, dict):
-        if dict.__len__(value) > maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return dict.copy(value)
-
-    snapshot: dict[str, object] = {}
-    for index, (key, item) in enumerate(value.items()):
-        if index >= maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        if not isinstance(key, str):
-            raise ValueError(f"{label} keys must be strings")
-        snapshot[key] = item
-    return snapshot
+    if not isinstance(value, dict):
+        raise TypeError(f"{label} must be a dict-backed mapping for bounded admission")
+    if dict.__len__(value) > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
 
 
 def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
@@ -211,13 +201,24 @@ def _validate_generation_evidence(contract: Mapping[str, Any]) -> None:
 def _bounded_samples(
     samples: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
+    if isinstance(samples, list):
+        sample_count = list.__len__(samples)
+        sample_iterator = list.__iter__(samples)
+    elif isinstance(samples, tuple):
+        sample_count = tuple.__len__(samples)
+        sample_iterator = tuple.__iter__(samples)
+    else:
+        raise TypeError(
+            "generation evidence samples must be a list or tuple for bounded admission"
+        )
+    if sample_count > ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES:
+        raise ValueError(
+            "generation evidence sample count exceeds maximum "
+            f"{ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES}"
+        )
+
     snapshot: list[dict[str, object]] = []
-    for index, sample in enumerate(samples):
-        if index >= ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES:
-            raise ValueError(
-                "generation evidence sample count exceeds maximum "
-                f"{ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES}"
-            )
+    for index, sample in enumerate(sample_iterator):
         snapshot.append(
             _bounded_mapping_snapshot(
                 sample,
