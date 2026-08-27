@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 use serde_json::{Number, Value};
 
 const MAX_EXACT_JSON_INTEGER: u64 = 9_007_199_254_740_991;
