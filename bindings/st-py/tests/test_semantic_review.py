@@ -317,6 +317,44 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
             {f"field_{index}": None for index in range(65)}
         )
 
+    packet = _packet()
+    draft = st.new_zspace_semantic_review_draft(
+        packet_id=packet["packet_id"],
+        reviewer_id=_identity("d"),
+        review_session_id=_identity("e"),
+    )
+    with pytest.raises(ValueError, match="packet field count exceeds maximum 12"):
+        st.summarize_zspace_semantic_review_draft(
+            packet={**packet, "unexpected": None},
+            draft=draft,
+        )
+    with pytest.raises(ValueError, match="packet field count exceeds maximum 12"):
+        st.summarize_zspace_semantic_review_draft(
+            packet=OversizedMapping(),
+            draft=draft,
+        )
+    with pytest.raises(ValueError, match="draft field count exceeds maximum 5"):
+        st.summarize_zspace_semantic_review_draft(
+            packet=packet,
+            draft={**draft, "unexpected": None},
+        )
+    with pytest.raises(ValueError, match="blinding map field count exceeds maximum 6"):
+        st.unblind_zspace_semantic_review(
+            packet=packet,
+            draft=draft,
+            blinding_map=OversizedMapping(),
+        )
+
+    response = {"group_id": _identity("1")}
+    isolated = st.new_zspace_semantic_review_draft(
+        packet_id=packet["packet_id"],
+        reviewer_id=_identity("d"),
+        review_session_id=_identity("e"),
+        responses=[response],
+    )
+    response["group_id"] = _identity("2")
+    assert isolated["responses"][0]["group_id"] == _identity("1")
+
     nested: dict[str, object] = {}
     cursor = nested
     for _ in range(34):

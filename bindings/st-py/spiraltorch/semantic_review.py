@@ -236,6 +236,9 @@ __all__ = [
 
 
 _MAX_NATIVE_ROOT_FIELDS = 64
+_MAX_PACKET_FIELDS = 12
+_MAX_DRAFT_FIELDS = 5
+_MAX_BLINDING_MAP_FIELDS = 6
 
 
 def _bounded_mapping_snapshot(
@@ -247,7 +250,7 @@ def _bounded_mapping_snapshot(
     if isinstance(value, dict):
         if len(value) > maximum:
             raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return value
+        return value.copy()
 
     snapshot: dict[str, object] = {}
     for index, (key, item) in enumerate(value.items()):
@@ -626,7 +629,18 @@ def summarize_zspace_semantic_review_draft(
 
     result = _native_operation(
         "_zspace_semantic_review_draft",
-        {"packet": dict(packet), "draft": dict(draft)},
+        {
+            "packet": _bounded_mapping_snapshot(
+                packet,
+                maximum=_MAX_PACKET_FIELDS,
+                label="semantic review packet",
+            ),
+            "draft": _bounded_mapping_snapshot(
+                draft,
+                maximum=_MAX_DRAFT_FIELDS,
+                label="semantic review draft",
+            ),
+        },
     )
     _validate_draft_receipt(result)
     return result
@@ -669,9 +683,21 @@ def unblind_zspace_semantic_review(
     result = _native_operation(
         "_zspace_semantic_review_unblind",
         {
-            "packet": dict(packet),
-            "draft": dict(draft),
-            "blinding_map": dict(blinding_map),
+            "packet": _bounded_mapping_snapshot(
+                packet,
+                maximum=_MAX_PACKET_FIELDS,
+                label="semantic review packet",
+            ),
+            "draft": _bounded_mapping_snapshot(
+                draft,
+                maximum=_MAX_DRAFT_FIELDS,
+                label="semantic review draft",
+            ),
+            "blinding_map": _bounded_mapping_snapshot(
+                blinding_map,
+                maximum=_MAX_BLINDING_MAP_FIELDS,
+                label="semantic review blinding map",
+            ),
         },
     )
     _validate_unblind_report(result)
