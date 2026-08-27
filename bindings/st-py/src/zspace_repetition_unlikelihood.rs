@@ -4,23 +4,27 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_repetition_unlikelihood::{
     plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
+    validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay,
     ZSpaceRepetitionUnlikelihoodRequest, ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
     ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER, ZSPACE_REPETITION_UNLIKELIHOOD_KIND,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER, ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_STRENGTH,
     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE,
-    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS, ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
     ZSPACE_REPETITION_UNLIKELIHOOD_MIN_NGRAM_ORDER, ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD,
     ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
     ZSPACE_REPETITION_UNLIKELIHOOD_PROBABILITY_EPSILON,
     ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_OWNER, ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND, ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
+    ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE,
 };
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
@@ -68,8 +72,30 @@ fn _zspace_repetition_unlikelihood_validate(
     plan: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
     let plan = mapping_value(plan, "Z-space repetition-unlikelihood plan")?;
-    let plan = validate_zspace_repetition_unlikelihood_value(plan)
+    let plan = py
+        .allow_threads(|| validate_zspace_repetition_unlikelihood_value(plan))
         .map_err(|error| json_error("Z-space repetition-unlikelihood validation failed", error))?;
+    response_to_py(
+        py,
+        &plan,
+        "Z-space repetition-unlikelihood plan encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_repetition_unlikelihood_validate_trusted_legacy_replay(
+    py: Python<'_>,
+    plan: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let plan = mapping_value(plan, "trusted legacy Z-space repetition-unlikelihood plan")?;
+    let plan = py
+        .allow_threads(|| validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(plan))
+        .map_err(|error| {
+            json_error(
+                "trusted legacy Z-space repetition-unlikelihood replay failed",
+                error,
+            )
+        })?;
     response_to_py(
         py,
         &plan,
@@ -114,6 +140,14 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
         (
             "ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE",
             ZSPACE_REPETITION_UNLIKELIHOOD_PROPOSAL_RULE,
+        ),
+        (
+            "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
+            ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE,
+        ),
+        (
+            "ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE",
+            ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE,
         ),
     ] {
         parent.add(name, value)?;
@@ -170,12 +204,24 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
         "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER",
         ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER,
     )?;
+    parent.add(
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS",
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
+    )?;
+    parent.add(
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES",
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES,
+    )?;
     parent.add_function(wrap_pyfunction!(
         _zspace_repetition_unlikelihood_plan,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_repetition_unlikelihood_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_repetition_unlikelihood_validate_trusted_legacy_replay,
         parent
     )?)?;
     Ok(())

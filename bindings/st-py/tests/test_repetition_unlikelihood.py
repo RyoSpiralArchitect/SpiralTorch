@@ -151,6 +151,82 @@ def test_repetition_unlikelihood_rejects_invalid_masks() -> None:
         )
 
 
+def test_repetition_unlikelihood_rejects_excessive_rust_work() -> None:
+    token_count = 6_000
+    with pytest.raises(ValueError, match=r"work .* exceeds maximum 64000000"):
+        st.zspace_repetition_unlikelihood_plan(
+            ngram_order=3,
+            context_window=token_count,
+            sequences=[
+                {
+                    "token_ids": list(range(token_count)),
+                    "token_mask": [True] * token_count,
+                    "label_mask": [True] * token_count,
+                }
+            ],
+        )
+
+
+def test_repetition_unlikelihood_rejects_excessive_materialization() -> None:
+    token_count = 50_000
+    sequences = []
+    remaining = token_count
+    while remaining:
+        sequence_token_count = min(remaining, 16_384)
+        token_ids = [index % 2 for index in range(sequence_token_count)]
+        proposals = [[]] + [
+            [token_ids[index - 1]] for index in range(1, sequence_token_count)
+        ]
+        sequences.append(
+            {
+                "token_ids": token_ids,
+                "token_mask": [True] * sequence_token_count,
+                "label_mask": [True] * sequence_token_count,
+                "proposal_token_ids": proposals,
+            }
+        )
+        remaining -= sequence_token_count
+    with pytest.raises(
+        ValueError,
+        match=r"materialized plan size .* exceeds maximum 33554432",
+    ):
+        st.zspace_repetition_unlikelihood_plan(
+            candidate_source="model_topk_history",
+            proposal_top_k=1,
+            context_window=1,
+            max_candidates_per_position=1,
+            sequences=sequences,
+        )
+
+
+def test_repetition_validator_is_bounded_and_legacy_replay_is_explicit() -> None:
+    plan = _plan([1, 2, 3, 1, 2, 4])
+    assert (
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(plan)
+        == plan
+    )
+
+    token_count = 6_000
+    forged = copy.deepcopy(plan)
+    forged["request"] = {
+        "config": {
+            "strength": 0.1,
+            "candidate_source": {"kind": "prior_continuation", "ngram_order": 3},
+            "context_window": token_count,
+            "max_candidates_per_position": 8,
+        },
+        "sequences": [
+            {
+                "token_ids": list(range(token_count)),
+                "token_mask": [True] * token_count,
+                "label_mask": [True] * token_count,
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match=r"work .* exceeds maximum 64000000"):
+        st.validate_zspace_repetition_unlikelihood_plan(forged)
+
+
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     expected = {
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
@@ -159,8 +235,22 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD",
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS",
         "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
         "validate_zspace_repetition_unlikelihood_plan",
+        "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
         "zspace_repetition_unlikelihood_plan",
     }
 
     assert expected <= set(st.__all__)
+    assert (
+        st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES
+        == 32 * 1_024 * 1_024
+    )
+    assert "potentially materialized position" in (
+        st.ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE
+    )
+    assert st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS == 64_000_000
+    assert "model_topk_periodic" in st.ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE

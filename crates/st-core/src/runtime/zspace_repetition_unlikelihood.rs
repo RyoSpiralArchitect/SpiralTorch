@@ -6,6 +6,7 @@
 //! identity. Model clients retain the differentiable tensor operation described
 //! by [`ZSPACE_REPETITION_UNLIKELIHOOD_OBJECTIVE_RULE`].
 
+use super::canonical_json::values_equivalent;
 use super::zspace_periodicity::{
     longest_periodic_suffix_with_appended_token, PeriodicSuffix, ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD,
     ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS,
@@ -46,6 +47,23 @@ pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES: usize = 4_096;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE: usize = 16_384;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS: usize = 1_000_000;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS: u64 = 64_000_000;
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES: u64 = 32 * 1_024 * 1_024;
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE: &str =
+    "count one base unit per input token; prior_continuation adds the upper-bound mask and prefix comparisons for every bounded history start; model_topk_history adds every bounded history token and submitted proposal; model_topk_periodic additionally adds the upper-bound contiguous-mask and period-comparison scans for every submitted proposal";
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE: &str =
+    "conservatively bound canonical plan serialization before planning: include fixed contract and per-sequence structure, every request token, mask, proposal row and proposal token, every potentially materialized position, and every potentially retained candidate";
+
+// Upper bounds for minified JSON. The token allowance includes both masks;
+// positions include the longest valid matched prefix; candidates include every
+// optional periodic field.
+const MATERIALIZED_PLAN_FIXED_BYTES: u64 = 4_096;
+const MATERIALIZED_REQUEST_SEQUENCE_BYTES: u64 = 128;
+const MATERIALIZED_REQUEST_TOKEN_BYTES: u64 = 32;
+const MATERIALIZED_REQUEST_PROPOSAL_ROW_BYTES: u64 = 3;
+const MATERIALIZED_REQUEST_PROPOSAL_TOKEN_BYTES: u64 = 17;
+const MATERIALIZED_POSITION_BYTES: u64 = 320;
+const MATERIALIZED_CANDIDATE_BYTES: u64 = 384;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -250,6 +268,22 @@ pub enum ZSpaceRepetitionUnlikelihoodError {
     },
     #[error("repetition-unlikelihood token count overflow")]
     TokenCountOverflow,
+    #[error(
+        "estimated repetition-unlikelihood work {estimated_work_units} units exceeds maximum {maximum_work_units}; reduce supervised targets, context_window, proposal_top_k, or periodic candidate use"
+    )]
+    WorkBudgetExceeded {
+        estimated_work_units: u64,
+        maximum_work_units: u64,
+    },
+    #[error(
+        "estimated repetition-unlikelihood materialized plan size {estimated_bytes} bytes exceeds maximum {maximum_bytes}; projected positions={estimated_positions}, projected candidates={estimated_candidates}"
+    )]
+    MaterializedPlanBudgetExceeded {
+        estimated_bytes: u64,
+        maximum_bytes: u64,
+        estimated_positions: u64,
+        estimated_candidates: u64,
+    },
     #[error("malformed repetition-unlikelihood plan: {message}")]
     MalformedPlan { message: String },
 }
@@ -257,8 +291,36 @@ pub enum ZSpaceRepetitionUnlikelihoodError {
 pub fn plan_zspace_repetition_unlikelihood(
     request: ZSpaceRepetitionUnlikelihoodRequest,
 ) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    plan_zspace_repetition_unlikelihood_internal(request, true)
+}
+
+fn plan_zspace_repetition_unlikelihood_internal(
+    request: ZSpaceRepetitionUnlikelihoodRequest,
+    enforce_admission_budget: bool,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
     validate_config(&request.config)?;
     validate_sequences(&request.sequences, &request.config.candidate_source)?;
+    if enforce_admission_budget {
+        let materialized = estimate_validated_materialized_plan(&request);
+        if materialized.bytes > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES {
+            return Err(
+                ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded {
+                    estimated_bytes: materialized.bytes,
+                    maximum_bytes: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES,
+                    estimated_positions: materialized.positions,
+                    estimated_candidates: materialized.candidates,
+                },
+            );
+        }
+        let estimated_work_units = estimate_validated_work_units(&request);
+        if estimated_work_units > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS {
+            return Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded {
+                estimated_work_units,
+                maximum_work_units: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
+            });
+        }
+    }
+    validate_proposal_values(&request.sequences, &request.config.candidate_source)?;
 
     let mut positions = Vec::new();
     let mut total_token_count = 0usize;
@@ -545,6 +607,24 @@ fn periodic_suffix_for_proposal(
 pub fn validate_zspace_repetition_unlikelihood_value(
     report: serde_json::Value,
 ) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    validate_zspace_repetition_unlikelihood_value_internal(report, true)
+}
+
+/// Replays a trusted historical v3 artifact without the newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input: an over-budget request can
+/// perform substantially more work and materialize a much larger plan than the
+/// bounded public validator.
+pub fn validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(
+    report: serde_json::Value,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    validate_zspace_repetition_unlikelihood_value_internal(report, false)
+}
+
+fn validate_zspace_repetition_unlikelihood_value_internal(
+    report: serde_json::Value,
+    enforce_admission_budget: bool,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
     let request_value = report.get("request").cloned().ok_or_else(|| {
         ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: "missing request".to_owned(),
@@ -555,13 +635,14 @@ pub fn validate_zspace_repetition_unlikelihood_value(
             message: error.to_string(),
         }
     })?;
-    let canonical = plan_zspace_repetition_unlikelihood(request)?;
+    let canonical =
+        plan_zspace_repetition_unlikelihood_internal(request, enforce_admission_budget)?;
     let canonical_value = serde_json::to_value(&canonical).map_err(|error| {
         ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: error.to_string(),
         }
     })?;
-    if report != canonical_value {
+    if !values_equivalent(&report, &canonical_value) {
         return Err(ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: "report does not match the canonical Rust plan".to_owned(),
         });
@@ -704,14 +785,172 @@ fn validate_sequences(
             }
             ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k }
             | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { proposal_top_k } => {
-                validate_model_proposals(sequence_index, sequence, *proposal_top_k)?;
+                validate_model_proposal_shape(sequence_index, sequence, *proposal_top_k)?;
             }
         }
     }
     Ok(())
 }
 
-fn validate_model_proposals(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MaterializedPlanEstimate {
+    bytes: u64,
+    positions: u64,
+    candidates: u64,
+}
+
+fn estimate_validated_materialized_plan(
+    request: &ZSpaceRepetitionUnlikelihoodRequest,
+) -> MaterializedPlanEstimate {
+    let mut bytes = MATERIALIZED_PLAN_FIXED_BYTES.saturating_add(
+        (request.sequences.len() as u64).saturating_mul(MATERIALIZED_REQUEST_SEQUENCE_BYTES),
+    );
+    for sequence in &request.sequences {
+        bytes = bytes.saturating_add(
+            (sequence.token_ids.len() as u64).saturating_mul(MATERIALIZED_REQUEST_TOKEN_BYTES),
+        );
+        if let Some(rows) = &sequence.proposal_token_ids {
+            bytes = bytes.saturating_add(
+                (rows.len() as u64).saturating_mul(MATERIALIZED_REQUEST_PROPOSAL_ROW_BYTES),
+            );
+            let proposal_count = rows
+                .iter()
+                .map(|row| row.len() as u64)
+                .fold(0u64, u64::saturating_add);
+            bytes = bytes.saturating_add(
+                proposal_count.saturating_mul(MATERIALIZED_REQUEST_PROPOSAL_TOKEN_BYTES),
+            );
+        }
+    }
+
+    let mut positions = 0u64;
+    let mut candidates = 0u64;
+    match &request.config.candidate_source {
+        ZSpaceRepetitionUnlikelihoodCandidateSource::PriorContinuation { ngram_order } => {
+            let prefix_len = ngram_order - 1;
+            for sequence in &request.sequences {
+                for target_index in prefix_len..sequence.token_ids.len() {
+                    if !sequence.label_mask[target_index]
+                        || !sequence.token_mask[target_index]
+                        || !sequence.token_mask[target_index - prefix_len..=target_index]
+                            .iter()
+                            .all(|valid| *valid)
+                    {
+                        continue;
+                    }
+                    let prefix_start = target_index - prefix_len;
+                    let history_start = target_index.saturating_sub(request.config.context_window);
+                    let candidate_upper_bound = prefix_start
+                        .saturating_sub(history_start)
+                        .min(request.config.max_candidates_per_position)
+                        as u64;
+                    if candidate_upper_bound == 0 {
+                        continue;
+                    }
+                    positions = positions.saturating_add(1);
+                    candidates = candidates.saturating_add(candidate_upper_bound);
+                }
+            }
+        }
+        ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k }
+        | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { proposal_top_k } => {
+            for sequence in &request.sequences {
+                for target_index in 1..sequence.token_ids.len() {
+                    if !eligible_model_proposal_target(sequence, target_index) {
+                        continue;
+                    }
+                    let history_start = target_index.saturating_sub(request.config.context_window);
+                    let candidate_upper_bound = (target_index - history_start)
+                        .min(*proposal_top_k)
+                        .min(request.config.max_candidates_per_position)
+                        as u64;
+                    if candidate_upper_bound == 0 {
+                        continue;
+                    }
+                    positions = positions.saturating_add(1);
+                    candidates = candidates.saturating_add(candidate_upper_bound);
+                }
+            }
+        }
+    }
+
+    bytes = bytes
+        .saturating_add(positions.saturating_mul(MATERIALIZED_POSITION_BYTES))
+        .saturating_add(candidates.saturating_mul(MATERIALIZED_CANDIDATE_BYTES));
+    MaterializedPlanEstimate {
+        bytes,
+        positions,
+        candidates,
+    }
+}
+
+fn estimate_validated_work_units(request: &ZSpaceRepetitionUnlikelihoodRequest) -> u64 {
+    let mut work_units = request
+        .sequences
+        .iter()
+        .map(|sequence| sequence.token_ids.len() as u64)
+        .sum::<u64>();
+
+    match &request.config.candidate_source {
+        ZSpaceRepetitionUnlikelihoodCandidateSource::PriorContinuation { ngram_order } => {
+            let prefix_len = ngram_order - 1;
+            let comparisons_per_history_start = (2 * prefix_len + 1) as u64;
+            for sequence in &request.sequences {
+                for target_index in prefix_len..sequence.token_ids.len() {
+                    if !sequence.label_mask[target_index]
+                        || !sequence.token_mask[target_index]
+                        || !sequence.token_mask[target_index - prefix_len..=target_index]
+                            .iter()
+                            .all(|valid| *valid)
+                    {
+                        continue;
+                    }
+                    let prefix_start = target_index - prefix_len;
+                    let history_start = target_index.saturating_sub(request.config.context_window);
+                    let history_start_count = prefix_start.saturating_sub(history_start) as u64;
+                    work_units = work_units.saturating_add(
+                        history_start_count.saturating_mul(comparisons_per_history_start),
+                    );
+                }
+            }
+        }
+        ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory { proposal_top_k }
+        | ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { proposal_top_k } => {
+            let periodic_only = matches!(
+                &request.config.candidate_source,
+                ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic { .. }
+            );
+            let proposal_top_k = *proposal_top_k as u64;
+            for sequence in &request.sequences {
+                for target_index in 1..sequence.token_ids.len() {
+                    if !eligible_model_proposal_target(sequence, target_index) {
+                        continue;
+                    }
+                    let history_start = target_index.saturating_sub(request.config.context_window);
+                    let history_token_count = (target_index - history_start) as u64;
+                    work_units = work_units
+                        .saturating_add(history_token_count)
+                        .saturating_add(proposal_top_k);
+                    if periodic_only {
+                        let effective_period_count =
+                            ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD.min(
+                                (history_token_count as usize + 1)
+                                    / ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS,
+                            ) as u64;
+                        let periodic_scan_units = proposal_top_k
+                            .saturating_mul(history_token_count)
+                            .saturating_mul(effective_period_count + 1);
+                        work_units = work_units.saturating_add(periodic_scan_units);
+                    }
+                }
+            }
+        }
+    }
+
+    work_units
+}
+
+fn validate_model_proposal_shape(
     sequence_index: usize,
     sequence: &ZSpaceRepetitionUnlikelihoodSequence,
     proposal_top_k: usize,
@@ -747,22 +986,47 @@ fn validate_model_proposals(
                 required: proposal_top_k,
             });
         }
-        let mut seen = BTreeSet::new();
-        for &token_id in proposals {
-            if token_id > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER {
-                return Err(ZSpaceRepetitionUnlikelihoodError::ProposalTokenIdLimit {
-                    sequence_index,
-                    token_index,
-                    token_id,
-                    maximum: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER,
-                });
+    }
+    Ok(())
+}
+
+fn validate_proposal_values(
+    sequences: &[ZSpaceRepetitionUnlikelihoodSequence],
+    candidate_source: &ZSpaceRepetitionUnlikelihoodCandidateSource,
+) -> Result<(), ZSpaceRepetitionUnlikelihoodError> {
+    if matches!(
+        candidate_source,
+        ZSpaceRepetitionUnlikelihoodCandidateSource::PriorContinuation { .. }
+    ) {
+        return Ok(());
+    }
+
+    for (sequence_index, sequence) in sequences.iter().enumerate() {
+        let proposal_rows = sequence
+            .proposal_token_ids
+            .as_ref()
+            .expect("model proposal rows were shape-validated");
+        for (token_index, proposals) in proposal_rows.iter().enumerate() {
+            if proposals.is_empty() {
+                continue;
             }
-            if !seen.insert(token_id) {
-                return Err(ZSpaceRepetitionUnlikelihoodError::DuplicateProposalToken {
-                    sequence_index,
-                    token_index,
-                    token_id,
-                });
+            let mut seen = BTreeSet::new();
+            for &token_id in proposals {
+                if token_id > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER {
+                    return Err(ZSpaceRepetitionUnlikelihoodError::ProposalTokenIdLimit {
+                        sequence_index,
+                        token_index,
+                        token_id,
+                        maximum: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER,
+                    });
+                }
+                if !seen.insert(token_id) {
+                    return Err(ZSpaceRepetitionUnlikelihoodError::DuplicateProposalToken {
+                        sequence_index,
+                        token_index,
+                        token_id,
+                    });
+                }
             }
         }
     }
@@ -868,6 +1132,47 @@ mod tests {
         let mut request = model_request(token_ids, target_index, proposals);
         request.config = periodic_config(proposals.len());
         request
+    }
+
+    fn materialization_heavy_request(
+        token_count: usize,
+        proposals_match_history: bool,
+    ) -> ZSpaceRepetitionUnlikelihoodRequest {
+        let mut remaining = token_count;
+        let mut sequences = Vec::new();
+        while remaining > 0 {
+            let sequence_token_count =
+                remaining.min(ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOKENS_PER_SEQUENCE);
+            let token_ids = (0..sequence_token_count)
+                .map(|index| (index % 2) as u64)
+                .collect::<Vec<_>>();
+            let mut proposal_rows = vec![Vec::new(); sequence_token_count];
+            for target_index in 1..sequence_token_count {
+                proposal_rows[target_index] = vec![if proposals_match_history {
+                    token_ids[target_index - 1]
+                } else {
+                    2
+                }];
+            }
+            sequences.push(ZSpaceRepetitionUnlikelihoodSequence {
+                token_ids,
+                token_mask: vec![true; sequence_token_count],
+                label_mask: vec![true; sequence_token_count],
+                proposal_token_ids: Some(proposal_rows),
+            });
+            remaining -= sequence_token_count;
+        }
+        ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory {
+                    proposal_top_k: 1,
+                },
+                context_window: 1,
+                max_candidates_per_position: 1,
+            },
+            sequences,
+        }
     }
 
     #[test]
@@ -1049,6 +1354,194 @@ mod tests {
             validate_zspace_repetition_unlikelihood_value(tampered),
             Err(ZSpaceRepetitionUnlikelihoodError::MalformedPlan { .. })
         ));
+    }
+
+    #[test]
+    fn validation_accepts_browser_integral_float_spelling_without_changing_v3() {
+        let mut request = prior_request(&[1, 2, 3, 1, 2, 4]);
+        request.config.strength = 1.0;
+        let plan = plan_zspace_repetition_unlikelihood(request).expect("plan");
+        let canonical = serde_json::to_value(&plan).expect("value");
+        let mut stored = canonical.clone();
+        stored["request"]["config"]["strength"] = json!(1);
+        stored["aggregate"]["mean_candidates_per_active_position"] = json!(1);
+
+        assert_eq!(
+            plan.contract_version,
+            "spiraltorch.zspace_repetition_unlikelihood.v3"
+        );
+        assert_eq!(
+            validate_zspace_repetition_unlikelihood_value(stored).expect("browser JSON"),
+            plan
+        );
+        assert_eq!(
+            serde_json::to_value(plan).expect("canonical replay"),
+            canonical
+        );
+    }
+
+    #[test]
+    fn validation_preserves_existing_v3_plans_above_the_new_admission_budget() {
+        let token_count = 4_096usize;
+        let mut sequence = ZSpaceRepetitionUnlikelihoodSequence {
+            token_ids: (0..token_count as u64).collect(),
+            token_mask: vec![true; token_count],
+            label_mask: vec![false; token_count],
+            proposal_token_ids: Some(vec![Vec::new(); token_count]),
+        };
+        let proposals = (1_000_000
+            ..1_000_000 + ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K as u64)
+            .collect::<Vec<_>>();
+        for target_index in token_count - 15..token_count {
+            sequence.label_mask[target_index] = true;
+            sequence.proposal_token_ids.as_mut().expect("proposal rows")[target_index] =
+                proposals.clone();
+        }
+        let request = ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic {
+                    proposal_top_k: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K,
+                },
+                context_window: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW,
+                max_candidates_per_position:
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION,
+            },
+            sequences: vec![sequence],
+        };
+        assert!(
+            estimate_validated_work_units(&request) > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS
+        );
+        let historical = plan_zspace_repetition_unlikelihood_internal(request.clone(), false)
+            .expect("historical v3 plan");
+        assert!(matches!(
+            plan_zspace_repetition_unlikelihood(request),
+            Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded { .. })
+        ));
+
+        let stored = serde_json::to_value(&historical).expect("historical value");
+        assert!(matches!(
+            validate_zspace_repetition_unlikelihood_value(stored.clone()),
+            Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded { .. })
+        ));
+        assert_eq!(
+            validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(stored)
+                .expect("trusted v3 replay"),
+            historical
+        );
+    }
+
+    #[test]
+    fn materialization_estimate_covers_canonical_serialization_for_every_source() {
+        let requests = [
+            prior_request(&[1, 2, 3, 1, 2, 4]),
+            model_request(&[7, 2, 3, 2, 4], 4, &[2, 3, 4, 9]),
+            periodic_request(&[9, 1, 2, 1, 2, 1, 7], 6, &[2, 1, 7, 8]),
+        ];
+
+        for request in requests {
+            let estimate = estimate_validated_materialized_plan(&request);
+            let plan = plan_zspace_repetition_unlikelihood_internal(request, false)
+                .expect("representative canonical plan");
+            let serialized_bytes = serde_json::to_vec(&plan)
+                .expect("canonical plan JSON")
+                .len() as u64;
+            assert!(
+                serialized_bytes <= estimate.bytes,
+                "serialized plan used {serialized_bytes} bytes, estimate allowed {}",
+                estimate.bytes
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_materialization_heavy_plans_before_building_positions() {
+        let request = materialization_heavy_request(100_000, true);
+        let projected_positions = 100_000 - request.sequences.len() as u64;
+        assert!(
+            estimate_validated_work_units(&request) < ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS
+        );
+        let estimate = estimate_validated_materialized_plan(&request);
+        assert_eq!(estimate.positions, projected_positions);
+        assert_eq!(estimate.candidates, projected_positions);
+        assert!(estimate.bytes > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES);
+
+        let error = plan_zspace_repetition_unlikelihood(request)
+            .expect_err("materialization-heavy plan must be rejected");
+        let ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded {
+            estimated_positions,
+            estimated_candidates,
+            ..
+        } = error
+        else {
+            panic!("unexpected error: {error}");
+        };
+        assert_eq!(estimated_positions, projected_positions);
+        assert_eq!(estimated_candidates, projected_positions);
+    }
+
+    #[test]
+    fn trusted_validation_preserves_v3_above_the_materialization_budget() {
+        let request = materialization_heavy_request(50_000, false);
+        let estimate = estimate_validated_materialized_plan(&request);
+        assert!(estimate.bytes > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES);
+        let historical = plan_zspace_repetition_unlikelihood_internal(request, false)
+            .expect("historical v3 plan");
+        assert!(historical.positions.is_empty());
+
+        let stored = serde_json::to_value(&historical).expect("historical value");
+        assert!(matches!(
+            validate_zspace_repetition_unlikelihood_value(stored.clone()),
+            Err(ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded { .. })
+        ));
+        assert_eq!(
+            validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(stored)
+                .expect("trusted v3 replay"),
+            historical
+        );
+    }
+
+    #[test]
+    fn rejects_excessive_periodic_work_before_deep_proposal_validation() {
+        let token_count = 4_096usize;
+        let mut value = ZSpaceRepetitionUnlikelihoodSequence {
+            token_ids: (0..token_count as u64).collect(),
+            token_mask: vec![true; token_count],
+            label_mask: vec![false; token_count],
+            proposal_token_ids: Some(vec![Vec::new(); token_count]),
+        };
+        for target_index in token_count - 15..token_count {
+            value.label_mask[target_index] = true;
+            value.proposal_token_ids.as_mut().expect("proposal rows")[target_index] =
+                vec![7; ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K];
+        }
+        let error = plan_zspace_repetition_unlikelihood(ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic {
+                    proposal_top_k: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K,
+                },
+                context_window: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW,
+                max_candidates_per_position:
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION,
+            },
+            sequences: vec![value],
+        })
+        .expect_err("work budget");
+
+        match error {
+            ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded {
+                estimated_work_units,
+                maximum_work_units,
+            } => {
+                assert!(estimated_work_units > maximum_work_units);
+                assert_eq!(
+                    maximum_work_units,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS
+                );
+            }
+            other => panic!("expected work-budget rejection before duplicate scan, got {other}"),
+        }
     }
 
     #[test]

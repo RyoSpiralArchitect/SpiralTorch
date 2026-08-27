@@ -229,6 +229,104 @@ declare module "spiraltorch-wasm" {
         report: ZSpaceGenerationEvidenceReport,
     ): ZSpaceGenerationEvidenceReport;
 
+    export type ZSpaceRepetitionUnlikelihoodCandidateSource =
+        | { kind: "prior_continuation"; ngram_order: number }
+        | { kind: "model_topk_history"; proposal_top_k: number }
+        | { kind: "model_topk_periodic"; proposal_top_k: number };
+
+    export type ZSpaceRepetitionUnlikelihoodConfig = {
+        strength: number;
+        candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource;
+        context_window: number;
+        max_candidates_per_position: number;
+    };
+
+    export type ZSpaceRepetitionUnlikelihoodSequence = {
+        token_ids: number[];
+        token_mask: boolean[];
+        label_mask: boolean[];
+        proposal_token_ids?: number[][] | null;
+    };
+
+    export type ZSpaceRepetitionUnlikelihoodRequest = {
+        config: ZSpaceRepetitionUnlikelihoodConfig;
+        sequences: ZSpaceRepetitionUnlikelihoodSequence[];
+    };
+
+    export type ZSpaceRepetitionUnlikelihoodCandidate = {
+        token_id: number;
+        occurrence_count: number;
+        most_recent_distance: number;
+        proposal_rank?: number;
+        periodic_suffix_period?: number;
+        periodic_suffix_token_count?: number;
+        periodic_suffix_repeated_token_count?: number;
+        periodic_suffix_repetition_count?: number;
+    };
+
+    export type ZSpaceRepetitionUnlikelihoodPosition = {
+        sequence_index: number;
+        prediction_index: number;
+        target_index: number;
+        target_token_id: number;
+        matched_prefix_token_ids?: number[];
+        candidates: ZSpaceRepetitionUnlikelihoodCandidate[];
+    };
+
+    export type ZSpaceRepetitionUnlikelihoodAggregate = {
+        sequence_count: number;
+        total_token_count: number;
+        eligible_target_count: number;
+        active_position_count: number;
+        candidate_count: number;
+        excluded_target_match_count: number;
+        proposal_count: number;
+        excluded_target_proposal_count: number;
+        excluded_out_of_history_proposal_count: number;
+        excluded_non_periodic_proposal_count: number;
+        periodic_candidate_count: number;
+        truncated_candidate_count: number;
+        maximum_candidates_per_active_position: number;
+        active_position_ratio: number | null;
+        mean_candidates_per_active_position: number | null;
+    };
+
+    /** Canonical negative-token plan owned and bounded by `st-core`. */
+    export type ZSpaceRepetitionUnlikelihoodPlan = {
+        contract_version: "spiraltorch.zspace_repetition_unlikelihood.v3";
+        kind: "spiraltorch.zspace_repetition_unlikelihood_plan";
+        semantic_owner: "st-core::runtime::zspace_repetition_unlikelihood";
+        semantic_backend: "rust";
+        differentiation_owner: "model-client-autograd";
+        proposal_owner: "model-client-no-grad";
+        plan_validated: true;
+        plan_id: string;
+        status: "ready";
+        request: ZSpaceRepetitionUnlikelihoodRequest;
+        proposal_rule: string;
+        candidate_rule: string;
+        objective_rule: string;
+        probability_epsilon: number;
+        periodic_suffix_max_period: number;
+        periodic_suffix_min_repetitions: number;
+        positions: ZSpaceRepetitionUnlikelihoodPosition[];
+        aggregate: ZSpaceRepetitionUnlikelihoodAggregate;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+    };
+
+    /** Plan in Rust within shared work/output budgets and bounded browser ingress. */
+    export function zspaceRepetitionUnlikelihoodPlanJson(requestJson: string): string;
+    export function zspaceRepetitionUnlikelihoodPlanObject(
+        request: ZSpaceRepetitionUnlikelihoodRequest,
+    ): ZSpaceRepetitionUnlikelihoodPlan;
+
+    /** Recompute v3 after bounded browser ingress and reject any changed field. */
+    export function validateZspaceRepetitionUnlikelihoodPlanJson(planJson: string): string;
+    export function validateZspaceRepetitionUnlikelihoodPlanObject(
+        plan: ZSpaceRepetitionUnlikelihoodPlan,
+    ): ZSpaceRepetitionUnlikelihoodPlan;
+
     /** Palette identifiers accepted by {@link FractalCanvas.set_palette}. */
     export type CanvasPaletteName =
         | "blue-magenta"
