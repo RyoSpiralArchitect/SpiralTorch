@@ -52,6 +52,37 @@ def periodicity_smoke() -> dict[str, object]:
     }
 
 
+def stochastic_schrodinger_smoke() -> dict[str, object]:
+    forward = st.zspace_stochastic_schrodinger_forward(
+        [1.0, 0.25, -0.5, 0.75],
+        [0.2, -0.1],
+        standard_normal=[0.1, -0.3, 0.2, 0.0],
+        config={
+            "time_step": 0.08,
+            "hopping_rate": 0.35,
+            "loss_rate": 0.02,
+            "noise_scale": 0.15,
+        },
+    )
+    assert st.validate_zspace_stochastic_schrodinger_forward(forward) == forward
+    assert forward["semantic_backend"] == "rust"
+    assert forward["forward_validated"] is True
+
+    vjp = st.zspace_stochastic_schrodinger_vjp(
+        forward,
+        [0.2, -0.4, 0.1, 0.3],
+    )
+    assert st.validate_zspace_stochastic_schrodinger_vjp(vjp) == vjp
+    assert vjp["semantic_backend"] == "rust"
+    assert vjp["forward_id"] == forward["forward_id"]
+    assert len(vjp["result"]["grad_input"]) == 4
+    assert len(vjp["result"]["grad_potential"]) == 2
+    return {
+        "forward_id": forward["forward_id"],
+        "vjp_id": vjp["vjp_id"],
+    }
+
+
 def repetition_unlikelihood_smoke() -> dict[str, object]:
     plan = st.zspace_repetition_unlikelihood_plan(
         sequences=[
@@ -185,6 +216,7 @@ def main() -> int:
     assert [protocol["name"] for protocol in catalog["protocols"]] == [
         "generation_evidence",
         "periodicity",
+        "stochastic_schrodinger",
         "repetition_unlikelihood",
         "semantic_review",
     ]
@@ -203,6 +235,7 @@ def main() -> int:
         "protocol_count": catalog["protocol_count"],
         "generation_evidence": generation_evidence_smoke(),
         "periodicity": periodicity_smoke(),
+        "stochastic_schrodinger": stochastic_schrodinger_smoke(),
         "repetition_unlikelihood": repetition_unlikelihood_smoke(),
         "semantic_review": semantic_review_smoke(),
     }

@@ -5614,6 +5614,38 @@ def zspace_periodicity(
 def validate_zspace_periodicity(
     report: Dict[str, object],
 ) -> Dict[str, object]: ...
+ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION: Literal["spiraltorch.zspace_stochastic_schrodinger_forward.v1"]
+ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND: Literal["spiraltorch.zspace_stochastic_schrodinger_forward"]
+ZSPACE_STOCHASTIC_SCHRODINGER_VJP_CONTRACT_VERSION: Literal["spiraltorch.zspace_stochastic_schrodinger_vjp.v1"]
+ZSPACE_STOCHASTIC_SCHRODINGER_VJP_KIND: Literal["spiraltorch.zspace_stochastic_schrodinger_vjp"]
+ZSPACE_STOCHASTIC_SCHRODINGER_PROTOCOL_OWNER: Literal["st-core::runtime::zspace_stochastic_schrodinger"]
+ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER: Literal["st-core::dynamics::stochastic_schrodinger"]
+ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND: Literal["rust"]
+ZSPACE_STOCHASTIC_SCHRODINGER_ID_RULE: str
+ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS: str
+ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY: str
+ZSPACE_STOCHASTIC_SCHRODINGER_MAX_VALUES: int
+ZSPACE_STOCHASTIC_SCHRODINGER_MAX_ROWS: int
+ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES: int
+def zspace_stochastic_schrodinger_forward(
+    input_values: List[float] | Tuple[float, ...],
+    potential: List[float] | Tuple[float, ...],
+    *,
+    rows: Optional[int] = ...,
+    features: Optional[int] = ...,
+    standard_normal: Optional[List[float] | Tuple[float, ...]] = ...,
+    config: Optional[Dict[str, object]] = ...,
+) -> Dict[str, object]: ...
+def validate_zspace_stochastic_schrodinger_forward(
+    receipt: Dict[str, object],
+) -> Dict[str, object]: ...
+def zspace_stochastic_schrodinger_vjp(
+    forward_receipt: Dict[str, object],
+    grad_output_real: List[float] | Tuple[float, ...],
+) -> Dict[str, object]: ...
+def validate_zspace_stochastic_schrodinger_vjp(
+    receipt: Dict[str, object],
+) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet(
     packet: Dict[str, object],
 ) -> Dict[str, object]: ...
@@ -12180,6 +12212,19 @@ __all__ = [
     "ZSPACE_PERIODICITY_SEMANTIC_OWNER",
     "ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD",
     "ZSPACE_PERIODIC_SUFFIX_MIN_REPETITIONS",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_ID_RULE",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_MAX_ROWS",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_MAX_VALUES",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_PROTOCOL_OWNER",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_VJP_CONTRACT_VERSION",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_VJP_KIND",
+    "ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS",
     "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
@@ -12281,6 +12326,10 @@ __all__ = [
     "zspace_generation_control",
     "zspace_generation_evidence",
     "zspace_periodicity",
+    "validate_zspace_stochastic_schrodinger_forward",
+    "validate_zspace_stochastic_schrodinger_vjp",
+    "zspace_stochastic_schrodinger_forward",
+    "zspace_stochastic_schrodinger_vjp",
     "zspace_repetition_unlikelihood_plan",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

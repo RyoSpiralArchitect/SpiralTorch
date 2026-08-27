@@ -1,5 +1,21 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.17
+
+- Promote the existing Rust stochastic Schrodinger kernel into a direct,
+  content-addressed cross-client protocol. Forward receipts bind the complete
+  shape, state, potential, configuration, and explicit standard-normal noise
+  witness; omitting noise records a zero witness instead of sampling an
+  implicit RNG.
+- Add a replayable analytic VJP for the real quadrature. Rust recomputes phase
+  from the canonical forward request and never accepts browser- or
+  Python-supplied phase evidence; changed requests, outputs, gradients, audits,
+  or identities fail closed.
+- Expose the same bounded semantics through passive Python containers and
+  JSON-only WASM entrypoints, add complete PEP 561 and TypeScript declarations,
+  and publish the lifecycle as runtime protocol catalog v3. Installed-wheel
+  smoke now executes forward, replay, VJP, and VJP replay before release.
+
 ## 0.4.16
 
 - Promote token periodicity into runtime protocol catalog v2 as the fourth

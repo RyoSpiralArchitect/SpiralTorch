@@ -33,6 +33,7 @@ def test_runtime_protocol_catalog_is_rust_owned_and_replayable() -> None:
     assert [protocol["name"] for protocol in catalog["protocols"]] == [
         "generation_evidence",
         "periodicity",
+        "stochastic_schrodinger",
         "repetition_unlikelihood",
         "semantic_review",
     ]

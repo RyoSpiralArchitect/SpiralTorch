@@ -54,6 +54,7 @@ mod zspace_periodicity;
 mod zspace_repetition_unlikelihood;
 mod zspace_runtime_protocol_catalog;
 mod zspace_semantic_review;
+mod zspace_stochastic_schrodinger;
 
 #[cfg(not(feature = "nn"))]
 mod psi_synchro {
@@ -305,6 +306,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     wgpu::register(py, m)?;
     telemetry::register(py, m)?;
     runtime::register(py, m)?;
+    zspace_stochastic_schrodinger::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
 

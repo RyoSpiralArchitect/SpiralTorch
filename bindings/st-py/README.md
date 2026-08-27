@@ -99,8 +99,9 @@ for protocol in catalog["protocols"]:
 ```
 
 The current catalog covers held-out generation evidence, bounded token
-periodicity, repetition-unlikelihood planning, and the complete blinded
-semantic-review lifecycle. Catalog v2 records a normal-admission profile and
+periodicity, stochastic Schrodinger forward/VJP, repetition-unlikelihood
+planning, and the complete blinded semantic-review lifecycle. Catalog v3
+records a normal-admission profile and
 guarantee for every client surface; serialized Python/WASM surfaces also carry
 Rust-owned byte/node/depth limits, while typed Rust admission has no serialized
 budget. Trusted historical replay is always opt-in, accepts only already trusted
@@ -195,6 +196,11 @@ disconnected.
   a Rust-owned Hermitian graph Hamiltonian, including spectral step bounds,
   potential-gauge normalization, and Rayleigh-energy audit fields. The payload
   reports its current `f64_cpu` execution backend and WGPU route blocker.
+- `zspace_stochastic_schrodinger_forward(...)` plus
+  `zspace_stochastic_schrodinger_vjp(...)` for a content-addressed real-time
+  stochastic transition and analytic VJP. The standard-normal samples are an
+  explicit replay witness; Python never samples hidden noise or accepts an
+  external phase for backward.
 - `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
   scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
   FT/runtime probes over local-HF embeddings.
@@ -550,6 +556,38 @@ iteration, item, length, or type hooks, then the native boundary applies the
 catalogued byte/node/depth limits before serde materialization. Arbitrary
 `Sequence` and `Mapping` implementations are deliberately not an ingress
 contract.
+
+## Rust-owned stochastic Schrodinger dynamics
+
+The direct dynamics API records the complete state, potential, standard-normal
+noise witness, configuration, complex quadratures, and numerical audit in a
+content-addressed Rust receipt. Omitting `standard_normal` records an all-zero
+witness instead of invoking an implicit RNG:
+
+```python
+import spiraltorch as st
+
+forward = st.zspace_stochastic_schrodinger_forward(
+    [1.0, 0.25, -0.5, 0.75],
+    [0.2, -0.1],
+    standard_normal=[0.1, -0.3, 0.2, 0.0],
+    config={"time_step": 0.08, "noise_scale": 0.15},
+)
+assert st.validate_zspace_stochastic_schrodinger_forward(forward) == forward
+
+vjp = st.zspace_stochastic_schrodinger_vjp(
+    forward,
+    [0.2, -0.4, 0.1, 0.3],
+)
+assert vjp["forward_id"] == forward["forward_id"]
+assert st.validate_zspace_stochastic_schrodinger_vjp(vjp) == vjp
+```
+
+VJP construction first replays the complete forward receipt in Rust, then
+recomputes phase from its canonical request. A changed quadrature, phase, noise
+witness, gradient, or audit field fails closed. These receipts certify the
+stated bounded numerical transition and derivative, not physical fidelity or
+training efficacy.
 
 ## Blinded semantic review
 

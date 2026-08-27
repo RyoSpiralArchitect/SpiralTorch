@@ -37,12 +37,20 @@ use super::zspace_semantic_review::{
     ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER, ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION,
     ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
 };
+use super::zspace_stochastic_schrodinger::{
+    ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION,
+    ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND, ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
+    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+    ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND, ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER,
+    ZSPACE_STOCHASTIC_SCHRODINGER_VJP_CONTRACT_VERSION, ZSPACE_STOCHASTIC_SCHRODINGER_VJP_KIND,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_runtime_protocol_catalog.v2";
+    "spiraltorch.zspace_runtime_protocol_catalog.v3";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND: &str =
     "spiraltorch.zspace_runtime_protocol_catalog";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER: &str =
@@ -331,6 +339,78 @@ fn periodicity_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
     }
 }
 
+fn stochastic_schrodinger_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
+    ZSpaceRuntimeProtocolDescriptor {
+        name: "stochastic_schrodinger".to_owned(),
+        semantic_owner: ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER.to_owned(),
+        semantic_backend: ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND.to_owned(),
+        admission_owner: "rust".to_owned(),
+        artifacts: vec![
+            artifact(
+                "forward_receipt",
+                ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION,
+                "kind",
+                ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND,
+            ),
+            artifact(
+                "vjp_receipt",
+                ZSPACE_STOCHASTIC_SCHRODINGER_VJP_CONTRACT_VERSION,
+                "kind",
+                ZSPACE_STOCHASTIC_SCHRODINGER_VJP_KIND,
+            ),
+        ],
+        clients: vec![
+            client(
+                "rust",
+                "st-core",
+                "native",
+                typed_native_admission(),
+                &[
+                    "run_zspace_stochastic_schrodinger_forward",
+                    "validate_zspace_stochastic_schrodinger_forward_value",
+                    "run_zspace_stochastic_schrodinger_vjp",
+                    "validate_zspace_stochastic_schrodinger_vjp_value",
+                ],
+                false,
+            ),
+            client(
+                "python",
+                "spiraltorch",
+                "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+                ),
+                &[
+                    "zspace_stochastic_schrodinger_forward",
+                    "validate_zspace_stochastic_schrodinger_forward",
+                    "zspace_stochastic_schrodinger_vjp",
+                    "validate_zspace_stochastic_schrodinger_vjp",
+                ],
+                false,
+            ),
+            client(
+                "wasm",
+                "spiraltorch-wasm",
+                "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+                ),
+                &[
+                    "zspaceStochasticSchrodingerForwardJson",
+                    "validateZspaceStochasticSchrodingerForwardJson",
+                    "zspaceStochasticSchrodingerVjpJson",
+                    "validateZspaceStochasticSchrodingerVjpJson",
+                ],
+                false,
+            ),
+        ],
+    }
+}
+
 fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
     ZSpaceRuntimeProtocolDescriptor {
         name: "repetition_unlikelihood".to_owned(),
@@ -519,6 +599,7 @@ pub fn zspace_runtime_protocol_catalog(
     let protocols = vec![
         generation_evidence_descriptor(),
         periodicity_descriptor(),
+        stochastic_schrodinger_descriptor(),
         repetition_unlikelihood_descriptor(),
         semantic_review_descriptor(),
     ];
@@ -533,7 +614,8 @@ pub fn zspace_runtime_protocol_catalog(
         status: ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS.to_owned(),
         protocol_count: protocols.len(),
         protocol_order_rule:
-            "generation_evidence,periodicity,repetition_unlikelihood,semantic_review".to_owned(),
+            "generation_evidence,periodicity,stochastic_schrodinger,repetition_unlikelihood,semantic_review"
+                .to_owned(),
         client_order_rule: "rust,python,wasm".to_owned(),
         legacy_replay_policy:
             "trusted legacy replay is explicit and Rust/Python-only; WASM never exposes it"
@@ -582,7 +664,7 @@ mod tests {
         let replay = zspace_runtime_protocol_catalog().expect("catalog replay");
 
         assert_eq!(catalog, replay);
-        assert_eq!(catalog.protocol_count, 4);
+        assert_eq!(catalog.protocol_count, 5);
         assert!(catalog.catalog_id.starts_with("sha256:"));
         assert_eq!(catalog.catalog_id.len(), 71);
         assert_eq!(
@@ -598,6 +680,7 @@ mod tests {
             vec![
                 "generation_evidence",
                 "periodicity",
+                "stochastic_schrodinger",
                 "repetition_unlikelihood",
                 "semantic_review"
             ]
@@ -652,6 +735,11 @@ mod tests {
                     ZSPACE_PERIODICITY_MAX_INGRESS_BYTES,
                     ZSPACE_PERIODICITY_MAX_INGRESS_NODES,
                     ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH,
+                ),
+                "stochastic_schrodinger" => ingress_limits(
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
                 ),
                 "repetition_unlikelihood" => ingress_limits(
                     ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
@@ -766,11 +854,20 @@ mod tests {
             validate_zspace_semantic_review_unblind_value_trusted_legacy_replay,
             zspace_semantic_review_map_id, zspace_semantic_review_map_id_trusted_legacy_replay,
         };
+        use crate::runtime::zspace_stochastic_schrodinger::{
+            run_zspace_stochastic_schrodinger_forward, run_zspace_stochastic_schrodinger_vjp,
+            validate_zspace_stochastic_schrodinger_forward_value,
+            validate_zspace_stochastic_schrodinger_vjp_value,
+        };
 
         let _ = summarize_zspace_generation_evidence;
         let _ = validate_zspace_generation_evidence_value;
         let _ = analyze_zspace_periodicity;
         let _ = validate_zspace_periodicity_value;
+        let _ = run_zspace_stochastic_schrodinger_forward;
+        let _ = validate_zspace_stochastic_schrodinger_forward_value;
+        let _ = run_zspace_stochastic_schrodinger_vjp;
+        let _ = validate_zspace_stochastic_schrodinger_vjp_value;
         let _ = plan_zspace_repetition_unlikelihood;
         let _ = validate_zspace_repetition_unlikelihood_value;
         let _ = validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay;
