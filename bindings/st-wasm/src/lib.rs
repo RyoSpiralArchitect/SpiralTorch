@@ -12,6 +12,7 @@ mod generation_evidence;
 mod imaginary_time_schrodinger;
 mod periodicity;
 mod rank_plan;
+mod repetition_unlikelihood;
 mod reports;
 mod runtime_execution_plan;
 mod runtime_probe;
@@ -65,6 +66,7 @@ pub use mellin::*;
 pub use periodicity::*;
 #[cfg(target_arch = "wasm32")]
 pub use rank_plan::*;
+pub use repetition_unlikelihood::*;
 pub use reports::*;
 pub use runtime_execution_plan::*;
 pub use runtime_probe::*;

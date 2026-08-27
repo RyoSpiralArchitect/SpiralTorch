@@ -307,6 +307,40 @@ storage. Validation replays the complete request in Rust and rejects a changed
 metric, identity, ordering, or evidence boundary. As in Python and direct Rust,
 these are structural token observations rather than semantic-quality claims.
 
+Repetition-unlikelihood planning is available to browser training clients without
+porting candidate semantics into TypeScript. Rust owns prior-continuation matching,
+model-top-k history filtering, periodic-suffix gating, candidate ordering, and the
+v3 plan identity:
+
+```ts
+import {
+    validateZspaceRepetitionUnlikelihoodPlanObject,
+    zspaceRepetitionUnlikelihoodPlanObject,
+} from "spiraltorch-wasm";
+
+const plan = zspaceRepetitionUnlikelihoodPlanObject({
+    config: {
+        strength: 0.1,
+        candidate_source: { kind: "prior_continuation", ngram_order: 3 },
+        context_window: 16,
+        max_candidates_per_position: 8,
+    },
+    sequences: [{
+        token_ids: [1, 2, 3, 1, 2, 4],
+        token_mask: [true, true, true, true, true, true],
+        label_mask: [true, true, true, true, true, true],
+    }],
+});
+const replay = validateZspaceRepetitionUnlikelihoodPlanObject(plan);
+
+console.log(replay.positions[0]?.candidates, replay.plan_id);
+```
+
+The JSON variants expose the same plan for worker messages and persistence. A
+shared 64,000,000-unit Rust preflight bounds prior-history scans and the more
+expensive proposal-by-period scans before canonical planning. This is an additive
+execution guard: existing v3 report fields and plan IDs remain unchanged.
+
 Z-space meta-optimization follows the same state-carrying client model. The
 browser stores the returned checkpoint, but Rust owns restore coercion,
 observation normalisation, the FFT-derived fractional Sobolev gradient, bounded Topos

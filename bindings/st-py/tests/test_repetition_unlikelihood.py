@@ -151,6 +151,22 @@ def test_repetition_unlikelihood_rejects_invalid_masks() -> None:
         )
 
 
+def test_repetition_unlikelihood_rejects_excessive_rust_work() -> None:
+    token_count = 6_000
+    with pytest.raises(ValueError, match=r"work .* exceeds maximum 64000000"):
+        st.zspace_repetition_unlikelihood_plan(
+            ngram_order=3,
+            context_window=token_count,
+            sequences=[
+                {
+                    "token_ids": list(range(token_count)),
+                    "token_mask": [True] * token_count,
+                    "label_mask": [True] * token_count,
+                }
+            ],
+        )
+
+
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     expected = {
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
@@ -159,8 +175,12 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD",
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS",
         "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
         "validate_zspace_repetition_unlikelihood_plan",
         "zspace_repetition_unlikelihood_plan",
     }
 
     assert expected <= set(st.__all__)
+    assert st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS == 64_000_000
+    assert "model_topk_periodic" in st.ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE
