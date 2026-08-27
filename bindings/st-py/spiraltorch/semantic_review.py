@@ -248,9 +248,9 @@ def _bounded_mapping_snapshot(
     label: str,
 ) -> dict[str, object]:
     if isinstance(value, dict):
-        if len(value) > maximum:
+        if dict.__len__(value) > maximum:
             raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return value.copy()
+        return dict.copy(value)
 
     snapshot: dict[str, object] = {}
     for index, (key, item) in enumerate(value.items()):

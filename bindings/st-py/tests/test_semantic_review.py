@@ -310,11 +310,32 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
         def __len__(self) -> int:
             return 66
 
+    class AdversarialDict(dict[str, object]):
+        def __len__(self) -> int:
+            return 0
+
+        def copy(self) -> dict[str, object]:
+            raise AssertionError("overridden copy must not run")
+
+        def items(self) -> object:
+            raise AssertionError("overridden items must not run")
+
     with pytest.raises(ValueError, match="field count exceeds maximum 64"):
         st.validate_zspace_semantic_review_packet(OversizedMapping())
     with pytest.raises(ValueError, match="field count exceeds maximum 64"):
         st.validate_zspace_semantic_review_packet(
             {f"field_{index}": None for index in range(65)}
+        )
+    assert semantic_review._bounded_mapping_snapshot(
+        AdversarialDict({"field": "safe"}),
+        maximum=1,
+        label="adversarial dict",
+    ) == {"field": "safe"}
+    with pytest.raises(ValueError, match="field count exceeds maximum 1"):
+        semantic_review._bounded_mapping_snapshot(
+            AdversarialDict({"field_1": None, "field_2": None}),
+            maximum=1,
+            label="adversarial dict",
         )
 
     packet = _packet()
