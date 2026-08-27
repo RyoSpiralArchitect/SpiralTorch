@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +17,8 @@ SCRIPT = ROOT / "scripts" / "security" / "verify_release.py"
 SPEC = importlib.util.spec_from_file_location("verify_release", SCRIPT)
 assert SPEC and SPEC.loader
 verify_release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(verify_release)
+with mock.patch.dict(sys.modules, {"requests": types.ModuleType("requests")}):
+    SPEC.loader.exec_module(verify_release)
 
 
 class VerifyReleaseTests(unittest.TestCase):
