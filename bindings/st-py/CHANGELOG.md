@@ -1,6 +1,6 @@
 # SpiralTorch (Python) changelog
 
-## 0.4.13
+## 0.4.14
 
 - HF optimizer feedback ablation: add a resumable three-arm
   `observe` / `raw_unguarded` / `raw_loss_guard` study that replays one
@@ -59,41 +59,6 @@
   `ready` / `not_ready` / `unknown` evidence states in the Rust-owned contract,
   keep execution gates fail-closed, and distinguish unknown-evidence failures
   across the Python and WASM clients.
-- HF PEFT runtime: add lazy `spiraltorch.hf_peft` helpers plus
-  `prepare_hf_finetune_model(...)` for model-family-aware LoRA target
-  resolution, parameter-freeze audits, gradient checkpointing, and adapter
-  attachment without making PEFT an eager import dependency.
-- HF adapter lifecycle: detect local adapter-only artifacts, reconstruct their
-  base model/tokenizer/PEFT stack through `load_hf_causal_lm_artifact(...)`,
-  expose compact load provenance to local trace, Z-Space inference/generation,
-  and checkpoint audit, and add `spiral-hf-adapter-export` for atomic safe-merge
-  export to a standalone full model.
-- HF adapter continuation: let `spiral-hf-finetune` consume local or declared
-  remote PEFT artifacts as trainable inputs, reuse their active adapter without
-  double attachment, and preserve artifact/base/tokenizer/runtime-config
-  provenance in the run card and model-profile surfaces.
-- HF adapter lineage and promotion: fingerprint adapter config/weight content,
-  write parent/root/run-card provenance after successful LoRA saves, expose
-  `spiral-hf-adapter-lineage` / `spiral-hf-adapter-promote`, and optionally fail
-  FT runs unless weights changed and before/after eval stays within a configured
-  loss-regression bound.
-- Promotion-aware HF sweeps: forward LoRA artifact/mode/promotion policy through
-  every bridge command, retain blocked candidates in comparison evidence, and
-  restrict selection, resume reuse, and scale-up command generation to adapters
-  whose promotion gate is ready.
-- Adapter-continuing HF scale-up: resolve promotion-ready sweep winners as the
-  parent PEFT artifact by default, preserve lineage provenance through command
-  replay, expose `auto` / `replay` / `continue` policy, and preflight local
-  adapter weights plus lineage/promotion fingerprint and depth consistency.
-- Multi-generation adapter chains: add `spiral-hf-adapter-chain` plus importable
-  DAG reports that revalidate fingerprints, parent/root/depth continuity,
-  promotion gates, run-card digests, forks, rejected generations, and a unique
-  continuation tip. FT run cards now retain their exact launch command, and
-  `spiral-hf-scale-up` accepts a ready chain report directly for the next depth.
-- Evidence-driven adapter continuation: add opt-in maximum-depth, target-loss,
-  and minimum-improvement/patience policies to promotion chains. Decisions are
-  separately inspectable and persistable, missing eval evidence fails closed,
-  and scale-up refuses to emit another generation after a policy stop.
 - Geometry-health continuation gates: promotion chains now carry live
   distortion pressure, desire stability, and psi telemetry from each run card.
   Optional thresholds fail closed on missing evidence, stop unsafe selected
@@ -237,6 +202,76 @@
   scale-up, executor, and status reports enforce parent-to-child continuity.
   The Pythia 70M sample now records a fresh-wheel depth-seven adoption and a
   depth-eight enforced promotion with matching pre/post-load identity evidence.
+- PyPI propagation guard: keep polling after uploaded wheels appear until the
+  project latest-version index also exposes the release, avoiding false-red
+  publication runs during the short CDN propagation window.
+- Release source contract: require every automatic release tag to equal the
+  Python package version exactly, require manual recovery to build the named
+  release tag rather than a moving branch, and use that same source for wheel
+  construction, validation, provenance manifests, signing, and publication.
+  Matrix build jobs now receive read-only repository permissions.
+- Model-neutral HF artifact probe: add `hf_causal_lm_artifact_probe_report(...)`
+  and `spiral-hf-artifact-probe` to reconstruct full models or PEFT adapters,
+  run bounded generation, and archive device/token/timing/runtime evidence. A
+  real Pythia 70M LoRA sample now covers non-GPT-2 train, promotion, reload, and
+  MPS generation.
+- Promotion-qualified artifact reload: Trainer outputs now retain their
+  tokenizer, while `--adapter-promotion-gate` releases the trained model and
+  accelerator cache, then requires a local-only fresh PEFT reload plus
+  deterministic bounded generation. Sweep, run-card,
+  promotion-chain, and scale-up artifacts preserve and revalidate the probe
+  path, device, candidate identity, and generated-token evidence.
+- Isolated artifact qualification: `spiral-hf-artifact-probe`, the importable
+  subprocess probe API, and promotion-gated Trainer runs now reconstruct the
+  saved artifact in a dedicated Python worker. Request JSON avoids repeating
+  prompts in the worker argv, while PID, parent PID, exit code, timeout, and
+  worker-module evidence are revalidated by promotion chains and retained by
+  scale-up handoffs.
+- Rust-owned token periodicity: promote the bounded periodic-suffix kernel into
+  a content-addressed request/report contract with exact Rust recomputation
+  validation, then expose the same structural token-ID evidence to Python and
+  WASM without duplicating period search, tie-breaking, or ratio semantics.
+  Unsafe integers, unbounded work, report tampering, and cross-client JSON
+  drift fail closed; a positive suffix deliberately makes no semantic-quality,
+  future-loop, or model-efficacy claim.
+
+## 0.4.13
+
+- HF PEFT runtime: add lazy `spiraltorch.hf_peft` helpers plus
+  `prepare_hf_finetune_model(...)` for model-family-aware LoRA target
+  resolution, parameter-freeze audits, gradient checkpointing, and adapter
+  attachment without making PEFT an eager import dependency.
+- HF adapter lifecycle: detect local adapter-only artifacts, reconstruct their
+  base model/tokenizer/PEFT stack through `load_hf_causal_lm_artifact(...)`,
+  expose compact load provenance to local trace, Z-Space inference/generation,
+  and checkpoint audit, and add `spiral-hf-adapter-export` for atomic safe-merge
+  export to a standalone full model.
+- HF adapter continuation: let `spiral-hf-finetune` consume local or declared
+  remote PEFT artifacts as trainable inputs, reuse their active adapter without
+  double attachment, and preserve artifact/base/tokenizer/runtime-config
+  provenance in the run card and model-profile surfaces.
+- HF adapter lineage and promotion: fingerprint adapter config/weight content,
+  write parent/root/run-card provenance after successful LoRA saves, expose
+  `spiral-hf-adapter-lineage` / `spiral-hf-adapter-promote`, and optionally fail
+  FT runs unless weights changed and before/after eval stays within a configured
+  loss-regression bound.
+- Promotion-aware HF sweeps: forward LoRA artifact/mode/promotion policy through
+  every bridge command, retain blocked candidates in comparison evidence, and
+  restrict selection, resume reuse, and scale-up command generation to adapters
+  whose promotion gate is ready.
+- Adapter-continuing HF scale-up: resolve promotion-ready sweep winners as the
+  parent PEFT artifact by default, preserve lineage provenance through command
+  replay, expose `auto` / `replay` / `continue` policy, and preflight local
+  adapter weights plus lineage/promotion fingerprint and depth consistency.
+- Multi-generation adapter chains: add `spiral-hf-adapter-chain` plus importable
+  DAG reports that revalidate fingerprints, parent/root/depth continuity,
+  promotion gates, run-card digests, forks, rejected generations, and a unique
+  continuation tip. FT run cards now retain their exact launch command, and
+  `spiral-hf-scale-up` accepts a ready chain report directly for the next depth.
+- Evidence-driven adapter continuation: add opt-in maximum-depth, target-loss,
+  and minimum-improvement/patience policies to promotion chains. Decisions are
+  separately inspectable and persistable, missing eval evidence fails closed,
+  and scale-up refuses to emit another generation after a policy stop.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,
@@ -318,26 +353,6 @@
 - Release payload gate: reuse the manifest-backed wheel validator in both PyPI
   upload workflows and smoke every installed HF/Z-Space console command across
   the Linux, macOS, and Windows release matrix before publication.
-- PyPI propagation guard: keep polling after uploaded wheels appear until the
-  project latest-version index also exposes the release, avoiding false-red
-  publication runs during the short CDN propagation window.
-- Model-neutral HF artifact probe: add `hf_causal_lm_artifact_probe_report(...)`
-  and `spiral-hf-artifact-probe` to reconstruct full models or PEFT adapters,
-  run bounded generation, and archive device/token/timing/runtime evidence. A
-  real Pythia 70M LoRA sample now covers non-GPT-2 train, promotion, reload, and
-  MPS generation.
-- Promotion-qualified artifact reload: Trainer outputs now retain their
-  tokenizer, while `--adapter-promotion-gate` releases the trained model and
-  accelerator cache, then requires a local-only fresh PEFT reload plus
-  deterministic bounded generation. Sweep, run-card,
-  promotion-chain, and scale-up artifacts preserve and revalidate the probe
-  path, device, candidate identity, and generated-token evidence.
-- Isolated artifact qualification: `spiral-hf-artifact-probe`, the importable
-  subprocess probe API, and promotion-gated Trainer runs now reconstruct the
-  saved artifact in a dedicated Python worker. Request JSON avoids repeating
-  prompts in the worker argv, while PID, parent PID, exit code, timeout, and
-  worker-module evidence are revalidated by promotion chains and retained by
-  scale-up handoffs.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter
