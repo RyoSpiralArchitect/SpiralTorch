@@ -3,7 +3,9 @@
 use serde_json::Value;
 use st_core::runtime::zspace_runtime_protocol_catalog::{
     validate_zspace_runtime_protocol_catalog_value, zspace_runtime_protocol_catalog,
-    ZSpaceRuntimeProtocolCatalogError,
+    ZSpaceRuntimeProtocolCatalogError, ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
 };
 
 use crate::utils::bounded_json_value_from_str;
@@ -18,16 +20,12 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::{bounded_json_string_from_js, js_error};
 
-const WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES: u64 = 1_024 * 1_024;
-const WASM_PROTOCOL_CATALOG_MAX_INGRESS_NODES: u64 = 20_000;
-const WASM_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH: u32 = 16;
-
 fn catalog_from_json(input_json: &str) -> Result<Value, String> {
     let value = bounded_json_value_from_str(
         input_json,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
         "Z-space runtime protocol catalog",
     )?;
     if value.is_object() {
@@ -83,7 +81,7 @@ pub fn validate_zspace_runtime_protocol_catalog_json(
 ) -> Result<String, JsValue> {
     let catalog_json = bounded_json_string_from_js(
         catalog_json,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
         "Z-space runtime protocol catalog JSON",
     )?;
     let catalog = catalog_from_json(&catalog_json).map_err(js_error)?;
@@ -105,7 +103,28 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert_eq!(actual["semantic_backend"], "rust");
-        assert_eq!(actual["protocol_count"], 3);
+        assert_eq!(actual["protocol_count"], 4);
+        assert_eq!(
+            actual["protocol_order_rule"],
+            "generation_evidence,periodicity,repetition_unlikelihood,semantic_review"
+        );
+        for protocol in actual["protocols"].as_array().expect("protocol array") {
+            let clients = protocol["clients"].as_array().expect("client array");
+            assert_eq!(clients[0]["normal_admission"]["profile"], "typed_native");
+            assert!(clients[0]["normal_admission"]["limits"].is_null());
+            assert_eq!(
+                clients[1]["normal_admission"]["profile"],
+                "passive_json_containers"
+            );
+            assert_eq!(
+                clients[2]["normal_admission"]["profile"],
+                "bounded_json_string"
+            );
+            assert_eq!(
+                clients[1]["normal_admission"]["limits"],
+                clients[2]["normal_admission"]["limits"]
+            );
+        }
         assert_eq!(
             validate_zspace_runtime_protocol_catalog_report_value(actual.clone())
                 .expect("catalog replay"),
@@ -127,9 +146,9 @@ mod tests {
             .contains("must be an object"));
         assert!(bounded_json_value_from_str(
             r#"{"catalog_id":"a","catalog_id":"b"}"#,
-            WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
-            WASM_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
-            WASM_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
+            ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+            ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
+            ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
             "catalog",
         )
         .expect_err("duplicate keys fail closed")

@@ -44,6 +44,12 @@ pub const ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES: usize = 32 * 1_024 * 1_0
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES: usize = 128;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES: usize = ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+/// Maximum normal JSON-compatible bytes admitted before review deserialization.
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
+/// Maximum normal JSON-compatible values admitted before review deserialization.
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES: u64 = 1_000_000;
+/// Maximum normal JSON-compatible nesting admitted before review deserialization.
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH: u32 = 32;
 pub const ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE: &str =
     "sum of UTF-8 JSON-encoded string-content bytes across packet values and dynamic rubric keys; fixed field names, quotes, punctuation, and container overhead excluded";
 pub const ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS: [&str; 3] = ["A", "B", "C"];

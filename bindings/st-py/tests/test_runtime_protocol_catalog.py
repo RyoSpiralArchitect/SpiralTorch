@@ -32,6 +32,7 @@ def test_runtime_protocol_catalog_is_rust_owned_and_replayable() -> None:
     assert catalog["catalog_id"].startswith("sha256:")
     assert [protocol["name"] for protocol in catalog["protocols"]] == [
         "generation_evidence",
+        "periodicity",
         "repetition_unlikelihood",
         "semantic_review",
     ]
@@ -57,6 +58,19 @@ def test_runtime_protocol_catalog_matches_python_and_wasm_public_surfaces() -> N
             if isinstance(surface, Mapping)
         }
         assert list(surfaces) == ["rust", "python", "wasm"]
+        rust_admission = surfaces["rust"]["normal_admission"]
+        python_admission = surfaces["python"]["normal_admission"]
+        wasm_admission = surfaces["wasm"]["normal_admission"]
+        assert rust_admission["profile"] == "typed_native"
+        assert rust_admission["limits"] is None
+        assert python_admission["profile"] == "passive_json_containers"
+        assert wasm_admission["profile"] == "bounded_json_string"
+        assert python_admission["limits"] == wasm_admission["limits"]
+        assert all(
+            isinstance(python_admission["limits"][field], int)
+            and python_admission["limits"][field] > 0
+            for field in ("maximum_bytes", "maximum_nodes", "maximum_depth")
+        )
         for operation in surfaces["python"]["operations"]:
             assert hasattr(st, operation), f"missing Python operation {operation}"
             assert operation in st.__all__
@@ -95,6 +109,15 @@ def test_runtime_protocol_catalog_public_surface_is_typed_and_exported() -> None
     assert "catalog: Dict[str, object]" in stub
     assert "samples: Sequence[Mapping[str, object]]" not in stub
     assert "samples: List[Dict[str, object]] | Tuple[Dict[str, object], ...]" in stub
+    periodicity_stub = stub.split("def zspace_periodicity(", 1)[1].split(
+        "def validate_zspace_periodicity(", 1
+    )[0]
+    assert "token_ids: Sequence[int]" not in periodicity_stub
+    assert "token_ids: List[int] | Tuple[int, ...]" in periodicity_stub
+    assert (
+        st.zspace_periodicity.__annotations__["token_ids"]
+        == "list[int] | tuple[int, ...]"
+    )
 
 
 def test_runtime_protocol_catalog_rejects_active_mapping_hooks_in_rust() -> None:

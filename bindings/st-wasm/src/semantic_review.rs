@@ -9,7 +9,8 @@ use st_core::runtime::zspace_semantic_review::{
     validate_zspace_semantic_review_unblind_value, zspace_semantic_review_map_id,
     ZSpaceSemanticReviewDraftRequest, ZSpaceSemanticReviewError, ZSpaceSemanticReviewMapIdRequest,
     ZSpaceSemanticReviewPacket, ZSpaceSemanticReviewPacketRequest,
-    ZSpaceSemanticReviewUnblindRequest,
+    ZSpaceSemanticReviewUnblindRequest, ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH, ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
 };
 
 use crate::utils::bounded_json_value_from_str;
@@ -24,10 +25,6 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::{bounded_json_string_from_js, js_error, snapshot_json_compatible_js_value};
 
-const WASM_SEMANTIC_REVIEW_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
-const WASM_SEMANTIC_REVIEW_MAX_INGRESS_NODES: u64 = 1_000_000;
-const WASM_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH: u32 = 32;
-
 fn typed_from_value<T: DeserializeOwned>(value: Value, context: &str) -> Result<T, String> {
     if !value.is_object() {
         return Err(format!("{context} must be an object"));
@@ -38,9 +35,9 @@ fn typed_from_value<T: DeserializeOwned>(value: Value, context: &str) -> Result<
 fn typed_from_json<T: DeserializeOwned>(input_json: &str, context: &str) -> Result<T, String> {
     let value = bounded_json_value_from_str(
         input_json,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
         context,
     )?;
     typed_from_value(value, context)
@@ -57,9 +54,9 @@ fn report_from_value(value: Value, context: &str) -> Result<Value, String> {
 fn report_from_json(input_json: &str, context: &str) -> Result<Value, String> {
     let value = bounded_json_value_from_str(
         input_json,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
         context,
     )?;
     report_from_value(value, context)
@@ -134,16 +131,16 @@ pub fn validate_zspace_semantic_review_unblind_report_value(
 fn snapshot_semantic_review_js_value(value: &JsValue, context: &str) -> Result<JsValue, JsValue> {
     snapshot_json_compatible_js_value(
         value,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
-        WASM_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+        ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
         context,
     )
 }
 
 #[cfg(target_arch = "wasm32")]
 fn string_from_js(value: &JsString, context: &str) -> Result<String, JsValue> {
-    bounded_json_string_from_js(value, WASM_SEMANTIC_REVIEW_MAX_INGRESS_BYTES, context)
+    bounded_json_string_from_js(value, ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES, context)
 }
 
 #[cfg(target_arch = "wasm32")]

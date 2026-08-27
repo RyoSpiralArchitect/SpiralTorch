@@ -30,6 +30,12 @@ pub const ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES: usize = 10_000;
 pub const ZSPACE_GENERATION_EVIDENCE_MAX_TOKENS_PER_SAMPLE: usize = 16_384;
 pub const ZSPACE_GENERATION_EVIDENCE_MAX_TOTAL_TOKENS: usize = 1_000_000;
 pub const ZSPACE_GENERATION_EVIDENCE_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+/// Maximum JSON-compatible bytes admitted before request/report deserialization.
+pub const ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES: u64 = 96 * 1_024 * 1_024;
+/// Maximum JSON-compatible values admitted before request/report deserialization.
+pub const ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES: u64 = 4_000_000;
+/// Maximum JSON-compatible nesting admitted before request/report deserialization.
+pub const ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH: u32 = 32;
 pub const ZSPACE_GENERATION_EVIDENCE_NGRAM_ORDERS: [usize; 4] = [1, 2, 3, 4];
 pub const ZSPACE_GENERATION_EVIDENCE_PERIODIC_SUFFIX_MAX_PERIOD: usize =
     ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD;

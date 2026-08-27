@@ -137,18 +137,40 @@ declare module "spiraltorch-wasm" {
         discriminator_value: string;
     };
 
+    /** Rust-published bounds charged before protocol deserialization. */
+    export type ZSpaceRuntimeProtocolAdmissionLimits = {
+        maximum_bytes: number;
+        maximum_nodes: number;
+        maximum_depth: number;
+    };
+
+    /** Exact normal-ingress guarantee; trusted legacy replay is separate. */
+    export type ZSpaceRuntimeProtocolAdmission = {
+        profile:
+            | "typed_native"
+            | "passive_json_containers"
+            | "bounded_json_string";
+        guarantee: string;
+        limits: ZSpaceRuntimeProtocolAdmissionLimits | null;
+    };
+
     /** Exact admission-certified operations exposed without local semantics. */
     export type ZSpaceRuntimeProtocolClientSurface = {
         client: "rust" | "python" | "wasm";
         package: "st-core" | "spiraltorch" | "spiraltorch-wasm";
         transport: "native" | "bounded_mapping" | "bounded_json";
+        normal_admission: ZSpaceRuntimeProtocolAdmission;
         operations: string[];
         trusted_legacy_replay: boolean;
     };
 
     /** One protocol family whose admission and semantics remain Rust-owned. */
     export type ZSpaceRuntimeProtocolDescriptor = {
-        name: "generation_evidence" | "repetition_unlikelihood" | "semantic_review";
+        name:
+            | "generation_evidence"
+            | "periodicity"
+            | "repetition_unlikelihood"
+            | "semantic_review";
         semantic_owner: string;
         semantic_backend: "rust";
         admission_owner: "rust";
@@ -158,7 +180,7 @@ declare module "spiraltorch-wasm" {
 
     /** Content-addressed cross-client surface generated and validated by `st-core`. */
     export type ZSpaceRuntimeProtocolCatalog = {
-        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v1";
+        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v2";
         kind: "spiraltorch.zspace_runtime_protocol_catalog";
         semantic_owner: "st-core::runtime::zspace_runtime_protocol_catalog";
         semantic_backend: "rust";
@@ -167,7 +189,7 @@ declare module "spiraltorch-wasm" {
         catalog_id_rule: string;
         status: "ready";
         protocol_count: number;
-        protocol_order_rule: "generation_evidence,repetition_unlikelihood,semantic_review";
+        protocol_order_rule: "generation_evidence,periodicity,repetition_unlikelihood,semantic_review";
         client_order_rule: "rust,python,wasm";
         legacy_replay_policy: string;
         protocols: ZSpaceRuntimeProtocolDescriptor[];

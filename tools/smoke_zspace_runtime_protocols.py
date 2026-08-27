@@ -37,6 +37,21 @@ def generation_evidence_smoke() -> dict[str, object]:
     }
 
 
+def periodicity_smoke() -> dict[str, object]:
+    report = st.zspace_periodicity(
+        [9, 1, 2, 1, 2, 1],
+        appended_token_id=2,
+    )
+    assert st.validate_zspace_periodicity(report) == report
+    assert report["semantic_backend"] == "rust"
+    assert report["periodic_loop_detected"] is True
+    assert report["periodic_suffix"]["period"] == 2
+    return {
+        "analysis_id": report["analysis_id"],
+        "period": report["periodic_suffix"]["period"],
+    }
+
+
 def repetition_unlikelihood_smoke() -> dict[str, object]:
     plan = st.zspace_repetition_unlikelihood_plan(
         sequences=[
@@ -169,6 +184,7 @@ def main() -> int:
     assert st.validate_zspace_runtime_protocol_catalog(catalog) == catalog
     assert [protocol["name"] for protocol in catalog["protocols"]] == [
         "generation_evidence",
+        "periodicity",
         "repetition_unlikelihood",
         "semantic_review",
     ]
@@ -186,6 +202,7 @@ def main() -> int:
         "catalog_id": catalog["catalog_id"],
         "protocol_count": catalog["protocol_count"],
         "generation_evidence": generation_evidence_smoke(),
+        "periodicity": periodicity_smoke(),
         "repetition_unlikelihood": repetition_unlikelihood_smoke(),
         "semantic_review": semantic_review_smoke(),
     }

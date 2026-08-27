@@ -4,6 +4,8 @@ use serde_json::Value;
 use st_core::runtime::zspace_generation_evidence::{
     summarize_zspace_generation_evidence, validate_zspace_generation_evidence_value,
     ZSpaceGenerationEvidenceError, ZSpaceGenerationEvidenceRequest,
+    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES, ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
 };
 
 use crate::utils::bounded_json_value_from_str;
@@ -18,15 +20,11 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::{bounded_json_string_from_js, js_error, snapshot_json_compatible_js_value};
 
-const WASM_GENERATION_EVIDENCE_MAX_INGRESS_BYTES: u64 = 96 * 1_024 * 1_024;
-const WASM_GENERATION_EVIDENCE_MAX_INGRESS_NODES: u64 = 4_000_000;
-const WASM_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH: u32 = 32;
-
 fn bounded_json_value(input_json: &str, context: &str) -> Result<Value, String> {
     bounded_json_value_with_limit(
         input_json,
         context,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
     )
 }
 
@@ -38,8 +36,8 @@ fn bounded_json_value_with_limit(
     bounded_json_value_from_str(
         input_json,
         maximum_bytes,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
         context,
     )
 }
@@ -48,9 +46,9 @@ fn bounded_json_value_with_limit(
 fn snapshot_generation_js_value(value: &JsValue, context: &str) -> Result<JsValue, JsValue> {
     snapshot_json_compatible_js_value(
         value,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
         context,
     )
 }
@@ -109,7 +107,7 @@ pub fn validate_zspace_generation_evidence_report_value(
 pub fn zspace_generation_evidence_json(request_json: &JsString) -> Result<String, JsValue> {
     let request_json = bounded_json_string_from_js(
         request_json,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
         "Z-space generation evidence request JSON",
     )?;
     let request = request_from_json(&request_json).map_err(js_error)?;
@@ -132,7 +130,7 @@ pub fn zspace_generation_evidence_object(request: &JsValue) -> Result<JsValue, J
 pub fn validate_zspace_generation_evidence_json(report_json: &JsString) -> Result<String, JsValue> {
     let report_json = bounded_json_string_from_js(
         report_json,
-        WASM_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+        ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
         "Z-space generation evidence report JSON",
     )?;
     let report = report_from_json(&report_json).map_err(js_error)?;

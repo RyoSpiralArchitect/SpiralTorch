@@ -11,31 +11,50 @@
 use super::canonical_json::values_equivalent;
 use super::zspace_generation_evidence::{
     ZSPACE_GENERATION_EVIDENCE_CONTRACT_VERSION, ZSPACE_GENERATION_EVIDENCE_KIND,
-    ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND, ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
+    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES, ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES, ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND,
+    ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
+};
+use super::zspace_periodicity::{
+    ZSPACE_PERIODICITY_CONTRACT_VERSION, ZSPACE_PERIODICITY_KIND,
+    ZSPACE_PERIODICITY_MAX_INGRESS_BYTES, ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH,
+    ZSPACE_PERIODICITY_MAX_INGRESS_NODES, ZSPACE_PERIODICITY_SEMANTIC_BACKEND,
+    ZSPACE_PERIODICITY_SEMANTIC_OWNER,
 };
 use super::zspace_repetition_unlikelihood::{
     ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION, ZSPACE_REPETITION_UNLIKELIHOOD_KIND,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND, ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
 };
 use super::zspace_semantic_review::{
     ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND,
     ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION, ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA,
-    ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_PACKET_KIND,
-    ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND, ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER,
-    ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION, ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
+    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES, ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES, ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION,
+    ZSPACE_SEMANTIC_REVIEW_PACKET_KIND, ZSPACE_SEMANTIC_REVIEW_SEMANTIC_BACKEND,
+    ZSPACE_SEMANTIC_REVIEW_SEMANTIC_OWNER, ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION,
+    ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_runtime_protocol_catalog.v1";
+    "spiraltorch.zspace_runtime_protocol_catalog.v2";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND: &str =
     "spiraltorch.zspace_runtime_protocol_catalog";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER: &str =
     "st-core::runtime::zspace_runtime_protocol_catalog";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_BACKEND: &str = "rust";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS: &str = "ready";
+/// Maximum JSON-compatible bytes admitted when replaying the catalog itself.
+pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES: u64 = 1_024 * 1_024;
+/// Maximum JSON-compatible values admitted when replaying the catalog itself.
+pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES: u64 = 20_000;
+/// Maximum JSON-compatible nesting admitted when replaying the catalog itself.
+pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH: u32 = 16;
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_ID_RULE: &str =
     "sha256(contract_version UTF-8 || NUL || compact catalog JSON with catalog_id empty)";
 
@@ -50,10 +69,27 @@ pub struct ZSpaceRuntimeProtocolArtifact {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct ZSpaceRuntimeProtocolAdmissionLimits {
+    pub maximum_bytes: u64,
+    pub maximum_nodes: u64,
+    pub maximum_depth: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceRuntimeProtocolAdmission {
+    pub profile: String,
+    pub guarantee: String,
+    pub limits: Option<ZSpaceRuntimeProtocolAdmissionLimits>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ZSpaceRuntimeProtocolClientSurface {
     pub client: String,
     pub package: String,
     pub transport: String,
+    pub normal_admission: ZSpaceRuntimeProtocolAdmission,
     pub operations: Vec<String>,
     pub trusted_legacy_replay: bool,
 }
@@ -115,10 +151,63 @@ fn artifact(
     }
 }
 
+fn ingress_limits(
+    maximum_bytes: u64,
+    maximum_nodes: u64,
+    maximum_depth: u32,
+) -> ZSpaceRuntimeProtocolAdmissionLimits {
+    ZSpaceRuntimeProtocolAdmissionLimits {
+        maximum_bytes,
+        maximum_nodes,
+        maximum_depth,
+    }
+}
+
+fn typed_native_admission() -> ZSpaceRuntimeProtocolAdmission {
+    ZSpaceRuntimeProtocolAdmission {
+        profile: "typed_native".to_owned(),
+        guarantee: "Rust receives typed values and applies protocol admission before protocol work; no serialized client-ingress budget applies".to_owned(),
+        limits: None,
+    }
+}
+
+fn passive_json_container_admission(
+    maximum_bytes: u64,
+    maximum_nodes: u64,
+    maximum_depth: u32,
+) -> ZSpaceRuntimeProtocolAdmission {
+    ZSpaceRuntimeProtocolAdmission {
+        profile: "passive_json_containers".to_owned(),
+        guarantee: "only concrete dict/list/tuple-backed JSON containers are traversed; Rust charges byte, node, and depth budgets during conversion before protocol deserialization".to_owned(),
+        limits: Some(ingress_limits(
+            maximum_bytes,
+            maximum_nodes,
+            maximum_depth,
+        )),
+    }
+}
+
+fn bounded_json_string_admission(
+    maximum_bytes: u64,
+    maximum_nodes: u64,
+    maximum_depth: u32,
+) -> ZSpaceRuntimeProtocolAdmission {
+    ZSpaceRuntimeProtocolAdmission {
+        profile: "bounded_json_string".to_owned(),
+        guarantee: "UTF-8 byte preflight precedes Rust String materialization; the duplicate-key-rejecting parser charges node and depth budgets before protocol deserialization".to_owned(),
+        limits: Some(ingress_limits(
+            maximum_bytes,
+            maximum_nodes,
+            maximum_depth,
+        )),
+    }
+}
+
 fn client(
     client: &str,
     package: &str,
     transport: &str,
+    normal_admission: ZSpaceRuntimeProtocolAdmission,
     operations: &[&str],
     trusted_legacy_replay: bool,
 ) -> ZSpaceRuntimeProtocolClientSurface {
@@ -126,6 +215,7 @@ fn client(
         client: client.to_owned(),
         package: package.to_owned(),
         transport: transport.to_owned(),
+        normal_admission,
         operations: strings(operations),
         trusted_legacy_replay,
     }
@@ -148,6 +238,7 @@ fn generation_evidence_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "rust",
                 "st-core",
                 "native",
+                typed_native_admission(),
                 &[
                     "summarize_zspace_generation_evidence",
                     "validate_zspace_generation_evidence_value",
@@ -158,6 +249,11 @@ fn generation_evidence_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "python",
                 "spiraltorch",
                 "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspace_generation_evidence",
                     "validate_zspace_generation_evidence",
@@ -168,10 +264,67 @@ fn generation_evidence_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "wasm",
                 "spiraltorch-wasm",
                 "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspaceGenerationEvidenceJson",
                     "validateZspaceGenerationEvidenceJson",
                 ],
+                false,
+            ),
+        ],
+    }
+}
+
+fn periodicity_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
+    ZSpaceRuntimeProtocolDescriptor {
+        name: "periodicity".to_owned(),
+        semantic_owner: ZSPACE_PERIODICITY_SEMANTIC_OWNER.to_owned(),
+        semantic_backend: ZSPACE_PERIODICITY_SEMANTIC_BACKEND.to_owned(),
+        admission_owner: "rust".to_owned(),
+        artifacts: vec![artifact(
+            "analysis_report",
+            ZSPACE_PERIODICITY_CONTRACT_VERSION,
+            "kind",
+            ZSPACE_PERIODICITY_KIND,
+        )],
+        clients: vec![
+            client(
+                "rust",
+                "st-core",
+                "native",
+                typed_native_admission(),
+                &[
+                    "analyze_zspace_periodicity",
+                    "validate_zspace_periodicity_value",
+                ],
+                false,
+            ),
+            client(
+                "python",
+                "spiraltorch",
+                "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_PERIODICITY_MAX_INGRESS_BYTES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_NODES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH,
+                ),
+                &["zspace_periodicity", "validate_zspace_periodicity"],
+                false,
+            ),
+            client(
+                "wasm",
+                "spiraltorch-wasm",
+                "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_PERIODICITY_MAX_INGRESS_BYTES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_NODES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH,
+                ),
+                &["zspacePeriodicityJson", "validateZspacePeriodicityJson"],
                 false,
             ),
         ],
@@ -195,6 +348,7 @@ fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "rust",
                 "st-core",
                 "native",
+                typed_native_admission(),
                 &[
                     "plan_zspace_repetition_unlikelihood",
                     "validate_zspace_repetition_unlikelihood_value",
@@ -206,6 +360,11 @@ fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "python",
                 "spiraltorch",
                 "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspace_repetition_unlikelihood_plan",
                     "validate_zspace_repetition_unlikelihood_plan",
@@ -217,6 +376,11 @@ fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "wasm",
                 "spiraltorch-wasm",
                 "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspaceRepetitionUnlikelihoodPlanJson",
                     "validateZspaceRepetitionUnlikelihoodPlanJson",
@@ -264,6 +428,7 @@ fn semantic_review_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "rust",
                 "st-core",
                 "native",
+                typed_native_admission(),
                 &[
                     "zspace_semantic_review_map_id",
                     "seal_zspace_semantic_review_packet",
@@ -285,6 +450,11 @@ fn semantic_review_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "python",
                 "spiraltorch",
                 "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspace_semantic_review_map_id",
                     "seal_zspace_semantic_review_packet",
@@ -306,6 +476,11 @@ fn semantic_review_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
                 "wasm",
                 "spiraltorch-wasm",
                 "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+                ),
                 &[
                     "zspaceSemanticReviewMapIdJson",
                     "sealZspaceSemanticReviewPacketJson",
@@ -343,6 +518,7 @@ pub fn zspace_runtime_protocol_catalog(
 ) -> Result<ZSpaceRuntimeProtocolCatalog, ZSpaceRuntimeProtocolCatalogError> {
     let protocols = vec![
         generation_evidence_descriptor(),
+        periodicity_descriptor(),
         repetition_unlikelihood_descriptor(),
         semantic_review_descriptor(),
     ];
@@ -356,8 +532,8 @@ pub fn zspace_runtime_protocol_catalog(
         catalog_id_rule: ZSPACE_RUNTIME_PROTOCOL_CATALOG_ID_RULE.to_owned(),
         status: ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS.to_owned(),
         protocol_count: protocols.len(),
-        protocol_order_rule: "generation_evidence,repetition_unlikelihood,semantic_review"
-            .to_owned(),
+        protocol_order_rule:
+            "generation_evidence,periodicity,repetition_unlikelihood,semantic_review".to_owned(),
         client_order_rule: "rust,python,wasm".to_owned(),
         legacy_replay_policy:
             "trusted legacy replay is explicit and Rust/Python-only; WASM never exposes it"
@@ -406,7 +582,7 @@ mod tests {
         let replay = zspace_runtime_protocol_catalog().expect("catalog replay");
 
         assert_eq!(catalog, replay);
-        assert_eq!(catalog.protocol_count, 3);
+        assert_eq!(catalog.protocol_count, 4);
         assert!(catalog.catalog_id.starts_with("sha256:"));
         assert_eq!(catalog.catalog_id.len(), 71);
         assert_eq!(
@@ -421,6 +597,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "generation_evidence",
+                "periodicity",
                 "repetition_unlikelihood",
                 "semantic_review"
             ]
@@ -440,6 +617,62 @@ mod tests {
                 .clients
                 .iter()
                 .all(|surface| !surface.operations.is_empty()));
+            assert_eq!(protocol.clients[0].normal_admission.profile, "typed_native");
+            assert!(protocol.clients[0].normal_admission.limits.is_none());
+            assert_eq!(
+                protocol.clients[1].normal_admission.profile,
+                "passive_json_containers"
+            );
+            assert_eq!(
+                protocol.clients[2].normal_admission.profile,
+                "bounded_json_string"
+            );
+            assert_eq!(
+                protocol.clients[1].normal_admission.limits,
+                protocol.clients[2].normal_admission.limits
+            );
+            assert!(protocol
+                .clients
+                .iter()
+                .all(|surface| !surface.normal_admission.guarantee.is_empty()));
+        }
+    }
+
+    #[test]
+    fn normal_admission_limits_are_protocol_specific_and_rust_owned() {
+        let catalog = zspace_runtime_protocol_catalog().expect("catalog");
+        for protocol in &catalog.protocols {
+            let expected = match protocol.name.as_str() {
+                "generation_evidence" => ingress_limits(
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+                    ZSPACE_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+                ),
+                "periodicity" => ingress_limits(
+                    ZSPACE_PERIODICITY_MAX_INGRESS_BYTES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_NODES,
+                    ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH,
+                ),
+                "repetition_unlikelihood" => ingress_limits(
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+                ),
+                "semantic_review" => ingress_limits(
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_BYTES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_NODES,
+                    ZSPACE_SEMANTIC_REVIEW_MAX_INGRESS_DEPTH,
+                ),
+                other => panic!("unexpected protocol {other}"),
+            };
+            assert_eq!(
+                protocol.clients[1].normal_admission.limits.as_ref(),
+                Some(&expected)
+            );
+            assert_eq!(
+                protocol.clients[2].normal_admission.limits.as_ref(),
+                Some(&expected)
+            );
         }
     }
 
@@ -514,6 +747,9 @@ mod tests {
         use crate::runtime::zspace_generation_evidence::{
             summarize_zspace_generation_evidence, validate_zspace_generation_evidence_value,
         };
+        use crate::runtime::zspace_periodicity::{
+            analyze_zspace_periodicity, validate_zspace_periodicity_value,
+        };
         use crate::runtime::zspace_repetition_unlikelihood::{
             plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
             validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay,
@@ -533,6 +769,8 @@ mod tests {
 
         let _ = summarize_zspace_generation_evidence;
         let _ = validate_zspace_generation_evidence_value;
+        let _ = analyze_zspace_periodicity;
+        let _ = validate_zspace_periodicity_value;
         let _ = plan_zspace_repetition_unlikelihood;
         let _ = validate_zspace_repetition_unlikelihood_value;
         let _ = validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay;
