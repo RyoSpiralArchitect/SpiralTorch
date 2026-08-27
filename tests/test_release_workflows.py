@@ -81,6 +81,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--require-latest", release_wheels)
         self.assertIn("--index-url https://pypi.org/simple", publish_from_release)
 
+    def test_release_verifier_uses_isolated_python_and_quoted_arguments(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "verify-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('PYTHONNOUSERSITE: "1"', workflow)
+        self.assertIn('python-version: "3.12"', workflow)
+        self.assertIn('ARGS=(--repo "${REPOSITORY}")', workflow)
+        self.assertIn('ARGS+=(--tag "${RELEASE_TAG}")', workflow)
+        self.assertIn('python scripts/security/verify_release.py "${ARGS[@]}"', workflow)
+        self.assertNotIn("TAG_ARG=", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

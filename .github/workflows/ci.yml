@@ -342,6 +342,7 @@ jobs:
           python -P tests/test_run_char_vae_context_chain.py
           python -P tests/test_run_pypi_publish_from_release.py
           python -P tests/test_runtime_imports.py
+          python -P tests/test_verify_release.py
           python -P tests/test_verify_pypi_release.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
