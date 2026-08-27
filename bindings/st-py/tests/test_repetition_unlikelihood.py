@@ -167,6 +167,34 @@ def test_repetition_unlikelihood_rejects_excessive_rust_work() -> None:
         )
 
 
+def test_repetition_validator_is_bounded_and_legacy_replay_is_explicit() -> None:
+    plan = _plan([1, 2, 3, 1, 2, 4])
+    assert (
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(plan)
+        == plan
+    )
+
+    token_count = 6_000
+    forged = copy.deepcopy(plan)
+    forged["request"] = {
+        "config": {
+            "strength": 0.1,
+            "candidate_source": {"kind": "prior_continuation", "ngram_order": 3},
+            "context_window": token_count,
+            "max_candidates_per_position": 8,
+        },
+        "sequences": [
+            {
+                "token_ids": list(range(token_count)),
+                "token_mask": [True] * token_count,
+                "label_mask": [True] * token_count,
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match=r"work .* exceeds maximum 64000000"):
+        st.validate_zspace_repetition_unlikelihood_plan(forged)
+
+
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     expected = {
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
@@ -178,6 +206,7 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
         "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS",
         "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
         "validate_zspace_repetition_unlikelihood_plan",
+        "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
         "zspace_repetition_unlikelihood_plan",
     }
 

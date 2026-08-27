@@ -752,6 +752,7 @@ from .repetition_unlikelihood import (
     ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
     ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE,
     validate_zspace_repetition_unlikelihood_plan,
+    validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay,
     zspace_repetition_unlikelihood_plan,
 )
 from .imaginary_time_schrodinger import zspace_imaginary_time_schrodinger
@@ -8703,6 +8704,7 @@ _EXTRAS.extend(
         "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
         "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
         "validate_zspace_repetition_unlikelihood_plan",
+        "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
         "zspace_repetition_unlikelihood_plan",
         "zspace_imaginary_time_schrodinger",
         "zspace_temperature_control",

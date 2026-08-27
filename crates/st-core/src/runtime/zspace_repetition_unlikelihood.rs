@@ -573,6 +573,23 @@ fn periodic_suffix_for_proposal(
 pub fn validate_zspace_repetition_unlikelihood_value(
     report: serde_json::Value,
 ) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    validate_zspace_repetition_unlikelihood_value_internal(report, true)
+}
+
+/// Replays a trusted historical v3 artifact without the newer admission budget.
+///
+/// Callers must not pass attacker-controlled input: an over-budget request can
+/// perform substantially more work than the bounded public validator.
+pub fn validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(
+    report: serde_json::Value,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    validate_zspace_repetition_unlikelihood_value_internal(report, false)
+}
+
+fn validate_zspace_repetition_unlikelihood_value_internal(
+    report: serde_json::Value,
+    enforce_admission_budget: bool,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
     let request_value = report.get("request").cloned().ok_or_else(|| {
         ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: "missing request".to_owned(),
@@ -583,10 +600,8 @@ pub fn validate_zspace_repetition_unlikelihood_value(
             message: error.to_string(),
         }
     })?;
-    // The budget is an admission guard for new work, not part of the frozen v3
-    // artifact semantics. Replaying a previously admitted v3 plan must remain
-    // possible after upgrading the library.
-    let canonical = plan_zspace_repetition_unlikelihood_internal(request, false)?;
+    let canonical =
+        plan_zspace_repetition_unlikelihood_internal(request, enforce_admission_budget)?;
     let canonical_value = serde_json::to_value(&canonical).map_err(|error| {
         ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: error.to_string(),
@@ -1237,8 +1252,13 @@ mod tests {
         ));
 
         let stored = serde_json::to_value(&historical).expect("historical value");
+        assert!(matches!(
+            validate_zspace_repetition_unlikelihood_value(stored.clone()),
+            Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded { .. })
+        ));
         assert_eq!(
-            validate_zspace_repetition_unlikelihood_value(stored).expect("v3 replay"),
+            validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(stored)
+                .expect("trusted v3 replay"),
             historical
         );
     }

@@ -5638,6 +5638,9 @@ def zspace_repetition_unlikelihood_plan(
 def validate_zspace_repetition_unlikelihood_plan(
     plan: Mapping[str, object],
 ) -> Dict[str, object]: ...
+def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+    plan: Mapping[str, object],
+) -> Dict[str, object]: ...
 
 def step_many(
     trainer: ZSpaceTrainer,
@@ -12190,6 +12193,7 @@ __all__ = [
     "validate_zspace_semantic_review_unblind",
     "zspace_semantic_review_map_id",
     "validate_zspace_repetition_unlikelihood_plan",
+    "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
     "zspace_meta_optimizer_init",
     "zspace_meta_optimizer_restore",
     "zspace_meta_optimizer_step",

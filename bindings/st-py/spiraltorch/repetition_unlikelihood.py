@@ -133,6 +133,7 @@ __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
     "validate_zspace_repetition_unlikelihood_plan",
+    "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
     "zspace_repetition_unlikelihood_plan",
 ]
 
@@ -290,6 +291,21 @@ def zspace_repetition_unlikelihood_plan(
 def validate_zspace_repetition_unlikelihood_plan(
     plan: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Recompute a serialized plan in Rust and reject any changed field."""
+    """Recompute a serialized plan in Rust within the shared work budget."""
 
     return _native_operation("_zspace_repetition_unlikelihood_validate", plan)
+
+
+def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+    plan: Mapping[str, object],
+) -> dict[str, Any]:
+    """Replay a trusted historical v3 plan without the newer work budget.
+
+    Never pass untrusted or remotely supplied input to this opt-in path. Use
+    :func:`validate_zspace_repetition_unlikelihood_plan` for normal validation.
+    """
+
+    return _native_operation(
+        "_zspace_repetition_unlikelihood_validate_trusted_legacy_replay",
+        plan,
+    )

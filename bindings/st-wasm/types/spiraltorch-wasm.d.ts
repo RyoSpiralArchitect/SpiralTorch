@@ -321,7 +321,7 @@ declare module "spiraltorch-wasm" {
         request: ZSpaceRepetitionUnlikelihoodRequest,
     ): ZSpaceRepetitionUnlikelihoodPlan;
 
-    /** Recompute a persisted v3 plan in Rust and reject any changed field. */
+    /** Recompute a persisted v3 plan within the Rust work budget and reject any changed field. */
     export function validateZspaceRepetitionUnlikelihoodPlanJson(planJson: string): string;
     export function validateZspaceRepetitionUnlikelihoodPlanObject(
         plan: ZSpaceRepetitionUnlikelihoodPlan,

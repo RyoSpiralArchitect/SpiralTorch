@@ -128,6 +128,26 @@ mod tests {
         .expect("valid request")
     }
 
+    fn over_budget_request() -> ZSpaceRepetitionUnlikelihoodRequest {
+        let token_count = 6_000usize;
+        ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::PriorContinuation {
+                    ngram_order: 3,
+                },
+                context_window: token_count,
+                max_candidates_per_position: 8,
+            },
+            sequences: vec![ZSpaceRepetitionUnlikelihoodSequence {
+                token_ids: (0..token_count as u64).collect(),
+                token_mask: vec![true; token_count],
+                label_mask: vec![true; token_count],
+                proposal_token_ids: None,
+            }],
+        }
+    }
+
     #[test]
     fn wasm_repetition_plan_matches_rust_exactly() {
         let request = request();
@@ -187,25 +207,25 @@ mod tests {
 
     #[test]
     fn wasm_repetition_path_enforces_the_rust_work_budget() {
-        let token_count = 6_000usize;
-        let request = ZSpaceRepetitionUnlikelihoodRequest {
-            config: ZSpaceRepetitionUnlikelihoodConfig {
-                strength: 0.1,
-                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::PriorContinuation {
-                    ngram_order: 3,
-                },
-                context_window: token_count,
-                max_candidates_per_position: 8,
-            },
-            sequences: vec![ZSpaceRepetitionUnlikelihoodSequence {
-                token_ids: (0..token_count as u64).collect(),
-                token_mask: vec![true; token_count],
-                label_mask: vec![true; token_count],
-                proposal_token_ids: None,
-            }],
-        };
-        let error = zspace_repetition_unlikelihood_plan_value(request)
+        let error = zspace_repetition_unlikelihood_plan_value(over_budget_request())
             .expect_err("Rust work budget must protect the WASM path");
+
+        assert!(matches!(
+            error,
+            ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded {
+                maximum_work_units: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wasm_repetition_validator_never_bypasses_the_rust_work_budget() {
+        let forged = json!({
+            "request": serde_json::to_value(over_budget_request()).expect("request value")
+        });
+        let error = validate_zspace_repetition_unlikelihood_plan_value(forged)
+            .expect_err("untrusted browser replay must be bounded");
 
         assert!(matches!(
             error,

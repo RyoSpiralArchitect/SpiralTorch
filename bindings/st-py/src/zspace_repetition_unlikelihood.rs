@@ -4,6 +4,7 @@ use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_repetition_unlikelihood::{
     plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
+    validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay,
     ZSpaceRepetitionUnlikelihoodRequest, ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE,
     ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
     ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER, ZSPACE_REPETITION_UNLIKELIHOOD_KIND,
@@ -69,8 +70,30 @@ fn _zspace_repetition_unlikelihood_validate(
     plan: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
     let plan = mapping_value(plan, "Z-space repetition-unlikelihood plan")?;
-    let plan = validate_zspace_repetition_unlikelihood_value(plan)
+    let plan = py
+        .allow_threads(|| validate_zspace_repetition_unlikelihood_value(plan))
         .map_err(|error| json_error("Z-space repetition-unlikelihood validation failed", error))?;
+    response_to_py(
+        py,
+        &plan,
+        "Z-space repetition-unlikelihood plan encoding failed",
+    )
+}
+
+#[pyfunction]
+fn _zspace_repetition_unlikelihood_validate_trusted_legacy_replay(
+    py: Python<'_>,
+    plan: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let plan = mapping_value(plan, "trusted legacy Z-space repetition-unlikelihood plan")?;
+    let plan = py
+        .allow_threads(|| validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(plan))
+        .map_err(|error| {
+            json_error(
+                "trusted legacy Z-space repetition-unlikelihood replay failed",
+                error,
+            )
+        })?;
     response_to_py(
         py,
         &plan,
@@ -185,6 +208,10 @@ pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResul
     )?)?;
     parent.add_function(wrap_pyfunction!(
         _zspace_repetition_unlikelihood_validate,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_repetition_unlikelihood_validate_trusted_legacy_replay,
         parent
     )?)?;
     Ok(())
