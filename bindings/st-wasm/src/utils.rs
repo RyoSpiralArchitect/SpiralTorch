@@ -171,7 +171,7 @@ pub(crate) fn bounded_json_value_from_str(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
-function utf8StringBytes(value) {
+function utf8StringBytes(value, maximumBytes) {
     let bytes = 0;
     for (let index = 0; index < value.length; index += 1) {
         const unit = value.charCodeAt(index);
@@ -187,6 +187,9 @@ function utf8StringBytes(value) {
             index += 1;
         } else {
             bytes += 3;
+        }
+        if (bytes > maximumBytes) {
+            return bytes;
         }
     }
     return bytes;
@@ -225,7 +228,8 @@ export function spiraltorchPreflightJsonString(value, maximumBytes, context) {
     if (typeof value !== "string") {
         throw new Error(`${context} must be a JSON string`);
     }
-    if (utf8StringBytes(value) > maximumBytes) {
+    if (value.length > maximumBytes
+        || utf8StringBytes(value, maximumBytes) > maximumBytes) {
         throw new Error(`${context} exceeds WASM ingress budget of ${maximumBytes} bytes`);
     }
 }
