@@ -124,7 +124,9 @@ def sigstore_verify_command(file_path: Path, repo: str, ref: str, trigger: str) 
     certificate, signature = legacy_sigstore_paths(file_path)
     material_args: list[str]
     if bundle.exists():
-        material_args = ["--bundle", str(bundle)]
+        # Bundles carry the transparency-log material needed for deterministic
+        # verification; avoid making release integrity depend on a live TUF refresh.
+        material_args = ["--bundle", str(bundle), "--offline"]
     elif certificate.exists() and signature.exists():
         material_args = ["--certificate", str(certificate), "--signature", str(signature)]
     else:

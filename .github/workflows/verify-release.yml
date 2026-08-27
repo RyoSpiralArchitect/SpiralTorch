@@ -17,12 +17,20 @@ jobs:
   verify:
     name: Validate signed release assets
     runs-on: ubuntu-22.04
+    env:
+      PYTHONNOUSERSITE: "1"
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install verification dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install sigstore==4.1.* requests==2.*
+          python -m pip install "sigstore==4.1.*" "requests>=2.32,<3"
+          python -m pip check
       - name: Verify official release bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,12 +39,11 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG_ARG=""
+          ARGS=(--repo "${REPOSITORY}")
           if [ -n "${RELEASE_TAG:-}" ]; then
-            TAG_ARG="--tag ${RELEASE_TAG}"
+            ARGS+=(--tag "${RELEASE_TAG}")
           fi
-          RECOVERY_REF_ARG=""
           if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            RECOVERY_REF_ARG="--allow-workflow-dispatch-ref refs/heads/main"
+            ARGS+=(--allow-workflow-dispatch-ref refs/heads/main)
           fi
-          python scripts/security/verify_release.py ${TAG_ARG} ${RECOVERY_REF_ARG} --repo "${REPOSITORY}"
+          python scripts/security/verify_release.py "${ARGS[@]}"
