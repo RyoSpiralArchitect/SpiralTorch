@@ -98,6 +98,12 @@ ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS = int(
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS = int(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS", 64_000_000)
 )
+ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES = int(
+    _native_constant(
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES",
+        32 * 1_024 * 1_024,
+    )
+)
 ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER = int(
     _native_constant(
         "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER", 9_007_199_254_740_991
@@ -106,14 +112,19 @@ ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER = int(
 ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE = str(
     _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE", "")
 )
+ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE = str(
+    _native_constant("ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE", "")
+)
 
 __all__ = [
     "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_KIND",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW",
+    "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_NGRAM_ORDER",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K",
     "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER",
@@ -291,7 +302,7 @@ def zspace_repetition_unlikelihood_plan(
 def validate_zspace_repetition_unlikelihood_plan(
     plan: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Recompute a serialized plan in Rust within the shared work budget."""
+    """Recompute a plan in Rust within the shared work and materialization budgets."""
 
     return _native_operation("_zspace_repetition_unlikelihood_validate", plan)
 
@@ -299,7 +310,7 @@ def validate_zspace_repetition_unlikelihood_plan(
 def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
     plan: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Replay a trusted historical v3 plan without the newer work budget.
+    """Replay a trusted historical v3 plan without the newer admission budgets.
 
     Never pass untrusted or remotely supplied input to this opt-in path. Use
     :func:`validate_zspace_repetition_unlikelihood_plan` for normal validation.

@@ -167,6 +167,38 @@ def test_repetition_unlikelihood_rejects_excessive_rust_work() -> None:
         )
 
 
+def test_repetition_unlikelihood_rejects_excessive_materialization() -> None:
+    token_count = 50_000
+    sequences = []
+    remaining = token_count
+    while remaining:
+        sequence_token_count = min(remaining, 16_384)
+        token_ids = [index % 2 for index in range(sequence_token_count)]
+        proposals = [[]] + [
+            [token_ids[index - 1]] for index in range(1, sequence_token_count)
+        ]
+        sequences.append(
+            {
+                "token_ids": token_ids,
+                "token_mask": [True] * sequence_token_count,
+                "label_mask": [True] * sequence_token_count,
+                "proposal_token_ids": proposals,
+            }
+        )
+        remaining -= sequence_token_count
+    with pytest.raises(
+        ValueError,
+        match=r"materialized plan size .* exceeds maximum 33554432",
+    ):
+        st.zspace_repetition_unlikelihood_plan(
+            candidate_source="model_topk_history",
+            proposal_top_k=1,
+            context_window=1,
+            max_candidates_per_position=1,
+            sequences=sequences,
+        )
+
+
 def test_repetition_validator_is_bounded_and_legacy_replay_is_explicit() -> None:
     plan = _plan([1, 2, 3, 1, 2, 4])
     assert (
@@ -203,6 +235,8 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MAX_PERIOD",
         "ZSPACE_REPETITION_UNLIKELIHOOD_PERIODIC_SUFFIX_MIN_REPETITIONS",
         "ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES",
+        "ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE",
         "ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS",
         "ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE",
         "validate_zspace_repetition_unlikelihood_plan",
@@ -211,5 +245,12 @@ def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     }
 
     assert expected <= set(st.__all__)
+    assert (
+        st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES
+        == 32 * 1_024 * 1_024
+    )
+    assert "potentially materialized position" in (
+        st.ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE
+    )
     assert st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS == 64_000_000
     assert "model_topk_periodic" in st.ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE

@@ -108,6 +108,7 @@ mod tests {
     use st_core::runtime::zspace_repetition_unlikelihood::{
         plan_zspace_repetition_unlikelihood, ZSpaceRepetitionUnlikelihoodCandidateSource,
         ZSpaceRepetitionUnlikelihoodConfig, ZSpaceRepetitionUnlikelihoodSequence,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES,
         ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
     };
 
@@ -145,6 +146,40 @@ mod tests {
                 label_mask: vec![true; token_count],
                 proposal_token_ids: None,
             }],
+        }
+    }
+
+    fn materialization_heavy_request() -> ZSpaceRepetitionUnlikelihoodRequest {
+        let token_count = 100_000usize;
+        let mut remaining = token_count;
+        let mut sequences = Vec::new();
+        while remaining > 0 {
+            let sequence_token_count = remaining.min(16_384);
+            let token_ids = (0..sequence_token_count)
+                .map(|index| (index % 2) as u64)
+                .collect::<Vec<_>>();
+            let mut proposal_rows = vec![Vec::new(); sequence_token_count];
+            for target_index in 1..sequence_token_count {
+                proposal_rows[target_index] = vec![token_ids[target_index - 1]];
+            }
+            sequences.push(ZSpaceRepetitionUnlikelihoodSequence {
+                token_ids,
+                token_mask: vec![true; sequence_token_count],
+                label_mask: vec![true; sequence_token_count],
+                proposal_token_ids: Some(proposal_rows),
+            });
+            remaining -= sequence_token_count;
+        }
+        ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkHistory {
+                    proposal_top_k: 1,
+                },
+                context_window: 1,
+                max_candidates_per_position: 1,
+            },
+            sequences,
         }
     }
 
@@ -233,6 +268,37 @@ mod tests {
                 maximum_work_units: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn wasm_repetition_paths_reject_materialization_heavy_requests() {
+        let request = materialization_heavy_request();
+        let projected_positions = 100_000 - request.sequences.len() as u64;
+        let error = zspace_repetition_unlikelihood_plan_value(request.clone())
+            .expect_err("browser planning must be materialization-bounded");
+        let ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded {
+            maximum_bytes,
+            estimated_positions,
+            estimated_candidates,
+            ..
+        } = error
+        else {
+            panic!("unexpected error: {error}");
+        };
+        assert_eq!(
+            maximum_bytes,
+            ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES
+        );
+        assert_eq!(estimated_positions, projected_positions);
+        assert_eq!(estimated_candidates, projected_positions);
+
+        let forged = json!({
+            "request": serde_json::to_value(request).expect("request value")
+        });
+        assert!(matches!(
+            validate_zspace_repetition_unlikelihood_plan_value(forged),
+            Err(ZSpaceRepetitionUnlikelihoodError::MaterializedPlanBudgetExceeded { .. })
         ));
     }
 

@@ -339,8 +339,11 @@ console.log(replay.positions[0]?.candidates, replay.plan_id);
 The JSON variants expose the same plan for worker messages and persistence. A
 shared 64,000,000-unit Rust preflight bounds prior-history scans and the more
 expensive proposal-by-period scans during both planning and browser validation.
-Existing v3 report fields and plan IDs remain unchanged. A historical v3 artifact
-above that newer limit can be replayed only through Rust's explicitly trusted
+An independent 32 MiB conservative materialization preflight accounts for the
+request arrays plus every potentially emitted position and candidate before Rust
+builds the plan or converts it to a JavaScript value. Existing v3 report fields
+and plan IDs remain unchanged. A historical v3 artifact above either newer limit
+can be replayed only through Rust's explicitly trusted
 `validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay` or the
 matching Python `validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay`;
 WASM deliberately exposes no unbounded validator for attacker-controlled browser
