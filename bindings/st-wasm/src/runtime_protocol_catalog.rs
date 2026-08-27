@@ -16,7 +16,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use crate::utils::{bounded_json_string_from_js, js_error, snapshot_json_compatible_js_value};
+use crate::utils::{bounded_json_string_from_js, js_error};
 
 const WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES: u64 = 1_024 * 1_024;
 const WASM_PROTOCOL_CATALOG_MAX_INGRESS_NODES: u64 = 20_000;
@@ -92,24 +92,6 @@ pub fn validate_zspace_runtime_protocol_catalog_json(
     serde_json::to_string(&catalog).map_err(js_error)
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = validateZspaceRuntimeProtocolCatalogObject)]
-pub fn validate_zspace_runtime_protocol_catalog_object(
-    catalog: &JsValue,
-) -> Result<JsValue, JsValue> {
-    let catalog = snapshot_json_compatible_js_value(
-        catalog,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
-        WASM_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
-        "Z-space runtime protocol catalog",
-    )?;
-    let catalog = serde_wasm_bindgen::from_value::<Value>(catalog).map_err(js_error)?;
-    let catalog =
-        validate_zspace_runtime_protocol_catalog_report_value(catalog).map_err(js_error)?;
-    to_json_compatible_js(&catalog)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,9 +160,9 @@ mod tests {
             "zspaceRuntimeProtocolCatalogJson",
             "zspaceRuntimeProtocolCatalogObject",
             "validateZspaceRuntimeProtocolCatalogJson",
-            "validateZspaceRuntimeProtocolCatalogObject",
         ] {
             assert!(declarations.contains(&format!("function {operation}(")));
         }
+        assert!(!declarations.contains("function validateZspaceRuntimeProtocolCatalogObject("));
     }
 }

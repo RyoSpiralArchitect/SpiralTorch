@@ -227,6 +227,50 @@ def test_repetition_validator_is_bounded_and_legacy_replay_is_explicit() -> None
         st.validate_zspace_repetition_unlikelihood_plan(forged)
 
 
+def test_repetition_facade_and_native_ingress_are_bounded() -> None:
+    sequence = {
+        "token_ids": [1],
+        "token_mask": [True],
+        "label_mask": [True],
+    }
+    with pytest.raises(ValueError, match="sequence count exceeds maximum 4096"):
+        st.zspace_repetition_unlikelihood_plan(
+            sequences=[sequence]
+            * (st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES + 1)
+        )
+
+    nested: object = None
+    for _ in range(40):
+        nested = [nested]
+    with pytest.raises(ValueError, match="too deeply nested"):
+        st.validate_zspace_repetition_unlikelihood_plan({"nested": nested})
+
+
+def test_repetition_dict_subclasses_cannot_override_bounded_snapshot() -> None:
+    class HostileDict(dict[str, object]):
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+        def copy(self) -> dict[str, object]:
+            raise AssertionError("overridden copy must not run")
+
+        def items(self):
+            raise AssertionError("overridden items must not run")
+
+    plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=[
+            HostileDict(
+                {
+                    "token_ids": [1, 2, 3],
+                    "token_mask": [True, True, True],
+                    "label_mask": [True, True, True],
+                }
+            )
+        ]
+    )
+    assert st.validate_zspace_repetition_unlikelihood_plan(HostileDict(plan)) == plan
+
+
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:
     expected = {
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",

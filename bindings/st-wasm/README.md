@@ -37,12 +37,12 @@ without keeping a JavaScript registry of versions or operations:
 
 ```ts
 import {
-    validateZspaceRuntimeProtocolCatalogObject,
-    zspaceRuntimeProtocolCatalogObject,
+    validateZspaceRuntimeProtocolCatalogJson,
+    zspaceRuntimeProtocolCatalogJson,
 } from "spiraltorch-wasm";
 
-const catalog = zspaceRuntimeProtocolCatalogObject();
-const replay = validateZspaceRuntimeProtocolCatalogObject(catalog);
+const catalogJson = zspaceRuntimeProtocolCatalogJson();
+const replay = JSON.parse(validateZspaceRuntimeProtocolCatalogJson(catalogJson));
 
 console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name));
 ```
@@ -50,9 +50,11 @@ console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name)
 The catalog is content-addressed by `st-core` and currently binds generation
 evidence, repetition-unlikelihood planning, and the complete blinded
 semantic-review lifecycle across Rust, Python, and WASM. Each WASM operation
-listed by the catalog is checked against the generated export and bundled
-TypeScript declaration. Trusted legacy replay remains deliberately absent from
-the browser surface.
+listed by the catalog is a byte/node/depth-bounded JSON admission route checked
+against the generated export and bundled TypeScript declaration. Object APIs
+remain trusted-local convenience transports rather than hostile-input
+boundaries. Trusted legacy replay remains deliberately absent from the browser
+surface.
 
 ## Shared reverse-mode autograd
 

@@ -83,6 +83,7 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
 
     protocol_order = str(catalog.get("protocol_order_rule") or "").split(",")
     client_order = str(catalog.get("client_order_rule") or "").split(",")
+    transport_order = ["native", "bounded_mapping", "bounded_json"]
     if len(protocol_order) != protocol_count or client_order != [
         "rust",
         "python",
@@ -106,6 +107,7 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
             or len(clients) != len(client_order)
             or not all(isinstance(client, Mapping) for client in clients)
             or [client.get("client") for client in clients] != client_order
+            or [client.get("transport") for client in clients] != transport_order
         ):
             raise RuntimeError("native Z-space core returned invalid protocol metadata")
         for artifact in artifacts:

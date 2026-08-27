@@ -21,7 +21,9 @@ and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
 catalog plus generation-evidence, repetition-plan, and blinded semantic-review
-lifecycles before any artifact can be uploaded.
+lifecycles before any artifact can be uploaded. The catalog certifies bounded
+Python mapping and WASM JSON admission; browser object helpers are trusted-local
+convenience transports and are not release evidence for hostile-input safety.
 Automatic releases require the pushed tag to equal `v<package-version>`
 exactly. Manual recovery with a non-empty `release_tag` also requires
 `checkout_ref` to name that same immutable tag, keeping wheel bytes,

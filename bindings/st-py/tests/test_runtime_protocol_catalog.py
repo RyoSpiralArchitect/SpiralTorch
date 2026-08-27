@@ -63,7 +63,13 @@ def test_runtime_protocol_catalog_matches_python_and_wasm_public_surfaces() -> N
         for operation in surfaces["wasm"]["operations"]:
             assert f"function {operation}(" in declarations
             assert "legacy" not in operation.lower()
+            assert operation.endswith("Json")
+            assert "Object" not in operation
+        assert surfaces["python"]["transport"] == "bounded_mapping"
+        assert surfaces["wasm"]["transport"] == "bounded_json"
         assert surfaces["wasm"]["trusted_legacy_replay"] is False
+
+    assert "function validateZspaceRuntimeProtocolCatalogObject(" not in declarations
 
 
 def test_runtime_protocol_catalog_public_surface_is_typed_and_exported() -> None:

@@ -27,12 +27,22 @@ use st_core::runtime::zspace_repetition_unlikelihood::{
     ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE,
 };
 
+const PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
+const PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES: u64 = 8_000_000;
+const PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH: usize = 32;
+
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
 }
 
 fn mapping_value(value: &Bound<'_, PyAny>, label: &str) -> PyResult<serde_json::Value> {
-    let value = crate::json::py_to_json(value)?;
+    let value = crate::json::py_to_json_bounded(
+        value,
+        PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+        PY_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+        label,
+    )?;
     if !value.is_object() {
         return Err(PyValueError::new_err(format!("{label} must be a mapping")));
     }

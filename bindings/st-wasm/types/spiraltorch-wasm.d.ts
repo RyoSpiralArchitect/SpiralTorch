@@ -137,11 +137,11 @@ declare module "spiraltorch-wasm" {
         discriminator_value: string;
     };
 
-    /** Exact public operations exposed by one client without local semantics. */
+    /** Exact admission-certified operations exposed without local semantics. */
     export type ZSpaceRuntimeProtocolClientSurface = {
         client: "rust" | "python" | "wasm";
         package: "st-core" | "spiraltorch" | "spiraltorch-wasm";
-        transport: "native" | "mapping" | "json_and_object";
+        transport: "native" | "bounded_mapping" | "bounded_json";
         operations: string[];
         trusted_legacy_replay: boolean;
     };
@@ -178,9 +178,6 @@ declare module "spiraltorch-wasm" {
     export function validateZspaceRuntimeProtocolCatalogJson(
         catalogJson: string,
     ): string;
-    export function validateZspaceRuntimeProtocolCatalogObject(
-        catalog: ZSpaceRuntimeProtocolCatalog,
-    ): ZSpaceRuntimeProtocolCatalog;
 
     /** A held-out continuation committed to the shared Rust evidence protocol. */
     export type ZSpaceGenerationEvidenceSample = {
@@ -272,12 +269,14 @@ declare module "spiraltorch-wasm" {
 
     /** Summarize held-out continuation tokens through the Rust semantic core. */
     export function zspaceGenerationEvidenceJson(requestJson: string): string;
+    /** Trusted-local convenience; use the JSON route for untrusted input. */
     export function zspaceGenerationEvidenceObject(
         request: ZSpaceGenerationEvidenceRequest,
     ): ZSpaceGenerationEvidenceReport;
 
     /** Recompute persisted evidence and reject any changed field. */
     export function validateZspaceGenerationEvidenceJson(reportJson: string): string;
+    /** Trusted-local convenience; use the JSON route for untrusted input. */
     export function validateZspaceGenerationEvidenceObject(
         report: ZSpaceGenerationEvidenceReport,
     ): ZSpaceGenerationEvidenceReport;

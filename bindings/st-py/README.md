@@ -78,8 +78,8 @@ PY
 
 ## Rust-owned protocol catalog
 
-The catalog is generated and replayed by `st-core`; Python does not maintain a
-second list of protocol versions or validation rules:
+The admission-certified catalog is generated and replayed by `st-core`; Python
+does not maintain a second list of protocol versions or validation rules:
 
 ```python
 import spiraltorch as st
@@ -97,7 +97,9 @@ The current catalog covers held-out generation evidence, bounded
 repetition-unlikelihood planning, and the complete blinded semantic-review
 lifecycle. Trusted historical replay is always opt-in, accepts only already
 trusted local evidence, and is exposed by Rust/Python only. Browser/WASM
-surfaces remain on the bounded current contracts.
+catalog entries expose only byte/node/depth-bounded JSON routes. WASM object
+helpers remain trusted-local convenience transports and are intentionally not
+certified as hostile-input boundaries.
 
 `describe_runtime_devices()` and HF preflight orchestrate observations in Python, but committed
 SpiralTorch probes are validated and projected into route evidence only by

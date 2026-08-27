@@ -6,9 +6,11 @@
   exact Rust, Python, and WASM operations for generation evidence, repetition
   unlikelihood, and blinded semantic review. Catalog replay fails closed on
   drift, and binding tests prove every advertised Python/WASM operation exists.
-- Expose generation-evidence construction and replay through matching WASM
-  JSON/object APIs, with browser-number compatibility and the same canonical
-  Rust evidence identity used by direct Rust and Python clients.
+- Expose generation-evidence construction and replay through WASM JSON and
+  trusted-local object APIs, with browser-number compatibility and the same
+  canonical Rust evidence identity used by direct Rust and Python clients.
+  Catalogued JSON routes now bound bytes, nodes, and depth before parsing;
+  active-object transports are deliberately outside the hostile-input claim.
 - Bound repetition-unlikelihood work and materialized plan size before heavy
   planning, preserve explicit trusted historical replay only in Rust/Python,
   and keep all WASM ingress on the current bounded contract.
@@ -19,6 +21,9 @@
 - Make both normal and release wheel workflows run the installed wheel through
   the catalog and all three protocol lifecycles before artifacts can be
   uploaded or published.
+- Bound generation and repetition Python ingress before serde materialization,
+  including shallow facade snapshots that preserve tuple inputs without
+  copying complete token trees.
 
 ## 0.4.14
 

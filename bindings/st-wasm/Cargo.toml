@@ -17,7 +17,7 @@ st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-core   = { path = "../../crates/st-core" }
 st-frac   = { path = "../../crates/st-frac" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 ndarray = "0.15"
 time = { version = "0.3", features = ["formatting"] }
 

@@ -586,8 +586,9 @@ Without cloning the repo, `pip install spiraltorch` gives you:
   Python, and WASM surface for held-out generation evidence, bounded
   repetition-unlikelihood plans, and blinded semantic review. Persisted
   catalogs can be replayed with `st.validate_zspace_runtime_protocol_catalog(...)`;
-  normal client paths remain bounded, while trusted legacy replay is explicit
-  and never exposed to WASM.
+  catalogued Python/WASM admission paths remain bounded, WASM object helpers
+  stay trusted-local and outside that guarantee, and trusted legacy replay is
+  explicit and never exposed to WASM.
 - **Canvas + observability:** `st.canvas.CanvasProjector`, `st.telemetry.*`, HTML trace writers, `st.serve_zspace_trace`.
 - **SpiralK planning:** `st.plan_topk(...)`, the Rust-owned
   `st.RankPlan.contract()` audit payload, `st.write_kdsl_trace_jsonl`, and

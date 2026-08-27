@@ -3,8 +3,10 @@
 //! Rust-owned catalog for the cross-client Z-space runtime protocol surface.
 //!
 //! The catalog does not claim that every SpiralTorch API is available in every
-//! client. It records the exact public operations that intentionally share one
-//! Rust semantic owner across Rust, Python, and WebAssembly.
+//! client. It records the exact admission-certified operations that share one
+//! Rust semantic owner across Rust, Python, and WebAssembly. Trusted-local
+//! convenience transports remain outside the catalog rather than weakening its
+//! hostile-input boundary.
 
 use super::canonical_json::values_equivalent;
 use super::zspace_generation_evidence::{
@@ -155,7 +157,7 @@ fn generation_evidence_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "python",
                 "spiraltorch",
-                "mapping",
+                "bounded_mapping",
                 &[
                     "zspace_generation_evidence",
                     "validate_zspace_generation_evidence",
@@ -165,12 +167,10 @@ fn generation_evidence_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "wasm",
                 "spiraltorch-wasm",
-                "json_and_object",
+                "bounded_json",
                 &[
                     "zspaceGenerationEvidenceJson",
-                    "zspaceGenerationEvidenceObject",
                     "validateZspaceGenerationEvidenceJson",
-                    "validateZspaceGenerationEvidenceObject",
                 ],
                 false,
             ),
@@ -205,7 +205,7 @@ fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "python",
                 "spiraltorch",
-                "mapping",
+                "bounded_mapping",
                 &[
                     "zspace_repetition_unlikelihood_plan",
                     "validate_zspace_repetition_unlikelihood_plan",
@@ -216,12 +216,10 @@ fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "wasm",
                 "spiraltorch-wasm",
-                "json_and_object",
+                "bounded_json",
                 &[
                     "zspaceRepetitionUnlikelihoodPlanJson",
-                    "zspaceRepetitionUnlikelihoodPlanObject",
                     "validateZspaceRepetitionUnlikelihoodPlanJson",
-                    "validateZspaceRepetitionUnlikelihoodPlanObject",
                 ],
                 false,
             ),
@@ -286,7 +284,7 @@ fn semantic_review_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "python",
                 "spiraltorch",
-                "mapping",
+                "bounded_mapping",
                 &[
                     "zspace_semantic_review_map_id",
                     "seal_zspace_semantic_review_packet",
@@ -307,24 +305,16 @@ fn semantic_review_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
             client(
                 "wasm",
                 "spiraltorch-wasm",
-                "json_and_object",
+                "bounded_json",
                 &[
                     "zspaceSemanticReviewMapIdJson",
-                    "zspaceSemanticReviewMapIdObject",
                     "sealZspaceSemanticReviewPacketJson",
-                    "sealZspaceSemanticReviewPacketObject",
                     "validateZspaceSemanticReviewPacketJson",
-                    "validateZspaceSemanticReviewPacketObject",
                     "validateZspaceSemanticReviewPacketReceiptJson",
-                    "validateZspaceSemanticReviewPacketReceiptObject",
                     "summarizeZspaceSemanticReviewDraftJson",
-                    "summarizeZspaceSemanticReviewDraftObject",
                     "validateZspaceSemanticReviewDraftReceiptJson",
-                    "validateZspaceSemanticReviewDraftReceiptObject",
                     "unblindZspaceSemanticReviewJson",
-                    "unblindZspaceSemanticReviewObject",
                     "validateZspaceSemanticReviewUnblindJson",
-                    "validateZspaceSemanticReviewUnblindObject",
                 ],
                 false,
             ),
@@ -467,6 +457,11 @@ mod tests {
                 .operations
                 .iter()
                 .all(|operation| !operation.contains("legacy")));
+            assert_eq!(wasm.transport, "bounded_json");
+            assert!(wasm
+                .operations
+                .iter()
+                .all(|operation| operation.ends_with("Json")));
         }
         for protocol_name in ["repetition_unlikelihood", "semantic_review"] {
             let protocol = catalog
