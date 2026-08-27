@@ -247,6 +247,32 @@ console.log(transition.entropy, transition.next_state.temperature);
 worker-message and persistence paths. Neither entry point contains a browser
 fallback for the transition formula.
 
+Token periodicity uses the same bounded suffix kernel consumed by Rust training
+and generation evidence. JavaScript transports token IDs and can persist the
+content-addressed report, but it does not reimplement period search or
+tie-breaking:
+
+```ts
+import {
+    validateZspacePeriodicityObject,
+    zspacePeriodicityObject,
+} from "spiraltorch-wasm";
+
+const report = zspacePeriodicityObject({
+    token_ids: [9, 1, 2, 1, 2, 1],
+    appended_token_id: 2,
+    config: { maximum_period: 16, minimum_repetitions: 3 },
+});
+const replay = validateZspacePeriodicityObject(report);
+
+console.log(replay.periodic_suffix?.period, replay.analysis_id);
+```
+
+`zspacePeriodicityJson` and `validateZspacePeriodicityJson` expose the same
+contract for workers and storage. Rust rejects unknown fields, unsafe token IDs,
+excessive comparison work, and any report tampering. A positive suffix is a
+structural token observation, not a semantic-quality or efficacy claim.
+
 Z-space meta-optimization follows the same state-carrying client model. The
 browser stores the returned checkpoint, but Rust owns restore coercion,
 observation normalisation, the FFT-derived fractional Sobolev gradient, bounded Topos

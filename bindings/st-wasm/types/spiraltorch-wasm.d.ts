@@ -64,6 +64,71 @@ declare module "spiraltorch-wasm" {
         graphSummary(): AutogradGraphSummary;
     }
 
+    /** Bounds for the Rust-owned trailing periodic-suffix kernel. */
+    export type ZSpacePeriodicityConfig = {
+        maximum_period?: number;
+        minimum_repetitions?: number;
+    };
+
+    /** Token sequence and optional proposal analyzed without duplicating Rust semantics. */
+    export type ZSpacePeriodicityRequest = {
+        token_ids: number[];
+        appended_token_id?: number | null;
+        config?: ZSpacePeriodicityConfig;
+    };
+
+    export type ZSpacePeriodicSuffix = {
+        period: number;
+        token_count: number;
+        repeated_token_count: number;
+        repetition_count: number;
+    };
+
+    /** Replayable periodicity report computed and validated by `st-core`. */
+    export type ZSpacePeriodicityReport = {
+        contract_version: "spiraltorch.zspace_periodicity.v1";
+        kind: "spiraltorch.zspace_periodicity";
+        semantic_owner: "st-core::runtime::zspace_periodicity";
+        semantic_backend: "rust";
+        analysis_validated: true;
+        analysis_id: string;
+        status: "ready";
+        request: {
+            token_ids: number[];
+            appended_token_id: number | null;
+            config: Required<ZSpacePeriodicityConfig>;
+        };
+        rule: string;
+        analysis_id_rule: string;
+        analysis_scope: "observed_sequence" | "observed_sequence_with_appended_token";
+        input_token_count: number;
+        effective_token_count: number;
+        candidate_period_count: number;
+        comparison_work_upper_bound: number;
+        periodic_loop_detected: boolean;
+        periodic_suffix: ZSpacePeriodicSuffix | null;
+        periodic_suffix_token_ratio: number | null;
+        periodic_suffix_repeated_token_ratio: number | null;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+    };
+
+    /** Analyze a JSON request and return the canonical report as JSON. */
+    export function zspacePeriodicityJson(requestJson: string): string;
+
+    /** Analyze an object request and return the canonical report. */
+    export function zspacePeriodicityObject(
+        request: ZSpacePeriodicityRequest,
+    ): ZSpacePeriodicityReport;
+
+    /** Recompute a serialized report in Rust and reject any changed field. */
+    export function validateZspacePeriodicityJson(reportJson: string): string;
+
+    /** Recompute an object report in Rust and reject any changed field. */
+    export function validateZspacePeriodicityObject(
+        report: ZSpacePeriodicityReport,
+    ): ZSpacePeriodicityReport;
+
     /** Palette identifiers accepted by {@link FractalCanvas.set_palette}. */
     export type CanvasPaletteName =
         | "blue-magenta"

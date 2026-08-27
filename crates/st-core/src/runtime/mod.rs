@@ -18,6 +18,6 @@ pub mod zspace_evidence;
 pub mod zspace_generation_evidence;
 pub mod zspace_optimizer;
 pub mod zspace_optimizer_feedback;
-pub(crate) mod zspace_periodicity;
+pub mod zspace_periodicity;
 pub mod zspace_repetition_unlikelihood;
 pub mod zspace_semantic_review;

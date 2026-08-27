@@ -470,6 +470,34 @@ model profile (`causal-lm-local-smoke`) and records its model/tokenizer/family
 metadata. Pass `model_name=...` for a one-off override, or `model_configs=` plus
 `model_profile=` to pin another config-driven route.
 
+## Rust-owned token periodicity
+
+Training objectives, generation evidence, Python, and WASM now share one bounded
+periodic-suffix kernel in `st-core`. Python sends token IDs and optional proposal
+state; it does not recreate period search, tie-breaking, ratios, or report
+identity:
+
+```python
+import spiraltorch as st
+
+report = st.zspace_periodicity(
+    [9, 1, 2, 1, 2, 1],
+    appended_token_id=2,
+    maximum_period=16,
+    minimum_repetitions=3,
+)
+assert report["periodic_suffix"]["period"] == 2
+assert st.validate_zspace_periodicity(report) == report
+```
+
+Every report records the canonical request, a SHA-256 analysis identity, a
+conservative comparison-work bound, and the exact selected suffix. The validator
+replays the Rust analysis and rejects changes to either request or result. Token
+IDs are limited to JavaScript-safe integers so persisted Python and browser
+reports remain identical. This is structural token evidence only: a detected
+suffix does not establish semantic degradation or predict that a loop will
+continue.
+
 ## Blinded semantic review
 
 Held-out generation packets can be reviewed without rebuilding scoring or
