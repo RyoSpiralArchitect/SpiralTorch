@@ -7,12 +7,67 @@ use st_core::runtime::zspace_repetition_unlikelihood::{
 };
 
 #[cfg(target_arch = "wasm32")]
+use js_sys::JsString;
+#[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use crate::utils::js_error;
+use crate::utils::{js_error, preflight_json_compatible_js_value};
+
+const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
+const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES: u64 = 8_000_000;
+const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH: u32 = 32;
+
+fn bounded_json_value(input_json: &str, context: &str) -> Result<Value, String> {
+    bounded_json_value_with_limit(
+        input_json,
+        context,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+    )
+}
+
+fn bounded_json_value_with_limit(
+    input_json: &str,
+    context: &str,
+    maximum_bytes: u64,
+) -> Result<Value, String> {
+    if input_json.len() as u64 > maximum_bytes {
+        return Err(format!(
+            "{context} exceeds WASM ingress budget of {maximum_bytes} bytes"
+        ));
+    }
+    serde_json::from_str(input_json).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn preflight_repetition_js_value(value: &JsValue, context: &str) -> Result<(), JsValue> {
+    preflight_json_compatible_js_value(
+        value,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+        context,
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bounded_json_string_from_js(value: &JsString, context: &str) -> Result<String, JsValue> {
+    if !value.is_string() {
+        return Err(js_error(format!("{context} must be a JSON string")));
+    }
+    let utf8_upper_bound = (value.length() as u64).saturating_mul(3);
+    if utf8_upper_bound > WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES {
+        return Err(js_error(format!(
+            "{context} exceeds WASM ingress budget of {} bytes",
+            WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES
+        )));
+    }
+    value
+        .as_string()
+        .ok_or_else(|| js_error(format!("{context} must be a JSON string")))
+}
 
 fn request_from_value(value: Value) -> Result<ZSpaceRepetitionUnlikelihoodRequest, String> {
     if !value.is_object() {
@@ -22,7 +77,7 @@ fn request_from_value(value: Value) -> Result<ZSpaceRepetitionUnlikelihoodReques
 }
 
 fn request_from_json(input_json: &str) -> Result<ZSpaceRepetitionUnlikelihoodRequest, String> {
-    let value = serde_json::from_str(input_json).map_err(|error| error.to_string())?;
+    let value = bounded_json_value(input_json, "Z-space repetition-unlikelihood request")?;
     request_from_value(value)
 }
 
@@ -34,7 +89,7 @@ fn plan_from_value(value: Value) -> Result<Value, String> {
 }
 
 fn plan_from_json(input_json: &str) -> Result<Value, String> {
-    let value = serde_json::from_str(input_json).map_err(|error| error.to_string())?;
+    let value = bounded_json_value(input_json, "Z-space repetition-unlikelihood plan")?;
     plan_from_value(value)
 }
 
@@ -65,8 +120,12 @@ pub fn validate_zspace_repetition_unlikelihood_plan_value(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = zspaceRepetitionUnlikelihoodPlanJson)]
-pub fn zspace_repetition_unlikelihood_plan_json(request_json: &str) -> Result<String, JsValue> {
-    let request = request_from_json(request_json).map_err(js_error)?;
+pub fn zspace_repetition_unlikelihood_plan_json(
+    request_json: &JsString,
+) -> Result<String, JsValue> {
+    let request_json =
+        bounded_json_string_from_js(request_json, "Z-space repetition-unlikelihood request JSON")?;
+    let request = request_from_json(&request_json).map_err(js_error)?;
     let plan = zspace_repetition_unlikelihood_plan_value(request).map_err(js_error)?;
     serde_json::to_string(&plan).map_err(js_error)
 }
@@ -74,6 +133,7 @@ pub fn zspace_repetition_unlikelihood_plan_json(request_json: &str) -> Result<St
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = zspaceRepetitionUnlikelihoodPlanObject)]
 pub fn zspace_repetition_unlikelihood_plan_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    preflight_repetition_js_value(request, "Z-space repetition-unlikelihood request")?;
     let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
     let request = request_from_value(request).map_err(js_error)?;
     let plan = zspace_repetition_unlikelihood_plan_value(request).map_err(js_error)?;
@@ -83,9 +143,11 @@ pub fn zspace_repetition_unlikelihood_plan_object(request: &JsValue) -> Result<J
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = validateZspaceRepetitionUnlikelihoodPlanJson)]
 pub fn validate_zspace_repetition_unlikelihood_plan_json(
-    plan_json: &str,
+    plan_json: &JsString,
 ) -> Result<String, JsValue> {
-    let plan = plan_from_json(plan_json).map_err(js_error)?;
+    let plan_json =
+        bounded_json_string_from_js(plan_json, "Z-space repetition-unlikelihood plan JSON")?;
+    let plan = plan_from_json(&plan_json).map_err(js_error)?;
     let plan = validate_zspace_repetition_unlikelihood_plan_value(plan).map_err(js_error)?;
     serde_json::to_string(&plan).map_err(js_error)
 }
@@ -95,6 +157,7 @@ pub fn validate_zspace_repetition_unlikelihood_plan_json(
 pub fn validate_zspace_repetition_unlikelihood_plan_object(
     plan: &JsValue,
 ) -> Result<JsValue, JsValue> {
+    preflight_repetition_js_value(plan, "Z-space repetition-unlikelihood plan")?;
     let plan = serde_wasm_bindgen::from_value::<Value>(plan.clone()).map_err(js_error)?;
     let plan = plan_from_value(plan).map_err(js_error)?;
     let plan = validate_zspace_repetition_unlikelihood_plan_value(plan).map_err(js_error)?;
@@ -237,6 +300,20 @@ mod tests {
         assert_eq!(
             plan_from_json("[]").expect_err("plan must be an object"),
             "Z-space repetition-unlikelihood plan must be an object"
+        );
+    }
+
+    #[test]
+    fn wasm_repetition_json_ingress_is_bounded_before_parsing() {
+        let error = bounded_json_value("{", "test plan")
+            .expect_err("malformed JSON should fail after the production size preflight");
+        assert!(error.contains("EOF"));
+
+        let oversized_error = bounded_json_value_with_limit("{}", "test plan", 1)
+            .expect_err("byte limit must run before JSON parsing");
+        assert_eq!(
+            oversized_error,
+            "test plan exceeds WASM ingress budget of 1 bytes"
         );
     }
 

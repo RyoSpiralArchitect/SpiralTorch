@@ -315,13 +315,13 @@ declare module "spiraltorch-wasm" {
         evidence_boundary: string;
     };
 
-    /** Plan repetition negatives in Rust within the shared work and 32 MiB materialization budgets. */
+    /** Plan in Rust within shared work/output budgets and bounded browser ingress. */
     export function zspaceRepetitionUnlikelihoodPlanJson(requestJson: string): string;
     export function zspaceRepetitionUnlikelihoodPlanObject(
         request: ZSpaceRepetitionUnlikelihoodRequest,
     ): ZSpaceRepetitionUnlikelihoodPlan;
 
-    /** Recompute v3 within the Rust work/materialization budgets and reject any changed field. */
+    /** Recompute v3 after bounded browser ingress and reject any changed field. */
     export function validateZspaceRepetitionUnlikelihoodPlanJson(planJson: string): string;
     export function validateZspaceRepetitionUnlikelihoodPlanObject(
         plan: ZSpaceRepetitionUnlikelihoodPlan,

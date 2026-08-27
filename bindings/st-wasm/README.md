@@ -342,7 +342,9 @@ expensive proposal-by-period scans during both planning and browser validation.
 An independent 32 MiB conservative materialization preflight accounts for the
 request arrays plus every potentially emitted position and candidate before Rust
 builds the plan or converts it to a JavaScript value. Existing v3 report fields
-and plan IDs remain unchanged. A historical v3 artifact above either newer limit
+and plan IDs remain unchanged. Browser JSON/object ingress is independently
+bounded to 64 MiB, 8,000,000 JSON nodes, and depth 32 before a JavaScript object
+is duplicated into Rust. A historical v3 artifact above either newer plan limit
 can be replayed only through Rust's explicitly trusted
 `validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay` or the
 matching Python `validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay`;
