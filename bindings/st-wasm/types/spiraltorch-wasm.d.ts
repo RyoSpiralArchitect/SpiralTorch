@@ -129,6 +129,59 @@ declare module "spiraltorch-wasm" {
         report: ZSpacePeriodicityReport,
     ): ZSpacePeriodicityReport;
 
+    /** One content type owned by a Rust runtime protocol. */
+    export type ZSpaceRuntimeProtocolArtifact = {
+        name: string;
+        contract_version: string;
+        discriminator_field: "kind" | "schema";
+        discriminator_value: string;
+    };
+
+    /** Exact public operations exposed by one client without local semantics. */
+    export type ZSpaceRuntimeProtocolClientSurface = {
+        client: "rust" | "python" | "wasm";
+        package: "st-core" | "spiraltorch" | "spiraltorch-wasm";
+        transport: "native" | "mapping" | "json_and_object";
+        operations: string[];
+        trusted_legacy_replay: boolean;
+    };
+
+    /** One protocol family whose admission and semantics remain Rust-owned. */
+    export type ZSpaceRuntimeProtocolDescriptor = {
+        name: "generation_evidence" | "repetition_unlikelihood" | "semantic_review";
+        semantic_owner: string;
+        semantic_backend: "rust";
+        admission_owner: "rust";
+        artifacts: ZSpaceRuntimeProtocolArtifact[];
+        clients: ZSpaceRuntimeProtocolClientSurface[];
+    };
+
+    /** Content-addressed cross-client surface generated and validated by `st-core`. */
+    export type ZSpaceRuntimeProtocolCatalog = {
+        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v1";
+        kind: "spiraltorch.zspace_runtime_protocol_catalog";
+        semantic_owner: "st-core::runtime::zspace_runtime_protocol_catalog";
+        semantic_backend: "rust";
+        catalog_validated: true;
+        catalog_id: string;
+        catalog_id_rule: string;
+        status: "ready";
+        protocol_count: number;
+        protocol_order_rule: "generation_evidence,repetition_unlikelihood,semantic_review";
+        client_order_rule: "rust,python,wasm";
+        legacy_replay_policy: string;
+        protocols: ZSpaceRuntimeProtocolDescriptor[];
+    };
+
+    export function zspaceRuntimeProtocolCatalogJson(): string;
+    export function zspaceRuntimeProtocolCatalogObject(): ZSpaceRuntimeProtocolCatalog;
+    export function validateZspaceRuntimeProtocolCatalogJson(
+        catalogJson: string,
+    ): string;
+    export function validateZspaceRuntimeProtocolCatalogObject(
+        catalog: ZSpaceRuntimeProtocolCatalog,
+    ): ZSpaceRuntimeProtocolCatalog;
+
     /** A held-out continuation committed to the shared Rust evidence protocol. */
     export type ZSpaceGenerationEvidenceSample = {
         prompt_id: string;

@@ -37,6 +37,10 @@ start with four handles:
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
   Torch, PEFT, or dataset dependency contract should be recorded before a
   heavier fine-tune run.
+- `spiraltorch.zspace_runtime_protocol_catalog()` when you need the exact,
+  content-addressed Rust/Python/WASM surface for generation evidence,
+  repetition control, and blinded semantic review before persisting or
+  dispatching an artifact.
 
 ```bash
 python - <<'PY'
@@ -71,6 +75,29 @@ print("WGPU status:", runtime["runtime_device_report_statuses"])
 print("route contract:", runtime["runtime_device_route_contract_version"])
 PY
 ```
+
+## Rust-owned protocol catalog
+
+The catalog is generated and replayed by `st-core`; Python does not maintain a
+second list of protocol versions or validation rules:
+
+```python
+import spiraltorch as st
+
+catalog = st.zspace_runtime_protocol_catalog()
+assert st.validate_zspace_runtime_protocol_catalog(catalog) == catalog
+
+for protocol in catalog["protocols"]:
+    print(protocol["name"], protocol["semantic_owner"])
+    for surface in protocol["clients"]:
+        print(" ", surface["client"], surface["operations"])
+```
+
+The current catalog covers held-out generation evidence, bounded
+repetition-unlikelihood planning, and the complete blinded semantic-review
+lifecycle. Trusted historical replay is always opt-in, accepts only already
+trusted local evidence, and is exposed by Rust/Python only. Browser/WASM
+surfaces remain on the bounded current contracts.
 
 `describe_runtime_devices()` and HF preflight orchestrate observations in Python, but committed
 SpiralTorch probes are validated and projected into route evidence only by

@@ -30,6 +30,30 @@ builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_P
 - Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
 
+## Rust-owned runtime protocol catalog
+
+Browser code can inspect and replay the exact cross-client protocol surface
+without keeping a JavaScript registry of versions or operations:
+
+```ts
+import {
+    validateZspaceRuntimeProtocolCatalogObject,
+    zspaceRuntimeProtocolCatalogObject,
+} from "spiraltorch-wasm";
+
+const catalog = zspaceRuntimeProtocolCatalogObject();
+const replay = validateZspaceRuntimeProtocolCatalogObject(catalog);
+
+console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name));
+```
+
+The catalog is content-addressed by `st-core` and currently binds generation
+evidence, repetition-unlikelihood planning, and the complete blinded
+semantic-review lifecycle across Rust, Python, and WASM. Each WASM operation
+listed by the catalog is checked against the generated export and bundled
+TypeScript declaration. Trusted legacy replay remains deliberately absent from
+the browser surface.
+
 ## Shared reverse-mode autograd
 
 `AutogradTensor` is a browser handle over the immutable graph implemented in

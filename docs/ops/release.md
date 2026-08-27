@@ -19,6 +19,9 @@ Both PyPI workflows call the same manifest-backed wheel validator before any
 token or trusted-publisher upload. Official release builds also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
+They also execute the installed wheel through the Rust-owned runtime protocol
+catalog plus generation-evidence, repetition-plan, and blinded semantic-review
+lifecycles before any artifact can be uploaded.
 Automatic releases require the pushed tag to equal `v<package-version>`
 exactly. Manual recovery with a non-empty `release_tag` also requires
 `checkout_ref` to name that same immutable tag, keeping wheel bytes,
@@ -28,7 +31,7 @@ Leave both inputs empty for a build-only branch preflight.
 ## Common Variables
 
 ```bash
-VERSION=0.4.14
+VERSION=0.4.15
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -44,7 +47,7 @@ python scripts/release_status.py \
   --expected-wheels 3
 ```
 
-Expected pre-publish shape for `0.4.14` is:
+Expected pre-publish shape for `0.4.15` is:
 
 ```text
 local_versions ... consistent=yes
@@ -57,8 +60,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.14 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.14 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.15 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.15 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```
