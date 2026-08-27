@@ -327,6 +327,263 @@ declare module "spiraltorch-wasm" {
         plan: ZSpaceRepetitionUnlikelihoodPlan,
     ): ZSpaceRepetitionUnlikelihoodPlan;
 
+    export type ZSpaceSemanticReviewCandidateLabel = "A" | "B" | "C";
+    export type ZSpaceSemanticReviewPreference = ZSpaceSemanticReviewCandidateLabel | "tie";
+
+    export type ZSpaceSemanticReviewCandidate = {
+        candidate_label: ZSpaceSemanticReviewCandidateLabel;
+        continuation: string;
+    };
+
+    export type ZSpaceSemanticReviewGroup = {
+        group_id: string;
+        prompt: string;
+        candidates: [
+            ZSpaceSemanticReviewCandidate,
+            ZSpaceSemanticReviewCandidate,
+            ZSpaceSemanticReviewCandidate,
+        ];
+    };
+
+    export type ZSpaceSemanticReviewRubric = {
+        fluency: "integer 1 through 5";
+        prompt_relevance: "integer 1 through 5";
+        local_coherence: "integer 1 through 5";
+        non_repetition: "integer 1 through 5";
+        preference: "A, B, C, or tie";
+    };
+
+    /** Uncommitted packet content; Rust owns fixed fields, counts, and packet identity. */
+    export type ZSpaceSemanticReviewPacketRequest = {
+        protocol_id: string;
+        prompt_set_id: string;
+        blinding_key_sha256: string;
+        blinding_map_id: string;
+        instructions: string;
+        rubric: ZSpaceSemanticReviewRubric;
+        groups: ZSpaceSemanticReviewGroup[];
+    };
+
+    export type ZSpaceSemanticReviewPacket = {
+        schema: "spiraltorch.hf_blinded_semantic_review_packet.v1";
+        status: "ready_for_blinded_review";
+        protocol_id: string;
+        prompt_set_id: string;
+        blinding_key_sha256: string;
+        blinding_map_id: string;
+        group_count: number;
+        candidate_count: number;
+        instructions: string;
+        rubric: ZSpaceSemanticReviewRubric;
+        groups: ZSpaceSemanticReviewGroup[];
+        packet_id: string;
+    };
+
+    export type ZSpaceSemanticReviewMapEntry = {
+        group_id: string;
+        seed: number;
+        prompt_id: string;
+        candidate_to_arm: Record<ZSpaceSemanticReviewCandidateLabel, string>;
+    };
+
+    export type ZSpaceSemanticReviewMapIdRequest = {
+        entries: ZSpaceSemanticReviewMapEntry[];
+    };
+
+    export type ZSpaceSemanticReviewMap = {
+        schema: "spiraltorch.hf_blinded_semantic_review_map.v1";
+        status: "sealed_pending_review";
+        protocol_id: string;
+        packet_id: string;
+        blinding_key_sha256: string;
+        entries: ZSpaceSemanticReviewMapEntry[];
+    };
+
+    export type ZSpaceSemanticReviewCandidateScore = {
+        candidate_label: ZSpaceSemanticReviewCandidateLabel;
+        fluency: 1 | 2 | 3 | 4 | 5;
+        prompt_relevance: 1 | 2 | 3 | 4 | 5;
+        local_coherence: 1 | 2 | 3 | 4 | 5;
+        non_repetition: 1 | 2 | 3 | 4 | 5;
+    };
+
+    export type ZSpaceSemanticReviewGroupResponse = {
+        group_id: string;
+        scores: [
+            ZSpaceSemanticReviewCandidateScore,
+            ZSpaceSemanticReviewCandidateScore,
+            ZSpaceSemanticReviewCandidateScore,
+        ];
+        preference: ZSpaceSemanticReviewPreference;
+    };
+
+    export type ZSpaceSemanticReviewDraft = {
+        schema: "spiraltorch.hf_blinded_semantic_review_draft.v1";
+        packet_id: string;
+        reviewer_id: string;
+        review_session_id: string;
+        responses: ZSpaceSemanticReviewGroupResponse[];
+    };
+
+    export type ZSpaceSemanticReviewPacketReceipt = {
+        contract_version: "spiraltorch.zspace_semantic_review_packet.v1";
+        kind: "spiraltorch.zspace_semantic_review_packet";
+        semantic_owner: "st-core::runtime::zspace_semantic_review";
+        semantic_backend: "rust";
+        packet_validated: true;
+        status: "ready";
+        packet_id: string;
+        protocol_id: string;
+        prompt_set_id: string;
+        blinding_key_sha256: string;
+        blinding_map_id: string;
+        group_count: number;
+        candidate_count: number;
+        candidate_labels: ["A", "B", "C"];
+        score_dimensions: [
+            "fluency",
+            "prompt_relevance",
+            "local_coherence",
+            "non_repetition",
+        ];
+        score_minimum: 1;
+        score_maximum: 5;
+        preference_values: ["A", "B", "C", "tie"];
+        packet_id_rule: string;
+        blinding_map_id_rule: string;
+        human_review_complete: false;
+        unblind_ready: false;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+        packet: ZSpaceSemanticReviewPacket;
+    };
+
+    export type ZSpaceSemanticReviewDraftRequest = {
+        packet: ZSpaceSemanticReviewPacket;
+        draft: ZSpaceSemanticReviewDraft;
+    };
+
+    export type ZSpaceSemanticReviewDraftReceipt = {
+        contract_version: "spiraltorch.zspace_semantic_review_draft.v1";
+        kind: "spiraltorch.zspace_semantic_review_draft";
+        semantic_owner: "st-core::runtime::zspace_semantic_review";
+        semantic_backend: "rust";
+        draft_validated: true;
+        status: "in_progress" | "ready_for_unblind";
+        draft_id: string;
+        response_id: string | null;
+        packet_id: string;
+        reviewer_id: string;
+        review_session_id: string;
+        group_count: number;
+        completed_group_count: number;
+        remaining_group_count: number;
+        scored_candidate_count: number;
+        completion_ratio: number;
+        missing_group_ids: string[];
+        human_review_complete: boolean;
+        unblind_ready: boolean;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+        request: ZSpaceSemanticReviewDraftRequest;
+    };
+
+    export type ZSpaceSemanticReviewMeanScores = {
+        fluency: number;
+        prompt_relevance: number;
+        local_coherence: number;
+        non_repetition: number;
+        overall: number;
+    };
+
+    export type ZSpaceSemanticReviewArmAggregate = {
+        arm: string;
+        candidate_count: number;
+        mean_scores: ZSpaceSemanticReviewMeanScores;
+        preference_win_count: number;
+        preference_share_of_groups: number;
+    };
+
+    export type ZSpaceSemanticReviewSeedAggregate = {
+        seed: number;
+        group_count: number;
+        tie_preference_count: number;
+        arms: ZSpaceSemanticReviewArmAggregate[];
+    };
+
+    export type ZSpaceSemanticReviewUnblindRequest = {
+        packet: ZSpaceSemanticReviewPacket;
+        draft: ZSpaceSemanticReviewDraft;
+        blinding_map: ZSpaceSemanticReviewMap;
+    };
+
+    export type ZSpaceSemanticReviewUnblindReport = {
+        contract_version: "spiraltorch.zspace_semantic_review_unblind.v1";
+        kind: "spiraltorch.zspace_semantic_review_unblind";
+        semantic_owner: "st-core::runtime::zspace_semantic_review";
+        semantic_backend: "rust";
+        unblind_validated: true;
+        status: "unblinded";
+        unblind_id: string;
+        packet_id: string;
+        response_id: string;
+        blinding_map_id: string;
+        protocol_id: string;
+        reviewer_id: string;
+        review_session_id: string;
+        reviewed_group_count: number;
+        unblinded_candidate_count: number;
+        arm_count: number;
+        tie_preference_count: number;
+        arms: ZSpaceSemanticReviewArmAggregate[];
+        seeds: ZSpaceSemanticReviewSeedAggregate[];
+        human_review_complete: true;
+        structural_blinding_inputs_validated: true;
+        reviewer_blinding_behavior_verified: false;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+        request: ZSpaceSemanticReviewUnblindRequest;
+    };
+
+    /** Seal and validate a packet in the Rust semantic core. */
+    export function sealZspaceSemanticReviewPacketJson(requestJson: string): string;
+    export function sealZspaceSemanticReviewPacketObject(
+        request: ZSpaceSemanticReviewPacketRequest,
+    ): ZSpaceSemanticReviewPacketReceipt;
+
+    /** Commit the exact pre-review candidate-to-arm assignments in Rust. */
+    export function zspaceSemanticReviewMapIdJson(requestJson: string): string;
+    export function zspaceSemanticReviewMapIdObject(
+        request: ZSpaceSemanticReviewMapIdRequest,
+    ): string;
+
+    export function validateZspaceSemanticReviewPacketJson(packetJson: string): string;
+    export function validateZspaceSemanticReviewPacketObject(
+        packet: ZSpaceSemanticReviewPacket,
+    ): ZSpaceSemanticReviewPacketReceipt;
+    export function validateZspaceSemanticReviewPacketReceiptJson(receiptJson: string): string;
+    export function validateZspaceSemanticReviewPacketReceiptObject(
+        receipt: ZSpaceSemanticReviewPacketReceipt,
+    ): ZSpaceSemanticReviewPacketReceipt;
+
+    export function summarizeZspaceSemanticReviewDraftJson(requestJson: string): string;
+    export function summarizeZspaceSemanticReviewDraftObject(
+        request: ZSpaceSemanticReviewDraftRequest,
+    ): ZSpaceSemanticReviewDraftReceipt;
+    export function validateZspaceSemanticReviewDraftReceiptJson(receiptJson: string): string;
+    export function validateZspaceSemanticReviewDraftReceiptObject(
+        receipt: ZSpaceSemanticReviewDraftReceipt,
+    ): ZSpaceSemanticReviewDraftReceipt;
+
+    export function unblindZspaceSemanticReviewJson(requestJson: string): string;
+    export function unblindZspaceSemanticReviewObject(
+        request: ZSpaceSemanticReviewUnblindRequest,
+    ): ZSpaceSemanticReviewUnblindReport;
+    export function validateZspaceSemanticReviewUnblindJson(reportJson: string): string;
+    export function validateZspaceSemanticReviewUnblindObject(
+        report: ZSpaceSemanticReviewUnblindReport,
+    ): ZSpaceSemanticReviewUnblindReport;
+
     /** Palette identifiers accepted by {@link FractalCanvas.set_palette}. */
     export type CanvasPaletteName =
         | "blue-magenta"

@@ -351,6 +351,49 @@ matching Python `validate_zspace_repetition_unlikelihood_plan_trusted_legacy_rep
 WASM deliberately exposes no unbounded validator for attacker-controlled browser
 input.
 
+Blinded semantic review is also a complete Rust-owned browser lifecycle rather
+than a report-only adapter. Rust seals packet fields and identities, commits the
+candidate-to-arm map before review, validates resumable drafts, and performs
+unblinding and arm/seed aggregation:
+
+```ts
+import {
+    sealZspaceSemanticReviewPacketObject,
+    summarizeZspaceSemanticReviewDraftObject,
+    zspaceSemanticReviewMapIdObject,
+} from "spiraltorch-wasm";
+
+const mapId = zspaceSemanticReviewMapIdObject({ entries: sealedMapEntries });
+const packetReceipt = sealZspaceSemanticReviewPacketObject({
+    protocol_id: protocolId,
+    prompt_set_id: promptSetId,
+    blinding_key_sha256: blindingKeyDigest,
+    blinding_map_id: mapId,
+    instructions: "Score every candidate while blind.",
+    rubric,
+    groups,
+});
+const draftReceipt = summarizeZspaceSemanticReviewDraftObject({
+    packet: packetReceipt.packet,
+    draft,
+});
+```
+
+JSON and object exports cover packet sealing and validation, packet-receipt
+replay, draft summarization and replay, unblinding, and unblind-report replay.
+Every object is preflighted before serde materialization with a 64 MiB,
+1,000,000-node, depth-32 browser ingress bound. Properties are read once into a
+bounded plain-data snapshot, so a getter or proxy cannot swap in an unchecked
+second value during Rust conversion. JSON-string variants apply the same node
+and depth limits in a duplicate-key-rejecting streaming Rust deserializer rather
+than constructing an unbounded intermediate tree. The Rust contract additionally
+limits packets to 10,000 groups and 32 MiB of aggregate JSON-encoded text, map entries
+to 10,000, and arm names to 128 bytes. Existing packet and map identity rules
+remain unchanged. Rust and Python provide explicitly named trusted-legacy replay
+functions for locally held v1 evidence above newer admission budgets; WASM
+deliberately exposes no unbounded replay route. Validation proves structural commitments and deterministic
+aggregation; it does not prove reviewer blindness or model superiority.
+
 Z-space meta-optimization follows the same state-carrying client model. The
 browser stores the returned checkpoint, but Rust owns restore coercion,
 observation normalisation, the FFT-derived fractional Sobolev gradient, bounded Topos

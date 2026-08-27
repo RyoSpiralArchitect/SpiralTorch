@@ -5426,11 +5426,21 @@ ZSPACE_SEMANTIC_REVIEW_EVIDENCE_BOUNDARY: str
 ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION: str
 ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE: str
 ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA: str
+ZSPACE_SEMANTIC_REVIEW_MAP_STATUS: str
+ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES: int
+ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES: int
 ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS: int
+ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES: int
+ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES: int
+ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES: int
+ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES: int
+ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER: int
 ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION: str
 ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE: str
 ZSPACE_SEMANTIC_REVIEW_PACKET_KIND: str
 ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA: str
+ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS: str
+ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE: str
 ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES: tuple[str, str, str, str]
 ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION: str
 ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS: tuple[str, str, str, str]
@@ -5597,10 +5607,29 @@ def validate_zspace_periodicity(
 def validate_zspace_semantic_review_packet(
     packet: Mapping[str, object],
 ) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_packet_trusted_legacy_replay(
+    packet: Mapping[str, object],
+) -> Dict[str, object]: ...
+def seal_zspace_semantic_review_packet(
+    *,
+    protocol_id: str,
+    prompt_set_id: str,
+    blinding_key_sha256: str,
+    blinding_map_id: str,
+    instructions: str,
+    rubric: Mapping[str, str],
+    groups: Sequence[Mapping[str, object]],
+) -> Dict[str, object]: ...
 def zspace_semantic_review_map_id(
     entries: Sequence[Mapping[str, object]],
 ) -> str: ...
+def zspace_semantic_review_map_id_trusted_legacy_replay(
+    entries: Sequence[Mapping[str, object]],
+) -> str: ...
 def validate_zspace_semantic_review_packet_receipt(
+    receipt: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay(
     receipt: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def new_zspace_semantic_review_draft(
@@ -5618,6 +5647,9 @@ def summarize_zspace_semantic_review_draft(
 def validate_zspace_semantic_review_draft_receipt(
     receipt: Mapping[str, object],
 ) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(
+    receipt: Mapping[str, object],
+) -> Dict[str, object]: ...
 def unblind_zspace_semantic_review(
     *,
     packet: Mapping[str, object],
@@ -5625,6 +5657,9 @@ def unblind_zspace_semantic_review(
     blinding_map: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_unblind(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
+def validate_zspace_semantic_review_unblind_trusted_legacy_replay(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def zspace_repetition_unlikelihood_plan(
@@ -12174,11 +12209,21 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_STATUS",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES",
     "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_KIND",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE",
     "ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES",
     "ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS",
@@ -12189,13 +12234,19 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND",
     "new_zspace_semantic_review_draft",
+    "seal_zspace_semantic_review_packet",
     "summarize_zspace_semantic_review_draft",
     "unblind_zspace_semantic_review",
     "validate_zspace_semantic_review_draft_receipt",
+    "validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay",
     "validate_zspace_semantic_review_packet",
+    "validate_zspace_semantic_review_packet_trusted_legacy_replay",
     "validate_zspace_semantic_review_packet_receipt",
+    "validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay",
     "validate_zspace_semantic_review_unblind",
+    "validate_zspace_semantic_review_unblind_trusted_legacy_replay",
     "zspace_semantic_review_map_id",
+    "zspace_semantic_review_map_id_trusted_legacy_replay",
     "validate_zspace_repetition_unlikelihood_plan",
     "validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay",
     "zspace_meta_optimizer_init",

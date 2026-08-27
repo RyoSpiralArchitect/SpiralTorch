@@ -501,8 +501,8 @@ continue.
 ## Blinded semantic review
 
 Held-out generation packets can be reviewed without rebuilding scoring or
-unblinding semantics in Python. Rust validates the packet and pre-review map
-commitments, partial draft coverage, 1-through-5 score bounds,
+unblinding semantics in Python. Rust can build and seal the packet itself,
+validates the packet and pre-review map commitments, partial draft coverage, 1-through-5 score bounds,
 complete-response receipt, and arm/seed aggregation. Python only presents
 groups and atomically saves the last fully validated draft.
 
@@ -527,10 +527,21 @@ spiral-hf-semantic-review validate-report semantic-review-unblind.json
 ```
 
 The corresponding Python surface is
+`seal_zspace_semantic_review_packet()`,
 `validate_zspace_semantic_review_packet()`,
 `zspace_semantic_review_map_id()`,
 `summarize_zspace_semantic_review_draft()`, and
-`unblind_zspace_semantic_review()`. A structurally valid report does not prove
+`unblind_zspace_semantic_review()`. The same lifecycle is available through
+the WASM JSON/object API. Python ingress is bounded before serde materialization;
+the Rust contract caps aggregate JSON-encoded packet text at 32 MiB, groups/map entries at
+10,000, and arm names at 128 bytes. Existing packet and map IDs are unchanged.
+A historical v1 artifact above a newer aggregate packet or standalone-map
+admission budget can be replayed only through the explicitly named
+`*_trusted_legacy_replay` Rust/Python functions. Those opt-in functions accept
+already trusted local evidence only; normal validation, the CLI, and every WASM
+entry point remain bounded and must be used for untrusted or remotely supplied
+input.
+A structurally valid report does not prove
 that the reviewer remained blind and does not establish model superiority.
 
 ## Building wheels

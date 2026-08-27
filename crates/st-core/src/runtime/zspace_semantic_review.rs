@@ -40,7 +40,12 @@ pub const ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS: usize = 10_000;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES: usize = 16_384;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES: usize = 65_536;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES: usize = 16_384;
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES: usize = 32 * 1_024 * 1_024;
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES: usize = 128;
+pub const ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES: usize = ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS;
 pub const ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+pub const ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE: &str =
+    "sum of UTF-8 JSON-encoded string-content bytes across packet values and dynamic rubric keys; fixed field names, quotes, punctuation, and container overhead excluded";
 pub const ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS: [&str; 3] = ["A", "B", "C"];
 pub const ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS: [&str; 4] = [
     "fluency",
@@ -69,6 +74,19 @@ pub struct ZSpaceSemanticReviewGroup {
     pub group_id: String,
     pub prompt: String,
     pub candidates: Vec<ZSpaceSemanticReviewCandidate>,
+}
+
+/// Uncommitted packet content. Rust fills every fixed field, count, and identity.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceSemanticReviewPacketRequest {
+    pub protocol_id: String,
+    pub prompt_set_id: String,
+    pub blinding_key_sha256: String,
+    pub blinding_map_id: String,
+    pub instructions: String,
+    pub rubric: BTreeMap<String, String>,
+    pub groups: Vec<ZSpaceSemanticReviewGroup>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -123,6 +141,12 @@ pub struct ZSpaceSemanticReviewMapEntry {
     pub seed: u64,
     pub prompt_id: String,
     pub candidate_to_arm: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZSpaceSemanticReviewMapIdRequest {
+    pub entries: Vec<ZSpaceSemanticReviewMapEntry>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -273,6 +297,12 @@ pub enum ZSpaceSemanticReviewError {
     EmptyPacket,
     #[error("semantic review group count {count} exceeds maximum {maximum}")]
     GroupLimit { count: usize, maximum: usize },
+    #[error("semantic review packet text byte count {count} exceeds maximum {maximum}")]
+    PacketTextLimit { count: usize, maximum: usize },
+    #[error("semantic review map must contain at least one entry")]
+    EmptyMap,
+    #[error("semantic review map entry count {count} exceeds maximum {maximum}")]
+    MapEntryLimit { count: usize, maximum: usize },
     #[error("{field} count {declared} does not match actual count {actual}")]
     CountMismatch {
         field: String,
@@ -350,22 +380,113 @@ struct ScoreAccumulator {
     preference_win_count: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ZSpaceSemanticReviewAdmission {
+    packet_text_bytes: Option<usize>,
+    map_entries: Option<usize>,
+    reject_empty_map: bool,
+}
+
+const ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION: ZSpaceSemanticReviewAdmission =
+    ZSpaceSemanticReviewAdmission {
+        packet_text_bytes: Some(ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES),
+        map_entries: Some(ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES),
+        reject_empty_map: true,
+    };
+
+const ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION: ZSpaceSemanticReviewAdmission =
+    ZSpaceSemanticReviewAdmission {
+        packet_text_bytes: None,
+        map_entries: None,
+        reject_empty_map: false,
+    };
+
 pub fn validate_zspace_semantic_review_packet(
     packet: ZSpaceSemanticReviewPacket,
 ) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
-    validate_packet(&packet)?;
+    validate_zspace_semantic_review_packet_internal(
+        packet,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+/// Replays a trusted historical v1 packet without newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input. The legacy packet can be
+/// substantially larger than the bounded public validator permits.
+pub fn validate_zspace_semantic_review_packet_trusted_legacy_replay(
+    packet: ZSpaceSemanticReviewPacket,
+) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_packet_internal(
+        packet,
+        ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION,
+    )
+}
+
+fn validate_zspace_semantic_review_packet_internal(
+    packet: ZSpaceSemanticReviewPacket,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
+    validate_packet(&packet, admission)?;
+    Ok(packet_receipt(packet))
+}
+
+pub fn seal_zspace_semantic_review_packet(
+    request: ZSpaceSemanticReviewPacketRequest,
+) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
+    validate_group_vector_shape(&request.groups)?;
+    let candidate_count = request.groups.len() * ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS.len();
+    let mut packet = ZSpaceSemanticReviewPacket {
+        schema: ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA.to_owned(),
+        status: ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS.to_owned(),
+        protocol_id: request.protocol_id,
+        prompt_set_id: request.prompt_set_id,
+        blinding_key_sha256: request.blinding_key_sha256,
+        blinding_map_id: request.blinding_map_id,
+        group_count: request.groups.len(),
+        candidate_count,
+        instructions: request.instructions,
+        rubric: request.rubric,
+        groups: request.groups,
+        packet_id: format!("sha256:{}", "0".repeat(64)),
+    };
+    validate_packet_content(&packet, ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION)?;
+    packet.packet_id = packet_identity(&packet)?;
     Ok(packet_receipt(packet))
 }
 
 pub fn validate_zspace_semantic_review_packet_receipt_value(
     report: serde_json::Value,
 ) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_packet_receipt_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+/// Replays a trusted historical v1 packet receipt without newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input because the embedded packet
+/// is recomputed without the aggregate text admission limit.
+pub fn validate_zspace_semantic_review_packet_receipt_value_trusted_legacy_replay(
+    report: serde_json::Value,
+) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_packet_receipt_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION,
+    )
+}
+
+fn validate_zspace_semantic_review_packet_receipt_value_internal(
+    report: serde_json::Value,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewPacketReceipt, ZSpaceSemanticReviewError> {
     let packet = report
         .get("packet")
         .cloned()
         .ok_or_else(|| malformed("missing packet"))?;
     let packet = serde_json::from_value(packet).map_err(|error| malformed(error.to_string()))?;
-    let canonical = validate_zspace_semantic_review_packet(packet)?;
+    let canonical = validate_zspace_semantic_review_packet_internal(packet, admission)?;
     require_canonical_report(report, &canonical, "packet receipt")?;
     Ok(canonical)
 }
@@ -374,7 +495,19 @@ pub fn summarize_zspace_semantic_review_draft(
     packet: ZSpaceSemanticReviewPacket,
     draft: ZSpaceSemanticReviewDraft,
 ) -> Result<ZSpaceSemanticReviewDraftReceipt, ZSpaceSemanticReviewError> {
-    validate_packet(&packet)?;
+    summarize_zspace_semantic_review_draft_internal(
+        packet,
+        draft,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+fn summarize_zspace_semantic_review_draft_internal(
+    packet: ZSpaceSemanticReviewPacket,
+    draft: ZSpaceSemanticReviewDraft,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewDraftReceipt, ZSpaceSemanticReviewError> {
+    validate_packet(&packet, admission)?;
     let (draft, missing_group_ids) = normalize_and_validate_draft(&packet, draft)?;
     let group_count = packet.groups.len();
     let completed_group_count = draft.responses.len();
@@ -421,13 +554,37 @@ pub fn summarize_zspace_semantic_review_draft(
 pub fn validate_zspace_semantic_review_draft_receipt_value(
     report: serde_json::Value,
 ) -> Result<ZSpaceSemanticReviewDraftReceipt, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_draft_receipt_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+/// Replays a trusted historical v1 draft receipt without newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input because the embedded packet
+/// is recomputed without the aggregate text admission limit.
+pub fn validate_zspace_semantic_review_draft_receipt_value_trusted_legacy_replay(
+    report: serde_json::Value,
+) -> Result<ZSpaceSemanticReviewDraftReceipt, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_draft_receipt_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION,
+    )
+}
+
+fn validate_zspace_semantic_review_draft_receipt_value_internal(
+    report: serde_json::Value,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewDraftReceipt, ZSpaceSemanticReviewError> {
     let request = report
         .get("request")
         .cloned()
         .ok_or_else(|| malformed("missing request"))?;
     let request: ZSpaceSemanticReviewDraftRequest =
         serde_json::from_value(request).map_err(|error| malformed(error.to_string()))?;
-    let canonical = summarize_zspace_semantic_review_draft(request.packet, request.draft)?;
+    let canonical =
+        summarize_zspace_semantic_review_draft_internal(request.packet, request.draft, admission)?;
     require_canonical_report(report, &canonical, "draft receipt")?;
     Ok(canonical)
 }
@@ -437,7 +594,21 @@ pub fn unblind_zspace_semantic_review(
     draft: ZSpaceSemanticReviewDraft,
     blinding_map: ZSpaceSemanticReviewMap,
 ) -> Result<ZSpaceSemanticReviewUnblindReport, ZSpaceSemanticReviewError> {
-    let draft_receipt = summarize_zspace_semantic_review_draft(packet, draft)?;
+    unblind_zspace_semantic_review_internal(
+        packet,
+        draft,
+        blinding_map,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+fn unblind_zspace_semantic_review_internal(
+    packet: ZSpaceSemanticReviewPacket,
+    draft: ZSpaceSemanticReviewDraft,
+    blinding_map: ZSpaceSemanticReviewMap,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewUnblindReport, ZSpaceSemanticReviewError> {
+    let draft_receipt = summarize_zspace_semantic_review_draft_internal(packet, draft, admission)?;
     if !draft_receipt.human_review_complete {
         return Err(ZSpaceSemanticReviewError::IncompleteDraft {
             remaining: draft_receipt.remaining_group_count,
@@ -448,7 +619,7 @@ pub fn unblind_zspace_semantic_review(
         .clone()
         .expect("complete drafts always carry a response identity");
     let ZSpaceSemanticReviewDraftRequest { packet, draft } = draft_receipt.request;
-    let blinding_map = normalize_and_validate_map(&packet, blinding_map)?;
+    let blinding_map = normalize_and_validate_map(&packet, blinding_map, admission)?;
     let blinding_map_id = packet.blinding_map_id.clone();
     let entry_by_group = blinding_map
         .entries
@@ -561,14 +732,41 @@ pub fn unblind_zspace_semantic_review(
 pub fn validate_zspace_semantic_review_unblind_value(
     report: serde_json::Value,
 ) -> Result<ZSpaceSemanticReviewUnblindReport, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_unblind_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION,
+    )
+}
+
+/// Replays a trusted historical v1 unblind report without newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input because packet and map
+/// recomputation bypasses the newer aggregate admission limits.
+pub fn validate_zspace_semantic_review_unblind_value_trusted_legacy_replay(
+    report: serde_json::Value,
+) -> Result<ZSpaceSemanticReviewUnblindReport, ZSpaceSemanticReviewError> {
+    validate_zspace_semantic_review_unblind_value_internal(
+        report,
+        ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION,
+    )
+}
+
+fn validate_zspace_semantic_review_unblind_value_internal(
+    report: serde_json::Value,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<ZSpaceSemanticReviewUnblindReport, ZSpaceSemanticReviewError> {
     let request = report
         .get("request")
         .cloned()
         .ok_or_else(|| malformed("missing request"))?;
     let request: ZSpaceSemanticReviewUnblindRequest =
         serde_json::from_value(request).map_err(|error| malformed(error.to_string()))?;
-    let canonical =
-        unblind_zspace_semantic_review(request.packet, request.draft, request.blinding_map)?;
+    let canonical = unblind_zspace_semantic_review_internal(
+        request.packet,
+        request.draft,
+        request.blinding_map,
+        admission,
+    )?;
     require_canonical_report(report, &canonical, "unblind report")?;
     Ok(canonical)
 }
@@ -603,7 +801,77 @@ fn packet_receipt(packet: ZSpaceSemanticReviewPacket) -> ZSpaceSemanticReviewPac
     }
 }
 
-fn validate_packet(packet: &ZSpaceSemanticReviewPacket) -> Result<(), ZSpaceSemanticReviewError> {
+fn validate_packet_text_budget(
+    packet: &ZSpaceSemanticReviewPacket,
+    maximum: usize,
+) -> Result<(), ZSpaceSemanticReviewError> {
+    fn charge(
+        count: &mut usize,
+        value: &str,
+        maximum: usize,
+    ) -> Result<(), ZSpaceSemanticReviewError> {
+        let encoded_bytes = value
+            .chars()
+            .map(|character| match character {
+                '"' | '\\' | '\u{0008}' | '\t' | '\n' | '\u{000c}' | '\r' => 2,
+                '\u{0000}'..='\u{001f}' => 6,
+                _ => character.len_utf8(),
+            })
+            .fold(0usize, usize::saturating_add);
+        *count = count.saturating_add(encoded_bytes);
+        if *count > maximum {
+            Err(ZSpaceSemanticReviewError::PacketTextLimit {
+                count: *count,
+                maximum,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    let mut count = 0usize;
+    for value in [
+        packet.schema.as_str(),
+        packet.status.as_str(),
+        packet.protocol_id.as_str(),
+        packet.prompt_set_id.as_str(),
+        packet.blinding_key_sha256.as_str(),
+        packet.blinding_map_id.as_str(),
+        packet.instructions.as_str(),
+        packet.packet_id.as_str(),
+    ] {
+        charge(&mut count, value, maximum)?;
+    }
+    for (key, value) in &packet.rubric {
+        charge(&mut count, key, maximum)?;
+        charge(&mut count, value, maximum)?;
+    }
+    for group in &packet.groups {
+        charge(&mut count, &group.group_id, maximum)?;
+        charge(&mut count, &group.prompt, maximum)?;
+        for candidate in &group.candidates {
+            charge(&mut count, &candidate.candidate_label, maximum)?;
+            charge(&mut count, &candidate.continuation, maximum)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_packet(
+    packet: &ZSpaceSemanticReviewPacket,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<(), ZSpaceSemanticReviewError> {
+    validate_packet_content(packet, admission)?;
+    if packet_identity(packet)? != packet.packet_id {
+        return Err(ZSpaceSemanticReviewError::PacketIdentityMismatch);
+    }
+    Ok(())
+}
+
+fn validate_packet_content(
+    packet: &ZSpaceSemanticReviewPacket,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<(), ZSpaceSemanticReviewError> {
     require_value(
         "schema",
         &packet.schema,
@@ -619,14 +887,9 @@ fn validate_packet(packet: &ZSpaceSemanticReviewPacket) -> Result<(), ZSpaceSema
     require_digest("blinding_key_sha256", &packet.blinding_key_sha256)?;
     require_sha256_id("blinding_map_id", &packet.blinding_map_id)?;
     require_sha256_id("packet_id", &packet.packet_id)?;
-    if packet.groups.is_empty() {
-        return Err(ZSpaceSemanticReviewError::EmptyPacket);
-    }
-    if packet.groups.len() > ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS {
-        return Err(ZSpaceSemanticReviewError::GroupLimit {
-            count: packet.groups.len(),
-            maximum: ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
-        });
+    validate_group_vector_shape(&packet.groups)?;
+    if let Some(maximum) = admission.packet_text_bytes {
+        validate_packet_text_budget(packet, maximum)?;
     }
     if packet.group_count != packet.groups.len() {
         return Err(ZSpaceSemanticReviewError::CountMismatch {
@@ -638,8 +901,10 @@ fn validate_packet(packet: &ZSpaceSemanticReviewPacket) -> Result<(), ZSpaceSema
     let actual_candidate_count = packet
         .groups
         .iter()
-        .map(|group| group.candidates.len())
-        .sum::<usize>();
+        .try_fold(0usize, |count, group| {
+            count.checked_add(group.candidates.len())
+        })
+        .ok_or_else(|| malformed("semantic review candidate count overflow"))?;
     if packet.candidate_count != actual_candidate_count {
         return Err(ZSpaceSemanticReviewError::CountMismatch {
             field: "candidate_count".to_owned(),
@@ -688,9 +953,6 @@ fn validate_packet(packet: &ZSpaceSemanticReviewPacket) -> Result<(), ZSpaceSema
             declared: packet.candidate_count,
             actual: packet.groups.len() * ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS.len(),
         });
-    }
-    if packet_identity(packet)? != packet.packet_id {
-        return Err(ZSpaceSemanticReviewError::PacketIdentityMismatch);
     }
     Ok(())
 }
@@ -782,13 +1044,42 @@ fn normalize_and_validate_draft(
 pub fn zspace_semantic_review_map_id(
     entries: Vec<ZSpaceSemanticReviewMapEntry>,
 ) -> Result<String, ZSpaceSemanticReviewError> {
-    let entries = normalize_and_validate_map_entries(entries)?;
+    zspace_semantic_review_map_id_internal(entries, ZSPACE_SEMANTIC_REVIEW_BOUNDED_ADMISSION)
+}
+
+/// Recomputes a trusted historical v1 map commitment without newer admission budgets.
+///
+/// Callers must not pass attacker-controlled input because the map can contain
+/// an unbounded number of entries.
+pub fn zspace_semantic_review_map_id_trusted_legacy_replay(
+    entries: Vec<ZSpaceSemanticReviewMapEntry>,
+) -> Result<String, ZSpaceSemanticReviewError> {
+    zspace_semantic_review_map_id_internal(entries, ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION)
+}
+
+fn zspace_semantic_review_map_id_internal(
+    entries: Vec<ZSpaceSemanticReviewMapEntry>,
+    admission: ZSpaceSemanticReviewAdmission,
+) -> Result<String, ZSpaceSemanticReviewError> {
+    let entries = normalize_and_validate_map_entries(entries, admission)?;
     semantic_identity(ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION, &entries)
 }
 
 fn normalize_and_validate_map_entries(
     mut entries: Vec<ZSpaceSemanticReviewMapEntry>,
+    admission: ZSpaceSemanticReviewAdmission,
 ) -> Result<Vec<ZSpaceSemanticReviewMapEntry>, ZSpaceSemanticReviewError> {
+    if admission.reject_empty_map && entries.is_empty() {
+        return Err(ZSpaceSemanticReviewError::EmptyMap);
+    }
+    if let Some(maximum) = admission.map_entries {
+        if entries.len() > maximum {
+            return Err(ZSpaceSemanticReviewError::MapEntryLimit {
+                count: entries.len(),
+                maximum,
+            });
+        }
+    }
     let mut seen_groups = BTreeSet::new();
     let mut seen_samples = BTreeSet::new();
     let mut expected_arms = None::<BTreeSet<String>>;
@@ -826,6 +1117,19 @@ fn normalize_and_validate_map_entries(
         .map_err(|_| ZSpaceSemanticReviewError::MapCandidateLabels {
             group_id: entry.group_id.clone(),
         })?;
+        for arm in entry.candidate_to_arm.values() {
+            require_text(
+                &format!("blinding_map.entries[{index}].candidate_to_arm"),
+                arm,
+                ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES,
+            )?;
+            if !valid_arm_name(arm) {
+                return Err(ZSpaceSemanticReviewError::InvalidArm {
+                    group_id: entry.group_id.clone(),
+                    arm: arm.clone(),
+                });
+            }
+        }
         let arms = entry
             .candidate_to_arm
             .values()
@@ -835,14 +1139,6 @@ fn normalize_and_validate_map_entries(
             return Err(ZSpaceSemanticReviewError::MapCandidateLabels {
                 group_id: entry.group_id.clone(),
             });
-        }
-        for arm in &arms {
-            if !valid_arm_name(arm) {
-                return Err(ZSpaceSemanticReviewError::InvalidArm {
-                    group_id: entry.group_id.clone(),
-                    arm: arm.clone(),
-                });
-            }
         }
         if let Some(expected) = &expected_arms {
             if expected != &arms {
@@ -861,6 +1157,7 @@ fn normalize_and_validate_map_entries(
 fn normalize_and_validate_map(
     packet: &ZSpaceSemanticReviewPacket,
     mut blinding_map: ZSpaceSemanticReviewMap,
+    admission: ZSpaceSemanticReviewAdmission,
 ) -> Result<ZSpaceSemanticReviewMap, ZSpaceSemanticReviewError> {
     require_value(
         "blinding_map.schema",
@@ -902,7 +1199,7 @@ fn normalize_and_validate_map(
         .enumerate()
         .map(|(index, group)| (group.group_id.as_str(), index))
         .collect::<BTreeMap<_, _>>();
-    let mut entries = normalize_and_validate_map_entries(blinding_map.entries)?;
+    let mut entries = normalize_and_validate_map_entries(blinding_map.entries, admission)?;
     let seen_groups = entries
         .iter()
         .map(|entry| entry.group_id.as_str())
@@ -967,7 +1264,9 @@ fn require_candidate_labels<'a>(
     group_id: &str,
     labels: impl Iterator<Item = &'a str>,
 ) -> Result<(), ZSpaceSemanticReviewError> {
-    let labels = labels.collect::<Vec<_>>();
+    let labels = labels
+        .take(ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS.len() + 1)
+        .collect::<Vec<_>>();
     let label_count = labels.len();
     let labels = labels.into_iter().collect::<BTreeSet<_>>();
     let expected = ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS
@@ -980,6 +1279,28 @@ fn require_candidate_labels<'a>(
             group_id: group_id.to_owned(),
         })
     }
+}
+
+fn validate_group_vector_shape(
+    groups: &[ZSpaceSemanticReviewGroup],
+) -> Result<(), ZSpaceSemanticReviewError> {
+    if groups.is_empty() {
+        return Err(ZSpaceSemanticReviewError::EmptyPacket);
+    }
+    if groups.len() > ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS {
+        return Err(ZSpaceSemanticReviewError::GroupLimit {
+            count: groups.len(),
+            maximum: ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
+        });
+    }
+    for group in groups {
+        if group.candidates.len() != ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS.len() {
+            return Err(ZSpaceSemanticReviewError::CandidateLabels {
+                group_id: group.group_id.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn add_score(accumulator: &mut ScoreAccumulator, score: &ZSpaceSemanticReviewCandidateScore) {
@@ -1155,7 +1476,7 @@ fn require_text(field: &str, value: &str, maximum: usize) -> Result<(), ZSpaceSe
 
 fn valid_arm_name(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 128
+        && value.len() <= ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
         })
@@ -1174,7 +1495,7 @@ fn require_canonical_report(
 ) -> Result<(), ZSpaceSemanticReviewError> {
     let canonical =
         serde_json::to_value(canonical).map_err(|error| malformed(error.to_string()))?;
-    if actual == canonical {
+    if super::canonical_json::values_equivalent(&actual, &canonical) {
         Ok(())
     } else {
         Err(malformed(format!(
@@ -1335,6 +1656,111 @@ mod tests {
     }
 
     #[test]
+    fn seals_packet_fields_and_identity_in_rust() {
+        let expected = packet();
+        let receipt = seal_zspace_semantic_review_packet(ZSpaceSemanticReviewPacketRequest {
+            protocol_id: expected.protocol_id.clone(),
+            prompt_set_id: expected.prompt_set_id.clone(),
+            blinding_key_sha256: expected.blinding_key_sha256.clone(),
+            blinding_map_id: expected.blinding_map_id.clone(),
+            instructions: expected.instructions.clone(),
+            rubric: expected.rubric.clone(),
+            groups: expected.groups.clone(),
+        })
+        .expect("sealed packet");
+
+        assert_eq!(receipt.packet, expected);
+        assert_eq!(receipt.group_count, 2);
+        assert_eq!(receipt.candidate_count, 6);
+    }
+
+    #[test]
+    fn bounds_packet_text_and_standalone_map_commitments() {
+        let packet = packet();
+        let narrow_admission = ZSpaceSemanticReviewAdmission {
+            packet_text_bytes: Some(32),
+            ..ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION
+        };
+        assert!(matches!(
+            validate_packet(&packet, narrow_admission),
+            Err(ZSpaceSemanticReviewError::PacketTextLimit { maximum: 32, .. })
+        ));
+        validate_packet(&packet, ZSPACE_SEMANTIC_REVIEW_TRUSTED_LEGACY_ADMISSION)
+            .expect("trusted legacy packet replay bypasses only newer admission budgets");
+
+        assert_eq!(
+            zspace_semantic_review_map_id(Vec::new()),
+            Err(ZSpaceSemanticReviewError::EmptyMap)
+        );
+        assert_eq!(
+            zspace_semantic_review_map_id_trusted_legacy_replay(Vec::new())
+                .expect("trusted empty legacy map commitment"),
+            semantic_identity(
+                ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION,
+                &Vec::<ZSpaceSemanticReviewMapEntry>::new(),
+            )
+            .expect("empty map identity")
+        );
+
+        let entry = blinding_map(&packet).entries.remove(0);
+        assert!(matches!(
+            zspace_semantic_review_map_id(vec![
+                entry.clone();
+                ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES + 1
+            ]),
+            Err(ZSpaceSemanticReviewError::MapEntryLimit { .. })
+        ));
+
+        let mut oversized_arm = entry;
+        oversized_arm.candidate_to_arm.insert(
+            "A".to_owned(),
+            "a".repeat(ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES + 1),
+        );
+        assert!(matches!(
+            zspace_semantic_review_map_id(vec![oversized_arm]),
+            Err(ZSpaceSemanticReviewError::TextLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn trusted_legacy_replay_recomputes_each_v1_receipt_kind() {
+        let packet = packet();
+        let packet_receipt =
+            validate_zspace_semantic_review_packet(packet.clone()).expect("packet receipt");
+        let packet_value = serde_json::to_value(&packet_receipt).expect("packet receipt value");
+        assert_eq!(
+            validate_zspace_semantic_review_packet_receipt_value_trusted_legacy_replay(
+                packet_value,
+            )
+            .expect("trusted packet receipt replay"),
+            packet_receipt
+        );
+
+        let draft_receipt =
+            summarize_zspace_semantic_review_draft(packet.clone(), draft(&packet, true))
+                .expect("draft receipt");
+        let draft_value = serde_json::to_value(&draft_receipt).expect("draft receipt value");
+        assert_eq!(
+            validate_zspace_semantic_review_draft_receipt_value_trusted_legacy_replay(draft_value)
+                .expect("trusted draft receipt replay"),
+            draft_receipt
+        );
+
+        let report = unblind_zspace_semantic_review(
+            packet.clone(),
+            draft(&packet, true),
+            blinding_map(&packet),
+        )
+        .expect("unblind report");
+        let report_value = serde_json::to_value(&report).expect("unblind report value");
+        assert_eq!(
+            validate_zspace_semantic_review_unblind_value_trusted_legacy_replay(report_value)
+                .expect("trusted unblind report replay"),
+            report
+        );
+    }
+
+    #[test]
     fn canonical_json_matches_python_packet_rule() {
         let value = json!({"z": "灯", "a": [2, 1]});
         assert_eq!(
@@ -1437,6 +1863,22 @@ mod tests {
             validate_zspace_semantic_review_draft_receipt_value(value),
             Err(ZSpaceSemanticReviewError::MalformedArtifact { .. })
         ));
+    }
+
+    #[test]
+    fn canonical_receipts_accept_browser_integral_float_spelling() {
+        let packet = packet();
+        let receipt = summarize_zspace_semantic_review_draft(packet.clone(), draft(&packet, true))
+            .expect("draft receipt");
+        let canonical = serde_json::to_value(&receipt).expect("receipt value");
+        let mut browser_round_trip = canonical.clone();
+        browser_round_trip["completion_ratio"] = json!(1);
+
+        assert_eq!(
+            validate_zspace_semantic_review_draft_receipt_value(browser_round_trip)
+                .expect("browser numeric spelling"),
+            receipt
+        );
     }
 
     #[test]

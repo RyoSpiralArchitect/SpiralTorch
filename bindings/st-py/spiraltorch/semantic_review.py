@@ -27,11 +27,17 @@ ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA = str(
         "spiraltorch.hf_blinded_semantic_review_packet.v1",
     )
 )
+ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS = str(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS", "ready_for_blinded_review")
+)
 ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA = str(
     _native_constant(
         "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
         "spiraltorch.hf_blinded_semantic_review_map.v1",
     )
+)
+ZSPACE_SEMANTIC_REVIEW_MAP_STATUS = str(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAP_STATUS", "sealed_pending_review")
 )
 ZSPACE_SEMANTIC_REVIEW_DRAFT_SCHEMA = str(
     _native_constant(
@@ -104,6 +110,14 @@ ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE = str(
         "whitespace",
     )
 )
+ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE = str(
+    _native_constant(
+        "ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE",
+        "sum of UTF-8 JSON-encoded string-content bytes across packet values "
+        "and dynamic rubric keys; fixed field names, quotes, punctuation, and "
+        "container overhead excluded",
+    )
+)
 ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE = str(
     _native_constant(
         "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
@@ -149,6 +163,27 @@ ZSPACE_SEMANTIC_REVIEW_SCORE_MAXIMUM = int(
 ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS = int(
     _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS", 10_000)
 )
+ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES", 16_384)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES", 65_536)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES", 16_384)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES", 32 * 1_024 * 1_024)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES", 128)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES", 10_000)
+)
+ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER = int(
+    _native_constant("ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER", 9_007_199_254_740_991)
+)
 
 __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS",
@@ -159,11 +194,21 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_MAP_COMMITMENT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_MAP_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_MAP_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_MAP_STATUS",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_CONTINUATION_BYTES",
     "ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_INSTRUCTIONS_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_PROMPT_BYTES",
+    "ZSPACE_SEMANTIC_REVIEW_MAX_SAFE_INTEGER",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_ID_RULE",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_KIND",
     "ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS",
+    "ZSPACE_SEMANTIC_REVIEW_PACKET_TEXT_BYTE_RULE",
     "ZSPACE_SEMANTIC_REVIEW_PREFERENCE_VALUES",
     "ZSPACE_SEMANTIC_REVIEW_RESPONSE_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_SCORE_DIMENSIONS",
@@ -174,13 +219,19 @@ __all__ = [
     "ZSPACE_SEMANTIC_REVIEW_UNBLIND_CONTRACT_VERSION",
     "ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND",
     "new_zspace_semantic_review_draft",
+    "seal_zspace_semantic_review_packet",
     "summarize_zspace_semantic_review_draft",
     "unblind_zspace_semantic_review",
     "validate_zspace_semantic_review_draft_receipt",
+    "validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay",
     "validate_zspace_semantic_review_packet",
+    "validate_zspace_semantic_review_packet_trusted_legacy_replay",
     "validate_zspace_semantic_review_packet_receipt",
+    "validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay",
     "validate_zspace_semantic_review_unblind",
+    "validate_zspace_semantic_review_unblind_trusted_legacy_replay",
     "zspace_semantic_review_map_id",
+    "zspace_semantic_review_map_id_trusted_legacy_replay",
 ]
 
 
@@ -212,6 +263,20 @@ def _native_identity_operation(name: str, payload: Mapping[str, object]) -> str:
     if not _sha256_identity(result):
         raise RuntimeError(f"native {name} returned an invalid identity")
     return result
+
+
+def _bounded_mapping_sequence(
+    values: Sequence[Mapping[str, object]],
+    *,
+    maximum: int,
+    label: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for index, value in enumerate(values):
+        if index >= maximum:
+            raise ValueError(f"{label} count exceeds maximum {maximum}")
+        rows.append(dict(value))
+    return rows
 
 
 def _sha256_identity(value: object) -> bool:
@@ -375,6 +440,54 @@ def validate_zspace_semantic_review_packet(
     return result
 
 
+def validate_zspace_semantic_review_packet_trusted_legacy_replay(
+    packet: Mapping[str, object],
+) -> dict[str, Any]:
+    """Replay a trusted historical v1 packet without newer admission budgets.
+
+    Never pass untrusted or remotely supplied input to this opt-in path. Use
+    :func:`validate_zspace_semantic_review_packet` for normal validation.
+    """
+
+    result = _native_operation(
+        "_zspace_semantic_review_packet_trusted_legacy_replay", packet
+    )
+    _validate_packet_receipt(result)
+    return result
+
+
+def seal_zspace_semantic_review_packet(
+    *,
+    protocol_id: str,
+    prompt_set_id: str,
+    blinding_key_sha256: str,
+    blinding_map_id: str,
+    instructions: str,
+    rubric: Mapping[str, str],
+    groups: Sequence[Mapping[str, object]],
+) -> dict[str, Any]:
+    """Build, content-address, and validate a blinded packet entirely in Rust."""
+
+    result = _native_operation(
+        "_zspace_semantic_review_packet_seal",
+        {
+            "protocol_id": protocol_id,
+            "prompt_set_id": prompt_set_id,
+            "blinding_key_sha256": blinding_key_sha256,
+            "blinding_map_id": blinding_map_id,
+            "instructions": instructions,
+            "rubric": dict(rubric),
+            "groups": _bounded_mapping_sequence(
+                groups,
+                maximum=ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
+                label="semantic review group",
+            ),
+        },
+    )
+    _validate_packet_receipt(result)
+    return result
+
+
 def zspace_semantic_review_map_id(
     entries: Sequence[Mapping[str, object]],
 ) -> str:
@@ -382,6 +495,26 @@ def zspace_semantic_review_map_id(
 
     return _native_identity_operation(
         "_zspace_semantic_review_map_id",
+        {
+            "entries": _bounded_mapping_sequence(
+                entries,
+                maximum=ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES,
+                label="semantic review map entry",
+            )
+        },
+    )
+
+
+def zspace_semantic_review_map_id_trusted_legacy_replay(
+    entries: Sequence[Mapping[str, object]],
+) -> str:
+    """Replay a trusted historical v1 map commitment without newer budgets.
+
+    Never pass untrusted or remotely supplied input to this opt-in path.
+    """
+
+    return _native_identity_operation(
+        "_zspace_semantic_review_map_id_trusted_legacy_replay",
         {"entries": [dict(entry) for entry in entries]},
     )
 
@@ -392,6 +525,22 @@ def validate_zspace_semantic_review_packet_receipt(
     """Recompute a packet receipt in Rust and reject changes."""
 
     result = _native_operation("_zspace_semantic_review_packet_validate", receipt)
+    _validate_packet_receipt(result)
+    return result
+
+
+def validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay(
+    receipt: Mapping[str, object],
+) -> dict[str, Any]:
+    """Replay a trusted historical v1 packet receipt without newer budgets.
+
+    Never pass untrusted or remotely supplied input to this opt-in path.
+    """
+
+    result = _native_operation(
+        "_zspace_semantic_review_packet_validate_trusted_legacy_replay",
+        receipt,
+    )
     _validate_packet_receipt(result)
     return result
 
@@ -410,7 +559,11 @@ def new_zspace_semantic_review_draft(
         "packet_id": packet_id,
         "reviewer_id": reviewer_id,
         "review_session_id": review_session_id,
-        "responses": [dict(response) for response in responses],
+        "responses": _bounded_mapping_sequence(
+            responses,
+            maximum=ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
+            label="semantic review response",
+        ),
     }
 
 
@@ -435,6 +588,22 @@ def validate_zspace_semantic_review_draft_receipt(
     """Recompute a draft receipt in Rust and reject changes."""
 
     result = _native_operation("_zspace_semantic_review_draft_validate", receipt)
+    _validate_draft_receipt(result)
+    return result
+
+
+def validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(
+    receipt: Mapping[str, object],
+) -> dict[str, Any]:
+    """Replay a trusted historical v1 draft receipt without newer budgets.
+
+    Never pass untrusted or remotely supplied input to this opt-in path.
+    """
+
+    result = _native_operation(
+        "_zspace_semantic_review_draft_validate_trusted_legacy_replay",
+        receipt,
+    )
     _validate_draft_receipt(result)
     return result
 
@@ -465,6 +634,22 @@ def validate_zspace_semantic_review_unblind(
     """Recompute an unblind report in Rust and reject changes."""
 
     result = _native_operation("_zspace_semantic_review_unblind_validate", report)
+    _validate_unblind_report(result)
+    return result
+
+
+def validate_zspace_semantic_review_unblind_trusted_legacy_replay(
+    report: Mapping[str, object],
+) -> dict[str, Any]:
+    """Replay a trusted historical v1 unblind report without newer budgets.
+
+    Never pass untrusted or remotely supplied input to this opt-in path.
+    """
+
+    result = _native_operation(
+        "_zspace_semantic_review_unblind_validate_trusted_legacy_replay",
+        report,
+    )
     _validate_unblind_report(result)
     return result
 
