@@ -175,6 +175,5 @@ def validate_zspace_runtime_protocol_catalog(
 ) -> dict[str, Any]:
     """Replay an archived catalog against the current exact Rust surface."""
 
-    if not isinstance(catalog, Mapping):
-        raise TypeError("catalog must be a mapping")
+    # PyO3 performs concrete PyDict admission without consulting __class__.
     return _native_operation("_zspace_runtime_protocol_catalog_validate", catalog)

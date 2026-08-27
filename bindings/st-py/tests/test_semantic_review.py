@@ -301,6 +301,10 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
         semantic_review._bounded_mapping_sequence([{}, {}], maximum=1, label="test row")
 
     class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _key: str) -> object:
             raise AssertionError("custom __getitem__ must not run")
 
@@ -314,6 +318,10 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
             raise AssertionError("custom items must not run")
 
     class ActiveSequence(Sequence[Mapping[str, object]]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _index: int) -> Mapping[str, object]:
             raise AssertionError("custom __getitem__ must not run")
 

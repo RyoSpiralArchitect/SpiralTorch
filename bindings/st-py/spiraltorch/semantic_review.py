@@ -247,9 +247,14 @@ def _bounded_mapping_snapshot(
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise TypeError(f"{label} must be a dict-backed mapping for bounded admission")
-    if dict.__len__(value) > maximum:
+    # Base descriptors inspect the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
         raise ValueError(f"{label} field count exceeds maximum {maximum}")
     return dict.copy(value)
 
@@ -303,14 +308,18 @@ def _bounded_mapping_sequence(
     label: str,
     maximum_fields: int = 8,
 ) -> list[dict[str, object]]:
-    if isinstance(values, list):
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
         value_count = list.__len__(values)
         value_iterator = list.__iter__(values)
-    elif isinstance(values, tuple):
-        value_count = tuple.__len__(values)
-        value_iterator = tuple.__iter__(values)
-    else:
-        raise TypeError(f"{label} must be a list or tuple for bounded admission")
+    except TypeError:
+        try:
+            value_count = tuple.__len__(values)
+            value_iterator = tuple.__iter__(values)
+        except TypeError:
+            raise TypeError(
+                f"{label} must be a list or tuple for bounded admission"
+            ) from None
     if value_count > maximum:
         raise ValueError(f"{label} count exceeds maximum {maximum}")
 
@@ -566,11 +575,16 @@ def zspace_semantic_review_map_id_trusted_legacy_replay(
     Never pass untrusted or remotely supplied input to this opt-in path.
     """
 
-    if not isinstance(entries, (list, tuple)):
-        raise TypeError(
-            "trusted legacy semantic review entries must be a list or tuple for "
-            "passive admission"
-        )
+    try:
+        list.__len__(entries)
+    except TypeError:
+        try:
+            tuple.__len__(entries)
+        except TypeError:
+            raise TypeError(
+                "trusted legacy semantic review entries must be a list or tuple for "
+                "passive admission"
+            ) from None
 
     return _native_identity_operation(
         "_zspace_semantic_review_map_id_trusted_legacy_replay",

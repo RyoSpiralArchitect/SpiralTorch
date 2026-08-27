@@ -227,6 +227,10 @@ def test_generation_evidence_dict_subclasses_cannot_bypass_snapshot_bounds() -> 
 
 def test_generation_evidence_rejects_active_container_hooks() -> None:
     class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _key: str) -> object:
             raise AssertionError("custom __getitem__ must not run")
 
@@ -240,6 +244,10 @@ def test_generation_evidence_rejects_active_container_hooks() -> None:
             raise AssertionError("custom items must not run")
 
     class ActiveSequence(Sequence[Mapping[str, object]]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _index: int) -> Mapping[str, object]:
             raise AssertionError("custom __getitem__ must not run")
 

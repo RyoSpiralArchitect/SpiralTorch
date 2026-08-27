@@ -274,6 +274,10 @@ def test_repetition_dict_subclasses_cannot_override_bounded_snapshot() -> None:
 
 def test_repetition_facade_rejects_active_container_hooks() -> None:
     class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _key: str) -> object:
             raise AssertionError("custom __getitem__ must not run")
 
@@ -287,6 +291,10 @@ def test_repetition_facade_rejects_active_container_hooks() -> None:
             raise AssertionError("custom items must not run")
 
     class ActiveSequence(Sequence[Mapping[str, object]]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _index: int) -> Mapping[str, object]:
             raise AssertionError("custom __getitem__ must not run")
 
@@ -303,6 +311,17 @@ def test_repetition_facade_rejects_active_container_hooks() -> None:
         def __len__(self) -> int:
             raise AssertionError("overridden __len__ must not run")
 
+    class HostileString(str):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __str__(self) -> str:
+            raise AssertionError("overridden __str__ must not run")
+
+        def __eq__(self, _other: object) -> bool:
+            raise AssertionError("overridden __eq__ must not run")
+
     sequence = {
         "token_ids": [1, 2, 3],
         "token_mask": [True, True, True],
@@ -312,12 +331,19 @@ def test_repetition_facade_rejects_active_container_hooks() -> None:
         sequences=HostileList([sequence])
     )
     assert plan["plan_validated"] is True
+    string_plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=[sequence],
+        candidate_source=HostileString("prior_continuation"),
+    )
+    assert string_plan["request"]["config"]["candidate_source"]["kind"] == (  # type: ignore[index]
+        "prior_continuation"
+    )
 
     with pytest.raises(TypeError, match="list or tuple for bounded admission"):
         st.zspace_repetition_unlikelihood_plan(sequences=ActiveSequence())
     with pytest.raises(TypeError, match="dict-backed mapping"):
         st.zspace_repetition_unlikelihood_plan(sequences=[ActiveMapping()])
-    with pytest.raises(TypeError, match="dict-backed mapping"):
+    with pytest.raises(ValueError, match="candidate_source must be"):
         st.zspace_repetition_unlikelihood_plan(
             sequences=[sequence],
             candidate_source=ActiveMapping(),

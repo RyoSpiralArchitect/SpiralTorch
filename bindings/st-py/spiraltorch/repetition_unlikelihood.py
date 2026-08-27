@@ -160,9 +160,14 @@ def _bounded_mapping_snapshot(
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise TypeError(f"{label} must be a dict-backed mapping for bounded admission")
-    if dict.__len__(value) > maximum:
+    # Base descriptors inspect the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
         raise ValueError(f"{label} field count exceeds maximum {maximum}")
     return dict.copy(value)
 
@@ -255,17 +260,19 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
 def _bounded_sequences(
     sequences: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
-    if isinstance(sequences, list):
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
         sequence_count = list.__len__(sequences)
         sequence_iterator = list.__iter__(sequences)
-    elif isinstance(sequences, tuple):
-        sequence_count = tuple.__len__(sequences)
-        sequence_iterator = tuple.__iter__(sequences)
-    else:
-        raise TypeError(
-            "repetition-unlikelihood sequences must be a list or tuple for bounded "
-            "admission"
-        )
+    except TypeError:
+        try:
+            sequence_count = tuple.__len__(sequences)
+            sequence_iterator = tuple.__iter__(sequences)
+        except TypeError:
+            raise TypeError(
+                "repetition-unlikelihood sequences must be a list or tuple for "
+                "bounded admission"
+            ) from None
     if sequence_count > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES:
         raise ValueError(
             "repetition-unlikelihood sequence count exceeds maximum "
@@ -290,16 +297,23 @@ def _candidate_source_payload(
     ngram_order: int,
     proposal_top_k: int,
 ) -> dict[str, object]:
-    if isinstance(candidate_source, Mapping):
+    # Avoid Mapping checks and subclass comparison hooks before Rust admission.
+    try:
         return _bounded_mapping_snapshot(
             candidate_source,
             maximum=_MAX_CANDIDATE_SOURCE_FIELDS,
             label="repetition-unlikelihood candidate source",
         )
-    if candidate_source == "prior_continuation":
-        return {"kind": candidate_source, "ngram_order": ngram_order}
-    if candidate_source in {"model_topk_history", "model_topk_periodic"}:
-        return {"kind": candidate_source, "proposal_top_k": proposal_top_k}
+    except TypeError:
+        pass
+    try:
+        source = str.__str__(candidate_source)
+    except TypeError:
+        source = None
+    if source == "prior_continuation":
+        return {"kind": source, "ngram_order": ngram_order}
+    if source in {"model_topk_history", "model_topk_periodic"}:
+        return {"kind": source, "proposal_top_k": proposal_top_k}
     raise ValueError(
         "candidate_source must be prior_continuation, model_topk_history, or "
         "model_topk_periodic"

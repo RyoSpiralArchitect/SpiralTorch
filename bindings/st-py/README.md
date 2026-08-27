@@ -102,9 +102,10 @@ helpers remain trusted-local convenience transports and are intentionally not
 certified as hostile-input boundaries.
 
 Normal catalogued Python routes admit `dict`-backed mappings and `list`/`tuple`
-sequences, including subclasses through base-container operations. Arbitrary
-`Mapping` or `Sequence` implementations are rejected before their Python
-enumeration hooks can run; Rust then applies the protocol byte/node/depth and
+sequences, including subclasses through base-container descriptors that inspect
+the concrete C type without consulting `__class__`. Arbitrary `Mapping` or
+`Sequence` implementations are rejected before their Python type, enumeration,
+or comparison hooks can run; Rust then applies the protocol byte/node/depth and
 semantic admission budgets. Opt-in trusted-legacy replay keeps its documented
 historical budget exemptions, but still rejects active outer containers and
 remains unsuitable for remote input.

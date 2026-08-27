@@ -24,9 +24,10 @@
 - Bound normal generation, repetition, and semantic-review Python ingress
   before serde materialization. Facade snapshots accept passive
   `dict`/`list`/`tuple` containers, bypass subclass overrides, reject arbitrary
-  mapping/sequence enumeration hooks, and preserve tuple inputs without
-  copying complete token trees. Trusted legacy replay retains its historical
-  budget semantics without enumerating active outer containers.
+  mapping/sequence type and enumeration hooks (including `__class__` proxies),
+  and preserve tuple inputs without copying complete token trees. Trusted legacy
+  replay retains its historical budget semantics without inspecting active
+  outer containers.
 
 ## 0.4.14
 

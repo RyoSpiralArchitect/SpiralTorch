@@ -92,6 +92,10 @@ def test_runtime_protocol_catalog_public_surface_is_typed_and_exported() -> None
 
 def test_runtime_protocol_catalog_rejects_active_mapping_hooks_in_rust() -> None:
     class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
         def __getitem__(self, _key: str) -> object:
             raise AssertionError("custom __getitem__ must not run")
 
@@ -114,8 +118,15 @@ def test_runtime_protocol_catalog_rejects_active_mapping_hooks_in_rust() -> None
         def items(self):
             raise AssertionError("overridden items must not run")
 
+    class ActiveClassProxy:
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
     with pytest.raises(ValueError, match="payload must be JSON-like"):
         st.validate_zspace_runtime_protocol_catalog(ActiveMapping())
+    with pytest.raises(ValueError, match="payload must be JSON-like"):
+        st.validate_zspace_runtime_protocol_catalog(ActiveClassProxy())  # type: ignore[arg-type]
 
     catalog = st.zspace_runtime_protocol_catalog()
     assert st.validate_zspace_runtime_protocol_catalog(HostileDict(catalog)) == catalog
