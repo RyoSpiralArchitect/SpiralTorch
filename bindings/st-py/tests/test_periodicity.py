@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -98,6 +99,66 @@ def test_periodicity_fails_closed_on_unsafe_or_unbounded_requests() -> None:
             maximum_period=st.ZSPACE_PERIODICITY_MAX_PERIOD,
             minimum_repetitions=2,
         )
+
+
+def test_periodicity_rejects_active_container_hooks_before_native_work() -> None:
+    class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class ActiveSequence(Sequence[int]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __getitem__(self, _index: int) -> int:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+    class HostileList(list[int]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+    class HostileDict(dict[str, object]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+        def items(self):
+            raise AssertionError("overridden items must not run")
+
+    report = st.zspace_periodicity(HostileList([1, 2, 1, 2, 1, 2]))
+    assert st.validate_zspace_periodicity(HostileDict(report)) == report
+
+    with pytest.raises(TypeError, match="list or tuple for bounded admission"):
+        st.zspace_periodicity(ActiveSequence())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_periodicity(ActiveMapping())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="payload must be JSON-like"):
+        st._rs._zspace_periodicity_validate(ActiveMapping())
 
 
 def test_periodicity_validator_rejects_request_and_result_tampering() -> None:

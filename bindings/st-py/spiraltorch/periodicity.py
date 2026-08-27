@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, Optional
 
 
@@ -97,7 +97,52 @@ __all__ = [
 ]
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+_MAX_NATIVE_ROOT_FIELDS = 64
+
+
+def _bounded_mapping_snapshot(
+    value: dict[str, object],
+    *,
+    maximum: int,
+    label: str,
+) -> dict[str, object]:
+    # Base descriptors prove the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
+
+
+def _bounded_token_ids(
+    token_ids: list[int] | tuple[int, ...],
+) -> list[int]:
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
+        token_count = list.__len__(token_ids)
+        token_iterator = list.__iter__(token_ids)
+    except TypeError:
+        try:
+            token_count = tuple.__len__(token_ids)
+            token_iterator = tuple.__iter__(token_ids)
+        except TypeError:
+            raise TypeError(
+                "Z-space periodicity token_ids must be a list or tuple for bounded "
+                "admission"
+            ) from None
+    if token_count > ZSPACE_PERIODICITY_MAX_TOKENS:
+        raise ValueError(
+            "Z-space periodicity token count exceeds maximum "
+            f"{ZSPACE_PERIODICITY_MAX_TOKENS}"
+        )
+    return list(token_iterator)
+
+
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -106,7 +151,13 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
             "Z-space periodicity requires the compiled Rust semantic core; "
             f"rebuild or reinstall SpiralTorch with {name}"
         )
-    contract = operation(dict(payload))
+    contract = operation(
+        _bounded_mapping_snapshot(
+            payload,
+            maximum=_MAX_NATIVE_ROOT_FIELDS,
+            label=f"native {name} payload",
+        )
+    )
     if not isinstance(contract, Mapping):
         raise RuntimeError(f"native {name} returned a non-mapping payload")
     result = dict(contract)
@@ -168,7 +219,7 @@ def _validate_periodicity(contract: Mapping[str, Any]) -> None:
 
 
 def zspace_periodicity(
-    token_ids: Sequence[int],
+    token_ids: list[int] | tuple[int, ...],
     *,
     appended_token_id: Optional[int] = None,
     maximum_period: int = ZSPACE_PERIODIC_SUFFIX_MAX_PERIOD,
@@ -179,7 +230,7 @@ def zspace_periodicity(
     return _native_operation(
         "_zspace_periodicity",
         {
-            "token_ids": list(token_ids),
+            "token_ids": _bounded_token_ids(token_ids),
             "appended_token_id": appended_token_id,
             "config": {
                 "maximum_period": maximum_period,
@@ -189,7 +240,7 @@ def zspace_periodicity(
     )
 
 
-def validate_zspace_periodicity(report: Mapping[str, object]) -> dict[str, Any]:
+def validate_zspace_periodicity(report: dict[str, object]) -> dict[str, Any]:
     """Recompute a serialized periodicity report in Rust and reject changes."""
 
     return _native_operation("_zspace_periodicity_validate", report)

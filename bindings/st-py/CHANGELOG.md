@@ -1,5 +1,22 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.16
+
+- Promote token periodicity into runtime protocol catalog v2 as the fourth
+  Rust-owned cross-client lifecycle. The content-addressed catalog now records
+  each Rust, Python, and WASM surface's normal-admission profile and guarantee;
+  serialized Python/WASM surfaces also carry protocol-specific byte/node/depth
+  limits instead of relying on binding-local documentation.
+- Harden normal periodicity ingress before materialization. Python snapshots only
+  passive `list`/`tuple` token containers and `dict` reports without invoking
+  subclass hooks, while WASM JSON entrypoints reject oversized strings,
+  duplicate keys, excessive nodes, and excessive depth before serde. WASM Object
+  helpers remain explicitly trusted-local.
+- Make `st-core` the single source of generation-evidence, periodicity,
+  repetition-unlikelihood, and semantic-review ingress limits. Python and WASM
+  bindings consume those constants directly, and installed-wheel release smoke
+  now executes all four protocol lifecycles.
+
 ## 0.4.15
 
 - Add a content-addressed Rust-owned runtime protocol catalog that records the

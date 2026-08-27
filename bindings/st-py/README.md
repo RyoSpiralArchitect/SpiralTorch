@@ -39,8 +39,8 @@ start with four handles:
   heavier fine-tune run.
 - `spiraltorch.zspace_runtime_protocol_catalog()` when you need the exact,
   content-addressed Rust/Python/WASM surface for generation evidence,
-  repetition control, and blinded semantic review before persisting or
-  dispatching an artifact.
+  periodicity analysis, repetition control, and blinded semantic review before
+  persisting or dispatching an artifact.
 
 ```bash
 python - <<'PY'
@@ -90,16 +90,24 @@ assert st.validate_zspace_runtime_protocol_catalog(catalog) == catalog
 for protocol in catalog["protocols"]:
     print(protocol["name"], protocol["semantic_owner"])
     for surface in protocol["clients"]:
-        print(" ", surface["client"], surface["operations"])
+        print(
+            " ",
+            surface["client"],
+            surface["normal_admission"]["profile"],
+            surface["normal_admission"]["limits"],
+        )
 ```
 
-The current catalog covers held-out generation evidence, bounded
-repetition-unlikelihood planning, and the complete blinded semantic-review
-lifecycle. Trusted historical replay is always opt-in, accepts only already
-trusted local evidence, and is exposed by Rust/Python only. Browser/WASM
-catalog entries expose only byte/node/depth-bounded JSON routes. WASM object
-helpers remain trusted-local convenience transports and are intentionally not
-certified as hostile-input boundaries.
+The current catalog covers held-out generation evidence, bounded token
+periodicity, repetition-unlikelihood planning, and the complete blinded
+semantic-review lifecycle. Catalog v2 records a normal-admission profile and
+guarantee for every client surface; serialized Python/WASM surfaces also carry
+Rust-owned byte/node/depth limits, while typed Rust admission has no serialized
+budget. Trusted historical replay is always opt-in, accepts only already trusted
+local evidence, and is exposed by Rust/Python only. Browser/WASM catalog entries
+expose only bounded JSON routes. WASM object helpers remain trusted-local
+convenience transports and are intentionally not certified as hostile-input
+boundaries.
 
 Normal catalogued Python routes admit `dict`-backed mappings and `list`/`tuple`
 sequences, including subclasses through base-container descriptors that inspect
@@ -535,6 +543,13 @@ IDs are limited to JavaScript-safe integers so persisted Python and browser
 reports remain identical. This is structural token evidence only: a detected
 suffix does not establish semantic degradation or predict that a loop will
 continue.
+
+The normal Python facade accepts only passive `list`/`tuple` token containers and
+passive `dict` reports. It snapshots built-in storage without invoking subclass
+iteration, item, length, or type hooks, then the native boundary applies the
+catalogued byte/node/depth limits before serde materialization. Arbitrary
+`Sequence` and `Mapping` implementations are deliberately not an ingress
+contract.
 
 ## Blinded semantic review
 

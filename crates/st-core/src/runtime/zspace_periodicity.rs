@@ -33,6 +33,12 @@ pub const ZSPACE_PERIODICITY_MAX_MINIMUM_REPETITIONS: usize = 1_000_000;
 pub const ZSPACE_PERIODICITY_MAX_COMPARISON_WORK: usize = 16_777_216;
 /// Largest integer transported exactly by every supported JSON/JavaScript client.
 pub const ZSPACE_PERIODICITY_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+/// Maximum JSON-compatible bytes admitted before request/report deserialization.
+pub const ZSPACE_PERIODICITY_MAX_INGRESS_BYTES: u64 = 32 * 1_024 * 1_024;
+/// Maximum JSON-compatible values admitted before request/report deserialization.
+pub const ZSPACE_PERIODICITY_MAX_INGRESS_NODES: u64 = 1_000_128;
+/// Maximum JSON-compatible nesting admitted before request/report deserialization.
+pub const ZSPACE_PERIODICITY_MAX_INGRESS_DEPTH: u32 = 8;
 /// Canonical periodic-suffix and tie-breaking semantics.
 pub const ZSPACE_PERIODICITY_RULE: &str =
     "trailing periodic run with period<=maximum_period and token_count>=period*minimum_repetitions; the run may start mid-cycle; select by maximum repeated_token_count, then token_count, then smaller period";

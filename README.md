@@ -584,11 +584,14 @@ Without cloning the repo, `pip install spiraltorch` gives you:
 - **Rust-owned evaluation protocols:**
   `st.zspace_runtime_protocol_catalog()` exposes the content-addressed Rust,
   Python, and WASM surface for held-out generation evidence, bounded
-  repetition-unlikelihood plans, and blinded semantic review. Persisted
+  token-periodicity analysis, repetition-unlikelihood plans, and blinded
+  semantic review. Persisted
   catalogs can be replayed with `st.validate_zspace_runtime_protocol_catalog(...)`;
-  catalogued Python/WASM admission paths remain bounded, WASM object helpers
-  stay trusted-local and outside that guarantee, and trusted legacy replay is
-  explicit and never exposed to WASM.
+  every client surface records its normal-admission profile, while serialized
+  Python/WASM surfaces also carry Rust-owned byte/node/depth limits. Catalogued
+  Python/WASM paths remain bounded, WASM object helpers stay trusted-local and
+  outside that guarantee, and trusted legacy replay is explicit and never
+  exposed to WASM.
 - **Canvas + observability:** `st.canvas.CanvasProjector`, `st.telemetry.*`, HTML trace writers, `st.serve_zspace_trace`.
 - **SpiralK planning:** `st.plan_topk(...)`, the Rust-owned
   `st.RankPlan.contract()` audit payload, `st.write_kdsl_trace_jsonl`, and
@@ -900,7 +903,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.15
+VERSION=0.4.16
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

@@ -15,7 +15,7 @@ def _native_constant(name: str, fallback: str) -> str:
 
 ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION = _native_constant(
     "ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION",
-    "spiraltorch.zspace_runtime_protocol_catalog.v1",
+    "spiraltorch.zspace_runtime_protocol_catalog.v2",
 )
 ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND = _native_constant(
     "ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND",
@@ -84,6 +84,11 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
     protocol_order = str(catalog.get("protocol_order_rule") or "").split(",")
     client_order = str(catalog.get("client_order_rule") or "").split(",")
     transport_order = ["native", "bounded_mapping", "bounded_json"]
+    admission_profile_order = [
+        "typed_native",
+        "passive_json_containers",
+        "bounded_json_string",
+    ]
     if len(protocol_order) != protocol_count or client_order != [
         "rust",
         "python",
@@ -124,8 +129,10 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
                 raise RuntimeError(
                     "native Z-space core returned invalid artifact metadata"
                 )
-        for client in clients:
+        normal_limits: list[Mapping[str, Any]] = []
+        for client_index, client in enumerate(clients):
             operations = client.get("operations")
+            admission = client.get("normal_admission")
             if (
                 not isinstance(operations, list)
                 or not operations
@@ -137,12 +144,43 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
                     "native Z-space core returned an empty client surface"
                 )
             if (
+                not isinstance(admission, Mapping)
+                or admission.get("profile")
+                != admission_profile_order[client_index]
+                or not isinstance(admission.get("guarantee"), str)
+                or not admission["guarantee"]
+            ):
+                raise RuntimeError(
+                    "native Z-space core returned invalid admission metadata"
+                )
+            limits = admission.get("limits")
+            if client_index == 0:
+                if limits is not None:
+                    raise RuntimeError(
+                        "native Z-space core budgeted typed Rust admission"
+                    )
+            else:
+                if not isinstance(limits, Mapping) or any(
+                    not isinstance(limits.get(field), int)
+                    or isinstance(limits.get(field), bool)
+                    or limits[field] <= 0
+                    for field in ("maximum_bytes", "maximum_nodes", "maximum_depth")
+                ):
+                    raise RuntimeError(
+                        "native Z-space core returned invalid admission limits"
+                    )
+                normal_limits.append(limits)
+            if (
                 client.get("client") == "wasm"
                 and client.get("trusted_legacy_replay") is not False
             ):
                 raise RuntimeError(
                     "native Z-space core exposed trusted legacy replay to WASM"
                 )
+        if len(normal_limits) != 2 or dict(normal_limits[0]) != dict(normal_limits[1]):
+            raise RuntimeError(
+                "native Z-space core returned cross-client admission-limit drift"
+            )
 
 
 def _native_operation(

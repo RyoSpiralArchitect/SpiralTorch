@@ -5,13 +5,12 @@ use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_runtime_protocol_catalog::{
     validate_zspace_runtime_protocol_catalog_value, zspace_runtime_protocol_catalog,
     ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION, ZSPACE_RUNTIME_PROTOCOL_CATALOG_ID_RULE,
-    ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND, ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_BACKEND,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND, ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_BACKEND,
     ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER, ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS,
 };
-
-const PY_PROTOCOL_CATALOG_MAX_INGRESS_BYTES: u64 = 1_024 * 1_024;
-const PY_PROTOCOL_CATALOG_MAX_INGRESS_NODES: u64 = 20_000;
-const PY_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH: usize = 16;
 
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
@@ -45,9 +44,9 @@ fn _zspace_runtime_protocol_catalog_validate(
 ) -> PyResult<PyObject> {
     let value = crate::json::py_to_json_bounded(
         catalog,
-        PY_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
-        PY_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
-        PY_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_NODES,
+        ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_DEPTH as usize,
         "Z-space runtime protocol catalog",
     )?;
     let catalog = py

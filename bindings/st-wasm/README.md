@@ -48,13 +48,15 @@ console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name)
 ```
 
 The catalog is content-addressed by `st-core` and currently binds generation
-evidence, repetition-unlikelihood planning, and the complete blinded
-semantic-review lifecycle across Rust, Python, and WASM. Each WASM operation
-listed by the catalog is a byte/node/depth-bounded JSON admission route checked
-against the generated export and bundled TypeScript declaration. Object APIs
-remain trusted-local convenience transports rather than hostile-input
-boundaries. Trusted legacy replay remains deliberately absent from the browser
-surface.
+evidence, token-periodicity analysis, repetition-unlikelihood planning, and the
+complete blinded semantic-review lifecycle across Rust, Python, and WASM.
+Catalog v2 records the normal-admission profile and guarantee for every client
+surface; serialized Python/WASM surfaces also carry Rust-owned byte/node/depth
+limits, while typed Rust admission has no serialized budget. Each catalogued
+WASM operation is a bounded JSON admission route checked against the generated
+export and bundled TypeScript declaration. Object APIs remain trusted-local
+convenience transports rather than hostile-input boundaries. Trusted legacy
+replay remains deliberately absent from the browser surface.
 
 ## Shared reverse-mode autograd
 
@@ -295,9 +297,12 @@ console.log(replay.periodic_suffix?.period, replay.analysis_id);
 ```
 
 `zspacePeriodicityJson` and `validateZspacePeriodicityJson` expose the same
-contract for workers and storage. Rust rejects unknown fields, unsafe token IDs,
-excessive comparison work, and any report tampering. A positive suffix is a
-structural token observation, not a semantic-quality or efficacy claim.
+contract for workers and storage. These JSON routes bound bytes before making a
+Rust string, then reject duplicate keys and enforce node/depth limits before
+serde materialization. Rust rejects unknown fields, unsafe token IDs, excessive
+comparison work, and any report tampering. The Object helpers above are
+trusted-local conveniences, not hostile-input boundaries. A positive suffix is
+a structural token observation, not a semantic-quality or efficacy claim.
 
 Held-out generation evidence is exposed through the same boundary. Browser
 clients provide only content-addressed run identities and continuation token IDs;

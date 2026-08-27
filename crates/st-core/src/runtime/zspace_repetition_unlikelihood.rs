@@ -49,6 +49,12 @@ pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_TOTAL_TOKENS: usize = 1_000_000;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS: u64 = 64_000_000;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES: u64 = 32 * 1_024 * 1_024;
+/// Maximum normal JSON-compatible bytes admitted before request/plan deserialization.
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
+/// Maximum normal JSON-compatible values admitted before request/plan deserialization.
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES: u64 = 8_000_000;
+/// Maximum normal JSON-compatible nesting admitted before request/plan deserialization.
+pub const ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH: u32 = 32;
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_WORK_UNIT_RULE: &str =
     "count one base unit per input token; prior_continuation adds the upper-bound mask and prefix comparisons for every bounded history start; model_topk_history adds every bounded history token and submitted proposal; model_topk_periodic additionally adds the upper-bound contiguous-mask and period-comparison scans for every submitted proposal";
 pub const ZSPACE_REPETITION_UNLIKELIHOOD_MATERIALIZED_PLAN_BYTE_RULE: &str =

@@ -4,6 +4,9 @@ use serde_json::Value;
 use st_core::runtime::zspace_repetition_unlikelihood::{
     plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
     ZSpaceRepetitionUnlikelihoodError, ZSpaceRepetitionUnlikelihoodRequest,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
 };
 
 use crate::utils::bounded_json_value_from_str;
@@ -18,15 +21,11 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::{bounded_json_string_from_js, js_error, snapshot_json_compatible_js_value};
 
-const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
-const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES: u64 = 8_000_000;
-const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH: u32 = 32;
-
 fn bounded_json_value(input_json: &str, context: &str) -> Result<Value, String> {
     bounded_json_value_with_limit(
         input_json,
         context,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
     )
 }
 
@@ -38,8 +37,8 @@ fn bounded_json_value_with_limit(
     bounded_json_value_from_str(
         input_json,
         maximum_bytes,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
         context,
     )
 }
@@ -48,9 +47,9 @@ fn bounded_json_value_with_limit(
 fn snapshot_repetition_js_value(value: &JsValue, context: &str) -> Result<JsValue, JsValue> {
     snapshot_json_compatible_js_value(
         value,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
         context,
     )
 }
@@ -111,7 +110,7 @@ pub fn zspace_repetition_unlikelihood_plan_json(
 ) -> Result<String, JsValue> {
     let request_json = bounded_json_string_from_js(
         request_json,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
         "Z-space repetition-unlikelihood request JSON",
     )?;
     let request = request_from_json(&request_json).map_err(js_error)?;
@@ -136,7 +135,7 @@ pub fn validate_zspace_repetition_unlikelihood_plan_json(
 ) -> Result<String, JsValue> {
     let plan_json = bounded_json_string_from_js(
         plan_json,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
         "Z-space repetition-unlikelihood plan JSON",
     )?;
     let plan = plan_from_json(&plan_json).map_err(js_error)?;

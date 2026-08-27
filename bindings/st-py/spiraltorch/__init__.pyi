@@ -5605,14 +5605,14 @@ def validate_zspace_runtime_protocol_catalog(
     catalog: Dict[str, object],
 ) -> Dict[str, object]: ...
 def zspace_periodicity(
-    token_ids: Sequence[int],
+    token_ids: List[int] | Tuple[int, ...],
     *,
     appended_token_id: Optional[int] = ...,
     maximum_period: int = ...,
     minimum_repetitions: int = ...,
 ) -> Dict[str, object]: ...
 def validate_zspace_periodicity(
-    report: Mapping[str, object],
+    report: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet(
     packet: Dict[str, object],
