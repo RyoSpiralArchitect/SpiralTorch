@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -97,7 +97,29 @@ __all__ = [
 ]
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+_MAX_NATIVE_ROOT_FIELDS = 32
+_MAX_SAMPLE_FIELDS = 3
+
+
+def _bounded_mapping_snapshot(
+    value: dict[str, object],
+    *,
+    maximum: int,
+    label: str,
+) -> dict[str, object]:
+    # Base descriptors inspect the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
+
+
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -106,7 +128,13 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
             "Z-space generation evidence requires the compiled Rust semantic core; "
             f"rebuild or reinstall SpiralTorch with {name}"
         )
-    contract = operation(dict(payload))
+    contract = operation(
+        _bounded_mapping_snapshot(
+            payload,
+            maximum=_MAX_NATIVE_ROOT_FIELDS,
+            label=f"native {name} payload",
+        )
+    )
     if not isinstance(contract, Mapping):
         raise RuntimeError(f"native {name} returned a non-mapping payload")
     result = dict(contract)
@@ -175,17 +203,38 @@ def _validate_generation_evidence(contract: Mapping[str, Any]) -> None:
         )
 
 
-def _normalized_samples(
-    samples: Sequence[Mapping[str, object]],
+def _bounded_samples(
+    samples: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> list[dict[str, object]]:
-    normalized: list[dict[str, object]] = []
-    for sample in samples:
-        row = dict(sample)
-        token_ids = row.get("continuation_token_ids")
-        if isinstance(token_ids, tuple):
-            row["continuation_token_ids"] = list(token_ids)
-        normalized.append(row)
-    return normalized
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
+        sample_count = list.__len__(samples)
+        sample_iterator = list.__iter__(samples)
+    except TypeError:
+        try:
+            sample_count = tuple.__len__(samples)
+            sample_iterator = tuple.__iter__(samples)
+        except TypeError:
+            raise TypeError(
+                "generation evidence samples must be a list or tuple for bounded "
+                "admission"
+            ) from None
+    if sample_count > ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES:
+        raise ValueError(
+            "generation evidence sample count exceeds maximum "
+            f"{ZSPACE_GENERATION_EVIDENCE_MAX_SAMPLES}"
+        )
+
+    snapshot: list[dict[str, object]] = []
+    for index, sample in enumerate(sample_iterator):
+        snapshot.append(
+            _bounded_mapping_snapshot(
+                sample,
+                maximum=_MAX_SAMPLE_FIELDS,
+                label=f"generation evidence sample[{index}]",
+            )
+        )
+    return snapshot
 
 
 def zspace_generation_evidence(
@@ -195,7 +244,7 @@ def zspace_generation_evidence(
     model_artifact_id: str,
     prompt_set_id: str,
     decoding_config_id: str,
-    samples: Sequence[Mapping[str, object]],
+    samples: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> dict[str, Any]:
     """Summarize held-out continuation token IDs in the canonical Rust core."""
 
@@ -207,13 +256,13 @@ def zspace_generation_evidence(
             "model_artifact_id": model_artifact_id,
             "prompt_set_id": prompt_set_id,
             "decoding_config_id": decoding_config_id,
-            "samples": _normalized_samples(samples),
+            "samples": _bounded_samples(samples),
         },
     )
 
 
 def validate_zspace_generation_evidence(
-    report: Mapping[str, object],
+    report: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a serialized generation report in Rust and reject changes."""
 

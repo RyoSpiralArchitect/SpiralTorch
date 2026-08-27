@@ -668,6 +668,16 @@ from .generation_evidence import (
     validate_zspace_generation_evidence,
     zspace_generation_evidence,
 )
+from .runtime_protocol_catalog import (
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_ID_RULE,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_BACKEND,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER,
+    ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS,
+    validate_zspace_runtime_protocol_catalog,
+    zspace_runtime_protocol_catalog,
+)
 from .periodicity import (
     ZSPACE_PERIODICITY_ANALYSIS_ID_RULE,
     ZSPACE_PERIODICITY_CONTRACT_VERSION,
@@ -8645,6 +8655,14 @@ _EXTRAS.extend(
         "ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER",
         "validate_zspace_generation_evidence",
         "zspace_generation_evidence",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_ID_RULE",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_BACKEND",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER",
+        "ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS",
+        "validate_zspace_runtime_protocol_catalog",
+        "zspace_runtime_protocol_catalog",
         "ZSPACE_PERIODICITY_ANALYSIS_ID_RULE",
         "ZSPACE_PERIODICITY_CONTRACT_VERSION",
         "ZSPACE_PERIODICITY_EVIDENCE_BOUNDARY",

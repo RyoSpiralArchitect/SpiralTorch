@@ -1,5 +1,36 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.15
+
+- Add a content-addressed Rust-owned runtime protocol catalog that records the
+  exact Rust, Python, and WASM operations for generation evidence, repetition
+  unlikelihood, and blinded semantic review. Catalog replay fails closed on
+  drift, and binding tests prove every advertised Python/WASM operation exists.
+- Expose generation-evidence construction and replay through WASM JSON and
+  trusted-local object APIs, with browser-number compatibility and the same
+  canonical Rust evidence identity used by direct Rust and Python clients.
+  Catalogued JSON routes now bound bytes, nodes, and depth before parsing;
+  active-object transports are deliberately outside the hostile-input claim.
+- Bound repetition-unlikelihood work and materialized plan size before heavy
+  planning, preserve explicit trusted historical replay only in Rust/Python,
+  and keep all WASM ingress on the current bounded contract.
+- Complete semantic-review packet sealing, map commitment, draft validation,
+  unblinding, and receipt replay across Python and WASM. Aggregate text,
+  mapping, node, depth, duplicate-key, getter/Proxy, and dict-subclass ingress
+  paths now fail closed before unbounded materialization.
+- Make both normal and release wheel workflows run the installed wheel through
+  the catalog and all three protocol lifecycles before artifacts can be
+  uploaded or published.
+- Bound normal generation, repetition, and semantic-review Python ingress
+  before serde materialization. Facade snapshots accept passive
+  `dict`/`list`/`tuple` containers, bypass subclass overrides, reject arbitrary
+  mapping/sequence type and enumeration hooks (including `__class__` proxies),
+  and preserve tuple inputs without copying complete token trees. Trusted legacy
+  replay retains its historical converter and budget semantics without
+  inspecting active outer containers. Public annotations and PEP 561 stubs now
+  declare those concrete passive containers rather than promising arbitrary
+  active protocols.
+
 ## 0.4.14
 
 - HF optimizer feedback ablation: add a resumable three-arm

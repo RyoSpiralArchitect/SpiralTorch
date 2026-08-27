@@ -21,4 +21,5 @@ pub mod zspace_optimizer;
 pub mod zspace_optimizer_feedback;
 pub mod zspace_periodicity;
 pub mod zspace_repetition_unlikelihood;
+pub mod zspace_runtime_protocol_catalog;
 pub mod zspace_semantic_review;

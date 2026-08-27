@@ -242,27 +242,24 @@ _MAX_BLINDING_MAP_FIELDS = 6
 
 
 def _bounded_mapping_snapshot(
-    value: Mapping[str, object],
+    value: dict[str, object],
     *,
     maximum: int,
     label: str,
 ) -> dict[str, object]:
-    if isinstance(value, dict):
-        if dict.__len__(value) > maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        return dict.copy(value)
-
-    snapshot: dict[str, object] = {}
-    for index, (key, item) in enumerate(value.items()):
-        if index >= maximum:
-            raise ValueError(f"{label} field count exceeds maximum {maximum}")
-        if not isinstance(key, str):
-            raise ValueError(f"{label} keys must be strings")
-        snapshot[key] = item
-    return snapshot
+    # Base descriptors inspect the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -283,7 +280,7 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
     return dict(result)
 
 
-def _native_identity_operation(name: str, payload: Mapping[str, object]) -> str:
+def _native_identity_operation(name: str, payload: dict[str, object]) -> str:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -305,16 +302,29 @@ def _native_identity_operation(name: str, payload: Mapping[str, object]) -> str:
 
 
 def _bounded_mapping_sequence(
-    values: Sequence[Mapping[str, object]],
+    values: list[dict[str, object]] | tuple[dict[str, object], ...],
     *,
     maximum: int,
     label: str,
     maximum_fields: int = 8,
 ) -> list[dict[str, object]]:
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
+        value_count = list.__len__(values)
+        value_iterator = list.__iter__(values)
+    except TypeError:
+        try:
+            value_count = tuple.__len__(values)
+            value_iterator = tuple.__iter__(values)
+        except TypeError:
+            raise TypeError(
+                f"{label} must be a list or tuple for bounded admission"
+            ) from None
+    if value_count > maximum:
+        raise ValueError(f"{label} count exceeds maximum {maximum}")
+
     rows: list[dict[str, object]] = []
-    for index, value in enumerate(values):
-        if index >= maximum:
-            raise ValueError(f"{label} count exceeds maximum {maximum}")
+    for index, value in enumerate(value_iterator):
         rows.append(
             _bounded_mapping_snapshot(
                 value,
@@ -477,7 +487,7 @@ def _validate_unblind_report(contract: Mapping[str, Any]) -> None:
 
 
 def validate_zspace_semantic_review_packet(
-    packet: Mapping[str, object],
+    packet: dict[str, object],
 ) -> dict[str, Any]:
     """Validate a blinded packet and its canonical packet commitment in Rust."""
 
@@ -487,7 +497,7 @@ def validate_zspace_semantic_review_packet(
 
 
 def validate_zspace_semantic_review_packet_trusted_legacy_replay(
-    packet: Mapping[str, object],
+    packet: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v1 packet without newer admission budgets.
 
@@ -509,8 +519,8 @@ def seal_zspace_semantic_review_packet(
     blinding_key_sha256: str,
     blinding_map_id: str,
     instructions: str,
-    rubric: Mapping[str, str],
-    groups: Sequence[Mapping[str, object]],
+    rubric: dict[str, str],
+    groups: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> dict[str, Any]:
     """Build, content-address, and validate a blinded packet entirely in Rust."""
 
@@ -540,7 +550,7 @@ def seal_zspace_semantic_review_packet(
 
 
 def zspace_semantic_review_map_id(
-    entries: Sequence[Mapping[str, object]],
+    entries: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> str:
     """Commit the exact pre-review candidate-to-arm assignments in Rust."""
 
@@ -558,21 +568,32 @@ def zspace_semantic_review_map_id(
 
 
 def zspace_semantic_review_map_id_trusted_legacy_replay(
-    entries: Sequence[Mapping[str, object]],
+    entries: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> str:
     """Replay a trusted historical v1 map commitment without newer budgets.
 
     Never pass untrusted or remotely supplied input to this opt-in path.
     """
 
+    try:
+        list.__len__(entries)
+    except TypeError:
+        try:
+            tuple.__len__(entries)
+        except TypeError:
+            raise TypeError(
+                "trusted legacy semantic review entries must be a list or tuple for "
+                "passive admission"
+            ) from None
+
     return _native_identity_operation(
         "_zspace_semantic_review_map_id_trusted_legacy_replay",
-        {"entries": [dict(entry) for entry in entries]},
+        {"entries": entries},
     )
 
 
 def validate_zspace_semantic_review_packet_receipt(
-    receipt: Mapping[str, object],
+    receipt: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a packet receipt in Rust and reject changes."""
 
@@ -582,7 +603,7 @@ def validate_zspace_semantic_review_packet_receipt(
 
 
 def validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay(
-    receipt: Mapping[str, object],
+    receipt: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v1 packet receipt without newer budgets.
 
@@ -602,7 +623,7 @@ def new_zspace_semantic_review_draft(
     packet_id: str,
     reviewer_id: str,
     review_session_id: str,
-    responses: Sequence[Mapping[str, object]] = (),
+    responses: list[dict[str, object]] | tuple[dict[str, object], ...] = (),
 ) -> dict[str, object]:
     """Create an unvalidated draft payload for the Rust progress contract."""
 
@@ -622,8 +643,8 @@ def new_zspace_semantic_review_draft(
 
 def summarize_zspace_semantic_review_draft(
     *,
-    packet: Mapping[str, object],
-    draft: Mapping[str, object],
+    packet: dict[str, object],
+    draft: dict[str, object],
 ) -> dict[str, Any]:
     """Validate and canonicalize partial or complete blinded review progress."""
 
@@ -647,7 +668,7 @@ def summarize_zspace_semantic_review_draft(
 
 
 def validate_zspace_semantic_review_draft_receipt(
-    receipt: Mapping[str, object],
+    receipt: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a draft receipt in Rust and reject changes."""
 
@@ -657,7 +678,7 @@ def validate_zspace_semantic_review_draft_receipt(
 
 
 def validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(
-    receipt: Mapping[str, object],
+    receipt: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v1 draft receipt without newer budgets.
 
@@ -674,9 +695,9 @@ def validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(
 
 def unblind_zspace_semantic_review(
     *,
-    packet: Mapping[str, object],
-    draft: Mapping[str, object],
-    blinding_map: Mapping[str, object],
+    packet: dict[str, object],
+    draft: dict[str, object],
+    blinding_map: dict[str, object],
 ) -> dict[str, Any]:
     """Unblind a complete response and aggregate arm/seed scores in Rust."""
 
@@ -705,7 +726,7 @@ def unblind_zspace_semantic_review(
 
 
 def validate_zspace_semantic_review_unblind(
-    report: Mapping[str, object],
+    report: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute an unblind report in Rust and reject changes."""
 
@@ -715,7 +736,7 @@ def validate_zspace_semantic_review_unblind(
 
 
 def validate_zspace_semantic_review_unblind_trusted_legacy_replay(
-    report: Mapping[str, object],
+    report: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v1 unblind report without newer budgets.
 

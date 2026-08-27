@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -149,7 +149,30 @@ __all__ = [
 ]
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+_MAX_NATIVE_ROOT_FIELDS = 64
+_MAX_SEQUENCE_FIELDS = 4
+_MAX_CANDIDATE_SOURCE_FIELDS = 2
+
+
+def _bounded_mapping_snapshot(
+    value: dict[str, object],
+    *,
+    maximum: int,
+    label: str,
+) -> dict[str, object]:
+    # Base descriptors inspect the concrete C type without consulting __class__.
+    try:
+        field_count = dict.__len__(value)
+    except TypeError:
+        raise TypeError(
+            f"{label} must be a dict-backed mapping for bounded admission"
+        ) from None
+    if field_count > maximum:
+        raise ValueError(f"{label} field count exceeds maximum {maximum}")
+    return dict.copy(value)
+
+
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -158,7 +181,13 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
             "Z-space repetition unlikelihood requires the compiled Rust semantic "
             f"core; rebuild or reinstall SpiralTorch with {name}"
         )
-    result = operation(dict(payload))
+    result = operation(
+        _bounded_mapping_snapshot(
+            payload,
+            maximum=_MAX_NATIVE_ROOT_FIELDS,
+            label=f"native {name} payload",
+        )
+    )
     if not isinstance(result, Mapping):
         raise RuntimeError(f"native {name} returned a non-mapping payload")
     plan = dict(result)
@@ -228,41 +257,63 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
         )
 
 
-def _normalized_sequences(
-    sequences: Sequence[Mapping[str, object]],
+def _bounded_sequences(
+    sequences: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> list[dict[str, object]]:
-    normalized: list[dict[str, object]] = []
-    for sequence in sequences:
-        row = dict(sequence)
-        for key in ("token_ids", "token_mask", "label_mask"):
-            value = row.get(key)
-            if isinstance(value, tuple):
-                row[key] = list(value)
-        proposals = row.get("proposal_token_ids")
-        if isinstance(proposals, tuple):
-            proposals = list(proposals)
-            row["proposal_token_ids"] = proposals
-        if isinstance(proposals, list):
-            row["proposal_token_ids"] = [
-                list(proposal_row) if isinstance(proposal_row, tuple) else proposal_row
-                for proposal_row in proposals
-            ]
-        normalized.append(row)
-    return normalized
+    # Keep admission hook-free while retaining list/tuple subclasses.
+    try:
+        sequence_count = list.__len__(sequences)
+        sequence_iterator = list.__iter__(sequences)
+    except TypeError:
+        try:
+            sequence_count = tuple.__len__(sequences)
+            sequence_iterator = tuple.__iter__(sequences)
+        except TypeError:
+            raise TypeError(
+                "repetition-unlikelihood sequences must be a list or tuple for "
+                "bounded admission"
+            ) from None
+    if sequence_count > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES:
+        raise ValueError(
+            "repetition-unlikelihood sequence count exceeds maximum "
+            f"{ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES}"
+        )
+
+    snapshot: list[dict[str, object]] = []
+    for index, sequence in enumerate(sequence_iterator):
+        snapshot.append(
+            _bounded_mapping_snapshot(
+                sequence,
+                maximum=_MAX_SEQUENCE_FIELDS,
+                label=f"repetition-unlikelihood sequence[{index}]",
+            )
+        )
+    return snapshot
 
 
 def _candidate_source_payload(
-    candidate_source: str | Mapping[str, object],
+    candidate_source: str | dict[str, object],
     *,
     ngram_order: int,
     proposal_top_k: int,
 ) -> dict[str, object]:
-    if isinstance(candidate_source, Mapping):
-        return dict(candidate_source)
-    if candidate_source == "prior_continuation":
-        return {"kind": candidate_source, "ngram_order": ngram_order}
-    if candidate_source in {"model_topk_history", "model_topk_periodic"}:
-        return {"kind": candidate_source, "proposal_top_k": proposal_top_k}
+    # Avoid Mapping checks and subclass comparison hooks before Rust admission.
+    try:
+        return _bounded_mapping_snapshot(
+            candidate_source,
+            maximum=_MAX_CANDIDATE_SOURCE_FIELDS,
+            label="repetition-unlikelihood candidate source",
+        )
+    except TypeError:
+        pass
+    try:
+        source = str.__str__(candidate_source)
+    except TypeError:
+        source = None
+    if source == "prior_continuation":
+        return {"kind": source, "ngram_order": ngram_order}
+    if source in {"model_topk_history", "model_topk_periodic"}:
+        return {"kind": source, "proposal_top_k": proposal_top_k}
     raise ValueError(
         "candidate_source must be prior_continuation, model_topk_history, or "
         "model_topk_periodic"
@@ -271,9 +322,9 @@ def _candidate_source_payload(
 
 def zspace_repetition_unlikelihood_plan(
     *,
-    sequences: Sequence[Mapping[str, object]],
+    sequences: list[dict[str, object]] | tuple[dict[str, object], ...],
     strength: float = 0.1,
-    candidate_source: str | Mapping[str, object] = "prior_continuation",
+    candidate_source: str | dict[str, object] = "prior_continuation",
     ngram_order: int = 3,
     proposal_top_k: int = 8,
     context_window: int = 128,
@@ -294,13 +345,13 @@ def zspace_repetition_unlikelihood_plan(
                 "context_window": context_window,
                 "max_candidates_per_position": max_candidates_per_position,
             },
-            "sequences": _normalized_sequences(sequences),
+            "sequences": _bounded_sequences(sequences),
         },
     )
 
 
 def validate_zspace_repetition_unlikelihood_plan(
-    plan: Mapping[str, object],
+    plan: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a plan in Rust within the shared work and materialization budgets."""
 
@@ -308,7 +359,7 @@ def validate_zspace_repetition_unlikelihood_plan(
 
 
 def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
-    plan: Mapping[str, object],
+    plan: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v3 plan without the newer admission budgets.
 

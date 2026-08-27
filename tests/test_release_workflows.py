@@ -64,10 +64,25 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
         self.assertIn("python -P ../../tools/smoke_hf_console_scripts.py", workflow)
         self.assertIn(
+            "python -P ../../tools/smoke_zspace_runtime_protocols.py",
+            workflow,
+        )
+        self.assertIn(
             "from scripts.publish_pypi_wheels import validate_wheel_metadata",
             workflow,
         )
         self.assertIn("validate_wheel_metadata(wheels, expected)", workflow)
+
+    def test_all_wheel_builds_smoke_rust_owned_zspace_protocols(self) -> None:
+        for workflow_name in ["wheels.yml", "release_wheels.yml"]:
+            with self.subTest(workflow=workflow_name):
+                workflow = (ROOT / ".github" / "workflows" / workflow_name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn(
+                    "python -P ../../tools/smoke_zspace_runtime_protocols.py",
+                    workflow,
+                )
 
     def test_pypi_publish_verification_requires_latest_release(self) -> None:
         publish_from_release = (

@@ -14,12 +14,22 @@ use st_core::runtime::zspace_generation_evidence::{
     ZSPACE_GENERATION_EVIDENCE_SEMANTIC_BACKEND, ZSPACE_GENERATION_EVIDENCE_SEMANTIC_OWNER,
 };
 
+const PY_GENERATION_EVIDENCE_MAX_INGRESS_BYTES: u64 = 96 * 1_024 * 1_024;
+const PY_GENERATION_EVIDENCE_MAX_INGRESS_NODES: u64 = 4_000_000;
+const PY_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH: usize = 32;
+
 fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(format!("{context}: {error}"))
 }
 
 fn request_value(request: &Bound<'_, PyAny>, label: &str) -> PyResult<serde_json::Value> {
-    let value = crate::json::py_to_json(request)?;
+    let value = crate::json::py_to_json_bounded(
+        request,
+        PY_GENERATION_EVIDENCE_MAX_INGRESS_BYTES,
+        PY_GENERATION_EVIDENCE_MAX_INGRESS_NODES,
+        PY_GENERATION_EVIDENCE_MAX_INGRESS_DEPTH,
+        label,
+    )?;
     if !value.is_object() {
         return Err(PyValueError::new_err(format!("{label} must be a mapping")));
     }

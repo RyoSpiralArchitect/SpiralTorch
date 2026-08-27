@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping, Sequence
 
 import pytest
 
@@ -225,6 +226,140 @@ def test_repetition_validator_is_bounded_and_legacy_replay_is_explicit() -> None
     }
     with pytest.raises(ValueError, match=r"work .* exceeds maximum 64000000"):
         st.validate_zspace_repetition_unlikelihood_plan(forged)
+
+
+def test_repetition_facade_and_native_ingress_are_bounded() -> None:
+    sequence = {
+        "token_ids": [1],
+        "token_mask": [True],
+        "label_mask": [True],
+    }
+    with pytest.raises(ValueError, match="sequence count exceeds maximum 4096"):
+        st.zspace_repetition_unlikelihood_plan(
+            sequences=[sequence]
+            * (st.ZSPACE_REPETITION_UNLIKELIHOOD_MAX_SEQUENCES + 1)
+        )
+
+    nested: object = None
+    for _ in range(40):
+        nested = [nested]
+    with pytest.raises(ValueError, match="too deeply nested"):
+        st.validate_zspace_repetition_unlikelihood_plan({"nested": nested})
+    with pytest.raises(ValueError) as legacy_error:
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+            {"nested": nested}
+        )
+    assert "too deeply nested" not in str(legacy_error.value)
+    assert "malformed repetition-unlikelihood plan" in str(legacy_error.value)
+
+
+def test_repetition_dict_subclasses_cannot_override_bounded_snapshot() -> None:
+    class HostileDict(dict[str, object]):
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+        def copy(self) -> dict[str, object]:
+            raise AssertionError("overridden copy must not run")
+
+        def items(self):
+            raise AssertionError("overridden items must not run")
+
+    plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=[
+            HostileDict(
+                {
+                    "token_ids": [1, 2, 3],
+                    "token_mask": [True, True, True],
+                    "label_mask": [True, True, True],
+                }
+            )
+        ]
+    )
+    assert st.validate_zspace_repetition_unlikelihood_plan(HostileDict(plan)) == plan
+
+
+def test_repetition_facade_rejects_active_container_hooks() -> None:
+    class ActiveMapping(Mapping[str, object]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __getitem__(self, _key: str) -> object:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+        def items(self):
+            raise AssertionError("custom items must not run")
+
+    class ActiveSequence(Sequence[Mapping[str, object]]):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __getitem__(self, _index: int) -> Mapping[str, object]:
+            raise AssertionError("custom __getitem__ must not run")
+
+        def __iter__(self):
+            raise AssertionError("custom __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("custom __len__ must not run")
+
+    class HostileList(list[Mapping[str, object]]):
+        def __iter__(self):
+            raise AssertionError("overridden __iter__ must not run")
+
+        def __len__(self) -> int:
+            raise AssertionError("overridden __len__ must not run")
+
+    class HostileString(str):
+        @property
+        def __class__(self) -> type[object]:
+            raise AssertionError("custom __class__ must not run")
+
+        def __str__(self) -> str:
+            raise AssertionError("overridden __str__ must not run")
+
+        def __eq__(self, _other: object) -> bool:
+            raise AssertionError("overridden __eq__ must not run")
+
+    sequence = {
+        "token_ids": [1, 2, 3],
+        "token_mask": [True, True, True],
+        "label_mask": [True, True, True],
+    }
+    plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=HostileList([sequence])
+    )
+    assert plan["plan_validated"] is True
+    string_plan = st.zspace_repetition_unlikelihood_plan(
+        sequences=[sequence],
+        candidate_source=HostileString("prior_continuation"),
+    )
+    assert string_plan["request"]["config"]["candidate_source"]["kind"] == (  # type: ignore[index]
+        "prior_continuation"
+    )
+
+    with pytest.raises(TypeError, match="list or tuple for bounded admission"):
+        st.zspace_repetition_unlikelihood_plan(sequences=ActiveSequence())
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.zspace_repetition_unlikelihood_plan(sequences=[ActiveMapping()])
+    with pytest.raises(ValueError, match="candidate_source must be"):
+        st.zspace_repetition_unlikelihood_plan(
+            sequences=[sequence],
+            candidate_source=ActiveMapping(),
+        )
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_repetition_unlikelihood_plan(ActiveMapping())
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+            ActiveMapping()
+        )
 
 
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:
