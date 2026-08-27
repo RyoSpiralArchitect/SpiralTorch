@@ -273,6 +273,40 @@ contract for workers and storage. Rust rejects unknown fields, unsafe token IDs,
 excessive comparison work, and any report tampering. A positive suffix is a
 structural token observation, not a semantic-quality or efficacy claim.
 
+Held-out generation evidence is exposed through the same boundary. Browser
+clients provide only content-addressed run identities and continuation token IDs;
+Rust canonicalizes sample order and owns all n-gram, adjacent-repetition,
+periodic-suffix, aggregate, and loop-score semantics:
+
+```ts
+import {
+    validateZspaceGenerationEvidenceObject,
+    zspaceGenerationEvidenceObject,
+} from "spiraltorch-wasm";
+
+const sha = (digit: string) => `sha256:${digit.repeat(64)}`;
+const evidence = zspaceGenerationEvidenceObject({
+    protocol_id: sha("a"),
+    runtime_identity_id: sha("b"),
+    model_artifact_id: sha("c"),
+    prompt_set_id: sha("d"),
+    decoding_config_id: sha("e"),
+    samples: [{
+        prompt_id: sha("f"),
+        seed: 17,
+        continuation_token_ids: [9, 1, 2, 1, 2, 1, 2],
+    }],
+});
+const replay = validateZspaceGenerationEvidenceObject(evidence);
+
+console.log(replay.aggregate.sample_mean_loop_score, replay.evidence_id);
+```
+
+The JSON variants carry the identical artifact through Web Workers or durable
+storage. Validation replays the complete request in Rust and rejects a changed
+metric, identity, ordering, or evidence boundary. As in Python and direct Rust,
+these are structural token observations rather than semantic-quality claims.
+
 Z-space meta-optimization follows the same state-carrying client model. The
 browser stores the returned checkpoint, but Rust owns restore coercion,
 observation normalisation, the FFT-derived fractional Sobolev gradient, bounded Topos

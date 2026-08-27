@@ -6,6 +6,7 @@
 pub mod api_llm_route_policy;
 pub mod autopilot;
 pub mod blackcat;
+mod canonical_json;
 #[cfg(feature = "golden")]
 pub mod golden;
 pub(crate) mod persistence;

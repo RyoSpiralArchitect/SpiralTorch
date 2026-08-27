@@ -129,6 +129,106 @@ declare module "spiraltorch-wasm" {
         report: ZSpacePeriodicityReport,
     ): ZSpacePeriodicityReport;
 
+    /** A held-out continuation committed to the shared Rust evidence protocol. */
+    export type ZSpaceGenerationEvidenceSample = {
+        prompt_id: string;
+        seed: number;
+        continuation_token_ids: number[];
+    };
+
+    /** Content-addressed identities and tokenizer-agnostic continuation tokens. */
+    export type ZSpaceGenerationEvidenceRequest = {
+        protocol_id: string;
+        runtime_identity_id: string;
+        model_artifact_id: string;
+        prompt_set_id: string;
+        decoding_config_id: string;
+        samples: ZSpaceGenerationEvidenceSample[];
+    };
+
+    export type ZSpaceGenerationNgramEvidence = {
+        order: number;
+        possible_count: number;
+        unique_count: number;
+        repeated_occurrence_count: number;
+        maximum_occurrence_count: number;
+        distinct_ratio: number | null;
+        repetition_ratio: number | null;
+    };
+
+    export type ZSpaceGenerationSampleEvidence = {
+        prompt_id: string;
+        seed: number;
+        token_count: number;
+        empty_continuation: boolean;
+        adjacent_transition_count: number;
+        consecutive_repeated_token_count: number;
+        consecutive_repetition_ratio: number | null;
+        periodic_loop_detected: boolean;
+        periodic_suffix_period: number | null;
+        periodic_suffix_token_count: number;
+        periodic_suffix_repeated_token_count: number;
+        periodic_suffix_repetition_count: number;
+        periodic_suffix_repeated_token_ratio: number | null;
+        loop_score: number;
+        ngrams: ZSpaceGenerationNgramEvidence[];
+    };
+
+    export type ZSpaceGenerationAggregateEvidence = {
+        sample_count: number;
+        nonempty_sample_count: number;
+        empty_sample_count: number;
+        total_token_count: number;
+        minimum_token_count: number;
+        maximum_token_count: number;
+        adjacent_transition_count: number;
+        consecutive_repeated_token_count: number;
+        consecutive_repetition_ratio: number | null;
+        periodic_loop_sample_count: number;
+        periodic_loop_sample_ratio: number;
+        periodic_suffix_repeated_token_count: number;
+        periodic_suffix_repeated_token_ratio: number | null;
+        sample_mean_loop_score: number;
+        maximum_loop_score: number;
+        ngrams: ZSpaceGenerationNgramEvidence[];
+    };
+
+    /** Canonical, replayable generation evidence computed by `st-core`. */
+    export type ZSpaceGenerationEvidenceReport = {
+        contract_version: "spiraltorch.zspace_generation_evidence.v1";
+        kind: "spiraltorch.zspace_generation_evidence";
+        semantic_owner: "st-core::runtime::zspace_generation_evidence";
+        semantic_backend: "rust";
+        evidence_validated: true;
+        evidence_id: string;
+        status: "ready";
+        request: ZSpaceGenerationEvidenceRequest;
+        metric_rule: string;
+        loop_score_rule: string;
+        ngram_orders: [1, 2, 3, 4];
+        periodic_suffix_max_period: number;
+        periodic_suffix_min_repetitions: number;
+        sample_count: number;
+        evidence_scope: "held_out_generation_token_observation";
+        samples: ZSpaceGenerationSampleEvidence[];
+        aggregate: ZSpaceGenerationAggregateEvidence;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+        efficacy_claim_requirements: string;
+    };
+
+    /** Summarize held-out continuation tokens through the Rust semantic core. */
+    export function zspaceGenerationEvidenceJson(requestJson: string): string;
+    export function zspaceGenerationEvidenceObject(
+        request: ZSpaceGenerationEvidenceRequest,
+    ): ZSpaceGenerationEvidenceReport;
+
+    /** Recompute persisted evidence and reject any changed field. */
+    export function validateZspaceGenerationEvidenceJson(reportJson: string): string;
+    export function validateZspaceGenerationEvidenceObject(
+        report: ZSpaceGenerationEvidenceReport,
+    ): ZSpaceGenerationEvidenceReport;
+
     /** Palette identifiers accepted by {@link FractalCanvas.set_palette}. */
     export type CanvasPaletteName =
         | "blue-magenta"
