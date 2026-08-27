@@ -146,7 +146,7 @@ def _validate_catalog(catalog: Mapping[str, Any]) -> None:
 
 
 def _native_operation(
-    name: str, payload: Mapping[str, object] | None = None
+    name: str, payload: dict[str, object] | None = None
 ) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
@@ -171,7 +171,7 @@ def zspace_runtime_protocol_catalog() -> dict[str, Any]:
 
 
 def validate_zspace_runtime_protocol_catalog(
-    catalog: Mapping[str, object],
+    catalog: dict[str, object],
 ) -> dict[str, Any]:
     """Replay an archived catalog against the current exact Rust surface."""
 

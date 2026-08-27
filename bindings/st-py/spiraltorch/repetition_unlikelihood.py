@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -155,7 +155,7 @@ _MAX_CANDIDATE_SOURCE_FIELDS = 2
 
 
 def _bounded_mapping_snapshot(
-    value: Mapping[str, object],
+    value: dict[str, object],
     *,
     maximum: int,
     label: str,
@@ -172,7 +172,7 @@ def _bounded_mapping_snapshot(
     return dict.copy(value)
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -258,7 +258,7 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
 
 
 def _bounded_sequences(
-    sequences: Sequence[Mapping[str, object]],
+    sequences: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> list[dict[str, object]]:
     # Keep admission hook-free while retaining list/tuple subclasses.
     try:
@@ -292,7 +292,7 @@ def _bounded_sequences(
 
 
 def _candidate_source_payload(
-    candidate_source: str | Mapping[str, object],
+    candidate_source: str | dict[str, object],
     *,
     ngram_order: int,
     proposal_top_k: int,
@@ -322,9 +322,9 @@ def _candidate_source_payload(
 
 def zspace_repetition_unlikelihood_plan(
     *,
-    sequences: Sequence[Mapping[str, object]],
+    sequences: list[dict[str, object]] | tuple[dict[str, object], ...],
     strength: float = 0.1,
-    candidate_source: str | Mapping[str, object] = "prior_continuation",
+    candidate_source: str | dict[str, object] = "prior_continuation",
     ngram_order: int = 3,
     proposal_top_k: int = 8,
     context_window: int = 128,
@@ -351,7 +351,7 @@ def zspace_repetition_unlikelihood_plan(
 
 
 def validate_zspace_repetition_unlikelihood_plan(
-    plan: Mapping[str, object],
+    plan: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a plan in Rust within the shared work and materialization budgets."""
 
@@ -359,7 +359,7 @@ def validate_zspace_repetition_unlikelihood_plan(
 
 
 def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
-    plan: Mapping[str, object],
+    plan: dict[str, object],
 ) -> dict[str, Any]:
     """Replay a trusted historical v3 plan without the newer admission budgets.
 

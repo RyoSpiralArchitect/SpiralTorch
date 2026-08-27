@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -102,7 +102,7 @@ _MAX_SAMPLE_FIELDS = 3
 
 
 def _bounded_mapping_snapshot(
-    value: Mapping[str, object],
+    value: dict[str, object],
     *,
     maximum: int,
     label: str,
@@ -119,7 +119,7 @@ def _bounded_mapping_snapshot(
     return dict.copy(value)
 
 
-def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
+def _native_operation(name: str, payload: dict[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
     operation = getattr(native, name, None)
@@ -204,7 +204,7 @@ def _validate_generation_evidence(contract: Mapping[str, Any]) -> None:
 
 
 def _bounded_samples(
-    samples: Sequence[Mapping[str, object]],
+    samples: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> list[dict[str, object]]:
     # Keep admission hook-free while retaining list/tuple subclasses.
     try:
@@ -244,7 +244,7 @@ def zspace_generation_evidence(
     model_artifact_id: str,
     prompt_set_id: str,
     decoding_config_id: str,
-    samples: Sequence[Mapping[str, object]],
+    samples: list[dict[str, object]] | tuple[dict[str, object], ...],
 ) -> dict[str, Any]:
     """Summarize held-out continuation token IDs in the canonical Rust core."""
 
@@ -262,7 +262,7 @@ def zspace_generation_evidence(
 
 
 def validate_zspace_generation_evidence(
-    report: Mapping[str, object],
+    report: dict[str, object],
 ) -> dict[str, Any]:
     """Recompute a serialized generation report in Rust and reject changes."""
 

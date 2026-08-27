@@ -5595,14 +5595,14 @@ def zspace_generation_evidence(
     model_artifact_id: str,
     prompt_set_id: str,
     decoding_config_id: str,
-    samples: Sequence[Mapping[str, object]],
+    samples: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
 ) -> Dict[str, object]: ...
 def validate_zspace_generation_evidence(
-    report: Mapping[str, object],
+    report: Dict[str, object],
 ) -> Dict[str, object]: ...
 def zspace_runtime_protocol_catalog() -> Dict[str, object]: ...
 def validate_zspace_runtime_protocol_catalog(
-    catalog: Mapping[str, object],
+    catalog: Dict[str, object],
 ) -> Dict[str, object]: ...
 def zspace_periodicity(
     token_ids: Sequence[int],
@@ -5615,10 +5615,10 @@ def validate_zspace_periodicity(
     report: Mapping[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet(
-    packet: Mapping[str, object],
+    packet: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet_trusted_legacy_replay(
-    packet: Mapping[str, object],
+    packet: Dict[str, object],
 ) -> Dict[str, object]: ...
 def seal_zspace_semantic_review_packet(
     *,
@@ -5627,66 +5627,66 @@ def seal_zspace_semantic_review_packet(
     blinding_key_sha256: str,
     blinding_map_id: str,
     instructions: str,
-    rubric: Mapping[str, str],
-    groups: Sequence[Mapping[str, object]],
+    rubric: Dict[str, str],
+    groups: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
 ) -> Dict[str, object]: ...
 def zspace_semantic_review_map_id(
-    entries: Sequence[Mapping[str, object]],
+    entries: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
 ) -> str: ...
 def zspace_semantic_review_map_id_trusted_legacy_replay(
-    entries: Sequence[Mapping[str, object]],
+    entries: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
 ) -> str: ...
 def validate_zspace_semantic_review_packet_receipt(
-    receipt: Mapping[str, object],
+    receipt: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay(
-    receipt: Mapping[str, object],
+    receipt: Dict[str, object],
 ) -> Dict[str, object]: ...
 def new_zspace_semantic_review_draft(
     *,
     packet_id: str,
     reviewer_id: str,
     review_session_id: str,
-    responses: Sequence[Mapping[str, object]] = ...,
+    responses: List[Dict[str, object]] | Tuple[Dict[str, object], ...] = ...,
 ) -> Dict[str, object]: ...
 def summarize_zspace_semantic_review_draft(
     *,
-    packet: Mapping[str, object],
-    draft: Mapping[str, object],
+    packet: Dict[str, object],
+    draft: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_draft_receipt(
-    receipt: Mapping[str, object],
+    receipt: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(
-    receipt: Mapping[str, object],
+    receipt: Dict[str, object],
 ) -> Dict[str, object]: ...
 def unblind_zspace_semantic_review(
     *,
-    packet: Mapping[str, object],
-    draft: Mapping[str, object],
-    blinding_map: Mapping[str, object],
+    packet: Dict[str, object],
+    draft: Dict[str, object],
+    blinding_map: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_unblind(
-    report: Mapping[str, object],
+    report: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_semantic_review_unblind_trusted_legacy_replay(
-    report: Mapping[str, object],
+    report: Dict[str, object],
 ) -> Dict[str, object]: ...
 def zspace_repetition_unlikelihood_plan(
     *,
-    sequences: Sequence[Mapping[str, object]],
+    sequences: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
     strength: float = ...,
-    candidate_source: str | Mapping[str, object] = ...,
+    candidate_source: str | Dict[str, object] = ...,
     ngram_order: int = ...,
     proposal_top_k: int = ...,
     context_window: int = ...,
     max_candidates_per_position: int = ...,
 ) -> Dict[str, object]: ...
 def validate_zspace_repetition_unlikelihood_plan(
-    plan: Mapping[str, object],
+    plan: Dict[str, object],
 ) -> Dict[str, object]: ...
 def validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
-    plan: Mapping[str, object],
+    plan: Dict[str, object],
 ) -> Dict[str, object]: ...
 
 def step_many(

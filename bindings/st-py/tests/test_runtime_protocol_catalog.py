@@ -88,6 +88,13 @@ def test_runtime_protocol_catalog_public_surface_is_typed_and_exported() -> None
     stub = (Path(st.__file__).with_name("__init__.pyi")).read_text(encoding="utf-8")
     for symbol in expected:
         assert symbol in stub
+    assert (
+        st.validate_zspace_runtime_protocol_catalog.__annotations__["catalog"]
+        == "dict[str, object]"
+    )
+    assert "catalog: Dict[str, object]" in stub
+    assert "samples: Sequence[Mapping[str, object]]" not in stub
+    assert "samples: List[Dict[str, object]] | Tuple[Dict[str, object], ...]" in stub
 
 
 def test_runtime_protocol_catalog_rejects_active_mapping_hooks_in_rust() -> None:
