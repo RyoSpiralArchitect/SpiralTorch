@@ -245,6 +245,12 @@ def test_repetition_facade_and_native_ingress_are_bounded() -> None:
         nested = [nested]
     with pytest.raises(ValueError, match="too deeply nested"):
         st.validate_zspace_repetition_unlikelihood_plan({"nested": nested})
+    with pytest.raises(ValueError) as legacy_error:
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+            {"nested": nested}
+        )
+    assert "too deeply nested" not in str(legacy_error.value)
+    assert "malformed repetition-unlikelihood plan" in str(legacy_error.value)
 
 
 def test_repetition_dict_subclasses_cannot_override_bounded_snapshot() -> None:
@@ -350,6 +356,10 @@ def test_repetition_facade_rejects_active_container_hooks() -> None:
         )
     with pytest.raises(TypeError, match="dict-backed mapping"):
         st.validate_zspace_repetition_unlikelihood_plan(ActiveMapping())
+    with pytest.raises(TypeError, match="dict-backed mapping"):
+        st.validate_zspace_repetition_unlikelihood_plan_trusted_legacy_replay(
+            ActiveMapping()
+        )
 
 
 def test_repetition_unlikelihood_public_surface_is_exported() -> None:

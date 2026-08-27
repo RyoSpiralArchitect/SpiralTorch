@@ -49,6 +49,18 @@ fn mapping_value(value: &Bound<'_, PyAny>, label: &str) -> PyResult<serde_json::
     Ok(value)
 }
 
+fn trusted_legacy_mapping_value(
+    value: &Bound<'_, PyAny>,
+    label: &str,
+) -> PyResult<serde_json::Value> {
+    // Keep the historical concrete-container converter for explicit trusted replay.
+    let value = crate::json::py_to_json(value)?;
+    if !value.is_object() {
+        return Err(PyValueError::new_err(format!("{label} must be a mapping")));
+    }
+    Ok(value)
+}
+
 fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
@@ -97,7 +109,8 @@ fn _zspace_repetition_unlikelihood_validate_trusted_legacy_replay(
     py: Python<'_>,
     plan: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
-    let plan = mapping_value(plan, "trusted legacy Z-space repetition-unlikelihood plan")?;
+    let plan =
+        trusted_legacy_mapping_value(plan, "trusted legacy Z-space repetition-unlikelihood plan")?;
     let plan = py
         .allow_threads(|| validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(plan))
         .map_err(|error| {

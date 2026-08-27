@@ -26,9 +26,10 @@
   `dict`/`list`/`tuple` containers, bypass subclass overrides, reject arbitrary
   mapping/sequence type and enumeration hooks (including `__class__` proxies),
   and preserve tuple inputs without copying complete token trees. Trusted legacy
-  replay retains its historical budget semantics without inspecting active
-  outer containers. Public annotations and PEP 561 stubs now declare those
-  concrete passive containers rather than promising arbitrary active protocols.
+  replay retains its historical converter and budget semantics without
+  inspecting active outer containers. Public annotations and PEP 561 stubs now
+  declare those concrete passive containers rather than promising arbitrary
+  active protocols.
 
 ## 0.4.14
 
