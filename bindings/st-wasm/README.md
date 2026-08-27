@@ -48,15 +48,54 @@ console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name)
 ```
 
 The catalog is content-addressed by `st-core` and currently binds generation
-evidence, token-periodicity analysis, repetition-unlikelihood planning, and the
-complete blinded semantic-review lifecycle across Rust, Python, and WASM.
-Catalog v2 records the normal-admission profile and guarantee for every client
+evidence, token-periodicity analysis, stochastic Schrodinger forward/VJP,
+repetition-unlikelihood planning, and the complete blinded semantic-review
+lifecycle across Rust, Python, and WASM. Catalog v3 records the normal-admission
+profile and guarantee for every client
 surface; serialized Python/WASM surfaces also carry Rust-owned byte/node/depth
 limits, while typed Rust admission has no serialized budget. Each catalogued
 WASM operation is a bounded JSON admission route checked against the generated
 export and bundled TypeScript declaration. Object APIs remain trusted-local
 convenience transports rather than hostile-input boundaries. Trusted legacy
 replay remains deliberately absent from the browser surface.
+
+## Replayable stochastic Schrodinger dynamics
+
+Browser workers and persisted runs can execute the same bounded real-time
+transition and analytic VJP as direct Rust and Python callers. The catalogued
+surface is JSON-only so JavaScript getters and Proxies are never a normal
+protocol admission path:
+
+```ts
+import {
+    validateZspaceStochasticSchrodingerForwardJson,
+    validateZspaceStochasticSchrodingerVjpJson,
+    zspaceStochasticSchrodingerForwardJson,
+    zspaceStochasticSchrodingerVjpJson,
+} from "spiraltorch-wasm";
+
+const forward = JSON.parse(zspaceStochasticSchrodingerForwardJson(JSON.stringify({
+    input: [1.0, 0.25, -0.5, 0.75],
+    potential: [0.2, -0.1],
+    standard_normal: [0.1, -0.3, 0.2, 0.0],
+    rows: 2,
+    features: 2,
+    config: { time_step: 0.08, noise_scale: 0.15 },
+})));
+validateZspaceStochasticSchrodingerForwardJson(JSON.stringify(forward));
+
+const vjp = JSON.parse(zspaceStochasticSchrodingerVjpJson(JSON.stringify({
+    forward_request: forward.request,
+    grad_output_real: [0.2, -0.4, 0.1, 0.3],
+})));
+validateZspaceStochasticSchrodingerVjpJson(JSON.stringify(vjp));
+```
+
+The standard-normal array and configuration are fixed stochastic witnesses. The
+VJP differentiates `output_real` with respect to input and potential; its phase
+is recomputed by `st-core` from the forward request and is never accepted from
+the browser. Receipts certify the stated numerical transition and derivative,
+not physical fidelity or training efficacy.
 
 ## Shared reverse-mode autograd
 

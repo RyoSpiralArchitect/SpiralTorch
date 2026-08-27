@@ -903,7 +903,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.16
+VERSION=0.4.17
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

@@ -279,7 +279,7 @@ pub struct StochasticSchrodingerStep {
     pub audit: StochasticSchrodingerAudit,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StochasticSchrodingerBackward {
     pub grad_input: Vec<f32>,
     pub grad_potential: Vec<f32>,

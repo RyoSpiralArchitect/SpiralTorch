@@ -15,7 +15,7 @@ def _native_constant(name: str, fallback: str) -> str:
 
 ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION = _native_constant(
     "ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION",
-    "spiraltorch.zspace_runtime_protocol_catalog.v2",
+    "spiraltorch.zspace_runtime_protocol_catalog.v3",
 )
 ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND = _native_constant(
     "ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND",

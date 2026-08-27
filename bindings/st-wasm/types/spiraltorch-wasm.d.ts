@@ -129,6 +129,155 @@ declare module "spiraltorch-wasm" {
         report: ZSpacePeriodicityReport,
     ): ZSpacePeriodicityReport;
 
+    /** Numerical controls for the Rust-owned real-time stochastic step. */
+    export type ZSpaceStochasticSchrodingerConfig = {
+        time_step?: number;
+        hopping_rate?: number;
+        loss_rate?: number;
+        noise_scale?: number;
+    };
+
+    /** Explicit state, potential, and standard-normal witness for one transition. */
+    export type ZSpaceStochasticSchrodingerForwardRequest = {
+        input: number[];
+        potential: number[];
+        standard_normal: number[];
+        rows: number;
+        features: number;
+        config?: ZSpaceStochasticSchrodingerConfig;
+    };
+
+    /** Rust-normalized forward request embedded in replayable receipts. */
+    export type ZSpaceStochasticSchrodingerCanonicalForwardRequest = Omit<
+        ZSpaceStochasticSchrodingerForwardRequest,
+        "config"
+    > & {
+        config: Required<ZSpaceStochasticSchrodingerConfig>;
+    };
+
+    export type ZSpaceStochasticSchrodingerAudit = {
+        rows: number;
+        features: number;
+        pair_count: number;
+        damping_factor: number;
+        ensemble_dephasing_rate: number;
+        expected_norm_ratio: number;
+        initial_norm_squared: number;
+        final_norm_squared: number;
+        expected_final_norm_squared: number;
+        max_row_norm_error: number;
+        max_row_norm_tolerance_ratio: number;
+        aggregate_norm_error: number;
+        aggregate_norm_tolerance: number;
+        max_phase_error: number;
+        max_output_error: number;
+        max_formula_tolerance_ratio: number;
+        phase_rms: number;
+        standard_normal_rms: number;
+    };
+
+    export type ZSpaceStochasticSchrodingerStep = {
+        kind: "spiraltorch.stochastic_real_time_schrodinger";
+        contract_version: "spiraltorch.stochastic_real_time_schrodinger.v1";
+        semantic_owner: "st-core::dynamics::stochastic_schrodinger";
+        semantic_backend: "rust";
+        integrator: "strang_diagonal_pair_unitary";
+        stochastic_calculus: "stratonovich";
+        hamiltonian: string;
+        noise_model: "independent_gaussian_phase_diffusion";
+        open_system_mode: "uniform_no_jump_loss";
+        output_observable: "real_quadrature";
+        config: Required<ZSpaceStochasticSchrodingerConfig>;
+        output_real: number[];
+        output_imaginary: number[];
+        phase: number[];
+        audit: ZSpaceStochasticSchrodingerAudit;
+    };
+
+    /** Content-addressed transition receipt recomputable by every client. */
+    export type ZSpaceStochasticSchrodingerForwardReceipt = {
+        contract_version: "spiraltorch.zspace_stochastic_schrodinger_forward.v1";
+        kind: "spiraltorch.zspace_stochastic_schrodinger_forward";
+        semantic_owner: "st-core::dynamics::stochastic_schrodinger";
+        semantic_backend: "rust";
+        protocol_owner: "st-core::runtime::zspace_stochastic_schrodinger";
+        forward_validated: true;
+        forward_id: string;
+        id_rule: string;
+        status: "ready";
+        request: ZSpaceStochasticSchrodingerCanonicalForwardRequest;
+        step: ZSpaceStochasticSchrodingerStep;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+    };
+
+    export type ZSpaceStochasticSchrodingerVjpRequest = {
+        forward_request: ZSpaceStochasticSchrodingerForwardRequest;
+        grad_output_real: number[];
+    };
+
+    /** Rust-normalized VJP request embedded in replayable receipts. */
+    export type ZSpaceStochasticSchrodingerCanonicalVjpRequest = Omit<
+        ZSpaceStochasticSchrodingerVjpRequest,
+        "forward_request"
+    > & {
+        forward_request: ZSpaceStochasticSchrodingerCanonicalForwardRequest;
+    };
+
+    export type ZSpaceStochasticSchrodingerBackward = {
+        grad_input: number[];
+        grad_potential: number[];
+    };
+
+    export type ZSpaceStochasticSchrodingerBackwardAudit = {
+        rows: number;
+        features: number;
+        max_grad_input_error: number;
+        max_grad_potential_error: number;
+        max_formula_tolerance_ratio: number;
+    };
+
+    /** Input/potential VJP of output_real; noise/config are fixed witnesses. */
+    export type ZSpaceStochasticSchrodingerVjpReceipt = {
+        contract_version: "spiraltorch.zspace_stochastic_schrodinger_vjp.v1";
+        kind: "spiraltorch.zspace_stochastic_schrodinger_vjp";
+        semantic_owner: "st-core::dynamics::stochastic_schrodinger";
+        semantic_backend: "rust";
+        protocol_owner: "st-core::runtime::zspace_stochastic_schrodinger";
+        vjp_validated: true;
+        vjp_id: string;
+        forward_id: string;
+        id_rule: string;
+        status: "ready";
+        request: ZSpaceStochasticSchrodingerCanonicalVjpRequest;
+        output_observable: "real_quadrature";
+        gradient_semantics: string;
+        result: ZSpaceStochasticSchrodingerBackward;
+        audit: ZSpaceStochasticSchrodingerBackwardAudit;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+    };
+
+    /** Run a bounded JSON forward request and return its canonical receipt JSON. */
+    export function zspaceStochasticSchrodingerForwardJson(
+        requestJson: string,
+    ): string;
+
+    /** Recompute a forward receipt in Rust and reject any changed field. */
+    export function validateZspaceStochasticSchrodingerForwardJson(
+        receiptJson: string,
+    ): string;
+
+    /** Run a bounded JSON VJP request and return its canonical receipt JSON. */
+    export function zspaceStochasticSchrodingerVjpJson(
+        requestJson: string,
+    ): string;
+
+    /** Recompute a VJP receipt in Rust and reject any changed field. */
+    export function validateZspaceStochasticSchrodingerVjpJson(
+        receiptJson: string,
+    ): string;
+
     /** One content type owned by a Rust runtime protocol. */
     export type ZSpaceRuntimeProtocolArtifact = {
         name: string;
@@ -169,6 +318,7 @@ declare module "spiraltorch-wasm" {
         name:
             | "generation_evidence"
             | "periodicity"
+            | "stochastic_schrodinger"
             | "repetition_unlikelihood"
             | "semantic_review";
         semantic_owner: string;
@@ -180,7 +330,7 @@ declare module "spiraltorch-wasm" {
 
     /** Content-addressed cross-client surface generated and validated by `st-core`. */
     export type ZSpaceRuntimeProtocolCatalog = {
-        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v2";
+        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v3";
         kind: "spiraltorch.zspace_runtime_protocol_catalog";
         semantic_owner: "st-core::runtime::zspace_runtime_protocol_catalog";
         semantic_backend: "rust";
@@ -189,7 +339,7 @@ declare module "spiraltorch-wasm" {
         catalog_id_rule: string;
         status: "ready";
         protocol_count: number;
-        protocol_order_rule: "generation_evidence,periodicity,repetition_unlikelihood,semantic_review";
+        protocol_order_rule: "generation_evidence,periodicity,stochastic_schrodinger,repetition_unlikelihood,semantic_review";
         client_order_rule: "rust,python,wasm";
         legacy_replay_policy: string;
         protocols: ZSpaceRuntimeProtocolDescriptor[];
