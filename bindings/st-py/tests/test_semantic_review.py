@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -299,6 +299,23 @@ def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
     )
     with pytest.raises(ValueError, match="count exceeds maximum 1"):
         semantic_review._bounded_mapping_sequence([{}, {}], maximum=1, label="test row")
+
+    class OversizedMapping(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            return None
+
+        def __iter__(self) -> Iterator[str]:
+            return (f"field_{index}" for index in range(66))
+
+        def __len__(self) -> int:
+            return 66
+
+    with pytest.raises(ValueError, match="field count exceeds maximum 64"):
+        st.validate_zspace_semantic_review_packet(OversizedMapping())
+    with pytest.raises(ValueError, match="field count exceeds maximum 64"):
+        st.validate_zspace_semantic_review_packet(
+            {f"field_{index}": None for index in range(65)}
+        )
 
     nested: dict[str, object] = {}
     cursor = nested

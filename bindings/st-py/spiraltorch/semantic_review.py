@@ -235,6 +235,30 @@ __all__ = [
 ]
 
 
+_MAX_NATIVE_ROOT_FIELDS = 64
+
+
+def _bounded_mapping_snapshot(
+    value: Mapping[str, object],
+    *,
+    maximum: int,
+    label: str,
+) -> dict[str, object]:
+    if isinstance(value, dict):
+        if len(value) > maximum:
+            raise ValueError(f"{label} field count exceeds maximum {maximum}")
+        return value
+
+    snapshot: dict[str, object] = {}
+    for index, (key, item) in enumerate(value.items()):
+        if index >= maximum:
+            raise ValueError(f"{label} field count exceeds maximum {maximum}")
+        if not isinstance(key, str):
+            raise ValueError(f"{label} keys must be strings")
+        snapshot[key] = item
+    return snapshot
+
+
 def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any]:
     package = sys.modules.get(__package__ or "spiraltorch")
     native = getattr(package, "_rs", None)
@@ -244,7 +268,13 @@ def _native_operation(name: str, payload: Mapping[str, object]) -> dict[str, Any
             "Z-space semantic review requires the compiled Rust semantic core; "
             f"rebuild or reinstall SpiralTorch with {name}"
         )
-    result = operation(dict(payload))
+    result = operation(
+        _bounded_mapping_snapshot(
+            payload,
+            maximum=_MAX_NATIVE_ROOT_FIELDS,
+            label=f"native {name} payload",
+        )
+    )
     if not isinstance(result, Mapping):
         raise RuntimeError(f"native {name} returned a non-mapping payload")
     return dict(result)
@@ -259,7 +289,13 @@ def _native_identity_operation(name: str, payload: Mapping[str, object]) -> str:
             "Z-space semantic review requires the compiled Rust semantic core; "
             f"rebuild or reinstall SpiralTorch with {name}"
         )
-    result = operation(dict(payload))
+    result = operation(
+        _bounded_mapping_snapshot(
+            payload,
+            maximum=_MAX_NATIVE_ROOT_FIELDS,
+            label=f"native {name} payload",
+        )
+    )
     if not _sha256_identity(result):
         raise RuntimeError(f"native {name} returned an invalid identity")
     return result
@@ -270,12 +306,19 @@ def _bounded_mapping_sequence(
     *,
     maximum: int,
     label: str,
+    maximum_fields: int = 8,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for index, value in enumerate(values):
         if index >= maximum:
             raise ValueError(f"{label} count exceeds maximum {maximum}")
-        rows.append(dict(value))
+        rows.append(
+            _bounded_mapping_snapshot(
+                value,
+                maximum=maximum_fields,
+                label=f"{label}[{index}]",
+            )
+        )
     return rows
 
 
@@ -476,11 +519,16 @@ def seal_zspace_semantic_review_packet(
             "blinding_key_sha256": blinding_key_sha256,
             "blinding_map_id": blinding_map_id,
             "instructions": instructions,
-            "rubric": dict(rubric),
+            "rubric": _bounded_mapping_snapshot(
+                rubric,
+                maximum=5,
+                label="semantic review rubric",
+            ),
             "groups": _bounded_mapping_sequence(
                 groups,
                 maximum=ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
                 label="semantic review group",
+                maximum_fields=3,
             ),
         },
     )
@@ -500,6 +548,7 @@ def zspace_semantic_review_map_id(
                 entries,
                 maximum=ZSPACE_SEMANTIC_REVIEW_MAX_MAP_ENTRIES,
                 label="semantic review map entry",
+                maximum_fields=4,
             )
         },
     )
@@ -563,6 +612,7 @@ def new_zspace_semantic_review_draft(
             responses,
             maximum=ZSPACE_SEMANTIC_REVIEW_MAX_GROUPS,
             label="semantic review response",
+            maximum_fields=3,
         ),
     }
 
