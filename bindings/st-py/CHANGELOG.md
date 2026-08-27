@@ -205,6 +205,11 @@
 - PyPI propagation guard: keep polling after uploaded wheels appear until the
   project latest-version index also exposes the release, avoiding false-red
   publication runs during the short CDN propagation window.
+- Release source contract: require every automatic release tag to equal the
+  Python package version exactly, require manual recovery to build the named
+  release tag rather than a moving branch, and use that same source for wheel
+  construction, validation, provenance manifests, signing, and publication.
+  Matrix build jobs now receive read-only repository permissions.
 - Model-neutral HF artifact probe: add `hf_causal_lm_artifact_probe_report(...)`
   and `spiral-hf-artifact-probe` to reconstruct full models or PEFT adapters,
   run bounded generation, and archive device/token/timing/runtime evidence. A

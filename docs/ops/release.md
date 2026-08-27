@@ -19,6 +19,11 @@ Both PyPI workflows call the same manifest-backed wheel validator before any
 token or trusted-publisher upload. Official release builds also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
+Automatic releases require the pushed tag to equal `v<package-version>`
+exactly. Manual recovery with a non-empty `release_tag` also requires
+`checkout_ref` to name that same immutable tag, keeping wheel bytes,
+compliance manifests, signatures, and publication helpers on one source ref.
+Leave both inputs empty for a build-only branch preflight.
 
 ## Common Variables
 
