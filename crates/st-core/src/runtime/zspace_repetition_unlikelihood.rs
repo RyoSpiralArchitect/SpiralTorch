@@ -268,10 +268,19 @@ pub enum ZSpaceRepetitionUnlikelihoodError {
 pub fn plan_zspace_repetition_unlikelihood(
     request: ZSpaceRepetitionUnlikelihoodRequest,
 ) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
+    plan_zspace_repetition_unlikelihood_internal(request, true)
+}
+
+fn plan_zspace_repetition_unlikelihood_internal(
+    request: ZSpaceRepetitionUnlikelihoodRequest,
+    enforce_admission_budget: bool,
+) -> Result<ZSpaceRepetitionUnlikelihoodPlan, ZSpaceRepetitionUnlikelihoodError> {
     validate_config(&request.config)?;
     validate_sequences(&request.sequences, &request.config.candidate_source)?;
     let estimated_work_units = estimate_validated_work_units(&request);
-    if estimated_work_units > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS {
+    if enforce_admission_budget
+        && estimated_work_units > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS
+    {
         return Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded {
             estimated_work_units,
             maximum_work_units: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
@@ -574,7 +583,10 @@ pub fn validate_zspace_repetition_unlikelihood_value(
             message: error.to_string(),
         }
     })?;
-    let canonical = plan_zspace_repetition_unlikelihood(request)?;
+    // The budget is an admission guard for new work, not part of the frozen v3
+    // artifact semantics. Replaying a previously admitted v3 plan must remain
+    // possible after upgrading the library.
+    let canonical = plan_zspace_repetition_unlikelihood_internal(request, false)?;
     let canonical_value = serde_json::to_value(&canonical).map_err(|error| {
         ZSpaceRepetitionUnlikelihoodError::MalformedPlan {
             message: error.to_string(),
@@ -1182,6 +1194,52 @@ mod tests {
         assert_eq!(
             serde_json::to_value(plan).expect("canonical replay"),
             canonical
+        );
+    }
+
+    #[test]
+    fn validation_preserves_existing_v3_plans_above_the_new_admission_budget() {
+        let token_count = 4_096usize;
+        let mut sequence = ZSpaceRepetitionUnlikelihoodSequence {
+            token_ids: (0..token_count as u64).collect(),
+            token_mask: vec![true; token_count],
+            label_mask: vec![false; token_count],
+            proposal_token_ids: Some(vec![Vec::new(); token_count]),
+        };
+        let proposals = (1_000_000
+            ..1_000_000 + ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K as u64)
+            .collect::<Vec<_>>();
+        for target_index in token_count - 15..token_count {
+            sequence.label_mask[target_index] = true;
+            sequence.proposal_token_ids.as_mut().expect("proposal rows")[target_index] =
+                proposals.clone();
+        }
+        let request = ZSpaceRepetitionUnlikelihoodRequest {
+            config: ZSpaceRepetitionUnlikelihoodConfig {
+                strength: 0.1,
+                candidate_source: ZSpaceRepetitionUnlikelihoodCandidateSource::ModelTopkPeriodic {
+                    proposal_top_k: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_PROPOSAL_TOP_K,
+                },
+                context_window: ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CONTEXT_WINDOW,
+                max_candidates_per_position:
+                    ZSPACE_REPETITION_UNLIKELIHOOD_MAX_CANDIDATES_PER_POSITION,
+            },
+            sequences: vec![sequence],
+        };
+        assert!(
+            estimate_validated_work_units(&request) > ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS
+        );
+        let historical = plan_zspace_repetition_unlikelihood_internal(request.clone(), false)
+            .expect("historical v3 plan");
+        assert!(matches!(
+            plan_zspace_repetition_unlikelihood(request),
+            Err(ZSpaceRepetitionUnlikelihoodError::WorkBudgetExceeded { .. })
+        ));
+
+        let stored = serde_json::to_value(&historical).expect("historical value");
+        assert_eq!(
+            validate_zspace_repetition_unlikelihood_value(stored).expect("v3 replay"),
+            historical
         );
     }
 
