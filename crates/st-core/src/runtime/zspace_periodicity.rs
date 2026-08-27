@@ -255,7 +255,7 @@ pub fn analyze_zspace_periodicity(
 
 /// Recompute a persisted report and reject any non-canonical field.
 pub fn validate_zspace_periodicity_value(
-    mut report: serde_json::Value,
+    report: serde_json::Value,
 ) -> Result<ZSpacePeriodicityReport, ZSpacePeriodicityError> {
     let request = report
         .get("request")
@@ -265,29 +265,12 @@ pub fn validate_zspace_periodicity_value(
     let canonical = analyze_zspace_periodicity(request)?;
     let canonical_value =
         serde_json::to_value(&canonical).map_err(|error| malformed(error.to_string()))?;
-    normalize_persisted_ratio_numbers(&mut report);
-    if report != canonical_value {
+    if !super::canonical_json::values_equivalent(&report, &canonical_value) {
         return Err(malformed(
             "report does not match the canonical Rust periodicity analysis",
         ));
     }
     Ok(canonical)
-}
-
-fn normalize_persisted_ratio_numbers(report: &mut serde_json::Value) {
-    for field in [
-        "periodic_suffix_token_ratio",
-        "periodic_suffix_repeated_token_ratio",
-    ] {
-        let Some(value) = report.get_mut(field) else {
-            continue;
-        };
-        match value.as_u64() {
-            Some(0) => *value = serde_json::json!(0.0),
-            Some(1) => *value = serde_json::json!(1.0),
-            _ => {}
-        }
-    }
 }
 
 fn validate_config(config: ZSpacePeriodicityConfig) -> Result<(), ZSpacePeriodicityError> {

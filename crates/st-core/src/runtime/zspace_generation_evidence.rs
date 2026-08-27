@@ -239,7 +239,7 @@ pub fn validate_zspace_generation_evidence_value(
             message: error.to_string(),
         }
     })?;
-    if report != canonical_value {
+    if !super::canonical_json::values_equivalent(&report, &canonical_value) {
         return Err(ZSpaceGenerationEvidenceError::MalformedReport {
             message: "report does not match the canonical Rust generation evidence".to_owned(),
         });
@@ -713,5 +713,24 @@ mod tests {
             validate_zspace_generation_evidence_value(tampered),
             Err(ZSpaceGenerationEvidenceError::MalformedReport { .. })
         ));
+    }
+
+    #[test]
+    fn validator_accepts_javascript_integer_spelling_for_nested_float_fields() {
+        let report = summarize_zspace_generation_evidence(request(vec![sample(
+            '1',
+            13,
+            &[1, 2, 1, 2, 1, 2],
+        )]))
+        .expect("generation evidence");
+        let mut stored = serde_json::to_value(&report).expect("serialized evidence");
+        stored["samples"][0]["consecutive_repetition_ratio"] = json!(0);
+        stored["aggregate"]["periodic_loop_sample_ratio"] = json!(1);
+
+        assert_eq!(
+            validate_zspace_generation_evidence_value(stored)
+                .expect("JavaScript numeric spelling is equivalent"),
+            report
+        );
     }
 }
