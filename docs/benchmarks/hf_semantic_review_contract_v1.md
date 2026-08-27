@@ -5,11 +5,24 @@ comparisons without moving semantic ownership into an experiment script.
 
 ## Ownership
 
-- `st-core::runtime::zspace_semantic_review` validates the packet commitment,
+- `st-core::runtime::zspace_semantic_review` seals new packets and validates the packet commitment,
   the pre-review map-content commitment, score bounds, group coverage, response
   identity, and deterministic arm/seed aggregation.
 - PyO3 exposes those Rust operations without changing their meaning.
 - Python owns terminal presentation and atomic draft persistence only.
+- WASM exposes the same packet, draft, and unblind lifecycle without rebuilding
+  identity, validation, or aggregate semantics in JavaScript.
+- JSON-encoded packet text is bounded to 32 MiB in aggregate, packet groups and map entries
+  to 10,000, and arm names to 128 UTF-8 bytes. Python and browser bindings also
+  preflight transport size, node count, and nesting before serde materialization.
+  Browser object ingress snapshots each property exactly once before Rust
+  conversion, closing getter/proxy time-of-check/time-of-use substitution. JSON
+  string ingress charges nodes and depth while Rust deserializes, before a full
+  intermediate tree can be materialized.
+- Historical v1 evidence above a newer aggregate packet or standalone-map
+  admission budget remains replayable only through explicitly trusted Rust and
+  Python functions. The normal validators, CLI, and every WASM entry point stay
+  bounded; trusted replay must never receive attacker-controlled input.
 - A group is the smallest persisted review unit. An interrupted group is not
   saved; every previously completed group remains resumable.
 - `response_id` is absent until all packet groups have complete A/B/C scores and

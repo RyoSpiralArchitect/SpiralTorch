@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -37,14 +36,10 @@ def _identity(character: str) -> str:
 
 
 def _packet() -> dict[str, object]:
-    packet: dict[str, object] = {
-        "schema": st.ZSPACE_SEMANTIC_REVIEW_PACKET_SCHEMA,
-        "status": "ready_for_blinded_review",
+    request: dict[str, object] = {
         "protocol_id": _identity("a"),
         "prompt_set_id": _identity("b"),
         "blinding_key_sha256": "c" * 64,
-        "group_count": 2,
-        "candidate_count": 6,
         "instructions": "Score each candidate while blind.",
         "rubric": {
             "fluency": "integer 1 through 5",
@@ -72,14 +67,10 @@ def _packet() -> dict[str, object]:
             },
         ],
     }
-    packet["blinding_map_id"] = st.zspace_semantic_review_map_id(_map_entries(packet))
-    encoded = json.dumps(
-        packet,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    packet["packet_id"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    request["blinding_map_id"] = st.zspace_semantic_review_map_id(_map_entries(request))
+    receipt = st.seal_zspace_semantic_review_packet(**request)
+    packet = receipt["packet"]
+    assert isinstance(packet, dict)
     return packet
 
 
@@ -182,18 +173,38 @@ def test_tracked_packets_match_rust_commitment(
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
     expected_exports = {
         "new_zspace_semantic_review_draft",
+        "seal_zspace_semantic_review_packet",
         "summarize_zspace_semantic_review_draft",
         "unblind_zspace_semantic_review",
         "validate_zspace_semantic_review_draft_receipt",
+        "validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay",
         "validate_zspace_semantic_review_packet",
+        "validate_zspace_semantic_review_packet_trusted_legacy_replay",
         "validate_zspace_semantic_review_packet_receipt",
+        "validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay",
         "validate_zspace_semantic_review_unblind",
+        "validate_zspace_semantic_review_unblind_trusted_legacy_replay",
         "zspace_semantic_review_map_id",
+        "zspace_semantic_review_map_id_trusted_legacy_replay",
     }
 
     receipt = st.validate_zspace_semantic_review_packet(packet)
+    sealed = st.seal_zspace_semantic_review_packet(
+        protocol_id=packet["protocol_id"],
+        prompt_set_id=packet["prompt_set_id"],
+        blinding_key_sha256=packet["blinding_key_sha256"],
+        blinding_map_id=packet["blinding_map_id"],
+        instructions=packet["instructions"],
+        rubric=packet["rubric"],
+        groups=packet["groups"],
+    )
 
     assert expected_exports <= set(st.__all__)
+    assert sealed == receipt
+    assert st.ZSPACE_SEMANTIC_REVIEW_PACKET_STATUS == "ready_for_blinded_review"
+    assert st.ZSPACE_SEMANTIC_REVIEW_MAP_STATUS == "sealed_pending_review"
+    assert st.ZSPACE_SEMANTIC_REVIEW_MAX_PACKET_TEXT_BYTES == 32 * 1_024 * 1_024
+    assert st.ZSPACE_SEMANTIC_REVIEW_MAX_ARM_NAME_BYTES == 128
     assert receipt["packet_id"] == expected_packet_id
     assert receipt["group_count"] == 36
     assert receipt["candidate_count"] == 108
@@ -201,6 +212,14 @@ def test_tracked_packets_match_rust_commitment(
     assert receipt["blinding_map_id"] == expected_blinding_map_id
     assert receipt["human_review_complete"] is False
     assert st.validate_zspace_semantic_review_packet_receipt(receipt) == receipt
+    assert (
+        st.validate_zspace_semantic_review_packet_trusted_legacy_replay(packet)
+        == receipt
+    )
+    assert (
+        st.validate_zspace_semantic_review_packet_receipt_trusted_legacy_replay(receipt)
+        == receipt
+    )
 
 
 def test_tracked_distilgpt2_report_preserves_bounded_negative_decision() -> None:
@@ -255,11 +274,116 @@ def test_draft_progress_only_seals_complete_review_and_is_order_independent() ->
     assert complete["unblind_ready"] is True
     assert str(complete["response_id"]).startswith("sha256:")
     assert st.validate_zspace_semantic_review_draft_receipt(complete) == complete
+    assert (
+        st.validate_zspace_semantic_review_draft_receipt_trusted_legacy_replay(complete)
+        == complete
+    )
+
+    browser_round_trip = copy.deepcopy(complete)
+    browser_round_trip["completion_ratio"] = 1
+    assert (
+        st.validate_zspace_semantic_review_draft_receipt(browser_round_trip) == complete
+    )
 
     tampered = copy.deepcopy(complete)
     tampered["completed_group_count"] = 1
     with pytest.raises(ValueError, match="canonical Rust artifact"):
         st.validate_zspace_semantic_review_draft_receipt(tampered)
+
+
+def test_semantic_review_rejects_empty_map_and_deep_ingress() -> None:
+    with pytest.raises(ValueError, match="at least one entry"):
+        st.zspace_semantic_review_map_id([])
+    assert st.zspace_semantic_review_map_id_trusted_legacy_replay([]).startswith(
+        "sha256:"
+    )
+    with pytest.raises(ValueError, match="count exceeds maximum 1"):
+        semantic_review._bounded_mapping_sequence([{}, {}], maximum=1, label="test row")
+
+    class OversizedMapping(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            return None
+
+        def __iter__(self) -> Iterator[str]:
+            return (f"field_{index}" for index in range(66))
+
+        def __len__(self) -> int:
+            return 66
+
+    class AdversarialDict(dict[str, object]):
+        def __len__(self) -> int:
+            return 0
+
+        def copy(self) -> dict[str, object]:
+            raise AssertionError("overridden copy must not run")
+
+        def items(self) -> object:
+            raise AssertionError("overridden items must not run")
+
+    with pytest.raises(ValueError, match="field count exceeds maximum 64"):
+        st.validate_zspace_semantic_review_packet(OversizedMapping())
+    with pytest.raises(ValueError, match="field count exceeds maximum 64"):
+        st.validate_zspace_semantic_review_packet(
+            {f"field_{index}": None for index in range(65)}
+        )
+    assert semantic_review._bounded_mapping_snapshot(
+        AdversarialDict({"field": "safe"}),
+        maximum=1,
+        label="adversarial dict",
+    ) == {"field": "safe"}
+    with pytest.raises(ValueError, match="field count exceeds maximum 1"):
+        semantic_review._bounded_mapping_snapshot(
+            AdversarialDict({"field_1": None, "field_2": None}),
+            maximum=1,
+            label="adversarial dict",
+        )
+
+    packet = _packet()
+    draft = st.new_zspace_semantic_review_draft(
+        packet_id=packet["packet_id"],
+        reviewer_id=_identity("d"),
+        review_session_id=_identity("e"),
+    )
+    with pytest.raises(ValueError, match="packet field count exceeds maximum 12"):
+        st.summarize_zspace_semantic_review_draft(
+            packet={**packet, "unexpected": None},
+            draft=draft,
+        )
+    with pytest.raises(ValueError, match="packet field count exceeds maximum 12"):
+        st.summarize_zspace_semantic_review_draft(
+            packet=OversizedMapping(),
+            draft=draft,
+        )
+    with pytest.raises(ValueError, match="draft field count exceeds maximum 5"):
+        st.summarize_zspace_semantic_review_draft(
+            packet=packet,
+            draft={**draft, "unexpected": None},
+        )
+    with pytest.raises(ValueError, match="blinding map field count exceeds maximum 6"):
+        st.unblind_zspace_semantic_review(
+            packet=packet,
+            draft=draft,
+            blinding_map=OversizedMapping(),
+        )
+
+    response = {"group_id": _identity("1")}
+    isolated = st.new_zspace_semantic_review_draft(
+        packet_id=packet["packet_id"],
+        reviewer_id=_identity("d"),
+        review_session_id=_identity("e"),
+        responses=[response],
+    )
+    response["group_id"] = _identity("2")
+    assert isolated["responses"][0]["group_id"] == _identity("1")
+
+    nested: dict[str, object] = {}
+    cursor = nested
+    for _ in range(34):
+        child: dict[str, object] = {}
+        cursor["nested"] = child
+        cursor = child
+    with pytest.raises(ValueError, match="deeply nested"):
+        st.validate_zspace_semantic_review_packet(nested)
 
 
 def test_unblind_requires_complete_review_and_aggregates_arm_and_seed_scores() -> None:
@@ -286,6 +410,10 @@ def test_unblind_requires_complete_review_and_aggregates_arm_and_seed_scores() -
     assert baseline["mean_scores"]["fluency"] == 3.5
     assert baseline["preference_win_count"] == 1
     assert st.validate_zspace_semantic_review_unblind(report) == report
+    assert (
+        st.validate_zspace_semantic_review_unblind_trusted_legacy_replay(report)
+        == report
+    )
 
 
 def test_unblind_rejects_a_valid_but_post_review_assignment_swap() -> None:

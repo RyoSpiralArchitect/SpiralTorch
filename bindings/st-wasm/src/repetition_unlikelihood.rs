@@ -6,6 +6,8 @@ use st_core::runtime::zspace_repetition_unlikelihood::{
     ZSpaceRepetitionUnlikelihoodError, ZSpaceRepetitionUnlikelihoodRequest,
 };
 
+use crate::utils::bounded_json_value_from_str;
+
 #[cfg(target_arch = "wasm32")]
 use js_sys::JsString;
 #[cfg(target_arch = "wasm32")]
@@ -14,7 +16,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use crate::utils::{js_error, preflight_json_compatible_js_value};
+use crate::utils::{bounded_json_string_from_js, js_error, snapshot_json_compatible_js_value};
 
 const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES: u64 = 64 * 1_024 * 1_024;
 const WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES: u64 = 8_000_000;
@@ -33,19 +35,9 @@ fn bounded_json_value_with_limit(
     context: &str,
     maximum_bytes: u64,
 ) -> Result<Value, String> {
-    if input_json.len() as u64 > maximum_bytes {
-        return Err(format!(
-            "{context} exceeds WASM ingress budget of {maximum_bytes} bytes"
-        ));
-    }
-    serde_json::from_str(input_json).map_err(|error| error.to_string())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn preflight_repetition_js_value(value: &JsValue, context: &str) -> Result<(), JsValue> {
-    preflight_json_compatible_js_value(
-        value,
-        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+    bounded_json_value_from_str(
+        input_json,
+        maximum_bytes,
         WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
         WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
         context,
@@ -53,20 +45,14 @@ fn preflight_repetition_js_value(value: &JsValue, context: &str) -> Result<(), J
 }
 
 #[cfg(target_arch = "wasm32")]
-fn bounded_json_string_from_js(value: &JsString, context: &str) -> Result<String, JsValue> {
-    if !value.is_string() {
-        return Err(js_error(format!("{context} must be a JSON string")));
-    }
-    let utf8_upper_bound = (value.length() as u64).saturating_mul(3);
-    if utf8_upper_bound > WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES {
-        return Err(js_error(format!(
-            "{context} exceeds WASM ingress budget of {} bytes",
-            WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES
-        )));
-    }
-    value
-        .as_string()
-        .ok_or_else(|| js_error(format!("{context} must be a JSON string")))
+fn snapshot_repetition_js_value(value: &JsValue, context: &str) -> Result<JsValue, JsValue> {
+    snapshot_json_compatible_js_value(
+        value,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_NODES,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_DEPTH,
+        context,
+    )
 }
 
 fn request_from_value(value: Value) -> Result<ZSpaceRepetitionUnlikelihoodRequest, String> {
@@ -123,8 +109,11 @@ pub fn validate_zspace_repetition_unlikelihood_plan_value(
 pub fn zspace_repetition_unlikelihood_plan_json(
     request_json: &JsString,
 ) -> Result<String, JsValue> {
-    let request_json =
-        bounded_json_string_from_js(request_json, "Z-space repetition-unlikelihood request JSON")?;
+    let request_json = bounded_json_string_from_js(
+        request_json,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        "Z-space repetition-unlikelihood request JSON",
+    )?;
     let request = request_from_json(&request_json).map_err(js_error)?;
     let plan = zspace_repetition_unlikelihood_plan_value(request).map_err(js_error)?;
     serde_json::to_string(&plan).map_err(js_error)
@@ -133,8 +122,8 @@ pub fn zspace_repetition_unlikelihood_plan_json(
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = zspaceRepetitionUnlikelihoodPlanObject)]
 pub fn zspace_repetition_unlikelihood_plan_object(request: &JsValue) -> Result<JsValue, JsValue> {
-    preflight_repetition_js_value(request, "Z-space repetition-unlikelihood request")?;
-    let request = serde_wasm_bindgen::from_value::<Value>(request.clone()).map_err(js_error)?;
+    let request = snapshot_repetition_js_value(request, "Z-space repetition-unlikelihood request")?;
+    let request = serde_wasm_bindgen::from_value::<Value>(request).map_err(js_error)?;
     let request = request_from_value(request).map_err(js_error)?;
     let plan = zspace_repetition_unlikelihood_plan_value(request).map_err(js_error)?;
     to_json_compatible_js(&plan)
@@ -145,8 +134,11 @@ pub fn zspace_repetition_unlikelihood_plan_object(request: &JsValue) -> Result<J
 pub fn validate_zspace_repetition_unlikelihood_plan_json(
     plan_json: &JsString,
 ) -> Result<String, JsValue> {
-    let plan_json =
-        bounded_json_string_from_js(plan_json, "Z-space repetition-unlikelihood plan JSON")?;
+    let plan_json = bounded_json_string_from_js(
+        plan_json,
+        WASM_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        "Z-space repetition-unlikelihood plan JSON",
+    )?;
     let plan = plan_from_json(&plan_json).map_err(js_error)?;
     let plan = validate_zspace_repetition_unlikelihood_plan_value(plan).map_err(js_error)?;
     serde_json::to_string(&plan).map_err(js_error)
@@ -157,8 +149,8 @@ pub fn validate_zspace_repetition_unlikelihood_plan_json(
 pub fn validate_zspace_repetition_unlikelihood_plan_object(
     plan: &JsValue,
 ) -> Result<JsValue, JsValue> {
-    preflight_repetition_js_value(plan, "Z-space repetition-unlikelihood plan")?;
-    let plan = serde_wasm_bindgen::from_value::<Value>(plan.clone()).map_err(js_error)?;
+    let plan = snapshot_repetition_js_value(plan, "Z-space repetition-unlikelihood plan")?;
+    let plan = serde_wasm_bindgen::from_value::<Value>(plan).map_err(js_error)?;
     let plan = plan_from_value(plan).map_err(js_error)?;
     let plan = validate_zspace_repetition_unlikelihood_plan_value(plan).map_err(js_error)?;
     to_json_compatible_js(&plan)

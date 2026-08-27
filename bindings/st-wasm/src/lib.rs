@@ -18,6 +18,7 @@ mod runtime_execution_plan;
 mod runtime_probe;
 mod runtime_route;
 mod scale_stack;
+mod semantic_review;
 mod temperature_control;
 mod tensor_execution_receipt;
 mod topos_control;
@@ -42,7 +43,6 @@ mod fft;
 mod mellin;
 #[cfg(target_arch = "wasm32")]
 mod tuner;
-#[cfg(target_arch = "wasm32")]
 mod utils;
 
 pub use api_llm_policy::*;
@@ -72,6 +72,7 @@ pub use runtime_execution_plan::*;
 pub use runtime_probe::*;
 pub use runtime_route::*;
 pub use scale_stack::*;
+pub use semantic_review::*;
 pub use temperature_control::*;
 pub use tensor_execution_receipt::*;
 pub use topos_control::*;
