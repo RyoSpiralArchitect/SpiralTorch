@@ -7,10 +7,11 @@
   shape, state, potential, configuration, and explicit standard-normal noise
   witness; omitting noise records a zero witness instead of sampling an
   implicit RNG.
-- Add a replayable analytic VJP for the real quadrature. Rust recomputes phase
-  from the canonical forward request and never accepts browser- or
-  Python-supplied phase evidence; changed requests, outputs, gradients, audits,
-  or identities fail closed.
+- Add a replayable analytic VJP of the real quadrature with respect to input and
+  potential. Standard-normal noise and configuration remain fixed witnesses;
+  Rust recomputes phase from the canonical forward request and never accepts
+  browser- or Python-supplied phase evidence. Changed requests, outputs,
+  gradients, audits, or identities fail closed.
 - Expose the same bounded semantics through passive Python containers and
   JSON-only WASM entrypoints, add complete PEP 561 and TypeScript declarations,
   and publish the lifecycle as runtime protocol catalog v3. Installed-wheel

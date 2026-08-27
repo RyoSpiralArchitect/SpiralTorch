@@ -79,6 +79,12 @@ def test_vjp_revalidates_forward_and_never_trusts_external_phase() -> None:
         receipt["gradient_semantics"]
         == st.ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS
     )
+    assert "with respect to input and potential only" in str(
+        receipt["gradient_semantics"]
+    )
+    assert "standard_normal and config are fixed witnesses" in str(
+        receipt["gradient_semantics"]
+    )
     assert receipt["output_observable"] == "real_quadrature"
     assert len(receipt["result"]["grad_input"]) == 6  # type: ignore[index]
     assert len(receipt["result"]["grad_potential"]) == 3  # type: ignore[index]

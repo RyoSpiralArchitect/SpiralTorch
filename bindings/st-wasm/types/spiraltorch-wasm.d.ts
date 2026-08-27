@@ -237,7 +237,7 @@ declare module "spiraltorch-wasm" {
         max_formula_tolerance_ratio: number;
     };
 
-    /** Analytic VJP of output_real; phase is always recomputed from the request. */
+    /** Input/potential VJP of output_real; noise/config are fixed witnesses. */
     export type ZSpaceStochasticSchrodingerVjpReceipt = {
         contract_version: "spiraltorch.zspace_stochastic_schrodinger_vjp.v1";
         kind: "spiraltorch.zspace_stochastic_schrodinger_vjp";

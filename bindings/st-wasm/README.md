@@ -91,10 +91,11 @@ const vjp = JSON.parse(zspaceStochasticSchrodingerVjpJson(JSON.stringify({
 validateZspaceStochasticSchrodingerVjpJson(JSON.stringify(vjp));
 ```
 
-The standard-normal array is the explicit stochastic witness. VJP phase is
-recomputed by `st-core` from the forward request and is never accepted from the
-browser. Receipts certify the stated numerical transition and derivative, not
-physical fidelity or training efficacy.
+The standard-normal array and configuration are fixed stochastic witnesses. The
+VJP differentiates `output_real` with respect to input and potential; its phase
+is recomputed by `st-core` from the forward request and is never accepted from
+the browser. Receipts certify the stated numerical transition and derivative,
+not physical fidelity or training efficacy.
 
 ## Shared reverse-mode autograd
 

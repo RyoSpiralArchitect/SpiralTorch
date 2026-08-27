@@ -198,9 +198,9 @@ disconnected.
   reports its current `f64_cpu` execution backend and WGPU route blocker.
 - `zspace_stochastic_schrodinger_forward(...)` plus
   `zspace_stochastic_schrodinger_vjp(...)` for a content-addressed real-time
-  stochastic transition and analytic VJP. The standard-normal samples are an
-  explicit replay witness; Python never samples hidden noise or accepts an
-  external phase for backward.
+  stochastic transition and analytic input/potential VJP. The standard-normal
+  samples and configuration are fixed replay witnesses; Python never samples
+  hidden noise or accepts an external phase for backward.
 - `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
   scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
   FT/runtime probes over local-HF embeddings.
@@ -584,10 +584,11 @@ assert st.validate_zspace_stochastic_schrodinger_vjp(vjp) == vjp
 ```
 
 VJP construction first replays the complete forward receipt in Rust, then
-recomputes phase from its canonical request. A changed quadrature, phase, noise
-witness, gradient, or audit field fails closed. These receipts certify the
-stated bounded numerical transition and derivative, not physical fidelity or
-training efficacy.
+recomputes phase from its canonical request. It differentiates `output_real`
+with respect to input and potential; the noise witness and configuration remain
+fixed. A changed quadrature, phase, noise witness, gradient, or audit field fails
+closed. These receipts certify the stated bounded numerical transition and
+derivative, not physical fidelity or training efficacy.
 
 ## Blinded semantic review
 

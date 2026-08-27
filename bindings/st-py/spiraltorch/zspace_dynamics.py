@@ -61,16 +61,17 @@ ZSPACE_STOCHASTIC_SCHRODINGER_ID_RULE = str(
 ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS = str(
     _native_constant(
         "ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS",
-        "vector-Jacobian product of output_real only; phase is recomputed from "
-        "the canonical forward request and is never accepted as external evidence",
+        "vector-Jacobian product of output_real with respect to input and potential "
+        "only; standard_normal and config are fixed witnesses; phase is recomputed "
+        "from the canonical forward request and is never accepted as external evidence",
     )
 )
 ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY = str(
     _native_constant(
         "ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY",
         "this receipt certifies one bounded real-quadrature numerical transition "
-        "and its analytic VJP; it does not establish physical fidelity beyond the "
-        "stated equation, semantic quality, or training efficacy",
+        "and its analytic input/potential VJP; it does not establish physical "
+        "fidelity beyond the stated equation, semantic quality, or training efficacy",
     )
 )
 ZSPACE_STOCHASTIC_SCHRODINGER_MAX_VALUES = int(

@@ -36,9 +36,9 @@ pub const ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND: &str =
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_ID_RULE: &str =
     "sha256(contract_version UTF-8 || NUL || compact canonical request JSON)";
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_VJP_SEMANTICS: &str =
-    "vector-Jacobian product of output_real only; phase is recomputed from the canonical forward request and is never accepted as external evidence";
+    "vector-Jacobian product of output_real with respect to input and potential only; standard_normal and config are fixed witnesses; phase is recomputed from the canonical forward request and is never accepted as external evidence";
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY: &str =
-    "this receipt certifies one bounded real-quadrature numerical transition and its analytic VJP; it does not establish physical fidelity beyond the stated equation, semantic quality, or training efficacy";
+    "this receipt certifies one bounded real-quadrature numerical transition and its analytic input/potential VJP; it does not establish physical fidelity beyond the stated equation, semantic quality, or training efficacy";
 
 /// Large enough for a four-row GPT-2 vocabulary while keeping browser replay bounded.
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_MAX_VALUES: usize = 262_144;
@@ -420,6 +420,12 @@ mod tests {
         assert_eq!(receipt.result.grad_potential.len(), 3);
         assert_eq!(receipt.audit.max_grad_input_error, 0.0);
         assert_eq!(receipt.audit.max_grad_potential_error, 0.0);
+        assert!(receipt
+            .gradient_semantics
+            .contains("with respect to input and potential only"));
+        assert!(receipt
+            .gradient_semantics
+            .contains("standard_normal and config are fixed witnesses"));
 
         let canonical = serde_json::to_value(&receipt).expect("serializable");
         assert_eq!(
