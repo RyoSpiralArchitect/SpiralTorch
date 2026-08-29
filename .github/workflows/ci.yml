@@ -7,6 +7,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  workspace-inventory:
+    name: workspace crate inventory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify generated workspace inventory
+        run: python3 tools/list_workspace_crates.py --check-doc docs/development/workspace_crates.md
+
   version-consistency:
     name: bindings/st-py version consistency
     runs-on: ubuntu-latest
