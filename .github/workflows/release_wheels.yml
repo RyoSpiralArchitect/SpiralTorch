@@ -391,7 +391,7 @@ jobs:
             --license "LICENSE .txt" \
             --tag "$RELEASE_TAG"
       - name: Generate SBOM for release payload
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@v0.24.2
         with:
           path: dist
           format: cyclonedx-json
@@ -450,7 +450,7 @@ jobs:
         with:
           subject-path: 'dist/**/*.whl'
       - name: Sign release artifacts with Sigstore
-        uses: sigstore/gh-action-sigstore-python@v3.4.0
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
         with:
           inputs: |
             dist/**/*.whl
