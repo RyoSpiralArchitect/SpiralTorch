@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.4.21
+
+- Extend the Rust-owned autograd graph with broadcast row bias, ReLU,
+  tanh-approximate GELU, and the full row-softmax VJP. Python and WASM expose
+  the same Rust operations; add a deterministic 600-step nonlinear learning
+  fixture and finite-difference/PyTorch gradient parity tests.
+- Protect graph values and committed gradients from pre-existing mutable
+  DLPack aliases. Native snapshots share read-only versioned exports and copy
+  for legacy consumers; uniquely owned Rust buffers retain their no-copy
+  capture path. Expose Tensor.snapshot() and Tensor.is_snapshot() in Python.
+- Normalize graph leaves and VJP seeds to logical row-major order. Handle empty GELU
+  backward tensors as explicit no-ops, reject non-finite seeds/results, and
+  stabilize saturated GELU derivatives on both CPU and WGPU.
+- Accumulate CPU row reductions in f64 before final f32 validation so large
+  cancelling cotangents remain valid. Share the canonical tensor GELU derivative
+  with the upper-layer CPU fallback instead of maintaining a second formula.
+
 ## 0.4.20
 
 - Add Rust-owned DLPack 1.0 versioned interchange with a safe RAII handle for

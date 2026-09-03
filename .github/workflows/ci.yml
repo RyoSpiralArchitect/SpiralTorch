@@ -155,6 +155,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build tensor + wgpu
         run: cargo build -p st-tensor --features wgpu --release
+      - name: nonlinear autograd on strict WGPU paths
+        env:
+          SPIRALTORCH_STRICT_GPU: "1"
+        run: cargo test --locked -p st-tensor --features wgpu --release --test autograd_nonlinear
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -383,3 +387,5 @@ jobs:
           python -m pip install numpy
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py bindings/st-py/tests/test_native_dlpack_versioned.py
           python -I tools/smoke_dlpack_interop.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py
+          python -I tools/smoke_autograd.py

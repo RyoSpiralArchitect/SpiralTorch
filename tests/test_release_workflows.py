@@ -96,6 +96,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--require-latest", release_wheels)
         self.assertIn("--index-url https://pypi.org/simple", publish_from_release)
 
+    def test_all_wheels_execute_nonlinear_training_before_upload(self) -> None:
+        for name in ["wheels.yml", "release_wheels.yml"]:
+            workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+            self.assertIn("python -I ../../tools/smoke_autograd.py", workflow)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("test_autograd_nonlinear.py", ci)
+        self.assertIn("python -I tools/smoke_autograd.py", ci)
+        self.assertIn("--test autograd_nonlinear", ci)
+
     def test_release_verifier_uses_isolated_python_and_quoted_arguments(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "verify-release.yml").read_text(
             encoding="utf-8"

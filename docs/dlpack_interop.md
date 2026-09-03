@@ -77,6 +77,13 @@ it, including from another thread. For isolation, ask for an explicit copy.
 The source-only NumPy fallback is a separate compatibility implementation; the
 native lifetime and zero-copy guarantees here require the installed Rust wheel.
 
+`tensor.snapshot()` isolates pre-existing mutable aliases. Snapshot exports
+share read-only versioned storage; legacy exports copy instead of exposing a
+writable alias. `tensor.is_snapshot()` reports this protection. Autograd leaves
+and saved gradients use snapshots automatically so a later NumPy/PyTorch write
+cannot silently change a prior graph. Ordinary Tensor interchange still shares
+storage when allowed. See the [autograd contract](autograd_contract.md).
+
 ## Rust
 
 Direct Rust callers need no raw pointers for an internal handoff:
