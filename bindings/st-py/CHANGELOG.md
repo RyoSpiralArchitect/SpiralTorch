@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.20
+
+- Add Rust-owned DLPack 1.0 versioned interchange with a safe RAII handle for
+  direct Rust callers, read-only foreign storage, explicit copy policies, and
+  matching Python `max_version`, `dl_device`, and `copy` export arguments.
+  Preserve legacy zero-copy exports for writable CPU f32 tensors. Accept empty
+  axes, reject overflowing byte spans, and fix the 64-bit byte-offset ABI on
+  WASM32. Cover real NumPy/PyTorch ownership and single-use capsule transfers.
 - Use the shipped Python helper implementation for the source-checkout fallback
   bridge and load native export helpers only on demand. Keep helper submodules
   from replacing the hypergrad factory.

@@ -381,4 +381,5 @@ jobs:
       - name: Native and NumPy stub boundary regression
         run: |
           python -m pip install numpy
-          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py bindings/st-py/tests/test_native_dlpack_versioned.py
+          python -I tools/smoke_dlpack_interop.py

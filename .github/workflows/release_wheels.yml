@@ -233,6 +233,7 @@ jobs:
           PY
           python -P ../../tools/smoke_hf_console_scripts.py
           python -P ../../tools/smoke_zspace_runtime_protocols.py
+          python -I ../../tools/smoke_dlpack_interop.py
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v7
         with:
