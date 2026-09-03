@@ -4,17 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import os
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 try:
     import tomllib
-    TOMLDecodeError = tomllib.TOMLDecodeError
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
     import tomli as tomllib  # type: ignore[assignment]
-    TOMLDecodeError = tomllib.TOMLDecodeError  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
@@ -67,41 +68,88 @@ def load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
+def load_cargo_metadata(manifest_path: Path) -> dict[str, Any]:
+    manifest_path = manifest_path.resolve()
+    try:
+        completed = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--locked",
+                "--no-deps",
+                "--format-version",
+                "1",
+                "--manifest-path",
+                str(manifest_path),
+            ],
+            cwd=manifest_path.parent,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("cargo is required to resolve the workspace inventory") from error
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(f"cargo metadata failed: {message}")
+    try:
+        metadata = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"cargo metadata returned invalid JSON: {error}") from error
+    if not isinstance(metadata, dict):
+        raise RuntimeError("cargo metadata returned a non-object document")
+    return metadata
+
+
+def _member_sort_key(path: str, declared_members: list[str]) -> tuple[int, str]:
+    normalized = path.removeprefix("./").rstrip("/")
+    for index, pattern in enumerate(declared_members):
+        pattern = pattern.removeprefix("./").rstrip("/")
+        if normalized == pattern or fnmatch.fnmatchcase(normalized, pattern):
+            return index, normalized
+    # Cargo can auto-enroll an in-tree path dependency that is not declared.
+    return len(declared_members), normalized
+
+
 def collect_workspace_crates(manifest_path: Path) -> list[WorkspaceCrate]:
     root_manifest = load_toml(manifest_path)
     workspace = root_manifest.get("workspace", {})
     root = manifest_path.resolve().parent
-    members = workspace.get("members", [])
-    default_members = set(workspace.get("default-members", []))
+    declared_members = [str(member) for member in workspace.get("members", [])]
+    metadata = load_cargo_metadata(manifest_path)
+    packages = {
+        str(package["id"]): package for package in metadata.get("packages", [])
+    }
+    workspace_members = [str(member) for member in metadata.get("workspace_members", [])]
+    default_members = {
+        str(member) for member in metadata.get("workspace_default_members", [])
+    }
+
+    resolved: list[tuple[str, dict[str, Any]]] = []
+    for member_id in workspace_members:
+        package = packages.get(member_id)
+        if package is None:
+            raise RuntimeError(
+                f"cargo metadata omitted workspace package '{member_id}'"
+            )
+        package_manifest = Path(str(package["manifest_path"])).resolve()
+        package_dir = package_manifest.parent
+        member_path = Path(os.path.relpath(package_dir, root)).as_posix()
+        resolved.append((member_path, package))
+    resolved.sort(key=lambda item: _member_sort_key(item[0], declared_members))
 
     crates: list[WorkspaceCrate] = []
-    for member in members:
-        package_manifest = root / member / "Cargo.toml"
-        if not package_manifest.exists():
-            raise FileNotFoundError(
-                f"Workspace member '{member}' has no Cargo.toml at {package_manifest}"
-            )
-        if not package_manifest.is_file():
-            raise ValueError(
-                f"Workspace member '{member}' Cargo.toml path is not a file: {package_manifest}"
-            )
-        try:
-            package_data = load_toml(package_manifest)
-        except (TOMLDecodeError, OSError, UnicodeDecodeError) as e:
-            raise ValueError(
-                f"Failed to parse Cargo.toml for workspace member '{member}' at {package_manifest}: {e}"
-            ) from e
-        package = package_data.get("package", {})
-        package_dir = package_manifest.parent
+    for member, package in resolved:
+        targets = package.get("targets", [])
         crates.append(
             WorkspaceCrate(
                 name=str(package.get("name", member)),
                 path=member,
                 version=str(package.get("version", "")),
-                default_member=member in default_members,
-                description=str(package.get("description", "")),
-                tests=sum(1 for _ in package_dir.glob("tests/**/*.rs")),
-                examples=sum(1 for _ in package_dir.glob("examples/**/*.rs")),
+                default_member=str(package["id"]) in default_members,
+                description=str(package.get("description") or ""),
+                tests=sum("test" in target.get("kind", []) for target in targets),
+                examples=sum("example" in target.get("kind", []) for target in targets),
             )
         )
     return crates

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -19,6 +21,59 @@ SPEC.loader.exec_module(list_workspace_crates)
 
 
 class WorkspaceInventoryTests(unittest.TestCase):
+    def test_cargo_metadata_resolves_auto_members_and_inherited_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Cargo.toml").write_text(
+                """[workspace]
+members = ["declared"]
+default-members = ["declared"]
+resolver = "2"
+
+[workspace.package]
+version = "0.9.0"
+description = "Inherited package metadata"
+""",
+                encoding="utf-8",
+            )
+            for name in ("declared", "auto-member"):
+                (root / name / "src").mkdir(parents=True)
+                (root / name / "src" / "lib.rs").write_text("", encoding="utf-8")
+            (root / "declared" / "Cargo.toml").write_text(
+                """[package]
+name = "declared"
+version.workspace = true
+description.workspace = true
+edition = "2021"
+
+[dependencies]
+auto-member = { path = "../auto-member" }
+""",
+                encoding="utf-8",
+            )
+            (root / "auto-member" / "Cargo.toml").write_text(
+                """[package]
+name = "auto-member"
+version = "0.1.0"
+edition = "2021"
+""",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["cargo", "generate-lockfile", "--manifest-path", str(root / "Cargo.toml")],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            crates = list_workspace_crates.collect_workspace_crates(root / "Cargo.toml")
+
+            self.assertEqual([crate.name for crate in crates], ["declared", "auto-member"])
+            self.assertEqual(crates[0].version, "0.9.0")
+            self.assertEqual(crates[0].description, "Inherited package metadata")
+            self.assertTrue(crates[0].default_member)
+            self.assertFalse(crates[1].default_member)
+
     def test_markdown_reports_count_and_escapes_cells(self) -> None:
         crate = list_workspace_crates.WorkspaceCrate(
             name="st-example",
