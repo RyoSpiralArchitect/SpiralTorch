@@ -913,6 +913,7 @@ impl fmt::Display for TensorUtilBackend {
 #[derive(Clone, Debug)]
 enum TensorBacking {
     Owned(Arc<AlignedVec>),
+    Snapshot(Arc<AlignedVec>),
     Foreign(ForeignTensor),
 }
 
@@ -936,12 +937,15 @@ impl TensorBuffer {
 
     fn as_slice(&self) -> &[f32] {
         match &self.backing {
-            TensorBacking::Owned(vec) => vec.as_slice(),
+            TensorBacking::Owned(vec) | TensorBacking::Snapshot(vec) => vec.as_slice(),
             TensorBacking::Foreign(foreign) => foreign.as_slice(),
         }
     }
 
     fn make_mut_slice(&mut self) -> &mut [f32] {
+        if let TensorBacking::Snapshot(vec) = &self.backing {
+            self.backing = TensorBacking::Owned(Arc::clone(vec));
+        }
         if let TensorBacking::Foreign(foreign) = &self.backing {
             let owned = aligned_from_slice(foreign.as_slice());
             self.backing = TensorBacking::Owned(Arc::new(owned));
@@ -956,7 +960,7 @@ impl TensorBuffer {
 
     fn as_ptr(&self) -> *const f32 {
         match &self.backing {
-            TensorBacking::Owned(vec) => vec.as_ptr(),
+            TensorBacking::Owned(vec) | TensorBacking::Snapshot(vec) => vec.as_ptr(),
             TensorBacking::Foreign(foreign) => foreign.as_ptr(),
         }
     }
@@ -964,13 +968,14 @@ impl TensorBuffer {
     fn export_handle(&self) -> ExportData {
         match &self.backing {
             TensorBacking::Owned(vec) => ExportData::Owned(Arc::clone(vec)),
+            TensorBacking::Snapshot(vec) => ExportData::ReadOnly(Arc::clone(vec)),
             TensorBacking::Foreign(foreign) => ExportData::Foreign(foreign.clone()),
         }
     }
 
     fn try_clone_owned(&self) -> Option<Arc<AlignedVec>> {
         match &self.backing {
-            TensorBacking::Owned(vec) => Some(Arc::clone(vec)),
+            TensorBacking::Owned(vec) | TensorBacking::Snapshot(vec) => Some(Arc::clone(vec)),
             TensorBacking::Foreign(_) => None,
         }
     }
@@ -1740,6 +1745,41 @@ impl Tensor {
     pub fn data_mut(&mut self) -> &mut [f32] {
         self.layout = Layout::RowMajor;
         Arc::make_mut(&mut self.data).make_mut_slice()
+    }
+
+    /// Captures an isolated value that exports read-only storage through DLPack.
+    ///
+    /// Mutable or foreign storage is copied. Existing snapshots can be shared;
+    /// subsequent Rust mutation detaches from any other snapshot owners.
+    pub fn snapshot(&self) -> Self {
+        self.clone().into_snapshot()
+    }
+
+    /// Captures a snapshot, reusing uniquely owned native storage without copying.
+    ///
+    /// Shared mutable storage and all foreign storage are copied so pre-existing
+    /// aliases cannot change the snapshot, even after a read-only foreign import.
+    pub fn into_snapshot(mut self) -> Self {
+        if self.is_snapshot() {
+            return self;
+        }
+        let values = match &self.data.backing {
+            TensorBacking::Owned(values)
+                if Arc::strong_count(&self.data) == 1 && Arc::strong_count(values) == 1 =>
+            {
+                Arc::clone(values)
+            }
+            _ => Arc::new(aligned_from_slice(self.data())),
+        };
+        self.data = Arc::new(TensorBuffer {
+            backing: TensorBacking::Snapshot(values),
+        });
+        self
+    }
+
+    /// Whether this handle currently owns protected snapshot storage.
+    pub fn is_snapshot(&self) -> bool {
+        matches!(&self.data.backing, TensorBacking::Snapshot(_))
     }
 
     /// Return the DLPack device descriptor for this tensor.
@@ -6304,6 +6344,25 @@ impl Tensor {
             });
         }
         let (rows, cols) = self.shape();
+        Self::validate_finite_tensor_util_slice("gelu_backward_input", self.data())?;
+        Self::validate_finite_tensor_util_slice("gelu_backward_seed", grad_output.data())?;
+        if self.is_empty() {
+            crate::emit_tensor_op("gelu_backward", &[rows, cols, rows, cols], &[rows, cols]);
+            emit_basic_tensor_op_meta(
+                "gelu_backward",
+                rows,
+                cols,
+                rows,
+                cols,
+                self.layout,
+                "no_op",
+                backend.label(),
+                "empty",
+                "gradient",
+                |_| {},
+            );
+            return Tensor::zeros(rows, cols);
+        }
 
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
@@ -6315,6 +6374,10 @@ impl Tensor {
                 if wgpu_dense::is_available() {
                     match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
                         Ok(buffer) => {
+                            Self::validate_finite_tensor_util_slice(
+                                "gelu_backward_output",
+                                &buffer,
+                            )?;
                             let output = Tensor::from_vec(rows, cols, buffer)?;
                             crate::emit_tensor_op(
                                 "gelu_backward",
@@ -6350,6 +6413,10 @@ impl Tensor {
                 {
                     match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
                         Ok(buffer) => {
+                            Self::validate_finite_tensor_util_slice(
+                                "gelu_backward_output",
+                                &buffer,
+                            )?;
                             let output = Tensor::from_vec(rows, cols, buffer)?;
                             crate::emit_tensor_op(
                                 "gelu_backward",
@@ -6388,6 +6455,7 @@ impl Tensor {
         for (z, g) in self.data().iter().zip(grad_output.data().iter()) {
             data.push(gelu_prime(*z) * g);
         }
+        Self::validate_finite_tensor_util_slice("gelu_backward_output", &data)?;
         let output = Tensor::from_vec(rows, cols, data)?;
         #[cfg(feature = "wgpu")]
         let (fallback_from, fallback_message) = if let Some(message) = wgpu_failure.as_deref() {
@@ -11871,6 +11939,10 @@ fn gelu(x: f32) -> f32 {
 fn gelu_prime(x: f32) -> f32 {
     const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     const KAPPA: f32 = 0.044_715;
+    // The tanh approximation is saturated here; avoid infinity times zero.
+    if x.abs() >= 10.0 {
+        return if x > 0.0 { 1.0 } else { 0.0 };
+    }
     let x2 = x * x;
     let inner = SQRT_2_OVER_PI * (x + KAPPA * x * x2);
     let t = inner.tanh();

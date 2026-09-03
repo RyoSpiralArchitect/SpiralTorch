@@ -23,6 +23,9 @@ struct Uniforms {
 @group(0) @binding(5) var<uniform>             U: Uniforms;
 
 fn gelu_prime(z: f32) -> f32 {
+  if (abs(z) >= 10.0) {
+    return select(0.0, 1.0, z > 0.0);
+  }
   let k0: f32 = 0.7978845608028654;
   let k1: f32 = 0.044715;
   let z2 = z * z;

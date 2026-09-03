@@ -304,31 +304,34 @@ impl ForeignTensor {
 #[derive(Clone, Debug)]
 pub enum ExportData {
     Owned(Arc<AlignedVec>),
+    /// Native snapshot storage that must not be mutated by a consumer.
+    ReadOnly(Arc<AlignedVec>),
     Foreign(ForeignTensor),
 }
 
 impl ExportData {
     pub fn is_read_only(&self) -> bool {
-        matches!(self, Self::Foreign(buffer) if buffer.is_read_only())
+        matches!(self, Self::ReadOnly(_))
+            || matches!(self, Self::Foreign(buffer) if buffer.is_read_only())
     }
 
     fn as_slice(&self) -> &[f32] {
         match self {
-            Self::Owned(data) => data.as_slice(),
+            Self::Owned(data) | Self::ReadOnly(data) => data.as_slice(),
             Self::Foreign(buffer) => buffer.as_slice(),
         }
     }
 
     pub fn as_ptr(&self) -> *const f32 {
         match self {
-            ExportData::Owned(data) => data.as_ptr(),
+            ExportData::Owned(data) | ExportData::ReadOnly(data) => data.as_ptr(),
             ExportData::Foreign(buffer) => buffer.as_ptr(),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            ExportData::Owned(data) => data.len(),
+            ExportData::Owned(data) | ExportData::ReadOnly(data) => data.len(),
             ExportData::Foreign(buffer) => buffer.len(),
         }
     }

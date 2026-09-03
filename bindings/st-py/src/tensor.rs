@@ -898,6 +898,15 @@ impl PyTensor {
         self.inner.data().as_ptr() as usize
     }
 
+    /// Isolate mutable aliases and expose read-only DLPack storage.
+    pub fn snapshot(&self) -> Self {
+        Self::from_tensor(self.inner.snapshot())
+    }
+
+    pub fn is_snapshot(&self) -> bool {
+        self.inner.is_snapshot()
+    }
+
     pub fn tolist(&self) -> Vec<Vec<f32>> {
         let (rows, cols) = self.inner.shape();
         let data = self.inner.data();

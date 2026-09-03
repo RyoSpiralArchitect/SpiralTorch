@@ -105,6 +105,34 @@ impl PyAutogradTensor {
             .map_err(tensor_err_to_py)
     }
 
+    fn add_row(&self, bias: &Self) -> PyResult<Self> {
+        self.inner
+            .add_row(&bias.inner)
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn relu(&self) -> PyResult<Self> {
+        self.inner
+            .relu()
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn gelu(&self) -> PyResult<Self> {
+        self.inner
+            .gelu()
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn row_softmax(&self) -> PyResult<Self> {
+        self.inner
+            .row_softmax()
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
     fn hadamard(&self, rhs: &Self) -> PyResult<Self> {
         self.inner
             .hadamard(&rhs.inner)

@@ -184,6 +184,44 @@ impl AutogradTensor {
             .map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = addRow)]
+    pub fn add_row(&self, bias: &AutogradTensor) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .add_row(&bias.transport.inner)
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    pub fn relu(&self) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .relu()
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    pub fn gelu(&self) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .gelu()
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = rowSoftmax)]
+    pub fn row_softmax(&self) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .row_softmax()
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
     pub fn hadamard(&self, rhs: &AutogradTensor) -> Result<AutogradTensor, JsValue> {
         self.transport
             .inner
@@ -349,5 +387,26 @@ mod tests {
         assert_eq!(autograd_semantic_owner(), "st-tensor");
         assert_eq!(summary["contract_version"], AUTOGRAD_CONTRACT_VERSION);
         assert_eq!(summary["semantic_owner"], AUTOGRAD_SEMANTIC_OWNER);
+    }
+
+    #[test]
+    fn wasm_transport_nonlinear_graph_uses_rust_vjp_and_bias_sum() {
+        let x = AutogradTransport::new(2, 3, vec![0.0; 6], true).unwrap();
+        let bias = AutogradTransport::new(1, 3, vec![0.0; 3], true).unwrap();
+        let output = AutogradTransport::from_inner(
+            x.inner
+                .add_row(&bias.inner)
+                .unwrap()
+                .gelu()
+                .unwrap()
+                .row_softmax()
+                .unwrap(),
+        );
+        let seed = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let vjp = output.vector_jacobian_product(&x, seed.clone()).unwrap();
+        assert!(x.inner.grad().is_none());
+        output.backward_with_values(seed).unwrap();
+        assert_eq!(x.inner.grad().unwrap(), vjp);
+        assert!((bias.inner.grad().unwrap().data()[0] - 2.0 / 9.0).abs() < 1e-6);
     }
 }

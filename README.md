@@ -447,6 +447,14 @@ operations without redefining derivatives. `AmegaHypergrad` and
 compute graph. See the [Rust-owned autograd contract](docs/autograd_contract.md)
 for the exact ownership boundaries and v1 invariants.
 
+The graph also supports `add_row`, `relu`, tanh-approximate `gelu`, and
+`row_softmax`, including their Rust VJPs. Leaves and saved gradients capture
+protected snapshots: mutating an imported NumPy/PyTorch array cannot silently
+change a previously built graph. Run `python examples/autograd_xor.py` with a
+native wheel, or `cargo run -p st-tensor --example autograd_xor`, for a bounded
+600-step nonlinear learning fixture. This checks learning mechanics, not LLM
+fine-tuning quality.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -906,7 +914,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.20
+VERSION=0.4.21
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

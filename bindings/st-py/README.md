@@ -172,6 +172,18 @@ invariants, not Python-side conventions. Use
 does not read or mutate accumulated gradients and returns zero when `input` is
 disconnected.
 
+Native graphs also expose `add_row(bias)`, `relu()`, `gelu()` (tanh
+approximation), and `row_softmax()`. Bias gradients sum over rows; any averaging
+belongs to the loss. See [the nonlinear learning example](../../examples/autograd_xor.py)
+for a complete training loop without PyTorch or NumPy dependencies.
+
+Leaves and accumulated gradients are protected Rust snapshots. `value()` and
+`grad()` expose read-only versioned DLPack storage; legacy export copies rather
+than exposing writable graph memory. For an ordinary Tensor, `snapshot()`
+explicitly isolates mutable aliases, and `is_snapshot()` reports that state.
+Normal `from_dlpack` Tensor sharing is unchanged. Snapshot capture is not a
+PyTorch autograd-graph transfer.
+
 ## What's included
 
 - `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free

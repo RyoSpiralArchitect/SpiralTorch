@@ -7,7 +7,7 @@
 //! backward pass never commits a partial gradient set. Python and WASM clients
 //! should expose this contract rather than rebuilding graph semantics.
 
-use crate::{PureResult, Tensor, TensorError};
+use crate::{Layout, PureResult, Tensor, TensorError};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -103,6 +103,10 @@ enum AutogradOperation {
         lhs: AutogradTensor,
         rhs: AutogradTensor,
     },
+    AddRow {
+        input: AutogradTensor,
+        bias: AutogradTensor,
+    },
     Sub {
         lhs: AutogradTensor,
         rhs: AutogradTensor,
@@ -121,6 +125,16 @@ enum AutogradOperation {
     },
     Transpose {
         input: AutogradTensor,
+    },
+    Relu {
+        input: AutogradTensor,
+    },
+    Gelu {
+        input: AutogradTensor,
+    },
+    RowSoftmax {
+        input: AutogradTensor,
+        probabilities: Tensor,
     },
     Sum {
         input: AutogradTensor,
@@ -154,11 +168,15 @@ impl AutogradOperation {
         match self {
             Self::Leaf => "leaf",
             Self::Add { .. } => "add",
+            Self::AddRow { .. } => "add_row",
             Self::Sub { .. } => "sub",
             Self::Hadamard { .. } => "hadamard",
             Self::Matmul { .. } => "matmul",
             Self::Scale { .. } => "scale",
             Self::Transpose { .. } => "transpose",
+            Self::Relu { .. } => "relu",
+            Self::Gelu { .. } => "gelu",
+            Self::RowSoftmax { .. } => "row_softmax",
             Self::Sum { .. } => "sum",
             Self::Mean { .. } => "mean",
         }
@@ -171,8 +189,12 @@ impl AutogradOperation {
             | Self::Sub { lhs, rhs }
             | Self::Hadamard { lhs, rhs }
             | Self::Matmul { lhs, rhs } => vec![lhs.clone(), rhs.clone()],
+            Self::AddRow { input, bias } => vec![input.clone(), bias.clone()],
             Self::Scale { input, .. }
             | Self::Transpose { input }
+            | Self::Relu { input }
+            | Self::Gelu { input }
+            | Self::RowSoftmax { input, .. }
             | Self::Sum { input }
             | Self::Mean { input } => vec![input.clone()],
         }
@@ -184,6 +206,13 @@ impl AutogradOperation {
             Self::Add { lhs, rhs } => Ok(vec![
                 (lhs.clone(), upstream.clone()),
                 (rhs.clone(), upstream.clone()),
+            ]),
+            Self::AddRow { input, bias } => Ok(vec![
+                (input.clone(), upstream.clone()),
+                (
+                    bias.clone(),
+                    Tensor::from_vec(1, bias.shape().1, upstream.try_sum_axis0()?)?,
+                ),
             ]),
             Self::Sub { lhs, rhs } => Ok(vec![
                 (lhs.clone(), upstream.clone()),
@@ -203,6 +232,55 @@ impl AutogradOperation {
             }
             Self::Scale { input, factor } => Ok(vec![(input.clone(), upstream.scale(*factor)?)]),
             Self::Transpose { input } => Ok(vec![(input.clone(), upstream.transpose())]),
+            Self::Relu { input } => {
+                let mask = Tensor::from_vec(
+                    input.shape().0,
+                    input.shape().1,
+                    input
+                        .value()
+                        .data()
+                        .iter()
+                        .map(|&x| if x > 0.0 { 1.0 } else { 0.0 })
+                        .collect(),
+                )?;
+                Ok(vec![(input.clone(), upstream.hadamard(&mask)?)])
+            }
+            Self::Gelu { input } => Ok(vec![(
+                input.clone(),
+                input.value().gelu_backward(upstream)?,
+            )]),
+            Self::RowSoftmax {
+                input,
+                probabilities,
+            } => {
+                let (rows, cols) = input.shape();
+                let mut gradient = Vec::with_capacity(input.value().len());
+                if cols > 0 {
+                    for (probabilities, seed) in probabilities
+                        .data()
+                        .chunks_exact(cols)
+                        .zip(upstream.data().chunks_exact(cols))
+                    {
+                        // Center the seed so a constant cotangent is exactly zero,
+                        // then use f64 to avoid overflow in the coupled row reduction.
+                        let origin = f64::from(seed[0]);
+                        let dot: f64 = probabilities
+                            .iter()
+                            .zip(seed)
+                            .map(|(&p, &g)| f64::from(p) * (f64::from(g) - origin))
+                            .sum();
+                        gradient.extend(
+                            probabilities.iter().zip(seed).map(|(&p, &g)| {
+                                (f64::from(p) * (f64::from(g) - origin - dot)) as f32
+                            }),
+                        );
+                    }
+                }
+                Ok(vec![(
+                    input.clone(),
+                    Tensor::from_vec(rows, cols, gradient)?,
+                )])
+            }
             Self::Sum { input } => {
                 let seed = scalar_value(upstream, "autograd_sum_seed")?;
                 let gradient = Tensor::from_vec(
@@ -230,8 +308,14 @@ impl AutogradOperation {
 }
 
 impl AutogradTensor {
-    /// Creates an immutable leaf. Trainable leaves accumulate gradients.
+    /// Captures a row-major immutable value. Trainable leaves accumulate gradients.
+    /// Foreign and shared mutable buffers are isolated; unique native buffers are reused.
     pub fn from_tensor(value: Tensor, requires_grad: bool) -> PureResult<Self> {
+        let value = if value.layout() == Layout::RowMajor {
+            value
+        } else {
+            value.to_layout(Layout::RowMajor)?
+        };
         validate_finite_tensor("autograd_leaf", &value)?;
         Ok(Self::from_node(
             value,
@@ -254,7 +338,7 @@ impl AutogradTensor {
         Self {
             node: Arc::new(AutogradNode {
                 id: NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed),
-                value,
+                value: value.into_snapshot(),
                 requires_grad,
                 gradient: Mutex::new(None),
                 operation,
@@ -332,6 +416,60 @@ impl AutogradTensor {
             AutogradOperation::Add {
                 lhs: self.clone(),
                 rhs: rhs.clone(),
+            },
+        )
+    }
+
+    /// Broadcasts a trainable 1 x cols bias over the input rows.
+    /// The bias VJP sums rows; it does not introduce an implicit batch average.
+    pub fn add_row(&self, bias: &Self) -> PureResult<Self> {
+        if bias.shape() != (1, self.shape().1) {
+            return Err(TensorError::ShapeMismatch {
+                left: bias.shape(),
+                right: (1, self.shape().1),
+            });
+        }
+        let mut value = self.value().clone();
+        value.add_row_inplace(bias.value().data())?;
+        Self::from_operation(
+            value,
+            AutogradOperation::AddRow {
+                input: self.clone(),
+                bias: bias.clone(),
+            },
+        )
+    }
+
+    /// ReLU with derivative zero at the origin.
+    pub fn relu(&self) -> PureResult<Self> {
+        Self::from_operation(
+            self.value().relu()?,
+            AutogradOperation::Relu {
+                input: self.clone(),
+            },
+        )
+    }
+
+    /// GELU using the same tanh approximation as the Tensor and neural layer kernels.
+    pub fn gelu(&self) -> PureResult<Self> {
+        let mut value = self.value().clone();
+        value.gelu_inplace();
+        Self::from_operation(
+            value,
+            AutogradOperation::Gelu {
+                input: self.clone(),
+            },
+        )
+    }
+
+    /// Row-wise softmax with the full coupled vector-Jacobian product.
+    pub fn row_softmax(&self) -> PureResult<Self> {
+        let value = self.value().row_softmax()?.into_snapshot();
+        Self::from_operation(
+            value.clone(),
+            AutogradOperation::RowSoftmax {
+                input: self.clone(),
+                probabilities: value,
             },
         )
     }
@@ -461,11 +599,11 @@ impl AutogradTensor {
     /// A tracked input that is not connected to this output has derivative zero.
     /// Existing accumulated gradients are neither read nor modified.
     pub fn vector_jacobian_product(&self, input: &Self, seed: &Tensor) -> PureResult<Tensor> {
-        self.validate_backward_seed(seed)?;
+        let seed = self.prepare_backward_seed(seed)?;
         let gradient = {
             let _serial = backward_lock();
             let topology = self.topological_order();
-            let mut gradients = self.local_gradients(&topology, seed)?;
+            let mut gradients = self.local_gradients(&topology, &seed)?;
             match gradients.remove(&input.id()) {
                 Some(gradient) => gradient,
                 None => Tensor::zeros(input.shape().0, input.shape().1)?,
@@ -491,23 +629,24 @@ impl AutogradTensor {
 
     /// Runs an atomic vector-Jacobian product with an explicit output seed.
     pub fn backward_with_grad(&self, seed: &Tensor) -> PureResult<AutogradBackwardReport> {
-        self.validate_backward_seed(seed)?;
+        let seed = self.prepare_backward_seed(seed)?;
         let report = {
             let _serial = backward_lock();
-            self.backward_locked(seed)?
+            self.backward_locked(&seed)?
         };
-        self.emit_backward_report(seed, &report);
+        self.emit_backward_report(&seed, &report);
         Ok(report)
     }
 
-    fn validate_backward_seed(&self, seed: &Tensor) -> PureResult<()> {
+    fn prepare_backward_seed(&self, seed: &Tensor) -> PureResult<Tensor> {
         if seed.shape() != self.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: seed.shape(),
                 right: self.shape(),
             });
         }
-        validate_finite_tensor("autograd_backward_seed", seed)
+        validate_finite_tensor("autograd_backward_seed", seed)?;
+        seed.to_layout(Layout::RowMajor)
     }
 
     fn backward_locked(&self, seed: &Tensor) -> PureResult<AutogradBackwardReport> {
@@ -528,7 +667,7 @@ impl AutogradTensor {
                 None => delta.clone(),
             };
             validate_finite_tensor("autograd_committed_gradient", &next)?;
-            prepared.push((node.clone(), next));
+            prepared.push((node.clone(), next.into_snapshot()));
         }
 
         for (node, gradient) in &prepared {
