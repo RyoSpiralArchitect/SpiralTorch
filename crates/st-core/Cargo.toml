@@ -36,6 +36,8 @@ julia-ffi = ["dep:julia-ffi-poc"]
 go-bridge = ["dep:ureq"]
 
 [dependencies]
+# Complex dynamics receipts require one transcendental implementation across targets.
+libm        = { version = "=0.2.16", default-features = false }
 thiserror   = "2"
 rand        = "0.8"
 serde       = { version = "1", features = ["derive"] }

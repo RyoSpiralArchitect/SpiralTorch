@@ -99,8 +99,8 @@ for protocol in catalog["protocols"]:
 ```
 
 The current catalog covers held-out generation evidence, bounded token
-periodicity, stochastic Schrodinger forward/VJP, repetition-unlikelihood
-planning, and the complete blinded semantic-review lifecycle. Catalog v3
+periodicity, stochastic Schrodinger real and complex forward/VJP, repetition-unlikelihood
+planning, and the complete blinded semantic-review lifecycle. Catalog v4
 records a normal-admission profile and
 guarantee for every client surface; serialized Python/WASM surfaces also carry
 Rust-owned byte/node/depth limits, while typed Rust admission has no serialized
@@ -109,6 +109,10 @@ local evidence, and is exposed by Rust/Python only. Browser/WASM catalog entries
 expose only bounded JSON routes. WASM object helpers remain trusted-local
 convenience transports and are intentionally not certified as hostile-input
 boundaries.
+
+For multi-step evolution that retains the imaginary state and learns through
+both quadratures, see the [complex dynamics guide](../../docs/zspace_complex_dynamics.md)
+and `examples/zspace_complex_trajectory.py`.
 
 Normal catalogued Python routes admit `dict`-backed mappings and `list`/`tuple`
 sequences, including subclasses through base-container descriptors that inspect

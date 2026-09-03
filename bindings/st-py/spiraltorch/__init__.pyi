@@ -5627,6 +5627,8 @@ ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY: str
 ZSPACE_STOCHASTIC_SCHRODINGER_MAX_VALUES: int
 ZSPACE_STOCHASTIC_SCHRODINGER_MAX_ROWS: int
 ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES: int
+def zspace_stochastic_schrodinger_complex_step(request: dict[str, object]) -> dict[str, Any]: ...
+def validate_zspace_stochastic_schrodinger_complex(receipt: dict[str, object]) -> dict[str, Any]: ...
 def zspace_stochastic_schrodinger_forward(
     input_values: List[float] | Tuple[float, ...],
     potential: List[float] | Tuple[float, ...],
@@ -12330,6 +12332,8 @@ __all__ = [
     "validate_zspace_stochastic_schrodinger_vjp",
     "zspace_stochastic_schrodinger_forward",
     "zspace_stochastic_schrodinger_vjp",
+    "zspace_stochastic_schrodinger_complex_step",
+    "validate_zspace_stochastic_schrodinger_complex",
     "zspace_repetition_unlikelihood_plan",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",

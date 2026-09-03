@@ -1,5 +1,17 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.18
+
+- Add Rust-owned complex Schrodinger steps that preserve both quadratures,
+  including analytic real Euclidean VJPs for real/imaginary state and shared
+  potential. Config and noise remain fixed witnesses; real-input v1 is unchanged.
+- Expose the identical bounded request in Python and WASM, include the complex
+  lifecycle in runtime catalog v4 and installed-wheel smoke, and add a
+  three-step potential-fitting example with full reverse trajectory gradients.
+- Pin the complex kernel's transcendental implementation to Rust libm 0.2.16:
+  a real native/WASM expf rounding mismatch was found and fixed without weakening
+  replay equality. Include the failing witness as a golden-bits regression.
+
 ## 0.4.17
 
 - Promote the existing Rust stochastic Schrodinger kernel into a direct,

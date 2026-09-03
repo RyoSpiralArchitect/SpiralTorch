@@ -83,6 +83,22 @@ def stochastic_schrodinger_smoke() -> dict[str, object]:
     }
 
 
+def complex_schrodinger_smoke() -> dict[str, object]:
+    receipt = st.zspace_stochastic_schrodinger_complex_step({
+        "forward_request": {
+            "input": [0.8, -0.3], "potential": [0.1, -0.2],
+            "standard_normal": [0.0, 0.0], "rows": 1, "features": 2,
+        },
+        "input_imaginary": [0.2, 0.5],
+        "cotangent": {"real": [1.0, 0.0], "imaginary": [0.0, 1.0]},
+    })
+    assert st.validate_zspace_stochastic_schrodinger_complex(receipt) == receipt
+    assert receipt["semantic_backend"] == "rust"
+    assert len(receipt["gradient"]["grad_input_imaginary"]) == 2
+    assert receipt["step"]["output_imaginary"] != [0.0, 0.0]
+    return {"evaluation_id": receipt["evaluation_id"]}
+
+
 def repetition_unlikelihood_smoke() -> dict[str, object]:
     plan = st.zspace_repetition_unlikelihood_plan(
         sequences=[
@@ -217,6 +233,7 @@ def main() -> int:
         "generation_evidence",
         "periodicity",
         "stochastic_schrodinger",
+        "stochastic_schrodinger_complex",
         "repetition_unlikelihood",
         "semantic_review",
     ]
@@ -236,6 +253,7 @@ def main() -> int:
         "generation_evidence": generation_evidence_smoke(),
         "periodicity": periodicity_smoke(),
         "stochastic_schrodinger": stochastic_schrodinger_smoke(),
+        "stochastic_schrodinger_complex": complex_schrodinger_smoke(),
         "repetition_unlikelihood": repetition_unlikelihood_smoke(),
         "semantic_review": semantic_review_smoke(),
     }

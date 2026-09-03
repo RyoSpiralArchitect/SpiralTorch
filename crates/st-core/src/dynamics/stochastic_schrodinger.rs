@@ -14,6 +14,9 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod complex;
+pub use complex::*;
+
 pub const STOCHASTIC_SCHRODINGER_CONTRACT_VERSION: &str =
     "spiraltorch.stochastic_real_time_schrodinger.v1";
 pub const STOCHASTIC_SCHRODINGER_KIND: &str = "spiraltorch.stochastic_real_time_schrodinger";

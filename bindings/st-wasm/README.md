@@ -48,9 +48,9 @@ console.log(replay.catalog_id, replay.protocols.map((protocol) => protocol.name)
 ```
 
 The catalog is content-addressed by `st-core` and currently binds generation
-evidence, token-periodicity analysis, stochastic Schrodinger forward/VJP,
+evidence, token-periodicity analysis, stochastic Schrodinger real and complex forward/VJP,
 repetition-unlikelihood planning, and the complete blinded semantic-review
-lifecycle across Rust, Python, and WASM. Catalog v3 records the normal-admission
+lifecycle across Rust, Python, and WASM. Catalog v4 records the normal-admission
 profile and guarantee for every client
 surface; serialized Python/WASM surfaces also carry Rust-owned byte/node/depth
 limits, while typed Rust admission has no serialized budget. Each catalogued
@@ -60,6 +60,11 @@ convenience transports rather than hostile-input boundaries. Trusted legacy
 replay remains deliberately absent from the browser surface.
 
 ## Replayable stochastic Schrodinger dynamics
+
+`zspaceStochasticSchrodingerComplexStepJson` preserves both quadratures and
+optionally evaluates their VJP; `validateZspaceStochasticSchrodingerComplexJson`
+replays the entire receipt. See the [complex dynamics guide](../../docs/zspace_complex_dynamics.md)
+for the shared request and trajectory-backpropagation contract.
 
 Browser workers and persisted runs can execute the same bounded real-time
 transition and analytic VJP as direct Rust and Python callers. The catalogued

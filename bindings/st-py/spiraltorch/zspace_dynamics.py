@@ -84,7 +84,30 @@ ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES = int(
     _native_constant("ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES", 65_536)
 )
 
+_COMPLEX_VERSION = str(_native_constant(
+    "ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION",
+    "spiraltorch.zspace_stochastic_schrodinger_complex_step.v1",
+))
+_COMPLEX_KIND = str(_native_constant(
+    "ZSPACE_SCHRODINGER_COMPLEX_KIND",
+    "spiraltorch.zspace_stochastic_schrodinger_complex_step",
+))
+_COMPLEX_GRADIENT_SEMANTICS = str(_native_constant(
+    "ZSPACE_SCHRODINGER_COMPLEX_GRADIENT_SEMANTICS",
+    "real Euclidean VJP of output_real and output_imaginary with respect to "
+    "input, input_imaginary, and shared potential; config and standard_normal "
+    "are fixed witnesses",
+))
+_COMPLEX_EVIDENCE_BOUNDARY = str(_native_constant(
+    "ZSPACE_SCHRODINGER_COMPLEX_EVIDENCE_BOUNDARY",
+    "one complex Strang-split transition and optional analytic input/potential "
+    "VJP; preserving both quadratures permits composition but does not establish "
+    "semantic quality or training efficacy",
+))
+
 __all__ = [
+    "zspace_stochastic_schrodinger_complex_step",
+    "validate_zspace_stochastic_schrodinger_complex",
     "ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY",
     "ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION",
     "ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND",
@@ -181,6 +204,7 @@ def _content_id(value: object) -> bool:
 
 def _validate_receipt(receipt: Mapping[str, Any]) -> None:
     kind = receipt.get("kind")
+    evidence_boundary = ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY
     if kind == ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND:
         validated = receipt.get("forward_validated") is True
         contract_version = ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION
@@ -198,6 +222,11 @@ def _validate_receipt(receipt: Mapping[str, Any]) -> None:
             raise RuntimeError(
                 "native Z-space core returned an untrusted stochastic Schrodinger VJP"
             )
+    elif kind == _COMPLEX_KIND:
+        contract_version = _COMPLEX_VERSION
+        identity = receipt.get("evaluation_id")
+        evidence_boundary = _COMPLEX_EVIDENCE_BOUNDARY
+        validated = receipt.get("gradient_semantics") == _COMPLEX_GRADIENT_SEMANTICS
     else:
         raise RuntimeError(
             "native Z-space core returned an unknown stochastic Schrodinger receipt"
@@ -214,7 +243,7 @@ def _validate_receipt(receipt: Mapping[str, Any]) -> None:
         or receipt.get("status") != "ready"
         or receipt.get("efficacy_claim_ready") is not False
         or receipt.get("evidence_boundary")
-        != ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY
+        != evidence_boundary
         or not validated
         or not _content_id(identity)
         or not isinstance(receipt.get("request"), Mapping)
@@ -333,3 +362,24 @@ def validate_zspace_stochastic_schrodinger_vjp(
     """Recompute a serialized VJP receipt in Rust and reject any drift."""
 
     return _native_operation("_zspace_stochastic_schrodinger_vjp_validate", receipt)
+
+
+def zspace_stochastic_schrodinger_complex_step(
+    request: dict[str, object],
+) -> dict[str, Any]:
+    """Evolve both quadratures using the same owned request as Rust/WASM.
+
+    ``forward_request`` contains the real input, potential, shape, explicit
+    Gaussian witness and optional config; ``input_imaginary`` is mandatory.
+    Optional ``cotangent={"real": [...], "imaginary": [...]}`` requests the
+    real Euclidean VJP of both outputs, with config/noise held fixed.
+    Keep both output arrays when constructing a subsequent step.
+    """
+    return _native_operation("_zspace_stochastic_schrodinger_complex_step", request)
+
+
+def validate_zspace_stochastic_schrodinger_complex(
+    receipt: dict[str, object],
+) -> dict[str, Any]:
+    """Replay a complex-state step, including optional gradients, in Rust."""
+    return _native_operation("_zspace_stochastic_schrodinger_complex_validate", receipt)

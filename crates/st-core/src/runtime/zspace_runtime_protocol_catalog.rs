@@ -38,6 +38,8 @@ use super::zspace_semantic_review::{
     ZSPACE_SEMANTIC_REVIEW_UNBLIND_KIND,
 };
 use super::zspace_stochastic_schrodinger::{
+    ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION, ZSPACE_SCHRODINGER_COMPLEX_KIND,
+    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES, ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
     ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION,
     ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND, ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
     ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
@@ -50,7 +52,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_CONTRACT_VERSION: &str =
-    "spiraltorch.zspace_runtime_protocol_catalog.v3";
+    "spiraltorch.zspace_runtime_protocol_catalog.v4";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_KIND: &str =
     "spiraltorch.zspace_runtime_protocol_catalog";
 pub const ZSPACE_RUNTIME_PROTOCOL_CATALOG_SEMANTIC_OWNER: &str =
@@ -411,6 +413,64 @@ fn stochastic_schrodinger_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
     }
 }
 
+fn complex_schrodinger_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
+    ZSpaceRuntimeProtocolDescriptor {
+        name: "stochastic_schrodinger_complex".to_owned(),
+        semantic_owner: ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_OWNER.to_owned(),
+        semantic_backend: ZSPACE_STOCHASTIC_SCHRODINGER_SEMANTIC_BACKEND.to_owned(),
+        admission_owner: "rust".to_owned(),
+        artifacts: vec![artifact(
+            "complex_step_receipt",
+            ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION,
+            "kind",
+            ZSPACE_SCHRODINGER_COMPLEX_KIND,
+        )],
+        clients: vec![
+            client(
+                "rust",
+                "st-core",
+                "native",
+                typed_native_admission(),
+                &[
+                    "run_zspace_stochastic_schrodinger_complex_step",
+                    "validate_zspace_stochastic_schrodinger_complex_value",
+                ],
+                false,
+            ),
+            client(
+                "python",
+                "spiraltorch",
+                "bounded_mapping",
+                passive_json_container_admission(
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES,
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+                ),
+                &[
+                    "zspace_stochastic_schrodinger_complex_step",
+                    "validate_zspace_stochastic_schrodinger_complex",
+                ],
+                false,
+            ),
+            client(
+                "wasm",
+                "spiraltorch-wasm",
+                "bounded_json",
+                bounded_json_string_admission(
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES,
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+                ),
+                &[
+                    "zspaceStochasticSchrodingerComplexStepJson",
+                    "validateZspaceStochasticSchrodingerComplexJson",
+                ],
+                false,
+            ),
+        ],
+    }
+}
+
 fn repetition_unlikelihood_descriptor() -> ZSpaceRuntimeProtocolDescriptor {
     ZSpaceRuntimeProtocolDescriptor {
         name: "repetition_unlikelihood".to_owned(),
@@ -600,6 +660,7 @@ pub fn zspace_runtime_protocol_catalog(
         generation_evidence_descriptor(),
         periodicity_descriptor(),
         stochastic_schrodinger_descriptor(),
+        complex_schrodinger_descriptor(),
         repetition_unlikelihood_descriptor(),
         semantic_review_descriptor(),
     ];
@@ -614,7 +675,7 @@ pub fn zspace_runtime_protocol_catalog(
         status: ZSPACE_RUNTIME_PROTOCOL_CATALOG_STATUS.to_owned(),
         protocol_count: protocols.len(),
         protocol_order_rule:
-            "generation_evidence,periodicity,stochastic_schrodinger,repetition_unlikelihood,semantic_review"
+            "generation_evidence,periodicity,stochastic_schrodinger,stochastic_schrodinger_complex,repetition_unlikelihood,semantic_review"
                 .to_owned(),
         client_order_rule: "rust,python,wasm".to_owned(),
         legacy_replay_policy:
@@ -664,7 +725,7 @@ mod tests {
         let replay = zspace_runtime_protocol_catalog().expect("catalog replay");
 
         assert_eq!(catalog, replay);
-        assert_eq!(catalog.protocol_count, 5);
+        assert_eq!(catalog.protocol_count, 6);
         assert!(catalog.catalog_id.starts_with("sha256:"));
         assert_eq!(catalog.catalog_id.len(), 71);
         assert_eq!(
@@ -681,6 +742,7 @@ mod tests {
                 "generation_evidence",
                 "periodicity",
                 "stochastic_schrodinger",
+                "stochastic_schrodinger_complex",
                 "repetition_unlikelihood",
                 "semantic_review"
             ]
@@ -739,6 +801,11 @@ mod tests {
                 "stochastic_schrodinger" => ingress_limits(
                     ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
                     ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+                    ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
+                ),
+                "stochastic_schrodinger_complex" => ingress_limits(
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES,
+                    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
                     ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH,
                 ),
                 "repetition_unlikelihood" => ingress_limits(

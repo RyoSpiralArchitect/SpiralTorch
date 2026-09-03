@@ -357,3 +357,8 @@ jobs:
           python -P bindings/st-py/examples/spiralk_plan_rewrite_quickstart.py
           python -P bindings/st-py/examples/maxwell_spiralk_bridge_quickstart.py --max-samples 32
           python -P bindings/st-py/examples/zspace_stream_training_quickstart.py --steps 25
+      - name: Complex dynamics and runtime protocol regression
+        run: |
+          python -m pip install pytest
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_zspace_complex_dynamics.py bindings/st-py/tests/test_zspace_dynamics.py bindings/st-py/tests/test_runtime_protocol_catalog.py
+          python -I tools/smoke_zspace_runtime_protocols.py
