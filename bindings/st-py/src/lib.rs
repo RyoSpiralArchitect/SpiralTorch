@@ -1,13 +1,10 @@
 //! Minimal one-binary PyO3 module: `import spiraltorch`
 
 #![allow(clippy::useless_conversion)]
-// PyO3 0.24 keeps the old IntoPy/ToPyObject conversion surface as deprecated
-// shims. The rename-only deprecations are migrated; the object-return migration
-// is intentionally quarantined here instead of leaking warning noise across CI.
-#![allow(deprecated)]
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
+use pyo3::IntoPyObjectExt;
 
 mod autograd;
 mod compat;
@@ -227,7 +224,7 @@ mod extras {
         meso_gain: f64,
         micro_gain: f64,
         seed: Option<u64>,
-    ) -> PyResult<Vec<PyObject>> {
+    ) -> PyResult<Vec<Py<PyAny>>> {
         let base_seed = seed.unwrap_or_else(|| GLOBAL_SEED.load(Ordering::SeqCst));
         let params = crate::sot::Sot3DParams {
             base_radius,
@@ -240,7 +237,7 @@ mod extras {
         for i in 0..n {
             let s = base_seed.wrapping_add(i as u64);
             let plan = crate::sot::build_plan_seeded(total_steps, params, s)?;
-            let obj = Py::new(py, plan)?.into_py(py);
+            let obj = Py::new(py, plan)?.into_py_any(py)?;
             out.push(obj);
         }
         Ok(out)
@@ -313,7 +310,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     let sot_module = PyModule::new(py, "spiraltorch.sot")?;
     sot::module(py, &sot_module)?;
     m.add_submodule(&sot_module)?;
-    m.add("sot", sot_module.to_object(py))?;
+    m.add("sot", sot_module.clone().unbind().into_any())?;
     m.add("SoT3DPlan", sot_module.getattr("SoT3DPlan")?)?;
     m.add("SoT3DStep", sot_module.getattr("SoT3DStep")?)?;
     m.add("MacroSummary", sot_module.getattr("MacroSummary")?)?;
@@ -524,13 +521,14 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 }
 
 // ================#[pymodule]
-#[pymodule]
+// Preserve the existing GIL contract until free-threaded callbacks are audited.
+#[pymodule(gil_used = true)]
 fn spiraltorch(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     init_spiraltorch_module(py, m)
 }
 
 // ================#[pymodule] (alias for maturin's `_native` expectation)
-#[pymodule]
+#[pymodule(gil_used = true)]
 fn spiraltorch_native(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     init_spiraltorch_module(py, m)
 }

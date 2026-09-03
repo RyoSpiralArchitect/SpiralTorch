@@ -4,6 +4,8 @@ use pyo3::types::PyModule;
 use pyo3::types::{PyAny, PyDict};
 use pyo3::Bound;
 #[cfg(feature = "spiral_rl")]
+use pyo3::IntoPyObjectExt;
+#[cfg(feature = "spiral_rl")]
 use std::ffi::CString;
 
 #[cfg(feature = "spiral_rl")]
@@ -39,7 +41,7 @@ struct ReplayConfigData {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.rl", name = "Replay")]
+#[pyclass(module = "spiraltorch.rl", name = "Replay", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyReplayConfig {
     inner: ReplayConfigData,
@@ -118,7 +120,7 @@ struct AgentConfigData {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.rl", name = "EpsilonGreedy")]
+#[pyclass(module = "spiraltorch.rl", name = "EpsilonGreedy", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyEpsilonGreedy {
     inner: EpsilonGreedySchedule,
@@ -179,7 +181,7 @@ impl PyEpsilonGreedy {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.rl", name = "AgentConfig")]
+#[pyclass(module = "spiraltorch.rl", name = "AgentConfig", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyAgentConfig {
     inner: AgentConfigData,
@@ -197,7 +199,7 @@ impl PyAgentConfig {
 }
 
 #[cfg(feature = "spiral_rl")]
-fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
+fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("state_dim", agent.state_dim())?;
     dict.set_item("action_dim", agent.action_dim())?;
@@ -216,7 +218,7 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     } else {
         dict.set_item("epsilon_schedule", py.None())?;
     }
-    Ok(dict.unbind().into_py(py))
+    dict.unbind().into_py_any(py)
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -234,7 +236,7 @@ fn set_optional_u32(
 }
 
 #[cfg(feature = "spiral_rl")]
-fn dqn_policy_report_dict(py: Python<'_>, agent: &DqnAgent, state: usize) -> PyResult<PyObject> {
+fn dqn_policy_report_dict(py: Python<'_>, agent: &DqnAgent, state: usize) -> PyResult<Py<PyAny>> {
     let q_values = agent.q_values(state).map_err(rl_err_to_py)?;
     let greedy_action = agent.greedy_action(state).map_err(rl_err_to_py)?;
     let dict = PyDict::new(py);
@@ -247,11 +249,11 @@ fn dqn_policy_report_dict(py: Python<'_>, agent: &DqnAgent, state: usize) -> PyR
     dict.set_item("greedy_value", q_values[greedy_action])?;
     dict.set_item("epsilon", agent.epsilon())?;
     set_optional_u32(py, &dict, "schedule_step", agent.schedule_step())?;
-    Ok(dict.unbind().into_py(py))
+    dict.unbind().into_py_any(py)
 }
 
 #[cfg(feature = "spiral_rl")]
-fn dqn_action_trace_dict(py: Python<'_>, trace: DqnActionTrace) -> PyResult<PyObject> {
+fn dqn_action_trace_dict(py: Python<'_>, trace: DqnActionTrace) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("kind", "spiraltorch.rl.dqn_action_trace")?;
     dict.set_item("state", trace.state)?;
@@ -270,12 +272,12 @@ fn dqn_action_trace_dict(py: Python<'_>, trace: DqnActionTrace) -> PyResult<PyOb
     )?;
     set_optional_u32(py, &dict, "schedule_step_after", trace.schedule_step_after)?;
     dict.set_item("q_values", trace.q_values)?;
-    Ok(dict.unbind().into_py(py))
+    dict.unbind().into_py_any(py)
 }
 
 #[cfg(feature = "spiral_rl")]
 fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResult<()> {
-    let dict = state.downcast::<PyDict>()?;
+    let dict = state.cast::<PyDict>()?;
 
     if let Ok(Some(epsilon)) = dict.get_item("epsilon") {
         let value: f32 = epsilon.extract()?;
@@ -291,7 +293,7 @@ fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResu
         if schedule_obj.is_none() {
             agent.set_epsilon(agent.epsilon());
         } else {
-            let schedule_dict = schedule_obj.downcast::<PyDict>()?;
+            let schedule_dict = schedule_obj.cast::<PyDict>()?;
             let start: f32 = required_schedule_field(schedule_dict, "start")?;
             let end: f32 = required_schedule_field(schedule_dict, "end")?;
             let steps: u32 = required_schedule_field(schedule_dict, "steps")?;
@@ -308,11 +310,12 @@ fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResu
 #[cfg(feature = "spiral_rl")]
 fn required_schedule_field<'py, T>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<T>
 where
-    T: FromPyObject<'py>,
+    T: FromPyObjectOwned<'py>,
 {
     dict.get_item(key)?
         .ok_or_else(|| PyValueError::new_err(format!("epsilon_schedule requires '{key}'")))?
         .extract()
+        .map_err(Into::into)
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -488,11 +491,11 @@ impl PyDqnAgent {
         self.inner.greedy_action(state).map_err(rl_err_to_py)
     }
 
-    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<Py<PyAny>> {
         dqn_policy_report_dict(py, &self.inner, state)
     }
 
-    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<Py<PyAny>> {
         let trace = self
             .inner
             .select_action_trace(state)
@@ -542,7 +545,7 @@ impl PyDqnAgent {
             .configure_epsilon_schedule(schedule.schedule().clone());
     }
 
-    pub fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn state_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         dqn_state_dict(py, &self.inner)
     }
 
@@ -611,11 +614,11 @@ impl PyAgent {
         self.dqn.greedy_action(state).map_err(rl_err_to_py)
     }
 
-    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<Py<PyAny>> {
         dqn_policy_report_dict(py, &self.dqn, state)
     }
 
-    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<Py<PyAny>> {
         let trace = self.dqn.select_action_trace(state).map_err(rl_err_to_py)?;
         dqn_action_trace_dict(py, trace)
     }
@@ -662,7 +665,7 @@ impl PyAgent {
             .configure_epsilon_schedule(schedule.schedule().clone());
     }
 
-    pub fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn state_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         dqn_state_dict(py, &self.dqn)
     }
 
@@ -804,7 +807,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_submodule(&module)?;
 
     // 4) mirror as st.rl (so users can do `import spiraltorch as st; st.rl...`)
-    let module_obj = module.to_object(py);
+    let module_obj = module.clone().unbind().into_any();
     parent.add("rl", module_obj.clone_ref(py))?;
 
     // 5) mirror convenient top-level names under `spiraltorch` for backward compatibility

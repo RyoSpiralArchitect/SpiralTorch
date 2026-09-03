@@ -53,7 +53,7 @@ fn zspace_eval(
         .map(|(r, i)| ComplexScalar::new(r, i))
         .collect();
 
-    let out = py.allow_threads(|| -> Result<_, PyErr> {
+    let out = py.detach(|| -> Result<_, PyErr> {
         let w = trapezoidal_weights(samples.len()).map_err(pyerr)?;
         let coeff = prepare_weighted_series(&samples, &w).map_err(pyerr)?;
         let vals = evaluate_weighted_series_many(&coeff, &zs).map_err(pyerr)?;
@@ -91,7 +91,7 @@ fn zspace_eval_stable(
         .map(|(r, i)| ComplexScalar::new(r, i))
         .collect();
 
-    let out = py.allow_threads(|| -> Result<_, PyErr> {
+    let out = py.detach(|| -> Result<_, PyErr> {
         let w = trapezoidal_weights(samples.len()).map_err(pyerr)?;
         let coeff = prepare_weighted_series(&samples, &w).map_err(pyerr)?;
         let vals = evaluate_weighted_series_many_stable(&coeff, &zs).map_err(pyerr)?;
@@ -135,7 +135,7 @@ fn zspace_eval_with_derivative(
         .map(|(r, i)| ComplexScalar::new(r, i))
         .collect();
 
-    let out = py.allow_threads(|| -> Result<_, PyErr> {
+    let out = py.detach(|| -> Result<_, PyErr> {
         let w = trapezoidal_weights(samples.len()).map_err(pyerr)?;
         let coeff = prepare_weighted_series(&samples, &w).map_err(pyerr)?;
         let (vals, derivs) =
@@ -178,7 +178,7 @@ fn zspace_eval_with_derivative_stable(
         .map(|(r, i)| ComplexScalar::new(r, i))
         .collect();
 
-    let out = py.allow_threads(|| -> Result<_, PyErr> {
+    let out = py.detach(|| -> Result<_, PyErr> {
         let w = trapezoidal_weights(samples.len()).map_err(pyerr)?;
         let coeff = prepare_weighted_series(&samples, &w).map_err(pyerr)?;
         let (vals, derivs) =

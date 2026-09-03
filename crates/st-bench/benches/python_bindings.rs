@@ -8,7 +8,8 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 fn ensure_python_paths(py: Python<'_>) -> PyResult<()> {
     let sys = py.import("sys")?;
-    let path: &PyList = sys.getattr("path")?.downcast()?;
+    let path = sys.getattr("path")?;
+    let path = path.cast::<PyList>()?;
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir
@@ -46,7 +47,7 @@ fn ensure_python_paths(py: Python<'_>) -> PyResult<()> {
 }
 
 fn load_tensor_class() -> (Py<PyAny>, String) {
-    Python::with_gil(|py| -> PyResult<_> {
+    Python::attach(|py| -> PyResult<_> {
         ensure_python_paths(py)?;
         let module = py.import("spiraltorch")?;
         let version = module
@@ -83,21 +84,21 @@ fn bench_tensor_matmul(c: &mut Criterion, tensor_cls: &Py<PyAny>, flavor: &str) 
     for &(m, k, n, seed) in &cases {
         let lhs_data = random_matrix(m, k, seed);
         let rhs_data = random_matrix(k, n, seed + 1);
-        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::with_gil(|py| -> PyResult<_> {
-            let lhs_data = PyList::new(py, &lhs_data);
-            let rhs_data = PyList::new(py, &rhs_data);
+        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::attach(|py| -> PyResult<_> {
+            let lhs_data = PyList::new(py, &lhs_data)?;
+            let rhs_data = PyList::new(py, &rhs_data)?;
             let lhs = tensor_cls.call1(py, (m, k, lhs_data))?;
             let rhs = tensor_cls.call1(py, (k, n, rhs_data))?;
-            Ok::<_, PyErr>((lhs.into(), rhs.into()))
+            Ok::<_, PyErr>((lhs, rhs))
         })
         .expect("failed to allocate python tensors for matmul");
 
         let bench_id = BenchmarkId::new(flavor, format!("{m}x{k}_by_{k}x{n}"));
         group.bench_function(bench_id, move |b| {
             b.iter(|| {
-                Python::with_gil(|py| -> PyResult<()> {
-                    let lhs_ref = lhs.as_ref(py);
-                    let rhs_ref = rhs.as_ref(py);
+                Python::attach(|py| -> PyResult<()> {
+                    let lhs_ref = lhs.bind(py);
+                    let rhs_ref = rhs.bind(py);
                     let _ = lhs_ref.call_method1("matmul", (rhs_ref,))?;
                     Ok(())
                 })
@@ -120,21 +121,21 @@ fn bench_tensor_hadamard(c: &mut Criterion, tensor_cls: &Py<PyAny>, flavor: &str
     for &(rows, cols, seed) in &cases {
         let lhs_data = random_matrix(rows, cols, seed);
         let rhs_data = random_matrix(rows, cols, seed + 1);
-        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::with_gil(|py| -> PyResult<_> {
-            let lhs_data = PyList::new(py, &lhs_data);
-            let rhs_data = PyList::new(py, &rhs_data);
+        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::attach(|py| -> PyResult<_> {
+            let lhs_data = PyList::new(py, &lhs_data)?;
+            let rhs_data = PyList::new(py, &rhs_data)?;
             let lhs = tensor_cls.call1(py, (rows, cols, lhs_data))?;
             let rhs = tensor_cls.call1(py, (rows, cols, rhs_data))?;
-            Ok::<_, PyErr>((lhs.into(), rhs.into()))
+            Ok::<_, PyErr>((lhs, rhs))
         })
         .expect("failed to allocate python tensors for hadamard");
 
         let bench_id = BenchmarkId::new(flavor, format!("{rows}x{cols}"));
         group.bench_function(bench_id, move |b| {
             b.iter(|| {
-                Python::with_gil(|py| -> PyResult<()> {
-                    let lhs_ref = lhs.as_ref(py);
-                    let rhs_ref = rhs.as_ref(py);
+                Python::attach(|py| -> PyResult<()> {
+                    let lhs_ref = lhs.bind(py);
+                    let rhs_ref = rhs.bind(py);
                     let _ = lhs_ref.call_method1("hadamard", (rhs_ref,))?;
                     Ok(())
                 })

@@ -4,6 +4,8 @@ use pyo3::types::PyDict;
 use pyo3::types::PyModule;
 use pyo3::Bound;
 #[cfg(feature = "rec")]
+use pyo3::IntoPyObjectExt;
+#[cfg(feature = "rec")]
 use std::borrow::Cow;
 
 #[cfg(feature = "rec")]
@@ -119,7 +121,7 @@ impl PyQueryPlan {
 }
 
 #[cfg(feature = "rec")]
-#[pyclass(name = "RecEpochReport", module = "spiraltorch.rec")]
+#[pyclass(name = "RecEpochReport", module = "spiraltorch.rec", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRecEpochReport {
     #[pyo3(get)]
@@ -294,17 +296,17 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
     let mut exported_objects = Vec::with_capacity(exports.len());
     for name in &exports {
-        let class = module.getattr(name.as_ref())?.into_py(py);
+        let class = module.getattr(name.as_ref())?.into_py_any(py)?;
         exported_objects.push((name.clone(), class));
     }
 
-    let rec_module = module.to_object(py);
+    let rec_module = module.clone().unbind().into_any();
 
     parent.add_submodule(&module)?;
     parent.add("rec", rec_module.clone_ref(py))?;
 
     let sys = PyModule::import(py, "sys")?;
-    let modules: Bound<PyDict> = sys.getattr("modules")?.downcast_into()?;
+    let modules: Bound<PyDict> = sys.getattr("modules")?.cast_into()?;
     modules.set_item("spiraltorch.rec", rec_module.clone_ref(py))?;
     modules.set_item("rec", rec_module)?;
 
@@ -320,7 +322,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
     parent.add_submodule(&module)?;
-    let rec_module = module.to_object(py);
+    let rec_module = module.clone().unbind().into_any();
     parent.add("rec", rec_module)?;
     Ok(())
 }

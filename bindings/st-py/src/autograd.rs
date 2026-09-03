@@ -7,16 +7,16 @@ use st_tensor::{
     AUTOGRAD_SEMANTIC_OWNER,
 };
 
-fn graph_summary_to_py(py: Python<'_>, summary: AutogradGraphSummary) -> PyResult<PyObject> {
+fn graph_summary_to_py(py: Python<'_>, summary: AutogradGraphSummary) -> PyResult<Py<PyAny>> {
     json_to_py(py, &summary.contract_payload())
 }
 
-fn backward_report_to_py(py: Python<'_>, report: AutogradBackwardReport) -> PyResult<PyObject> {
+fn backward_report_to_py(py: Python<'_>, report: AutogradBackwardReport) -> PyResult<Py<PyAny>> {
     json_to_py(py, &report.contract_payload())
 }
 
 /// Thin Python handle over the Rust-owned reverse-mode graph.
-#[pyclass(module = "spiraltorch", name = "AutogradTensor")]
+#[pyclass(module = "spiraltorch", name = "AutogradTensor", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyAutogradTensor {
     inner: AutogradTensor,
@@ -173,7 +173,7 @@ impl PyAutogradTensor {
     }
 
     #[pyo3(signature = (seed=None))]
-    fn backward(&self, py: Python<'_>, seed: Option<&PyTensor>) -> PyResult<PyObject> {
+    fn backward(&self, py: Python<'_>, seed: Option<&PyTensor>) -> PyResult<Py<PyAny>> {
         let report = match seed {
             Some(seed) => self.inner.backward_with_grad(&seed.inner),
             None => self.inner.backward(),
@@ -182,7 +182,7 @@ impl PyAutogradTensor {
         backward_report_to_py(py, report)
     }
 
-    fn graph_summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn graph_summary(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         graph_summary_to_py(py, self.inner.graph_summary())
     }
 

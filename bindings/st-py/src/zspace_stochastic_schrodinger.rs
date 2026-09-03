@@ -59,7 +59,7 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
@@ -68,7 +68,7 @@ fn response_to_py<T: serde::Serialize>(
 fn _zspace_stochastic_schrodinger_forward(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space stochastic Schrodinger forward request")?;
     let request: ZSpaceStochasticSchrodingerForwardRequest = serde_json::from_value(request)
         .map_err(|error| {
@@ -78,7 +78,7 @@ fn _zspace_stochastic_schrodinger_forward(
             )
         })?;
     let receipt = py
-        .allow_threads(|| run_zspace_stochastic_schrodinger_forward(request))
+        .detach(|| run_zspace_stochastic_schrodinger_forward(request))
         .map_err(|error| json_error("Z-space stochastic Schrodinger forward failed", error))?;
     response_to_py(
         py,
@@ -91,7 +91,7 @@ fn _zspace_stochastic_schrodinger_forward(
 fn _zspace_stochastic_schrodinger_forward_validate(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = mapping_value(receipt, "Z-space stochastic Schrodinger forward receipt")?;
     let receipt =
         validate_zspace_stochastic_schrodinger_forward_value(receipt).map_err(|error| {
@@ -111,12 +111,12 @@ fn _zspace_stochastic_schrodinger_forward_validate(
 fn _zspace_stochastic_schrodinger_vjp(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space stochastic Schrodinger VJP request")?;
     let request: ZSpaceStochasticSchrodingerVjpRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space stochastic Schrodinger VJP request", error))?;
     let receipt = py
-        .allow_threads(|| run_zspace_stochastic_schrodinger_vjp(request))
+        .detach(|| run_zspace_stochastic_schrodinger_vjp(request))
         .map_err(|error| json_error("Z-space stochastic Schrodinger VJP failed", error))?;
     response_to_py(
         py,
@@ -129,7 +129,7 @@ fn _zspace_stochastic_schrodinger_vjp(
 fn _zspace_stochastic_schrodinger_vjp_validate(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = mapping_value(receipt, "Z-space stochastic Schrodinger VJP receipt")?;
     let receipt = validate_zspace_stochastic_schrodinger_vjp_value(receipt).map_err(|error| {
         json_error(
@@ -148,7 +148,7 @@ fn _zspace_stochastic_schrodinger_vjp_validate(
 fn _zspace_stochastic_schrodinger_complex_step(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = mapping_value_with_limits(
         request,
         "complex Schrodinger request",
@@ -158,7 +158,7 @@ fn _zspace_stochastic_schrodinger_complex_step(
     let request: ZSpaceSchrodingerComplexRequest =
         serde_json::from_value(value).map_err(|e| json_error("complex Schrodinger request", e))?;
     let receipt = py
-        .allow_threads(|| run_zspace_stochastic_schrodinger_complex_step(request))
+        .detach(|| run_zspace_stochastic_schrodinger_complex_step(request))
         .map_err(|e| json_error("complex Schrodinger step", e))?;
     response_to_py(py, &receipt, "complex Schrodinger encoding")
 }
@@ -167,7 +167,7 @@ fn _zspace_stochastic_schrodinger_complex_step(
 fn _zspace_stochastic_schrodinger_complex_validate(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = mapping_value_with_limits(
         receipt,
         "complex Schrodinger receipt",
@@ -175,7 +175,7 @@ fn _zspace_stochastic_schrodinger_complex_validate(
         ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
     )?;
     let receipt = py
-        .allow_threads(|| validate_zspace_stochastic_schrodinger_complex_value(value))
+        .detach(|| validate_zspace_stochastic_schrodinger_complex_value(value))
         .map_err(|e| json_error("complex Schrodinger replay", e))?;
     response_to_py(py, &receipt, "complex Schrodinger encoding")
 }

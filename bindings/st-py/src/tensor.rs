@@ -5,6 +5,7 @@ use pyo3::types::{
     PyAny, PyByteArray, PyBytes, PyDict, PyList, PyMemoryView, PyModule, PyString, PyTuple,
 };
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
@@ -168,7 +169,7 @@ struct TensorCtorDims {
 enum TensorDataArg {
     Unspecified,
     ExplicitNone,
-    Provided(PyObject),
+    Provided(Py<PyAny>),
 }
 
 impl TensorDataArg {
@@ -184,7 +185,7 @@ impl TensorDataArg {
         }
     }
 
-    fn into_option(self) -> Option<PyObject> {
+    fn into_option(self) -> Option<Py<PyAny>> {
         match self {
             Self::Unspecified | Self::ExplicitNone => None,
             Self::Provided(obj) => Some(obj),
@@ -229,7 +230,7 @@ impl TensorOutPtr {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs")]
+#[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs", from_py_object)]
 #[derive(Clone)]
 pub struct PyCpuSimdPackedRhs {
     inner: usize,
@@ -277,7 +278,7 @@ fn borrow_f32_argument(any: &Bound<PyAny>) -> PyResult<Vec<f32>> {
 
 const USED_DLPACK_CAPSULE_NAME: &CStr = c"used_dltensor";
 
-#[pyclass(module = "spiraltorch", name = "Tensor", subclass)]
+#[pyclass(module = "spiraltorch", name = "Tensor", subclass, from_py_object)]
 #[derive(Clone)]
 pub struct PyTensor {
     pub(crate) inner: Tensor,
@@ -314,10 +315,10 @@ fn object_repr(any: &Bound<PyAny>) -> String {
 }
 
 fn is_string_like(any: &Bound<PyAny>) -> bool {
-    any.downcast::<PyString>().is_ok()
-        || any.downcast::<PyBytes>().is_ok()
-        || any.downcast::<PyByteArray>().is_ok()
-        || any.downcast::<PyMemoryView>().is_ok()
+    any.cast::<PyString>().is_ok()
+        || any.cast::<PyBytes>().is_ok()
+        || any.cast::<PyByteArray>().is_ok()
+        || any.cast::<PyMemoryView>().is_ok()
 }
 
 fn is_sequence_like(any: &Bound<PyAny>) -> bool {
@@ -327,7 +328,7 @@ fn is_sequence_like(any: &Bound<PyAny>) -> bool {
     unsafe { ffi::PySequence_Check(any.as_ptr()) == 1 }
 }
 
-fn collect_iterable(any: &Bound<PyAny>, context: CollectContext) -> PyResult<Vec<PyObject>> {
+fn collect_iterable(any: &Bound<PyAny>, context: CollectContext) -> PyResult<Vec<Py<PyAny>>> {
     if is_string_like(any) {
         return Err(PyTypeError::new_err(context.type_error_message()));
     }
@@ -534,7 +535,7 @@ impl F32Input {
             return Ok(Self::Tensor(tensor));
         }
 
-        if let Ok(list) = any.downcast::<PyList>() {
+        if let Ok(list) = any.cast::<PyList>() {
             let mut owned = Vec::with_capacity(list.len());
             for item in list {
                 owned.push(item.extract::<f32>()?);
@@ -563,16 +564,16 @@ impl PyTensor {
     ) -> PyResult<Self> {
         let mut dims = TensorCtorDims::default();
         let mut data_kw = TensorDataArg::Unspecified;
-        let mut shape_kw: Option<PyObject> = None;
-        let mut rows_kw: Option<PyObject> = None;
-        let mut cols_kw: Option<PyObject> = None;
-        let mut backend_kw: Option<PyObject> = None;
+        let mut shape_kw: Option<Py<PyAny>> = None;
+        let mut rows_kw: Option<Py<PyAny>> = None;
+        let mut cols_kw: Option<Py<PyAny>> = None;
+        let mut backend_kw: Option<Py<PyAny>> = None;
         let mut unexpected = Vec::new();
 
         if let Some(kwargs) = kwargs {
             for (key, value) in kwargs.iter() {
                 let key = key
-                    .downcast::<PyString>()
+                    .cast::<PyString>()
                     .map_err(|_| PyTypeError::new_err("Tensor() keyword names must be strings"))?;
                 let label = key.to_string();
                 match label.as_str() {
@@ -628,7 +629,7 @@ impl PyTensor {
             ensure_dim_matches(&mut dims.cols, cols, "cols")?;
         }
 
-        let mut positional: Vec<PyObject> = args.iter().map(|item| item.unbind()).collect();
+        let mut positional: Vec<Py<PyAny>> = args.iter().map(|item| item.unbind()).collect();
 
         match positional.len() {
             0 => {}
@@ -813,17 +814,17 @@ impl PyTensor {
     }
 
     #[staticmethod]
-    pub fn from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<Self> {
+    pub fn from_dlpack(py: Python<'_>, capsule: Py<PyAny>) -> PyResult<Self> {
         let capsule = capsule.bind(py);
         from_dlpack_impl(py, capsule)
     }
 
-    pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         to_dlpack_impl(py, &self.inner)
     }
 
     #[pyo3(signature = (*, stream=None))]
-    pub fn __dlpack__(&self, py: Python<'_>, stream: Option<PyObject>) -> PyResult<PyObject> {
+    pub fn __dlpack__(&self, py: Python<'_>, stream: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
         if let Some(stream_obj) = stream {
             let stream = stream_obj.bind(py);
             if !stream.is_none() {
@@ -926,7 +927,7 @@ impl PyTensor {
             let cols_cl = cols;
             let dst_ptr_closure = dst_ptr;
 
-            py.allow_threads(move || unsafe {
+            py.detach(move || unsafe {
                 let tensor = &mut *dst_ptr_closure.as_mut_ptr();
                 cpu_dense::matmul_packed_into(
                     tensor.data_mut(),
@@ -950,7 +951,7 @@ impl PyTensor {
         let cols_cl = cols;
         let dst_ptr_closure = dst_ptr;
 
-        py.allow_threads(move || unsafe {
+        py.detach(move || unsafe {
             let tensor = &mut *dst_ptr_closure.as_mut_ptr();
             cpu_dense::matmul_packed_into(
                 tensor.data_mut(),
@@ -985,7 +986,7 @@ impl PyTensor {
             // object. We drop the `PyRefMut` before releasing the GIL, ensuring there
             // are no outstanding Rust borrows when the computation runs.
             let dst_ptr_closure = dst_ptr;
-            py.allow_threads(move || unsafe {
+            py.detach(move || unsafe {
                 self.inner.matmul_into_with_backend(
                     &other.inner,
                     &mut *dst_ptr_closure.as_mut_ptr(),
@@ -1002,7 +1003,7 @@ impl PyTensor {
         }
 
         let tensor = py
-            .allow_threads(|| self.inner.matmul_with_backend(&other.inner, backend))
+            .detach(|| self.inner.matmul_with_backend(&other.inner, backend))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -1029,7 +1030,7 @@ impl PyTensor {
             // SAFETY: see the explanation in `matmul`; we drop the borrow before
             // releasing the GIL and only touch the tensor through `dst_ptr`.
             let dst_ptr_closure = dst_ptr;
-            py.allow_threads(move || unsafe {
+            py.detach(move || unsafe {
                 self.inner.matmul_bias_relu_into_with_backend(
                     &other.inner,
                     slice,
@@ -1046,7 +1047,7 @@ impl PyTensor {
 
         let slice = bias.as_slice();
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner
                     .matmul_bias_relu_with_backend(&other.inner, slice, backend)
             })
@@ -1070,7 +1071,7 @@ impl PyTensor {
         if let Some(cell) = out {
             let bias_owned = bias.clone();
             let tensor = py
-                .allow_threads(move || {
+                .detach(move || {
                     self.inner.matmul_bias_gelu_with_backend(
                         &other.inner,
                         bias_owned.as_slice(),
@@ -1089,7 +1090,7 @@ impl PyTensor {
 
         let slice = bias.as_slice();
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner
                     .matmul_bias_gelu_with_backend(&other.inner, slice, backend)
             })
@@ -1120,7 +1121,7 @@ impl PyTensor {
             // SAFETY: identical reasoning to `matmul` — the raw pointer targets the
             // tensor inside `out` and no Rust borrow lives across the GIL release.
             let dst_ptr_closure = dst_ptr;
-            py.allow_threads(move || unsafe {
+            py.detach(move || unsafe {
                 self.inner.matmul_bias_add_relu_into_with_backend(
                     &other.inner,
                     slice,
@@ -1138,7 +1139,7 @@ impl PyTensor {
 
         let slice = bias.as_slice();
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner.matmul_bias_add_relu_with_backend(
                     &other.inner,
                     slice,
@@ -1167,7 +1168,7 @@ impl PyTensor {
         if let Some(cell) = out {
             let bias_owned = bias.clone();
             let tensor = py
-                .allow_threads(move || {
+                .detach(move || {
                     self.inner.matmul_bias_add_gelu_with_backend(
                         &other.inner,
                         bias_owned.as_slice(),
@@ -1187,7 +1188,7 @@ impl PyTensor {
 
         let slice = bias.as_slice();
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner.matmul_bias_add_gelu_with_backend(
                     &other.inner,
                     slice,
@@ -1204,7 +1205,7 @@ impl PyTensor {
     pub fn row_softmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {
         let backend = parse_softmax_backend(backend);
         let tensor = py
-            .allow_threads(|| self.inner.row_softmax_with_backend(backend))
+            .detach(|| self.inner.row_softmax_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -1218,7 +1219,7 @@ impl PyTensor {
     ) -> PyResult<(PyTensor, PyTensor)> {
         let backend = parse_softmax_backend(backend);
         let (softmax, hardmax) = py
-            .allow_threads(|| self.inner.row_softmax_hardmax_with_backend(backend))
+            .detach(|| self.inner.row_softmax_hardmax_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         Ok((PyTensor { inner: softmax }, PyTensor { inner: hardmax }))
     }
@@ -1229,10 +1230,10 @@ impl PyTensor {
         &self,
         backend: Option<&str>,
         py: Python<'_>,
-    ) -> PyResult<(PyTensor, PyTensor, PyTensor, PyObject)> {
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor, Py<PyAny>)> {
         let backend = parse_softmax_backend(backend);
         let report = py
-            .allow_threads(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
+            .detach(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         let (softmax, hardmax, spiral, metrics) = report.into_parts();
         let metrics_dict = PyDict::new(py);
@@ -1249,7 +1250,7 @@ impl PyTensor {
             PyTensor { inner: softmax },
             PyTensor { inner: hardmax },
             PyTensor { inner: spiral },
-            metrics_dict.into_py(py),
+            metrics_dict.into_py_any(py)?,
         ))
     }
 
@@ -1258,7 +1259,7 @@ impl PyTensor {
     pub fn row_hardmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {
         let backend = parse_hardmax_backend(backend);
         let tensor = py
-            .allow_threads(|| self.inner.row_hardmax_with_backend(backend))
+            .detach(|| self.inner.row_hardmax_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -1279,7 +1280,7 @@ impl PyTensor {
     ) -> PyResult<PyTensor> {
         let backend = parse_attention_backend(backend);
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner.scaled_dot_attention_with_backend(
                     &keys.inner,
                     &values.inner,
@@ -1305,7 +1306,7 @@ impl PyTensor {
         py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner
                     .layer_norm_affine(&gamma.inner, &beta.inner, epsilon)
             })
@@ -1324,7 +1325,7 @@ impl PyTensor {
         py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| {
+            .detach(|| {
                 self.inner.layer_norm_affine_add(
                     &residual.inner,
                     &gamma.inner,
@@ -1339,21 +1340,21 @@ impl PyTensor {
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| self.inner.add(&other.inner))
+            .detach(|| self.inner.add(&other.inner))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
 
     pub fn sub(&self, other: &PyTensor, py: Python<'_>) -> PyResult<Self> {
         let tensor = py
-            .allow_threads(|| self.inner.sub(&other.inner))
+            .detach(|| self.inner.sub(&other.inner))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
     pub fn scale(&self, value: f32, py: Python<'_>) -> PyResult<Self> {
         let tensor = py
-            .allow_threads(|| self.inner.scale(value))
+            .detach(|| self.inner.scale(value))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
@@ -1361,7 +1362,7 @@ impl PyTensor {
     /// Element-wise multiply (Hadamard)
     pub fn hadamard(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| self.inner.hadamard(&other.inner))
+            .detach(|| self.inner.hadamard(&other.inner))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -1373,30 +1374,30 @@ impl PyTensor {
         scale: f32,
         py: Python<'_>,
     ) -> PyResult<()> {
-        py.allow_threads(|| self.inner.add_scaled(&other.inner, scale))
+        py.detach(|| self.inner.add_scaled(&other.inner, scale))
             .map_err(tensor_err_to_py)
     }
 
     pub fn add_row_inplace(&mut self, bias: Vec<f32>, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.add_row_inplace(&bias))
+        py.detach(|| self.inner.add_row_inplace(&bias))
             .map_err(tensor_err_to_py)
     }
 
     /// Transpose
     pub fn transpose(&self, py: Python<'_>) -> PyResult<PyTensor> {
-        let tensor = py.allow_threads(|| self.inner.transpose());
+        let tensor = py.detach(|| self.inner.transpose());
         Ok(PyTensor { inner: tensor })
     }
 
     pub fn reshape(&self, rows: usize, cols: usize, py: Python<'_>) -> PyResult<Self> {
         let tensor = py
-            .allow_threads(|| self.inner.reshape(rows, cols))
+            .detach(|| self.inner.reshape(rows, cols))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
 
     pub fn sum_axis0(&self, py: Python<'_>) -> PyResult<Vec<f32>> {
-        py.allow_threads(|| self.inner.try_sum_axis0())
+        py.detach(|| self.inner.try_sum_axis0())
             .map_err(tensor_err_to_py)
     }
 
@@ -1410,7 +1411,7 @@ impl PyTensor {
 
     pub fn project_to_poincare(&self, curvature: f32, py: Python<'_>) -> PyResult<Self> {
         let tensor = py
-            .allow_threads(|| self.inner.project_to_poincare(curvature))
+            .detach(|| self.inner.project_to_poincare(curvature))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
@@ -1421,7 +1422,7 @@ impl PyTensor {
         curvature: f32,
         py: Python<'_>,
     ) -> PyResult<f32> {
-        py.allow_threads(|| self.inner.hyperbolic_distance(&other.inner, curvature))
+        py.detach(|| self.inner.hyperbolic_distance(&other.inner, curvature))
             .map_err(tensor_err_to_py)
     }
 
@@ -1433,7 +1434,7 @@ impl PyTensor {
             owned.push(tensor.inner.clone());
         }
         let tensor = py
-            .allow_threads(|| Tensor::cat_rows(&owned))
+            .detach(|| Tensor::cat_rows(&owned))
             .map_err(tensor_err_to_py)?;
         Ok(Self { inner: tensor })
     }
@@ -1441,13 +1442,13 @@ impl PyTensor {
 
 #[pyfunction]
 #[pyo3(name = "from_dlpack")]
-fn tensor_from_dlpack(py: Python<'_>, capsule: PyObject) -> PyResult<PyTensor> {
+fn tensor_from_dlpack(py: Python<'_>, capsule: Py<PyAny>) -> PyResult<PyTensor> {
     PyTensor::from_dlpack(py, capsule)
 }
 
 #[pyfunction]
 #[pyo3(name = "to_dlpack")]
-fn tensor_to_dlpack(py: Python<'_>, tensor: PyRef<PyTensor>) -> PyResult<PyObject> {
+fn tensor_to_dlpack(py: Python<'_>, tensor: PyRef<PyTensor>) -> PyResult<Py<PyAny>> {
     tensor.to_dlpack(py)
 }
 
@@ -1461,7 +1462,7 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
 
     let (inner, cols) = rhs.inner.shape();
     let packed = py
-        .allow_threads(|| cpu_dense::prepack_rhs(rhs.inner.data(), inner, cols))
+        .detach(|| cpu_dense::prepack_rhs(rhs.inner.data(), inner, cols))
         .map_err(PyRuntimeError::new_err)?;
 
     Ok(PyCpuSimdPackedRhs::new(inner, cols, packed))
@@ -1495,7 +1496,7 @@ fn init_backend(label: &str) -> PyResult<bool> {
 
 #[cfg(feature = "wgpu")]
 #[pyfunction]
-fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<Py<PyAny>>>> {
     use st_tensor::backend::wgpu_dense;
 
     if !wgpu_dense::is_available() {
@@ -1605,7 +1606,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
 
 #[cfg(not(feature = "wgpu"))]
 #[pyfunction]
-fn describe_wgpu_softmax_variants(_py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+fn describe_wgpu_softmax_variants(_py: Python<'_>) -> PyResult<Option<Vec<Py<PyAny>>>> {
     Ok(None)
 }
 
@@ -1645,7 +1646,7 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
     }
 }
 
-pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<Py<PyAny>> {
     let managed = tensor.to_dlpack().map_err(tensor_err_to_py)?;
     unsafe {
         extern "C" fn drop_capsule(ptr: *mut ffi::PyObject) {
@@ -1668,11 +1669,11 @@ pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObje
             drop_exported_state(managed);
             return Err(PyErr::fetch(py));
         }
-        Ok(PyObject::from_owned_ptr(py, capsule))
+        Ok(Bound::from_owned_ptr(py, capsule).unbind())
     }
 }
 
-pub(crate) fn tensor_to_torch(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+pub(crate) fn tensor_to_torch(py: Python<'_>, tensor: &Tensor) -> PyResult<Py<PyAny>> {
     let capsule = to_dlpack_impl(py, tensor)?;
     let torch_dlpack = PyModule::import(py, "torch.utils.dlpack").map_err(|_| {
         PyValueError::new_err("import torch.utils.dlpack before requesting torch tensors")
@@ -1743,14 +1744,14 @@ mod tests {
             // (e.g. Metal-backed ML stacks). Disable user-site loading so embedded
             // Python stays reproducible in `cargo test`.
             std::env::set_var("PYTHONNOUSERSITE", "1");
-            pyo3::prepare_freethreaded_python();
+            Python::initialize();
         });
     }
 
     #[test]
     fn dlpack_roundtrip_shares_buffer() {
         ensure_python_initialized();
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let tensor = PyTensor::from_tensor(
                 Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap(),
             );
@@ -1766,7 +1767,7 @@ mod tests {
     #[test]
     fn dlpack_device_reports_cpu() {
         ensure_python_initialized();
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let tensor = PyTensor::zeros(1, 1).unwrap();
             let device = tensor.__dlpack_device__();
             assert_eq!(device, (1, 0));

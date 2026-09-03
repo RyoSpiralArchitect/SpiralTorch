@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::IntoPyObjectExt;
 
 use st_backend_hip as hip_backend;
 #[cfg(feature = "cuda")]
@@ -236,7 +237,7 @@ impl PyRankPlan {
     }
 
     /// Returns the shared Rust-owned planning contract with client provenance.
-    fn contract(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn contract(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let mut value = serde_json::to_value(self.inner.snapshot())
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
         let object = value
@@ -259,17 +260,17 @@ impl PyRankPlan {
     }
 
     #[cfg(feature = "kdsl")]
-    fn spiralk_context(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn spiralk_context(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let ctx = self
             .plan()
             .spiralk_context()
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let wrapper = PySpiralKContext::from_ctx(ctx);
-        Ok(Py::new(py, wrapper)?.into_py(py))
+        Py::new(py, wrapper)?.into_py_any(py)
     }
 
     #[cfg(not(feature = "kdsl"))]
-    fn spiralk_context(&self, _py: Python<'_>) -> PyResult<PyObject> {
+    fn spiralk_context(&self, _py: Python<'_>) -> PyResult<Py<PyAny>> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "SpiralK support requires enabling the 'kdsl' feature",
         ))
@@ -301,7 +302,7 @@ impl PyRankPlan {
         py: Python<'_>,
         script: &str,
         max_events: usize,
-    ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
+    ) -> PyResult<(PyRankPlan, Py<PyAny>, Py<PyAny>)> {
         let ctx = self
             .plan()
             .spiralk_context()
@@ -341,7 +342,7 @@ impl PyRankPlan {
         _py: Python<'_>,
         _script: &str,
         _max_events: usize,
-    ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
+    ) -> PyResult<(PyRankPlan, Py<PyAny>, Py<PyAny>)> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "SpiralK support requires enabling the 'kdsl' feature",
         ))
@@ -459,7 +460,7 @@ fn probe_gpu_path(
     rows: u32,
     cols: u32,
     k: u32,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     if rows == 0 || cols == 0 || k == 0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "rows, cols, and k must be positive",
@@ -524,7 +525,7 @@ fn probe_gpu_path(
         }
     }
 
-    Ok(report.into_py(py))
+    report.into_py_any(py)
 }
 
 pub(crate) fn build_caps(
@@ -691,7 +692,7 @@ fn describe_device(
     cols: Option<u32>,
     tile_hint: Option<u32>,
     compaction_hint: Option<u32>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let requested_backend = parse_backend(Some(backend))?;
     let report = observe_runtime_device_probe(RuntimeDeviceProbeObservationRequest {
         requested_backend,
@@ -713,7 +714,7 @@ fn describe_device(
 }
 
 #[pyfunction]
-fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
+fn hip_probe(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let probe = hip_backend::probe();
     let py_devices = PyList::empty(py);
     for device in probe.devices.iter() {
@@ -731,11 +732,11 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
         Some(message) => out.set_item("error", message)?,
         None => out.set_item("error", py.None())?,
     }
-    Ok(out.into_py(py))
+    out.into_py_any(py)
 }
 
 #[pyfunction]
-fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
+fn mps_probe(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let probe = core_mps_probe();
     probe
         .validate()

@@ -3,37 +3,38 @@ use pyo3::prelude::*;
 use pyo3::types::{
     PyAny, PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyStringMethods, PyTuple,
 };
+use pyo3::IntoPyObjectExt;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
 
-pub fn json_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
+pub fn json_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<Py<PyAny>> {
     Ok(match value {
         JsonValue::Null => py.None(),
-        JsonValue::Bool(v) => v.into_py(py),
+        JsonValue::Bool(v) => v.into_py_any(py)?,
         JsonValue::Number(v) => {
             if let Some(i) = v.as_i64() {
-                i.into_py(py)
+                i.into_py_any(py)?
             } else if let Some(u) = v.as_u64() {
-                u.into_py(py)
+                u.into_py_any(py)?
             } else if let Some(f) = v.as_f64() {
-                f.into_py(py)
+                f.into_py_any(py)?
             } else {
                 py.None()
             }
         }
-        JsonValue::String(v) => v.into_py(py),
+        JsonValue::String(v) => v.into_py_any(py)?,
         JsonValue::Array(items) => {
             let list = PyList::empty(py);
             for item in items {
                 list.append(json_to_py(py, item)?)?;
             }
-            list.into_py(py)
+            list.into_py_any(py)?
         }
         JsonValue::Object(map) => {
             let dict = PyDict::new(py);
             for (key, item) in map {
                 dict.set_item(key, json_to_py(py, item)?)?;
             }
-            dict.into_py(py)
+            dict.into_py_any(py)?
         }
     })
 }
@@ -142,14 +143,14 @@ fn py_to_json_inner(
         return Ok(JsonValue::Null);
     }
 
-    if let Ok(value) = value.downcast::<PyBool>() {
+    if let Ok(value) = value.cast::<PyBool>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.charge(5, 0)?;
         }
         return Ok(JsonValue::Bool(value.is_true()));
     }
 
-    if let Ok(value) = value.downcast::<PyInt>() {
+    if let Ok(value) = value.cast::<PyInt>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.charge(24, 0)?;
         }
@@ -164,7 +165,7 @@ fn py_to_json_inner(
         ));
     }
 
-    if let Ok(value) = value.downcast::<PyFloat>() {
+    if let Ok(value) = value.cast::<PyFloat>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.charge(24, 0)?;
         }
@@ -182,7 +183,7 @@ fn py_to_json_inner(
         return Ok(JsonValue::Number(number));
     }
 
-    if let Ok(value) = value.downcast::<PyString>() {
+    if let Ok(value) = value.cast::<PyString>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.require_string_capacity(value.len()?)?;
         }
@@ -196,14 +197,14 @@ fn py_to_json_inner(
         return Ok(JsonValue::String(value_str.into_owned()));
     }
 
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.require_child_capacity(dict.len())?;
             budget.charge((dict.len().saturating_sub(1) as u64).saturating_add(2), 0)?;
         }
         let mut out = serde_json::Map::with_capacity(dict.len());
         for (key, value) in dict.iter() {
-            let key = key.downcast::<PyString>().map_err(|_| {
+            let key = key.cast::<PyString>().map_err(|_| {
                 PyValueError::new_err("dict keys must be strings for JSON encoding")
             })?;
             if let Some(budget) = budget.as_deref_mut() {
@@ -224,7 +225,7 @@ fn py_to_json_inner(
         return Ok(JsonValue::Object(out));
     }
 
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.require_child_capacity(list.len())?;
             budget.charge((list.len().saturating_sub(1) as u64).saturating_add(2), 0)?;
@@ -241,7 +242,7 @@ fn py_to_json_inner(
         return Ok(JsonValue::Array(out));
     }
 
-    if let Ok(tuple) = value.downcast::<PyTuple>() {
+    if let Ok(tuple) = value.cast::<PyTuple>() {
         if let Some(budget) = budget.as_deref_mut() {
             budget.require_child_capacity(tuple.len())?;
             budget.charge((tuple.len().saturating_sub(1) as u64).saturating_add(2), 0)?;

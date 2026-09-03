@@ -43,7 +43,7 @@ fn array_to_tuple(values: [f64; 3]) -> (f64, f64, f64) {
     (values[0], values[1], values[2])
 }
 
-fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
+fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("frequency", peak.frequency)?;
     dict.set_item("magnitude", peak.magnitude)?;
@@ -51,7 +51,7 @@ fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
     Ok(dict.into())
 }
 
-fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<PyObject> {
+fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("frames", summary.frames)?;
     dict.set_item("duration", summary.duration)?;
@@ -67,7 +67,7 @@ fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<PyO
     Ok(dict.into())
 }
 
-fn chrono_harmonics_to_py(py: Python<'_>, harmonics: &ChronoHarmonics) -> PyResult<PyObject> {
+fn chrono_harmonics_to_py(py: Python<'_>, harmonics: &ChronoHarmonics) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("frames", harmonics.frames)?;
     dict.set_item("duration", harmonics.duration)?;
@@ -97,7 +97,7 @@ fn concept_annotation_to_py(
     term: &str,
     sense: ConceptSense,
     rationale: Option<&String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("term", term)?;
     dict.set_item("sense", sense.label())?;
@@ -110,7 +110,7 @@ fn concept_annotation_to_py(
     Ok(dict.into())
 }
 
-fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyObject> {
+fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("timestamp", fragment.timestamp)?;
     dict.set_item("loop_support", fragment.loop_support)?;
@@ -155,7 +155,7 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
 }
 
 #[cfg(feature = "psi")]
-fn psi_reading_to_py(py: Python<'_>, reading: PsiReading) -> PyResult<PyObject> {
+fn psi_reading_to_py(py: Python<'_>, reading: PsiReading) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("total", reading.total)?;
     dict.set_item("step", reading.step)?;
@@ -167,7 +167,7 @@ fn psi_reading_to_py(py: Python<'_>, reading: PsiReading) -> PyResult<PyObject> 
     Ok(dict.into())
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "MetaMembConfig")]
+#[pyclass(module = "spiraltorch.psi", name = "MetaMembConfig", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyMetaMembConfig {
     pub(crate) inner: MetaMembConfig,
@@ -228,7 +228,11 @@ impl PyMetaMembConfig {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "CircleLockMapConfig")]
+#[pyclass(
+    module = "spiraltorch.psi",
+    name = "CircleLockMapConfig",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyCircleLockMapConfig {
     pub(crate) inner: CircleLockMapConfig,
@@ -324,7 +328,11 @@ impl PyCircleLockMapConfig {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "PsiTelemetryConfig")]
+#[pyclass(
+    module = "spiraltorch.psi",
+    name = "PsiTelemetryConfig",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyPsiTelemetryConfig {
     pub(crate) inner: PsiTelemetryConfig,
@@ -473,7 +481,7 @@ impl PyPsiTelemetryConfig {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroConfig")]
+#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroConfig", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyPsiSynchroConfig {
     pub(crate) inner: PsiSynchroConfig,
@@ -565,7 +573,7 @@ impl PyPsiSynchroConfig {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "PsiBranchState")]
+#[pyclass(module = "spiraltorch.psi", name = "PsiBranchState", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyPsiBranchState {
     pub(crate) inner: PsiBranchState,
@@ -638,7 +646,7 @@ impl PyPsiBranchState {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "ArnoldTonguePeak")]
+#[pyclass(module = "spiraltorch.psi", name = "ArnoldTonguePeak", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyArnoldTongue {
     inner: ArnoldTongueSummary,
@@ -698,7 +706,7 @@ impl PyArnoldTongue {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "HeatmapAnalytics")]
+#[pyclass(module = "spiraltorch.psi", name = "HeatmapAnalytics", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyHeatmapAnalytics {
     inner: HeatmapAnalytics,
@@ -811,7 +819,7 @@ impl PyHeatmapAnalytics {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "HeatmapResult")]
+#[pyclass(module = "spiraltorch.psi", name = "HeatmapResult", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyHeatmapResult {
     inner: HeatmapResult,
@@ -881,7 +889,7 @@ impl PyHeatmapResult {
         &self,
         py: Python<'_>,
         timestamp: Option<f32>,
-    ) -> PyResult<Option<PyObject>> {
+    ) -> PyResult<Option<Py<PyAny>>> {
         match self.inner.to_atlas_fragment(timestamp) {
             Some(fragment) => atlas_fragment_to_py(py, fragment).map(Some),
             None => Ok(None),
@@ -889,7 +897,7 @@ impl PyHeatmapResult {
     }
 
     #[cfg(feature = "psi")]
-    pub fn to_psi_reading(&self, py: Python<'_>, step: u64) -> PyResult<Option<PyObject>> {
+    pub fn to_psi_reading(&self, py: Python<'_>, step: u64) -> PyResult<Option<Py<PyAny>>> {
         match self.inner.to_psi_reading(step) {
             Some(reading) => psi_reading_to_py(py, reading).map(Some),
             None => Ok(None),
@@ -901,7 +909,7 @@ impl PyHeatmapResult {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroPulse")]
+#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroPulse", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyPsiSynchroPulse {
     branch_id: String,
@@ -931,7 +939,7 @@ impl PyPsiSynchroPulse {
 }
 
 #[cfg(feature = "golden")]
-#[pyclass(module = "spiraltorch.psi", name = "GoldenPulse")]
+#[pyclass(module = "spiraltorch.psi", name = "GoldenPulse", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyGoldenPulse {
     inner: GoldenBlackcatPulse,
@@ -1023,7 +1031,7 @@ impl PyGoldenPulse {
 }
 
 #[cfg(feature = "golden")]
-#[pyclass(module = "spiraltorch.psi", name = "GoldenDirective")]
+#[pyclass(module = "spiraltorch.psi", name = "GoldenDirective", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyGoldenDirective {
     inner: GoldenCooperativeDirective,
@@ -1061,7 +1069,11 @@ impl PyGoldenDirective {
 }
 
 #[cfg(feature = "golden")]
-#[pyclass(module = "spiraltorch.psi", name = "GoldenPsiTelemetry")]
+#[pyclass(
+    module = "spiraltorch.psi",
+    name = "GoldenPsiTelemetry",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyGoldenPsiTelemetry {
     inner: PsiGoldenTelemetry,
@@ -1093,7 +1105,7 @@ impl PyGoldenPsiTelemetry {
     }
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroResult")]
+#[pyclass(module = "spiraltorch.psi", name = "PsiSynchroResult", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyPsiSynchroResult {
     heatmaps: Vec<HeatmapResult>,
@@ -1147,7 +1159,7 @@ impl PyPsiSynchroResult {
             .collect()
     }
 
-    pub fn atlas_fragments(&self, py: Python<'_>) -> PyResult<Vec<(String, PyObject)>> {
+    pub fn atlas_fragments(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
         self.atlas
             .iter()
             .cloned()
@@ -1159,7 +1171,7 @@ impl PyPsiSynchroResult {
     }
 
     #[cfg(feature = "psi")]
-    pub fn psi_readings(&self, py: Python<'_>) -> PyResult<Vec<(String, PyObject)>> {
+    pub fn psi_readings(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
         self.psi
             .iter()
             .cloned()

@@ -4,6 +4,8 @@ use pyo3::types::PyModule;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList};
 use pyo3::wrap_pyfunction;
 #[cfg(feature = "kdsl")]
+use pyo3::IntoPyObjectExt;
+#[cfg(feature = "kdsl")]
 use pyo3::PyRef;
 #[cfg(feature = "kdsl")]
 use pyo3::{Bound, Py};
@@ -180,7 +182,7 @@ fn spiralk_ai_err_to_py(err: AiRewriteError) -> PyErr {
 }
 
 #[cfg(feature = "kdsl")]
-pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<PyObject> {
+pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<Py<PyAny>> {
     let hard = PyDict::new(py);
     if let Some(flag) = out.hard.use_2ce {
         hard.set_item("use_2ce", flag)?;
@@ -282,7 +284,7 @@ pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<
     let out_dict = PyDict::new(py);
     out_dict.set_item("hard", hard)?;
     out_dict.set_item("soft", soft_rules)?;
-    Ok(out_dict.into_py(py))
+    out_dict.into_py_any(py)
 }
 
 #[cfg(feature = "kdsl")]
@@ -395,7 +397,7 @@ impl PySpiralKContext {
         self.inner.segments
     }
 
-    fn eval(&self, py: Python<'_>, program: &str) -> PyResult<PyObject> {
+    fn eval(&self, py: Python<'_>, program: &str) -> PyResult<Py<PyAny>> {
         let out = st_kdsl::eval_program(program, &self.inner)
             .map_err(|err| spiralk_err_with_src_to_py(program, err))?;
         spiralk_out_to_dict(py, &out)
@@ -407,7 +409,7 @@ impl PySpiralKContext {
         py: Python<'_>,
         program: &str,
         max_events: usize,
-    ) -> PyResult<(PyObject, PyObject)> {
+    ) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         let (out, trace) = st_kdsl::eval_program_with_trace(program, &self.inner, max_events)
             .map_err(|err| spiralk_err_with_src_to_py(program, err))?;
         let out_obj = spiralk_out_to_dict(py, &out)?;
@@ -673,7 +675,7 @@ fn rewrite_with_wilson(
     hints: Vec<PyRef<PySpiralKHeuristicHint>>,
     min_gain: f32,
     min_confidence: f32,
-) -> PyResult<(PyObject, String)> {
+) -> PyResult<(Py<PyAny>, String)> {
     let collected: Vec<HeuristicHint> =
         hints.into_iter().map(|hint| hint.inner().clone()).collect();
     let (out, script) = auto::rewrite_with_wilson(
@@ -699,7 +701,7 @@ fn rewrite_with_ai(
     config: &PySpiralKAiRewriteConfig,
     prompt: &PySpiralKAiRewritePrompt,
     generator: Option<Bound<'_, PyAny>>,
-) -> PyResult<(PyObject, String, PyObject)> {
+) -> PyResult<(Py<PyAny>, String, Py<PyAny>)> {
     let result = if let Some(custom) = generator {
         let python_generator = PythonAiHintGenerator::new(&custom);
         auto::rewrite_with_ai(
@@ -738,7 +740,7 @@ struct PythonAiHintGenerator {
 impl PythonAiHintGenerator {
     fn new(callable: &Bound<'_, PyAny>) -> Self {
         Self {
-            callable: callable.to_object(callable.py()),
+            callable: callable.clone().unbind().into_any(),
         }
     }
 }
@@ -750,7 +752,7 @@ impl AiHintGenerator for PythonAiHintGenerator {
         config: &AiRewriteConfig,
         prompt: &AiRewritePrompt,
     ) -> Result<Vec<HeuristicHint>, AiRewriteError> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let callable = self.callable.bind(py);
             let config_obj = Py::new(
                 py,
@@ -766,7 +768,7 @@ impl AiHintGenerator for PythonAiHintGenerator {
                 },
             )
             .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
-            let args = (config_obj.to_object(py), prompt_obj.to_object(py));
+            let args = (config_obj.into_any(), prompt_obj.into_any());
             let value = callable
                 .call1(args)
                 .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
@@ -785,7 +787,7 @@ fn extract_python_hints(value: &Bound<'_, PyAny>) -> Result<Vec<HeuristicHint>, 
     let mut hints = Vec::new();
     for item in iterator {
         let object = item.map_err(|err| AiRewriteError::Generator(err.to_string()))?;
-        let hint: &Bound<'_, PySpiralKHeuristicHint> = object.downcast().map_err(|_| {
+        let hint: &Bound<'_, PySpiralKHeuristicHint> = object.cast().map_err(|_| {
             AiRewriteError::Generator(
                 "AI generator must yield SpiralKHeuristicHint instances".to_string(),
             )
@@ -806,14 +808,14 @@ mod tests {
         static INIT: Once = Once::new();
         INIT.call_once(|| {
             std::env::set_var("PYTHONNOUSERSITE", "1");
-            pyo3::prepare_freethreaded_python();
+            Python::initialize();
         });
     }
 
     #[test]
     fn evaluation_errors_map_to_python_value_errors() {
         ensure_python_initialized();
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let err = spiralk_err_to_py(SpiralKErr::Eval(st_kdsl::EvalError::ExpectedNumber));
 
             assert!(err.is_instance_of::<PyValueError>(py));
@@ -822,7 +824,11 @@ mod tests {
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKHint")]
+#[pyclass(
+    module = "spiraltorch.spiralk",
+    name = "MaxwellSpiralKHint",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyMaxwellSpiralKHint {
     inner: MaxwellSpiralKHint,
@@ -1124,7 +1130,7 @@ impl PyMeaningGate {
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "SequentialZ")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SequentialZ", from_py_object)]
 #[derive(Clone, Default)]
 pub(crate) struct PySequentialZ {
     pub(crate) inner: SequentialZ,
@@ -1180,7 +1186,7 @@ impl PySequentialZ {
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellPulse")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellPulse", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyMaxwellPulse {
     inner: MaxwellZPulse,

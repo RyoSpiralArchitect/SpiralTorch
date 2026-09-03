@@ -4,6 +4,7 @@ use std::sync::Arc;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyDict};
+use pyo3::IntoPyObjectExt;
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::telemetry::PyAtlasFrame;
@@ -91,7 +92,7 @@ fn tensor_to_rows(tensor: &Tensor) -> Vec<Vec<f32>> {
 }
 
 fn chrono_summary_from_any(summary: &Bound<'_, PyAny>) -> PyResult<ChronoSummary> {
-    if let Ok(dict) = summary.downcast::<PyDict>() {
+    if let Ok(dict) = summary.cast::<PyDict>() {
         let frames_obj = dict
             .get_item("frames")?
             .ok_or_else(|| PyValueError::new_err("summary missing key 'frames'"))?;
@@ -343,7 +344,7 @@ fn transform_pipeline_audit_to_dict(
     Ok(dict.into())
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "ImageTensor")]
+#[pyclass(module = "spiraltorch.vision", name = "ImageTensor", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyImageTensor {
     inner: PureImageTensor,
@@ -448,7 +449,12 @@ impl PyImageTensor {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "TransformPipeline", unsendable)]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "TransformPipeline",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyTransformPipeline {
     inner: PureTransformPipeline,
@@ -562,7 +568,7 @@ impl PyTransformPipeline {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "VisionSample")]
+#[pyclass(module = "spiraltorch.vision", name = "VisionSample", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyVisionSample {
     inner: DatasetSample,
@@ -665,7 +671,11 @@ impl PyVisionSample {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "TensorVisionDataset")]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "TensorVisionDataset",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyTensorVisionDataset {
     inner: TensorVisionDataset,
@@ -755,7 +765,7 @@ impl PyTensorVisionDataset {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "VisionBatch")]
+#[pyclass(module = "spiraltorch.vision", name = "VisionBatch", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyVisionBatch {
     inner: VisionBatch,
@@ -865,7 +875,7 @@ impl PyVisionDataLoader {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "VisionModel")]
+#[pyclass(module = "spiraltorch.vision", name = "VisionModel", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyVisionModel {
     inner: Arc<dyn VisionModel>,
@@ -915,7 +925,7 @@ enum TapeTarget {
     Realgrad,
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "ChronoSnapshot")]
+#[pyclass(module = "spiraltorch.vision", name = "ChronoSnapshot", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyChronoSnapshot {
     inner: PureChronoSnapshot,
@@ -1019,7 +1029,12 @@ impl PyChronoSnapshot {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "ZSpaceStreamFrame", unsendable)]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "ZSpaceStreamFrame",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyZSpaceStreamFrame {
     inner: PureZSpaceStreamFrame,
@@ -1131,7 +1146,7 @@ impl PyZSpaceStreamFrame {
             atlas_dict.set_item("timestamp", atlas.timestamp)?;
             atlas_dict.set_item("metrics", atlas.metrics.len())?;
             atlas_dict.set_item("notes", atlas.notes.len())?;
-            Some(atlas_dict.into_py(py))
+            Some(atlas_dict.into_py_any(py)?)
         } else {
             None
         };
@@ -1161,7 +1176,12 @@ impl PyZSpaceStreamFrame {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "StreamedVolume", unsendable)]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "StreamedVolume",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyStreamedVolume {
     inner: PureStreamedVolume,
@@ -1263,7 +1283,7 @@ impl PyStreamedVolume {
             atlas_dict.set_item("timestamp", atlas.timestamp)?;
             atlas_dict.set_item("metrics", atlas.metrics.len())?;
             atlas_dict.set_item("notes", atlas.notes.len())?;
-            Some(atlas_dict.into_py(py))
+            Some(atlas_dict.into_py_any(py)?)
         } else {
             None
         };
@@ -1296,6 +1316,7 @@ impl PyStreamedVolume {
 }
 
 #[pyclass(
+    from_py_object,
     module = "spiraltorch.vision",
     name = "ZSpaceStreamFrameAggregator",
     unsendable
@@ -1634,7 +1655,7 @@ impl PyCanvasTransformer {
         strict: bool,
     ) -> PyResult<()> {
         let mapping = state
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyTypeError::new_err("state must be a mapping with string keys"))?;
 
         let mut width = self.width;
@@ -1835,7 +1856,11 @@ fn matrix_summary(data: &[f32]) -> HashMap<String, f32> {
     summary
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "InfiniteZSpacePatch")]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "InfiniteZSpacePatch",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyInfiniteZSpacePatch {
     inner: PureInfiniteZSpacePatch,
@@ -1879,7 +1904,7 @@ impl PyInfiniteZSpacePatch {
     }
 }
 
-#[pyclass(module = "spiraltorch.vision", name = "FractalCanvas")]
+#[pyclass(module = "spiraltorch.vision", name = "FractalCanvas", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyFractalCanvas {
     inner: PureFractalCanvas,

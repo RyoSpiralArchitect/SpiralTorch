@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyModule};
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -28,12 +29,12 @@ fn collect_tensors(py: Python<'_>, inputs: &Bound<'_, PyAny>) -> PyResult<Vec<Te
     Ok(out)
 }
 
-fn tensors_to_pylist(py: Python<'_>, tensors: &[Tensor]) -> PyResult<PyObject> {
+fn tensors_to_pylist(py: Python<'_>, tensors: &[Tensor]) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for tensor in tensors {
         list.append(Py::new(py, PyTensor::from_tensor(tensor.clone()))?)?;
     }
-    Ok(list.into_py(py))
+    list.into_py_any(py)
 }
 
 fn extract_output_tensors(py: Python<'_>, output: &Bound<'_, PyAny>) -> PyResult<Vec<Tensor>> {
@@ -74,7 +75,7 @@ fn call_python_forward(
     inputs: &[&Tensor],
     expected_outputs: usize,
 ) -> Result<Vec<Tensor>, TensorError> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let mut input_vec = Vec::with_capacity(inputs.len());
         for tensor in inputs {
             input_vec.push((*tensor).clone());
@@ -107,7 +108,7 @@ fn call_python_backward(
     grad_outputs: &[&Tensor],
     expected_grads: usize,
 ) -> Result<Vec<Tensor>, TensorError> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let mut input_vec = Vec::with_capacity(inputs.len());
         for tensor in inputs {
             input_vec.push((*tensor).clone());
@@ -151,7 +152,7 @@ fn parse_attributes(attrs: Option<&Bound<'_, PyAny>>) -> PyResult<HashMap<String
         return Ok(map);
     };
     let dict = attrs
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyTypeError::new_err("attributes must be a dict[str, str]"))?;
     for (key, value) in dict.iter() {
         let key: String = key.extract()?;
@@ -171,8 +172,8 @@ fn register(
     name: &str,
     num_inputs: usize,
     num_outputs: usize,
-    forward: PyObject,
-    backward: Option<PyObject>,
+    forward: Py<PyAny>,
+    backward: Option<Py<PyAny>>,
     description: Option<&str>,
     backends: Option<Vec<String>>,
     attributes: Option<&Bound<'_, PyAny>>,
@@ -252,20 +253,20 @@ fn execute(
     name: &str,
     inputs: &Bound<'_, PyAny>,
     return_single: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let tensors = collect_tensors(py, inputs)?;
     let refs: Vec<&Tensor> = tensors.iter().collect();
     let outputs = global_operator_registry()
         .execute(name, &refs)
         .map_err(tensor_err_to_py)?;
     if return_single && outputs.len() == 1 {
-        return Ok(Py::new(py, PyTensor::from_tensor(outputs[0].clone()))?.into_py(py));
+        return Py::new(py, PyTensor::from_tensor(outputs[0].clone()))?.into_py_any(py);
     }
     let list = PyList::empty(py);
     for output in outputs {
         list.append(Py::new(py, PyTensor::from_tensor(output))?)?;
     }
-    Ok(list.into_py(py))
+    list.into_py_any(py)
 }
 
 #[pyfunction]
@@ -277,7 +278,7 @@ fn backward(
     outputs: &Bound<'_, PyAny>,
     grad_outputs: &Bound<'_, PyAny>,
     return_single: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let inputs = collect_tensors(py, inputs)?;
     let outputs = collect_tensors(py, outputs)?;
     let grads = collect_tensors(py, grad_outputs)?;
@@ -293,13 +294,13 @@ fn backward(
         .map_err(tensor_err_to_py)?;
 
     if return_single && grads.len() == 1 {
-        return Ok(Py::new(py, PyTensor::from_tensor(grads[0].clone()))?.into_py(py));
+        return Py::new(py, PyTensor::from_tensor(grads[0].clone()))?.into_py_any(py);
     }
     let list = PyList::empty(py);
     for grad in grads {
         list.append(Py::new(py, PyTensor::from_tensor(grad))?)?;
     }
-    Ok(list.into_py(py))
+    list.into_py_any(py)
 }
 
 #[pyfunction]
@@ -312,7 +313,7 @@ fn unregister(name: &str) -> bool {
     global_operator_registry().unregister(name)
 }
 
-fn metadata_dict(py: Python<'_>, operator: &RegisteredOperator) -> PyResult<PyObject> {
+fn metadata_dict(py: Python<'_>, operator: &RegisteredOperator) -> PyResult<Py<PyAny>> {
     let meta = operator.metadata();
     let dict = PyDict::new(py);
     dict.set_item("name", meta.signature.name.clone())?;
@@ -323,11 +324,11 @@ fn metadata_dict(py: Python<'_>, operator: &RegisteredOperator) -> PyResult<PyOb
     dict.set_item("description", meta.description.clone())?;
     dict.set_item("backends", meta.backends.clone())?;
     dict.set_item("attributes", meta.attributes.clone())?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[pyfunction]
-fn metadata(py: Python<'_>, name: &str) -> PyResult<PyObject> {
+fn metadata(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
     let operator = global_operator_registry()
         .get(name)
         .ok_or_else(|| PyValueError::new_err(format!("operator '{name}' not found")))?;
@@ -355,6 +356,6 @@ pub(crate) fn register_module(py: Python<'_>, parent: &Bound<PyModule>) -> PyRes
         ],
     )?;
     parent.add_submodule(&module)?;
-    parent.add("ops", module.to_object(py))?;
+    parent.add("ops", module.clone().unbind().into_any())?;
     Ok(())
 }

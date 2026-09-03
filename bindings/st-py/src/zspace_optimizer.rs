@@ -37,13 +37,13 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
 
 #[pyfunction]
-fn _zspace_meta_optimizer_init(py: Python<'_>, config: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_meta_optimizer_init(py: Python<'_>, config: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let config = request_value(config, "Z-space meta-optimizer config")?;
     let config: ZSpaceMetaOptimizerConfig = serde_json::from_value(config)
         .map_err(|error| json_error("invalid Z-space meta-optimizer config", error))?;
@@ -60,7 +60,7 @@ fn _zspace_meta_optimizer_init(py: Python<'_>, config: &Bound<'_, PyAny>) -> PyR
 fn _zspace_meta_optimizer_restore(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space meta-optimizer restore request")?;
     let request: ZSpaceMetaOptimizerRestoreRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space meta-optimizer restore request", error))?;
@@ -74,18 +74,18 @@ fn _zspace_meta_optimizer_restore(
 }
 
 #[pyfunction]
-fn _zspace_meta_optimizer_step(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_meta_optimizer_step(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space meta-optimizer step request")?;
     let request: ZSpaceMetaOptimizerStepRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space meta-optimizer step request", error))?;
     let report = py
-        .allow_threads(|| transition_zspace_meta_optimizer(request))
+        .detach(|| transition_zspace_meta_optimizer(request))
         .map_err(|error| json_error("Z-space meta-optimizer step failed", error))?;
     response_to_py(py, &report, "Z-space meta-optimizer report encoding failed")
 }
 
 #[pyfunction]
-fn _zspace_parameter_control(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_parameter_control(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let report = request_value(report, "Z-space meta-optimizer report")?;
     let control = zspace_parameter_control_from_value(report)
         .map_err(|error| json_error("Z-space parameter-control validation failed", error))?;
@@ -93,12 +93,12 @@ fn _zspace_parameter_control(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyRes
 }
 
 #[pyfunction]
-fn _zspace_parameter_trajectory(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_parameter_trajectory(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space parameter-trajectory request")?;
     let request: ZSpaceParameterTrajectoryRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space parameter-trajectory request", error))?;
     let report = py
-        .allow_threads(|| plan_zspace_parameter_trajectory(request))
+        .detach(|| plan_zspace_parameter_trajectory(request))
         .map_err(|error| json_error("Z-space parameter-trajectory planning failed", error))?;
     response_to_py(py, &report, "Z-space parameter-trajectory encoding failed")
 }
@@ -107,7 +107,7 @@ fn _zspace_parameter_trajectory(py: Python<'_>, request: &Bound<'_, PyAny>) -> P
 fn _zspace_parameter_trajectory_validate(
     py: Python<'_>,
     report: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let report = request_value(report, "Z-space parameter-trajectory report")?;
     let report = validate_zspace_parameter_trajectory_value(report)
         .map_err(|error| json_error("Z-space parameter-trajectory validation failed", error))?;
@@ -118,7 +118,7 @@ fn _zspace_parameter_trajectory_validate(
 fn _zspace_parameter_trajectory_policy(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space parameter-trajectory policy request")?;
     let source = request
         .get("source_trajectory")
@@ -131,7 +131,7 @@ fn _zspace_parameter_trajectory_policy(
     let policy: ZSpaceParameterTrajectoryPolicy = serde_json::from_value(policy)
         .map_err(|error| json_error("invalid Z-space parameter-trajectory policy", error))?;
     let report = py
-        .allow_threads(|| plan_zspace_parameter_trajectory_policy_from_value(source, policy))
+        .detach(|| plan_zspace_parameter_trajectory_policy_from_value(source, policy))
         .map_err(|error| {
             json_error("Z-space parameter-trajectory policy planning failed", error)
         })?;
@@ -146,7 +146,7 @@ fn _zspace_parameter_trajectory_policy(
 fn _zspace_parameter_trajectory_policy_validate(
     py: Python<'_>,
     report: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let report = request_value(report, "Z-space parameter-trajectory policy report")?;
     let report = validate_zspace_parameter_trajectory_policy_value(report).map_err(|error| {
         json_error(
@@ -162,12 +162,12 @@ fn _zspace_parameter_trajectory_policy_validate(
 }
 
 #[pyfunction]
-fn _zspace_polarity_evidence(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_polarity_evidence(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space polarity evidence request")?;
     let request: ZSpacePolarityEvidenceRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space polarity evidence request", error))?;
     let report = py
-        .allow_threads(|| summarize_zspace_polarity_evidence(request))
+        .detach(|| summarize_zspace_polarity_evidence(request))
         .map_err(|error| json_error("Z-space polarity evidence aggregation failed", error))?;
     response_to_py(py, &report, "Z-space polarity evidence encoding failed")
 }
@@ -176,7 +176,7 @@ fn _zspace_polarity_evidence(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
 fn _zspace_polarity_evidence_validate(
     py: Python<'_>,
     report: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let report = request_value(report, "Z-space polarity evidence report")?;
     let report = validate_zspace_polarity_evidence_value(report)
         .map_err(|error| json_error("Z-space polarity evidence validation failed", error))?;
@@ -187,7 +187,7 @@ fn _zspace_polarity_evidence_validate(
 fn _zspace_optimizer_feedback_init(
     py: Python<'_>,
     config: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let config = request_value(config, "Z-space optimizer feedback config")?;
     let config: ZSpaceOptimizerFeedbackConfig = serde_json::from_value(config)
         .map_err(|error| json_error("invalid Z-space optimizer feedback config", error))?;
@@ -204,7 +204,7 @@ fn _zspace_optimizer_feedback_init(
 fn _zspace_optimizer_feedback_restore(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space optimizer feedback restore request")?;
     let request: ZSpaceOptimizerFeedbackRestoreRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space optimizer feedback restore request", error))?;
@@ -221,7 +221,7 @@ fn _zspace_optimizer_feedback_restore(
 fn _zspace_optimizer_feedback_observe(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space optimizer feedback observation request")?;
     let request: ZSpaceOptimizerFeedbackObserveRequest =
         serde_json::from_value(request).map_err(|error| {
@@ -243,7 +243,7 @@ fn _zspace_optimizer_feedback_observe(
 fn _zspace_optimizer_feedback_control(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = request_value(request, "Z-space optimizer feedback control request")?;
     let request: ZSpaceOptimizerFeedbackControlRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space optimizer feedback control request", error))?;

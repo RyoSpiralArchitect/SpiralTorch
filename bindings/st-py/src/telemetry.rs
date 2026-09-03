@@ -2,6 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use pyo3::{Bound, Py};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -26,7 +27,7 @@ fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
 }
 
 #[pyfunction]
-fn _zspace_telemetry_fusion(py: Python<'_>, payloads: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_telemetry_fusion(py: Python<'_>, payloads: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let payloads = crate::json::py_to_json(payloads)?;
     let payloads: Vec<serde_json::Value> = serde_json::from_value(payloads)
         .map_err(|error| json_error("telemetry payloads must be a sequence of mappings", error))?;
@@ -38,7 +39,7 @@ fn _zspace_telemetry_fusion(py: Python<'_>, payloads: &Bound<'_, PyAny>) -> PyRe
 }
 
 #[pyfunction]
-fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request: ZSpacePartialFusionRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space partial fusion request", error))?;
@@ -53,7 +54,7 @@ fn _zspace_partial_fusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResul
 fn _zspace_metric_gradient_projection(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request: ZSpaceMetricGradientProjectionRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space metric-gradient request", error))?;
@@ -65,7 +66,7 @@ fn _zspace_metric_gradient_projection(
 }
 
 #[pyfunction]
-fn _zspace_free_energy(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_free_energy(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     if !request.is_object() {
         return Err(PyValueError::new_err(
@@ -85,7 +86,7 @@ fn _zspace_free_energy(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<P
 fn _training_telemetry_projection(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("training telemetry projection request must be a mapping")
@@ -144,7 +145,11 @@ fn seconds_to_timestamp(seconds: Option<f64>) -> SystemTime {
     }
 }
 
-#[pyclass(name = "DashboardMetric", module = "spiraltorch.telemetry")]
+#[pyclass(
+    name = "DashboardMetric",
+    module = "spiraltorch.telemetry",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyDashboardMetric {
     inner: DashboardMetric,
@@ -192,7 +197,11 @@ impl PyDashboardMetric {
     }
 }
 
-#[pyclass(name = "DashboardEvent", module = "spiraltorch.telemetry")]
+#[pyclass(
+    name = "DashboardEvent",
+    module = "spiraltorch.telemetry",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyDashboardEvent {
     inner: DashboardEvent,
@@ -225,7 +234,11 @@ impl PyDashboardEvent {
     }
 }
 
-#[pyclass(name = "DashboardFrame", module = "spiraltorch.telemetry")]
+#[pyclass(
+    name = "DashboardFrame",
+    module = "spiraltorch.telemetry",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyDashboardFrame {
     pub(crate) inner: DashboardFrame,
@@ -297,7 +310,7 @@ impl PyDashboardRing {
     }
 }
 
-#[pyclass(name = "AtlasMetric", module = "spiraltorch.telemetry")]
+#[pyclass(name = "AtlasMetric", module = "spiraltorch.telemetry", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyAtlasMetric {
     inner: AtlasMetric,
@@ -327,7 +340,11 @@ impl PyAtlasMetric {
     }
 }
 
-#[pyclass(name = "AtlasFragment", module = "spiraltorch.telemetry")]
+#[pyclass(
+    name = "AtlasFragment",
+    module = "spiraltorch.telemetry",
+    from_py_object
+)]
 #[derive(Clone, Default)]
 pub(crate) struct PyAtlasFragment {
     inner: AtlasFragment,
@@ -398,7 +415,7 @@ impl PyAtlasFragment {
     }
 }
 
-#[pyclass(name = "AtlasFrame", module = "spiraltorch.telemetry")]
+#[pyclass(name = "AtlasFrame", module = "spiraltorch.telemetry", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyAtlasFrame {
     inner: AtlasFrame,
@@ -484,14 +501,14 @@ impl PyAtlasFrame {
                 .into_iter()
                 .map(PyAtlasMetric::from_metric)
                 .collect();
-            dict.set_item("metrics", metrics.into_py(py))?;
+            dict.set_item("metrics", metrics.into_py_any(py)?)?;
             out.push(dict.into());
         }
         Ok(out)
     }
 }
 
-#[pyclass(name = "AtlasRoute", module = "spiraltorch.telemetry")]
+#[pyclass(name = "AtlasRoute", module = "spiraltorch.telemetry", from_py_object)]
 #[derive(Clone, Default)]
 pub(crate) struct PyAtlasRoute {
     inner: AtlasRoute,

@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pyclass::{PyTraverseError, PyVisit};
 use pyo3::types::{PyAny, PyDict, PyList, PySequence};
-use pyo3::IntoPy;
+use pyo3::IntoPyObjectExt;
 use spiral_hpo::{
     self as hpo, ExperimentTracker, NoOpTracker, Objective, ParamSpec, ParamValue, ResourceConfig,
     SearchError, SearchLoop, SearchLoopState, SearchSpace, Strategy, TrialRecord,
@@ -44,7 +44,7 @@ fn search_error_to_py(err: SearchError) -> PyErr {
     }
 }
 
-fn required_item<'py, T: FromPyObject<'py>>(
+fn required_item<'py, T: FromPyObjectOwned<'py>>(
     dict: &Bound<'py, PyDict>,
     key: &str,
     err: &str,
@@ -52,11 +52,12 @@ fn required_item<'py, T: FromPyObject<'py>>(
     dict.get_item(key)?
         .ok_or_else(|| PyValueError::new_err(err.to_string()))?
         .extract()
+        .map_err(Into::into)
 }
 
 fn parse_param_spec(any: &Bound<'_, PyAny>) -> PyResult<ParamSpec> {
     let dict = any
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("parameter spec must be a mapping"))?;
     let name: String = required_item(dict, "name", "parameter spec missing 'name'")?;
     let kind: String = required_item(dict, "type", "parameter spec missing 'type'")?;
@@ -87,7 +88,7 @@ fn parse_param_spec(any: &Bound<'_, PyAny>) -> PyResult<ParamSpec> {
 }
 
 fn parse_space(specs: &Bound<'_, PyAny>) -> PyResult<SearchSpace> {
-    if let Ok(dict) = specs.downcast::<PyDict>() {
+    if let Ok(dict) = specs.cast::<PyDict>() {
         // allow mapping -> {name: {...}}
         let mut params = Vec::with_capacity(dict.len());
         for (_, value) in dict.iter() {
@@ -96,7 +97,7 @@ fn parse_space(specs: &Bound<'_, PyAny>) -> PyResult<SearchSpace> {
         return Ok(SearchSpace::new(params));
     }
     let seq = specs
-        .downcast::<PySequence>()
+        .cast::<PySequence>()
         .map_err(|_| PyValueError::new_err("search space must be a sequence or mapping"))?;
     let mut params = Vec::new();
     for item in seq.try_iter()? {
@@ -176,7 +177,7 @@ fn parse_strategy(config: &Bound<'_, PyDict>) -> PyResult<Strategy> {
     }
 }
 
-fn trial_to_dict(py: Python<'_>, record: &TrialRecord) -> PyResult<PyObject> {
+fn trial_to_dict(py: Python<'_>, record: &TrialRecord) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("id", record.id)?;
     let params = PyDict::new(py);
@@ -197,7 +198,7 @@ fn trial_to_dict(py: Python<'_>, record: &TrialRecord) -> PyResult<PyObject> {
     if let Some(metric) = record.metric {
         dict.set_item("metric", metric)?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 fn dict_to_state(checkpoint: &str) -> PyResult<SearchLoopState> {
@@ -450,7 +451,7 @@ impl PySearchLoop {
         tracker: Option<Py<PyAny>>,
         maximize: bool,
     ) -> PyResult<Self> {
-        Python::with_gil(|_py| {
+        Python::attach(|_py| {
             let space = parse_space(space)?;
             let strategy = parse_strategy(strategy)?;
             let resource = parse_resource_config(resource)?;
@@ -469,7 +470,7 @@ impl PySearchLoop {
         checkpoint: &str,
         tracker: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        Python::with_gil(|_py| {
+        Python::attach(|_py| {
             let space = parse_space(space)?;
             let state = dict_to_state(checkpoint)?;
             let (tracker, tracker_dispatcher) = tracker_from_py(tracker);
@@ -479,7 +480,7 @@ impl PySearchLoop {
         })
     }
 
-    pub fn suggest(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn suggest(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let record = {
             let mut guard = lock_recover(&self.inner);
             guard.suggest().map_err(search_error_to_py)?
@@ -533,12 +534,12 @@ impl PySearchLoop {
         Ok(objective.as_str().to_string())
     }
 
-    pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let best = lock_recover(&self.inner).best_trial();
         best.map(|record| trial_to_dict(py, &record)).transpose()
     }
 
-    pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn summary(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let summary = lock_recover(&self.inner).summary();
         let dict = PyDict::new(py);
         dict.set_item("objective", summary.objective.as_str())?;
@@ -554,7 +555,7 @@ impl PySearchLoop {
                 dict.set_item("best_trial", py.None())?;
             }
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 

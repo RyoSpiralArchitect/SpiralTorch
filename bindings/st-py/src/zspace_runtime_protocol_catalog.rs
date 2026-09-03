@@ -20,15 +20,15 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
 
 #[pyfunction]
-fn _zspace_runtime_protocol_catalog(py: Python<'_>) -> PyResult<PyObject> {
+fn _zspace_runtime_protocol_catalog(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let catalog = py
-        .allow_threads(zspace_runtime_protocol_catalog)
+        .detach(zspace_runtime_protocol_catalog)
         .map_err(|error| json_error("Z-space runtime protocol catalog failed", error))?;
     response_to_py(
         py,
@@ -41,7 +41,7 @@ fn _zspace_runtime_protocol_catalog(py: Python<'_>) -> PyResult<PyObject> {
 fn _zspace_runtime_protocol_catalog_validate(
     py: Python<'_>,
     catalog: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = crate::json::py_to_json_bounded(
         catalog,
         ZSPACE_RUNTIME_PROTOCOL_CATALOG_MAX_INGRESS_BYTES,
@@ -50,7 +50,7 @@ fn _zspace_runtime_protocol_catalog_validate(
         "Z-space runtime protocol catalog",
     )?;
     let catalog = py
-        .allow_threads(|| validate_zspace_runtime_protocol_catalog_value(value))
+        .detach(|| validate_zspace_runtime_protocol_catalog_value(value))
         .map_err(|error| json_error("Z-space runtime protocol catalog validation failed", error))?;
     response_to_py(
         py,

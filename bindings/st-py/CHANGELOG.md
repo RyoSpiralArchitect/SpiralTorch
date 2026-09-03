@@ -1,5 +1,20 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.19
+
+- Upgrade the native binding and embedded-Python benchmarks from PyO3 0.24.2
+  to 0.29.2, removing deprecated object-conversion and interpreter-attachment
+  shims. The Python 3.8+ abi3 wheel contract, public API, and default backend
+  feature policy remain unchanged. Both native module entrypoints explicitly
+  retain the existing GIL requirement rather than silently opting into PyO3's
+  new free-threaded default.
+- Make cloned Python-class extraction explicit, propagate fallible object
+  conversions, and preserve callback and DLPack ownership across the Rust/Python
+  boundary without a crate-wide deprecation suppression.
+- Add native lifetime regressions for state-dict extraction, retained callback
+  arguments, callback exceptions, and single-use DLPack transfers, plus optional
+  real-PyTorch interop. CI now also type-checks the embedded Python benchmark.
+
 ## 0.4.18
 
 - Add Rust-owned complex Schrodinger steps that preserve both quadratures,

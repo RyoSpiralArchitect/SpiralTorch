@@ -36,24 +36,24 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
 
 #[pyfunction]
-fn _zspace_periodicity(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_periodicity(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space periodicity request")?;
     let request: ZSpacePeriodicityRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space periodicity request", error))?;
     let report = py
-        .allow_threads(|| analyze_zspace_periodicity(request))
+        .detach(|| analyze_zspace_periodicity(request))
         .map_err(|error| json_error("Z-space periodicity analysis failed", error))?;
     response_to_py(py, &report, "Z-space periodicity encoding failed")
 }
 
 #[pyfunction]
-fn _zspace_periodicity_validate(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_periodicity_validate(py: Python<'_>, report: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let report = mapping_value(report, "Z-space periodicity report")?;
     let report = validate_zspace_periodicity_value(report)
         .map_err(|error| json_error("Z-space periodicity validation failed", error))?;

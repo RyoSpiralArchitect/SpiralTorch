@@ -64,7 +64,7 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
@@ -73,12 +73,12 @@ fn response_to_py<T: serde::Serialize>(
 fn _zspace_repetition_unlikelihood_plan(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space repetition-unlikelihood request")?;
     let request: ZSpaceRepetitionUnlikelihoodRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space repetition-unlikelihood request", error))?;
     let plan = py
-        .allow_threads(|| plan_zspace_repetition_unlikelihood(request))
+        .detach(|| plan_zspace_repetition_unlikelihood(request))
         .map_err(|error| json_error("Z-space repetition-unlikelihood planning failed", error))?;
     response_to_py(
         py,
@@ -91,10 +91,10 @@ fn _zspace_repetition_unlikelihood_plan(
 fn _zspace_repetition_unlikelihood_validate(
     py: Python<'_>,
     plan: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let plan = mapping_value(plan, "Z-space repetition-unlikelihood plan")?;
     let plan = py
-        .allow_threads(|| validate_zspace_repetition_unlikelihood_value(plan))
+        .detach(|| validate_zspace_repetition_unlikelihood_value(plan))
         .map_err(|error| json_error("Z-space repetition-unlikelihood validation failed", error))?;
     response_to_py(
         py,
@@ -107,11 +107,11 @@ fn _zspace_repetition_unlikelihood_validate(
 fn _zspace_repetition_unlikelihood_validate_trusted_legacy_replay(
     py: Python<'_>,
     plan: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let plan =
         trusted_legacy_mapping_value(plan, "trusted legacy Z-space repetition-unlikelihood plan")?;
     let plan = py
-        .allow_threads(|| validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(plan))
+        .detach(|| validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay(plan))
         .map_err(|error| {
             json_error(
                 "trusted legacy Z-space repetition-unlikelihood replay failed",

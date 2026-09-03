@@ -190,6 +190,8 @@ jobs:
         run: |
           python -m pip install -U pip wheel maturin
           maturin build --release --locked -m bindings/st-py/Cargo.toml --features "logic,kdsl"
+      - name: Check embedded Python benchmark API
+        run: cargo check --locked -p st-bench --features python --bench python_bindings
       - name: Verify wheel archive
         run: |
           python -P - <<'PY'
@@ -346,6 +348,7 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           python -P bindings/st-py/tests/test_unittest_smoke.py
+          python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
           python -P tests/test_publish_pypi_wheels.py

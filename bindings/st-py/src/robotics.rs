@@ -2,6 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use pyo3::PyRef;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -35,23 +36,23 @@ fn dict_to_payloads(dict: &Bound<PyDict>) -> PyResult<HashMap<String, Vec<f32>>>
     Ok(payloads)
 }
 
-fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<PyObject> {
+fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     for (key, value) in map {
         dict.set_item(key, *value)?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
-fn hashmap_to_dict(py: Python<'_>, map: &HashMap<String, f32>) -> PyResult<PyObject> {
+fn hashmap_to_dict(py: Python<'_>, map: &HashMap<String, f32>) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     for (key, value) in map {
         dict.set_item(key, *value)?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
-fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObject> {
+fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<Py<PyAny>> {
     let metrics = &review.metrics;
     let dict = PyDict::new(py);
     dict.set_item("existence_load", metrics.existence_load)?;
@@ -72,7 +73,7 @@ fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObj
     dict.set_item("word", word)?;
     dict.set_item("frame_signatures", metrics.frame_signatures.len())?;
     dict.set_item("direction_signatures", metrics.direction_signatures.len())?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 fn vectors_from_py(raw: Vec<Vec<f32>>) -> PyResult<Vec<[f32; 4]>> {
@@ -149,7 +150,11 @@ pub fn relativity_dynamics_from_ansatz(
     Ok(PyZSpaceDynamics { inner: dynamics })
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceGeometry")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpaceGeometry",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceGeometry {
     inner: ZSpaceGeometry,
@@ -193,7 +198,7 @@ impl PyZSpaceGeometry {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "GravityWell")]
+#[pyclass(module = "spiraltorch.robotics", name = "GravityWell", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyGravityWell {
     inner: GravityWell,
@@ -216,7 +221,7 @@ impl PyGravityWell {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "GravityField")]
+#[pyclass(module = "spiraltorch.robotics", name = "GravityField", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyGravityField {
     inner: GravityField,
@@ -249,7 +254,11 @@ impl PyGravityField {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceDynamics")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpaceDynamics",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceDynamics {
     inner: ZSpaceDynamics,
@@ -280,7 +289,11 @@ impl PyZSpaceDynamics {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "SensorFusionHub")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "SensorFusionHub",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PySensorFusionHub {
     inner: SensorFusionHub,
@@ -340,7 +353,7 @@ impl PySensorFusionHub {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "FusedFrame")]
+#[pyclass(module = "spiraltorch.robotics", name = "FusedFrame", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyFusedFrame {
     inner: FusedFrame,
@@ -349,12 +362,12 @@ pub(crate) struct PyFusedFrame {
 #[pymethods]
 impl PyFusedFrame {
     #[getter]
-    pub fn coordinates(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn coordinates(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, values) in &self.inner.coordinates {
             dict.set_item(key, values.clone())?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     pub fn norm(&self, channel: &str) -> Option<f32> {
@@ -370,7 +383,7 @@ impl PyFusedFrame {
     }
 
     #[getter]
-    pub fn health(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn health(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, health) in &self.inner.health {
             let py_health = Py::new(
@@ -381,11 +394,15 @@ impl PyFusedFrame {
             )?;
             dict.set_item(key, py_health)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ChannelHealth")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ChannelHealth",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyChannelHealth {
     inner: ChannelHealth,
@@ -404,7 +421,7 @@ impl PyChannelHealth {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "Desire")]
+#[pyclass(module = "spiraltorch.robotics", name = "Desire", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyDesire {
     inner: Desire,
@@ -440,7 +457,11 @@ impl PyDesire {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "DesireLagrangianField")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "DesireLagrangianField",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyDesireLagrangianField {
     inner: DesireLagrangianField,
@@ -474,7 +495,7 @@ impl PyDesireLagrangianField {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "EnergyReport")]
+#[pyclass(module = "spiraltorch.robotics", name = "EnergyReport", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyEnergyReport {
     inner: EnergyReport,
@@ -488,12 +509,12 @@ impl PyEnergyReport {
     }
 
     #[getter]
-    pub fn per_channel(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn per_channel(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, value) in &self.inner.per_channel {
             dict.set_item(key, *value)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     #[getter]
@@ -502,16 +523,16 @@ impl PyEnergyReport {
     }
 
     #[getter]
-    pub fn gravitational_per_channel(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn gravitational_per_channel(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, value) in &self.inner.gravitational_per_channel {
             dict.set_item(key, *value)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "PsiTelemetry")]
+#[pyclass(module = "spiraltorch.robotics", name = "PsiTelemetry", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyPsiTelemetry {
     inner: PsiTelemetry,
@@ -573,7 +594,11 @@ impl PyPsiTelemetry {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "TelemetryReport")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "TelemetryReport",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyTelemetryReport {
     inner: TelemetryReport,
@@ -597,12 +622,16 @@ impl PyTelemetryReport {
     }
 
     #[getter]
-    pub fn anomalies(&self, py: Python<'_>) -> PyResult<PyObject> {
-        Ok(self.inner.anomalies.clone().into_py(py))
+    pub fn anomalies(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.inner.anomalies.clone().into_py_any(py)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "PolicyGradientController")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "PolicyGradientController",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyPolicyGradientController {
     inner: PolicyGradientController,
@@ -619,7 +648,7 @@ impl PyPolicyGradientController {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "SafetyReview")]
+#[pyclass(module = "spiraltorch.robotics", name = "SafetyReview", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PySafetyReview {
     inner: SafetyReview,
@@ -638,17 +667,21 @@ impl PySafetyReview {
     }
 
     #[getter]
-    pub fn flagged_frames(&self, py: Python<'_>) -> PyResult<PyObject> {
-        Ok(self.inner.flagged_frames.clone().into_py(py))
+    pub fn flagged_frames(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        self.inner.flagged_frames.clone().into_py_any(py)
     }
 
     #[getter]
-    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         safety_metrics_to_py(py, &self.inner)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "DriftSafetyPlugin")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "DriftSafetyPlugin",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyDriftSafetyPlugin {
     inner: DriftSafetyPlugin,
@@ -737,18 +770,22 @@ impl PyRoboticsRuntime {
         self.inner.recording_len()
     }
 
-    pub fn drain_trajectory(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn drain_trajectory(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let steps = self.inner.drain_trajectory();
         let list = PyList::empty(py);
         for step in steps {
             let py_step = Py::new(py, PyRuntimeStep { inner: step })?;
             list.append(py_step)?;
         }
-        Ok(list.into_py(py))
+        list.into_py_any(py)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "VisionFeedbackSnapshot")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "VisionFeedbackSnapshot",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyVisionFeedbackSnapshot {
     inner: VisionFeedbackSnapshot,
@@ -781,16 +818,20 @@ impl PyVisionFeedbackSnapshot {
     }
 
     #[getter]
-    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, value) in self.inner.metrics() {
             dict.set_item(key, value)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "VisionFeedbackSynchronizer")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "VisionFeedbackSynchronizer",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyVisionFeedbackSynchronizer {
     inner: VisionFeedbackSynchronizer,
@@ -829,7 +870,11 @@ impl PyVisionFeedbackSynchronizer {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpacePartialObservation")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpacePartialObservation",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpacePartialObservation {
     inner: ZSpacePartialObservation,
@@ -838,12 +883,12 @@ pub(crate) struct PyZSpacePartialObservation {
 #[pymethods]
 impl PyZSpacePartialObservation {
     #[getter]
-    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         hashmap_to_dict(py, &self.inner.metrics)
     }
 
     #[getter]
-    pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn commands(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         hashmap_to_dict(py, &self.inner.commands)
     }
 
@@ -858,7 +903,11 @@ impl PyZSpacePartialObservation {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "TrainerMetrics")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "TrainerMetrics",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyTrainerMetrics {
     inner: TrainerMetrics,
@@ -892,7 +941,11 @@ impl PyTrainerMetrics {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "TemporalFeedbackSummary")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "TemporalFeedbackSummary",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyTemporalFeedbackSummary {
     inner: TemporalFeedbackSummary,
@@ -921,7 +974,7 @@ impl PyTemporalFeedbackSummary {
     }
 
     #[getter]
-    pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn commands(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         hashmap_to_dict(py, &self.inner.commands)
     }
 
@@ -943,7 +996,11 @@ impl PyTemporalFeedbackSummary {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "TemporalFeedbackLearner")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "TemporalFeedbackLearner",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyTemporalFeedbackLearner {
     inner: TemporalFeedbackLearner,
@@ -980,7 +1037,11 @@ impl PyTemporalFeedbackLearner {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerSample")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpaceTrainerSample",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceTrainerSample {
     inner: ZSpaceTrainerSample,
@@ -1003,7 +1064,11 @@ impl PyZSpaceTrainerSample {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "TrainerEpisode")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "TrainerEpisode",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyTrainerEpisode {
     inner: TrainerEpisode,
@@ -1042,7 +1107,11 @@ impl PyTrainerEpisode {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerBridge")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpaceTrainerBridge",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceTrainerBridge {
     inner: ZSpaceTrainerBridge,
@@ -1082,7 +1151,11 @@ impl PyZSpaceTrainerBridge {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerEpisodeBuilder")]
+#[pyclass(
+    module = "spiraltorch.robotics",
+    name = "ZSpaceTrainerEpisodeBuilder",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceTrainerEpisodeBuilder {
     inner: ZSpaceTrainerEpisodeBuilder,
@@ -1133,7 +1206,7 @@ impl PyZSpaceTrainerEpisodeBuilder {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "RuntimeStep")]
+#[pyclass(module = "spiraltorch.robotics", name = "RuntimeStep", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyRuntimeStep {
     inner: RuntimeStep,
@@ -1163,12 +1236,12 @@ impl PyRuntimeStep {
     }
 
     #[getter]
-    pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn commands(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, value) in &self.inner.commands {
             dict.set_item(key, *value)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     #[getter]
@@ -1177,7 +1250,7 @@ impl PyRuntimeStep {
     }
 
     #[getter]
-    pub fn safety(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn safety(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let list = PyList::empty(py);
         for review in &self.inner.safety {
             let review = Py::new(
@@ -1188,7 +1261,7 @@ impl PyRuntimeStep {
             )?;
             list.append(review)?;
         }
-        Ok(list.into_py(py))
+        list.into_py_any(py)
     }
 }
 

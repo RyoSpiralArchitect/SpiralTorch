@@ -67,12 +67,12 @@ fn trusted_legacy_mapping_value(
 fn _zspace_semantic_review_packet_seal(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space semantic review packet request")?;
     let request: ZSpaceSemanticReviewPacketRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space semantic review packet request", error))?;
     let receipt = py
-        .allow_threads(|| seal_zspace_semantic_review_packet(request))
+        .detach(|| seal_zspace_semantic_review_packet(request))
         .map_err(|error| json_error("Z-space semantic review packet sealing failed", error))?;
     response_to_py(
         py,
@@ -85,7 +85,7 @@ fn response_to_py<T: serde::Serialize>(
     py: Python<'_>,
     response: &T,
     context: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(response).map_err(|error| json_error(context, error))?;
     crate::json::json_to_py(py, &value)
 }
@@ -94,12 +94,12 @@ fn response_to_py<T: serde::Serialize>(
 fn _zspace_semantic_review_map_id(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space semantic review map commitment request")?;
     let request: ZSpaceSemanticReviewMapIdRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space semantic review map commitment", error))?;
     let map_id = py
-        .allow_threads(|| zspace_semantic_review_map_id(request.entries))
+        .detach(|| zspace_semantic_review_map_id(request.entries))
         .map_err(|error| json_error("Z-space semantic review map commitment failed", error))?;
     response_to_py(
         py,
@@ -112,7 +112,7 @@ fn _zspace_semantic_review_map_id(
 fn _zspace_semantic_review_map_id_trusted_legacy_replay(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = trusted_legacy_mapping_value(
         request,
         "trusted legacy Z-space semantic review map commitment request",
@@ -125,7 +125,7 @@ fn _zspace_semantic_review_map_id_trusted_legacy_replay(
             )
         })?;
     let map_id = py
-        .allow_threads(|| zspace_semantic_review_map_id_trusted_legacy_replay(request.entries))
+        .detach(|| zspace_semantic_review_map_id_trusted_legacy_replay(request.entries))
         .map_err(|error| {
             json_error(
                 "trusted legacy Z-space semantic review map commitment replay failed",
@@ -140,12 +140,15 @@ fn _zspace_semantic_review_map_id_trusted_legacy_replay(
 }
 
 #[pyfunction]
-fn _zspace_semantic_review_packet(py: Python<'_>, packet: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_semantic_review_packet(
+    py: Python<'_>,
+    packet: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
     let packet = mapping_value(packet, "Z-space semantic review packet")?;
     let packet: ZSpaceSemanticReviewPacket = serde_json::from_value(packet)
         .map_err(|error| json_error("invalid Z-space semantic review packet", error))?;
     let receipt = py
-        .allow_threads(|| validate_zspace_semantic_review_packet(packet))
+        .detach(|| validate_zspace_semantic_review_packet(packet))
         .map_err(|error| json_error("Z-space semantic review packet validation failed", error))?;
     response_to_py(
         py,
@@ -158,7 +161,7 @@ fn _zspace_semantic_review_packet(py: Python<'_>, packet: &Bound<'_, PyAny>) -> 
 fn _zspace_semantic_review_packet_trusted_legacy_replay(
     py: Python<'_>,
     packet: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let packet =
         trusted_legacy_mapping_value(packet, "trusted legacy Z-space semantic review packet")?;
     let packet: ZSpaceSemanticReviewPacket = serde_json::from_value(packet).map_err(|error| {
@@ -168,7 +171,7 @@ fn _zspace_semantic_review_packet_trusted_legacy_replay(
         )
     })?;
     let receipt = py
-        .allow_threads(|| validate_zspace_semantic_review_packet_trusted_legacy_replay(packet))
+        .detach(|| validate_zspace_semantic_review_packet_trusted_legacy_replay(packet))
         .map_err(|error| {
             json_error(
                 "trusted legacy Z-space semantic review packet replay failed",
@@ -186,7 +189,7 @@ fn _zspace_semantic_review_packet_trusted_legacy_replay(
 fn _zspace_semantic_review_packet_validate(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = mapping_value(receipt, "Z-space semantic review packet receipt")?;
     let receipt =
         validate_zspace_semantic_review_packet_receipt_value(receipt).map_err(|error| {
@@ -206,7 +209,7 @@ fn _zspace_semantic_review_packet_validate(
 fn _zspace_semantic_review_packet_validate_trusted_legacy_replay(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = trusted_legacy_mapping_value(
         receipt,
         "trusted legacy Z-space semantic review packet receipt",
@@ -227,12 +230,15 @@ fn _zspace_semantic_review_packet_validate_trusted_legacy_replay(
 }
 
 #[pyfunction]
-fn _zspace_semantic_review_draft(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_semantic_review_draft(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space semantic review draft request")?;
     let request: ZSpaceSemanticReviewDraftRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space semantic review draft request", error))?;
     let receipt = py
-        .allow_threads(|| summarize_zspace_semantic_review_draft(request.packet, request.draft))
+        .detach(|| summarize_zspace_semantic_review_draft(request.packet, request.draft))
         .map_err(|error| json_error("Z-space semantic review draft validation failed", error))?;
     response_to_py(
         py,
@@ -245,7 +251,7 @@ fn _zspace_semantic_review_draft(py: Python<'_>, request: &Bound<'_, PyAny>) -> 
 fn _zspace_semantic_review_draft_validate(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = mapping_value(receipt, "Z-space semantic review draft receipt")?;
     let receipt =
         validate_zspace_semantic_review_draft_receipt_value(receipt).map_err(|error| {
@@ -265,7 +271,7 @@ fn _zspace_semantic_review_draft_validate(
 fn _zspace_semantic_review_draft_validate_trusted_legacy_replay(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let receipt = trusted_legacy_mapping_value(
         receipt,
         "trusted legacy Z-space semantic review draft receipt",
@@ -289,12 +295,12 @@ fn _zspace_semantic_review_draft_validate_trusted_legacy_replay(
 fn _zspace_semantic_review_unblind(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = mapping_value(request, "Z-space semantic review unblind request")?;
     let request: ZSpaceSemanticReviewUnblindRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space semantic review unblind request", error))?;
     let report = py
-        .allow_threads(|| {
+        .detach(|| {
             unblind_zspace_semantic_review(request.packet, request.draft, request.blinding_map)
         })
         .map_err(|error| json_error("Z-space semantic review unblind failed", error))?;
@@ -309,7 +315,7 @@ fn _zspace_semantic_review_unblind(
 fn _zspace_semantic_review_unblind_validate(
     py: Python<'_>,
     report: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let report = mapping_value(report, "Z-space semantic review unblind report")?;
     let report = validate_zspace_semantic_review_unblind_value(report).map_err(|error| {
         json_error(
@@ -328,7 +334,7 @@ fn _zspace_semantic_review_unblind_validate(
 fn _zspace_semantic_review_unblind_validate_trusted_legacy_replay(
     py: Python<'_>,
     report: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let report = trusted_legacy_mapping_value(
         report,
         "trusted legacy Z-space semantic review unblind report",

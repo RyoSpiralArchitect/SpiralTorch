@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::IntoPyObjectExt;
 use st_tensor::{Tensor, TensorBiome};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -516,7 +517,7 @@ impl PySoT3DStep {
         (self.step.x, self.step.y, self.step.height)
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("index", self.step.index)?;
         dict.set_item("angle", self.step.angle)?;
@@ -551,7 +552,7 @@ impl PySoT3DStep {
         micro_info.set_item("role_index", self.step.micro_role_index)?;
         micro_info.set_item("reflection", self.step.micro_reflection)?;
         dict.set_item("micro", micro_info)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -610,7 +611,7 @@ impl PyMacroSummary {
         self.summary.mean_curvature
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("index", self.summary.index)?;
         dict.set_item("start", self.summary.start)?;
@@ -619,7 +620,7 @@ impl PyMacroSummary {
         dict.set_item("reflection_step", self.summary.reflection_step)?;
         dict.set_item("height_gain", self.summary.height_gain)?;
         dict.set_item("mean_curvature", self.summary.mean_curvature)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -630,7 +631,7 @@ impl PyMacroSummary {
     }
 }
 
-#[pyclass(module = "spiraltorch.sot", name = "SoT3DPlan")]
+#[pyclass(module = "spiraltorch.sot", name = "SoT3DPlan", from_py_object)]
 #[derive(Clone)]
 pub struct PySoT3DPlan {
     steps: Vec<Sot3DStep>,
@@ -820,12 +821,12 @@ impl PySoT3DPlan {
             .collect()
     }
 
-    fn as_dicts(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    fn as_dicts(&self, py: Python<'_>) -> PyResult<Vec<Py<PyAny>>> {
         let mut out = Vec::with_capacity(self.steps.len());
         for step in &self.steps {
             let py_step = Py::new(py, PySoT3DStep { step: step.clone() })?;
             let dict = py_step.bind(py).call_method0("as_dict")?;
-            out.push(dict.into_py(py));
+            out.push(dict.into_py_any(py)?);
         }
         Ok(out)
     }

@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use pyo3::IntoPyObjectExt;
 use pyo3::Py;
 use pyo3::PyAny;
 
@@ -301,12 +302,12 @@ impl PyLinearModel {
         self.inner.weights().shape().1
     }
 
-    pub fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn state_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         let weights = Py::new(py, PyTensor::from_tensor(self.inner.weights().clone()))?;
         dict.set_item("weights", weights)?;
         dict.set_item("bias", self.inner.bias().to_vec())?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
