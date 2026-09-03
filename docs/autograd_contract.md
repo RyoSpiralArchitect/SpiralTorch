@@ -141,6 +141,7 @@ the caller's responsibility.
   VJPs to the same kernels; clients do not implement another derivative.
 - These new kernels are explicitly CPU, not WGPU kernels or a claim of GPU
   residency. `st-nn::CrossEntropyWithLogits` rejects strict WGPU execution.
+  Allowed CPU fallbacks retain the requested WGPU route in adapter metadata.
 - Kernel notifications from reverse mode are deferred until the graph lock is
   released, including when validation fails. Completed kernel events are not
   proof that a backward pass committed; only a successful backward receipt is.
@@ -179,6 +180,7 @@ print(loss.item(), logits.grad().tolist())
 
 `python examples/autograd_classification.py` trains a `2 -> 12 -> 3` GELU
 classifier for 300 steps on 72 synthetic points and checks 36 disjoint points.
+The fixture asserts a minimum distance between training and validation points.
 This is a working-pipeline fixture, not evidence of real-world generalization or
 of a Z-space advantage over ordinary fine-tuning.
 WASM exposes `rowLogSoftmax()` and

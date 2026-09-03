@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 Ryo SpiralArchitect
 
-use super::Loss;
+use super::{emit_loss_backend_meta_with_backend, Loss};
+use crate::execution::TensorUtilRoute;
 use crate::{PureResult, Tensor};
 use st_tensor::{class_indices_from_tensor, CrossEntropyConfig, TensorError, TensorUtilBackend};
 
@@ -23,34 +24,77 @@ impl CrossEntropyWithLogits {
         self.config
     }
 
-    fn validate_execution(&self, prediction: &Tensor) -> PureResult<()> {
+    fn validate_execution(&self, prediction: &Tensor) -> PureResult<TensorUtilRoute> {
+        let route = crate::execution::current_tensor_util_route(prediction.len());
         if crate::execution::current_accelerator_fallback().is_strict()
-            && matches!(
-                crate::execution::current_tensor_util_backend_for_values(prediction.len()),
-                TensorUtilBackend::GpuWgpu
-            )
+            && matches!(route.selected_backend, TensorUtilBackend::GpuWgpu)
         {
             return Err(TensorError::BackendFailure {
                 backend: "wgpu",
                 message: "CrossEntropyWithLogits has a CPU kernel only; fallback disabled".into(),
             });
         }
-        Ok(())
+        Ok(route)
+    }
+
+    fn emit_route(
+        &self,
+        name: &'static str,
+        prediction: &Tensor,
+        output: &Tensor,
+        route: TensorUtilRoute,
+    ) {
+        let fallback = if matches!(route.requested_backend, TensorUtilBackend::GpuWgpu) {
+            Some(
+                if matches!(route.selected_backend, TensorUtilBackend::Cpu) {
+                    "tensor utility size threshold selected CPU"
+                } else {
+                    "CrossEntropyWithLogits has a CPU kernel only"
+                },
+            )
+        } else {
+            None
+        };
+        emit_loss_backend_meta_with_backend(
+            name,
+            prediction,
+            output.shape(),
+            self.config.reduction.as_str(),
+            "cpu",
+            route.requested_backend_label(),
+            "classification.st_tensor_cpu",
+            fallback,
+        );
     }
 }
 
 impl Loss for CrossEntropyWithLogits {
     fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
-        self.validate_execution(prediction)?;
-        prediction.cross_entropy_with_logits(&class_indices_from_tensor(target)?, self.config)
+        let route = self.validate_execution(prediction)?;
+        let output = prediction
+            .cross_entropy_with_logits(&class_indices_from_tensor(target)?, self.config)?;
+        self.emit_route(
+            "cross_entropy_logits_loss_forward",
+            prediction,
+            &output,
+            route,
+        );
+        Ok(output)
     }
 
     fn backward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
-        self.validate_execution(prediction)?;
+        let route = self.validate_execution(prediction)?;
         let labels = class_indices_from_tensor(target)?;
         let shape = self.config.output_shape(prediction.shape().0);
         let seed = Tensor::from_vec(shape.0, shape.1, vec![1.0; shape.0])?;
-        prediction.cross_entropy_with_logits_backward(&labels, self.config, &seed)
+        let output = prediction.cross_entropy_with_logits_backward(&labels, self.config, &seed)?;
+        self.emit_route(
+            "cross_entropy_logits_loss_backward",
+            prediction,
+            &output,
+            route,
+        );
+        Ok(output)
     }
 }
 
@@ -100,6 +144,42 @@ mod tests {
         ] {
             assert!(loss.forward(&logits, &target).is_err());
             assert!(loss.backward(&logits, &target).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn allowed_cpu_fallback_retains_the_requested_wgpu_route() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+        use std::sync::{Arc, Mutex};
+        for threshold in [0, 1024] {
+            let _guard = push_backend_policy(BackendPolicy::from_device_caps_with_config(
+                DeviceCaps::wgpu(32, true, 256),
+                ExecutionConfig::new(AcceleratorFallback::Allow, threshold),
+            ));
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let captured = events.clone();
+            let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+                if event.op_name.starts_with("cross_entropy_logits_loss_") {
+                    captured.lock().unwrap().push(event.data.clone());
+                }
+            })));
+            let logits = Tensor::zeros(2, 3).unwrap();
+            let target = Tensor::from_vec(2, 1, vec![0.0, 1.0]).unwrap();
+            let mut loss = CrossEntropyWithLogits::default();
+            loss.forward(&logits, &target).unwrap();
+            loss.backward(&logits, &target).unwrap();
+            st_tensor::set_thread_meta_observer(previous);
+            let events = events.lock().unwrap();
+            assert_eq!(events.len(), 2);
+            for event in events.iter() {
+                assert_eq!(event["backend"], "cpu");
+                assert_eq!(event["requested_backend"], "wgpu");
+                assert_eq!(event["fallback"]["from"], "wgpu");
+            }
         }
     }
 

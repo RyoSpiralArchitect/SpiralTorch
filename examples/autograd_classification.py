@@ -23,7 +23,12 @@ def run(steps=300):
     variable = st.AutogradTensor.variable
     constant = st.AutogradTensor.constant
     train, labels = samples(24, 0.0)
-    validation, validation_labels = samples(12, 0.5)
+    validation, validation_labels = samples(12, 0.25)
+    minimum_split_distance = min(
+        math.hypot(a[0] - b[0], a[1] - b[1])
+        for a in train.tolist() for b in validation.tolist()
+    )
+    assert minimum_split_distance > 0.01, "training and validation points overlap"
     inputs = constant(train)
     held_out = constant(validation)
     parameters = [
@@ -57,6 +62,7 @@ def run(steps=300):
         "train_samples": len(labels), "validation_samples": len(validation_labels),
         "initial_smoothed_ce": initial, "final_smoothed_ce": final,
         "validation_nll": validation_nll, "validation_accuracy": accuracy,
+        "minimum_split_distance": minimum_split_distance,
         "semantic_owner": st.AUTOGRAD_SEMANTIC_OWNER,
         "evidence_scope": "synthetic pipeline fixture, not an HF/FT quality benchmark",
     }
