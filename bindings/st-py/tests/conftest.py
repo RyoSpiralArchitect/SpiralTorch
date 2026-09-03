@@ -11,28 +11,7 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
-@contextlib.contextmanager
-def _stub_spiraltorch_context(*, allow_numpy: bool):
-    def tracked_module(name: str) -> bool:
-        return (
-            name == "spiraltorch"
-            or name.startswith("spiraltorch.")
-            or name == "spiraltorch_native"
-            or name == "spiral_rl"
-            or name.startswith("spiral_rl.")
-            or name == "rl"
-        )
-
-    saved_module_graph = {
-        name: module
-        for name, module in sys.modules.items()
-        if tracked_module(name)
-    }
-    torch_saved = sys.modules.get("torch")
-    for name in tuple(sys.modules):
-        if tracked_module(name):
-            sys.modules.pop(name, None)
-
+def _create_stub_module(*, allow_numpy: bool):
     if "torch" not in sys.modules:
         torch_stub = types.ModuleType("torch")
         torch_stub.autograd = types.SimpleNamespace(Function=object)
@@ -49,7 +28,7 @@ def _stub_spiraltorch_context(*, allow_numpy: bool):
         str(stub_path.parent),
         str(REPO_ROOT / "bindings" / "st-py" / "spiraltorch"),
     ]
-    module.__spec__ = importlib.util.spec_from_loader("spiraltorch", loader=None)
+    module.__spec__ = importlib.util.spec_from_loader("spiraltorch", loader=None, is_package=True)
     sys.modules["spiraltorch"] = module
     exec(compile(prefix, str(stub_path), "exec"), module.__dict__)
     if hasattr(module, "_install_stub_bindings"):
@@ -103,17 +82,49 @@ def _stub_spiraltorch_context(*, allow_numpy: bool):
         module.plan_topk = plan_topk
         module.planner = planner
         sys.modules["spiraltorch.planner"] = planner
+    return module
+
+
+@contextlib.contextmanager
+def _stub_spiraltorch_context(*, allow_numpy: bool):
+    def tracked_module(name: str) -> bool:
+        return (
+            name == "spiraltorch"
+            or name.startswith("spiraltorch.")
+            or name == "spiraltorch_native"
+            or name == "spiral_rl"
+            or name.startswith("spiral_rl.")
+            or name == "rl"
+            or name == "_spiraltorch_stub_py_bridge"
+            or name.startswith("_spiraltorch_stub_py_bridge.")
+        )
+
+    saved_module_graph = {
+        name: module
+        for name, module in sys.modules.items()
+        if tracked_module(name)
+    }
+    missing = object()
+    torch_saved = sys.modules.get("torch", missing)
     try:
-        yield module
+        for name in tuple(sys.modules):
+            if tracked_module(name):
+                sys.modules.pop(name, None)
+        yield _create_stub_module(allow_numpy=allow_numpy)
     finally:
         for name in tuple(sys.modules):
             if tracked_module(name):
                 sys.modules.pop(name, None)
         sys.modules.update(saved_module_graph)
-        if torch_saved is None:
+        if torch_saved is missing:
             sys.modules.pop("torch", None)
         else:
             sys.modules["torch"] = torch_saved
+
+
+@pytest.fixture
+def stub_spiraltorch_context():
+    return _stub_spiraltorch_context
 
 
 @pytest.fixture

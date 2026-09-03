@@ -16,18 +16,22 @@ import sys
 import types
 from typing import Any, NoReturn
 
-from .export import DeploymentTarget, ExportConfig, ExportPipeline, load_benchmark_report
-
-__all__: list[str] = [
+_EXPORT_HELPERS = (
     "DeploymentTarget",
     "ExportConfig",
     "ExportPipeline",
     "load_benchmark_report",
-    "cli",
-]
+)
+
+__all__: list[str] = [*_EXPORT_HELPERS, "cli"]
 
 
 def __getattr__(name: str) -> Any:  # pragma: no cover - exercised indirectly via imports
+    if name in _EXPORT_HELPERS:
+        module = importlib.import_module(f"{__name__}.export")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name == "cli":
         module = importlib.import_module(f"{__name__}.cli")
         globals()["cli"] = module

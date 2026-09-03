@@ -1,5 +1,19 @@
 # SpiralTorch (Python) changelog
 
+## Unreleased
+
+- Use the shipped Python helper implementation for the source-checkout fallback
+  bridge and load native export helpers only on demand. Keep helper submodules
+  from replacing the hypergrad factory.
+- Keep source-only ecosystem inspection helpers importable without a native
+  build; require the native Tensor only when conversion is requested, and keep
+  both cross-entropy import aliases available without simulating the Rust loss.
+  Defer native model imports in fine-tuning examples until execution, so help
+  and checkpoint-shape inspection remain usable before building the extension.
+- Repair NumPy-backed DLPack capsule imports and restore module/import state
+  even when test setup fails. Run the previously separated NumPy tensor suites
+  and import-boundary regressions in CI.
+
 ## 0.4.19
 
 - Upgrade the native binding and embedded-Python benchmarks from PyO3 0.24.2

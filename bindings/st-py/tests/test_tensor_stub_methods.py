@@ -118,7 +118,7 @@ def test_tensor_subclass_preserves_type(stub_spiraltorch) -> None:
 
 @pytest.mark.parametrize("backend", ["python", "numpy"])
 def test_row_softmax_stub_backends(stub_spiraltorch, backend: str) -> None:
-    if backend == "numpy" and not getattr(stub_spiraltorch, "NUMPY_AVAILABLE", False):
+    if backend == "numpy" and "numpy" not in stub_spiraltorch.available_stub_backends():
         pytest.skip("NumPy backend not available in stub")
 
     Tensor = stub_spiraltorch.Tensor
@@ -151,7 +151,7 @@ def test_labeled_tensor_row_softmax_preserves_axes(stub_spiraltorch) -> None:
 
 @pytest.mark.parametrize("backend", ["python", "numpy"])
 def test_scaled_dot_attention_stub_matches_manual(stub_spiraltorch, backend: str) -> None:
-    if backend == "numpy" and not getattr(stub_spiraltorch, "NUMPY_AVAILABLE", False):
+    if backend == "numpy" and "numpy" not in stub_spiraltorch.available_stub_backends():
         pytest.skip("NumPy backend not available in stub")
 
     Tensor = stub_spiraltorch.Tensor
@@ -203,7 +203,7 @@ def test_scaled_dot_attention_stub_matches_manual(stub_spiraltorch, backend: str
 
 @pytest.mark.parametrize("backend", ["python", "numpy"])
 def test_tensor_add_sub_scale_backends(stub_spiraltorch, backend: str) -> None:
-    if backend == "numpy" and not getattr(stub_spiraltorch, "NUMPY_AVAILABLE", False):
+    if backend == "numpy" and "numpy" not in stub_spiraltorch.available_stub_backends():
         pytest.skip("NumPy backend not available in stub")
 
     Tensor = stub_spiraltorch.Tensor
@@ -237,7 +237,7 @@ def test_tensor_add_sub_scale_backends(stub_spiraltorch, backend: str) -> None:
 
 @pytest.mark.parametrize("backend", ["python", "numpy"])
 def test_tensor_inplace_ops_backends(stub_spiraltorch, backend: str) -> None:
-    if backend == "numpy" and not getattr(stub_spiraltorch, "NUMPY_AVAILABLE", False):
+    if backend == "numpy" and "numpy" not in stub_spiraltorch.available_stub_backends():
         pytest.skip("NumPy backend not available in stub")
 
     Tensor = stub_spiraltorch.Tensor
@@ -261,7 +261,7 @@ def test_tensor_inplace_ops_backends(stub_spiraltorch, backend: str) -> None:
 
 @pytest.mark.parametrize("backend", ["python", "numpy"])
 def test_tensor_squared_norm_and_hyperbolic(stub_spiraltorch, backend: str) -> None:
-    if backend == "numpy" and not getattr(stub_spiraltorch, "NUMPY_AVAILABLE", False):
+    if backend == "numpy" and "numpy" not in stub_spiraltorch.available_stub_backends():
         pytest.skip("NumPy backend not available in stub")
 
     Tensor = stub_spiraltorch.Tensor

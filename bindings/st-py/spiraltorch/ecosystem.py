@@ -8,7 +8,7 @@ import numbers
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable
 
-from . import Tensor
+import spiraltorch as _spiraltorch
 
 __all__ = [
     "bound_external_state_tensors",
@@ -33,6 +33,13 @@ _NATIVE_EXTENSION_HINT = (
     "Build the SpiralTorch native extension (e.g. `maturin develop -m "
     "bindings/st-py/Cargo.toml`) to enable spiraltorch.compat helpers."
 )
+
+
+def _require_tensor_type() -> type:
+    tensor_type = getattr(_spiraltorch, "Tensor", None)
+    if not isinstance(tensor_type, type):
+        raise RuntimeError("SpiralTorch Tensor conversion requires the native extension.")
+    return tensor_type
 
 
 def _compat_namespace(name: str) -> Any:
@@ -60,7 +67,7 @@ def _compat_call(namespace: str, attr: str, *args: Any, **kwargs: Any) -> Any:
 
 
 def tensor_to_torch(
-    tensor: Tensor,
+    tensor: _spiraltorch.Tensor,
     *,
     dtype: Any | None = None,
     device: Any | None = None,
@@ -90,7 +97,7 @@ def torch_to_tensor(
     ensure_cpu: bool | None = None,
     copy: bool | None = None,
     require_contiguous: bool | None = None,
-) -> Tensor:
+) -> _spiraltorch.Tensor:
     """Convert a ``torch.Tensor`` into a SpiralTorch tensor."""
 
     return _compat_call(
@@ -105,25 +112,25 @@ def torch_to_tensor(
     )
 
 
-def tensor_to_jax(tensor: Tensor) -> Any:
+def tensor_to_jax(tensor: _spiraltorch.Tensor) -> Any:
     """Share a :class:`~spiraltorch.Tensor` with JAX."""
 
     return _compat_call("jax", "to_jax", tensor)
 
 
-def jax_to_tensor(array: Any) -> Tensor:
+def jax_to_tensor(array: Any) -> _spiraltorch.Tensor:
     """Convert a ``jax.Array`` (or compatible object) into a SpiralTorch tensor."""
 
     return _compat_call("jax", "from_jax", array)
 
 
-def tensor_to_tensorflow(tensor: Tensor) -> Any:
+def tensor_to_tensorflow(tensor: _spiraltorch.Tensor) -> Any:
     """Share a :class:`~spiraltorch.Tensor` with TensorFlow."""
 
     return _compat_call("tensorflow", "to_tensorflow", tensor)
 
 
-def tensorflow_to_tensor(value: Any) -> Tensor:
+def tensorflow_to_tensor(value: Any) -> _spiraltorch.Tensor:
     """Convert a ``tf.Tensor`` (or compatible object) into a SpiralTorch tensor."""
 
     return _compat_call("tensorflow", "from_tensorflow", value)
@@ -338,10 +345,11 @@ def _slice_spiraltorch_tensor(
     shape: tuple[int, ...],
     rows: int,
     cols: int,
-) -> Tensor:
+) -> _spiraltorch.Tensor:
+    tensor_type = _require_tensor_type()
     if len(shape) == 1:
         limit = min(shape[0], cols)
-        return Tensor(1, limit, _spiraltorch_tensor_data(value)[:limit])
+        return tensor_type(1, limit, _spiraltorch_tensor_data(value)[:limit])
     row_limit = min(shape[0], rows)
     col_limit = min(shape[1], cols)
     data = []
@@ -349,7 +357,7 @@ def _slice_spiraltorch_tensor(
     for row in range(row_limit):
         offset = row * value.cols
         data.extend(source[offset : offset + col_limit])
-    return Tensor(row_limit, col_limit, data)
+    return tensor_type(row_limit, col_limit, data)
 
 
 def slice_external_tensor(
@@ -464,7 +472,7 @@ def external_tensor_last_token(value: Any, *, name: str = "tensor") -> Any:
     return materialized
 
 
-def tensor_from_external(value: Any, *, name: str = "tensor") -> Tensor:
+def tensor_from_external(value: Any, *, name: str = "tensor") -> _spiraltorch.Tensor:
     """Convert a torch/numpy/list-like 1D or 2D tensor into ``Tensor``.
 
     2D arrays become ``(rows, cols)`` tensors. 1D arrays are imported as a
@@ -474,6 +482,7 @@ def tensor_from_external(value: Any, *, name: str = "tensor") -> Tensor:
 
     if _looks_like_spiraltorch_tensor(value):
         return value
+    tensor_type = _require_tensor_type()
     materialized = _materialize_external_tensor(value)
     shape = _external_shape_from_materialized(materialized, name)
     if len(shape) == 1:
@@ -491,7 +500,7 @@ def tensor_from_external(value: Any, *, name: str = "tensor") -> Tensor:
     expected = rows * cols
     if len(data) != expected:
         raise ValueError(f"{name} shape={shape} expects {expected} values, got {len(data)}")
-    return Tensor(rows, cols, data)
+    return tensor_type(rows, cols, data)
 
 
 def checkpoint_from_external_state(
@@ -499,7 +508,7 @@ def checkpoint_from_external_state(
     *,
     include: Iterable[str] | None = None,
     tensor_bounds: Mapping[str, tuple[int, int]] | None = None,
-) -> dict[str, Tensor]:
+) -> dict[str, _spiraltorch.Tensor]:
     """Convert selected external checkpoint values into SpiralTorch tensors."""
 
     include_names = None if include is None else set(include)
@@ -641,7 +650,7 @@ def _dlpack_from_array(array: Any, *, stream: Any | None, cupy_module: Any | Non
     raise TypeError("Object does not expose a DLPack-compatible exporter")
 
 
-def tensor_to_cupy(tensor: Tensor, *, stream: Any | None = None) -> Any:
+def tensor_to_cupy(tensor: _spiraltorch.Tensor, *, stream: Any | None = None) -> Any:
     """Share a :class:`~spiraltorch.Tensor` with CuPy via DLPack."""
 
     cupy = _require_module("cupy")
@@ -653,10 +662,11 @@ def tensor_to_cupy(tensor: Tensor, *, stream: Any | None = None) -> Any:
     return _call_with_optional_stream(exporter, (capsule,), stream=stream)
 
 
-def cupy_to_tensor(array: Any, *, stream: Any | None = None) -> Tensor:
+def cupy_to_tensor(array: Any, *, stream: Any | None = None) -> _spiraltorch.Tensor:
     """Convert a ``cupy.ndarray`` (or compatible object) into a SpiralTorch tensor."""
 
+    tensor_type = _require_tensor_type()
     cupy = _require_module("cupy")
     stream = _resolve_cupy_stream(stream, cupy=cupy)
     capsule = _dlpack_from_array(array, stream=stream, cupy_module=cupy)
-    return Tensor.from_dlpack(capsule)
+    return tensor_type.from_dlpack(capsule)

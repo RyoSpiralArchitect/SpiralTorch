@@ -1,7 +1,7 @@
 import argparse
 
 import spiraltorch as st
-from spiraltorch.nn import Linear, SoftmaxCrossEntropy, sparse_classification_delta
+from spiraltorch.nn import SoftmaxCrossEntropy, sparse_classification_delta
 
 
 VOCAB = st.dataset.BYTE_LM_VOCAB
@@ -49,6 +49,8 @@ def print_delta(label, delta):
 
 def main():
     parse_args()
+    from spiraltorch.nn import Linear
+
     source_docs = [
         "spiraltorch learns from source bytes",
         "byte windows keep tokenizerless FT honest",

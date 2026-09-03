@@ -5,10 +5,7 @@ from types import SimpleNamespace
 
 import spiraltorch as st
 from spiraltorch.nn import (
-    Linear,
     LoraLinear,
-    Relu,
-    Sequential,
     SoftmaxCrossEntropy,
     sparse_classification_delta,
 )
@@ -1420,6 +1417,8 @@ def scale_state_dict(model, factor):
 
 
 def build_dense_mlp():
+    from spiraltorch.nn import Linear, Relu, Sequential
+
     model = Sequential(
         [
             Linear(VOCAB, HIDDEN, name="embed"),
@@ -1497,6 +1496,8 @@ def build_lora_mlp(
     label_prefix,
     emit_preflight=True,
 ):
+    from spiraltorch.nn import Linear, Relu, Sequential
+
     embed = Linear(VOCAB, HIDDEN, name="embed")
     embed_report, embed_load = preflight_and_load(
         f"{label_prefix}_embed",

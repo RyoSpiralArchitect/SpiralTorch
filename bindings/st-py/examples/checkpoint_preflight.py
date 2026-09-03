@@ -17,7 +17,7 @@ from spiraltorch.hf_peft import (
     load_hf_causal_lm_artifact,
     summarize_hf_causal_lm_artifact,
 )
-from spiraltorch.nn import Linear, LoraLinear, ZSpaceProjector
+from spiraltorch.nn import LoraLinear, ZSpaceProjector
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
     runtime_import_names_from_args,
@@ -1142,6 +1142,8 @@ def apply_checkpoint_source_gain(checkpoint, rules, args):
 
 
 def external_state():
+    from spiraltorch.nn import Linear
+
     embed = Linear(VOCAB, HIDDEN, name="embed")
     head = Linear(HIDDEN, TARGET_CLASSES, name="head")
     embed_state = dict(embed.state_dict())
@@ -1767,6 +1769,8 @@ def hf_style_external_state():
 
 
 def hf_style_external_state_rows():
+    from spiraltorch.nn import Linear
+
     embed = Linear(VOCAB, HIDDEN, name="embed")
     head = Linear(HIDDEN, TARGET_CLASSES, name="head")
     embed_state = dict(embed.state_dict())
@@ -1785,6 +1789,8 @@ def hf_no_bias_external_state():
 
 
 def hf_preset_external_state(preset, *, synthesize_bias):
+    from spiraltorch.nn import Linear
+
     embed = Linear(VOCAB, HIDDEN, name="embed")
     head = Linear(HIDDEN, TARGET_CLASSES, name="head")
     state = {}
@@ -2367,6 +2373,8 @@ def main():
         check_transformers_runtime_import_gate(row, args)
         check_transformers_audit_gate(row, args)
         return
+
+    from spiraltorch.nn import Linear
 
     checkpoint, rules, source_label, loaded_files, inferred_shapes = (
         resolved_checkpoint_source(args)
