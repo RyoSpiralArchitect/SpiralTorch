@@ -33,6 +33,7 @@ mod zspace_coherence;
 mod zspace_fusion;
 mod zspace_optimizer;
 mod zspace_posterior;
+mod zspace_schrodinger_complex;
 mod zspace_stochastic_schrodinger;
 
 #[cfg(target_arch = "wasm32")]
@@ -91,4 +92,5 @@ pub use zspace_coherence::*;
 pub use zspace_fusion::*;
 pub use zspace_optimizer::*;
 pub use zspace_posterior::*;
+pub use zspace_schrodinger_complex::*;
 pub use zspace_stochastic_schrodinger::*;

@@ -103,10 +103,10 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert_eq!(actual["semantic_backend"], "rust");
-        assert_eq!(actual["protocol_count"], 5);
+        assert_eq!(actual["protocol_count"], 6);
         assert_eq!(
             actual["protocol_order_rule"],
-            "generation_evidence,periodicity,stochastic_schrodinger,repetition_unlikelihood,semantic_review"
+            "generation_evidence,periodicity,stochastic_schrodinger,stochastic_schrodinger_complex,repetition_unlikelihood,semantic_review"
         );
         for protocol in actual["protocols"].as_array().expect("protocol array") {
             let clients = protocol["clients"].as_array().expect("client array");

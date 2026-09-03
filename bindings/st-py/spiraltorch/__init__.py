@@ -714,6 +714,8 @@ from .zspace_dynamics import (
     validate_zspace_stochastic_schrodinger_vjp,
     zspace_stochastic_schrodinger_forward,
     zspace_stochastic_schrodinger_vjp,
+    zspace_stochastic_schrodinger_complex_step,
+    validate_zspace_stochastic_schrodinger_complex,
 )
 from .semantic_review import (
     ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS,
@@ -8715,6 +8717,8 @@ _EXTRAS.extend(
         "validate_zspace_stochastic_schrodinger_vjp",
         "zspace_stochastic_schrodinger_forward",
         "zspace_stochastic_schrodinger_vjp",
+        "zspace_stochastic_schrodinger_complex_step",
+        "validate_zspace_stochastic_schrodinger_complex",
         "ZSPACE_SEMANTIC_REVIEW_CANDIDATE_LABELS",
         "ZSPACE_SEMANTIC_REVIEW_DRAFT_CONTRACT_VERSION",
         "ZSPACE_SEMANTIC_REVIEW_DRAFT_KIND",

@@ -34,6 +34,7 @@ def test_runtime_protocol_catalog_is_rust_owned_and_replayable() -> None:
         "generation_evidence",
         "periodicity",
         "stochastic_schrodinger",
+        "stochastic_schrodinger_complex",
         "repetition_unlikelihood",
         "semantic_review",
     ]

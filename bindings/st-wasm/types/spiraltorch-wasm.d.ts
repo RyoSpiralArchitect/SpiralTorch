@@ -278,6 +278,52 @@ declare module "spiraltorch-wasm" {
         receiptJson: string,
     ): string;
 
+    /** Both quadratures are mandatory; omit cotangent for forward-only evolution. */
+    export type ZSpaceSchrodingerComplexRequest = {
+        forward_request: ZSpaceStochasticSchrodingerForwardRequest;
+        input_imaginary: number[];
+        cotangent?: { real: number[]; imaginary: number[] } | null;
+    };
+
+    export type ZSpaceSchrodingerComplexReceipt = {
+        contract_version: "spiraltorch.zspace_stochastic_schrodinger_complex_step.v1";
+        kind: "spiraltorch.zspace_stochastic_schrodinger_complex_step";
+        semantic_owner: "st-core::dynamics::stochastic_schrodinger";
+        semantic_backend: "rust";
+        protocol_owner: "st-core::runtime::zspace_stochastic_schrodinger";
+        evaluation_id: string;
+        id_rule: string;
+        status: "ready";
+        request: {
+            forward_request: ZSpaceStochasticSchrodingerCanonicalForwardRequest;
+            input_imaginary: number[];
+            cotangent: { real: number[]; imaginary: number[] } | null;
+        };
+        step: {
+            contract_version: "spiraltorch.stochastic_complex_schrodinger.v1";
+            arithmetic: "libm_0.2.16_f32_phase_f64_complex";
+            output_real: number[];
+            output_imaginary: number[];
+            phase: number[];
+            initial_norm_squared: number;
+            final_norm_squared: number;
+            expected_norm_ratio: number;
+            max_row_norm_error: number;
+        };
+        gradient: {
+            grad_input_real: number[];
+            grad_input_imaginary: number[];
+            grad_potential: number[];
+        } | null;
+        gradient_semantics: string;
+        efficacy_claim_ready: false;
+        evidence_boundary: string;
+    };
+
+    /** Rust-owned complex evolution and optional real Euclidean VJP. */
+    export function zspaceStochasticSchrodingerComplexStepJson(requestJson: string): string;
+    export function validateZspaceStochasticSchrodingerComplexJson(receiptJson: string): string;
+
     /** One content type owned by a Rust runtime protocol. */
     export type ZSpaceRuntimeProtocolArtifact = {
         name: string;
@@ -319,6 +365,7 @@ declare module "spiraltorch-wasm" {
             | "generation_evidence"
             | "periodicity"
             | "stochastic_schrodinger"
+            | "stochastic_schrodinger_complex"
             | "repetition_unlikelihood"
             | "semantic_review";
         semantic_owner: string;
@@ -330,7 +377,7 @@ declare module "spiraltorch-wasm" {
 
     /** Content-addressed cross-client surface generated and validated by `st-core`. */
     export type ZSpaceRuntimeProtocolCatalog = {
-        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v3";
+        contract_version: "spiraltorch.zspace_runtime_protocol_catalog.v4";
         kind: "spiraltorch.zspace_runtime_protocol_catalog";
         semantic_owner: "st-core::runtime::zspace_runtime_protocol_catalog";
         semantic_backend: "rust";
@@ -339,7 +386,7 @@ declare module "spiraltorch-wasm" {
         catalog_id_rule: string;
         status: "ready";
         protocol_count: number;
-        protocol_order_rule: "generation_evidence,periodicity,stochastic_schrodinger,repetition_unlikelihood,semantic_review";
+        protocol_order_rule: "generation_evidence,periodicity,stochastic_schrodinger,stochastic_schrodinger_complex,repetition_unlikelihood,semantic_review";
         client_order_rule: "rust,python,wasm";
         legacy_replay_policy: string;
         protocols: ZSpaceRuntimeProtocolDescriptor[];

@@ -3,10 +3,15 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
 use st_core::runtime::zspace_stochastic_schrodinger::{
-    run_zspace_stochastic_schrodinger_forward, run_zspace_stochastic_schrodinger_vjp,
+    run_zspace_stochastic_schrodinger_complex_step, run_zspace_stochastic_schrodinger_forward,
+    run_zspace_stochastic_schrodinger_vjp, validate_zspace_stochastic_schrodinger_complex_value,
     validate_zspace_stochastic_schrodinger_forward_value,
-    validate_zspace_stochastic_schrodinger_vjp_value, ZSpaceStochasticSchrodingerForwardRequest,
-    ZSpaceStochasticSchrodingerVjpRequest, ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY,
+    validate_zspace_stochastic_schrodinger_vjp_value, ZSpaceSchrodingerComplexRequest,
+    ZSpaceStochasticSchrodingerForwardRequest, ZSpaceStochasticSchrodingerVjpRequest,
+    ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION, ZSPACE_SCHRODINGER_COMPLEX_EVIDENCE_BOUNDARY,
+    ZSPACE_SCHRODINGER_COMPLEX_GRADIENT_SEMANTICS, ZSPACE_SCHRODINGER_COMPLEX_KIND,
+    ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES, ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
+    ZSPACE_STOCHASTIC_SCHRODINGER_EVIDENCE_BOUNDARY,
     ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION,
     ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND, ZSPACE_STOCHASTIC_SCHRODINGER_ID_RULE,
     ZSPACE_STOCHASTIC_SCHRODINGER_MAX_FEATURES, ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
@@ -23,10 +28,24 @@ fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
 }
 
 fn mapping_value(value: &Bound<'_, PyAny>, label: &str) -> PyResult<serde_json::Value> {
-    let value = crate::json::py_to_json_bounded(
+    mapping_value_with_limits(
         value,
+        label,
         ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_BYTES,
         ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_NODES,
+    )
+}
+
+fn mapping_value_with_limits(
+    value: &Bound<'_, PyAny>,
+    label: &str,
+    bytes: u64,
+    nodes: u64,
+) -> PyResult<serde_json::Value> {
+    let value = crate::json::py_to_json_bounded(
+        value,
+        bytes,
+        nodes,
         ZSPACE_STOCHASTIC_SCHRODINGER_MAX_INGRESS_DEPTH as usize,
         label,
     )?;
@@ -125,8 +144,68 @@ fn _zspace_stochastic_schrodinger_vjp_validate(
     )
 }
 
+#[pyfunction]
+fn _zspace_stochastic_schrodinger_complex_step(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let value = mapping_value_with_limits(
+        request,
+        "complex Schrodinger request",
+        ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES,
+        ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
+    )?;
+    let request: ZSpaceSchrodingerComplexRequest =
+        serde_json::from_value(value).map_err(|e| json_error("complex Schrodinger request", e))?;
+    let receipt = py
+        .allow_threads(|| run_zspace_stochastic_schrodinger_complex_step(request))
+        .map_err(|e| json_error("complex Schrodinger step", e))?;
+    response_to_py(py, &receipt, "complex Schrodinger encoding")
+}
+
+#[pyfunction]
+fn _zspace_stochastic_schrodinger_complex_validate(
+    py: Python<'_>,
+    receipt: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let value = mapping_value_with_limits(
+        receipt,
+        "complex Schrodinger receipt",
+        ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_BYTES,
+        ZSPACE_SCHRODINGER_COMPLEX_MAX_INGRESS_NODES,
+    )?;
+    let receipt = py
+        .allow_threads(|| validate_zspace_stochastic_schrodinger_complex_value(value))
+        .map_err(|e| json_error("complex Schrodinger replay", e))?;
+    response_to_py(py, &receipt, "complex Schrodinger encoding")
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    parent.add_function(wrap_pyfunction!(
+        _zspace_stochastic_schrodinger_complex_step,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        _zspace_stochastic_schrodinger_complex_validate,
+        parent
+    )?)?;
     for (name, value) in [
+        (
+            "ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION",
+            ZSPACE_SCHRODINGER_COMPLEX_CONTRACT_VERSION,
+        ),
+        (
+            "ZSPACE_SCHRODINGER_COMPLEX_KIND",
+            ZSPACE_SCHRODINGER_COMPLEX_KIND,
+        ),
+        (
+            "ZSPACE_SCHRODINGER_COMPLEX_GRADIENT_SEMANTICS",
+            ZSPACE_SCHRODINGER_COMPLEX_GRADIENT_SEMANTICS,
+        ),
+        (
+            "ZSPACE_SCHRODINGER_COMPLEX_EVIDENCE_BOUNDARY",
+            ZSPACE_SCHRODINGER_COMPLEX_EVIDENCE_BOUNDARY,
+        ),
         (
             "ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION",
             ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION,

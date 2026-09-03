@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.4.17"
+version = "0.4.18"
 dependencies = [
  "julia-ffi-poc",
  "nalgebra 0.32.6",
@@ -3375,6 +3375,7 @@ dependencies = [
  "dirs 5.0.1",
  "getrandom 0.2.17",
  "julia-ffi-poc",
+ "libm",
  "naga",
  "nalgebra 0.32.6",
  "ndarray",

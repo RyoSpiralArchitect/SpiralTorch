@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod complex;
+pub use complex::*;
+
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_stochastic_schrodinger_forward.v1";
 pub const ZSPACE_STOCHASTIC_SCHRODINGER_FORWARD_KIND: &str =
