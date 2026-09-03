@@ -312,8 +312,9 @@ mod tests {
             ),
         );
         let mut layer = Gelu::new();
-        let input = Tensor::from_vec(1, 1, vec![f32::MAX]).unwrap();
-        let grad_out = Tensor::from_vec(1, 1, vec![1.0]).unwrap();
+        // The derivative exceeds one here, so the finite seed truly overflows.
+        let input = Tensor::from_vec(1, 1, vec![1.0]).unwrap();
+        let grad_out = Tensor::from_vec(1, 1, vec![f32::MAX]).unwrap();
 
         let err = layer.backward(&input, &grad_out).unwrap_err();
 
@@ -324,6 +325,22 @@ mod tests {
                 value,
             } if !value.is_finite()
         ));
+    }
+
+    #[test]
+    fn gelu_backward_preserves_finite_saturated_backend_output() {
+        let _policy_guard = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(
+                st_core::backend::device_caps::DeviceCaps::cpu(),
+            ),
+        );
+        let mut layer = Gelu::new();
+        let input = Tensor::from_vec(1, 4, vec![-f32::MAX, -10.0, 10.0, f32::MAX]).unwrap();
+        let grad_out = Tensor::from_vec(1, 4, vec![f32::MAX, 2.0, -3.0, f32::MAX]).unwrap();
+
+        let grad_in = layer.backward(&input, &grad_out).unwrap();
+
+        assert_eq!(grad_in.data(), &[0.0, 0.0, -3.0, f32::MAX]);
     }
 
     #[test]
