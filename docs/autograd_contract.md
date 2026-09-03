@@ -76,7 +76,7 @@ concurrent writes to foreign memory while snapshot capture is reading it.
 
 | Operation | Forward and VJP contract |
 |---|---|
-| `add_row(bias)` | Bias has shape `(1, cols)`; its gradient sums over rows without implicit averaging. |
+| `add_row(bias)` | Bias has shape `(1, cols)`; its gradient sums over rows without implicit averaging. The CPU reduction accumulates in f64, then validates the final f32 result. |
 | `relu()` | Derivative is zero for nonpositive inputs, including exactly zero. |
 | `gelu()` | Uses the existing tanh approximation, not erf GELU; saturated derivatives stay finite. |
 | `row_softmax()` | Uses the full coupled row VJP, not an elementwise approximation. A constant row cotangent gives zero. |
@@ -86,6 +86,8 @@ on CPU; matrix products, softmax forward, and GELU backward can use existing
 WGPU paths. This is not a claim that the whole graph stays GPU-resident. Empty
 tensors preserve their shapes, and empty GELU backward is an explicit no-op
 even with strict GPU fallback policy.
+The upper-layer GELU CPU fallback delegates to `st_tensor::gelu_derivative`,
+sharing the same saturation and finite-input rules instead of a second formula.
 
 GELU parity tests use PyTorch's [tanh approximation](https://docs.pytorch.org/docs/2.14/generated/torch.nn.GELU.html).
 The Rust VJP tests also use finite differences and cover shared branches,

@@ -6921,6 +6921,7 @@ impl Tensor {
     }
 
     /// Fallible sum over rows for each column with an explicit utility backend.
+    /// The CPU path accumulates in f64 before validating the final f32 result.
     pub fn try_sum_axis0_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Vec<f32>> {
         let rows = self.rows;
         let cols = self.cols;
@@ -6936,7 +6937,6 @@ impl Tensor {
             "sum_axis0",
             _backend.tensor_execution_backend(),
         )?;
-        let mut sums = vec![0.0; self.cols];
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
         if cols == 0 {
@@ -6948,7 +6948,7 @@ impl Tensor {
                 data.insert("axis".to_owned(), serde_json::json!(0));
                 data.insert("kernel".to_owned(), serde_json::json!("no_op"));
             });
-            return Ok(sums);
+            return Ok(Vec::new());
         }
         #[cfg(feature = "wgpu")]
         {
@@ -6984,13 +6984,15 @@ impl Tensor {
                 }
             }
         }
-        for row in input.chunks(self.cols) {
-            for (sum, value) in sums.iter_mut().zip(row.iter()) {
-                Self::validate_finite_tensor_util_value("sum_axis0_input", *value)?;
-                *sum += *value;
-                Self::validate_finite_tensor_util_value("sum_axis0_output", *sum)?;
+        // Finite terms may overflow f32 transiently before later rows cancel.
+        let mut wide_sums = vec![0.0f64; cols];
+        for row in input.chunks(cols) {
+            for (sum, &value) in wide_sums.iter_mut().zip(row) {
+                *sum += f64::from(value);
             }
         }
+        let sums: Vec<f32> = wide_sums.into_iter().map(|sum| sum as f32).collect();
+        Self::validate_finite_tensor_util_slice("sum_axis0_output", &sums)?;
         let runtime_fallback = matches!(_backend, TensorUtilBackend::GpuWgpu);
         let completion = completed_component_execution(execution, "cpu", runtime_fallback)?;
         crate::emit_tensor_op("sum_axis0", &[rows, cols], &[1, cols]);
@@ -6999,6 +7001,7 @@ impl Tensor {
             data.insert("kind".to_owned(), serde_json::json!("reduction"));
             data.insert("axis".to_owned(), serde_json::json!(0));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
+            data.insert("accumulator_dtype".to_owned(), serde_json::json!("f64"));
             if runtime_fallback {
                 #[cfg(feature = "wgpu")]
                 let message = wgpu_failure.as_deref();
@@ -11934,6 +11937,18 @@ fn gelu(x: f32) -> f32 {
     const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     let x_cubed = x * x * x;
     0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + COEFF * x_cubed)).tanh())
+}
+
+/// Returns the scalar derivative of the tanh-approximate GELU used by Tensor.
+///
+/// Saturated finite inputs return their limiting derivative without overflowing
+/// intermediate powers. Non-finite inputs are rejected. Upper-layer CPU fallback
+/// implementations can use this function without duplicating the derivative.
+pub fn gelu_derivative(value: f32) -> PureResult<f32> {
+    Tensor::validate_finite_tensor_util_value("gelu_backward_input", value)?;
+    let derivative = gelu_prime(value);
+    Tensor::validate_finite_tensor_util_value("gelu_derivative", derivative)?;
+    Ok(derivative)
 }
 
 fn gelu_prime(x: f32) -> f32 {

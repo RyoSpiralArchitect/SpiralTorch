@@ -15,6 +15,9 @@
 - Normalize graph leaves and VJP seeds to logical row-major order. Handle empty GELU
   backward tensors as explicit no-ops, reject non-finite seeds/results, and
   stabilize saturated GELU derivatives on both CPU and WGPU.
+- Accumulate CPU row reductions in f64 before final f32 validation so large
+  cancelling cotangents remain valid. Share the canonical tensor GELU derivative
+  with the upper-layer CPU fallback instead of maintaining a second formula.
 
 ## 0.4.20
 

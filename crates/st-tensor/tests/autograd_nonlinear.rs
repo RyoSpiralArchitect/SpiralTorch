@@ -260,3 +260,57 @@ fn column_major_seeds_have_the_same_logical_vjp_as_row_major() {
     output.backward_with_grad(&seed).unwrap();
     assert_eq!(x.grad().unwrap().data(), vjp.data());
 }
+
+#[test]
+fn row_bias_gradient_cancels_large_finite_seeds_before_narrowing() {
+    let x = AutogradTensor::variable(Tensor::zeros(3, 2).unwrap()).unwrap();
+    let bias = AutogradTensor::variable(Tensor::zeros(1, 2).unwrap()).unwrap();
+    let output = x.add_row(&bias).unwrap();
+    let seed = tensor(
+        3,
+        2,
+        &[
+            f32::MAX,
+            -f32::MAX,
+            f32::MAX,
+            -f32::MAX,
+            -f32::MAX,
+            f32::MAX,
+        ],
+    );
+    let vjp = output.vector_jacobian_product(&bias, &seed).unwrap();
+    assert_eq!(vjp.data(), &[f32::MAX, -f32::MAX]);
+    assert!(bias.grad().is_none());
+    output.backward_with_grad(&seed).unwrap();
+    assert_eq!(bias.grad().unwrap().data(), vjp.data());
+    assert_eq!(x.grad().unwrap().data(), seed.data());
+}
+
+#[test]
+fn row_bias_gradient_rejects_final_overflow_without_partial_commit() {
+    let x = AutogradTensor::variable(Tensor::zeros(2, 1).unwrap()).unwrap();
+    let bias = AutogradTensor::variable(Tensor::zeros(1, 1).unwrap()).unwrap();
+    bias.sum().unwrap().backward().unwrap();
+    let output = x.add_row(&bias).unwrap();
+    let seed = tensor(2, 1, &[f32::MAX, f32::MAX]);
+    assert!(output.vector_jacobian_product(&bias, &seed).is_err());
+    assert!(output.backward_with_grad(&seed).is_err());
+    assert_eq!(bias.grad().unwrap().data(), &[1.0]);
+    assert!(x.grad().is_none());
+    assert!(output.grad().is_none());
+}
+
+#[test]
+fn constant_row_bias_does_not_reduce_an_unused_gradient() {
+    let x = AutogradTensor::variable(Tensor::zeros(2, 1).unwrap()).unwrap();
+    let bias = AutogradTensor::constant(Tensor::zeros(1, 1).unwrap()).unwrap();
+    let output = x.add_row(&bias).unwrap();
+    let seed = tensor(2, 1, &[f32::MAX, f32::MAX]);
+    assert_eq!(
+        output.vector_jacobian_product(&x, &seed).unwrap().data(),
+        seed.data()
+    );
+    output.backward_with_grad(&seed).unwrap();
+    assert_eq!(x.grad().unwrap().data(), seed.data());
+    assert!(bias.grad().is_none());
+}

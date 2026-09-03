@@ -207,13 +207,16 @@ impl AutogradOperation {
                 (lhs.clone(), upstream.clone()),
                 (rhs.clone(), upstream.clone()),
             ]),
-            Self::AddRow { input, bias } => Ok(vec![
-                (input.clone(), upstream.clone()),
-                (
-                    bias.clone(),
-                    Tensor::from_vec(1, bias.shape().1, upstream.try_sum_axis0()?)?,
-                ),
-            ]),
+            Self::AddRow { input, bias } => {
+                let mut gradients = vec![(input.clone(), upstream.clone())];
+                if bias.requires_grad() {
+                    gradients.push((
+                        bias.clone(),
+                        Tensor::from_vec(1, bias.shape().1, upstream.try_sum_axis0()?)?,
+                    ));
+                }
+                Ok(gradients)
+            }
             Self::Sub { lhs, rhs } => Ok(vec![
                 (lhs.clone(), upstream.clone()),
                 (rhs.clone(), upstream.scale(-1.0)?),

@@ -148,3 +148,41 @@ def test_empty_nonlinear_graph_keeps_shape(shape):
     output.sum().backward()
     assert x.grad().shape() == shape
     assert bias.grad().tolist() == [[0.0] * cols]
+
+
+def test_row_bias_gradient_allows_finite_large_cancellation():
+    maximum = float.fromhex("0x1.fffffep127")
+    x = st.AutogradTensor.variable(st.Tensor.zeros(3, 1))
+    bias = st.AutogradTensor.variable(st.Tensor.zeros(1, 1))
+    output = x.add_row(bias)
+    seed = st.Tensor(3, 1, [maximum, maximum, -maximum])
+    assert output.vector_jacobian_product(bias, seed).tolist() == [[maximum]]
+    assert bias.grad() is None
+    output.backward(seed)
+    assert bias.grad().tolist() == [[maximum]]
+    assert x.grad().tolist() == seed.tolist()
+
+
+def test_row_bias_gradient_overflow_does_not_commit():
+    maximum = float.fromhex("0x1.fffffep127")
+    x = st.AutogradTensor.variable(st.Tensor.zeros(2, 1))
+    bias = st.AutogradTensor.variable(st.Tensor.zeros(1, 1))
+    bias.sum().backward()
+    output = x.add_row(bias)
+    with pytest.raises(ValueError):
+        output.backward(st.Tensor(2, 1, [maximum, maximum]))
+    assert bias.grad().tolist() == [[1.0]]
+    assert x.grad() is None
+    assert output.grad() is None
+
+
+def test_fixed_row_bias_does_not_reduce_an_unused_gradient():
+    maximum = float.fromhex("0x1.fffffep127")
+    x = st.AutogradTensor.variable(st.Tensor.zeros(2, 1))
+    bias = st.AutogradTensor.constant(st.Tensor.zeros(1, 1))
+    output = x.add_row(bias)
+    seed = st.Tensor(2, 1, [maximum, maximum])
+    assert output.vector_jacobian_product(x, seed).tolist() == seed.tolist()
+    output.backward(seed)
+    assert x.grad().tolist() == seed.tolist()
+    assert bias.grad() is None

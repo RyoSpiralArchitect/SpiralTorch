@@ -29,6 +29,18 @@ try {
   const emptyOutput = keep(keep(empty.gelu()).rowSoftmax());
   keep(emptyOutput.sum()).backward();
   assert.equal(empty.gradientValues().length, 0);
+  const maximum = (2 - 2 ** -23) * 2 ** 127;
+  const largeInput = keep(new AutogradTensor(3, 1, new Float32Array(3), true));
+  const largeBias = keep(new AutogradTensor(1, 1, new Float32Array(1), true));
+  const largeOutput = keep(largeInput.addRow(largeBias));
+  const largeSeed = new Float32Array([maximum, maximum, -maximum]);
+  assert.deepEqual(Array.from(largeOutput.vectorJacobianProduct(largeBias, largeSeed)), [maximum]);
+  largeOutput.backwardWithGrad(largeSeed);
+  assert.deepEqual(Array.from(largeBias.gradientValues()), [maximum]);
+  const overflowingSeed = new Float32Array([maximum, maximum, maximum]);
+  assert.throws(() => largeOutput.backwardWithGrad(overflowingSeed));
+  assert.deepEqual(Array.from(largeBias.gradientValues()), [maximum]);
+  assert.deepEqual(Array.from(largeInput.gradientValues()), Array.from(largeSeed));
   console.log("wasm nonlinear autograd exports, VJP, bias reduction, and empty gradients passed");
 } finally {
   for (const tensor of owned.reverse()) tensor.free();

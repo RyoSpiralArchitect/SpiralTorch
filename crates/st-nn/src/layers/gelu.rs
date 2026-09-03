@@ -103,24 +103,7 @@ impl Gelu {
     }
 
     fn gelu_derivative_checked(value: f32) -> PureResult<f32> {
-        validate_finite_value("gelu_backward_input", value)?;
-        let square = value * value;
-        validate_finite_value("gelu_derivative_square", square)?;
-        let cubic = square * value;
-        validate_finite_value("gelu_derivative_cubic", cubic)?;
-        let inner_arg = value + KAPPA * cubic;
-        validate_finite_value("gelu_derivative_inner_arg", inner_arg)?;
-        let inner = SQRT_2_OVER_PI * inner_arg;
-        validate_finite_value("gelu_derivative_inner", inner)?;
-        let tanh_inner = inner.tanh();
-        validate_finite_value("gelu_derivative_tanh", tanh_inner)?;
-        let sech_sq = 1.0 - tanh_inner * tanh_inner;
-        validate_finite_value("gelu_derivative_sech_sq", sech_sq)?;
-        let d_inner = SQRT_2_OVER_PI * (1.0 + 3.0 * KAPPA * square);
-        validate_finite_value("gelu_derivative_inner_grad", d_inner)?;
-        let derivative = 0.5 * (1.0 + tanh_inner) + 0.5 * value * sech_sq * d_inner;
-        validate_finite_value("gelu_derivative", derivative)?;
-        Ok(derivative)
+        st_tensor::gelu_derivative(value)
     }
 }
 
@@ -341,6 +324,22 @@ mod tests {
         let grad_in = layer.backward(&input, &grad_out).unwrap();
 
         assert_eq!(grad_in.data(), &[0.0, 0.0, -3.0, f32::MAX]);
+    }
+
+    #[test]
+    fn gelu_fallback_derivative_matches_saturated_tensor_backend() {
+        let values = [-f32::MAX, -10.0, -1.0, 0.0, 1.0, 10.0, f32::MAX];
+        let input = Tensor::from_vec(1, values.len(), values.to_vec()).unwrap();
+        let seed = Tensor::from_vec(1, values.len(), vec![1.0; values.len()]).unwrap();
+        let expected = input
+            .gelu_backward_with_backend(&seed, TensorUtilBackend::Cpu)
+            .unwrap();
+        for (&value, &gradient) in values.iter().zip(expected.data()) {
+            assert_eq!(Gelu::gelu_derivative_checked(value).unwrap(), gradient);
+        }
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(Gelu::gelu_derivative_checked(value).is_err());
+        }
     }
 
     #[test]
