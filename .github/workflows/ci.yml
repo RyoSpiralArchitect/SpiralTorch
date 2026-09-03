@@ -15,6 +15,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Test workspace inventory resolver
+        run: python3 -m unittest tests/test_list_workspace_crates.py
       - name: Verify generated workspace inventory
         run: python3 tools/list_workspace_crates.py --check-doc docs/development/workspace_crates.md
 
