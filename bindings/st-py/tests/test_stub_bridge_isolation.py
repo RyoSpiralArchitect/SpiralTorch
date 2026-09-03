@@ -265,3 +265,37 @@ def test_example_help_without_native_or_optional_dependencies(source_without_nat
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "usage:" in result.stdout.lower()
+
+
+def test_real_checkout_import_finds_helpers_after_facade_replaces_file(tmp_path):
+    pytest.importorskip("numpy")
+    repo = tmp_path / "checkout"
+    for relative in ("spiraltorch", "bindings/st-py/spiraltorch", "bindings/st-py/spiral"):
+        shutil.copytree(
+            ROOT / relative,
+            repo / relative,
+            ignore=shutil.ignore_patterns("*.so", "*.pyd", "*.dylib", "__pycache__"),
+        )
+    code = """
+from pathlib import Path
+import numpy as np
+import spiraltorch as st
+
+assert st._rs is None
+assert Path(st.__file__).parent.parent.name == "st-py"
+assert "numpy" in st.available_stub_backends()
+assert "dormancy" in st.suggest_hypergrad_operator({"summary": {"mean_abs": 1.0}})
+assert callable(st.hypergrad)
+assert sys.modules["spiraltorch.hypergrad"].st is st
+np.testing.assert_array_equal(st.normalize_batch([[1., 2.]]), [[-1., 1.]])
+tensor = st.Tensor.from_dlpack(np.array([[1., 2.]]))
+assert tensor.tolist() == [[1., 2.]]
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(repo)!r});\n" + code],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

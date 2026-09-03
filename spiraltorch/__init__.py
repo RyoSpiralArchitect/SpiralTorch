@@ -3229,7 +3229,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     _install_spiral_rl_stub()
 
     def _bridge_pure_python_namespace() -> None:
-        base_dir = pathlib.Path(__file__).resolve().parents[1] / "bindings" / "st-py" / "spiral"
+        # The native facade replaces __file__; keep lookup anchored to the shim.
+        base_dir = _DEV_SHIM_DIR.parent / "bindings" / "st-py" / "spiral"
         init_py = base_dir / "__init__.py"
         if not init_py.exists():
             return
