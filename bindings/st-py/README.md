@@ -645,6 +645,13 @@ that the reviewer remained blind and does not establish model superiority.
 The binding mirrors the Rust feature flags. Pick the backend(s) you need
 and maturin will bake the appropriate artefact:
 
+Native builds use PyO3 0.29.2. Python 3.8+ abi3 support and the default
+WGPU-first/CPU-fallback policy are unchanged. The native modules retain their
+GIL requirement; this release does not claim free-threaded Python support.
+If a user-site `sitecustomize.py`
+prints during Python startup, set `PYTHONNOUSERSITE=1` for the build so the
+interpreter probe receives only its expected configuration output.
+
 ```bash
 pip install maturin==1.*
 
@@ -680,7 +687,8 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ## Smoke tests (no pytest required)
 
 ```bash
-PYTHONNOUSERSITE=1 python3 -s -m unittest bindings/st-py/tests/test_unittest_smoke.py
+PYTHONNOUSERSITE=1 python3 -s bindings/st-py/tests/test_unittest_smoke.py
+PYTHONNOUSERSITE=1 python3 -s bindings/st-py/tests/test_native_binding_ownership.py
 ```
 
 After installing a wheel, optional Hugging Face/FT dependencies can be checked

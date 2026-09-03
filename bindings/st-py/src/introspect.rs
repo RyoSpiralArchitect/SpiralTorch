@@ -2,6 +2,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 
 use st_core::ops::zspace_round::SpectralFeatureSample;
 use st_core::telemetry::hub;
@@ -47,7 +48,7 @@ pub(crate) fn band_energy_detail_to_py(
     band_energy: (f32, f32, f32),
     drift: Option<f32>,
     spectral: Option<SpectralFeatureSample>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let (above, here, beneath) = band_energy;
     let total = above.abs() + here.abs() + beneath.abs();
@@ -99,10 +100,10 @@ pub(crate) fn band_energy_detail_to_py(
         }
     }
 
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "ZSpaceSpinBand")]
+#[pyclass(module = "spiraltorch.zspace", name = "ZSpaceSpinBand", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyZSpaceSpinBand {
     inner: ZSpaceSpinBand,
@@ -139,7 +140,11 @@ impl PyZSpaceSpinBand {
     }
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "ZSpaceRadiusBand")]
+#[pyclass(
+    module = "spiraltorch.zspace",
+    name = "ZSpaceRadiusBand",
+    from_py_object
+)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyZSpaceRadiusBand {
     inner: ZSpaceRadiusBand,
@@ -176,7 +181,11 @@ impl PyZSpaceRadiusBand {
     }
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "ZSpaceRegionKey")]
+#[pyclass(
+    module = "spiraltorch.zspace",
+    name = "ZSpaceRegionKey",
+    from_py_object
+)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyZSpaceRegionKey {
     inner: ZSpaceRegionKey,
@@ -210,7 +219,11 @@ impl PyZSpaceRegionKey {
     }
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "ZSpaceRegionDescriptor")]
+#[pyclass(
+    module = "spiraltorch.zspace",
+    name = "ZSpaceRegionDescriptor",
+    from_py_object
+)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyZSpaceRegionDescriptor {
     inner: ZSpaceRegionDescriptor,
@@ -311,7 +324,11 @@ impl PyZSpaceRegionDescriptor {
     }
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "SoftlogicEllipticSample")]
+#[pyclass(
+    module = "spiraltorch.zspace",
+    name = "SoftlogicEllipticSample",
+    from_py_object
+)]
 #[derive(Clone, Copy)]
 pub(crate) struct PySoftlogicEllipticSample {
     inner: SoftlogicEllipticSample,
@@ -436,7 +453,12 @@ impl PySoftlogicEllipticSample {
     }
 }
 
-#[pyclass(module = "spiraltorch.zspace", name = "SoftlogicZFeedback", unsendable)]
+#[pyclass(
+    module = "spiraltorch.zspace",
+    name = "SoftlogicZFeedback",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PySoftlogicZFeedback {
     inner: SoftlogicZFeedback,
@@ -465,7 +487,7 @@ impl PySoftlogicZFeedback {
         self.inner.band_energy
     }
 
-    pub fn band_energy_detail(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn band_energy_detail(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         band_energy_detail_to_py(py, self.inner.band_energy, Some(self.inner.drift), None)
     }
 
@@ -563,7 +585,7 @@ pub(crate) fn describe_zspace(
     py: Python<'_>,
     latest: bool,
     feedback: bool,
-) -> PyResult<Option<PyObject>> {
+) -> PyResult<Option<Py<PyAny>>> {
     if !latest {
         return Err(PyRuntimeError::new_err(
             "only the latest Z-space snapshot is currently available",
@@ -576,17 +598,17 @@ pub(crate) fn describe_zspace(
 
     if feedback {
         let obj = Py::new(py, PySoftlogicZFeedback::from_feedback(sample))?;
-        Ok(Some(obj.into_py(py)))
+        Ok(Some(obj.into_py_any(py)?))
     } else if let Some(descriptor) = sample.region_descriptor() {
         let obj = Py::new(py, PyZSpaceRegionDescriptor::from_descriptor(descriptor))?;
-        Ok(Some(obj.into_py(py)))
+        Ok(Some(obj.into_py_any(py)?))
     } else {
         Ok(None)
     }
 }
 
 #[pyfunction]
-pub(crate) fn softlogic_signal(py: Python<'_>) -> PyResult<Option<PyObject>> {
+pub(crate) fn softlogic_signal(py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
     let Some(sample) = hub::get_softlogic_z() else {
         return Ok(None);
     };

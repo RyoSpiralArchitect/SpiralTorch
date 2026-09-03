@@ -2,6 +2,7 @@ use num_complex::Complex32 as PyComplex32;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
+use pyo3::IntoPyObjectExt;
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::tensor::{tensor_err_to_py, PyTensor};
@@ -42,7 +43,7 @@ fn serialized_payload_to_py<T: serde::Serialize>(
     py: Python<'_>,
     label: &str,
     payload: T,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let value = serde_json::to_value(payload).map_err(|error| {
         PyRuntimeError::new_err(format!("failed to serialize {label}: {error}"))
     })?;
@@ -115,37 +116,40 @@ fn topos_optimizer_state_control_from_py(
 fn topos_control_signal_to_pydict(
     py: Python<'_>,
     signal: ToposControlSignal,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos control signal", signal.payload())
 }
 
-fn topos_training_hints_to_pydict(py: Python<'_>, hints: ToposTrainingHints) -> PyResult<PyObject> {
+fn topos_training_hints_to_pydict(
+    py: Python<'_>,
+    hints: ToposTrainingHints,
+) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos training hints", hints.payload())
 }
 
-fn topos_training_plan_to_pydict(py: Python<'_>, plan: ToposTrainingPlan) -> PyResult<PyObject> {
+fn topos_training_plan_to_pydict(py: Python<'_>, plan: ToposTrainingPlan) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos training plan", plan.payload())
 }
 
 fn topos_inference_hints_to_pydict(
     py: Python<'_>,
     hints: ToposInferenceHints,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos inference hints", hints.payload())
 }
 
-fn topos_inference_plan_to_pydict(py: Python<'_>, plan: ToposInferencePlan) -> PyResult<PyObject> {
+fn topos_inference_plan_to_pydict(py: Python<'_>, plan: ToposInferencePlan) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos inference plan", plan.payload())
 }
 
 fn topos_runtime_profile_to_pydict(
     py: Python<'_>,
     profile: ToposRuntimeProfile,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos runtime profile", profile.payload())
 }
 
-fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<PyObject> {
+fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<Py<PyAny>> {
     serialized_payload_to_py(py, "Topos runtime route", route.payload())
 }
 
@@ -153,7 +157,7 @@ fn topos_zspace_projection_to_pydict(
     py: Python<'_>,
     signal: &ToposControlSignal,
     gradient_dim: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let projection = signal
         .zspace_projection(ToposZSpaceProjectionOptions { gradient_dim })
         .map_err(tensor_err_to_py)?;
@@ -403,7 +407,7 @@ fn topos_runtime_profile_input_from_pydict(
 fn py_topos_runtime_route_from_profile(
     py: Python<'_>,
     profile: &Bound<'_, PyDict>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let profile =
         ToposRuntimeProfile::from_input(topos_runtime_profile_input_from_pydict(profile)?);
     topos_runtime_route_to_pydict(py, profile.route())
@@ -417,7 +421,7 @@ fn py_topos_control_bundle_from_observation(
     options: Option<&Bound<'_, PyDict>>,
     training_hints: Option<&Bound<'_, PyDict>>,
     inference_hints: Option<&Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let signal = ToposControlSignal::from_input(topos_control_signal_input_from_pydict(signal)?)
         .map_err(tensor_err_to_py)?;
     let options = topos_control_plan_options_from_pydict(options)?;
@@ -445,7 +449,7 @@ fn py_topos_optimizer_snapshot_from_observation(
     options: Option<&Bound<'_, PyDict>>,
     training_hints: Option<&Bound<'_, PyDict>>,
     inference_hints: Option<&Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let signal = ToposControlSignal::from_input(topos_control_signal_input_from_pydict(signal)?)
         .map_err(tensor_err_to_py)?;
     let options = topos_control_plan_options_from_pydict(options)?;
@@ -474,7 +478,7 @@ fn py_topos_zspace_projection_from_observation(
     py: Python<'_>,
     signal: &Bound<'_, PyDict>,
     gradient_dim: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let signal = ToposControlSignal::from_input(topos_control_signal_input_from_pydict(signal)?)
         .map_err(tensor_err_to_py)?;
     topos_zspace_projection_to_pydict(py, &signal, gradient_dim)
@@ -493,7 +497,7 @@ fn py_topos_control_signal_from_observation(
     max_volume: usize,
     observed_depth: usize,
     visited_volume: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let signal = ToposControlSignal::from_input(ToposControlSignalInput {
         curvature,
         tolerance,
@@ -508,7 +512,7 @@ fn py_topos_control_signal_from_observation(
     topos_control_signal_to_pydict(py, signal)
 }
 
-#[pyclass(module = "spiraltorch", name = "ComplexTensor")]
+#[pyclass(module = "spiraltorch", name = "ComplexTensor", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyComplexTensor {
     pub(crate) inner: ComplexTensor,
@@ -565,7 +569,7 @@ impl PyComplexTensor {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "OpenCartesianTopos")]
+#[pyclass(module = "spiraltorch", name = "OpenCartesianTopos", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyOpenCartesianTopos {
     pub(crate) inner: OpenCartesianTopos,
@@ -640,7 +644,7 @@ impl PyOpenCartesianTopos {
         py: Python<'_>,
         observed_depth: usize,
         visited_volume: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_control_signal_to_pydict(
             py,
             self.inner
@@ -654,7 +658,7 @@ impl PyOpenCartesianTopos {
         py: Python<'_>,
         observed_depth: usize,
         visited_volume: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_training_hints_to_pydict(
             py,
             self.inner
@@ -670,7 +674,7 @@ impl PyOpenCartesianTopos {
         observed_depth: usize,
         visited_volume: usize,
         gain: f32,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_training_plan_to_pydict(
             py,
             self.inner
@@ -685,7 +689,7 @@ impl PyOpenCartesianTopos {
         py: Python<'_>,
         observed_depth: usize,
         visited_volume: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_inference_hints_to_pydict(
             py,
             self.inner
@@ -705,7 +709,7 @@ impl PyOpenCartesianTopos {
         base_top_p: f32,
         base_frequency_penalty: f32,
         base_presence_penalty: f32,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_inference_plan_to_pydict(
             py,
             self.inner
@@ -732,7 +736,7 @@ impl PyOpenCartesianTopos {
         base_top_p: f32,
         base_frequency_penalty: f32,
         base_presence_penalty: f32,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_runtime_profile_to_pydict(
             py,
             self.inner
@@ -760,7 +764,7 @@ impl PyOpenCartesianTopos {
         base_top_p: f32,
         base_frequency_penalty: f32,
         base_presence_penalty: f32,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         topos_runtime_route_to_pydict(
             py,
             self.inner
@@ -793,7 +797,7 @@ impl PyOpenCartesianTopos {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "ZBox")]
+#[pyclass(module = "spiraltorch", name = "ZBox", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZBox {
     inner: ZBox,
@@ -857,7 +861,7 @@ impl PyZBox {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "ZBoxSite")]
+#[pyclass(module = "spiraltorch", name = "ZBoxSite", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZBoxSite {
     inner: ZBoxSite,
@@ -911,7 +915,7 @@ impl PyZBoxSite {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "LanguageWaveEncoder")]
+#[pyclass(module = "spiraltorch", name = "LanguageWaveEncoder", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyLanguageWaveEncoder {
     pub(crate) inner: LanguageWaveEncoder,
@@ -944,7 +948,7 @@ impl PyLanguageWaveEncoder {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "GradientSummary")]
+#[pyclass(module = "spiraltorch", name = "GradientSummary", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyGradientSummary {
     inner: GradientSummary,
@@ -1088,7 +1092,7 @@ impl PyGradientSummary {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "NonCollapseSnapshot")]
+#[pyclass(module = "spiraltorch", name = "NonCollapseSnapshot", from_py_object)]
 #[derive(Clone, Default)]
 pub(crate) struct PyNonCollapseSnapshot {
     coherence_entropy: Option<f32>,
@@ -1149,7 +1153,7 @@ impl PyNonCollapseSnapshot {
             && self.pre_discard_survivor_energy_ratio.is_none()
     }
 
-    pub(crate) fn to_pydict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub(crate) fn to_pydict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         if let Some(value) = self.coherence_entropy {
             dict.set_item("coherence_entropy", value)?;
@@ -1196,7 +1200,7 @@ impl PyNonCollapseSnapshot {
         if let Some(value) = self.pre_discard_survivor_energy_ratio {
             dict.set_item("pre_discard_survivor_energy_ratio", value)?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
@@ -1281,7 +1285,7 @@ impl PyNonCollapseSnapshot {
         self.is_empty_inner()
     }
 
-    pub fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         self.to_pydict(py)
     }
 
@@ -1294,7 +1298,7 @@ impl PyNonCollapseSnapshot {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "HypergradTelemetry")]
+#[pyclass(module = "spiraltorch", name = "HypergradTelemetry", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyHypergradTelemetry {
     inner: HypergradTelemetry,
@@ -1366,6 +1370,7 @@ impl PyHypergradTelemetry {
 }
 
 #[pyclass(
+    from_py_object,
     module = "spiraltorch",
     name = "DesireGradientInterpretation",
     unsendable
@@ -1432,7 +1437,12 @@ impl PyDesireGradientInterpretation {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "DesireGradientControl", unsendable)]
+#[pyclass(
+    module = "spiraltorch",
+    name = "DesireGradientControl",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyDesireGradientControl {
     inner: DesireGradientControl,
@@ -1585,7 +1595,7 @@ impl PyHypergrad {
         self.inner.gradient().to_vec()
     }
 
-    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         serialized_payload_to_py(
             py,
             "Topos optimizer-state control",
@@ -1601,7 +1611,7 @@ impl PyHypergrad {
         &mut self,
         py: Python<'_>,
         control: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let control = topos_optimizer_state_control_from_py(control)?;
         self.inner.configure_optimizer_state(control);
         serialized_payload_to_py(py, "Topos optimizer-state control", control)
@@ -1760,7 +1770,7 @@ impl PyRealgrad {
         self.inner.gradient().to_vec()
     }
 
-    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn optimizer_state_control(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         serialized_payload_to_py(
             py,
             "Topos optimizer-state control",
@@ -1776,7 +1786,7 @@ impl PyRealgrad {
         &mut self,
         py: Python<'_>,
         control: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let control = topos_optimizer_state_control_from_py(control)?;
         self.inner.configure_optimizer_state(control);
         serialized_payload_to_py(py, "Topos optimizer-state control", control)
@@ -1877,7 +1887,12 @@ impl PyTensorBiome {
     }
 }
 
-#[pyclass(module = "spiraltorch", name = "BarycenterIntermediate", unsendable)]
+#[pyclass(
+    module = "spiraltorch",
+    name = "BarycenterIntermediate",
+    unsendable,
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyBarycenterIntermediate {
     inner: BarycenterIntermediate,
@@ -1958,7 +1973,7 @@ impl PyTensorBiome {
         self.inner.total_weight()
     }
 
-    pub fn control_signal(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn control_signal(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         topos_control_signal_to_pydict(py, self.inner.control_signal())
     }
 

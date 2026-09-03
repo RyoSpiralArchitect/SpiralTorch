@@ -30,7 +30,7 @@ fn json_error(context: &str, error: impl std::fmt::Display) -> PyErr {
 }
 
 #[pyfunction]
-fn _zspace_generation_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_generation_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space generation control request must be a mapping")
@@ -63,7 +63,7 @@ fn _zspace_generation_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyR
 }
 
 #[pyfunction]
-fn _zspace_temperature_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_temperature_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space temperature control request must be a mapping")
@@ -104,7 +104,7 @@ fn _zspace_temperature_control(py: Python<'_>, request: &Bound<'_, PyAny>) -> Py
 }
 
 #[pyfunction]
-fn _zspace_concept_diffusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_concept_diffusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space concept diffusion request must be a mapping")
@@ -156,7 +156,7 @@ fn _zspace_concept_diffusion(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
 fn _zspace_imaginary_time_schrodinger(
     py: Python<'_>,
     request: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space imaginary-time Schrodinger request must be a mapping")
@@ -189,7 +189,7 @@ fn _zspace_imaginary_time_schrodinger(
 }
 
 #[pyfunction]
-fn _zspace_posterior_decode(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_posterior_decode(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space posterior decode request must be a mapping")
@@ -205,7 +205,7 @@ fn _zspace_posterior_decode(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRes
     let request: ZSpacePosteriorDecodeRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space posterior decode request", error))?;
     let payload = py
-        .allow_threads(|| decode_zspace_posterior(request))
+        .detach(|| decode_zspace_posterior(request))
         .map_err(|error| json_error("Z-space posterior decode failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space posterior decode encoding failed", error))?;
@@ -213,7 +213,7 @@ fn _zspace_posterior_decode(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRes
 }
 
 #[pyfunction]
-fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space posterior projection request must be a mapping")
@@ -245,7 +245,7 @@ fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
     let request: ZSpacePosteriorProjectionRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space posterior projection request", error))?;
     let payload = py
-        .allow_threads(|| project_zspace_posterior(request))
+        .detach(|| project_zspace_posterior(request))
         .map_err(|error| json_error("Z-space posterior projection failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space posterior projection encoding failed", error))?;
@@ -253,7 +253,7 @@ fn _zspace_posterior_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
 }
 
 #[pyfunction]
-fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let request = crate::json::py_to_json(request)?;
     let request_object = request.as_object().ok_or_else(|| {
         PyValueError::new_err("Z-space coherence projection request must be a mapping")
@@ -301,7 +301,7 @@ fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
     let request: ZSpaceCoherenceProjectionRequest = serde_json::from_value(request)
         .map_err(|error| json_error("invalid Z-space coherence projection request", error))?;
     let payload = py
-        .allow_threads(|| project_zspace_coherence(request))
+        .detach(|| project_zspace_coherence(request))
         .map_err(|error| json_error("Z-space coherence projection failed", error))?;
     let payload = serde_json::to_value(payload)
         .map_err(|error| json_error("Z-space coherence projection encoding failed", error))?;
@@ -312,9 +312,9 @@ fn _zspace_coherence_project(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRe
 fn _zspace_coherence_distribution_witness(
     py: Python<'_>,
     normalized_weights: Vec<f64>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let witness = py
-        .allow_threads(|| build_zspace_coherence_distribution_witness(&normalized_weights))
+        .detach(|| build_zspace_coherence_distribution_witness(&normalized_weights))
         .map_err(|error| json_error("Z-space coherence witness construction failed", error))?;
     let payload = serde_json::to_value(witness)
         .map_err(|error| json_error("Z-space coherence witness encoding failed", error))?;
@@ -325,7 +325,7 @@ fn _zspace_coherence_distribution_witness(
 fn _zspace_coherence_distribution_validate(
     py: Python<'_>,
     witness: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let witness = crate::json::py_to_json(witness)?;
     if !witness.is_object() {
         return Err(PyValueError::new_err(
@@ -335,14 +335,18 @@ fn _zspace_coherence_distribution_validate(
     let witness: ZSpaceCoherenceDistributionWitness = serde_json::from_value(witness)
         .map_err(|error| json_error("invalid Z-space coherence distribution witness", error))?;
     let summary = py
-        .allow_threads(|| validate_zspace_coherence_distribution_witness(&witness))
+        .detach(|| validate_zspace_coherence_distribution_witness(&witness))
         .map_err(|error| json_error("Z-space coherence witness validation failed", error))?;
     let payload = serde_json::to_value(summary)
         .map_err(|error| json_error("Z-space coherence summary encoding failed", error))?;
     crate::json::json_to_py(py, &payload)
 }
 
-#[pyclass(module = "spiraltorch.inference", name = "SafetyViolation")]
+#[pyclass(
+    module = "spiraltorch.inference",
+    name = "SafetyViolation",
+    from_py_object
+)]
 #[derive(Clone)]
 struct SafetyViolationPy {
     #[pyo3(get)]
@@ -369,7 +373,11 @@ impl From<SafetyViolation> for SafetyViolationPy {
     }
 }
 
-#[pyclass(module = "spiraltorch.inference", name = "SafetyVerdict")]
+#[pyclass(
+    module = "spiraltorch.inference",
+    name = "SafetyVerdict",
+    from_py_object
+)]
 #[derive(Clone)]
 struct SafetyVerdictPy {
     #[pyo3(get)]
@@ -397,7 +405,7 @@ impl From<SafetyVerdict> for SafetyVerdictPy {
     }
 }
 
-#[pyclass(module = "spiraltorch.inference", name = "AuditEvent")]
+#[pyclass(module = "spiraltorch.inference", name = "AuditEvent", from_py_object)]
 #[derive(Clone)]
 struct AuditEventPy {
     #[pyo3(get)]
@@ -421,7 +429,7 @@ impl From<AuditEvent> for AuditEventPy {
     }
 }
 
-#[pyclass(module = "spiraltorch.inference", name = "AuditLog")]
+#[pyclass(module = "spiraltorch.inference", name = "AuditLog", from_py_object)]
 #[derive(Clone)]
 pub struct AuditLogPy {
     sink: AuditSink,
@@ -438,7 +446,11 @@ impl AuditLogPy {
     }
 }
 
-#[pyclass(module = "spiraltorch.inference", name = "InferenceResult")]
+#[pyclass(
+    module = "spiraltorch.inference",
+    name = "InferenceResult",
+    from_py_object
+)]
 #[derive(Clone)]
 pub struct InferenceResultPy {
     #[pyo3(get)]

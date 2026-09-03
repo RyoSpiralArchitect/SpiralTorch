@@ -203,7 +203,11 @@ fn fft_real(signal: Vec<f32>, inverse: bool) -> PyResult<Vec<(f32, f32)>> {
     Ok(complex32_to_tuples(values))
 }
 
-#[pyclass(module = "spiraltorch.frac", name = "FractalFieldGenerator")]
+#[pyclass(
+    module = "spiraltorch.frac",
+    name = "FractalFieldGenerator",
+    from_py_object
+)]
 #[derive(Clone, Debug)]
 struct PyFractalFieldGenerator {
     inner: FractalFieldGenerator,
@@ -282,7 +286,7 @@ impl PyFractalFieldGenerator {
     }
 }
 
-#[pyclass(module = "spiraltorch.frac", name = "LogZSeries")]
+#[pyclass(module = "spiraltorch.frac", name = "LogZSeries", from_py_object)]
 #[derive(Clone, Debug)]
 struct PyLogZSeries {
     inner: LogZSeries,
@@ -410,13 +414,13 @@ fn assemble_pzeta(
     .map_err(cosmology_err_to_py)
 }
 
-#[pyclass(module = "spiraltorch.frac", name = "MellinLogGrid")]
+#[pyclass(module = "spiraltorch.frac", name = "MellinLogGrid", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyMellinLogGrid {
     pub(crate) inner: MellinLogGrid,
 }
 
-#[pyclass(module = "spiraltorch.frac", name = "MellinEvalPlan")]
+#[pyclass(module = "spiraltorch.frac", name = "MellinEvalPlan", from_py_object)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyMellinEvalPlan {
     inner: MellinEvalPlan,

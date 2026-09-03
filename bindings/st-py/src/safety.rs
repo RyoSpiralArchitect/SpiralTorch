@@ -37,7 +37,7 @@ where
     }
 }
 
-fn serialize_to_py<T>(py: Python<'_>, value: &T) -> PyResult<PyObject>
+fn serialize_to_py<T>(py: Python<'_>, value: &T) -> PyResult<Py<PyAny>>
 where
     T: Serialize,
 {
@@ -60,7 +60,7 @@ fn parse_direction_queries(
 }
 
 #[pyfunction]
-fn drl_default_thresholds(py: Python<'_>) -> PyResult<PyObject> {
+fn drl_default_thresholds(py: Python<'_>) -> PyResult<Py<PyAny>> {
     serialize_to_py(py, &default_thresholds())
 }
 
@@ -73,7 +73,7 @@ fn drl_analyse_word(
     hazard_cut: Option<f32>,
     min_radius: f32,
     direction_queries: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let word: WordState = parse_json_like(word, "word")?;
     let thresholds = parse_thresholds(thresholds)?;
     let options = AnalysisOptions {
@@ -94,7 +94,7 @@ fn drl_analyze_word(
     hazard_cut: Option<f32>,
     min_radius: f32,
     direction_queries: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     drl_analyse_word(
         py,
         word,
@@ -117,7 +117,7 @@ fn drl_safe_radii(
     py: Python<'_>,
     word: &Bound<'_, PyAny>,
     thresholds: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let word: WordState = parse_json_like(word, "word")?;
     let thresholds = parse_thresholds(thresholds)?;
     serialize_to_py(py, &safe_radius(&word, &thresholds))
@@ -156,7 +156,7 @@ fn drl_aggregate_penalty(metrics: &Bound<'_, PyAny>, min_radius: f32) -> PyResul
 }
 
 #[pyfunction]
-fn drl_frame_summary(py: Python<'_>, metrics: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn drl_frame_summary(py: Python<'_>, metrics: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let metrics: DrlMetrics = parse_json_like(metrics, "metrics")?;
     serialize_to_py(py, &frame_summary(&metrics))
 }

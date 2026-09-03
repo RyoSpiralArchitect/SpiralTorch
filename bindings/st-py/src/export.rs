@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
-use pyo3::IntoPy;
+use pyo3::IntoPyObjectExt;
 use spiral_opt::{
     CompressionReport, OptimisationError, QatConfig, QatObserver, QuantizationLeveling,
     QuantizationReport, StructuredPruner, StructuredPruningConfig, StructuredPruningReport,
@@ -43,7 +43,7 @@ impl PyQuantizationReport {
         self.inner.observed_steps
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("bit_width", self.inner.bit_width)?;
         dict.set_item("observed_min", self.inner.observed_min)?;
@@ -52,7 +52,7 @@ impl PyQuantizationReport {
         dict.set_item("zero_point", self.inner.zero_point)?;
         dict.set_item("quant_error", self.inner.quant_error)?;
         dict.set_item("observed_steps", self.inner.observed_steps)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
@@ -94,7 +94,7 @@ impl PyStructuredPruningReport {
         self.inner.kept_blocks
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("target_sparsity", self.inner.target_sparsity)?;
         dict.set_item("achieved_sparsity", self.inner.achieved_sparsity)?;
@@ -102,7 +102,7 @@ impl PyStructuredPruningReport {
         dict.set_item("pruned_blocks", self.inner.pruned_blocks)?;
         dict.set_item("kept_blocks", self.inner.kept_blocks)?;
         dict.set_item("l2_error", self.inner.l2_error)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
@@ -142,7 +142,7 @@ impl PyCompressionReport {
         self.inner.pruning.is_some()
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("original_params", self.inner.original_params)?;
         dict.set_item("remaining_params", self.inner.remaining_params)?;
@@ -162,7 +162,7 @@ impl PyCompressionReport {
                 PyStructuredPruningReport { inner: p.clone() }.as_dict(py)?,
             )?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 

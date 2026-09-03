@@ -101,7 +101,11 @@ fn fractal_patch_to_pulses(patch: &Bound<'_, PyAny>, eta_scale: f64) -> Vec<Maxw
     pulses
 }
 
-#[pyclass(module = "spiraltorch.qr", name = "QuantumOverlayConfig")]
+#[pyclass(
+    module = "spiraltorch.qr",
+    name = "QuantumOverlayConfig",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyQuantumOverlayConfig {
     inner: QuantumOverlayConfig,
@@ -183,7 +187,7 @@ impl PyQuantumOverlayConfig {
     }
 }
 
-#[pyclass(module = "spiraltorch.qr", name = "ZResonance")]
+#[pyclass(module = "spiraltorch.qr", name = "ZResonance", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZResonance {
     inner: ZResonance,
@@ -250,7 +254,7 @@ impl PyZResonance {
     }
 }
 
-#[pyclass(module = "spiraltorch.qr", name = "ZOverlayCircuit")]
+#[pyclass(module = "spiraltorch.qr", name = "ZOverlayCircuit", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZOverlayCircuit {
     inner: ZOverlayCircuit,
@@ -282,7 +286,7 @@ impl PyZOverlayCircuit {
     }
 }
 
-#[pyclass(module = "spiraltorch.qr", name = "QuantumMeasurement")]
+#[pyclass(module = "spiraltorch.qr", name = "QuantumMeasurement", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyQuantumMeasurement {
     inner: QuantumMeasurement,
@@ -378,7 +382,11 @@ impl PyQuantumMeasurement {
     }
 }
 
-#[pyclass(module = "spiraltorch.qr", name = "QuantumRealityStudio")]
+#[pyclass(
+    module = "spiraltorch.qr",
+    name = "QuantumRealityStudio",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyQuantumRealityStudio {
     config: QuantumOverlayConfig,
@@ -695,7 +703,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     )?;
 
     parent.add_submodule(&module)?;
-    let module_obj = module.to_object(py);
+    let module_obj = module.clone().unbind().into_any();
     parent.add("qr", module_obj)?;
 
     for name in [
@@ -710,7 +718,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         "quantum_measurement_from_fractal_sequence",
     ] {
         let attr = module.getattr(name)?;
-        parent.add(name, attr.to_object(py))?;
+        parent.add(name, attr.clone().unbind().into_any())?;
     }
 
     Ok(())

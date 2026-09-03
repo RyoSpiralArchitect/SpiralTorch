@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyImportError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 
 use crate::tensor::PyTensor;
 
@@ -90,11 +91,11 @@ fn capture_impl(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
         Source::Torch => torch::from_torch(py, value),
         Source::Jax => jax::from_jax(py, value),
         Source::TensorFlow => tensorflow::from_tensorflow(py, value),
-        Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind().into_py(py)),
+        Source::Dlpack => PyTensor::from_dlpack(py, value.clone().unbind()),
     }
 }
 
-fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<PyObject> {
+fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py<PyAny>> {
     let normalized = target.to_ascii_lowercase();
     let ty = value.get_type();
     let module = ty
@@ -105,28 +106,28 @@ fn share_impl(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py
     match normalized.as_str() {
         "spiraltorch" | "spiral" | "st" | "tensor" => {
             if value.is_instance_of::<PyTensor>() {
-                return Ok(value.clone().unbind().into_py(py));
+                return Ok(value.clone().unbind());
             }
             let tensor = capture_impl(py, value)?;
-            Py::new(py, tensor).map(|py_tensor| py_tensor.into_py(py))
+            Py::new(py, tensor).map(|py_tensor| py_tensor.into_any())
         }
         "torch" | "pytorch" => {
             if module.starts_with("torch") {
-                return Ok(value.clone().unbind().into_py(py));
+                return Ok(value.clone().unbind());
             }
             let tensor = capture_impl(py, value)?;
             torch::to_torch(py, &tensor)
         }
         "jax" => {
             if module.starts_with("jax") || module.contains("jaxlib") {
-                return Ok(value.clone().unbind().into_py(py));
+                return Ok(value.clone().unbind());
             }
             let tensor = capture_impl(py, value)?;
             jax::to_jax(py, &tensor)
         }
         "tensorflow" | "tf" => {
             if module.starts_with("tensorflow") {
-                return Ok(value.clone().unbind().into_py(py));
+                return Ok(value.clone().unbind());
             }
             let tensor = capture_impl(py, value)?;
             tensorflow::to_tensorflow(py, &tensor)
@@ -147,7 +148,7 @@ fn capture(py: Python<'_>, value: &Bound<PyAny>) -> PyResult<PyTensor> {
 /// Share a tensor with another framework without copying the underlying buffer.
 #[pyfunction]
 #[pyo3(text_signature = "(value, target, /)")]
-fn share(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<PyObject> {
+fn share(py: Python<'_>, value: &Bound<PyAny>, target: &str) -> PyResult<Py<PyAny>> {
     share_impl(py, value, target)
 }
 
@@ -172,12 +173,12 @@ mod torch {
     fn to_torch_py(
         py: Python<'_>,
         tensor: &PyTensor,
-        dtype: Option<PyObject>,
-        device: Option<PyObject>,
+        dtype: Option<Py<PyAny>>,
+        device: Option<Py<PyAny>>,
         requires_grad: Option<bool>,
         copy: Option<bool>,
-        memory_format: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        memory_format: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let utils = super::import_with_hint(py, "torch.utils.dlpack", "PyTorch >= 1.10")?;
         let from_dlpack = utils.getattr("from_dlpack")?;
         let capsule = tensor.to_dlpack(py)?;
@@ -206,10 +207,10 @@ mod torch {
             tensor = tensor.call_method1("requires_grad_", (requires_grad,))?;
         }
 
-        Ok(tensor.into_py(py))
+        tensor.into_py_any(py)
     }
 
-    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
+    pub(super) fn to_torch(py: Python<'_>, tensor: &PyTensor) -> PyResult<Py<PyAny>> {
         to_torch_py(py, tensor, None, None, None, None, None)
     }
 
@@ -218,8 +219,8 @@ mod torch {
     fn from_torch_py(
         py: Python<'_>,
         tensor: &Bound<PyAny>,
-        dtype: Option<PyObject>,
-        device: Option<PyObject>,
+        dtype: Option<Py<PyAny>>,
+        device: Option<Py<PyAny>>,
         ensure_cpu: Option<bool>,
         copy: Option<bool>,
         require_contiguous: Option<bool>,
@@ -292,12 +293,12 @@ mod jax {
     }
 
     #[pyfunction]
-    pub(super) fn to_jax(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
+    pub(super) fn to_jax(py: Python<'_>, tensor: &PyTensor) -> PyResult<Py<PyAny>> {
         let module = super::import_with_hint(py, "jax.dlpack", "JAX >= 0.4")?;
         let from_dlpack = module.getattr("from_dlpack")?;
         let capsule = tensor.to_dlpack(py)?;
         let array = from_dlpack.call1((capsule,))?;
-        Ok(array.into_py(py))
+        array.into_py_any(py)
     }
 
     #[pyfunction]
@@ -326,13 +327,13 @@ mod tensorflow {
     }
 
     #[pyfunction]
-    pub(super) fn to_tensorflow(py: Python<'_>, tensor: &PyTensor) -> PyResult<PyObject> {
+    pub(super) fn to_tensorflow(py: Python<'_>, tensor: &PyTensor) -> PyResult<Py<PyAny>> {
         let module =
             super::import_with_hint(py, "tensorflow.experimental.dlpack", "TensorFlow >= 2.12")?;
         let from_dlpack = module.getattr("from_dlpack")?;
         let capsule = tensor.to_dlpack(py)?;
         let tensor = from_dlpack.call1((capsule,))?;
-        Ok(tensor.into_py(py))
+        tensor.into_py_any(py)
     }
 
     #[pyfunction]

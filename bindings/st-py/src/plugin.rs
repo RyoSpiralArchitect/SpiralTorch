@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyStopIteration, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyModule};
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use st_core::plugin::{
 use st_core::PureResult;
 use st_core::TensorError;
 
-fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject> {
+fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -77,10 +78,10 @@ fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject>
             }
         }
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
-fn plugin_metadata_to_py(py: Python<'_>, metadata: &PluginMetadata) -> PyResult<PyObject> {
+fn plugin_metadata_to_py(py: Python<'_>, metadata: &PluginMetadata) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("id", metadata.id.clone())?;
     dict.set_item("version", metadata.version.clone())?;
@@ -106,10 +107,10 @@ fn plugin_metadata_to_py(py: Python<'_>, metadata: &PluginMetadata) -> PyResult<
     }
     dict.set_item("metadata", extra)?;
 
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
-fn required_item<'py, T: FromPyObject<'py>>(
+fn required_item<'py, T: FromPyObjectOwned<'py>>(
     dict: &Bound<'py, PyDict>,
     key: &str,
     err: &str,
@@ -117,6 +118,7 @@ fn required_item<'py, T: FromPyObject<'py>>(
     dict.get_item(key)?
         .ok_or_else(|| PyValueError::new_err(err.to_string()))?
         .extract()
+        .map_err(Into::into)
 }
 
 fn optional_string_item(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
@@ -243,7 +245,7 @@ fn plugin_metadata_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<PluginMetadat
 
     if let Some(deps_obj) = dict.get_item("dependencies")? {
         if !deps_obj.is_none() {
-            let deps = deps_obj.downcast::<PyDict>().map_err(|_| {
+            let deps = deps_obj.cast::<PyDict>().map_err(|_| {
                 PyTypeError::new_err("plugin metadata field 'dependencies' must be a mapping")
             })?;
             for (key, value) in deps.iter() {
@@ -268,7 +270,7 @@ fn plugin_metadata_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<PluginMetadat
 
     if let Some(extra_obj) = dict.get_item("metadata")? {
         if !extra_obj.is_none() {
-            let extra = extra_obj.downcast::<PyDict>().map_err(|_| {
+            let extra = extra_obj.cast::<PyDict>().map_err(|_| {
                 PyTypeError::new_err("plugin metadata field 'metadata' must be a mapping")
             })?;
             for (key, value) in extra.iter() {
@@ -313,7 +315,7 @@ fn plugin_metadata_from_attrs(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetad
 
     if let Ok(deps_obj) = plugin.getattr("dependencies") {
         if !deps_obj.is_none() {
-            let deps = deps_obj.downcast::<PyDict>().map_err(|_| {
+            let deps = deps_obj.cast::<PyDict>().map_err(|_| {
                 PyTypeError::new_err("python plugin attribute 'dependencies' must be a mapping")
             })?;
             for (key, value) in deps.iter() {
@@ -338,7 +340,7 @@ fn plugin_metadata_from_attrs(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetad
 
     if let Ok(extra_obj) = plugin.getattr("metadata") {
         if !extra_obj.is_callable() && !extra_obj.is_none() {
-            let extra = extra_obj.downcast::<PyDict>().map_err(|_| {
+            let extra = extra_obj.cast::<PyDict>().map_err(|_| {
                 PyTypeError::new_err("python plugin attribute 'metadata' must be a mapping")
             })?;
             for (key, value) in extra.iter() {
@@ -364,7 +366,7 @@ fn plugin_metadata_from_py(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata
                 return plugin_metadata_from_attrs(plugin);
             }
             let dict = meta_obj
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyTypeError::new_err("metadata() must return a dict-like mapping"))?;
             return plugin_metadata_from_dict(dict);
         }
@@ -373,7 +375,7 @@ fn plugin_metadata_from_py(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata
             return plugin_metadata_from_attrs(plugin);
         }
 
-        if let Ok(dict) = meta_attr.downcast::<PyDict>() {
+        if let Ok(dict) = meta_attr.cast::<PyDict>() {
             let has_id = dict.get_item("id")?.is_some();
             let has_version = dict.get_item("version")?.is_some();
             if has_id && has_version {
@@ -478,7 +480,7 @@ impl PythonPlugin {
             let plugin = plugin.clone();
             let plugin_id = plugin_id.clone();
             let listener: EventListener = Arc::new(move |event| {
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     let payload = match plugin_event_to_py(py, event) {
                         Ok(payload) => payload,
                         Err(err) => {
@@ -513,7 +515,7 @@ impl PythonPlugin {
     }
 
     fn call_hook(&self, hook: &str) -> PureResult<()> {
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             let obj = self.clone_plugin_ref(py)?;
             let obj = obj.bind(py);
             let Ok(method) = obj.getattr(hook) else {
@@ -548,7 +550,7 @@ impl Plugin for PythonPlugin {
     fn on_load(&mut self, ctx: &mut PluginContext) -> st_core::PureResult<()> {
         self.call_hook("on_load")?;
 
-        let targets = Python::with_gil(|py| self.resolve_event_targets(py)).map_err(|err| {
+        let targets = Python::attach(|py| self.resolve_event_targets(py)).map_err(|err| {
             TensorError::Generic(format!(
                 "python plugin '{}' event subscription lookup failed: {err}",
                 self.metadata.id
@@ -580,7 +582,7 @@ impl Plugin for PythonPlugin {
     }
 }
 
-fn validate_callback(py: Python<'_>, callback: &PyObject) -> PyResult<()> {
+fn validate_callback(py: Python<'_>, callback: &Py<PyAny>) -> PyResult<()> {
     let callback_any: &Bound<PyAny> = callback.bind(py);
     if !callback_any.is_callable() {
         return Err(PyTypeError::new_err(
@@ -592,7 +594,7 @@ fn validate_callback(py: Python<'_>, callback: &PyObject) -> PyResult<()> {
 
 fn listener_from_callback(callback: Arc<Mutex<Py<PyAny>>>) -> EventListener {
     Arc::new(move |event| {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let payload = match plugin_event_to_py(py, event) {
                 Ok(payload) => payload,
                 Err(err) => {
@@ -613,7 +615,7 @@ fn listener_from_callback(callback: Arc<Mutex<Py<PyAny>>>) -> EventListener {
 
 #[pyfunction]
 #[pyo3(signature = (event_type, callback))]
-fn subscribe(py: Python<'_>, event_type: &str, callback: PyObject) -> PyResult<usize> {
+fn subscribe(py: Python<'_>, event_type: &str, callback: Py<PyAny>) -> PyResult<usize> {
     validate_callback(py, &callback)?;
 
     init_plugin_system().map_err(tensor_err_to_py)?;
@@ -660,7 +662,7 @@ fn collect_event_types(event_types: &Bound<'_, PyAny>) -> PyResult<Vec<String>> 
 fn subscribe_many(
     py: Python<'_>,
     event_types: &Bound<'_, PyAny>,
-    callback: PyObject,
+    callback: Py<PyAny>,
 ) -> PyResult<Vec<(String, usize)>> {
     validate_callback(py, &callback)?;
     init_plugin_system().map_err(tensor_err_to_py)?;
@@ -704,7 +706,7 @@ pub struct PyPluginQueue {
     event_type: String,
     subscription_id: usize,
     maxlen: usize,
-    queue: Arc<Mutex<VecDeque<PyObject>>>,
+    queue: Arc<Mutex<VecDeque<Py<PyAny>>>>,
     closed: bool,
 }
 
@@ -737,16 +739,16 @@ impl PyPluginQueue {
         self.maxlen
     }
 
-    pub fn poll(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn poll(&self, _py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let mut queue = self
             .queue
             .lock()
             .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
-        Ok(queue.pop_front().map(|item| item.into_py(py)))
+        Ok(queue.pop_front())
     }
 
     #[pyo3(signature = (max_items=None))]
-    pub fn drain(&self, py: Python<'_>, max_items: Option<usize>) -> PyResult<Vec<PyObject>> {
+    pub fn drain(&self, _py: Python<'_>, max_items: Option<usize>) -> PyResult<Vec<Py<PyAny>>> {
         let mut queue = self
             .queue
             .lock()
@@ -755,7 +757,7 @@ impl PyPluginQueue {
         let mut out = Vec::new();
         for _ in 0..take {
             if let Some(item) = queue.pop_front() {
-                out.push(item.into_py(py));
+                out.push(item);
             } else {
                 break;
             }
@@ -795,13 +797,13 @@ impl PyPluginQueue {
         slf
     }
 
-    fn __next__(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn __next__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let mut queue = self
             .queue
             .lock()
             .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
         if let Some(item) = queue.pop_front() {
-            Ok(item.into_py(py))
+            item.into_py_any(py)
         } else {
             Err(PyStopIteration::new_err(()))
         }
@@ -827,7 +829,7 @@ fn listen(event_type: &str, maxlen: usize) -> PyResult<PyPluginQueue> {
     let subscription_id = global_registry().event_bus().subscribe(
         event_type_string.clone(),
         Arc::new(move |event| {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let payload = match plugin_event_to_py(py, event) {
                     Ok(payload) => payload,
                     Err(err) => {
@@ -905,7 +907,7 @@ fn canonicalize_path_for_metadata(path: &Path) -> String {
 
 fn register_python_plugin_from_metadata(
     _py: Python<'_>,
-    plugin: PyObject,
+    plugin: Py<PyAny>,
     metadata: PluginMetadata,
     replace: bool,
 ) -> PyResult<String> {
@@ -969,7 +971,7 @@ fn annotate_entrypoint_metadata(
 
 #[pyfunction]
 #[pyo3(signature = (plugin, *, replace=false))]
-fn register_python_plugin(py: Python<'_>, plugin: PyObject, replace: bool) -> PyResult<String> {
+fn register_python_plugin(py: Python<'_>, plugin: Py<PyAny>, replace: bool) -> PyResult<String> {
     let metadata = {
         let plugin_any = plugin.bind(py);
         plugin_metadata_from_py(plugin_any)?
@@ -998,7 +1000,7 @@ fn unregister_safe(plugin_id: &str, strict: bool) -> PyResult<Vec<String>> {
 
 #[pyfunction]
 #[pyo3(signature = (plugin_id))]
-fn plugin_metadata(py: Python<'_>, plugin_id: &str) -> PyResult<Option<PyObject>> {
+fn plugin_metadata(py: Python<'_>, plugin_id: &str) -> PyResult<Option<Py<PyAny>>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let Some(handle) = global_registry().get(plugin_id) else {
         return Ok(None);
@@ -1046,7 +1048,7 @@ fn unset_config(key: &str) -> PyResult<bool> {
 
 #[pyfunction]
 #[pyo3(signature = (prefix=None))]
-fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
+fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<Py<PyAny>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let ctx = global_registry().context_snapshot();
     let items = ctx.list_config();
@@ -1059,7 +1061,7 @@ fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
         }
         dict.set_item(key, value)?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[pyfunction]
@@ -1079,7 +1081,7 @@ fn clear_config(prefix: Option<&str>, strict: bool) -> PyResult<Vec<String>> {
 
 #[pyfunction]
 #[pyo3(signature = (name, service))]
-fn register_service(name: &str, service: PyObject) -> PyResult<()> {
+fn register_service(name: &str, service: Py<PyAny>) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let ctx = global_registry().context_snapshot();
     ctx.register_service(name, Mutex::new(service));
@@ -1088,7 +1090,7 @@ fn register_service(name: &str, service: PyObject) -> PyResult<()> {
 
 #[pyfunction]
 #[pyo3(signature = (name))]
-fn get_service(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
+fn get_service(py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let ctx = global_registry().context_snapshot();
     let Some(service) = ctx.get_service::<Mutex<Py<PyAny>>>(name) else {
@@ -1223,7 +1225,7 @@ fn load_module_from_file<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let sys = PyModule::import(py, "sys")?;
     let modules_any = sys.getattr("modules")?;
-    let modules: &Bound<'py, PyDict> = modules_any.downcast()?;
+    let modules: &Bound<'py, PyDict> = modules_any.cast()?;
 
     if !reload {
         if let Some(existing) = modules.get_item(module_name)? {
@@ -1266,7 +1268,7 @@ fn load_module_from_file<'py>(
             .getattr("compile")?
             .call1((source, path_string, "exec"))?;
         let module_dict = module.getattr("__dict__")?;
-        let module_dict_obj = module_dict.to_object(py);
+        let module_dict_obj = module_dict.clone().unbind().into_any();
         builtins
             .getattr("exec")?
             .call1((code, module_dict_obj.clone_ref(py), module_dict_obj))?;
@@ -1437,7 +1439,7 @@ impl PyPluginEventRecorder {
             .map_err(|err| PyValueError::new_err(format!("failed to encode snapshot: {err}")))
     }
 
-    pub fn snapshot(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn snapshot(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let trace = self.inner()?.snapshot();
         let value = serde_json::to_value(trace)
             .map_err(|err| PyValueError::new_err(format!("failed to encode snapshot: {err}")))?;
@@ -1541,7 +1543,7 @@ fn list_plugins() -> PyResult<Vec<String>> {
 
 #[pyfunction]
 #[pyo3(signature = (*, internal_only=false))]
-fn dependency_graph(py: Python<'_>, internal_only: bool) -> PyResult<PyObject> {
+fn dependency_graph(py: Python<'_>, internal_only: bool) -> PyResult<Py<PyAny>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
 
     let graph = global_registry().dependency_graph(internal_only);
@@ -1552,12 +1554,12 @@ fn dependency_graph(py: Python<'_>, internal_only: bool) -> PyResult<PyObject> {
         let deps = graph.get(&key).cloned().unwrap_or_default();
         out.set_item(key, deps)?;
     }
-    Ok(out.into_py(py))
+    out.into_py_any(py)
 }
 
 #[pyfunction]
 #[pyo3(signature = (*, internal_only=false, strict=false))]
-fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> PyResult<PyObject> {
+fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> PyResult<Py<PyAny>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
 
     let summary = global_registry().validate_dependency_graph(internal_only);
@@ -1599,12 +1601,12 @@ fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> P
     }
     dict.set_item("cycles", cycles)?;
 
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[pyfunction]
 #[pyo3(signature = (event_type, payload=None))]
-fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyResult<()> {
+fn publish(py: Python<'_>, event_type: &str, payload: Option<Py<PyAny>>) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let event = custom_event_from_py(py, event_type, payload)?;
     global_registry().event_bus().publish(&event);
@@ -1614,7 +1616,7 @@ fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyRes
 fn custom_event_from_py(
     py: Python<'_>,
     event_type: &str,
-    payload: Option<PyObject>,
+    payload: Option<Py<PyAny>>,
 ) -> PyResult<PluginEvent> {
     Ok(match payload {
         None => PluginEvent::custom(event_type, serde_json::Value::Null),
@@ -1631,7 +1633,10 @@ fn custom_event_from_py(
     })
 }
 
-fn dispatch_report_to_py(py: Python<'_>, report: &PluginEventDispatchReport) -> PyResult<PyObject> {
+fn dispatch_report_to_py(
+    py: Python<'_>,
+    report: &PluginEventDispatchReport,
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("ok", report.ok())?;
     dict.set_item("event_type", &report.event_type)?;
@@ -1647,7 +1652,7 @@ fn dispatch_report_to_py(py: Python<'_>, report: &PluginEventDispatchReport) -> 
         failures.append(item)?;
     }
     dict.set_item("failures", failures)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 /// Publish a custom event and report Rust-level listener panics.
@@ -1658,8 +1663,8 @@ fn dispatch_report_to_py(py: Python<'_>, report: &PluginEventDispatchReport) -> 
 fn publish_report(
     py: Python<'_>,
     event_type: &str,
-    payload: Option<PyObject>,
-) -> PyResult<PyObject> {
+    payload: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
     let event = custom_event_from_py(py, event_type, payload)?;
     let report = global_registry().event_bus().publish_report(&event);
@@ -1704,7 +1709,7 @@ fn load_entrypoints(
         let kwargs = PyDict::new(py);
         kwargs.set_item("group", group)?;
         select.call((), Some(&kwargs))?
-    } else if let Ok(dict) = entry_points.downcast::<PyDict>() {
+    } else if let Ok(dict) = entry_points.cast::<PyDict>() {
         match dict.get_item(group)? {
             Some(value) => value,
             None => py.None().into_bound(py),
@@ -1725,7 +1730,7 @@ fn load_entrypoints(
 
     struct PendingPlugin {
         metadata: PluginMetadata,
-        plugin: PyObject,
+        plugin: Py<PyAny>,
     }
 
     let mut pending = Vec::new();
@@ -1885,7 +1890,7 @@ fn load_path(
 
     let sys = PyModule::import(py, "sys")?;
     let sys_path_any = sys.getattr("path")?;
-    let sys_path: &Bound<'_, PyList> = sys_path_any.downcast()?;
+    let sys_path: &Bound<'_, PyList> = sys_path_any.cast()?;
     if add_sys_path {
         let mut dirs: Vec<String> = files
             .iter()
@@ -1920,7 +1925,7 @@ fn load_path(
     (|| -> PyResult<Vec<String>> {
         struct PendingPlugin {
             metadata: PluginMetadata,
-            plugin: PyObject,
+            plugin: Py<PyAny>,
         }
 
         let mut pending = Vec::new();
@@ -2158,6 +2163,6 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     )?;
 
     parent.add_submodule(&module)?;
-    parent.add("plugin", module.to_object(py))?;
+    parent.add("plugin", module.clone().unbind().into_any())?;
     Ok(())
 }

@@ -357,7 +357,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "token_coherence_levels",
         ],
     )?;
-    let module_obj = module.to_object(py);
+    let module_obj = module.clone().unbind().into_any();
     parent.add_submodule(&module)?;
     parent.add("text", module_obj.clone_ref(py))?;
     parent.add_function(wrap_pyfunction!(token_scale_stack, parent)?)?;
@@ -380,7 +380,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         "__doc__",
         "Contextual resonance narrators (compiled without the 'text' feature)",
     )?;
-    let module_obj = module.to_object(py);
+    let module_obj = module.clone().unbind().into_any();
     parent.add_submodule(&module)?;
     parent.add("text", module_obj)?;
     Ok(())

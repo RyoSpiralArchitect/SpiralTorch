@@ -4,7 +4,7 @@ use pyo3::types::PyDict;
 #[cfg(feature = "selfsup")]
 use pyo3::wrap_pyfunction;
 #[cfg(feature = "selfsup")]
-use pyo3::IntoPy;
+use pyo3::IntoPyObjectExt;
 #[cfg(feature = "selfsup")]
 use spiral_selfsup::{contrastive, masked, ObjectiveError};
 
@@ -22,7 +22,7 @@ fn info_nce(
     positives: Vec<Vec<f32>>,
     temperature: f32,
     normalize: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let result = contrastive::info_nce_loss(&anchors, &positives, temperature, normalize)
         .map_err(objective_err)?;
 
@@ -37,7 +37,7 @@ fn info_nce(
     dict.set_item("batch", result.batch)?;
     dict.set_item("temperature", temperature)?;
     dict.set_item("normalized", normalize)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "selfsup")]
@@ -48,7 +48,7 @@ fn masked_mse(
     predictions: Vec<Vec<f32>>,
     targets: Vec<Vec<f32>>,
     mask_indices: Vec<Vec<usize>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let result =
         masked::masked_mse_loss(&predictions, &targets, &mask_indices).map_err(objective_err)?;
 
@@ -56,7 +56,7 @@ fn masked_mse(
     dict.set_item("loss", result.loss)?;
     dict.set_item("total_masked", result.total_masked)?;
     dict.set_item("per_example", result.per_example)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "selfsup")]

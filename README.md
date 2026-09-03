@@ -886,7 +886,10 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-featu
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 
-If your local `python` aborts during startup because of a third-party `sitecustomize.py`, rerun the commands above with `PYTHONNOUSERSITE=1` (or `python -s`).
+If your local `python` aborts or prints startup output from a third-party
+`sitecustomize.py`, rerun the build with `PYTHONNOUSERSITE=1`. Startup output can
+also confuse PyO3's interpreter probe; `python -s` disables user-site hooks for
+direct Python invocations.
 
 Linux note: for manylinux2014 wheels you either need a manylinux container (e.g. via GitHub Actions) or `maturin --compatibility manylinux2014 --zig` (requires `pip install maturin[zig]`). Building directly on Ubuntu without these may produce wheels that won’t install on older distros.
 
@@ -903,7 +906,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.18
+VERSION=0.4.19
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

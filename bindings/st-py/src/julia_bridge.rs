@@ -4,7 +4,7 @@ use pyo3::{wrap_pyfunction, Bound};
 
 use julia_ffi_poc::{tempo_latency_score as rust_tempo_latency_score, ZTigerOptim};
 
-#[pyclass(module = "spiraltorch.julia", name = "ZTigerOptim")]
+#[pyclass(module = "spiraltorch.julia", name = "ZTigerOptim", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZTigerOptim {
     inner: ZTigerOptim,
@@ -49,13 +49,13 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add("__all__", vec!["ZTigerOptim", "tempo_latency_score"])?;
 
     parent.add_submodule(&module)?;
-    let module_obj = module.to_object(py);
+    let module_obj = module.clone().unbind().into_any();
     parent.add("julia", module_obj)?;
 
     let optim = module.getattr("ZTigerOptim")?;
-    parent.add("ZTigerOptim", optim.to_object(py))?;
+    parent.add("ZTigerOptim", optim.clone().unbind().into_any())?;
     let tempo = module.getattr("tempo_latency_score")?;
-    parent.add("tempo_latency_score", tempo.to_object(py))?;
+    parent.add("tempo_latency_score", tempo.clone().unbind().into_any())?;
 
     Ok(())
 }

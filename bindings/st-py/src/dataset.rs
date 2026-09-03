@@ -14,7 +14,7 @@ use pyo3::PyRefMut;
 use st_nn::dataset::{DataLoader as RustDataLoader, DataLoaderBatches, Dataset as RustDataset};
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.dataset", name = "Dataset")]
+#[pyclass(module = "spiraltorch.dataset", name = "Dataset", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyDataset {
     inner: RustDataset,
@@ -85,7 +85,7 @@ impl PyDataset {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.dataset", name = "DataLoader")]
+#[pyclass(module = "spiraltorch.dataset", name = "DataLoader", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyDataLoader {
     inner: RustDataLoader,

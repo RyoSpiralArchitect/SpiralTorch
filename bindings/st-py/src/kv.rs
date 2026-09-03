@@ -6,6 +6,7 @@ use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
+use pyo3::IntoPyObjectExt;
 use pyo3::{wrap_pyfunction, PyRef};
 #[cfg(feature = "kv-redis")]
 use serde_json::Value as JsonValue;
@@ -190,7 +191,7 @@ fn kv_choice_key_from_rank_plan(plan: PyRef<'_, PyRankPlan>, namespace: &str) ->
 }
 
 #[pyfunction]
-fn kv_choice_from_rank_plan(py: Python<'_>, plan: PyRef<'_, PyRankPlan>) -> PyResult<PyObject> {
+fn kv_choice_from_rank_plan(py: Python<'_>, plan: PyRef<'_, PyRankPlan>) -> PyResult<Py<PyAny>> {
     let plan = plan.plan();
     let choice = &plan.choice;
     let dict = PyDict::new(py);
@@ -246,7 +247,7 @@ fn kv_choice_from_rank_plan(py: Python<'_>, plan: PyRef<'_, PyRankPlan>) -> PyRe
     } else {
         dict.set_item("latency_window", py.None())?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[pyfunction]
@@ -260,7 +261,7 @@ fn kv_json_set_options(
     keep_ttl: bool,
     persist: bool,
     condition: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let condition = condition_label(condition)?;
     let expiry = selected_expiry(
         expiry_seconds,
@@ -285,7 +286,7 @@ fn kv_json_set_options(
     let fragments = PyList::empty(py);
     append_option_fragments(py, &fragments, expiry, keep_ttl, persist, condition)?;
     dict.set_item("fragments", fragments)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "kv-redis")]
@@ -405,7 +406,7 @@ fn kv_redis_set_json(
 
 #[cfg(feature = "kv-redis")]
 #[pyfunction]
-fn kv_redis_get_json(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObject> {
+fn kv_redis_get_json(py: Python<'_>, url: &str, key: &str) -> PyResult<Py<PyAny>> {
     match st_kv::redis_get_json::<JsonValue>(url, key).map_err(kv_err_to_py)? {
         Some(value) => json_to_py(py, &value),
         None => Ok(py.None()),
@@ -414,7 +415,7 @@ fn kv_redis_get_json(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObject>
 
 #[cfg(not(feature = "kv-redis"))]
 #[pyfunction]
-fn kv_redis_get_json(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObject> {
+fn kv_redis_get_json(py: Python<'_>, url: &str, key: &str) -> PyResult<Py<PyAny>> {
     let _ = (py, url, key);
     Err(kv_unavailable())
 }
@@ -448,7 +449,7 @@ fn kv_redis_set_choice(
 
 #[cfg(feature = "kv-redis")]
 #[pyfunction]
-fn kv_redis_get_choice(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObject> {
+fn kv_redis_get_choice(py: Python<'_>, url: &str, key: &str) -> PyResult<Py<PyAny>> {
     match st_kv::redis_get_choice(url, key).map_err(kv_err_to_py)? {
         Some(choice) => {
             let value = serde_json::to_value(choice).map_err(|err| {
@@ -462,7 +463,7 @@ fn kv_redis_get_choice(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObjec
 
 #[cfg(not(feature = "kv-redis"))]
 #[pyfunction]
-fn kv_redis_get_choice(py: Python<'_>, url: &str, key: &str) -> PyResult<PyObject> {
+fn kv_redis_get_choice(py: Python<'_>, url: &str, key: &str) -> PyResult<Py<PyAny>> {
     let _ = (py, url, key);
     Err(kv_unavailable())
 }
@@ -502,7 +503,7 @@ fn kv_redis_lrange_choice(
     key: &str,
     start: isize,
     stop: isize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let choices = st_kv::redis_lrange_choice(url, key, start, stop).map_err(kv_err_to_py)?;
     let value = serde_json::to_value(choices)
         .map_err(|err| PyValueError::new_err(format!("failed to serialize choices: {err}")))?;
@@ -518,7 +519,7 @@ fn kv_redis_lrange_choice(
     key: &str,
     start: isize,
     stop: isize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let _ = (py, url, key, start, stop);
     Err(kv_unavailable())
 }

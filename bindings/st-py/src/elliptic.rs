@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use pyo3::IntoPyObjectExt;
 use st_core::theory::microlocal::{EllipticTelemetry, EllipticWarp};
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
@@ -192,7 +193,7 @@ impl PyEllipticTelemetry {
         self.inner.event_tags().to_vec()
     }
 
-    fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn as_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("curvature_radius", self.inner.curvature_radius)?;
         dict.set_item("geodesic_radius", self.inner.geodesic_radius)?;
@@ -214,7 +215,7 @@ impl PyEllipticTelemetry {
         dict.set_item("lie_quaternion", self.inner.lie_frame.quaternion())?;
         dict.set_item("lie_rotation", self.inner.lie_frame.rotation_matrix())?;
         dict.set_item("event_tags", self.inner.event_tags().to_vec())?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 

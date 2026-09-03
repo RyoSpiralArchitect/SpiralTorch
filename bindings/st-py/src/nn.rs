@@ -6,6 +6,8 @@ use pyo3::types::PyDict;
 use pyo3::types::PyModule;
 #[cfg(feature = "nn")]
 use pyo3::wrap_pyfunction;
+#[cfg(feature = "nn")]
+use pyo3::IntoPyObjectExt;
 
 #[cfg(feature = "nn")]
 use pyo3::exceptions::PyTypeError;
@@ -350,7 +352,7 @@ impl PoolMode {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn", name = "CurvatureDecision")]
+#[pyclass(module = "spiraltorch.nn", name = "CurvatureDecision", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct PyCurvatureDecision {
     inner: RustCurvatureDecision,
@@ -1476,7 +1478,7 @@ impl PyLinear {
         &mut self,
         py: Python<'_>,
         state: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let incoming = extract_state_dict_required(py, state)?;
         let report = exact_state_dict_report(py, &expected, &incoming)?;
@@ -1493,7 +1495,7 @@ impl PyLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         mapped_state_dict_report(py, &expected, checkpoint, key_map)
     }
@@ -1503,7 +1505,7 @@ impl PyLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let (report, adapted) =
             mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
@@ -1669,7 +1671,7 @@ impl PyLoraLinear {
         &mut self,
         py: Python<'_>,
         state: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let incoming = extract_state_dict_required(py, state)?;
         let report = exact_state_dict_report(py, &expected, &incoming)?;
@@ -1686,7 +1688,7 @@ impl PyLoraLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         mapped_state_dict_report(py, &expected, checkpoint, key_map)
     }
@@ -1696,7 +1698,7 @@ impl PyLoraLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let (report, adapted) =
             mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
@@ -1713,7 +1715,7 @@ impl PyLoraLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.base_state_dict().map_err(tensor_err_to_py)?;
         mapped_state_dict_report(py, &expected, checkpoint, key_map)
     }
@@ -1723,7 +1725,7 @@ impl PyLoraLinear {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.base_state_dict().map_err(tensor_err_to_py)?;
         let (report, adapted) =
             mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
@@ -1973,7 +1975,7 @@ impl PyEmbedding {
         &mut self,
         py: Python<'_>,
         state: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let incoming = extract_state_dict_required(py, state)?;
         let report = exact_state_dict_report(py, &expected, &incoming)?;
@@ -1990,7 +1992,7 @@ impl PyEmbedding {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         mapped_state_dict_report(py, &expected, checkpoint, key_map)
     }
@@ -2000,7 +2002,7 @@ impl PyEmbedding {
         py: Python<'_>,
         checkpoint: &Bound<'_, PyAny>,
         key_map: &Bound<'_, PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
         let (report, adapted) =
             mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
@@ -3401,7 +3403,7 @@ impl PyZSpaceLayerNorm {
     }
 
     #[pyo3(signature = (*, full=false))]
-    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<PyObject>> {
+    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<Py<PyAny>>> {
         let Some(telemetry) = self.inner()?.telemetry() else {
             return Ok(None);
         };
@@ -3416,7 +3418,7 @@ impl PyZSpaceLayerNorm {
             dict.set_item("projected", telemetry.projected().to_vec())?;
             dict.set_item("jacobian", telemetry.jacobian().to_vec())?;
         }
-        Ok(Some(dict.into_py(py)))
+        Ok(Some(dict.into_py_any(py)?))
     }
 
     #[pyo3(signature = (x))]
@@ -3785,7 +3787,7 @@ impl PyZSpaceBatchNorm1d {
     }
 
     #[pyo3(signature = (*, full=false))]
-    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<PyObject>> {
+    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<Py<PyAny>>> {
         let Some(telemetry) = self.inner()?.telemetry() else {
             return Ok(None);
         };
@@ -3800,7 +3802,7 @@ impl PyZSpaceBatchNorm1d {
             dict.set_item("projected", telemetry.projected().to_vec())?;
             dict.set_item("jacobian", telemetry.jacobian().to_vec())?;
         }
-        Ok(Some(dict.into_py(py)))
+        Ok(Some(dict.into_py_any(py)?))
     }
 
     #[pyo3(signature = (x))]
@@ -4693,7 +4695,7 @@ impl PyRoundtableSchedule {
         Ok((energy.above, energy.here, energy.beneath))
     }
 
-    pub fn band_energy_detail(&self, py: Python<'_>, gradient: &PyTensor) -> PyResult<PyObject> {
+    pub fn band_energy_detail(&self, py: Python<'_>, gradient: &PyTensor) -> PyResult<Py<PyAny>> {
         let energy = self
             .inner
             .band_energy(&gradient.inner)
@@ -4749,7 +4751,7 @@ impl PyEpochStats {
     }
 
     #[getter]
-    pub fn tensor_backend(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn tensor_backend(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         tensor_backend_stats_to_pydict(py, self.inner.tensor_backend)
     }
 
@@ -4768,7 +4770,7 @@ impl PyEpochStats {
 fn tensor_backend_stats_to_pydict(
     py: Python<'_>,
     stats: RustEpochTensorBackendStats,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("ops_total", stats.ops_total)?;
     dict.set_item("fallbacks", stats.fallbacks)?;
@@ -4827,11 +4829,11 @@ fn tensor_backend_stats_to_pydict(
         stats.embedding_repeated_token_indices,
     )?;
     dict.set_item("embedding_token_repairs", stats.embedding_token_repairs)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
-fn epoch_stats_to_pydict(py: Python<'_>, stats: RustEpochStats) -> PyResult<PyObject> {
+fn epoch_stats_to_pydict(py: Python<'_>, stats: RustEpochStats) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("batches", stats.batches)?;
     dict.set_item("total_loss", stats.total_loss)?;
@@ -4840,14 +4842,14 @@ fn epoch_stats_to_pydict(py: Python<'_>, stats: RustEpochStats) -> PyResult<PyOb
         "tensor_backend",
         tensor_backend_stats_to_pydict(py, stats.tensor_backend)?,
     )?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn training_run_report_to_pydict(
     py: Python<'_>,
     report: RustTrainingRunReport,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("epochs_run", report.epochs_run())?;
     dict.set_item("best_epoch_index", report.best_epoch_index)?;
@@ -4879,14 +4881,14 @@ fn training_run_report_to_pydict(
         history.append(item)?;
     }
     dict.set_item("history", history)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn parameter_control_receipt_to_pydict(
     py: Python<'_>,
     receipt: ZSpaceParameterControlReceipt,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("control_contract_version", receipt.control_contract_version)?;
     dict.set_item("control_kind", receipt.control_kind)?;
@@ -4915,7 +4917,7 @@ fn parameter_control_receipt_to_pydict(
         receipt.source_effective_learning_rate,
     )?;
     dict.set_item("changed", receipt.changed)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
@@ -5275,7 +5277,7 @@ struct StateDictKeyRule {
 
 #[cfg(feature = "nn")]
 fn parse_state_dict_key_rules(key_map: &Bound<'_, PyAny>) -> PyResult<Vec<StateDictKeyRule>> {
-    let dict = key_map.downcast::<PyDict>().map_err(|_| {
+    let dict = key_map.cast::<PyDict>().map_err(|_| {
         PyTypeError::new_err(
             "key_map must be a dict mapping source keys to target keys or rule dicts",
         )
@@ -5291,7 +5293,7 @@ fn parse_state_dict_key_rules(key_map: &Bound<'_, PyAny>) -> PyResult<Vec<StateD
             });
             continue;
         }
-        let rule_dict = rule_obj.downcast::<PyDict>().map_err(|_| {
+        let rule_dict = rule_obj.cast::<PyDict>().map_err(|_| {
             PyTypeError::new_err(
                 "key_map values must be target strings or dicts with target/transform fields",
             )
@@ -5408,34 +5410,34 @@ fn transform_state_tensor(
 }
 
 #[cfg(feature = "nn")]
-fn shape_to_py(py: Python<'_>, shape: Option<(usize, usize)>) -> PyObject {
+fn shape_to_py(py: Python<'_>, shape: Option<(usize, usize)>) -> PyResult<Py<PyAny>> {
     match shape {
-        Some((rows, cols)) => (rows, cols).into_py(py),
-        None => py.None(),
+        Some((rows, cols)) => (rows, cols).into_py_any(py),
+        None => Ok(py.None()),
     }
 }
 
 #[cfg(feature = "nn")]
 impl StateDictEntryReport {
-    fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn to_py(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("name", &self.name)?;
         dict.set_item("status", &self.status)?;
         dict.set_item("source_name", &self.source_name)?;
         dict.set_item("transform", &self.transform)?;
-        dict.set_item("expected_shape", shape_to_py(py, self.expected_shape))?;
-        dict.set_item("source_shape", shape_to_py(py, self.source_shape))?;
+        dict.set_item("expected_shape", shape_to_py(py, self.expected_shape)?)?;
+        dict.set_item("source_shape", shape_to_py(py, self.source_shape)?)?;
         dict.set_item(
             "original_source_shape",
-            shape_to_py(py, self.original_source_shape),
+            shape_to_py(py, self.original_source_shape)?,
         )?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
 #[cfg(feature = "nn")]
 impl StateDictReport {
-    fn into_py(self, py: Python<'_>) -> PyResult<PyObject> {
+    fn into_py(self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("compatible", self.compatible)?;
         dict.set_item("matched", self.matched)?;
@@ -5453,10 +5455,10 @@ impl StateDictReport {
             entries.append(entry.to_py(py)?)?;
         }
         dict.set_item("entries", entries)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
-    fn into_load_py(self, py: Python<'_>) -> PyResult<PyObject> {
+    fn into_load_py(self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         dict.set_item("matched", self.compatible)?;
         dict.set_item("compatible", self.compatible)?;
@@ -5470,7 +5472,7 @@ impl StateDictReport {
         let matched_subset = PyDict::new(py);
         matched_subset.set_item("hash", self.matched_subset_hash)?;
         dict.set_item("matched_subset", matched_subset)?;
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 }
 
@@ -5656,7 +5658,7 @@ fn mapped_state_dict_report(
     expected: &std::collections::HashMap<String, Tensor>,
     checkpoint: &Bound<'_, PyAny>,
     key_map: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let (report, _) = mapped_state_dict_report_and_subset(py, expected, checkpoint, key_map)?;
     report.into_py(py)
 }
@@ -5665,14 +5667,14 @@ fn mapped_state_dict_report(
 fn state_dict_to_pylist(
     py: Python<'_>,
     state: std::collections::HashMap<String, Tensor>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let mut entries: Vec<_> = state.into_iter().collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     let list = PyList::empty(py);
     for (name, tensor) in entries {
         list.append((name, Py::new(py, PyTensor::from_tensor(tensor))?))?;
     }
-    Ok(list.into_py(py))
+    list.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
@@ -5689,7 +5691,7 @@ fn save_json(module: &Bound<'_, PyAny>, path: &str) -> PyResult<()> {
 #[cfg(feature = "nn")]
 #[pyfunction]
 #[pyo3(signature = (module, path))]
-fn load_json(module: &Bound<'_, PyAny>, path: &str) -> PyResult<PyObject> {
+fn load_json(module: &Bound<'_, PyAny>, path: &str) -> PyResult<Py<PyAny>> {
     if module.is_none() {
         let state = nn_io::load_state_dict_json(path).map_err(tensor_err_to_py)?;
         return state_dict_to_pylist(module.py(), state);
@@ -5712,7 +5714,7 @@ fn save_bincode(module: &Bound<'_, PyAny>, path: &str) -> PyResult<()> {
 #[cfg(feature = "nn")]
 #[pyfunction]
 #[pyo3(signature = (module, path))]
-fn load_bincode(module: &Bound<'_, PyAny>, path: &str) -> PyResult<PyObject> {
+fn load_bincode(module: &Bound<'_, PyAny>, path: &str) -> PyResult<Py<PyAny>> {
     if module.is_none() {
         let state = nn_io::load_state_dict_bincode(path).map_err(tensor_err_to_py)?;
         return state_dict_to_pylist(module.py(), state);
@@ -5825,7 +5827,7 @@ impl PyNnModuleTrainer {
         min_delta: f32,
         shuffle_seed: Option<u64>,
         restore_best: bool,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         if !min_delta.is_finite() {
             return Err(PyValueError::new_err("min_delta must be finite"));
         }
@@ -5899,7 +5901,7 @@ impl PyNnModuleTrainer {
     }
 
     #[getter]
-    pub fn runtime_execution_plan(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn runtime_execution_plan(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let Some(plan) = self.inner.runtime_execution_plan() else {
             return Ok(None);
         };
@@ -5946,7 +5948,7 @@ impl PyNnModuleTrainer {
         self.inner.disable_realgrad();
     }
 
-    pub fn optimizer_config_contract(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn optimizer_config_contract(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let contract = self
             .inner
             .optimizer_config_contract()
@@ -5960,7 +5962,7 @@ impl PyNnModuleTrainer {
         &self,
         py: Python<'_>,
         module: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let checkpoint = with_module_ref(module, |module_inner| {
             self.inner
                 .optimizer_checkpoint(module_inner)
@@ -5976,7 +5978,7 @@ impl PyNnModuleTrainer {
         py: Python<'_>,
         module: &Bound<PyAny>,
         checkpoint: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let value = crate::json::py_to_json(checkpoint)?;
         let checkpoint: TrainerOptimizerCheckpoint = serde_json::from_value(value)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -5990,7 +5992,7 @@ impl PyNnModuleTrainer {
         json_to_py(py, &value)
     }
 
-    pub fn external_state_checkpoint(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn external_state_checkpoint(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let checkpoint = self
             .inner
             .external_state_checkpoint()
@@ -6004,7 +6006,7 @@ impl PyNnModuleTrainer {
         &mut self,
         py: Python<'_>,
         checkpoint: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let value = crate::json::py_to_json(checkpoint)?;
         let checkpoint: TrainerExternalStateCheckpoint = serde_json::from_value(value)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -6021,7 +6023,7 @@ impl PyNnModuleTrainer {
         &self,
         py: Python<'_>,
         module: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let bundle = with_module_ref(module, |module_inner| {
             self.inner
                 .runtime_checkpoint_bundle(module_inner)
@@ -6037,7 +6039,7 @@ impl PyNnModuleTrainer {
         py: Python<'_>,
         module: &Bound<PyAny>,
         bundle: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let value = crate::json::py_to_json(bundle)?;
         let bundle: TrainerRuntimeCheckpointBundle = serde_json::from_value(value)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -6082,7 +6084,7 @@ impl PyNnModuleTrainer {
         self.inner.disable_curvature_scheduler();
     }
 
-    pub fn curvature_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn curvature_metrics(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let metrics = self.inner.curvature_metrics();
         match metrics {
             Some(metrics) => {
@@ -6090,7 +6092,7 @@ impl PyNnModuleTrainer {
                 dict.set_item("raw_pressure", metrics.raw_pressure)?;
                 dict.set_item("smoothed_pressure", metrics.smoothed_pressure)?;
                 dict.set_item("curvature", metrics.curvature)?;
-                Ok(Some(dict.into_py(py)))
+                Ok(Some(dict.into_py_any(py)?))
             }
             None => Ok(None),
         }
@@ -6113,7 +6115,7 @@ impl PyNnModuleTrainer {
             .push_coherence_diagnostics(diagnostics.inner.clone())
     }
 
-    pub fn spectral_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn spectral_metrics(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let metrics = self.inner.spectral_metrics();
         match metrics {
             Some(metrics) => {
@@ -6235,7 +6237,7 @@ impl PyNnModuleTrainer {
                 } else {
                     dict.set_item("band", py.None())?;
                 }
-                Ok(Some(dict.into_py(py)))
+                Ok(Some(dict.into_py_any(py)?))
             }
             None => Ok(None),
         }
@@ -6258,7 +6260,7 @@ impl PyNnModuleTrainer {
         self.inner.disable_gnn_roundtable_bridge();
     }
 
-    pub fn gnn_roundtable_signal(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn gnn_roundtable_signal(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .gnn_roundtable_signal()
             .as_ref()
@@ -6298,7 +6300,7 @@ impl PyNnModuleTrainer {
         py: Python<'_>,
         module: &Bound<PyAny>,
         report: &Bound<PyAny>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let report = crate::json::py_to_json(report)?;
         let control = zspace_parameter_control_from_value(report).map_err(|error| {
             PyValueError::new_err(format!("invalid Z-space meta-optimizer report: {error}"))
@@ -6368,7 +6370,7 @@ impl PyNnModuleTrainer {
         self.inner.disable_desire_roundtable_bridge();
     }
 
-    pub fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let summary = self.inner.desire_roundtable_summary();
         match summary {
             Some(summary) => Ok(Some(desire_roundtable_summary_to_py(py, &summary)?)),
@@ -6399,13 +6401,13 @@ fn desire_phase_label(phase: DesirePhase) -> &'static str {
 }
 
 #[cfg(feature = "nn")]
-fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
+fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("alpha", weights.alpha)?;
     dict.set_item("beta", weights.beta)?;
     dict.set_item("gamma", weights.gamma)?;
     dict.set_item("lambda", weights.lambda)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
@@ -6445,7 +6447,7 @@ fn geometry_bias_update_from_source(
 fn geometry_bias_metrics_to_py(
     py: Python<'_>,
     metrics: &GeometryBiasMetrics,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("accuracy_mean", metrics.accuracy_mean)?;
     dict.set_item("fairness_mean", metrics.fairness_mean)?;
@@ -6459,14 +6461,14 @@ fn geometry_bias_metrics_to_py(
     } else {
         dict.set_item("latest", py.None())?;
     }
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn geometry_coherence_to_py(
     py: Python<'_>,
     sample: &GeometryCoherenceSample,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("z_energy", sample.z_energy)?;
     dict.set_item("roundtable_energy", sample.roundtable_energy)?;
@@ -6474,14 +6476,14 @@ fn geometry_coherence_to_py(
     dict.set_item("balance", sample.balance())?;
     dict.set_item("coherence", sample.coherence())?;
     dict.set_item("timestamp_ms", system_time_ms(sample.timestamp))?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn desire_trainer_summary_to_py(
     py: Python<'_>,
     summary: &st_nn::DesireTrainerSummary,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("total", summary.total)?;
     dict.set_item("observation", summary.observation)?;
@@ -6499,14 +6501,14 @@ fn desire_trainer_summary_to_py(
     dict.set_item("trigger_mean_entropy", summary.trigger_mean_entropy)?;
     dict.set_item("trigger_mean_temperature", summary.trigger_mean_temperature)?;
     dict.set_item("trigger_mean_samples", summary.trigger_mean_samples)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn desire_roundtable_summary_to_py(
     py: Python<'_>,
     summary: &DesireRoundtableSummary,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("steps", summary.steps)?;
     dict.set_item("triggers", summary.triggers)?;
@@ -6521,14 +6523,14 @@ fn desire_roundtable_summary_to_py(
     dict.set_item("mean_beneath", summary.mean_beneath)?;
     dict.set_item("mean_drift", summary.mean_drift)?;
     dict.set_item("last_timestamp_ms", system_time_ms(summary.last_timestamp))?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "nn")]
 fn gnn_roundtable_signal_to_py(
     py: Python<'_>,
     signal: &RoundtableBandSignal,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let observation = signal.observation().map_err(tensor_err_to_py)?;
     let issued_at = signal.issued_at_checkpoint();
     issued_at
@@ -6575,7 +6577,7 @@ impl PyRoundtableGnnBridge {
         self.inner.is_empty()
     }
 
-    pub fn latest(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn latest(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.inner
             .latest()
             .map_err(tensor_err_to_py)?
@@ -6584,13 +6586,13 @@ impl PyRoundtableGnnBridge {
             .transpose()
     }
 
-    pub fn drain(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn drain(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let signals = self.inner.drain().map_err(tensor_err_to_py)?;
         let list = PyList::empty(py);
         for signal in &signals {
             list.append(gnn_roundtable_signal_to_py(py, signal)?)?;
         }
-        Ok(list.into_py(py))
+        list.into_py_any(py)
     }
 
     fn __repr__(&self) -> String {
@@ -6626,7 +6628,7 @@ impl PyDesireTrainerBridge {
         self.inner.is_empty()
     }
 
-    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let summary = self.inner.drain_summary().map_err(tensor_err_to_py)?;
         match summary {
             Some(summary) => Ok(Some(desire_trainer_summary_to_py(py, &summary)?)),
@@ -6685,7 +6687,7 @@ impl PyDesireRoundtableBridge {
         self.inner.set_drift_gain(drift_gain);
     }
 
-    pub fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn impulse(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let impulse = self.inner.impulse().map_err(tensor_err_to_py)?;
         let Some(impulse) = impulse else {
             return Ok(None);
@@ -6701,10 +6703,10 @@ impl PyDesireRoundtableBridge {
         )?;
         dict.set_item("drift", impulse.drift)?;
         dict.set_item("timestamp_ms", system_time_ms(impulse.timestamp))?;
-        Ok(Some(dict.into_py(py)))
+        Ok(Some(dict.into_py_any(py)?))
     }
 
-    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let summary = self.inner.drain_summary().map_err(tensor_err_to_py)?;
         match summary {
             Some(summary) => Ok(Some(desire_roundtable_summary_to_py(py, &summary)?)),
@@ -6797,7 +6799,7 @@ impl PyDesireTelemetryBundle {
         }
     }
 
-    pub fn drain_trainer_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn drain_trainer_summary(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let Some(bridge) = self.trainer.as_ref() else {
             return Ok(None);
         };
@@ -6808,7 +6810,7 @@ impl PyDesireTelemetryBundle {
         }
     }
 
-    pub fn drain_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn drain_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         let Some(bridge) = self.roundtable.as_ref() else {
             return Ok(None);
         };
@@ -6929,7 +6931,7 @@ fn maxwell_pulse_from_any(pulse: &Bound<'_, PyAny>) -> PyResult<MaxwellZPulse> {
         return Ok(handle.bind(py).borrow().to_pulse());
     }
 
-    if let Ok(dict) = pulse.downcast::<PyDict>() {
+    if let Ok(dict) = pulse.cast::<PyDict>() {
         let get = |key: &str| -> PyResult<Bound<'_, PyAny>> {
             dict.get_item(key)?
                 .ok_or_else(|| PyValueError::new_err(format!("pulse missing field '{key}'")))
@@ -6981,7 +6983,7 @@ fn maxwell_pulse_from_any(pulse: &Bound<'_, PyAny>) -> PyResult<MaxwellZPulse> {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn", name = "NarrativeSummary")]
+#[pyclass(module = "spiraltorch.nn", name = "NarrativeSummary", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyNarrativeSummary {
     inner: NarrativeSummary,
@@ -7052,7 +7054,7 @@ impl PyNarrativeSummary {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn", name = "NarrativeHint")]
+#[pyclass(module = "spiraltorch.nn", name = "NarrativeHint", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyNarrativeHint {
     inner: NarrativeHint,
@@ -7252,7 +7254,7 @@ impl PyMaxwellDesireBridge {
         py: Python<'_>,
         channel: &str,
         pulse: &Bound<'_, PyAny>,
-    ) -> PyResult<Option<PyObject>> {
+    ) -> PyResult<Option<Py<PyAny>>> {
         let pulse = maxwell_pulse_from_any(pulse)?;
         let Some((hint, narrative)) = self.inner.emit(channel, &pulse) else {
             return Ok(None);
@@ -7271,7 +7273,7 @@ impl PyMaxwellDesireBridge {
         } else {
             dict.set_item("narrative", py.None())?;
         }
-        Ok(Some(dict.into_py(py)))
+        Ok(Some(dict.into_py_any(py)?))
     }
 
     fn __repr__(&self) -> String {
@@ -7390,14 +7392,14 @@ impl PyDesirePipeline {
         self.inner.clear_geometry_bias();
     }
 
-    pub fn geometry_bias_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn geometry_bias_metrics(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         match self.inner.geometry_bias_metrics() {
             Some(metrics) => Ok(Some(geometry_bias_metrics_to_py(py, &metrics)?)),
             None => Ok(None),
         }
     }
 
-    pub fn geometry_bias_coherence(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    pub fn geometry_bias_coherence(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         match self.inner.geometry_bias_coherence() {
             Some(sample) => Ok(Some(geometry_coherence_to_py(py, &sample)?)),
             None => Ok(None),
@@ -7412,7 +7414,7 @@ impl PyDesirePipeline {
         previous_token: usize,
         concept: Option<Vec<f32>>,
         window: Option<Vec<(usize, f32)>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         if logits.len() != self.vocab_size {
             return Err(PyValueError::new_err(format!(
                 "logits length mismatch (expected {}, got {})",
@@ -7489,7 +7491,7 @@ impl PyDesirePipeline {
                 geometry_coherence_to_py(py, &sample)?,
             )?;
         }
-        Ok(dict.into_py(py))
+        dict.into_py_any(py)
     }
 
     pub fn flush(&mut self) -> PyResult<()> {
@@ -8967,7 +8969,11 @@ pub(crate) fn py_is_swap_invariant(arrangement: Vec<f32>) -> bool {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "CoherenceChannelReport")]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "CoherenceChannelReport",
+    from_py_object
+)]
 pub(crate) struct PyCoherenceChannelReport {
     channel: usize,
     weight: f32,
@@ -9029,7 +9035,12 @@ impl PyCoherenceChannelReport {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "CoherenceSignature", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "CoherenceSignature",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyCoherenceSignature {
     dominant_channel: Option<usize>,
     energy_ratio: f32,
@@ -9174,7 +9185,12 @@ impl PyCoherenceSignature {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "CoherenceObservation", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "CoherenceObservation",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyCoherenceObservation {
     observation: CoherenceObservation,
     label: CoherenceLabel,
@@ -9227,14 +9243,24 @@ impl PyCoherenceObservation {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "CoherenceDiagnostics", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "CoherenceDiagnostics",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyCoherenceDiagnostics {
     inner: CoherenceDiagnostics,
 }
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "LinguisticContour", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "LinguisticContour",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyLinguisticContour {
     inner: LinguisticContour,
 }
@@ -9265,7 +9291,12 @@ impl PyLinguisticContour {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "PreDiscardTelemetry", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "PreDiscardTelemetry",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyPreDiscardTelemetry {
     dominance_ratio: f32,
     energy_floor: f32,
@@ -9379,7 +9410,12 @@ impl PyPreDiscardTelemetry {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "PreDiscardSnapshot", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "PreDiscardSnapshot",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyPreDiscardSnapshot {
     step: u64,
     telemetry: PyPreDiscardTelemetry,
@@ -9432,7 +9468,12 @@ impl PyPreDiscardSnapshot {
 
 #[cfg(feature = "nn")]
 #[derive(Clone)]
-#[pyclass(module = "spiraltorch.nn", name = "PreDiscardPolicy", unsendable)]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "PreDiscardPolicy",
+    unsendable,
+    from_py_object
+)]
 pub(crate) struct PyPreDiscardPolicy {
     dominance_ratio: f32,
     energy_floor: f32,
@@ -9496,7 +9537,7 @@ impl PyCoherenceDiagnostics {
         &self,
         py: Python<'_>,
         policy: ZSpaceCoherenceClassificationPolicy,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let classification = self
             .inner
             .classify(policy)
@@ -9506,7 +9547,7 @@ impl PyCoherenceDiagnostics {
         json_to_py(py, &value)
     }
 
-    fn control_to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn control_to_py(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let control = self
             .inner
             .control_summary()
@@ -9623,12 +9664,12 @@ impl PyCoherenceDiagnostics {
     }
 
     #[getter]
-    fn classification(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn classification(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         self.classification_to_py(py, ZSpaceCoherenceClassificationPolicy::default())
     }
 
     #[getter]
-    fn control(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn control(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         self.control_to_py(py)
     }
 
@@ -9638,7 +9679,7 @@ impl PyCoherenceDiagnostics {
         py: Python<'_>,
         background_energy_ratio_max: f64,
         cascade_energy_ratio_min: f64,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         self.classification_to_py(
             py,
             ZSpaceCoherenceClassificationPolicy {
@@ -9674,14 +9715,14 @@ pub(crate) struct PyZSpaceTraceRecorder {
 #[cfg(feature = "nn")]
 #[pymethods]
 impl PyZSpaceTraceRecorder {
-    pub fn snapshot(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn snapshot(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let trace = self.inner.snapshot();
         let value =
             serde_json::to_value(&trace).map_err(|err| PyValueError::new_err(err.to_string()))?;
         json_to_py(py, &value)
     }
 
-    pub fn records(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn records(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let records = self.inner.records();
         let value =
             serde_json::to_value(&records).map_err(|err| PyValueError::new_err(err.to_string()))?;
@@ -10677,7 +10718,7 @@ impl PyZRelativityModule {
         Ok(PyTensor::from_tensor(output))
     }
 
-    pub fn torch_parameters(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn torch_parameters(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
         let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
         tensor_to_torch(py, &output)

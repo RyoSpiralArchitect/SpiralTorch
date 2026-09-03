@@ -22,7 +22,7 @@ fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
     scale.map(|value| (value.physical_radius, value.log_radius))
 }
 
-#[pyclass(module = "spiraltorch.psi", name = "ZPulseSnapshot")]
+#[pyclass(module = "spiraltorch.psi", name = "ZPulseSnapshot", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyZPulse {
     inner: ZPulse,

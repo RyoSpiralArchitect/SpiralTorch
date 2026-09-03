@@ -4,6 +4,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
+use pyo3::IntoPyObjectExt;
 use st_core::theory::general_relativity::{
     BoundaryCondition, BoundaryConditionKind, GeneralRelativityModel, InternalMetric,
     InternalPatch, InternalSpace, LorentzianMetric, MetricDerivatives, MetricError,
@@ -82,8 +83,8 @@ fn dmatrix_to_py(matrix: &DMatrix<f64>) -> Vec<Vec<f64>> {
         .collect()
 }
 
-fn tensor_to_py(py: Python<'_>, tensor: Tensor) -> PyResult<PyObject> {
-    Ok(Py::new(py, PyTensor::from_tensor(tensor))?.into_py(py))
+fn tensor_to_py(py: Python<'_>, tensor: Tensor) -> PyResult<Py<PyAny>> {
+    Py::new(py, PyTensor::from_tensor(tensor))?.into_py_any(py)
 }
 
 fn parse_metric_derivatives(data: Option<Vec<Vec<Vec<f64>>>>) -> PyResult<MetricDerivatives> {
@@ -201,7 +202,7 @@ impl PyZRelativityModel {
         Ok(PyTensor::from_tensor(tensor))
     }
 
-    pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn to_dlpack(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let tensor = self.inner.as_tensor().map_err(tensor_err_to_py)?;
         to_dlpack_impl(py, &tensor)
     }
@@ -239,7 +240,7 @@ impl PyZRelativityModel {
         Ok(PyTensor::from_tensor(tensor))
     }
 
-    pub fn tensor_bundle(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn tensor_bundle(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let bundle = self.inner.tensor_bundle().map_err(tensor_err_to_py)?;
         let ZRelativityTensorBundle {
             block_metric,
@@ -267,7 +268,7 @@ impl PyZRelativityModel {
         Ok(dict.into())
     }
 
-    pub fn torch_bundle(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn torch_bundle(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let bundle = self.inner.tensor_bundle().map_err(tensor_err_to_py)?;
         let ZRelativityTensorBundle {
             block_metric,
@@ -295,7 +296,7 @@ impl PyZRelativityModel {
         Ok(dict.into())
     }
 
-    pub fn reduction_summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn reduction_summary(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         let reduction = &self.inner.reduction;
         dict.set_item(
@@ -327,7 +328,7 @@ impl PyZRelativityModel {
         Ok(dict.into())
     }
 
-    pub fn curvature_diagnostics(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn curvature_diagnostics(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         let diagnostics = &self.inner.base_model.diagnostics;
         dict.set_item("scalar_curvature", diagnostics.scalar_curvature)?;
@@ -403,7 +404,7 @@ pub fn lorentzian_metric_scaled(
     py: Python<'_>,
     components: Vec<Vec<f64>>,
     scale: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let matrix = matrix4_from_py(components)?;
     let metric = LorentzianMetric::try_scaled(matrix, scale).map_err(metric_error)?;
     let dict = PyDict::new(py);
@@ -512,7 +513,11 @@ pub fn assemble_zrelativity_model(
     Ok(PyZRelativityModel { inner: zr_model })
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "ResonanceProfile")]
+#[pyclass(
+    module = "spiraltorch.theory",
+    name = "ResonanceProfile",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyResonanceProfile {
     inner: rg_mellin::ResonanceProfile,
@@ -535,7 +540,7 @@ impl PyResonanceProfile {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RGOperator")]
+#[pyclass(module = "spiraltorch.theory", name = "RGOperator", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRGOperator {
     inner: rg_mellin::RGOperator,
@@ -587,7 +592,11 @@ impl PyRGOperator {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RGFlowTrajectory")]
+#[pyclass(
+    module = "spiraltorch.theory",
+    name = "RGFlowTrajectory",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyRGFlowTrajectory {
     inner: rg_mellin::RGFlowTrajectory,
@@ -610,7 +619,7 @@ impl PyRGFlowTrajectory {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RGFlowSolution")]
+#[pyclass(module = "spiraltorch.theory", name = "RGFlowSolution", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRGFlowSolution {
     inner: rg_mellin::RGFlowSolution,
@@ -640,7 +649,7 @@ impl PyRGFlowSolution {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RGFlowModel")]
+#[pyclass(module = "spiraltorch.theory", name = "RGFlowModel", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRGFlowModel {
     inner: rg_mellin::RGFlowModel,
@@ -743,7 +752,7 @@ fn breathing_resonance(
     Ok(PyResonanceProfile { inner })
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RgFlowNode")]
+#[pyclass(module = "spiraltorch.theory", name = "RgFlowNode", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRgFlowNode {
     inner: rg_zspace::RgFlowNode,
@@ -781,7 +790,11 @@ impl PyRgFlowNode {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "ScaleFixedPoint")]
+#[pyclass(
+    module = "spiraltorch.theory",
+    name = "ScaleFixedPoint",
+    from_py_object
+)]
 #[derive(Clone)]
 pub(crate) struct PyScaleFixedPoint {
     inner: rg_zspace::ScaleFixedPoint,
@@ -810,7 +823,7 @@ impl PyScaleFixedPoint {
     }
 }
 
-#[pyclass(module = "spiraltorch.theory", name = "RgFlowLattice")]
+#[pyclass(module = "spiraltorch.theory", name = "RgFlowLattice", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct PyRgFlowLattice {
     inner: rg_zspace::RgFlowLattice,
@@ -833,7 +846,7 @@ impl PyRgFlowLattice {
             if err_slot.borrow().is_some() {
                 return vec![0.0; couplings.len()];
             }
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let couplings_vec = couplings.to_vec();
                 match callback.call1(py, (log_scale, couplings_vec)) {
                     Ok(value) => match value.extract::<Vec<f32>>(py) {
@@ -879,7 +892,7 @@ impl PyRgFlowLattice {
             if err_slot.borrow().is_some() {
                 return vec![0.0; couplings.len()];
             }
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let couplings_vec = couplings.to_vec();
                 match callback.call1(py, (log_scale, couplings_vec)) {
                     Ok(value) => match value.extract::<Vec<f32>>(py) {

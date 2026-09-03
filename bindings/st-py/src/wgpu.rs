@@ -7,13 +7,15 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 #[cfg(feature = "wgpu")]
 use pyo3::types::{PyDict, PyList};
+#[cfg(feature = "wgpu")]
+use pyo3::IntoPyObjectExt;
 use pyo3::{wrap_pyfunction, PyRef};
 
 #[cfg(feature = "wgpu")]
 fn descriptor_to_dict(
     py: Python<'_>,
     descriptor: &st_backend_wgpu::WgpuKernelDescriptor,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("name", descriptor.name)?;
     dict.set_item("family", descriptor.family)?;
@@ -27,14 +29,14 @@ fn descriptor_to_dict(
     dict.set_item("stages", descriptor.stages.to_vec())?;
     dict.set_item("bindings", descriptor.bindings.to_vec())?;
     dict.set_item("notes", descriptor.notes)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "wgpu")]
 fn dispatch_to_dict(
     py: Python<'_>,
     dispatch: st_backend_wgpu::WgpuDispatchGeometry,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item(
         "workgroups",
@@ -47,16 +49,16 @@ fn dispatch_to_dict(
     dict.set_item("tiles_x", dispatch.tiles_x)?;
     dict.set_item("row_stride", dispatch.row_stride)?;
     dict.set_item("empty", dispatch.empty)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "wgpu")]
-fn fft_to_dict(py: Python<'_>, fft: st_backend_wgpu::WgpuFftKernelHints) -> PyResult<PyObject> {
+fn fft_to_dict(py: Python<'_>, fft: st_backend_wgpu::WgpuFftKernelHints) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("tile_cols", fft.tile_cols)?;
     dict.set_item("radix", fft.radix)?;
     dict.set_item("segments", fft.segments)?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "wgpu")]
@@ -75,7 +77,7 @@ fn parse_rank_kind(kind: &str) -> PyResult<st_backend_wgpu::WgpuRankKernelKind> 
 fn rank_report_to_dict(
     py: Python<'_>,
     report: st_backend_wgpu::WgpuRankKernelReport,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let request = PyDict::new(py);
     request.set_item("kind", report.request.kind.as_str())?;
@@ -101,14 +103,14 @@ fn rank_report_to_dict(
     dict.set_item("dispatch", dispatch_to_dict(py, report.dispatch)?)?;
     dict.set_item("fft", fft_to_dict(py, report.fft)?)?;
     dict.set_item("stages", report.stages.to_vec())?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(feature = "wgpu")]
 fn softmax_report_to_dict(
     py: Python<'_>,
     report: st_backend_wgpu::WgpuSoftmaxKernelReport,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let request = PyDict::new(py);
     request.set_item("rows", report.request.rows)?;
@@ -128,7 +130,7 @@ fn softmax_report_to_dict(
     dict.set_item("dispatch", dispatch_to_dict(py, report.dispatch)?)?;
     dict.set_item("flags", report.flags)?;
     dict.set_item("stages", report.stages.to_vec())?;
-    Ok(dict.into_py(py))
+    dict.into_py_any(py)
 }
 
 #[cfg(not(feature = "wgpu"))]
@@ -145,24 +147,24 @@ fn wgpu_kernel_reports_available() -> bool {
 
 #[cfg(feature = "wgpu")]
 #[pyfunction]
-fn wgpu_kernel_catalog(py: Python<'_>) -> PyResult<PyObject> {
+fn wgpu_kernel_catalog(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for descriptor in st_backend_wgpu::kernel_catalog() {
         list.append(descriptor_to_dict(py, descriptor)?)?;
     }
-    Ok(list.into_py(py))
+    list.into_py_any(py)
 }
 
 #[cfg(not(feature = "wgpu"))]
 #[pyfunction]
-fn wgpu_kernel_catalog(py: Python<'_>) -> PyResult<PyObject> {
+fn wgpu_kernel_catalog(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let _ = py;
     Err(wgpu_unavailable())
 }
 
 #[cfg(feature = "wgpu")]
 #[pyfunction]
-fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<PyObject> {
+fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
     match st_backend_wgpu::kernel_descriptor(name) {
         Some(descriptor) => descriptor_to_dict(py, descriptor),
         None => Ok(py.None()),
@@ -171,7 +173,7 @@ fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<PyObject> {
 
 #[cfg(not(feature = "wgpu"))]
 #[pyfunction]
-fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<PyObject> {
+fn wgpu_kernel_descriptor(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
     let _ = (py, name);
     Err(wgpu_unavailable())
 }
@@ -192,7 +194,7 @@ fn wgpu_rank_kernel_report(
     fft_segments: u32,
     rank_tile: u32,
     compaction_tile: u32,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = st_backend_wgpu::WgpuRankKernelRequest {
         kind: parse_rank_kind(kind)?,
         rows,
@@ -225,7 +227,7 @@ fn wgpu_rank_kernel_report(
     fft_segments: u32,
     rank_tile: u32,
     compaction_tile: u32,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let _ = (
         py,
         kind,
@@ -248,7 +250,7 @@ fn wgpu_rank_kernel_report(
 fn wgpu_kernel_report_from_rank_plan(
     py: Python<'_>,
     plan: PyRef<'_, PyRankPlan>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let plan = plan.plan();
     let request = st_backend_wgpu::WgpuRankKernelRequest {
         kind: parse_rank_kind(plan.kind.as_str())?,
@@ -271,7 +273,7 @@ fn wgpu_kernel_report_from_rank_plan(
 fn wgpu_kernel_report_from_rank_plan(
     py: Python<'_>,
     plan: PyRef<'_, PyRankPlan>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let _ = (py, plan);
     Err(wgpu_unavailable())
 }
@@ -286,7 +288,7 @@ fn wgpu_softmax_kernel_report(
     subgroup: bool,
     hardmax: bool,
     mask: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let request = st_backend_wgpu::WgpuSoftmaxKernelRequest {
         rows,
         cols,
@@ -307,7 +309,7 @@ fn wgpu_softmax_kernel_report(
     subgroup: bool,
     hardmax: bool,
     mask: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let _ = (py, rows, cols, subgroup, hardmax, mask);
     Err(wgpu_unavailable())
 }
