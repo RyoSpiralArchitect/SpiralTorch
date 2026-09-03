@@ -906,7 +906,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.19
+VERSION=0.4.20
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.
@@ -1205,8 +1205,10 @@ print("roundtrip:", roundtrip.tolist())
 ```
 
 The wheel exposes both `Tensor.to_dlpack()` and `Tensor.from_dlpack(...)` so you
-can move data between SpiralTorch, PyTorch, NumPy (via CuPy), or any other
-DLPack-aware runtime without copies.
+can share contiguous 2D CPU `float32` storage directly with PyTorch or NumPy.
+Versioned DLPack adds read-only metadata and explicit copy requests without
+removing the legacy path. See the [Rust/Python interchange contract](docs/dlpack_interop.md)
+for ownership, copy policy, and autograd boundaries.
 
 ### 7) Row softmax (GPU-accelerated when available)
 

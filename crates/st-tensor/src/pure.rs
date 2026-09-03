@@ -65,9 +65,11 @@ use crate::backend::hip_dense;
 use crate::backend::wgpu_dense;
 use crate::backend::{cpu_dense, faer_dense};
 use crate::dlpack::{
-    call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
-    DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
+    self, DLDevice, DLDeviceType, DLManagedTensor, DLManagedTensorVersioned, DlpackCopyPolicy,
+    DlpackExportOptions, DlpackProtocol, ExportData, ForeignTensor, ManagedTensor,
 };
+#[cfg(test)]
+use crate::dlpack::{drop_exported_state, DLDataType, DLDataTypeCode, DLTensor};
 use crate::execution::{
     emit_tensor_execution_receipt, prepare_tensor_execution, PreparedTensorExecution,
     TensorExecutionCompletion, TensorExecutionFallback,
@@ -92,11 +94,10 @@ use std::cell::{Cell, RefCell};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::consts::PI;
+#[cfg(test)]
 use std::ffi::c_void;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
-use std::slice;
 use std::sync::Arc;
 
 /// Result alias used throughout the pure module.
@@ -177,6 +178,8 @@ pub enum TensorError {
     UnsupportedLayout { label: &'static str },
     /// Interoperability bridge encountered an unsupported or malformed DLPack tensor.
     DlpackError { message: String },
+    /// The requested interchange protocol cannot preserve storage without a copy.
+    DlpackCopyRequired,
     /// Generic error with a custom message.
     Generic(String),
 }
@@ -324,6 +327,12 @@ impl fmt::Display for TensorError {
             }
             TensorError::DlpackError { message } => {
                 write!(f, "dlpack error: {message}")
+            }
+            TensorError::DlpackCopyRequired => {
+                write!(
+                    f,
+                    "DLPack export requires a copy to preserve read-only storage"
+                )
             }
             TensorError::Generic(message) => {
                 write!(f, "{message}")
@@ -1741,55 +1750,49 @@ impl Tensor {
         }
     }
 
-    /// Export the tensor as a managed DLPack tensor.
+    /// Export a legacy capsule handle. Read-only foreign storage is copied
+    /// because the legacy ABI cannot express its mutation restriction.
     pub fn to_dlpack(&self) -> PureResult<*mut DLManagedTensor> {
+        Ok(self
+            .export_dlpack(DlpackExportOptions {
+                protocol: DlpackProtocol::Legacy,
+                copy: DlpackCopyPolicy::IfNeeded,
+            })?
+            .into_raw()
+            .cast())
+    }
+
+    /// Export a DLPack 1.0 handle. An explicit copy owns independent writable
+    /// storage; otherwise read-only flags and shared-buffer lifetimes are preserved.
+    pub fn to_dlpack_versioned(&self, copy: bool) -> PureResult<*mut DLManagedTensorVersioned> {
+        Ok(self
+            .export_dlpack(DlpackExportOptions {
+                protocol: DlpackProtocol::Versioned,
+                copy: if copy {
+                    DlpackCopyPolicy::Always
+                } else {
+                    DlpackCopyPolicy::Never
+                },
+            })?
+            .into_raw()
+            .cast())
+    }
+
+    /// Export an owned, automatically released DLPack handle. Rust callers can
+    /// pass it directly to [`Self::from_managed_dlpack`] without using raw pointers.
+    pub fn export_dlpack(&self, options: DlpackExportOptions) -> PureResult<ManagedTensor> {
         self.layout.expect_row_major("dlpack export")?;
-        let rows_i64 = i64::try_from(self.rows).map_err(|_| TensorError::DlpackError {
-            message: "tensor rows exceed i64 range".to_string(),
-        })?;
-        let cols_i64 = i64::try_from(self.cols).map_err(|_| TensorError::DlpackError {
-            message: "tensor cols exceed i64 range".to_string(),
-        })?;
-
-        let export = self.data.export_handle();
-        let mut state = Box::new(ManagedTensorState::new(
-            export,
-            vec![rows_i64, cols_i64].into_boxed_slice(),
-            vec![cols_i64, 1].into_boxed_slice(),
-        ));
-
-        let dl_tensor = DLTensor {
-            data: state.data.as_ptr() as *mut c_void,
-            device: DLDevice {
-                device_type: DLDeviceType::Cpu as i32,
-                device_id: 0,
-            },
-            ndim: 2,
-            dtype: DLDataType {
-                code: DLDataTypeCode::Float as u8,
-                bits: 32,
-                lanes: 1,
-            },
-            shape: state.shape.as_mut_ptr(),
-            strides: state.strides.as_mut_ptr(),
-            byte_offset: 0,
-        };
-
-        let manager_ctx = Box::into_raw(state) as *mut c_void;
-        let managed = Box::new(DLManagedTensor {
-            dl_tensor,
-            manager_ctx,
-            deleter: Some(drop_exported_state),
-        });
-
-        Ok(Box::into_raw(managed))
+        dlpack::export_tensor(self.data.export_handle(), self.rows, self.cols, options)
     }
 
     /// Return a zero-copy view of the tensor with new row/column dimensions.
     pub fn view(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
-        if rows * cols != self.len() {
+        let expected = rows
+            .checked_mul(cols)
+            .ok_or(TensorError::InvalidDimensions { rows, cols })?;
+        if expected != self.len() {
             return Err(TensorError::DataLength {
-                expected: rows * cols,
+                expected,
                 got: self.len(),
             });
         }
@@ -1803,205 +1806,38 @@ impl Tensor {
         })
     }
 
-    /// Construct a tensor from a managed DLPack tensor. The managed tensor is consumed.
-    ///
-    /// # Safety
-    /// - `managed` must point to a valid `DLManagedTensor` produced by a DLPack exporter.
-    /// - This function takes ownership of `managed`; the pointer must not be used again after a
-    ///   successful call.
-    /// - The tensor must describe a contiguous 2D CPU `f32` buffer in row-major order, and
-    ///   `dl_tensor.data` + `dl_tensor.byte_offset` must remain valid for `rows * cols` elements
-    ///   until the DLPack deleter runs.
-    /// - The managed tensor must include a non-null deleter that is safe to call exactly once.
-    pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
-        struct ManagedGuard {
-            ptr: NonNull<DLManagedTensor>,
-            armed: bool,
-        }
-
-        impl ManagedGuard {
-            fn new(ptr: NonNull<DLManagedTensor>) -> Self {
-                Self { ptr, armed: true }
-            }
-
-            fn tensor(&self) -> &DLManagedTensor {
-                unsafe { self.ptr.as_ref() }
-            }
-
-            fn into_inner(mut self) -> NonNull<DLManagedTensor> {
-                self.armed = false;
-                self.ptr
-            }
-        }
-
-        impl Drop for ManagedGuard {
-            fn drop(&mut self) {
-                if self.armed {
-                    unsafe { call_managed_deleter(self.ptr.as_ptr()) }
-                }
-            }
-        }
-
-        let managed_ptr = match NonNull::new(managed) {
-            Some(ptr) => ptr,
-            None => {
-                return Err(TensorError::EmptyInput("dlpack tensor"));
-            }
-        };
-
-        let guard = ManagedGuard::new(managed_ptr);
-        let tensor = guard.tensor();
-        let dl_tensor = &tensor.dl_tensor;
-
-        if dl_tensor.ndim != 2 {
-            return Err(TensorError::DlpackError {
-                message: format!("expected 2 dimensions, got {}", dl_tensor.ndim),
-            });
-        }
-
-        if dl_tensor.device.device_type != DLDeviceType::Cpu as i32 {
-            return Err(TensorError::DlpackError {
-                message: format!(
-                    "unsupported device type {}; only CPU tensors are accepted",
-                    dl_tensor.device.device_type
-                ),
-            });
-        }
-
-        if dl_tensor.dtype.code != DLDataTypeCode::Float as u8
-            || dl_tensor.dtype.bits != 32
-            || dl_tensor.dtype.lanes != 1
-        {
-            return Err(TensorError::DlpackError {
-                message: "only f32 tensors are supported".to_string(),
-            });
-        }
-
-        if dl_tensor.shape.is_null() {
-            return Err(TensorError::DlpackError {
-                message: "dlpack tensor provided a null shape pointer".to_string(),
-            });
-        }
-
-        if !(dl_tensor.shape as usize).is_multiple_of(mem::align_of::<i64>()) {
-            return Err(TensorError::DlpackError {
-                message: "dlpack tensor shape pointer is misaligned".to_string(),
-            });
-        }
-
-        if tensor.deleter.is_none() {
-            return Err(TensorError::DlpackError {
-                message: "dlpack tensor is missing a deleter".to_string(),
-            });
-        }
-
-        let shape = unsafe {
-            // SAFETY: `dl_tensor.shape` is non-null and aligned, and `dl_tensor.ndim == 2` ensures
-            // there are exactly two shape entries.
-            slice::from_raw_parts(dl_tensor.shape, 2)
-        };
-        let rows_i64 = shape[0];
-        let cols_i64 = shape[1];
-
-        if rows_i64 <= 0 || cols_i64 <= 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: rows_i64.max(0) as usize,
-                cols: cols_i64.max(0) as usize,
-            });
-        }
-
-        let rows = usize::try_from(rows_i64).map_err(|_| TensorError::DlpackError {
-            message: format!("rows {rows_i64} exceed usize range"),
-        })?;
-        let cols = usize::try_from(cols_i64).map_err(|_| TensorError::DlpackError {
-            message: format!("cols {cols_i64} exceed usize range"),
-        })?;
-
-        let expected_len = rows
-            .checked_mul(cols)
-            .ok_or_else(|| TensorError::DlpackError {
-                message: "tensor volume overflow".to_string(),
-            })?;
-
-        if dl_tensor.byte_offset % mem::size_of::<f32>() != 0 {
-            return Err(TensorError::DlpackError {
-                message: format!(
-                    "byte offset {} is not aligned to f32 elements",
-                    dl_tensor.byte_offset
-                ),
-            });
-        }
-
-        let offset = dl_tensor.byte_offset / mem::size_of::<f32>();
-        let _ = (dl_tensor.data as usize)
-            .checked_add(dl_tensor.byte_offset)
-            .ok_or_else(|| TensorError::DlpackError {
-                message: "byte offset causes pointer overflow".to_string(),
-            })?;
-
-        let base_ptr = match NonNull::new(dl_tensor.data as *mut f32) {
-            Some(ptr) => ptr,
-            None => {
-                return Err(TensorError::EmptyInput("dlpack tensor data"));
-            }
-        };
-
-        if !dl_tensor.strides.is_null() {
-            if !(dl_tensor.strides as usize).is_multiple_of(mem::align_of::<i64>()) {
-                return Err(TensorError::DlpackError {
-                    message: "dlpack tensor strides pointer is misaligned".to_string(),
-                });
-            }
-
-            let strides = unsafe {
-                // SAFETY: `dl_tensor.strides` is non-null and aligned, and `dl_tensor.ndim == 2`
-                // ensures there are exactly two stride entries when provided.
-                slice::from_raw_parts(dl_tensor.strides, 2)
-            };
-            let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
-                message: format!("cols {cols} exceed i64 range"),
-            })?;
-
-            // Treat degenerate layouts as contiguous row-major:
-            // * When there is a single row, the stride along that axis is irrelevant.
-            // * When there is a single column, a stride of 1 still respects row-major
-            //   assumptions and matches how column vectors are typically exported.
-            let row_ok =
-                strides[0] == expected_row || rows_i64 == 1 || (cols_i64 == 1 && strides[0] == 1);
-            let col_ok = strides[1] == 1;
-
-            if !(row_ok && col_ok) {
-                return Err(TensorError::DlpackError {
-                    message: format!(
-                        "only contiguous row-major tensors are supported; received strides {:?}",
-                        strides
-                    ),
-                });
-            }
-        }
-
-        let data_ptr = base_ptr.as_ptr().wrapping_add(offset);
-        let data_ptr = match NonNull::new(data_ptr) {
-            Some(ptr) => ptr,
-            None => {
-                return Err(TensorError::EmptyInput("dlpack tensor data"));
-            }
-        };
-
-        if !(data_ptr.as_ptr() as usize).is_multiple_of(mem::align_of::<f32>()) {
-            return Err(TensorError::DlpackError {
-                message: "dlpack tensor data pointer is misaligned for f32 elements".to_string(),
-            });
-        }
-
-        let foreign = unsafe { ForeignTensor::new(guard.into_inner(), data_ptr, expected_len) };
-
+    /// Consume an owned DLPack handle, sharing contiguous 2D CPU f32 storage.
+    /// Foreign storage is materialized before any Rust mutation. The producer
+    /// is released exactly once, including when descriptor validation fails.
+    pub fn from_managed_dlpack(managed: ManagedTensor) -> PureResult<Self> {
+        let (foreign, rows, cols) = dlpack::import_tensor(managed)?;
         Ok(Self {
             data: Arc::new(TensorBuffer::from_foreign(foreign)),
             rows,
             cols,
             layout: Layout::RowMajor,
         })
+    }
+
+    /// Consume a legacy producer handle on success or error.
+    ///
+    /// # Safety
+    /// The pointer ownership, buffer lifetime, and synchronization requirements
+    /// of [`ManagedTensor::from_legacy`] apply. The pointer must not be used again
+    /// after this call, including if validation fails.
+    pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
+        Self::from_managed_dlpack(unsafe { ManagedTensor::from_legacy(managed)? })
+    }
+
+    /// Consume a versioned producer handle on success or error.
+    ///
+    /// # Safety
+    /// The requirements of [`ManagedTensor::from_versioned`] apply. Unknown major
+    /// versions are released without accessing fields beyond the stable prefix.
+    pub unsafe fn from_dlpack_versioned(
+        managed: *mut DLManagedTensorVersioned,
+    ) -> PureResult<Self> {
+        Self::from_managed_dlpack(unsafe { ManagedTensor::from_versioned(managed)? })
     }
 
     /// Matrix multiply (`self @ other`).
@@ -14241,7 +14077,7 @@ mod tests {
             Some(strides) => strides.as_ptr() as *mut i64,
             None => ptr::null_mut(),
         };
-        let byte_offset = mem::size_of::<f32>() * 8;
+        let byte_offset = (mem::size_of::<f32>() * 8) as u64;
         let expected_ptr = data_ptr.wrapping_add(8) as *const f32;
 
         let managed = Box::new(DLManagedTensor {

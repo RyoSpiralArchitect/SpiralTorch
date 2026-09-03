@@ -180,6 +180,7 @@ jobs:
           print("smoke ok")
           PY
           python -P ../../tools/smoke_zspace_runtime_protocols.py
+          python -I ../../tools/smoke_dlpack_interop.py
       - name: Upload
         uses: actions/upload-artifact@v7
         with:

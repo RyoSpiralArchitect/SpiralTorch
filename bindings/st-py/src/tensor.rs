@@ -1,4 +1,6 @@
-use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyAttributeError, PyBufferError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{
@@ -13,12 +15,15 @@ use st_core::backend::device_caps::BackendKind;
 #[cfg(feature = "wgpu")]
 use st_core::backend::runtime_probe::backend_runtime_ready;
 use st_core::backend::runtime_probe::resolve_backend;
-use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
+use st_tensor::dlpack::{
+    call_managed_deleter, call_versioned_deleter, DlpackCopyPolicy, DlpackExportOptions,
+    DlpackProtocol, ManagedTensor, DLPACK_CAPSULE_NAME, DLPACK_VERSIONED_CAPSULE_NAME,
+    USED_DLPACK_CAPSULE_NAME, USED_DLPACK_VERSIONED_CAPSULE_NAME,
+};
 use st_tensor::{
     backend::cpu_dense, AttentionBackend, HardmaxBackend, Layout, MatmulBackend, SoftmaxBackend,
     Tensor, TensorError,
 };
-use std::ffi::{c_void, CStr};
 use std::sync::Arc;
 use tracing::warn;
 
@@ -275,8 +280,6 @@ fn borrow_f32_argument(any: &Bound<PyAny>) -> PyResult<Vec<f32>> {
         F32Input::Owned(vec) => Ok(vec),
     }
 }
-
-const USED_DLPACK_CAPSULE_NAME: &CStr = c"used_dltensor";
 
 #[pyclass(module = "spiraltorch", name = "Tensor", subclass, from_py_object)]
 #[derive(Clone)]
@@ -823,8 +826,16 @@ impl PyTensor {
         to_dlpack_impl(py, &self.inner)
     }
 
-    #[pyo3(signature = (*, stream=None))]
-    pub fn __dlpack__(&self, py: Python<'_>, stream: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+    /// Export shared CPU f32 storage, negotiating the legacy or DLPack 1.0 ABI.
+    #[pyo3(signature = (*, stream=None, max_version=None, dl_device=None, copy=None))]
+    pub fn __dlpack__(
+        &self,
+        py: Python<'_>,
+        stream: Option<Py<PyAny>>,
+        max_version: Option<(u32, u32)>,
+        dl_device: Option<(i32, i32)>,
+        copy: Option<bool>,
+    ) -> PyResult<Py<PyAny>> {
         if let Some(stream_obj) = stream {
             let stream = stream_obj.bind(py);
             if !stream.is_none() {
@@ -836,7 +847,27 @@ impl PyTensor {
                 }
             }
         }
-        self.to_dlpack(py)
+        if dl_device.is_some_and(|device| device != self.__dlpack_device__()) {
+            return Err(PyBufferError::new_err(
+                "DLPack exports only support CPU device (1, 0)",
+            ));
+        }
+        export_dlpack_impl(
+            py,
+            &self.inner,
+            DlpackExportOptions {
+                protocol: if max_version.is_some_and(|version| version >= (1, 0)) {
+                    DlpackProtocol::Versioned
+                } else {
+                    DlpackProtocol::Legacy
+                },
+                copy: match copy {
+                    Some(true) => DlpackCopyPolicy::Always,
+                    Some(false) => DlpackCopyPolicy::Never,
+                    None => DlpackCopyPolicy::IfNeeded,
+                },
+            },
+        )
     }
 
     pub fn __dlpack_device__(&self) -> (i32, i32) {
@@ -1625,6 +1656,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
 
 pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
     match err {
+        TensorError::DlpackCopyRequired => PyBufferError::new_err(err.to_string()),
         TensorError::InvalidDimensions { .. }
         | TensorError::DataLength { .. }
         | TensorError::EmptyInput(_)
@@ -1647,28 +1679,49 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
 }
 
 pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<Py<PyAny>> {
-    let managed = tensor.to_dlpack().map_err(tensor_err_to_py)?;
+    export_dlpack_impl(
+        py,
+        tensor,
+        DlpackExportOptions {
+            protocol: DlpackProtocol::Legacy,
+            copy: DlpackCopyPolicy::IfNeeded,
+        },
+    )
+}
+
+fn export_dlpack_impl(
+    py: Python<'_>,
+    tensor: &Tensor,
+    options: DlpackExportOptions,
+) -> PyResult<Py<PyAny>> {
+    let managed = tensor.export_dlpack(options).map_err(tensor_err_to_py)?;
+    let name = match managed.protocol() {
+        DlpackProtocol::Legacy => DLPACK_CAPSULE_NAME,
+        DlpackProtocol::Versioned => DLPACK_VERSIONED_CAPSULE_NAME,
+    };
     unsafe {
         extern "C" fn drop_capsule(ptr: *mut ffi::PyObject) {
             unsafe {
-                let tensor_ptr = ffi::PyCapsule_GetPointer(ptr, DLPACK_CAPSULE_NAME.as_ptr());
-                if tensor_ptr.is_null() {
-                    ffi::PyErr_Clear();
-                    return;
+                if ffi::PyCapsule_IsValid(ptr, DLPACK_CAPSULE_NAME.as_ptr()) == 1 {
+                    call_managed_deleter(
+                        ffi::PyCapsule_GetPointer(ptr, DLPACK_CAPSULE_NAME.as_ptr()).cast(),
+                    );
+                } else if ffi::PyCapsule_IsValid(ptr, DLPACK_VERSIONED_CAPSULE_NAME.as_ptr()) == 1 {
+                    call_versioned_deleter(
+                        ffi::PyCapsule_GetPointer(ptr, DLPACK_VERSIONED_CAPSULE_NAME.as_ptr())
+                            .cast(),
+                    );
                 }
-                drop_exported_state(tensor_ptr as *mut DLManagedTensor);
             }
         }
 
-        let capsule = ffi::PyCapsule_New(
-            managed as *mut c_void,
-            DLPACK_CAPSULE_NAME.as_ptr(),
-            Some(drop_capsule),
-        );
+        let capsule = ffi::PyCapsule_New(managed.as_ptr(), name.as_ptr(), Some(drop_capsule));
         if capsule.is_null() {
-            drop_exported_state(managed);
             return Err(PyErr::fetch(py));
         }
+        // The Rust guard covers allocation failures; only the live capsule owns
+        // the producer release obligation after this point.
+        managed.into_raw();
         Ok(Bound::from_owned_ptr(py, capsule).unbind())
     }
 }
@@ -1687,21 +1740,46 @@ fn from_dlpack_impl(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor
     let capsule_ref = owned_capsule.bind(py);
 
     unsafe {
-        let managed_ptr =
-            ffi::PyCapsule_GetPointer(capsule_ref.as_ptr(), DLPACK_CAPSULE_NAME.as_ptr());
+        let (name, used_name, protocol) =
+            if ffi::PyCapsule_IsValid(capsule_ref.as_ptr(), DLPACK_CAPSULE_NAME.as_ptr()) == 1 {
+                (
+                    DLPACK_CAPSULE_NAME,
+                    USED_DLPACK_CAPSULE_NAME,
+                    DlpackProtocol::Legacy,
+                )
+            } else if ffi::PyCapsule_IsValid(
+                capsule_ref.as_ptr(),
+                DLPACK_VERSIONED_CAPSULE_NAME.as_ptr(),
+            ) == 1
+            {
+                (
+                    DLPACK_VERSIONED_CAPSULE_NAME,
+                    USED_DLPACK_VERSIONED_CAPSULE_NAME,
+                    DlpackProtocol::Versioned,
+                )
+            } else {
+                return Err(PyValueError::new_err(
+                    "expected an unconsumed DLPack capsule",
+                ));
+            };
+        let managed_ptr = ffi::PyCapsule_GetPointer(capsule_ref.as_ptr(), name.as_ptr());
         if managed_ptr.is_null() {
             return Err(PyErr::fetch(py));
         }
 
-        if ffi::PyCapsule_SetName(capsule_ref.as_ptr(), USED_DLPACK_CAPSULE_NAME.as_ptr()) != 0 {
+        if ffi::PyCapsule_SetName(capsule_ref.as_ptr(), used_name.as_ptr()) != 0 {
             return Err(PyErr::fetch(py));
         }
+        let owner = match protocol {
+            DlpackProtocol::Legacy => ManagedTensor::from_legacy(managed_ptr.cast()),
+            DlpackProtocol::Versioned => ManagedTensor::from_versioned(managed_ptr.cast()),
+        }
+        .map_err(tensor_err_to_py)?;
         if ffi::PyCapsule_SetDestructor(capsule_ref.as_ptr(), None) != 0 {
             return Err(PyErr::fetch(py));
         }
 
-        let tensor =
-            Tensor::from_dlpack(managed_ptr as *mut DLManagedTensor).map_err(tensor_err_to_py)?;
+        let tensor = Tensor::from_managed_dlpack(owner).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(tensor))
     }
 }
@@ -1713,23 +1791,46 @@ fn ensure_dlpack_capsule(py: Python<'_>, candidate: &Bound<PyAny>) -> PyResult<P
         }
     }
 
-    if let Ok(method) = candidate.getattr("__dlpack__") {
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("stream", py.None())?;
-        let capsule = method.call((), Some(&kwargs))?;
-        unsafe {
-            if ffi::PyCapsule_CheckExact(capsule.as_ptr()) == 1 {
-                return Ok(capsule.into());
-            }
+    let method = match candidate.getattr("__dlpack__") {
+        Ok(method) => method,
+        Err(error) if error.is_instance_of::<PyAttributeError>(py) => {
+            return Err(PyTypeError::new_err(
+                "expected a DLPack capsule or object implementing __dlpack__",
+            ));
         }
-        return Err(PyTypeError::new_err(
-            "__dlpack__ did not return a DLPack capsule",
-        ));
+        Err(error) => return Err(error),
+    };
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("stream", py.None())?;
+    kwargs.set_item("max_version", (1, 0))?;
+    let capsule = match method.call((), Some(&kwargs)) {
+        Ok(capsule) => capsule,
+        Err(error) if rejects_max_version_keyword(py, &error) => {
+            kwargs.del_item("max_version")?;
+            method.call((), Some(&kwargs))?
+        }
+        Err(error) => return Err(error),
+    };
+    unsafe {
+        if ffi::PyCapsule_CheckExact(capsule.as_ptr()) == 1 {
+            return Ok(capsule.into());
+        }
     }
-
     Err(PyTypeError::new_err(
-        "expected a DLPack capsule or object implementing __dlpack__",
+        "__dlpack__ did not return a DLPack capsule",
     ))
+}
+
+fn rejects_max_version_keyword(py: Python<'_>, error: &PyErr) -> bool {
+    // Older producers reject the new keyword at argument binding. Never retry
+    // errors from inside a Python producer, which may already have done work.
+    error.is_instance_of::<PyTypeError>(py)
+        && error.traceback(py).is_none()
+        && error.value(py).str().is_ok_and(|message| {
+            message
+                .to_string_lossy()
+                .contains("unexpected keyword argument 'max_version'")
+        })
 }
 
 #[cfg(test)]

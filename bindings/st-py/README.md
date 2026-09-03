@@ -2737,6 +2737,13 @@ python bindings/st-py/examples/zspace_stream_training_quickstart.py
 
 ### Ecosystem bridges
 
+Native tensors support legacy and DLPack 1.0 versioned exchange for contiguous
+2D CPU `float32` buffers. NumPy can consume them directly: use
+`np.from_dlpack(tensor, copy=False)` to share or `copy=True` for an independent
+writable array (NumPy 2.x). Read-only imports are preserved until Rust mutation
+materializes owned storage. See the [DLPack contract and examples](../../docs/dlpack_interop.md)
+for version negotiation, legacy compatibility, and lifetime/gradient boundaries.
+
 SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the
 `spiraltorch.ecosystem` helpers. CuPy round-trips also accept optional CUDA
 streams so you can coordinate asynchronous pipelines, and the helpers can
