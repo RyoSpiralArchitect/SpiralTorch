@@ -2276,27 +2276,6 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             denom = math.sqrt(max(sum_inner, 1e-6))
             return float(2.0 * math.acosh(1.0 + (sum_norm / denom)))
 
-        @staticmethod
-        def from_dlpack(_: object) -> "Tensor":
-            raise RuntimeError(
-                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
-            )
-
-        def to_dlpack(self) -> object:
-            raise RuntimeError(
-                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
-            )
-
-        def __dlpack__(self, *, stream=None):  # pragma: no cover - interoperability hook
-            raise RuntimeError(
-                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
-            )
-
-        def __dlpack_device__(self):  # pragma: no cover - interoperability hook
-            raise RuntimeError(
-                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
-            )
-
         def numpy(self, *, copy: bool = True):
             if not NUMPY_AVAILABLE:
                 raise RuntimeError("NumPy is not available in the stub bindings")
@@ -2319,7 +2298,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         @classmethod
         def from_dlpack(cls, capsule: Any) -> "Tensor":
-            """Create a ``Tensor`` from a DLPack capsule.
+            """Copy a DLPack producer or capsule into a NumPy-backed ``Tensor``.
 
             Raises:
                 RuntimeError: DLPack interoperability requires NumPy support in the stub
@@ -2328,7 +2307,14 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
             if not NUMPY_AVAILABLE or _np is None or not hasattr(_np, "from_dlpack"):
                 cls._raise_dlpack_unavailable()
-            matrix = _np.from_dlpack(capsule)
+            producer = capsule
+            if not hasattr(producer, "__dlpack__"):
+                class CapsuleProducer:
+                    def __dlpack__(self, **kwargs):
+                        return capsule
+
+                producer = CapsuleProducer()
+            matrix = _np.from_dlpack(producer)
             matrix = _np.asarray(matrix, dtype=_np.float64)
             if matrix.ndim != 2:
                 raise ValueError("Tensor expects a 2D array")
@@ -3098,6 +3084,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         return _stub
 
     for _native_name, _feature in {
+        "hypergrad": "spiraltorch.hypergrad()",
         "init_backend": "spiraltorch.init_backend()",
         "describe_device": "spiraltorch.describe_device()",
         "plan": "spiraltorch.plan()",
@@ -3242,7 +3229,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     _install_spiral_rl_stub()
 
     def _bridge_pure_python_namespace() -> None:
-        base_dir = pathlib.Path(__file__).resolve().parents[1] / "bindings" / "python" / "spiral"
+        # The native facade replaces __file__; keep lookup anchored to the shim.
+        base_dir = _DEV_SHIM_DIR.parent / "bindings" / "st-py" / "spiral"
         init_py = base_dir / "__init__.py"
         if not init_py.exists():
             return
@@ -3259,18 +3247,36 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if spec is None or spec.loader is None:
             return
 
-        bridge_module = importlib.util.module_from_spec(spec)
-        bridge_module.__package__ = bridge_name
-        bridge_module.__path__ = [str(base_dir)]
-        sys.modules[bridge_name] = bridge_module
+        prefix = f"{bridge_name}."
+        previous_bridge = {
+            name: value
+            for name, value in sys.modules.items()
+            if name == bridge_name or name.startswith(prefix)
+        }
+        for name in previous_bridge:
+            sys.modules.pop(name, None)
+
         try:
+            bridge_module = importlib.util.module_from_spec(spec)
+            bridge_module.__package__ = bridge_name
+            bridge_module.__path__ = [str(base_dir)]
+            sys.modules[bridge_name] = bridge_module
             spec.loader.exec_module(bridge_module)
-        except ModuleNotFoundError:
-            sys.modules.pop(bridge_name, None)
-            return
+        except BaseException:
+            for name in tuple(sys.modules):
+                if name == bridge_name or name.startswith(prefix):
+                    sys.modules.pop(name, None)
+            sys.modules.update(previous_bridge)
+            raise
 
         def _register(name: str, value: object) -> None:
             if name.startswith("_"):
+                return
+            if (
+                isinstance(value, types.ModuleType)
+                and name in module.__dict__
+                and not isinstance(module.__dict__[name], types.ModuleType)
+            ):
                 return
             module.__dict__[name] = value
             exports = module.__dict__.setdefault("__all__", [])
@@ -3282,7 +3288,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if not exports:
                 exports = (name for name in dir(source) if not name.startswith("_"))
             for name in exports:
-                value = getattr(source, name, None)
+                # Do not force lazy entrypoints (such as the CLI) while installing a stub.
+                value = source.__dict__.get(name)
                 if value is not None:
                     _register(name, value)
 
@@ -3296,12 +3303,10 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             sys.modules[target_name] = submodule
             head, _, tail = relative_name.partition(".")
             if not tail:
-                setattr(module, head, submodule)
                 _register(head, submodule)
 
         _merge_public_members(bridge_module)
 
-        prefix = f"{bridge_name}."
         for name, value in list(sys.modules.items()):
             if name == bridge_name or not name.startswith(prefix):
                 continue

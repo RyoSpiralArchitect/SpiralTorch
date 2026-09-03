@@ -6563,6 +6563,10 @@ def _install_nn_helpers() -> None:
     globals()["SoftmaxCrossEntropy"] = softmax_cross_entropy
     nn_module.SoftmaxCrossEntropy = softmax_cross_entropy
     _register_module_export(nn_module, "SoftmaxCrossEntropy")
+    if getattr(nn_module, "CategoricalCrossEntropy", None) is None:
+        globals()["CategoricalCrossEntropy"] = softmax_cross_entropy
+        nn_module.CategoricalCrossEntropy = softmax_cross_entropy
+        _register_module_export(nn_module, "CategoricalCrossEntropy")
 
     lora_linear = _resolve_rs_attr("nn.LoraLinear") or _resolve_rs_attr("LoraLinear")
     if lora_linear is None:

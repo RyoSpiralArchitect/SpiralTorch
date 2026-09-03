@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 
-def test_tensor_dlpack_roundtrip(stub_spiraltorch_with_numpy) -> None:
+@pytest.mark.parametrize("transport", ["capsule", "protocol"])
+def test_tensor_dlpack_roundtrip(stub_spiraltorch_with_numpy, transport) -> None:
     np = pytest.importorskip("numpy")
     if not hasattr(np, "from_dlpack") or not hasattr(np.ndarray, "__dlpack__"):
         pytest.skip("NumPy lacks DLPack support")
@@ -11,8 +12,8 @@ def test_tensor_dlpack_roundtrip(stub_spiraltorch_with_numpy) -> None:
     Tensor = stub_spiraltorch_with_numpy.Tensor
     source = Tensor(shape=(2, 3), data=[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
 
-    capsule = source.to_dlpack()
-    restored = Tensor.from_dlpack(capsule)
+    payload = source.to_dlpack() if transport == "capsule" else source
+    restored = Tensor.from_dlpack(payload)
 
     assert restored.shape() == source.shape()
     assert restored.backend == "numpy"
@@ -29,9 +30,54 @@ def test_tensor_dlpack_roundtrip(stub_spiraltorch_with_numpy) -> None:
     product = restored.matmul(identity)
     assert product.tolist() == source.tolist()
 
-    array_from_dlpack = np.from_dlpack(source.__dlpack__())
+    array_from_dlpack = np.from_dlpack(source)
     assert array_from_dlpack.shape == (2, 3)
     assert array_from_dlpack.tolist() == source.tolist()
+
+
+def test_tensor_dlpack_capsule_is_single_use(stub_spiraltorch_with_numpy) -> None:
+    np = pytest.importorskip("numpy")
+    if not hasattr(np, "from_dlpack"):
+        pytest.skip("NumPy lacks DLPack support")
+    Tensor = stub_spiraltorch_with_numpy.Tensor
+    source = Tensor(shape=(1, 2), data=[[2.0, 3.0]])
+    capsule = source.to_dlpack()
+    assert Tensor.from_dlpack(capsule).tolist() == [[2.0, 3.0]]
+    with pytest.raises(ValueError):
+        Tensor.from_dlpack(capsule)
+
+
+def test_tensor_dlpack_provider_errors_propagate(stub_spiraltorch_with_numpy) -> None:
+    pytest.importorskip("numpy")
+
+    class BrokenProducer:
+        def __dlpack__(self, **kwargs):
+            raise RuntimeError("dlpack-producer-failed")
+
+    with pytest.raises(RuntimeError, match="dlpack-producer-failed"):
+        stub_spiraltorch_with_numpy.Tensor.from_dlpack(BrokenProducer())
+
+
+def test_tensor_dlpack_copy_does_not_alias_producer(stub_spiraltorch_with_numpy) -> None:
+    np = pytest.importorskip("numpy")
+    source = np.array([[2.0, 3.0]], dtype=np.float64)
+    restored = stub_spiraltorch_with_numpy.Tensor.from_dlpack(source)
+    source[:] = -1.0
+    assert restored.tolist() == [[2.0, 3.0]]
+    restored.numpy(copy=False)[:] = 7.0
+    np.testing.assert_array_equal(source, [[-1.0, -1.0]])
+
+
+def test_tensor_dlpack_rejects_wrong_shape_and_consumes_capsule(
+    stub_spiraltorch_with_numpy,
+) -> None:
+    np = pytest.importorskip("numpy")
+    capsule = np.array([1.0, 2.0]).__dlpack__()
+    Tensor = stub_spiraltorch_with_numpy.Tensor
+    with pytest.raises(ValueError, match="2D"):
+        Tensor.from_dlpack(capsule)
+    with pytest.raises(ValueError):
+        Tensor.from_dlpack(capsule)
 
 
 def test_tensor_dlpack_unavailable(stub_spiraltorch_with_numpy) -> None:
