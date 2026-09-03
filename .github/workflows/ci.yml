@@ -159,6 +159,8 @@ jobs:
         env:
           SPIRALTORCH_STRICT_GPU: "1"
         run: cargo test --locked -p st-tensor --features wgpu --release --test autograd_nonlinear
+      - name: neural layers and losses with WGPU enabled
+        run: cargo test --locked -p st-nn --features wgpu --release --lib
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)

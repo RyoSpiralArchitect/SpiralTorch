@@ -1218,9 +1218,16 @@ mod tests {
         assert_eq!(window_distribution.1["distribution_scale_backend"], "wgpu");
         let reduction = events
             .iter()
-            .find(|(op_name, data)| *op_name == "sum_axis0" && data["requested_backend"] == "wgpu")
+            .find(|(op_name, data)| {
+                *op_name == "sum_axis0"
+                    && data["requested_backend"] == "wgpu"
+                    && data["event_phase"] == "completed"
+            })
             .expect("sum_axis0 WGPU accumulation metadata event");
-        assert_eq!(reduction.1["backend"], "wgpu_dense");
+        assert_eq!(reduction.1["backend"], "wgpu");
+        assert_eq!(reduction.1["kernel_backend"], "wgpu_dense");
+        assert_eq!(reduction.1["execution_receipt"]["executed_backend"], "wgpu");
+        assert_eq!(reduction.1["execution_receipt"]["route_status"], "direct");
     }
 
     #[test]
