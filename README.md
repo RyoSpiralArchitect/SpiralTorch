@@ -455,6 +455,14 @@ native wheel, or `cargo run -p st-tensor --example autograd_xor`, for a bounded
 600-step nonlinear learning fixture. This checks learning mechanics, not LLM
 fine-tuning quality.
 
+For multiclass or flattened-token training, `row_log_softmax()` and
+`cross_entropy_with_logits(labels, label_smoothing=0.05)` now share stable
+Rust CPU kernels across Tensor, autograd, Python and WASM. Integer labels,
+ignored tokens and reduction rules live in one core; `nn.CrossEntropyWithLogits`
+connects it to `ModuleTrainer`. The [classification contract](docs/autograd_contract.md#classification-from-logits)
+explains the boundaries. `python examples/autograd_classification.py` runs a
+300-step, three-class learning fixture without NumPy or PyTorch.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -914,7 +922,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.21
+VERSION=0.4.22
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

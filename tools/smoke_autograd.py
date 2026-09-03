@@ -31,7 +31,10 @@ def main():
         raise AssertionError("legacy export exposed a writable graph alias")
     example = Path(__file__).resolve().parents[1] / "examples" / "autograd_xor.py"
     result = runpy.run_path(str(example))["run"]()
-    print(json.dumps({"snapshot_boundary": "ok", "training": result}, sort_keys=True))
+    classification = example.with_name("autograd_classification.py")
+    classification_result = runpy.run_path(str(classification))["run"]()
+    print(json.dumps({"snapshot_boundary": "ok", "training": result,
+                      "classification": classification_result}, sort_keys=True))
 
 
 if __name__ == "__main__":

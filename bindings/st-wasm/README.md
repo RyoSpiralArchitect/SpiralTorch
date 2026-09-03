@@ -126,6 +126,25 @@ report `spiraltorch.autograd.v1` with semantic owner `st-tensor`. For probes tha
 must not touch accumulated state, use `output.vectorJacobianProduct(input, seed)`;
 a disconnected input returns an all-zero gradient.
 
+Classification uses the same stable CPU kernels as native Rust and Python:
+
+```ts
+const logits = new AutogradTensor(2, 3, new Float32Array([2, 0, -1, 0, 2, -1]), true);
+const loss = logits.crossEntropyWithLogits(new Int32Array([0, 1]), "mean", -100, 0.05);
+loss.backward();
+console.log(loss.values(), logits.gradientValues());
+loss.free();
+logits.free();
+```
+
+The arguments after `Int32Array` are optional: mean reduction, ignore index
+`-100`, and no smoothing. `"none"` returns `(rows, 1)` and needs a matching
+backward seed; an all-ignored mean is rejected. `rowLogSoftmax()` exposes stable
+log-probabilities and their coupled VJP. These are CPU kernels compiled to WASM,
+not WebGPU dispatch. Run `node bindings/st-wasm/tests/classification.cjs
+/absolute/path/to/spiraltorch_wasm.js` against an actual nodejs-target build for
+masking, gradient, and 180-step learning checks.
+
 ## Shared Topos control and runtime routing
 
 Browser clients can derive a topology control signal and project a runtime profile through

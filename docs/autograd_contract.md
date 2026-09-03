@@ -50,7 +50,8 @@ meaning of a backward pass.
 
 V1 includes add, subtract, Hadamard product, matrix multiplication, scalar
 scale, transpose, sum, mean, dot product, mean-squared error, broadcast row bias,
-ReLU, tanh-approximate GELU, and row softmax. The nonlinear methods are additive;
+ReLU, tanh-approximate GELU, row softmax, row log-softmax, and integer-label
+cross entropy with logits. These methods are additive;
 snapshot isolation enforces the existing immutable-value invariant rather than
 introducing a second contract version. Unsupported operations belong in this
 Rust module first, with closed-form and finite-difference tests.
@@ -114,7 +115,78 @@ wasm-pack build bindings/st-wasm --target nodejs --out-dir /tmp/spiraltorch-wasm
 node bindings/st-wasm/tests/autograd_nonlinear.cjs /tmp/spiraltorch-wasm/spiraltorch_wasm.js
 ```
 
-## Direct Rust use
+## Classification from logits
+
+`Tensor` and `AutogradTensor` both expose `row_log_softmax()` and
+`cross_entropy_with_logits(labels, config)`. `CrossEntropyConfig` selects
+`LossReduction::{None, Sum, Mean}`, `ignore_index` (default `-100`), and
+`label_smoothing` (default `0`, valid finite range `[0, 1]`). Predictions have
+shape `(samples, classes)` and labels contain one integer per row. Token logits
+can use flattened sample/token rows; shifting language-model targets remains
+the caller's responsibility.
+
+- Mean divides by the count of non-ignored rows; an all-ignored or empty mean
+  is an error rather than NaN or a silently successful training step.
+- Unreduced output is `(samples, 1)` with zero at ignored rows; sum and mean
+  return `(1, 1)`. All-ignored sum/unreduced output and gradients are zero.
+- Labels outside the class range, invalid smoothing, non-finite logits
+  (including ignored rows), and invalid backward seeds are rejected.
+- Smoothing mixes the class target with the uniform distribution over classes.
+  Class weights and soft-label distributions are not supported by this API.
+- CPU f64 row partitions use a shifted `log1p` tail and only narrow the final
+  reduction to f32. Large common offsets and tiny dominant-class residuals
+  do not disappear through `log(softmax(...))` or subtraction of rounded ones.
+- Direct Tensor backward methods take the original logits and a seed matching
+  the loss output shape. Autograd owns labels/configuration and delegates these
+  VJPs to the same kernels; clients do not implement another derivative.
+- These new kernels are explicitly CPU, not WGPU kernels or a claim of GPU
+  residency. `st-nn::CrossEntropyWithLogits` rejects strict WGPU execution.
+- Kernel notifications from reverse mode are deferred until the graph lock is
+  released, including when validation fails. Completed kernel events are not
+  proof that a backward pass committed; only a successful backward receipt is.
+
+The definition follows PyTorch's integer-target, unweighted
+[cross entropy](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html)
+and [log-softmax](https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.log_softmax.html).
+The explicit all-ignored mean error and stricter finite checks are intentional
+differences. Tests compare finite differences and an independent float64 PyTorch
+oracle without depending on PyTorch for runtime computation.
+
+```rust
+use st_tensor::{AutogradTensor, CrossEntropyConfig, Tensor};
+
+let logits = AutogradTensor::variable(Tensor::from_vec(2, 3, vec![2., 0., -1., 0., 2., -1.])?)?;
+let loss = logits.cross_entropy_with_logits(&[0, 1], CrossEntropyConfig::default())?;
+loss.backward()?;
+# Ok::<(), st_tensor::TensorError>(())
+```
+
+Python spells the options as keyword arguments. For `ModuleTrainer`, use
+`st.nn.CrossEntropyWithLogits` with an integral `(samples, 1)` target Tensor;
+the adapter validates the transport and delegates to st-tensor. Its unreduced
+backward uses an all-ones seed, matching the trainer's sum of unreduced losses.
+Existing `CategoricalCrossEntropy`/`SoftmaxCrossEntropy` still take probabilities
+and one-hot targets, and `CrossEntropy` remains the hyperbolic-loss alias.
+
+```python
+import spiraltorch as st
+
+logits = st.AutogradTensor.variable(st.Tensor(2, 3, [2., 0., -1., 0., 2., -1.]))
+loss = logits.cross_entropy_with_logits([0, 1], label_smoothing=0.05)
+loss.backward()
+print(loss.item(), logits.grad().tolist())
+```
+
+`python examples/autograd_classification.py` trains a `2 -> 12 -> 3` GELU
+classifier for 300 steps on 72 synthetic points and checks 36 disjoint points.
+This is a working-pipeline fixture, not evidence of real-world generalization or
+of a Z-space advantage over ordinary fine-tuning.
+WASM exposes `rowLogSoftmax()` and
+`crossEntropyWithLogits(Int32Array, reduction?, ignoreIndex?, labelSmoothing?)`.
+Its executable `bindings/st-wasm/tests/classification.cjs` checks real WASM
+exports, masking, tiny residuals, VJPs, and a 180-step classifier.
+
+## Direct Rust graph use
 
 ```rust
 use st_tensor::{AutogradTensor, Tensor};

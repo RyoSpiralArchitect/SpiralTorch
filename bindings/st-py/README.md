@@ -177,6 +177,25 @@ approximation), and `row_softmax()`. Bias gradients sum over rows; any averaging
 belongs to the loss. See [the nonlinear learning example](../../examples/autograd_xor.py)
 for a complete training loop without PyTorch or NumPy dependencies.
 
+For classification, feed **logits**, not probabilities, directly into the
+Rust-owned loss:
+
+```python
+logits = st.AutogradTensor.variable(st.Tensor(2, 3, [2., 0., -1., 0., 2., -1.]))
+loss = logits.cross_entropy_with_logits([0, 1], label_smoothing=0.05)
+loss.backward()
+print(loss.item(), logits.grad().tolist())
+```
+
+`reduction="mean"` averages non-ignored rows; `ignore_index=-100` masks labels.
+`"sum"` and `"none"` are also available. An all-ignored mean batch raises an
+error. `row_log_softmax()` and the Tensor forward/VJP methods share the same
+stable CPU kernels. `st.nn.CrossEntropyWithLogits` plugs into `ModuleTrainer`
+using `(samples, 1)` integral target Tensors; strict WGPU execution is rejected
+for this CPU-only loss. Existing `SoftmaxCrossEntropy` remains the probability
+loss and is **not** renamed. See the [classification contract](../../docs/autograd_contract.md#classification-from-logits)
+and [runnable multiclass fixture](../../examples/autograd_classification.py).
+
 Leaves and accumulated gradients are protected Rust snapshots. `value()` and
 `grad()` expose read-only versioned DLPack storage; legacy export copies rather
 than exposing writable graph memory. For an ordinary Tensor, `snapshot()`

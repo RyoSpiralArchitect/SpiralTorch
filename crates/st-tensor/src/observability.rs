@@ -40,6 +40,52 @@ thread_local! {
     static IN_META_OBSERVER_CALLBACK: Cell<bool> = const { Cell::new(false) };
     static THREAD_TENSOR_OP_META_OBSERVER: RefCell<Option<TensorOpMetaObserver>> =
         const { RefCell::new(None) };
+    static OBSERVER_DEFER_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static DEFERRED_OBSERVATIONS: RefCell<Vec<DeferredObservation>> = const { RefCell::new(Vec::new()) };
+}
+
+enum DeferredObservation {
+    Operation(TensorOpObserver, TensorOpEvent),
+    Metadata(
+        Option<TensorOpMetaObserver>,
+        Option<TensorOpMetaObserver>,
+        TensorOpMetaEvent,
+    ),
+}
+
+/// Must be created before a graph lock so its notifications run after that lock drops.
+pub(crate) struct ObserverDeferralGuard(std::marker::PhantomData<std::rc::Rc<()>>);
+
+pub(crate) fn defer_tensor_observers() -> ObserverDeferralGuard {
+    OBSERVER_DEFER_DEPTH.with(|depth| depth.set(depth.get() + 1));
+    ObserverDeferralGuard(std::marker::PhantomData)
+}
+
+impl Drop for ObserverDeferralGuard {
+    fn drop(&mut self) {
+        let flush = OBSERVER_DEFER_DEPTH.with(|depth| {
+            depth.set(depth.get() - 1);
+            depth.get() == 0
+        });
+        if !flush {
+            return;
+        }
+        let events = DEFERRED_OBSERVATIONS.with(|events| std::mem::take(&mut *events.borrow_mut()));
+        for event in events {
+            match event {
+                DeferredObservation::Operation(observer, event) => {
+                    notify_operation(&observer, &event)
+                }
+                DeferredObservation::Metadata(thread, global, event) => {
+                    if IN_META_OBSERVER_CALLBACK.with(|flag| flag.replace(true)) {
+                        continue;
+                    }
+                    let _reset = MetaObserverCallbackReset;
+                    notify_metadata(thread.as_ref(), global.as_ref(), &event);
+                }
+            }
+        }
+    }
 }
 
 struct MetaObserverCallbackReset;
@@ -128,6 +174,26 @@ pub fn emit_tensor_op(op_name: &'static str, input_shape: &[usize], output_shape
         return;
     };
 
+    if IN_OBSERVER_CALLBACK.with(Cell::get) {
+        return;
+    }
+    let event = TensorOpEvent {
+        op_name,
+        input_shape: input_shape.to_vec(),
+        output_shape: output_shape.to_vec(),
+    };
+    if OBSERVER_DEFER_DEPTH.with(|depth| depth.get() > 0) {
+        DEFERRED_OBSERVATIONS.with(|events| {
+            events
+                .borrow_mut()
+                .push(DeferredObservation::Operation(observer, event))
+        });
+        return;
+    }
+    notify_operation(&observer, &event);
+}
+
+fn notify_operation(observer: &TensorOpObserver, event: &TensorOpEvent) {
     let already_in_callback = IN_OBSERVER_CALLBACK.with(|flag| {
         if flag.get() {
             true
@@ -140,13 +206,7 @@ pub fn emit_tensor_op(op_name: &'static str, input_shape: &[usize], output_shape
         return;
     }
 
-    let event = TensorOpEvent {
-        op_name,
-        input_shape: input_shape.to_vec(),
-        output_shape: output_shape.to_vec(),
-    };
-
-    let _ = catch_unwind(AssertUnwindSafe(|| observer(&event)));
+    let _ = catch_unwind(AssertUnwindSafe(|| observer(event)));
 
     IN_OBSERVER_CALLBACK.with(|flag| flag.set(false));
 }
@@ -189,16 +249,33 @@ where
         data: build(),
     };
 
-    if let Some(observer) = thread_observer.as_ref() {
-        let _ = catch_unwind(AssertUnwindSafe(|| observer(&event)));
+    if OBSERVER_DEFER_DEPTH.with(|depth| depth.get() > 0) {
+        DEFERRED_OBSERVATIONS.with(|events| {
+            events.borrow_mut().push(DeferredObservation::Metadata(
+                thread_observer,
+                global_observer,
+                event,
+            ))
+        });
+        return;
     }
-    if let Some(observer) = global_observer.as_ref() {
+    notify_metadata(thread_observer.as_ref(), global_observer.as_ref(), &event);
+}
+
+fn notify_metadata(
+    thread_observer: Option<&TensorOpMetaObserver>,
+    global_observer: Option<&TensorOpMetaObserver>,
+    event: &TensorOpMetaEvent,
+) {
+    if let Some(observer) = thread_observer {
+        let _ = catch_unwind(AssertUnwindSafe(|| observer(event)));
+    }
+    if let Some(observer) = global_observer {
         let duplicates_thread_observer = thread_observer
-            .as_ref()
             .map(|thread| Arc::ptr_eq(thread, observer))
             .unwrap_or(false);
         if !duplicates_thread_observer {
-            let _ = catch_unwind(AssertUnwindSafe(|| observer(&event)));
+            let _ = catch_unwind(AssertUnwindSafe(|| observer(event)));
         }
     }
 }

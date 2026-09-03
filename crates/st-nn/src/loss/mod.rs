@@ -5,6 +5,7 @@
 
 mod categorical_cross_entropy;
 mod contrastive_loss;
+mod cross_entropy_with_logits;
 mod focal_loss;
 mod hyperbolic_cross_entropy;
 mod mean_squared_error;
@@ -16,6 +17,7 @@ use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError};
 
 pub use categorical_cross_entropy::CategoricalCrossEntropy;
 pub use contrastive_loss::ContrastiveLoss;
+pub use cross_entropy_with_logits::CrossEntropyWithLogits;
 pub use focal_loss::FocalLoss;
 pub use hyperbolic_cross_entropy::HyperbolicCrossEntropy;
 pub use mean_squared_error::MeanSquaredError;

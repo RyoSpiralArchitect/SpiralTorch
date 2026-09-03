@@ -128,7 +128,9 @@ pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
 };
-pub use loss::{CategoricalCrossEntropy, HyperbolicCrossEntropy, Loss, MeanSquaredError};
+pub use loss::{
+    CategoricalCrossEntropy, CrossEntropyWithLogits, HyperbolicCrossEntropy, Loss, MeanSquaredError,
+};
 pub use module::{Module, Parameter};
 pub use optim::{
     LocalLearningRateAdapter, LrScheduler, OptimizerMode, SpectralLrAdapter,

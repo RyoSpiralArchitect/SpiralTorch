@@ -7,7 +7,7 @@
 //! backward pass never commits a partial gradient set. Python and WASM clients
 //! should expose this contract rather than rebuilding graph semantics.
 
-use crate::{Layout, PureResult, Tensor, TensorError};
+use crate::{CrossEntropyConfig, Layout, PureResult, Tensor, TensorError};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -136,6 +136,14 @@ enum AutogradOperation {
         input: AutogradTensor,
         probabilities: Tensor,
     },
+    RowLogSoftmax {
+        input: AutogradTensor,
+    },
+    CrossEntropyWithLogits {
+        input: AutogradTensor,
+        labels: Arc<[i64]>,
+        config: CrossEntropyConfig,
+    },
     Sum {
         input: AutogradTensor,
     },
@@ -177,6 +185,8 @@ impl AutogradOperation {
             Self::Relu { .. } => "relu",
             Self::Gelu { .. } => "gelu",
             Self::RowSoftmax { .. } => "row_softmax",
+            Self::RowLogSoftmax { .. } => "row_log_softmax",
+            Self::CrossEntropyWithLogits { .. } => "cross_entropy_with_logits",
             Self::Sum { .. } => "sum",
             Self::Mean { .. } => "mean",
         }
@@ -195,6 +205,8 @@ impl AutogradOperation {
             | Self::Relu { input }
             | Self::Gelu { input }
             | Self::RowSoftmax { input, .. }
+            | Self::RowLogSoftmax { input }
+            | Self::CrossEntropyWithLogits { input, .. }
             | Self::Sum { input }
             | Self::Mean { input } => vec![input.clone()],
         }
@@ -284,6 +296,20 @@ impl AutogradOperation {
                     Tensor::from_vec(rows, cols, gradient)?,
                 )])
             }
+            Self::RowLogSoftmax { input } => Ok(vec![(
+                input.clone(),
+                input.value().row_log_softmax_backward(upstream)?,
+            )]),
+            Self::CrossEntropyWithLogits {
+                input,
+                labels,
+                config,
+            } => Ok(vec![(
+                input.clone(),
+                input
+                    .value()
+                    .cross_entropy_with_logits_backward(labels, *config, upstream)?,
+            )]),
             Self::Sum { input } => {
                 let seed = scalar_value(upstream, "autograd_sum_seed")?;
                 let gradient = Tensor::from_vec(
@@ -477,6 +503,32 @@ impl AutogradTensor {
         )
     }
 
+    /// Stable row log-probabilities with the coupled VJP owned by st-tensor.
+    pub fn row_log_softmax(&self) -> PureResult<Self> {
+        Self::from_operation(
+            self.value().row_log_softmax()?,
+            AutogradOperation::RowLogSoftmax {
+                input: self.clone(),
+            },
+        )
+    }
+
+    /// Integer-label logits loss. Captures labels and configuration by value.
+    pub fn cross_entropy_with_logits(
+        &self,
+        labels: &[i64],
+        config: CrossEntropyConfig,
+    ) -> PureResult<Self> {
+        Self::from_operation(
+            self.value().cross_entropy_with_logits(labels, config)?,
+            AutogradOperation::CrossEntropyWithLogits {
+                input: self.clone(),
+                labels: labels.into(),
+                config,
+            },
+        )
+    }
+
     pub fn sub(&self, rhs: &Self) -> PureResult<Self> {
         let value = self.value().sub(rhs.value())?;
         Self::from_operation(
@@ -604,6 +656,7 @@ impl AutogradTensor {
     pub fn vector_jacobian_product(&self, input: &Self, seed: &Tensor) -> PureResult<Tensor> {
         let seed = self.prepare_backward_seed(seed)?;
         let gradient = {
+            let _deferred_observers = crate::observability::defer_tensor_observers();
             let _serial = backward_lock();
             let topology = self.topological_order();
             let mut gradients = self.local_gradients(&topology, &seed)?;
@@ -634,6 +687,7 @@ impl AutogradTensor {
     pub fn backward_with_grad(&self, seed: &Tensor) -> PureResult<AutogradBackwardReport> {
         let seed = self.prepare_backward_seed(seed)?;
         let report = {
+            let _deferred_observers = crate::observability::defer_tensor_observers();
             let _serial = backward_lock();
             self.backward_locked(&seed)?
         };

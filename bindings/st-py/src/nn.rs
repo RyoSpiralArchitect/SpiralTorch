@@ -84,10 +84,10 @@ use st_nn::{
         PreDiscardPolicy, PreDiscardSnapshot, PreDiscardTelemetry,
         ZSpaceCoherenceClassificationPolicy,
     },
-    AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset,
-    DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
-    DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireWeights,
-    EpochStats as RustEpochStats, Gelu, GeometryBiasContext, GeometryBiasMetrics,
+    AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, CrossEntropyWithLogits,
+    DataLoader, Dataset, DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
+    DesireWeights, EpochStats as RustEpochStats, Gelu, GeometryBiasContext, GeometryBiasMetrics,
     GeometryBiasUpdate, GeometryCoherenceSample, HyperbolicCrossEntropy, LayerNorm, Linear,
     LoraLinear as RustLoraLinear, MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
     ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
@@ -4240,6 +4240,59 @@ impl PyCategoricalCrossEntropy {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CrossEntropyWithLogits", unsendable)]
+pub(crate) struct PyCrossEntropyWithLogits {
+    inner: CrossEntropyWithLogits,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCrossEntropyWithLogits {
+    #[new]
+    #[pyo3(signature = (*, reduction="mean", ignore_index=-100, label_smoothing=0.0))]
+    pub fn new(reduction: &str, ignore_index: i64, label_smoothing: f64) -> PyResult<Self> {
+        let config =
+            crate::tensor::parse_cross_entropy_config(reduction, ignore_index, label_smoothing)?;
+        Ok(Self {
+            inner: CrossEntropyWithLogits::new(config).map_err(tensor_err_to_py)?,
+        })
+    }
+
+    pub fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        self.inner
+            .forward(&prediction.inner, &target.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        self.inner
+            .backward(&prediction.inner, &target.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn reduction(&self) -> &'static str {
+        self.inner.config().reduction.as_str()
+    }
+
+    #[getter]
+    pub fn ignore_index(&self) -> i64 {
+        self.inner.config().ignore_index
+    }
+
+    #[getter]
+    pub fn label_smoothing(&self) -> f64 {
+        self.inner.config().label_smoothing
+    }
+
+    pub fn __call__(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(prediction, target)
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "HyperbolicCrossEntropy", unsendable)]
 pub(crate) struct PyHyperbolicCrossEntropy {
     inner: HyperbolicCrossEntropy,
@@ -5211,6 +5264,10 @@ fn with_loss_mut<R>(
         let mut inner = handle.bind(py).borrow_mut();
         return f(&mut inner.inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = loss.extract::<Py<PyCrossEntropyWithLogits>>() {
+        let mut inner = handle.bind(py).borrow_mut();
+        return f(&mut inner.inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = loss.extract::<Py<PyHyperbolicCrossEntropy>>() {
         let mut inner = handle.bind(py).borrow_mut();
         return f(&mut inner.inner).map_err(tensor_err_to_py);
@@ -5229,7 +5286,7 @@ fn with_loss_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "loss must be a spiraltorch.nn loss (supported: MeanSquaredError, CategoricalCrossEntropy, HyperbolicCrossEntropy, FocalLoss, ContrastiveLoss, TripletLoss)",
+        "loss must be a spiraltorch.nn loss (supported: MeanSquaredError, CategoricalCrossEntropy, CrossEntropyWithLogits, HyperbolicCrossEntropy, FocalLoss, ContrastiveLoss, TripletLoss)",
     ))
 }
 
@@ -10781,6 +10838,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PySequential>()?;
     module.add_class::<PyMeanSquaredError>()?;
     module.add_class::<PyCategoricalCrossEntropy>()?;
+    module.add_class::<PyCrossEntropyWithLogits>()?;
     module.add_class::<PyHyperbolicCrossEntropy>()?;
     if let Ok(loss) = module.getattr("HyperbolicCrossEntropy") {
         module.add("CrossEntropy", loss)?;
@@ -10865,6 +10923,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "Sequential",
             "MeanSquaredError",
             "CategoricalCrossEntropy",
+            "CrossEntropyWithLogits",
             "HyperbolicCrossEntropy",
             "CrossEntropy",
             "FocalLoss",
@@ -10957,6 +11016,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     if let Ok(mse) = module.getattr("MeanSquaredError") {
         parent.add("MeanSquaredError", mse)?;
     }
+    parent.add(
+        "CrossEntropyWithLogits",
+        module.getattr("CrossEntropyWithLogits")?,
+    )?;
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
     }
