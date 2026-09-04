@@ -10,6 +10,11 @@ SPEC = importlib.util.spec_from_file_location("backend_bench", PATH)
 bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
 
+RANK_PATH = Path(__file__).resolve().parents[1] / "tools" / "bench_rank_vs_torch.py"
+RANK_SPEC = importlib.util.spec_from_file_location("rank_bench", RANK_PATH)
+rank_bench = importlib.util.module_from_spec(RANK_SPEC)
+RANK_SPEC.loader.exec_module(rank_bench)
+
 
 class BackendBenchmarkTests(unittest.TestCase):
     def test_effective_backend_identifies_non_faer_indexing(self):
@@ -49,6 +54,53 @@ class BackendBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["median_ms"], 10.5)
         self.assertEqual(report["p95_ms"], 19)
         self.assertEqual(report["samples_ms"], values)
+
+    def test_rank_build_identity_must_match_clean_source(self):
+        source = {
+            "commit": "a" * 40,
+            "tree": "b" * 40,
+            "tracked_dirty": False,
+        }
+        identity = {
+            "schema": rank_bench.BUILD_IDENTITY_SCHEMA,
+            "manifest": {
+                "pkg": {"name": "st-core"},
+                "git": {
+                    "commit": source["commit"],
+                    "tree": source["tree"],
+                    "dirty": False,
+                },
+            },
+        }
+        binding = rank_bench.validate_source_binding(identity, source)
+        self.assertTrue(binding["valid"])
+        self.assertTrue(all(binding["checks"].values()))
+
+    def test_rank_build_identity_rejects_stale_or_dirty_binary(self):
+        source = {
+            "commit": "a" * 40,
+            "tree": "b" * 40,
+            "tracked_dirty": False,
+        }
+        for field, value in (
+            ("commit", "c" * 40),
+            ("tree", "d" * 40),
+            ("dirty", True),
+        ):
+            with self.subTest(field=field):
+                git = {
+                    "commit": source["commit"],
+                    "tree": source["tree"],
+                    "dirty": False,
+                }
+                git[field] = value
+                identity = {
+                    "schema": rank_bench.BUILD_IDENTITY_SCHEMA,
+                    "manifest": {"pkg": {"name": "st-core"}, "git": git},
+                }
+                self.assertFalse(
+                    rank_bench.validate_source_binding(identity, source)["valid"]
+                )
 
 
 if __name__ == "__main__":

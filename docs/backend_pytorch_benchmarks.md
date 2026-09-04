@@ -91,6 +91,11 @@ both in one receipt. Process-level failures also produce an atomic v2 receipt
 with a named stage. Successful runs record the clean Git commit/tree and tracked
 diff identity, execute a private hardlink snapshot of the native binary, and
 verify source, path, inode, size, timestamp, and SHA-256 stability after the run.
+Before measuring, the harness also asks that exact execution image for its
+Rust-embedded build manifest. Its package, Git commit, Git tree, and clean-build
+state must match the source checkout or the run fails at
+`build_identity_preflight`; two independently stable but unrelated artifacts are
+not accepted as valid provenance.
 
 NVRTC rank kernels are header-independent in runtime compilation. The original
 heap remains in use where it is exact; wide rows with k > 8 use an exact rescan

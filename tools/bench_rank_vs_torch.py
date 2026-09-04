@@ -12,6 +12,7 @@ import tempfile
 
 
 SCHEMA = "spiraltorch.rank_backend_bench.v2"
+BUILD_IDENTITY_SCHEMA = "spiraltorch.native_build_identity.v1"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -56,6 +57,61 @@ def source_identity():
         "tracked_dirty": bool(status),
         "tracked_status_sha256": hashlib.sha256(status).hexdigest(),
         "tracked_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
+
+
+def read_native_build_identity(executable):
+    completed = subprocess.run(
+        [str(executable), "--build-info"],
+        stdin=subprocess.DEVNULL,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "native build identity failed "
+            f"with exit {completed.returncode}: {completed.stderr[-4000:]}"
+        )
+    if completed.stderr:
+        raise RuntimeError(
+            f"native build identity wrote to stderr: {completed.stderr[-4000:]}"
+        )
+    lines = completed.stdout.splitlines()
+    if len(lines) != 1:
+        raise RuntimeError(
+            f"native build identity returned {len(lines)} lines instead of one"
+        )
+    try:
+        identity = json.loads(lines[0])
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"native build identity is not JSON: {error}") from error
+    if not isinstance(identity, dict):
+        raise RuntimeError("native build identity is not an object")
+    return identity
+
+
+def validate_source_binding(identity, source):
+    manifest = identity.get("manifest")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    package = manifest.get("pkg")
+    package = package if isinstance(package, dict) else {}
+    git = manifest.get("git")
+    git = git if isinstance(git, dict) else {}
+    checks = {
+        "schema_matches": identity.get("schema") == BUILD_IDENTITY_SCHEMA,
+        "package_matches": package.get("name") == "st-core",
+        "commit_matches": git.get("commit") == source.get("commit"),
+        "tree_matches": git.get("tree") == source.get("tree"),
+        "build_was_clean": git.get("dirty") is False,
+        "source_is_clean": source.get("tracked_dirty") is False,
+    }
+    return {
+        "valid": all(checks.values()),
+        "checks": checks,
+        "embedded_commit": git.get("commit"),
+        "embedded_tree": git.get("tree"),
+        "source_commit": source.get("commit"),
+        "source_tree": source.get("tree"),
     }
 
 
@@ -127,6 +183,8 @@ def failure_report(stage, error, state):
         "source_executable_after",
         "execution_image_before",
         "execution_image_after",
+        "native_build_identity",
+        "source_binding",
         "request_sha256",
     ):
         if state.get(key) is not None:
@@ -161,6 +219,16 @@ def run_benchmark(args):
                 != state["source_executable_before"]["sha256"]
             ):
                 raise RuntimeError("private execution image differs from source executable")
+
+            stage = "build_identity_preflight"
+            state["native_build_identity"] = read_native_build_identity(execution_path)
+            state["source_binding"] = validate_source_binding(
+                state["native_build_identity"], state["source_before"]
+            )
+            if not state["source_binding"]["valid"]:
+                raise RuntimeError(
+                    "native executable build identity does not match the clean source tree"
+                )
 
             stage = "benchmark_helper_import"
             bench = load_bench_module()
@@ -227,6 +295,7 @@ def run_benchmark(args):
                     "executed_before": state["execution_image_before"],
                     "executed_after": state["execution_image_after"],
                 },
+                "native_build_identity": state["native_build_identity"],
                 "source": state["source_before"],
                 "cases": [],
             }
@@ -317,7 +386,9 @@ def run_benchmark(args):
                 "source_stable": source_stable,
                 "source_executable_stable": source_executable_stable,
                 "execution_image_stable": execution_image_stable,
-                "valid": source_stable
+                "build_source_binding": state["source_binding"],
+                "valid": state["source_binding"]["valid"]
+                and source_stable
                 and source_executable_stable
                 and execution_image_stable,
             }

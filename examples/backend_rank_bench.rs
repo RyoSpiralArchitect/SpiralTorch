@@ -12,8 +12,21 @@ use st_core::backend::wgpu_exec::WgpuExecutor;
 use st_core::ops::rank_entry::{execute_rank, try_plan_rank_with_config, RankPlan};
 use st_core::runtime::blackcat::bandit::SoftBanditMode;
 use st_core::runtime::rank_adaptation::RankAdaptationSession;
+use std::ffi::OsStr;
 use std::io::{self, BufRead};
 use std::time::Instant;
+
+const BUILD_IDENTITY_SCHEMA: &str = "spiraltorch.native_build_identity.v1";
+
+fn build_identity() -> Result<serde_json::Value, String> {
+    let manifest = serde_json::from_str::<serde_json::Value>(st_core::build_manifest_json())
+        .map_err(|error| format!("invalid embedded build manifest: {error}"))?;
+    Ok(json!({
+        "schema": BUILD_IDENTITY_SCHEMA,
+        "build_fingerprint": st_core::build_fingerprint(),
+        "manifest": manifest,
+    }))
+}
 
 #[derive(Deserialize)]
 struct Request {
@@ -326,6 +339,25 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
 }
 
 fn main() {
+    let mut args = std::env::args_os().skip(1);
+    match (args.next(), args.next()) {
+        (Some(flag), None) if flag == OsStr::new("--build-info") => {
+            match build_identity() {
+                Ok(identity) => println!("{identity}"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        (None, None) => {}
+        _ => {
+            eprintln!("usage: backend_rank_bench [--build-info]");
+            std::process::exit(2);
+        }
+    }
+
     let mut failed = false;
     for line in io::stdin().lock().lines() {
         let result = line

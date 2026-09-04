@@ -32,6 +32,7 @@ fn emit_build_info() {
     let build_seed = Uuid::new_v4().simple().to_string();
 
     let git_commit = git_capture(["rev-parse", "HEAD"]).map(|s| s.to_string());
+    let git_tree = git_capture(["rev-parse", "HEAD^{tree}"]).map(|s| s.to_string());
     let git_describe = git_capture(["describe", "--tags", "--always"]).map(|s| s.to_string());
     let git_dirty = git_status_is_dirty();
 
@@ -53,6 +54,7 @@ fn emit_build_info() {
         "rustc": detect_rustc_version(),
         "git": {
             "commit": git_commit,
+            "tree": git_tree,
             "describe": git_describe,
             "dirty": git_dirty,
         },

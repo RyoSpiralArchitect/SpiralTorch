@@ -81,8 +81,10 @@ native optima by shape instead of "tuning" knobs that CUDA ignored.
 The retained binary was built from a detached clean worktree into a fresh
 commit-specific target directory. The harness executed a private hardlink of
 that binary and verified its SHA-256, device, inode, size, timestamp, and source
-identity before and after the run. The native process returned zero with empty
-stderr; the top-level provenance gate is `valid: true`.
+identity before and after the run. The refreshed receipt also requires the
+binary's embedded build commit/tree and clean-build bit to match that checkout.
+The native process returned zero with empty stderr; the top-level provenance
+gate is `valid: true`.
 
 ## Reproduction
 
