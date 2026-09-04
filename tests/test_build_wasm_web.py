@@ -20,9 +20,10 @@ class BuildWasmWebTests(unittest.TestCase):
             fake.write_text(
                 """#!/usr/bin/env bash
 set -euo pipefail
-printf 'rust=%s\\nencoded=%s\\ntarget=%s\\nargs=%s\\n' \\
+printf 'rust=%s\\nencoded=%s\\ntarget=%s\\nlibrary=%s\\npkg_config=%s\\nargs=%s\\n' \\
   "${RUSTFLAGS-unset}" "${CARGO_ENCODED_RUSTFLAGS-unset}" \\
-  "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS-unset}" "$*" > "$CAPTURE"
+  "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS-unset}" \\
+  "${LIBRARY_PATH-unset}" "${PKG_CONFIG_PATH-unset}" "$*" > "$CAPTURE"
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == "--out-dir" ]]; then out="$2"; shift 2; else shift; fi
 done
@@ -61,7 +62,10 @@ touch "$out/spiraltorch_wasm.js"
 
     def test_portable_profile_strips_all_rust_flag_sources(self):
         capture = self.run_profile("--dev")
-        self.assertIn("rust=unset\nencoded=unset\ntarget=unset\n", capture)
+        self.assertIn(
+            "rust=unset\nencoded=unset\ntarget=unset\nlibrary=unset\npkg_config=unset\n",
+            capture,
+        )
         self.assertIn("--dev", capture)
 
     def test_portable_profile_accepts_no_wasm_pack_options(self):
