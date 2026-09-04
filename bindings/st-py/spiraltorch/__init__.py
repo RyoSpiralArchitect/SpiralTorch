@@ -3167,6 +3167,10 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "planner": {
         "RankPlan": ("PyRankPlan",),
+        "RankAdaptationSelection": (),
+        "RankAdaptationSession": (),
+        "RANK_ADAPTATION_CONTRACT_VERSION": (),
+        "RANK_ADAPTATION_SEMANTIC_OWNER": (),
         "plan": (),
         "plan_topk": (),
         "describe_device": (),
@@ -7172,6 +7176,10 @@ _mirror_into_module(
     "planner",
     {
         "RankPlan": (),
+        "RankAdaptationSelection": (),
+        "RankAdaptationSession": (),
+        "RANK_ADAPTATION_CONTRACT_VERSION": (),
+        "RANK_ADAPTATION_SEMANTIC_OWNER": (),
         "plan": (),
         "plan_topk": (),
         "describe_device": (),
@@ -8878,6 +8886,8 @@ _CORE_EXPORTS = [
     "wgpu_rank_kernel_report","wgpu_kernel_report_from_rank_plan",
     "wgpu_softmax_kernel_report",
     "token_scale_stack","token_coherence_levels",
+    "RankAdaptationSelection","RankAdaptationSession",
+    "RANK_ADAPTATION_CONTRACT_VERSION","RANK_ADAPTATION_SEMANTIC_OWNER",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:

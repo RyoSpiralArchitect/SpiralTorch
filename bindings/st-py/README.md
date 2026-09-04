@@ -392,6 +392,20 @@ These APIs are not in the published 0.4.27 wheel yet.
   produced by `st-tensor` as either a static host contract or an accelerator
   dispatch/readback sentinel; Python never supplies or reconstructs a naked `Ready`
   capability list.
+- `RankAdaptationSession` for bounded SpiralK candidate compilation and Black
+  Cat selection over one rank workload. `choose()` returns a typed
+  `RankAdaptationSelection`; its `.plan` is the selected `RankPlan` and its
+  `.receipt()` carries the decision witness and client provenance.
+  `observe(selection_id, elapsed_ms, correctness_passed)` credits the Rust-owned
+  reward only after correctness, while `abandon(selection_id)` closes an
+  unexecuted choice without posterior credit. UCB decision receipts distinguish
+  `selection_attempts` from rewarded `observations`, so failed work advances
+  initial exploration without being reported as learned performance. A
+  correctness-failed arm is quarantined; an abandoned arm remains eligible.
+  These fields use Black Cat bandit witness contract v3. Candidate receipts
+  expose the effective kernel execution signature, and every nested plan carries
+  the same requested/effective Python client provenance as a directly created
+  `RankPlan`.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field

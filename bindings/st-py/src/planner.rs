@@ -68,6 +68,20 @@ impl PyRankPlan {
         &self.inner
     }
 
+    pub(crate) fn metadata(
+        &self,
+    ) -> (
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+    ) {
+        (
+            self.kind_override,
+            self.requested_backend,
+            self.effective_backend,
+        )
+    }
+
     fn merge_kind(&self) -> &'static str {
         match self.inner.choice.mk {
             1 => "shared",
@@ -86,6 +100,31 @@ impl PyRankPlan {
             _ => "auto",
         }
     }
+}
+
+pub(crate) fn rank_plan_contract_value(
+    plan: &RankPlan,
+    requested_backend: Option<&'static str>,
+    effective_backend: Option<&'static str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(plan.snapshot())?;
+    let object = value
+        .as_object_mut()
+        .expect("rank-plan snapshot serializes as an object");
+    object.insert("execution_client".into(), "python".into());
+    object.insert(
+        "requested_backend".into(),
+        requested_backend
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "effective_backend".into(),
+        effective_backend
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    Ok(value)
 }
 
 #[pymethods]
@@ -238,24 +277,9 @@ impl PyRankPlan {
 
     /// Returns the shared Rust-owned planning contract with client provenance.
     fn contract(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let mut value = serde_json::to_value(self.inner.snapshot())
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-        let object = value
-            .as_object_mut()
-            .expect("rank-plan snapshot serializes as an object");
-        object.insert("execution_client".into(), "python".into());
-        object.insert(
-            "requested_backend".into(),
-            self.requested_backend
-                .map(serde_json::Value::from)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        object.insert(
-            "effective_backend".into(),
-            self.effective_backend
-                .map(serde_json::Value::from)
-                .unwrap_or(serde_json::Value::Null),
-        );
+        let value =
+            rank_plan_contract_value(&self.inner, self.requested_backend, self.effective_backend)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
         json_to_py(py, &value)
     }
 

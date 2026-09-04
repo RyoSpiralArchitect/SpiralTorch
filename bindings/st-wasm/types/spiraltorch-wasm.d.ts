@@ -1941,6 +1941,123 @@ declare module "spiraltorch-wasm" {
         };
     };
 
+    export type RankAdaptationRequest = {
+        rank_plan: RankPlanRequest;
+        scripts: string[];
+        policy?: "ucb" | "upper_confidence_bound" | "ts" | "thompson_sampling";
+        /** Nonnegative JavaScript-safe integer. */
+        seed?: number;
+    };
+
+    export type RankAdaptationBanditArm = {
+        choice: string;
+        posterior_mean: number;
+        predictive_stddev: number;
+        decision_score: number;
+        selection_attempts: number;
+        observations: number;
+        quarantined: boolean;
+        hinted: boolean;
+    };
+
+    export type RankAdaptationBanditDecision = {
+        mode: string;
+        chosen: string;
+        decision_index: number;
+        posterior_estimator: string;
+        posterior_regularization: number;
+        exploration_scale: number;
+        forced_exploration: boolean;
+        sampling_applied: boolean;
+        rng_algorithm: string | null;
+        /** Exact decimal u64 text; never rounded to a JavaScript number. */
+        rng_stream_seed: string | null;
+        arms: RankAdaptationBanditArm[];
+    };
+
+    export type RankAdaptationSelectionReceipt = {
+        kind: "spiraltorch.rank_adaptation";
+        contract_version: "spiraltorch.rank_adaptation.v1";
+        semantic_owner: "st-core::runtime::rank_adaptation";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        policy: "upper_confidence_bound" | "thompson_sampling";
+        selection_id: number;
+        candidate_index: number;
+        spiralk_source_sha256: string;
+        execution_signature: string;
+        plan: RankPlanContract;
+        decision: RankAdaptationBanditDecision;
+    };
+
+    export type RankAdaptationObservationReceipt = {
+        kind: "spiraltorch.rank_adaptation";
+        contract_version: "spiraltorch.rank_adaptation.v1";
+        semantic_owner: "st-core::runtime::rank_adaptation";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        selection_id: number;
+        candidate_index: number;
+        elapsed_ms: number;
+        correctness_passed: boolean;
+        credited: boolean;
+        candidate_quarantined: boolean;
+        reward: number | null;
+        reward_formula: "1 / (1 + elapsed_ms)";
+        observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
+    };
+
+    export type RankAdaptationAbandonmentReceipt = {
+        kind: "spiraltorch.rank_adaptation";
+        contract_version: "spiraltorch.rank_adaptation.v1";
+        semantic_owner: "st-core::runtime::rank_adaptation";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        selection_id: number;
+        candidate_index: number;
+        credited: false;
+        observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
+    };
+
+    export type RankAdaptationSessionSnapshot = {
+        kind: "spiraltorch.rank_adaptation";
+        contract_version: "spiraltorch.rank_adaptation.v1";
+        semantic_owner: "st-core::runtime::rank_adaptation";
+        semantic_backend: "rust";
+        execution_client: "wasm";
+        policy: "upper_confidence_bound" | "thompson_sampling";
+        seed: number;
+        bandit_context: [number];
+        reward_formula: "1 / (1 + elapsed_ms)";
+        candidates: Array<{
+            index: number;
+            spiralk_source_sha256: string;
+            execution_signature: string;
+            plan: RankPlanContract;
+        }>;
+        choice_domains: Record<string, string[]>;
+        observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
+        pending_selection_id: number | null;
+    };
+
+    /** Rust-owned SpiralK candidate planner plus Black Cat feedback state. */
+    export class RankAdaptationSession {
+        constructor(request: RankAdaptationRequest);
+        free(): void;
+        choose(): RankAdaptationSelectionReceipt;
+        observe(
+            selection_id: number,
+            elapsed_ms: number,
+            correctness_passed: boolean,
+        ): RankAdaptationObservationReceipt;
+        abandon(selection_id: number): RankAdaptationAbandonmentReceipt;
+        snapshot(): RankAdaptationSessionSnapshot;
+        pendingSelectionId(): number | undefined;
+    }
+
     export type RouteSelectionProfile =
         | "balanced"
         | "quality"

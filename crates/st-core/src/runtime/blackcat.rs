@@ -25,7 +25,7 @@ use crate::telemetry::{monitoring::MonitoringHub, trace_init};
 /// Stable semantic contract emitted with every contextual bandit decision.
 pub const BLACKCAT_BANDIT_CONTRACT: &str = "spiraltorch.blackcat.contextual-bandit";
 /// Schema version for [`BlackCatSelectionWitness`].
-pub const BLACKCAT_BANDIT_CONTRACT_VERSION: u32 = 2;
+pub const BLACKCAT_BANDIT_CONTRACT_VERSION: u32 = 3;
 /// Maximum accepted contextual feature width for guarded construction.
 pub const BLACKCAT_MAX_FEATURE_DIM: usize = 256;
 /// Maximum accepted named choice groups for guarded construction.
@@ -479,6 +479,16 @@ impl MultiBandit {
         Ok(())
     }
 
+    /// Permanently excludes every pending group choice after hard validation fails.
+    pub fn try_quarantine_all(&mut self) -> Result<(), &'static str> {
+        let mut next = self.clone();
+        for bandit in next.arms.values_mut() {
+            bandit.try_quarantine_last_selection()?;
+        }
+        *self = next;
+        Ok(())
+    }
+
     /// Reports the common pending state and rejects impossible cross-group
     /// disagreement.
     pub fn selection_pending(&self) -> Result<bool, &'static str> {
@@ -503,6 +513,14 @@ impl MultiBandit {
         self.arms
             .iter()
             .map(|(name, bandit)| (name.clone(), bandit.choices().to_vec()))
+            .collect()
+    }
+
+    /// Stable quarantined choices for every named group.
+    pub fn quarantined_choices(&self) -> BTreeMap<String, Vec<String>> {
+        self.arms
+            .iter()
+            .map(|(name, bandit)| (name.clone(), bandit.quarantined_choices()))
             .collect()
     }
 
@@ -2214,6 +2232,11 @@ mod tests {
         );
         let first_witness = runtime.last_selection_witness().expect("selection witness");
         assert_eq!(first_witness.contract, BLACKCAT_BANDIT_CONTRACT);
+        assert_eq!(first_witness.contract_version, 3);
+        let serialized = serde_json::to_value(first_witness).expect("serialize v3 witness");
+        let arm = &serialized["decisions"]["tile"]["arms"][0];
+        assert!(arm.get("selection_attempts").is_some());
+        assert!(arm.get("quarantined").is_some());
         assert!(!first_witness.decisions["tile"].sampling_applied);
         assert!(matches!(
             runtime.try_choose_with_hints(context.clone(), &hinted_b),
@@ -4340,9 +4363,10 @@ pub mod bandit {
 
     /// Contextual decision policy used by [`SoftBandit`].
     #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-    #[serde(rename_all = "snake_case")]
     pub enum SoftBanditMode {
+        #[serde(rename = "thompson_sampling")]
         TS,
+        #[serde(rename = "upper_confidence_bound")]
         UCB,
     }
 
@@ -4362,7 +4386,9 @@ pub mod bandit {
         pub posterior_mean: f64,
         pub predictive_stddev: f64,
         pub decision_score: f64,
+        pub selection_attempts: u64,
         pub observations: u64,
+        pub quarantined: bool,
         pub hinted: bool,
     }
 
@@ -4375,9 +4401,11 @@ pub mod bandit {
         pub posterior_estimator: &'static str,
         pub posterior_regularization: f64,
         pub exploration_scale: f64,
+        pub forced_exploration: bool,
         pub sampling_applied: bool,
         pub rng_algorithm: Option<&'static str>,
-        pub rng_stream_seed: Option<u64>,
+        /// Decimal u64 text so JavaScript clients receive the exact stream seed.
+        pub rng_stream_seed: Option<String>,
         pub arms: Vec<BanditArmWitness>,
     }
 
@@ -4577,6 +4605,8 @@ pub mod bandit {
     pub struct SoftBandit {
         choices: Vec<String>,
         arms: Vec<LinTSArm>,
+        selection_attempts: Vec<u64>,
+        quarantined: Vec<bool>,
         last_index: usize,
         mode: SoftBanditMode,
         rng: BanditRng,
@@ -4599,6 +4629,8 @@ pub mod bandit {
             Self::try_new_seeded(choices, feat_dim, mode, seed).unwrap_or_else(|_| Self {
                 choices: Vec::new(),
                 arms: Vec::new(),
+                selection_attempts: Vec::new(),
+                quarantined: Vec::new(),
                 last_index: 0,
                 mode,
                 rng: BanditRng::new(seed),
@@ -4633,12 +4665,15 @@ pub mod bandit {
                 .and_then(|cells| cells.checked_mul(choices.len()))
                 .filter(|cells| *cells <= super::BLACKCAT_MAX_POSTERIOR_CELLS)
                 .ok_or("bandit.posterior_size")?;
-            let arms = (0..choices.len())
+            let choice_count = choices.len();
+            let arms = (0..choice_count)
                 .map(|_| LinTSArm::new(feat_dim, POSTERIOR_REGULARIZATION))
                 .collect();
             Ok(Self {
                 choices,
                 arms,
+                selection_attempts: vec![0; choice_count],
+                quarantined: vec![false; choice_count],
                 last_index: 0,
                 mode,
                 rng: BanditRng::new(seed),
@@ -4686,15 +4721,43 @@ pub mod bandit {
             validate_context(x, self.arms[0].dim)?;
             let hint_index =
                 hint.and_then(|value| self.choices.iter().position(|choice| choice == value));
+            if hint_index.is_some_and(|index| self.quarantined[index]) {
+                return Err("bandit.quarantined_hint");
+            }
+            let first_eligible = self
+                .quarantined
+                .iter()
+                .position(|quarantined| !quarantined)
+                .ok_or("bandit.no_eligible_choices")?;
             let projections = self
                 .arms
                 .iter()
                 .map(|arm| arm.project(x))
                 .collect::<Result<Vec<_>, _>>()?;
-            let equivalent_hint_prior = hint_index.is_some()
-                && projections
-                    .windows(2)
-                    .all(|pair| projections_equivalent(pair[0], pair[1]));
+            let equivalent_hint_prior = hint_index.is_some() && {
+                let reference = projections[first_eligible];
+                projections.iter().enumerate().all(|(index, projection)| {
+                    self.quarantined[index] || projections_equivalent(reference, *projection)
+                })
+            };
+            // A finite UCB prior does not by itself guarantee exploration: a
+            // fast first arm can immediately outscore every unattempted arm.
+            // Attempts are tracked separately so failed or abandoned work does
+            // not become a reward observation and also cannot stall discovery.
+            let forced_exploration = (self.mode == SoftBanditMode::UCB)
+                .then(|| {
+                    hint_index
+                        .filter(|index| {
+                            !self.quarantined[*index] && self.selection_attempts[*index] == 0
+                        })
+                        .or_else(|| {
+                            self.selection_attempts
+                                .iter()
+                                .zip(&self.quarantined)
+                                .position(|(count, quarantined)| *count == 0 && !*quarantined)
+                        })
+                })
+                .flatten();
             let sampling_applied = self.mode == SoftBanditMode::TS && !equivalent_hint_prior;
             let mut scores = Vec::with_capacity(self.arms.len());
             for projection in &projections {
@@ -4711,24 +4774,32 @@ pub mod bandit {
                 }
                 scores.push(score);
             }
-            let mut idx = if equivalent_hint_prior {
-                hint_index.unwrap_or(0)
-            } else {
-                0
-            };
+            let mut idx = forced_exploration.unwrap_or_else(|| {
+                if equivalent_hint_prior {
+                    hint_index.unwrap_or(first_eligible)
+                } else {
+                    first_eligible
+                }
+            });
             let mut best = scores[idx];
-            for (index, score) in scores.iter().copied().enumerate() {
-                if score > best {
-                    best = score;
-                    idx = index;
+            if forced_exploration.is_none() {
+                for (index, score) in scores.iter().copied().enumerate() {
+                    if !self.quarantined[index] && score > best {
+                        best = score;
+                        idx = index;
+                    }
                 }
             }
             let decision_index = self
                 .decisions
                 .checked_add(1)
                 .ok_or("bandit.decision_count")?;
+            let selection_attempts = self.selection_attempts[idx]
+                .checked_add(1)
+                .ok_or("bandit.selection_count")?;
             self.last_index = idx;
             self.decisions = decision_index;
+            self.selection_attempts[idx] = selection_attempts;
             self.selection_pending = true;
             Ok(BanditDecisionWitness {
                 mode: self.mode,
@@ -4737,22 +4808,31 @@ pub mod bandit {
                 posterior_estimator: POSTERIOR_ESTIMATOR,
                 posterior_regularization: POSTERIOR_REGULARIZATION,
                 exploration_scale: EXPLORATION_SCALE,
+                forced_exploration: forced_exploration.is_some(),
                 sampling_applied,
                 rng_algorithm: (self.mode == SoftBanditMode::TS).then_some(THOMPSON_RNG_ALGORITHM),
-                rng_stream_seed: (self.mode == SoftBanditMode::TS).then_some(self.rng_seed),
+                rng_stream_seed: (self.mode == SoftBanditMode::TS)
+                    .then(|| self.rng_seed.to_string()),
                 arms: self
                     .choices
                     .iter()
                     .zip(self.arms.iter())
+                    .zip(self.selection_attempts.iter())
+                    .zip(self.quarantined.iter())
                     .zip(projections)
                     .zip(scores)
                     .map(
-                        |(((choice, arm), projection), decision_score)| BanditArmWitness {
+                        |(
+                            ((((choice, arm), selection_attempts), quarantined), projection),
+                            decision_score,
+                        )| BanditArmWitness {
                             choice: choice.clone(),
                             posterior_mean: projection.mean,
                             predictive_stddev: projection.stddev,
                             decision_score,
+                            selection_attempts: *selection_attempts,
                             observations: arm.observations,
+                            quarantined: *quarantined,
                             hinted: hint == Some(choice.as_str()),
                         },
                     )
@@ -4769,11 +4849,24 @@ pub mod bandit {
             if !self.selection_pending {
                 return Err("bandit.missing_selection");
             }
+            if self.quarantined[self.last_index] {
+                return Err("bandit.quarantined_selection");
+            }
             let arm = self
                 .arms
                 .get_mut(self.last_index)
                 .ok_or("bandit.choice_state")?;
             arm.try_update(x, reward)?;
+            self.selection_pending = false;
+            Ok(())
+        }
+
+        /// Permanently excludes the pending choice without posterior credit.
+        pub fn try_quarantine_last_selection(&mut self) -> Result<(), &'static str> {
+            if !self.selection_pending {
+                return Err("bandit.missing_selection");
+            }
+            self.quarantined[self.last_index] = true;
             self.selection_pending = false;
             Ok(())
         }
@@ -4797,9 +4890,21 @@ pub mod bandit {
             &self.choices
         }
 
+        /// Stable list of choices excluded after a hard validation failure.
+        pub fn quarantined_choices(&self) -> Vec<String> {
+            self.choices
+                .iter()
+                .zip(&self.quarantined)
+                .filter(|(_, quarantined)| **quarantined)
+                .map(|(choice, _)| choice.clone())
+                .collect()
+        }
+
         pub(super) fn validate_state(&self, context_dim: usize) -> Result<(), &'static str> {
             if self.choices.is_empty()
                 || self.choices.len() != self.arms.len()
+                || self.choices.len() != self.selection_attempts.len()
+                || self.choices.len() != self.quarantined.len()
                 || self.last_index >= self.choices.len()
             {
                 return Err("bandit.choice_state");
@@ -4811,6 +4916,23 @@ pub mod bandit {
                 .any(|choice| choice.trim().is_empty() || !unique.insert(choice.as_str()))
             {
                 return Err("bandit.choice_domain");
+            }
+            let total_attempts = self
+                .selection_attempts
+                .iter()
+                .try_fold(0_u64, |total, count| total.checked_add(*count))
+                .ok_or("bandit.selection_count")?;
+            if total_attempts != self.decisions
+                || self
+                    .arms
+                    .iter()
+                    .zip(&self.selection_attempts)
+                    .any(|(arm, attempts)| arm.observations() > *attempts)
+            {
+                return Err("bandit.selection_state");
+            }
+            if self.selection_pending && self.quarantined[self.last_index] {
+                return Err("bandit.quarantined_selection");
             }
             self.rng.validate_state()?;
             if self.selection_pending && self.decisions == 0 {
@@ -5020,6 +5142,8 @@ pub mod bandit {
             bandit.arms[1].a[0] = 4.0;
             bandit.arms[1].b[0] = 2.0;
             bandit.arms[1].observations = 3;
+            bandit.selection_attempts[1] = 3;
+            bandit.decisions = 3;
 
             let decision = bandit
                 .try_select_with_hint(&[1.0], Some("hinted"))
@@ -5036,6 +5160,100 @@ pub mod bandit {
                 (decision.arms[0].decision_score - decision.arms[1].decision_score).abs() < 1.0e-12
             );
             assert_eq!(decision.chosen, "canonical");
+            assert!(decision.forced_exploration);
+        }
+
+        #[test]
+        fn ucb_attempts_every_unobserved_arm_even_after_a_high_reward() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                1,
+                SoftBanditMode::UCB,
+                29,
+            );
+
+            for expected in ["a", "b", "c"] {
+                let decision = bandit.try_select(&[1.0]).expect("forced exploration");
+                assert_eq!(decision.chosen, expected);
+                assert!(decision.forced_exploration);
+                assert_eq!(
+                    decision
+                        .arms
+                        .iter()
+                        .map(|arm| arm.selection_attempts)
+                        .sum::<u64>(),
+                    decision.decision_index
+                );
+                bandit.try_update_last(&[1.0], 0.99).expect("high reward");
+            }
+
+            let learned = bandit.try_select(&[1.0]).expect("posterior decision");
+            assert!(!learned.forced_exploration);
+            assert_eq!(learned.chosen, "a");
+        }
+
+        #[test]
+        fn ucb_advances_forced_exploration_after_abandonment() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string()],
+                1,
+                SoftBanditMode::UCB,
+                31,
+            );
+
+            let first = bandit.try_select(&[1.0]).expect("first attempt");
+            assert_eq!(first.chosen, "a");
+            bandit
+                .try_abandon_last_selection()
+                .expect("abandon first attempt");
+            let second = bandit.try_select(&[1.0]).expect("second attempt");
+            assert_eq!(second.chosen, "b");
+            assert!(second.forced_exploration);
+            assert!(second.arms.iter().all(|arm| arm.selection_attempts == 1));
+            assert!(second.arms.iter().all(|arm| arm.observations == 0));
+        }
+
+        #[test]
+        fn quarantined_ucb_arm_is_never_selected_again() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["invalid".to_string(), "valid".to_string()],
+                1,
+                SoftBanditMode::UCB,
+                37,
+            );
+
+            let rejected = bandit.try_select(&[1.0]).expect("invalid attempt");
+            assert_eq!(rejected.chosen, "invalid");
+            bandit
+                .try_quarantine_last_selection()
+                .expect("hard validation failure");
+            assert_eq!(bandit.quarantined_choices(), ["invalid"]);
+
+            for _ in 0..32 {
+                let decision = bandit.try_select(&[1.0]).expect("eligible decision");
+                assert_eq!(decision.chosen, "valid");
+                assert!(decision.arms[0].quarantined);
+                assert!(!decision.arms[1].quarantined);
+                bandit.try_update_last(&[1.0], 0.1).expect("valid reward");
+            }
+        }
+
+        #[test]
+        fn all_quarantined_arms_fail_closed() {
+            let mut bandit = SoftBandit::new_seeded(
+                vec!["a".to_string(), "b".to_string()],
+                1,
+                SoftBanditMode::UCB,
+                41,
+            );
+            for expected in ["a", "b"] {
+                assert_eq!(bandit.try_select(&[1.0]).unwrap().chosen, expected);
+                bandit.try_quarantine_last_selection().unwrap();
+            }
+            assert!(matches!(
+                bandit.try_select(&[1.0]),
+                Err("bandit.no_eligible_choices")
+            ));
         }
 
         #[test]
@@ -5090,7 +5308,7 @@ pub mod bandit {
             assert!(decision.sampling_applied);
             assert_eq!(decision.posterior_estimator, POSTERIOR_ESTIMATOR);
             assert_eq!(decision.rng_algorithm, Some(THOMPSON_RNG_ALGORITHM));
-            assert_eq!(decision.rng_stream_seed, Some(31));
+            assert_eq!(decision.rng_stream_seed.as_deref(), Some("31"));
         }
 
         #[test]

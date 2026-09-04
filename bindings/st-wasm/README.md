@@ -975,6 +975,41 @@ fallback, runtime readiness, and tensor-utility threshold behavior remain Rust
 decisions in both cases, so JavaScript only transports the same contract used by
 Python.
 
+Stateful rank adaptation keeps that boundary intact. JavaScript supplies bounded
+SpiralK candidates and measured elapsed time; Rust owns candidate compilation,
+Black Cat selection, correctness-gated reward, and the pending-selection slot:
+
+```ts
+import { RankAdaptationSession } from "spiraltorch-wasm";
+
+const session = new RankAdaptationSession({
+  rank_plan: { kind: "topk", rows: 2, cols: 256, k: 8, backend: "wgpu" },
+  scripts: ["u2: false;", "u2: true;"],
+  policy: "ucb",
+  seed: 17,
+});
+const selection = session.choose();
+const result = await executeAndCheck(selection.plan);
+const observation = session.observe(
+  selection.selection_id,
+  result.elapsedMs,
+  result.correct,
+);
+console.log(selection.decision.arms, observation.credited, session.snapshot());
+session.free();
+```
+
+UCB gives every candidate one selection attempt before posterior comparison.
+`selection_attempts` therefore advances after a failed or abandoned run while
+`observations` remains unchanged. Correctness failure quarantines that arm;
+abandonment does not. These decision fields use Black Cat bandit witness contract
+v3. Candidate receipts expose the effective execution signature, and Thompson
+RNG seeds are decimal strings so values above JavaScript's safe-integer range
+remain exact. Mutating calls commit the cloned Rust session only after their
+receipt is serializable, so a transport error does not leave hidden state behind.
+Neither JavaScript nor the WASM wrapper derives the reward or silently retries a
+candidate.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw
