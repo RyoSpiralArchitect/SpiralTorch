@@ -741,6 +741,104 @@ mod tests {
             .all(|value| value.to_bits() == sentinel.to_bits()));
     }
 
+    #[test]
+    fn portable_scan_matches_stable_compaction_across_tile_and_block_edges() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipping compaction runtime test: no WGPU adapter");
+            return;
+        };
+        let pipelines = Builder::new(
+            &device,
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/shaders"),
+        )
+        .build()
+        .unwrap();
+        // 65_793 columns require 258 tiles, crossing the row-prefix scratch block.
+        for cols in [1u32, 255, 256, 257, 300, 65_793] {
+            for pattern in 0..3 {
+                let stride = cols + 7;
+                let mut values = vec![-777.0f32; 2 * stride as usize];
+                let mut mask = vec![0u32; values.len()];
+                let mut expected = [Vec::new(), Vec::new()];
+                for (row, expected_row) in expected.iter_mut().enumerate() {
+                    for col in 0..cols {
+                        let index = row * stride as usize + col as usize;
+                        values[index] = (row * 1_000_000 + col as usize) as f32;
+                        let keep = match pattern {
+                            0 => col % 7 == row as u32,
+                            1 => row == 0,
+                            _ => col == cols - 1,
+                        };
+                        if keep {
+                            mask[index] = 1;
+                            expected_row.push(values[index]);
+                        }
+                    }
+                }
+                let input = initialized_storage(&device, "scan.edge.values", &values);
+                let mask = initialized_storage(&device, "scan.edge.mask", &mask);
+                let counts = initialized_storage_copy_src(&device, "scan.edge.counts", &[99u32; 2]);
+                let sentinel = -9_999.0f32;
+                let output = initialized_storage_copy_src(
+                    &device,
+                    "scan.edge.output",
+                    &vec![sentinel; values.len()],
+                );
+                let prefix = initialized_storage(
+                    &device,
+                    "scan.edge.prefix",
+                    &vec![0u32; (2 * cols.div_ceil(256)) as usize],
+                );
+                dispatch(
+                    &device,
+                    &queue,
+                    &pipelines,
+                    DispatchArgs {
+                        rows: 2,
+                        cols,
+                        row_stride: stride,
+                        kind: Kind::MidK,
+                        values: &input,
+                        mask: &mask,
+                        out_positions: &counts,
+                        out_values: &output,
+                        out_middlemax: None,
+                        prefix: &prefix,
+                    },
+                    ApplyStrategy::Fallback,
+                )
+                .unwrap();
+                assert_eq!(
+                    read_u32(&device, &queue, &counts, 2),
+                    expected
+                        .iter()
+                        .map(|row| row.len() as u32)
+                        .collect::<Vec<_>>(),
+                    "counts: cols={cols} pattern={pattern}"
+                );
+                let actual = read_f32(&device, &queue, &output, values.len());
+                for (row, expected_row) in expected.iter().enumerate() {
+                    let start = row * stride as usize;
+                    let kept = expected_row.len();
+                    assert_eq!(
+                        &actual[start..start + kept],
+                        expected_row.as_slice(),
+                        "stable output: cols={cols} pattern={pattern} row={row}"
+                    );
+                    assert!(
+                        actual[start + kept..start + stride as usize]
+                            .iter()
+                            .all(|&value| value == sentinel),
+                        "untouched tail and padding"
+                    );
+                }
+            }
+        }
+    }
+
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {

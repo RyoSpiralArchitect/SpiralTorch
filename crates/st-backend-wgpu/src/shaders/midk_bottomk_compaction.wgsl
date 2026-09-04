@@ -110,16 +110,18 @@ fn midk_compact_row_prefix(
             workgroupBarrier();
         }
 
-        var last = temp[255u];
+        let last = temp[255u];
+        // Every lane must snapshot the total before any lane clears the root.
+        workgroupBarrier();
         if (lid.x == 255u) {
             temp[255u] = 0u;
         }
         workgroupBarrier();
 
-        var h2 = 128u;
+        var h2 = 1u;
         var step = 128u;
         loop {
-            if (h2 == 0u) {
+            if (step == 0u) {
                 break;
             }
             if (lid.x < h2) {
@@ -130,7 +132,7 @@ fn midk_compact_row_prefix(
                 temp[bi] = temp[bi] + t;
             }
             step = step >> 1u;
-            h2 = h2 >> 1u;
+            h2 = h2 << 1u;
             workgroupBarrier();
         }
 
@@ -139,6 +141,8 @@ fn midk_compact_row_prefix(
         }
         acc = acc + last;
         base = base + 256u;
+        // Finish consuming this scan before reusing scratch for the next block.
+        workgroupBarrier();
     }
 
     if (lid.x == 0u) {
@@ -358,10 +362,10 @@ fn midk_compact_apply(
     }
     workgroupBarrier();
 
-    var h2 = 128u;
+    var h2 = 1u;
     var step = 128u;
     loop {
-        if (h2 == 0u) {
+        if (step == 0u) {
             break;
         }
         if (lid.x < h2) {
@@ -372,7 +376,7 @@ fn midk_compact_apply(
             temp2[bi] = temp2[bi] + t;
         }
         step = step >> 1u;
-        h2 = h2 >> 1u;
+        h2 = h2 << 1u;
         workgroupBarrier();
     }
 

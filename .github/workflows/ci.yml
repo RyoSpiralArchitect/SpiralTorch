@@ -182,6 +182,10 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
         run: cargo test --locked --release -p st-backend-wgpu resident_matmul
+      - name: Portable GPU compaction across tile and row-prefix blocks
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+        run: cargo test --locked --release -p st-backend-wgpu midk_bottomk
       - name: neural layers and losses with WGPU enabled
         run: cargo test --locked -p st-nn --features wgpu --release --lib
 

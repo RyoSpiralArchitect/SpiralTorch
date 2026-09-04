@@ -1,0 +1,25 @@
+   Compiling st-kernel-contracts v0.1.0 (/home/ryospiralarchitect/.local/state/spiraltorch/worktrees/midk-compaction-baseline-v1/crates/st-kernel-contracts)
+   Compiling st-backend-wgpu v0.1.0 (/home/ryospiralarchitect/.local/state/spiraltorch/worktrees/midk-compaction-baseline-v1/crates/st-backend-wgpu)
+    Finished `release` profile [optimized] target(s) in 2.59s
+     Running unittests src/lib.rs (/home/ryospiralarchitect/.local/state/spiraltorch/build/target/release/deps/st_backend_wgpu-502a0e4ae5819789)
+
+running 1 test
+test midk_bottomk::tests::multi_tile_compaction_preserves_row_stride_when_runtime_enabled ... FAILED
+
+failures:
+
+---- midk_bottomk::tests::multi_tile_compaction_preserves_row_stride_when_runtime_enabled stdout ----
+
+thread 'midk_bottomk::tests::multi_tile_compaction_preserves_row_stride_when_runtime_enabled' (3281775) panicked at crates/st-backend-wgpu/src/midk_bottomk.rs:727:9:
+assertion `left == right` failed
+  left: [0, 0]
+ right: [5, 3]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    midk_bottomk::tests::multi_tile_compaction_preserves_row_stride_when_runtime_enabled
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.26s
+
+error: test failed, to rerun pass `-p st-backend-wgpu --lib`
