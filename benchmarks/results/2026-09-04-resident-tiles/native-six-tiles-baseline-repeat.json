@@ -1,0 +1,4389 @@
+{
+  "schema": "spiraltorch.resident_matmul_bench.v2",
+  "tiles_mnk": [
+    [
+      8,
+      8,
+      16
+    ],
+    [
+      8,
+      16,
+      16
+    ],
+    [
+      16,
+      8,
+      16
+    ],
+    [
+      16,
+      16,
+      16
+    ],
+    [
+      16,
+      16,
+      32
+    ],
+    [
+      16,
+      16,
+      64
+    ]
+  ],
+  "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.43",
+  "host": "spiralreality",
+  "python": "3.14.4 (main, Jun 18 2026, 14:25:02) [GCC 15.2.0]",
+  "torch": "2.13.0+cu132",
+  "torch_device": "cuda",
+  "torch_gpu": "NVIDIA GeForce RTX 5090",
+  "visible_cuda_devices": 1,
+  "device_identity_boundary": "single visible CUDA GPU plus matching adapter names; no cross-API UUID attestation",
+  "spiraltorch_native": "/home/ryospiralarchitect/.local/state/spiraltorch/benchmarks/resident-tiles-v1/baseline-venv/lib/python3.14/site-packages/spiraltorch/spiraltorch.abi3.so",
+  "spiraltorch_native_sha256": "7e48719d37364821ec9801f04c2b5e537889341ed83e3603d8d4362b0d8b2770",
+  "script_sha256": "a9b3d90fba85a66b776a6f83e2310dc37502550455dd69a05aa410f458ef264b",
+  "helper_sha256": "7401f011fc7cfe4a7704918afc82bb76bbbeadc027c580e3d4715921bf984e64",
+  "iterations": 20,
+  "warmup": 5,
+  "dispatches_per_sample": 16,
+  "dtype": "float32",
+  "tf32": false,
+  "int8": false,
+  "boundary": "equal Python-loop resident matmul calls then backend synchronize; allocation/upload/readback excluded",
+  "notes": "includes API/queue/host synchronization costs; not GPU timestamp or model-quality evidence",
+  "cases": [
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "b3e57b6190a676ada27712c6aa6d7c4982af4e10c0b8fcd63ac4ba1afa0e6679",
+        "fdfb578edf294fb06454d01b7e4dac2ff1cf2b0b48d356f9cba6ae6728ba91fc"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.207449325888124e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1276575,
+          "p95_ms": 0.138678,
+          "min_ms": 0.098104,
+          "samples_ms": [
+            0.153172,
+            0.131942,
+            0.129613,
+            0.130448,
+            0.138678,
+            0.12881,
+            0.126636,
+            0.127484,
+            0.12791,
+            0.126239,
+            0.126717,
+            0.127778,
+            0.126305,
+            0.12624,
+            0.127496,
+            0.128483,
+            0.128518,
+            0.098104,
+            0.127524,
+            0.127537
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.263117,
+          "p95_ms": 1.904743,
+          "min_ms": 0.259691,
+          "samples_ms": [
+            0.330465,
+            0.264959,
+            0.263573,
+            0.261692,
+            0.263317,
+            0.392189,
+            0.261477,
+            0.263024,
+            0.262168,
+            1.904743,
+            0.262504,
+            0.259878,
+            0.389658,
+            0.262609,
+            0.26321,
+            0.261019,
+            0.259691,
+            0.261203,
+            0.263435,
+            2.028593
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.26503750000000004,
+          "p95_ms": 0.384935,
+          "min_ms": 0.261413,
+          "samples_ms": [
+            0.26425,
+            0.261624,
+            0.26145,
+            0.343488,
+            0.261413,
+            0.26381,
+            0.263748,
+            0.261929,
+            0.264834,
+            0.265814,
+            0.265398,
+            0.265575,
+            0.261528,
+            0.384935,
+            0.26147,
+            0.387936,
+            0.26705,
+            0.269551,
+            0.265241,
+            0.267041
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.2629245,
+          "p95_ms": 0.391196,
+          "min_ms": 0.260028,
+          "samples_ms": [
+            0.261591,
+            0.26074,
+            0.264393,
+            0.260194,
+            0.26284,
+            0.263862,
+            0.391347,
+            0.266823,
+            0.262977,
+            0.262872,
+            0.389057,
+            0.260028,
+            0.261521,
+            0.261263,
+            0.387732,
+            0.261118,
+            0.263033,
+            0.260935,
+            0.391196,
+            0.387625
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.2622485,
+          "p95_ms": 0.326623,
+          "min_ms": 0.259736,
+          "samples_ms": [
+            0.263092,
+            0.262134,
+            0.326623,
+            0.265221,
+            0.260999,
+            0.260926,
+            0.262503,
+            0.262363,
+            0.26441,
+            0.261243,
+            0.260874,
+            0.388955,
+            0.261234,
+            0.261394,
+            0.260589,
+            0.259736,
+            0.261096,
+            0.263971,
+            0.263849,
+            0.264562
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.2792695,
+          "p95_ms": 0.390865,
+          "min_ms": 0.275844,
+          "samples_ms": [
+            0.278722,
+            0.285681,
+            0.277052,
+            0.277635,
+            0.277966,
+            0.397513,
+            0.279741,
+            0.390865,
+            0.28287,
+            0.288428,
+            0.390188,
+            0.276444,
+            0.280531,
+            0.278798,
+            0.277823,
+            0.278708,
+            0.275844,
+            0.282097,
+            0.276262,
+            0.288985
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.2754175,
+          "p95_ms": 1.929728,
+          "min_ms": 0.265785,
+          "samples_ms": [
+            0.270791,
+            0.332965,
+            0.273586,
+            0.265785,
+            1.929728,
+            0.270843,
+            0.279037,
+            0.275286,
+            0.389672,
+            0.384467,
+            0.274268,
+            0.280724,
+            0.269463,
+            0.272579,
+            2.052984,
+            0.275549,
+            0.279325,
+            0.390076,
+            0.270731,
+            0.267667
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4851738960234421,
+        "st_8x16x16": 0.4816582559071829,
+        "st_16x8x16": 0.4855291157727789,
+        "st_16x16x16": 0.4867806679542495,
+        "st_16x16x32": 0.45711221597775625,
+        "st_16x16x64": 0.46350540542993823
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "6115239cb384931d43fa149d47371f92c6f8c7587a286894e48768c61fd0850d",
+        "ac620b21142a70465fe5170fa499dc6e410fc93ef136791f130280dbc5519fa5"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.174129402123583e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.12629849999999998,
+          "p95_ms": 0.128217,
+          "min_ms": 0.123611,
+          "samples_ms": [
+            0.138859,
+            0.125839,
+            0.12641,
+            0.128217,
+            0.124709,
+            0.125459,
+            0.127441,
+            0.125809,
+            0.127329,
+            0.127309,
+            0.125375,
+            0.125301,
+            0.123611,
+            0.126994,
+            0.126187,
+            0.1273,
+            0.126513,
+            0.124653,
+            0.123832,
+            0.12794
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.2623985,
+          "p95_ms": 0.387897,
+          "min_ms": 0.260469,
+          "samples_ms": [
+            0.262043,
+            0.261426,
+            0.391859,
+            0.260541,
+            0.261142,
+            0.260499,
+            0.262896,
+            0.387897,
+            0.260693,
+            0.262897,
+            0.261682,
+            0.260469,
+            0.385821,
+            0.38756,
+            0.262754,
+            0.261101,
+            0.261782,
+            0.386918,
+            0.386801,
+            0.358691
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.2650585,
+          "p95_ms": 0.389016,
+          "min_ms": 0.261472,
+          "samples_ms": [
+            0.26581,
+            0.392098,
+            0.271798,
+            0.265855,
+            0.263063,
+            0.2651,
+            0.265005,
+            0.269072,
+            0.389016,
+            0.264001,
+            0.264561,
+            0.261768,
+            0.265498,
+            0.261472,
+            0.264575,
+            0.387997,
+            0.386188,
+            0.264483,
+            0.265017,
+            0.263697
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.2625105,
+          "p95_ms": 1.992886,
+          "min_ms": 0.258947,
+          "samples_ms": [
+            0.263156,
+            0.263621,
+            0.260353,
+            0.263062,
+            2.026359,
+            0.260409,
+            0.386588,
+            0.260852,
+            0.259786,
+            0.262282,
+            0.388604,
+            0.264524,
+            0.262561,
+            0.260593,
+            1.992886,
+            0.26246,
+            0.263174,
+            0.261395,
+            0.262358,
+            0.258947
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.26228450000000003,
+          "p95_ms": 1.977713,
+          "min_ms": 0.259112,
+          "samples_ms": [
+            0.397132,
+            0.259754,
+            0.262355,
+            0.262214,
+            0.38941,
+            0.264489,
+            0.266065,
+            0.261491,
+            0.262134,
+            2.013344,
+            0.262775,
+            0.387147,
+            0.26058,
+            0.260648,
+            0.261801,
+            0.259112,
+            0.262184,
+            0.260576,
+            0.262385,
+            1.977713
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.281117,
+          "p95_ms": 0.386639,
+          "min_ms": 0.276109,
+          "samples_ms": [
+            0.2811,
+            0.283876,
+            0.284249,
+            0.281134,
+            0.287125,
+            0.388413,
+            0.278964,
+            0.27899,
+            0.28793,
+            0.279107,
+            0.280774,
+            0.278492,
+            0.2832,
+            0.278889,
+            0.386639,
+            0.27874,
+            0.283148,
+            0.279279,
+            0.283403,
+            0.276109
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.2746465,
+          "p95_ms": 0.283341,
+          "min_ms": 0.269939,
+          "samples_ms": [
+            0.273501,
+            0.273651,
+            0.27489,
+            0.277257,
+            0.387827,
+            0.270076,
+            0.283341,
+            0.275055,
+            0.269939,
+            0.274946,
+            0.274403,
+            0.270809,
+            0.273903,
+            0.272637,
+            0.277409,
+            0.278626,
+            0.27498,
+            0.273761,
+            0.272067,
+            0.281439
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4813232545155555,
+        "st_8x16x16": 0.4764929251467129,
+        "st_16x8x16": 0.4811178981412172,
+        "st_16x16x16": 0.4815324580751053,
+        "st_16x16x32": 0.44927378991665384,
+        "st_16x16x64": 0.4598583997975578
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "52d195316339c1b009409992cd8cda4b03b280db7a42dff273a16cbbc58f90d6",
+        "b6d4002a204ac0045248bc89f676f6a89ee854bc179825398b5c10a46f7ad82c"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.151576624700226e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1267635,
+          "p95_ms": 0.129003,
+          "min_ms": 0.124264,
+          "samples_ms": [
+            0.137324,
+            0.124918,
+            0.128759,
+            0.125198,
+            0.125597,
+            0.126965,
+            0.127859,
+            0.128094,
+            0.128342,
+            0.124264,
+            0.127228,
+            0.126355,
+            0.126659,
+            0.125859,
+            0.12568,
+            0.125618,
+            0.126868,
+            0.12605,
+            0.127722,
+            0.129003
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.263744,
+          "p95_ms": 1.938961,
+          "min_ms": 0.260171,
+          "samples_ms": [
+            0.260387,
+            0.386818,
+            0.260285,
+            0.386701,
+            0.387871,
+            0.263024,
+            0.262214,
+            0.387448,
+            0.26292,
+            1.955981,
+            0.26155,
+            0.264247,
+            0.261641,
+            0.263241,
+            1.938961,
+            0.388978,
+            0.264571,
+            0.260171,
+            0.263104,
+            0.389178
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.265748,
+          "p95_ms": 0.395444,
+          "min_ms": 0.262299,
+          "samples_ms": [
+            0.265087,
+            0.395444,
+            0.262844,
+            0.346687,
+            0.267607,
+            0.268078,
+            0.267302,
+            0.266191,
+            0.268216,
+            0.265366,
+            0.263312,
+            0.265672,
+            0.265669,
+            0.265639,
+            0.264722,
+            0.264334,
+            0.386731,
+            0.265824,
+            0.262299,
+            1.914771
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.26249,
+          "p95_ms": 0.266191,
+          "min_ms": 0.260266,
+          "samples_ms": [
+            0.262894,
+            0.263391,
+            0.263117,
+            0.261013,
+            0.261691,
+            0.261889,
+            0.260317,
+            0.266191,
+            0.261337,
+            0.262461,
+            0.261274,
+            0.260266,
+            0.260331,
+            0.262519,
+            0.262891,
+            0.263048,
+            0.262578,
+            0.385553,
+            0.261391,
+            0.264079
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.2618755,
+          "p95_ms": 0.386142,
+          "min_ms": 0.260035,
+          "samples_ms": [
+            0.261889,
+            0.260035,
+            0.262141,
+            0.260289,
+            0.26058,
+            0.261102,
+            0.260334,
+            0.261285,
+            0.262879,
+            0.264337,
+            0.260682,
+            0.385701,
+            0.261862,
+            0.386142,
+            0.261784,
+            0.261939,
+            0.260135,
+            0.2643,
+            0.262585,
+            0.38698
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.281522,
+          "p95_ms": 0.388543,
+          "min_ms": 0.272838,
+          "samples_ms": [
+            0.279653,
+            0.281751,
+            0.27918,
+            0.283582,
+            1.984194,
+            0.28016,
+            0.277746,
+            0.388543,
+            0.387418,
+            0.285146,
+            0.388396,
+            0.284152,
+            0.276927,
+            0.280866,
+            0.272838,
+            0.279535,
+            0.286011,
+            0.281293,
+            0.282134,
+            0.280726
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.275931,
+          "p95_ms": 0.388513,
+          "min_ms": 0.270428,
+          "samples_ms": [
+            0.270428,
+            0.276022,
+            0.274416,
+            0.279678,
+            0.27584,
+            0.390023,
+            0.276355,
+            0.275253,
+            0.275347,
+            0.388513,
+            0.280622,
+            0.273169,
+            0.387631,
+            0.272054,
+            0.272611,
+            0.279015,
+            0.276673,
+            0.27311,
+            0.275007,
+            0.28257
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4806308389953895,
+        "st_8x16x16": 0.4770064120896489,
+        "st_16x8x16": 0.48292696864642465,
+        "st_16x16x16": 0.4840601736321268,
+        "st_16x16x32": 0.4502791966524819,
+        "st_16x16x64": 0.45940289420181135
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "4d575d2919aa712ae560c77958e835abb28d5079ef24eaee4936f79cf5b14857",
+        "36b76dd83906169e4231472dcad3b75935a3380a607b98118d62409c58a4b878"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.539388335469738e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.158671,
+          "p95_ms": 0.171937,
+          "min_ms": 0.100815,
+          "samples_ms": [
+            0.171937,
+            0.157854,
+            0.157434,
+            0.157416,
+            0.172836,
+            0.158617,
+            0.158725,
+            0.158991,
+            0.158495,
+            0.160292,
+            0.15719,
+            0.159337,
+            0.15538,
+            0.158223,
+            0.159352,
+            0.160112,
+            0.160455,
+            0.100815,
+            0.160468,
+            0.157502
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.5719,
+          "p95_ms": 0.585014,
+          "min_ms": 0.526992,
+          "samples_ms": [
+            0.585014,
+            0.550315,
+            0.526992,
+            0.568879,
+            0.583731,
+            0.574714,
+            0.571951,
+            0.569316,
+            0.573883,
+            0.56899,
+            0.573292,
+            0.569257,
+            0.656736,
+            0.571889,
+            0.5688,
+            0.573365,
+            0.573267,
+            0.569009,
+            0.568694,
+            0.571911
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.571661,
+          "p95_ms": 0.685256,
+          "min_ms": 0.55903,
+          "samples_ms": [
+            0.580166,
+            0.571677,
+            0.620408,
+            0.616185,
+            0.57162,
+            0.571645,
+            0.580837,
+            0.609312,
+            0.572009,
+            2.376786,
+            0.570568,
+            0.569697,
+            0.569554,
+            0.685256,
+            0.569063,
+            0.68458,
+            0.55903,
+            0.570763,
+            0.570117,
+            0.569231
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.47560650000000004,
+          "p95_ms": 0.622101,
+          "min_ms": 0.470506,
+          "samples_ms": [
+            0.477782,
+            0.474853,
+            0.474473,
+            0.47636,
+            0.472129,
+            0.471823,
+            0.574425,
+            0.558279,
+            0.472951,
+            0.471029,
+            0.622101,
+            0.524202,
+            0.470506,
+            0.473289,
+            2.2709,
+            0.471315,
+            0.480492,
+            0.473432,
+            0.576129,
+            0.526207
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.5711645000000001,
+          "p95_ms": 0.697017,
+          "min_ms": 0.5501,
+          "samples_ms": [
+            0.571854,
+            0.572439,
+            0.697017,
+            0.582774,
+            1.914089,
+            0.582242,
+            0.570569,
+            0.570026,
+            0.623825,
+            0.569816,
+            0.624092,
+            0.66667,
+            0.570348,
+            0.56937,
+            0.570174,
+            0.569634,
+            0.56924,
+            0.5501,
+            0.570771,
+            0.571558
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.806279,
+          "p95_ms": 0.811176,
+          "min_ms": 0.765712,
+          "samples_ms": [
+            0.810179,
+            0.809014,
+            0.811176,
+            0.806544,
+            0.809934,
+            0.768982,
+            0.806632,
+            0.808616,
+            0.806051,
+            0.805849,
+            0.810291,
+            0.80041,
+            0.804773,
+            0.805444,
+            0.782255,
+            0.806507,
+            0.8049,
+            0.765712,
+            0.805136,
+            2.380357
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.8051355,
+          "p95_ms": 0.814026,
+          "min_ms": 0.742991,
+          "samples_ms": [
+            0.808418,
+            0.836529,
+            0.80957,
+            0.780231,
+            0.805122,
+            0.806063,
+            0.805657,
+            0.758287,
+            0.809964,
+            0.781989,
+            0.802147,
+            0.803871,
+            0.808308,
+            0.805504,
+            0.79573,
+            0.805149,
+            0.803395,
+            0.814026,
+            0.743404,
+            0.742991
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.27744535757999655,
+        "st_8x16x16": 0.2775613519201065,
+        "st_16x8x16": 0.33361823271969576,
+        "st_16x16x16": 0.2778026295401762,
+        "st_16x16x32": 0.19679416182239648,
+        "st_16x16x64": 0.19707366027209086
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "ed7a9e47122947dfa5806610b2d61ae831d6b09ea633316deccf759dcf630fb0",
+        "f93ca3fd30995f64c7db55489ada678c66f5b6cf181017b217e23a93b2d6bb63"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7382140691246661e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.159573,
+          "p95_ms": 0.160328,
+          "min_ms": 0.155857,
+          "samples_ms": [
+            0.178167,
+            0.159874,
+            0.160328,
+            0.159685,
+            0.159173,
+            0.159404,
+            0.158801,
+            0.159729,
+            0.159778,
+            0.159827,
+            0.158024,
+            0.155857,
+            0.159577,
+            0.157624,
+            0.159569,
+            0.158329,
+            0.159439,
+            0.159835,
+            0.158282,
+            0.160227
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.5715085,
+          "p95_ms": 0.65161,
+          "min_ms": 0.569156,
+          "samples_ms": [
+            0.570303,
+            0.570726,
+            0.574597,
+            0.57031,
+            2.179415,
+            0.572008,
+            0.569887,
+            0.576161,
+            0.56938,
+            0.570915,
+            0.569861,
+            0.569156,
+            0.573039,
+            0.573927,
+            0.571009,
+            0.569462,
+            0.572967,
+            0.573757,
+            0.576252,
+            0.65161
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.5710275,
+          "p95_ms": 0.689452,
+          "min_ms": 0.569316,
+          "samples_ms": [
+            0.625314,
+            0.685477,
+            0.569588,
+            0.570333,
+            0.571097,
+            0.570578,
+            0.569788,
+            0.569684,
+            0.687049,
+            2.18086,
+            0.570958,
+            0.569628,
+            0.569316,
+            0.570152,
+            0.571388,
+            0.689452,
+            0.684558,
+            0.579627,
+            0.572958,
+            0.570813
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.47323550000000003,
+          "p95_ms": 0.571271,
+          "min_ms": 0.462841,
+          "samples_ms": [
+            0.473783,
+            0.473553,
+            0.462841,
+            0.473314,
+            0.474138,
+            0.472265,
+            0.57276,
+            0.472664,
+            0.471603,
+            0.47124,
+            0.571271,
+            0.472465,
+            0.472426,
+            0.473157,
+            0.474845,
+            0.533881,
+            0.47302,
+            0.480167,
+            0.473763,
+            0.473146
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.5705215,
+          "p95_ms": 0.687101,
+          "min_ms": 0.560534,
+          "samples_ms": [
+            0.691971,
+            0.56972,
+            0.560534,
+            0.569915,
+            0.686458,
+            0.572501,
+            0.56967,
+            0.624008,
+            0.569477,
+            0.687101,
+            0.570409,
+            0.686227,
+            0.571033,
+            0.570005,
+            0.569898,
+            0.571484,
+            0.569935,
+            0.573646,
+            0.570634,
+            0.569633
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.806517,
+          "p95_ms": 0.811499,
+          "min_ms": 0.759025,
+          "samples_ms": [
+            0.808189,
+            0.808131,
+            0.810455,
+            0.804887,
+            0.806023,
+            0.808769,
+            0.807491,
+            0.759025,
+            0.783926,
+            0.805391,
+            0.806745,
+            0.795475,
+            0.804767,
+            0.806471,
+            2.186194,
+            0.777584,
+            0.806563,
+            0.805617,
+            0.806677,
+            0.811499
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.8059945,
+          "p95_ms": 0.811032,
+          "min_ms": 0.751447,
+          "samples_ms": [
+            0.80587,
+            0.806609,
+            0.805491,
+            0.805873,
+            0.811032,
+            0.751447,
+            0.761808,
+            0.806327,
+            0.806385,
+            0.804822,
+            0.807248,
+            0.786212,
+            0.804805,
+            0.805136,
+            0.807379,
+            0.810565,
+            0.805429,
+            0.806116,
+            0.806375,
+            2.095787
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.27921369498441406,
+        "st_8x16x16": 0.2794488881883972,
+        "st_16x8x16": 0.3371957513753723,
+        "st_16x16x16": 0.27969673360250225,
+        "st_16x16x32": 0.19785447795892708,
+        "st_16x16x64": 0.19798274057701387
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "07508975c6b36e355e37fae2713539446452f2c14acb4975a38427c67b11bea7",
+        "f046396efbd671f5f1329b715f0d3dca451a719c99a1b184a21545d10e4d14ad"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7729489574236368e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1593795,
+          "p95_ms": 0.161419,
+          "min_ms": 0.157385,
+          "samples_ms": [
+            0.174908,
+            0.16061,
+            0.159993,
+            0.159331,
+            0.157584,
+            0.158145,
+            0.158957,
+            0.158786,
+            0.159046,
+            0.157631,
+            0.159428,
+            0.157385,
+            0.159772,
+            0.158069,
+            0.159872,
+            0.161419,
+            0.160876,
+            0.157704,
+            0.160696,
+            0.160082
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.5711685,
+          "p95_ms": 0.629335,
+          "min_ms": 0.518348,
+          "samples_ms": [
+            0.518348,
+            0.577043,
+            0.571365,
+            0.576909,
+            0.578081,
+            0.570451,
+            0.524855,
+            0.566941,
+            0.571526,
+            0.559646,
+            0.534033,
+            0.571167,
+            0.57139,
+            0.57117,
+            0.574429,
+            0.629335,
+            0.570654,
+            0.570402,
+            0.570142,
+            1.909942
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.570533,
+          "p95_ms": 0.68655,
+          "min_ms": 0.550229,
+          "samples_ms": [
+            0.571657,
+            0.694836,
+            0.623338,
+            0.686265,
+            0.573697,
+            0.571981,
+            0.550229,
+            0.569896,
+            0.571685,
+            0.570575,
+            0.569873,
+            0.570461,
+            0.570491,
+            0.570368,
+            0.570435,
+            0.569367,
+            0.68655,
+            0.569569,
+            0.570864,
+            0.570099
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.4727535,
+          "p95_ms": 0.574512,
+          "min_ms": 0.465368,
+          "samples_ms": [
+            0.472366,
+            0.465368,
+            0.471843,
+            0.474135,
+            2.022675,
+            0.472447,
+            0.471513,
+            0.472654,
+            0.473648,
+            0.473491,
+            0.522994,
+            0.472738,
+            0.472449,
+            0.473004,
+            0.471975,
+            0.473405,
+            0.472276,
+            0.574512,
+            0.472769,
+            0.517653
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.570406,
+          "p95_ms": 0.685392,
+          "min_ms": 0.535381,
+          "samples_ms": [
+            0.559935,
+            0.570574,
+            0.571237,
+            0.571163,
+            0.570996,
+            0.569851,
+            0.570058,
+            0.56998,
+            0.56924,
+            0.570981,
+            0.570028,
+            0.627358,
+            0.570238,
+            0.685392,
+            1.950851,
+            0.569725,
+            0.570036,
+            0.572115,
+            0.535381,
+            0.67736
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.805939,
+          "p95_ms": 0.810835,
+          "min_ms": 0.757431,
+          "samples_ms": [
+            0.805756,
+            0.805614,
+            0.805812,
+            0.809148,
+            0.799485,
+            0.806668,
+            0.806066,
+            0.811963,
+            0.809285,
+            0.805729,
+            0.809998,
+            0.807268,
+            0.810835,
+            0.805689,
+            0.805425,
+            0.757431,
+            0.805617,
+            0.803976,
+            0.806565,
+            0.807108
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.803193,
+          "p95_ms": 0.810321,
+          "min_ms": 0.710559,
+          "samples_ms": [
+            0.80515,
+            0.799714,
+            0.802294,
+            0.810321,
+            0.805984,
+            0.780148,
+            0.804532,
+            0.748455,
+            0.805881,
+            2.023621,
+            0.778289,
+            0.735967,
+            0.809317,
+            0.804092,
+            0.710559,
+            0.763708,
+            0.746856,
+            0.806034,
+            0.768103,
+            0.807083
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.27904112359137456,
+        "st_8x16x16": 0.27935193932691016,
+        "st_16x8x16": 0.33713023806275366,
+        "st_16x16x16": 0.27941413659744113,
+        "st_16x16x32": 0.19775628180296526,
+        "st_16x16x64": 0.1984323817563151
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "936bdd058177dd9215bbc5036298f58bc5bd7d166d306383e977b6ccd3c1ea41",
+        "60ab77ffcfbfc7bad903515f7394ede88ce4e3a44e0c78a17931b0e8fd41955f"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.9233052439560083e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.249614,
+          "p95_ms": 0.264773,
+          "min_ms": 0.175224,
+          "samples_ms": [
+            0.264773,
+            0.242359,
+            0.258815,
+            0.253396,
+            0.245832,
+            0.25658,
+            0.282666,
+            0.244006,
+            0.239519,
+            0.258879,
+            0.242557,
+            0.240697,
+            0.259835,
+            0.240291,
+            0.257724,
+            0.243683,
+            0.259201,
+            0.175224,
+            0.258521,
+            0.240424
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 1.77087,
+          "p95_ms": 1.919148,
+          "min_ms": 1.686686,
+          "samples_ms": [
+            1.769755,
+            1.758677,
+            1.713081,
+            1.920257,
+            1.773301,
+            1.899298,
+            1.773314,
+            1.870364,
+            1.686686,
+            1.700325,
+            1.74696,
+            1.718185,
+            1.792894,
+            1.878531,
+            1.760912,
+            1.705619,
+            1.771985,
+            1.815684,
+            1.919148,
+            1.706943
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 2.1751500000000004,
+          "p95_ms": 2.27431,
+          "min_ms": 1.954944,
+          "samples_ms": [
+            1.962452,
+            2.205027,
+            2.185979,
+            2.251326,
+            2.595393,
+            2.241401,
+            1.955244,
+            2.164321,
+            2.026948,
+            1.986033,
+            2.014549,
+            2.220449,
+            2.017559,
+            2.27431,
+            2.197055,
+            2.214332,
+            2.065146,
+            2.25507,
+            1.954944,
+            2.004309
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 1.712717,
+          "p95_ms": 1.821755,
+          "min_ms": 1.537467,
+          "samples_ms": [
+            1.717986,
+            1.740545,
+            1.622961,
+            1.755157,
+            1.701879,
+            1.539709,
+            1.821755,
+            1.537467,
+            1.771387,
+            2.267504,
+            1.654667,
+            1.626926,
+            1.713893,
+            1.711541,
+            1.761351,
+            1.711398,
+            1.710915,
+            1.678145,
+            1.784434,
+            1.774655
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 1.97201,
+          "p95_ms": 2.151485,
+          "min_ms": 1.907735,
+          "samples_ms": [
+            1.975,
+            1.96902,
+            1.997016,
+            2.136608,
+            2.181914,
+            2.071883,
+            1.952607,
+            2.026939,
+            1.955965,
+            1.95245,
+            2.151485,
+            1.999033,
+            1.938179,
+            1.963268,
+            2.034283,
+            1.907735,
+            1.959842,
+            1.954814,
+            2.146426,
+            1.911586
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 3.582572,
+          "p95_ms": 3.869148,
+          "min_ms": 3.339989,
+          "samples_ms": [
+            3.38462,
+            3.502901,
+            3.869148,
+            3.350784,
+            3.339989,
+            3.886398,
+            3.818654,
+            3.7423,
+            3.357587,
+            3.857068,
+            3.784369,
+            3.380805,
+            3.346172,
+            3.698324,
+            3.662243,
+            3.427549,
+            3.366514,
+            3.860578,
+            3.772725,
+            3.457112
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 3.4308465,
+          "p95_ms": 3.827083,
+          "min_ms": 3.332711,
+          "samples_ms": [
+            3.758003,
+            3.385264,
+            3.776901,
+            3.476429,
+            3.754536,
+            3.372645,
+            3.350346,
+            3.716759,
+            3.49501,
+            3.346175,
+            3.350681,
+            3.338314,
+            3.859996,
+            3.827083,
+            3.343966,
+            3.352978,
+            3.726389,
+            3.547873,
+            3.332711,
+            3.3481
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.1409555755080836,
+        "st_8x16x16": 0.11475714318552742,
+        "st_16x8x16": 0.14574153231386153,
+        "st_16x16x16": 0.12657846562644207,
+        "st_16x16x32": 0.06967452433614733,
+        "st_16x16x64": 0.07275580530927281
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "131214ac4dd99870bc784b621f865b7453a129b7a7e52d2431d0b124f3e9be74",
+        "06f469495ca67233c2ebece33d0971135000c7f7e049ddc34b1aa3ba28d72d42"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7502088267562499e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.25690650000000004,
+          "p95_ms": 0.259853,
+          "min_ms": 0.236935,
+          "samples_ms": [
+            0.258926,
+            0.238196,
+            0.284824,
+            0.258006,
+            0.256386,
+            0.258198,
+            0.258122,
+            0.257427,
+            0.242937,
+            0.240978,
+            0.236935,
+            0.259853,
+            0.241833,
+            0.258343,
+            0.242795,
+            0.257882,
+            0.241627,
+            0.257922,
+            0.240168,
+            0.240208
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 1.8479275,
+          "p95_ms": 1.969064,
+          "min_ms": 1.704368,
+          "samples_ms": [
+            1.902789,
+            1.768332,
+            1.793066,
+            1.704368,
+            1.912372,
+            1.709177,
+            1.785739,
+            1.785504,
+            1.767266,
+            1.922608,
+            1.792722,
+            1.718044,
+            1.982873,
+            1.964202,
+            1.917827,
+            1.916241,
+            1.706725,
+            1.937353,
+            1.969064,
+            1.948622
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 2.009867,
+          "p95_ms": 2.218016,
+          "min_ms": 1.935883,
+          "samples_ms": [
+            2.000131,
+            2.196059,
+            1.99139,
+            2.185157,
+            1.953761,
+            1.935883,
+            2.027559,
+            2.199974,
+            2.485162,
+            1.983388,
+            1.954559,
+            2.006923,
+            2.107803,
+            2.064236,
+            1.983552,
+            2.012811,
+            2.218016,
+            2.03135,
+            1.94055,
+            1.956297
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 1.701651,
+          "p95_ms": 1.756244,
+          "min_ms": 1.551912,
+          "samples_ms": [
+            1.756244,
+            1.713856,
+            1.645818,
+            1.668358,
+            1.633102,
+            1.5584,
+            1.71922,
+            1.701686,
+            1.701778,
+            1.701616,
+            1.706823,
+            1.718259,
+            1.674596,
+            2.101752,
+            1.551912,
+            1.700797,
+            1.678506,
+            1.704906,
+            1.643942,
+            1.732953
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 2.008941,
+          "p95_ms": 2.251034,
+          "min_ms": 1.929315,
+          "samples_ms": [
+            1.988089,
+            1.929315,
+            1.969892,
+            2.660207,
+            2.251034,
+            2.011974,
+            1.946568,
+            1.957339,
+            1.98152,
+            2.225253,
+            2.04343,
+            2.101346,
+            2.027394,
+            1.95689,
+            2.18934,
+            2.1486,
+            2.005908,
+            2.002599,
+            1.957359,
+            2.150117
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 3.590696,
+          "p95_ms": 3.880628,
+          "min_ms": 3.334885,
+          "samples_ms": [
+            3.383907,
+            3.36697,
+            3.6821,
+            3.821747,
+            3.382219,
+            3.908772,
+            3.772083,
+            3.880628,
+            3.345269,
+            3.453104,
+            3.665199,
+            3.352313,
+            3.833588,
+            3.516193,
+            3.873062,
+            3.334885,
+            3.775754,
+            3.845445,
+            3.338323,
+            3.367611
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 3.361035,
+          "p95_ms": 3.833489,
+          "min_ms": 3.331083,
+          "samples_ms": [
+            3.367229,
+            3.63165,
+            3.784869,
+            3.390395,
+            3.876797,
+            3.760678,
+            3.354841,
+            3.674169,
+            3.338085,
+            3.333999,
+            3.345804,
+            3.833489,
+            3.3425,
+            3.462082,
+            3.475522,
+            3.353862,
+            3.351541,
+            3.34544,
+            3.331083,
+            3.334366
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.13902412297019232,
+        "st_8x16x16": 0.12782263702026056,
+        "st_16x8x16": 0.15097484736882005,
+        "st_16x16x16": 0.12788155550610994,
+        "st_16x16x32": 0.07154782805339133,
+        "st_16x16x64": 0.07643672261669397
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "cef45f14702390daac7dc2e6f6438069ee46ceb302eb1a83ab6e0076ab67c8ee",
+        "2f30dc1979a15f5130a170c9e1228006f272f15b20fbaef42f85c3f6d0777a4a"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.799131400304077e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.242801,
+          "p95_ms": 0.2619,
+          "min_ms": 0.238611,
+          "samples_ms": [
+            0.26963,
+            0.241197,
+            0.26098,
+            0.2619,
+            0.242027,
+            0.239944,
+            0.260337,
+            0.240897,
+            0.241744,
+            0.25815,
+            0.243575,
+            0.238611,
+            0.241887,
+            0.258177,
+            0.246435,
+            0.259802,
+            0.246015,
+            0.239528,
+            0.240942,
+            0.238729
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 1.7805175000000002,
+          "p95_ms": 2.002707,
+          "min_ms": 1.704662,
+          "samples_ms": [
+            1.731337,
+            1.768265,
+            1.724374,
+            1.854417,
+            1.877536,
+            1.711167,
+            1.704662,
+            1.964238,
+            1.77682,
+            1.710978,
+            1.899333,
+            1.930182,
+            1.711269,
+            1.784215,
+            2.002707,
+            2.023488,
+            1.710422,
+            1.891821,
+            1.717851,
+            1.94194
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 2.1328275000000003,
+          "p95_ms": 2.261262,
+          "min_ms": 1.953274,
+          "samples_ms": [
+            1.964078,
+            2.261262,
+            2.11409,
+            2.285303,
+            2.217485,
+            2.172354,
+            2.085007,
+            1.954522,
+            1.953274,
+            2.202752,
+            1.964779,
+            2.206299,
+            2.197668,
+            2.16496,
+            1.967499,
+            2.007253,
+            2.02001,
+            2.151565,
+            1.978826,
+            2.182736
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 1.7048394999999998,
+          "p95_ms": 1.808693,
+          "min_ms": 1.541714,
+          "samples_ms": [
+            1.714958,
+            1.716303,
+            1.672717,
+            1.683552,
+            1.678773,
+            1.703039,
+            1.712761,
+            1.659781,
+            1.603656,
+            1.541714,
+            1.71138,
+            1.744168,
+            1.604915,
+            1.5872,
+            1.717173,
+            1.715722,
+            1.656558,
+            1.808693,
+            2.510481,
+            1.70664
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 2.0170705,
+          "p95_ms": 2.251503,
+          "min_ms": 1.905589,
+          "samples_ms": [
+            1.921617,
+            1.905589,
+            1.945849,
+            2.65898,
+            1.925026,
+            2.18503,
+            2.179844,
+            2.025969,
+            1.95777,
+            2.032019,
+            2.043757,
+            2.208485,
+            1.965877,
+            2.191496,
+            2.008172,
+            1.957518,
+            1.926095,
+            1.941451,
+            2.030431,
+            2.251503
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 3.5805585,
+          "p95_ms": 3.804572,
+          "min_ms": 3.337999,
+          "samples_ms": [
+            3.337999,
+            3.648364,
+            3.519428,
+            3.786139,
+            3.736909,
+            3.812625,
+            3.388142,
+            3.804572,
+            3.802334,
+            3.677001,
+            3.712923,
+            3.641689,
+            3.394002,
+            3.375772,
+            3.415083,
+            3.671882,
+            3.340534,
+            3.358008,
+            3.360785,
+            3.350656
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 3.464238,
+          "p95_ms": 3.787467,
+          "min_ms": 3.314613,
+          "samples_ms": [
+            3.538456,
+            3.365397,
+            3.324426,
+            3.369237,
+            3.344577,
+            3.848746,
+            3.421187,
+            3.345462,
+            3.481728,
+            3.71925,
+            3.750351,
+            3.441666,
+            3.775522,
+            3.501663,
+            3.314613,
+            3.730823,
+            3.787467,
+            3.34706,
+            3.446748,
+            3.61072
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.13636541061798044,
+        "st_8x16x16": 0.11383996127206722,
+        "st_16x8x16": 0.14241868516068523,
+        "st_16x16x16": 0.12037308562095375,
+        "st_16x16x32": 0.06781092949605487,
+        "st_16x16x64": 0.07008785193165135
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "4d575d2919aa712ae560c77958e835abb28d5079ef24eaee4936f79cf5b14857",
+        "124c6e774410da7f0a536768790deedad89fc95c5f9b0906c81de3de7575a935"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.118302,
+          "p95_ms": 0.120636,
+          "min_ms": 0.071823,
+          "samples_ms": [
+            0.130059,
+            0.119244,
+            0.119364,
+            0.118799,
+            0.119165,
+            0.117709,
+            0.118027,
+            0.118799,
+            0.117622,
+            0.118274,
+            0.117695,
+            0.11833,
+            0.120636,
+            0.11744,
+            0.118636,
+            0.116982,
+            0.118981,
+            0.071823,
+            0.117376,
+            0.116442
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.2801615,
+          "p95_ms": 0.397672,
+          "min_ms": 0.27695,
+          "samples_ms": [
+            0.397672,
+            0.277712,
+            0.27695,
+            0.277031,
+            0.280183,
+            0.386953,
+            0.281377,
+            0.278151,
+            1.957094,
+            0.278066,
+            0.28333,
+            0.282503,
+            0.386697,
+            0.279484,
+            0.280317,
+            0.278589,
+            0.279428,
+            0.279885,
+            0.28014,
+            0.28257
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.2752465,
+          "p95_ms": 0.387441,
+          "min_ms": 0.269068,
+          "samples_ms": [
+            0.274961,
+            0.274304,
+            0.274762,
+            0.388462,
+            0.278304,
+            0.269068,
+            0.279025,
+            0.276782,
+            0.272242,
+            0.273349,
+            0.272916,
+            0.278333,
+            0.275532,
+            0.386554,
+            0.271342,
+            0.387441,
+            0.278395,
+            0.276251,
+            0.271792,
+            0.274939
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.2622825,
+          "p95_ms": 0.391317,
+          "min_ms": 0.259534,
+          "samples_ms": [
+            0.261626,
+            0.261001,
+            0.262627,
+            0.262345,
+            0.261651,
+            0.261471,
+            0.391317,
+            0.263255,
+            0.26359,
+            0.26222,
+            0.385609,
+            0.261566,
+            0.26093,
+            0.261782,
+            0.387136,
+            0.259652,
+            0.259534,
+            0.264954,
+            1.915081,
+            0.387169
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.2623625,
+          "p95_ms": 0.38715,
+          "min_ms": 0.260671,
+          "samples_ms": [
+            0.262488,
+            0.263849,
+            0.38715,
+            0.263624,
+            0.262237,
+            0.261287,
+            0.261378,
+            0.260857,
+            0.263134,
+            0.261248,
+            0.260671,
+            0.38666,
+            0.263567,
+            1.938397,
+            0.262978,
+            0.261918,
+            0.26599,
+            0.262151,
+            0.261915,
+            0.261776
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.2898775,
+          "p95_ms": 0.389518,
+          "min_ms": 0.284318,
+          "samples_ms": [
+            0.286624,
+            0.295651,
+            0.291405,
+            1.981311,
+            0.2878,
+            0.389518,
+            0.289459,
+            0.387225,
+            0.286053,
+            0.290609,
+            0.387674,
+            0.291326,
+            0.290023,
+            0.284736,
+            0.288111,
+            0.284318,
+            0.287471,
+            0.290594,
+            0.286855,
+            0.289732
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.2785275,
+          "p95_ms": 0.391201,
+          "min_ms": 0.272825,
+          "samples_ms": [
+            0.298436,
+            0.392807,
+            0.274352,
+            0.278435,
+            0.278326,
+            0.285011,
+            0.278241,
+            0.278272,
+            0.391201,
+            0.274198,
+            0.281991,
+            0.283078,
+            0.275896,
+            0.282946,
+            0.277656,
+            0.282422,
+            0.277394,
+            0.389585,
+            0.27862,
+            0.272825
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4222635872523527,
+        "st_8x16x16": 0.4298038303847642,
+        "st_16x8x16": 0.4510480112092878,
+        "st_16x16x16": 0.45091047691648006,
+        "st_16x16x32": 0.40811032246379936,
+        "st_16x16x64": 0.424740824514635
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "ed7a9e47122947dfa5806610b2d61ae831d6b09ea633316deccf759dcf630fb0",
+        "cc1da591c5ee334098da7563f2e304b83b8f5790477530bb6675a2670b958163"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1175745,
+          "p95_ms": 0.119387,
+          "min_ms": 0.116318,
+          "samples_ms": [
+            0.127492,
+            0.119387,
+            0.118684,
+            0.118709,
+            0.116318,
+            0.116699,
+            0.1172,
+            0.117801,
+            0.118329,
+            0.116732,
+            0.116657,
+            0.11786,
+            0.117579,
+            0.117447,
+            0.118838,
+            0.117246,
+            0.11757,
+            0.118988,
+            0.117259,
+            0.117475
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.28261250000000004,
+          "p95_ms": 0.387948,
+          "min_ms": 0.274623,
+          "samples_ms": [
+            0.28092,
+            0.280931,
+            0.387508,
+            1.913904,
+            0.284546,
+            0.281137,
+            0.2815,
+            0.386717,
+            0.282413,
+            0.280997,
+            0.28187,
+            0.274623,
+            0.386561,
+            0.387948,
+            0.282812,
+            0.280139,
+            0.277287,
+            0.386448,
+            0.386219,
+            0.386653
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.27508,
+          "p95_ms": 0.391858,
+          "min_ms": 0.266841,
+          "samples_ms": [
+            0.272861,
+            0.391858,
+            0.277608,
+            0.276779,
+            0.27754,
+            0.266841,
+            0.276372,
+            0.275666,
+            0.390512,
+            0.274206,
+            0.271585,
+            0.269913,
+            0.271124,
+            2.042599,
+            0.274494,
+            0.387834,
+            0.387384,
+            0.27324,
+            0.271811,
+            0.26946
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.2629345,
+          "p95_ms": 0.390921,
+          "min_ms": 0.259855,
+          "samples_ms": [
+            0.261522,
+            0.265753,
+            0.262302,
+            0.261994,
+            0.263834,
+            0.261664,
+            0.390921,
+            0.260479,
+            0.263552,
+            0.261213,
+            0.388067,
+            0.266075,
+            0.2615,
+            0.262317,
+            0.264041,
+            0.26487,
+            0.26804,
+            0.262234,
+            2.015763,
+            0.259855
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.2626785,
+          "p95_ms": 0.395145,
+          "min_ms": 0.260557,
+          "samples_ms": [
+            0.395145,
+            0.262038,
+            0.261888,
+            0.261829,
+            0.386678,
+            0.264722,
+            0.265192,
+            0.261378,
+            2.051305,
+            0.386839,
+            0.263075,
+            0.386112,
+            0.262518,
+            0.260557,
+            0.262839,
+            0.262103,
+            0.261119,
+            0.262167,
+            0.266828,
+            0.261643
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.2899705,
+          "p95_ms": 0.38858,
+          "min_ms": 0.282437,
+          "samples_ms": [
+            0.291165,
+            0.290279,
+            0.288249,
+            0.288824,
+            0.296183,
+            0.390501,
+            0.290244,
+            0.288554,
+            0.289697,
+            0.284361,
+            0.286215,
+            0.284079,
+            0.288081,
+            0.291367,
+            0.38858,
+            0.28653,
+            0.292193,
+            0.293342,
+            0.292506,
+            0.282437
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.2808755,
+          "p95_ms": 0.285688,
+          "min_ms": 0.275847,
+          "samples_ms": [
+            0.278959,
+            0.283043,
+            0.280007,
+            0.277767,
+            0.390624,
+            0.279333,
+            0.28107,
+            0.280681,
+            0.284917,
+            0.277014,
+            0.283093,
+            0.279646,
+            0.276972,
+            0.275847,
+            0.285688,
+            0.282277,
+            0.278191,
+            0.282811,
+            0.284899,
+            0.281307
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4160272457870759,
+        "st_8x16x16": 0.42741929620474045,
+        "st_16x8x16": 0.44716269641298495,
+        "st_16x16x16": 0.4475984901695419,
+        "st_16x16x32": 0.4054705564876427,
+        "st_16x16x64": 0.4186000558966517
+      },
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "07508975c6b36e355e37fae2713539446452f2c14acb4975a38427c67b11bea7",
+        "b44c155ba93e4839f9d278f82dad291ab54729241cf16db3731d84bdb6319864"
+      ],
+      "correctness": {
+        "torch": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x8x16": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_8x16x16": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x8x16": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x16": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x32": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "st_16x16x64": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "wgpu_variants": {
+        "st_8x8x16": {
+          "tile_mnk": [
+            8,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_8x16x16": {
+          "tile_mnk": [
+            8,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x8x16": {
+          "tile_mnk": [
+            16,
+            8,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x16": {
+          "tile_mnk": [
+            16,
+            16,
+            16
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x32": {
+          "tile_mnk": [
+            16,
+            16,
+            32
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        },
+        "st_16x16x64": {
+          "tile_mnk": [
+            16,
+            16,
+            64
+          ],
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          }
+        }
+      },
+      "timings": {
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.11852399999999999,
+          "p95_ms": 0.120425,
+          "min_ms": 0.116871,
+          "samples_ms": [
+            0.128246,
+            0.118876,
+            0.119419,
+            0.120284,
+            0.118542,
+            0.118406,
+            0.119757,
+            0.116871,
+            0.118304,
+            0.118562,
+            0.117902,
+            0.117223,
+            0.117389,
+            0.116988,
+            0.118364,
+            0.1186,
+            0.118506,
+            0.117914,
+            0.119354,
+            0.120425
+          ]
+        },
+        "st_8x8x16": {
+          "n": 20,
+          "median_ms": 0.28524700000000003,
+          "p95_ms": 0.389476,
+          "min_ms": 0.277277,
+          "samples_ms": [
+            0.279291,
+            0.389476,
+            0.281924,
+            0.390363,
+            0.388718,
+            0.281132,
+            0.28152,
+            0.388701,
+            0.283665,
+            0.281038,
+            0.286612,
+            0.286675,
+            0.281546,
+            0.277774,
+            0.387966,
+            0.38673,
+            0.287208,
+            0.283882,
+            0.277277,
+            0.387336
+          ]
+        },
+        "st_8x16x16": {
+          "n": 20,
+          "median_ms": 0.2752295,
+          "p95_ms": 0.400857,
+          "min_ms": 0.268254,
+          "samples_ms": [
+            0.275605,
+            0.400857,
+            0.278096,
+            0.350333,
+            0.276069,
+            0.275202,
+            0.270185,
+            0.272375,
+            0.270722,
+            0.270663,
+            0.276005,
+            0.268254,
+            0.26851,
+            1.983966,
+            0.277392,
+            0.274593,
+            0.387015,
+            0.273421,
+            0.270542,
+            0.275257
+          ]
+        },
+        "st_16x8x16": {
+          "n": 20,
+          "median_ms": 0.2629625,
+          "p95_ms": 0.38754,
+          "min_ms": 0.259791,
+          "samples_ms": [
+            0.262281,
+            0.265944,
+            0.261367,
+            2.018373,
+            0.262324,
+            0.264298,
+            0.263584,
+            0.261533,
+            0.262596,
+            0.259791,
+            0.263603,
+            0.263342,
+            0.260775,
+            0.270823,
+            0.263295,
+            0.264229,
+            0.26263,
+            0.38754,
+            0.262517,
+            0.261737
+          ]
+        },
+        "st_16x16x16": {
+          "n": 20,
+          "median_ms": 0.2633885,
+          "p95_ms": 0.387548,
+          "min_ms": 0.260494,
+          "samples_ms": [
+            0.262524,
+            0.263578,
+            0.262626,
+            0.261934,
+            0.261849,
+            0.261008,
+            0.263467,
+            0.263071,
+            1.996159,
+            0.263816,
+            0.261045,
+            0.387478,
+            0.261342,
+            0.387186,
+            0.260494,
+            0.264553,
+            0.264164,
+            0.263478,
+            0.26331,
+            0.387548
+          ]
+        },
+        "st_16x16x32": {
+          "n": 20,
+          "median_ms": 0.288845,
+          "p95_ms": 0.3896,
+          "min_ms": 0.282919,
+          "samples_ms": [
+            0.28756,
+            0.288624,
+            0.28774,
+            0.286919,
+            0.29377,
+            0.287451,
+            0.282919,
+            0.3896,
+            0.388118,
+            0.291649,
+            0.387435,
+            0.290447,
+            0.290754,
+            0.285655,
+            0.29113,
+            0.28905,
+            0.28795,
+            0.28864,
+            1.972335,
+            0.287731
+          ]
+        },
+        "st_16x16x64": {
+          "n": 20,
+          "median_ms": 0.28083250000000004,
+          "p95_ms": 0.38607,
+          "min_ms": 0.27596,
+          "samples_ms": [
+            0.278868,
+            0.28115,
+            0.282042,
+            0.28316,
+            0.276155,
+            0.372317,
+            0.283233,
+            0.27942,
+            0.278177,
+            0.38607,
+            0.279016,
+            0.280764,
+            0.387818,
+            0.282301,
+            0.282172,
+            0.279546,
+            0.27596,
+            0.280504,
+            0.278348,
+            0.280901
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": {
+        "st_8x8x16": 0.4155135724477382,
+        "st_8x16x16": 0.43063697750422825,
+        "st_16x8x16": 0.45072586395398584,
+        "st_16x16x16": 0.44999686774479514,
+        "st_16x16x32": 0.41033772438505073,
+        "st_16x16x64": 0.4220451692734992
+      },
+      "status": "passed"
+    }
+  ]
+}

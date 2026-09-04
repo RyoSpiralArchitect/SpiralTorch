@@ -9,7 +9,7 @@ use pyo3::{
 };
 #[cfg(feature = "wgpu")]
 use st_backend_wgpu::{
-    resident_matmul::{MatmulError, MatmulShape, ResidentMatmul},
+    resident_matmul::{MatmulError, MatmulShape, MatmulTile, ResidentMatmul},
     runtime,
 };
 
@@ -31,13 +31,24 @@ pub(crate) struct PyWgpuMatmul {
 #[pymethods]
 impl PyWgpuMatmul {
     #[new]
-    fn new(py: Python<'_>, rows: usize, inner: usize, cols: usize) -> PyResult<Self> {
+    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None))]
+    fn new(
+        py: Python<'_>,
+        rows: usize,
+        inner: usize,
+        cols: usize,
+        tile_mnk: Option<(u32, u32, u32)>,
+    ) -> PyResult<Self> {
         let shape = MatmulShape::new(rows, inner, cols).map_err(error)?;
+        let tile = match tile_mnk {
+            Some((m, n, k)) => MatmulTile::new(m, n, k).map_err(error)?,
+            None => MatmulTile::default(),
+        };
         py.detach(move || {
             let (runtime, _) = runtime::ensure_default_runtime_blocking("python.resident.matmul")
                 .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
             Ok(Self {
-                inner: ResidentMatmul::new(runtime, shape).map_err(error)?,
+                inner: ResidentMatmul::with_tile(runtime, shape, tile).map_err(error)?,
             })
         })
     }
@@ -45,6 +56,12 @@ impl PyWgpuMatmul {
     #[getter]
     fn shape(&self) -> (usize, usize, usize) {
         self.inner.shape().dimensions()
+    }
+
+    #[getter]
+    fn tile_mnk(&self) -> (u32, u32, u32) {
+        let [m, n, k] = self.inner.tile().dimensions();
+        (m, n, k)
     }
 
     #[getter]
@@ -136,8 +153,14 @@ pub(crate) struct PyWgpuMatmul;
 #[pymethods]
 impl PyWgpuMatmul {
     #[new]
-    fn new(rows: usize, inner: usize, cols: usize) -> PyResult<Self> {
-        let _ = (rows, inner, cols);
+    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None))]
+    fn new(
+        rows: usize,
+        inner: usize,
+        cols: usize,
+        tile_mnk: Option<(u32, u32, u32)>,
+    ) -> PyResult<Self> {
+        let _ = (rows, inner, cols, tile_mnk);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "WgpuMatmul requires a wheel built with the 'wgpu' feature",
         ))

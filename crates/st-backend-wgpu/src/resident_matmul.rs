@@ -8,13 +8,15 @@ use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 
-const TILE: [u32; 3] = [8, 8, 16];
+const MAX_TILE_AXIS: u32 = 64;
 pub const MAX_REPETITIONS: u32 = 1024;
 
 #[derive(Debug, Error)]
 pub enum MatmulError {
     #[error("resident matmul requires nonzero, u32-addressable dimensions and buffers")]
     InvalidShape,
+    #[error("tile axes must be in 1..=64 with at most 256 output lanes")]
+    InvalidTile,
     #[error("resident matmul exceeds device limit: {0}")]
     DeviceLimit(&'static str),
     #[error("{operand} requires {expected} elements, received {actual}")]
@@ -37,6 +39,33 @@ pub enum MatmulError {
     Runtime(#[from] WgpuRuntimeError),
 }
 
+/// Checked workgroup geometry, ordered M/N/K (unlike matrix shape M/K/N).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatmulTile([u32; 3]);
+
+impl Default for MatmulTile {
+    fn default() -> Self {
+        Self([8, 8, 16])
+    }
+}
+
+impl MatmulTile {
+    pub fn new(rows: u32, cols: u32, inner: u32) -> Result<Self, MatmulError> {
+        if [rows, cols, inner]
+            .iter()
+            .any(|&v| v == 0 || v > MAX_TILE_AXIS)
+            || u64::from(rows) * u64::from(cols) > 256
+        {
+            return Err(MatmulError::InvalidTile);
+        }
+        Ok(Self([rows, cols, inner]))
+    }
+
+    pub fn dimensions(self) -> [u32; 3] {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MatmulShape {
     rows: u32,
@@ -49,7 +78,7 @@ impl MatmulShape {
         let dim = |x| {
             u32::try_from(x)
                 .ok()
-                .filter(|&v| v > 0 && v <= u32::MAX - 16)
+                .filter(|&v| v > 0 && v <= u32::MAX - MAX_TILE_AXIS)
         };
         let shape = Self {
             rows: dim(rows).ok_or(MatmulError::InvalidShape)?,
@@ -79,7 +108,8 @@ impl MatmulShape {
         ]
     }
 
-    fn validate(self, limits: &wgpu::Limits) -> Result<(), MatmulError> {
+    fn validate(self, limits: &wgpu::Limits, tile: MatmulTile) -> Result<(), MatmulError> {
+        let [tile_m, tile_n, tile_k] = tile.dimensions();
         for len in self.lengths() {
             let bytes = runtime::checked_byte_len::<f32>("resident matmul", len)?;
             if bytes > limits.max_buffer_size
@@ -88,15 +118,15 @@ impl MatmulShape {
                 return Err(MatmulError::DeviceLimit("storage buffer bytes"));
             }
         }
-        if self.rows.div_ceil(TILE[0]) > limits.max_compute_workgroups_per_dimension
-            || self.cols.div_ceil(TILE[1]) > limits.max_compute_workgroups_per_dimension
+        if self.rows.div_ceil(tile_m) > limits.max_compute_workgroups_per_dimension
+            || self.cols.div_ceil(tile_n) > limits.max_compute_workgroups_per_dimension
         {
             return Err(MatmulError::DeviceLimit("dispatch workgroups"));
         }
-        if limits.max_compute_workgroup_size_x < TILE[1]
-            || limits.max_compute_workgroup_size_y < TILE[0]
-            || limits.max_compute_invocations_per_workgroup < TILE[0] * TILE[1]
-            || limits.max_compute_workgroup_storage_size < (TILE[0] + TILE[1]) * TILE[2] * 4
+        if limits.max_compute_workgroup_size_x < tile_n
+            || limits.max_compute_workgroup_size_y < tile_m
+            || limits.max_compute_invocations_per_workgroup < tile_m * tile_n
+            || limits.max_compute_workgroup_storage_size < (tile_m + tile_n) * tile_k * 4
             || limits.max_storage_buffers_per_shader_stage < 6
             || limits.max_uniform_buffers_per_shader_stage < 1
             || limits.max_bind_groups < 1
@@ -123,6 +153,7 @@ struct Uniforms {
 pub struct ResidentMatmul {
     runtime: WgpuRuntime,
     shape: MatmulShape,
+    tile: MatmulTile,
     lhs: wgpu::Buffer,
     rhs: wgpu::Buffer,
     output: wgpu::Buffer,
@@ -135,9 +166,17 @@ pub struct ResidentMatmul {
 
 impl ResidentMatmul {
     pub fn new(runtime: WgpuRuntime, shape: MatmulShape) -> Result<Self, MatmulError> {
+        Self::with_tile(runtime, shape, MatmulTile::default())
+    }
+
+    pub fn with_tile(
+        runtime: WgpuRuntime,
+        shape: MatmulShape,
+        tile: MatmulTile,
+    ) -> Result<Self, MatmulError> {
         let context = runtime.context();
         let device = context.device();
-        shape.validate(&device.limits())?;
+        shape.validate(&device.limits(), tile)?;
         let [lhs_len, rhs_len, out_len] = shape.lengths();
         let storage = wgpu::BufferUsages::STORAGE;
         let lhs = runtime::empty_buffer::<f32>(
@@ -203,7 +242,7 @@ impl ResidentMatmul {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("resident.matmul.shader"),
             source: wgpu::ShaderSource::Wgsl(
-                crate::shader_sources::dense_matmul_source(TILE, false).into(),
+                crate::shader_sources::dense_matmul_source(tile.dimensions(), false).into(),
             ),
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -230,6 +269,7 @@ impl ResidentMatmul {
         Ok(Self {
             runtime,
             shape,
+            tile,
             lhs,
             rhs,
             output,
@@ -243,6 +283,9 @@ impl ResidentMatmul {
 
     pub fn shape(&self) -> MatmulShape {
         self.shape
+    }
+    pub fn tile(&self) -> MatmulTile {
+        self.tile
     }
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         self.runtime.adapter_info()
@@ -332,6 +375,7 @@ impl ResidentMatmul {
             return Err(MatmulError::MissingInputs);
         }
         let context = self.runtime.context();
+        let [tile_m, tile_n, _] = self.tile.dimensions();
         let mut encoder = context.device().create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -342,8 +386,8 @@ impl ResidentMatmul {
             pass.set_bind_group(0, &self.bind_group, &[]);
             for _ in 0..repetitions {
                 pass.dispatch_workgroups(
-                    self.shape.cols.div_ceil(TILE[1]),
-                    self.shape.rows.div_ceil(TILE[0]),
+                    self.shape.cols.div_ceil(tile_n),
+                    self.shape.rows.div_ceil(tile_m),
                     1,
                 );
             }
@@ -493,18 +537,21 @@ mod tests {
         let shape = MatmulShape::new(7, 63, 65).unwrap();
         assert_eq!(shape.lengths(), [441, 4095, 455]);
         let mut limits = wgpu::Limits::default();
-        shape.validate(&limits).unwrap();
+        shape.validate(&limits, MatmulTile::default()).unwrap();
         limits.max_storage_buffer_binding_size = 1024;
-        assert!(shape.validate(&limits).is_err());
+        assert!(shape.validate(&limits, MatmulTile::default()).is_err());
         limits = wgpu::Limits::default();
         limits.max_compute_workgroups_per_dimension = 1;
-        assert!(shape.validate(&limits).is_err());
+        assert!(shape.validate(&limits, MatmulTile::default()).is_err());
     }
 
     #[test]
     fn shared_shader_variants_validate() {
         for int8 in [false, true] {
-            let source = crate::shader_sources::dense_matmul_source(TILE, int8);
+            let source = crate::shader_sources::dense_matmul_source(
+                MatmulTile::default().dimensions(),
+                int8,
+            );
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
@@ -515,6 +562,67 @@ mod tests {
         }
     }
 
+    #[test]
+    fn tile_checks_are_structural_and_device_specific() {
+        for [m, n, k] in [
+            [0, 8, 16],
+            [8, 0, 16],
+            [8, 8, 0],
+            [65, 1, 1],
+            [8, 8, 65],
+            [32, 32, 16],
+            [u32::MAX, 1, 1],
+        ] {
+            assert!(MatmulTile::new(m, n, k).is_err());
+        }
+        let tile = MatmulTile::new(16, 16, 64).unwrap();
+        let shape = MatmulShape::new(7, 63, 65).unwrap();
+        let mut limits = wgpu::Limits::default();
+        shape.validate(&limits, tile).unwrap();
+        limits.max_compute_workgroup_storage_size = 4096;
+        assert!(shape.validate(&limits, tile).is_err());
+        shape.validate(&limits, MatmulTile::default()).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn resident_tiles_match_f64_reference_when_enabled() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = runtime::ensure_default_runtime_blocking("resident-tiles").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let shape = MatmulShape::new(7, 63, 65).unwrap();
+        let lhs: Vec<_> = (0..7 * 63).map(|i| (i % 13) as f32 / 13.0 - 0.5).collect();
+        let rhs: Vec<_> = (0..63 * 65).map(|i| (i % 17) as f32 / 17.0 - 0.5).collect();
+        for [m, n, k] in [
+            [8, 16, 16],
+            [16, 8, 16],
+            [16, 16, 16],
+            [16, 16, 32],
+            [16, 16, 64],
+            [3, 5, 7],
+        ] {
+            let tile = MatmulTile::new(m, n, k).unwrap();
+            let mut workspace = ResidentMatmul::with_tile(runtime.clone(), shape, tile).unwrap();
+            assert_eq!(workspace.tile(), tile);
+            workspace.upload(&lhs, &rhs).unwrap();
+            workspace.dispatch(2).unwrap();
+            let actual = workspace.snapshot().unwrap().read().unwrap();
+            for row in 0..7 {
+                for col in 0..65 {
+                    let expected: f64 = (0..63)
+                        .map(|i| f64::from(lhs[row * 63 + i]) * f64::from(rhs[i * 65 + col]))
+                        .sum();
+                    assert!(
+                        (f64::from(actual[row * 65 + col]) - expected).abs() < 1e-5,
+                        "tile={tile:?} row={row} col={col}"
+                    );
+                }
+            }
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn resident_device_reuse_snapshots_and_chaining() {
@@ -522,6 +630,7 @@ mod tests {
             return;
         }
         let (runtime, _) = runtime::ensure_default_runtime_blocking("resident-test").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
         let mut workspace =
             ResidentMatmul::new(runtime.clone(), MatmulShape::new(7, 63, 65).unwrap()).unwrap();
         assert!(matches!(

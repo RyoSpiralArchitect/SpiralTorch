@@ -124,7 +124,7 @@ fn main(
                 if (b_k < params.inner && b_col < params.cols) {
                     value = load_rhs_value(b_k, b_col);
                 }
-                tile_b[load_col * TILE_K + load_k] = value;
+                tile_b[load_k * TILE_N + load_col] = value;
                 load_k = load_k + WG_SIZE_Y;
             }
             load_col = load_col + WG_SIZE_X;
@@ -138,7 +138,7 @@ fn main(
                 break;
             }
             let lhs_val = tile_a[local_row * TILE_K + k];
-            let rhs_val = tile_b[local_col * TILE_K + k];
+            let rhs_val = tile_b[k * TILE_N + local_col];
             {fma_line}
             k = k + 1u;
         }

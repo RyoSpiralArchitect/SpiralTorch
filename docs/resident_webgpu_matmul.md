@@ -30,6 +30,18 @@ constructor that raises `NotImplementedError`, not a silent CPU substitute.
 Python inputs are Tensors; logical row-major conversion occurs before upload.
 Native waits release the GIL and have a 30-second host-poll timeout.
 
+An explicit checked tile is optional:
+
+```python
+workspace = WgpuMatmul(512, 512, 512, tile_mnk=(16, 16, 16))
+print(workspace.tile_mnk)  # actual M/N/K workgroup tile
+```
+
+Rust owns tile validation. Axes must be in 1..64 with at most 256 output lanes;
+the actual device's dispatch, workgroup and scratch-storage limits are also
+checked before allocation. Invalid requests fail, rather than silently changing
+the tile or running CPU math. Matrix shape is M/K/N; the tile tuple is M/N/K.
+
 ## Browser / WASM
 
 Build with the explicit `webgpu` feature and a matching wasm-bindgen CLI:
@@ -70,12 +82,18 @@ The workspace pins a [minimal upstream limit-mapping backport](../vendor/wgpu-0.
 for current browsers. It removes the obsolete `maxInterStageShaderComponents`
 device requirement without upgrading native WGPU or modifying browser globals.
 
+The same Rust tile contract is available via
+`await WgpuMatmul.createWithTile(512, 512, 512, 16, 16, 16)` and `tileMNK()`.
+Dimensions and tile axes remain TypeScript numbers but are checked as original
+JS values before conversion. Workspaces with different tiles can be chained
+when their matrix shapes and device/queue agree.
+
 ## Execution Boundaries
 
 - This is a fixed-shape 2D execution workspace, not an autograd graph. It does
   not implicitly register gradients, choose a route, or change training policy.
 - Precision is always float32, independent of the host Tensor int8 opt-in.
-  The current portable tile is 8x8x16; this is not an autotuned speed claim.
+  The default tile remains 8x8x16; explicit tiles are not an autotuned speed claim.
 - `upload` validates both lengths before changing either operand. Input changes
   invalidate the output. Reading or copying requires a dispatch of current inputs.
 - `dispatch` enqueues work. `output_is_current` / `outputIsCurrent` denotes
@@ -96,15 +114,29 @@ SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 \
   python bindings/st-py/tests/test_wgpu_resident.py
 python tools/bench_resident_vs_torch.py \
   --torch-device cuda --expected-adapter "NVIDIA GeForce RTX 5090" \
+  --tiles-mnk '8,8,16;16,16,16;16,16,32;16,16,64' \
   --output resident-vs-torch.json
 node tools/test_resident_browser.cjs /absolute/wasm-webgpu \
-  /absolute/chrome-executable /absolute/new-browser-result.json
+  /absolute/chrome-executable /absolute/new-browser-result.json \
+  '8,8,16;16,16,16;16,16,32;16,16,64'
 ```
 
 The browser runner needs Playwright and launches an isolated headless test
 profile. It does not inspect existing browser sessions. Its
 `--enable-unsafe-webgpu` flag is recorded; no CPU computation fallback is used.
 The page runs numerical, ownership, and invalid-input gates before timing.
+Multi-tile runs randomize variant order in each measurement iteration, rather
+than timing complete variants sequentially. Every variant uses the same input
+bytes, a float64 reference, float32 GPU arithmetic and 16 separate dispatch
+calls. The native report schema is v2 and keeps each variant's actual tile,
+adapter and raw samples; previous v1 reports remain immutable historical data.
+
+The shared shader keeps RHS workgroup memory contiguous across output columns.
+This does not change global RHS packing, f32 accumulation, or fused operations.
+The host Tensor autotune revision is bumped so older layout timings are not
+reused. See the [six-tile measurements](../benchmarks/results/2026-09-04-resident-tiles/README.md)
+for before/after browser and same-GPU PyTorch comparisons. No universal tile
+winner or faster-than-PyTorch claim is implied by the explicit override.
 
 The PyTorch comparison uses identical float32 input bytes and float64 reference
 gates. Both sides preallocate output and run the same number of Python-loop

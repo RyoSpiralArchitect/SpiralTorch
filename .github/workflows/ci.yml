@@ -169,11 +169,13 @@ jobs:
           SPIRALTORCH_EXPECT_NO_WGPU_ALIAS=1 cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu_dense --release --test wgpu_feature_ownership
           SPIRALTORCH_EXPECT_NO_WGPU_ALIAS=1 cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu_f16 --release --test wgpu_feature_ownership
           cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu --release --test wgpu_feature_ownership
-      - name: Stable LayerNorm on real WGPU without fallback
+      - name: Tensor numerical regressions on real WGPU without fallback
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
-        run: cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_matmul_precision
+        run: |
+          cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_matmul_precision
+          cargo test --locked -p st-tensor --features wgpu --release --lib matmul
       - name: nonlinear autograd on strict WGPU paths
         env:
           SPIRALTORCH_STRICT_GPU: "1"

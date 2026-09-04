@@ -6,7 +6,7 @@
 <script type="module">
 const output = document.querySelector("#result");
 const report = {
-  schema: "spiraltorch.browser_resident_matmul.v1",
+  schema: "spiraltorch.browser_resident_matmul.v2",
   boundary: "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
   dtype: "float32", user_agent: navigator.userAgent, cases: [], assertions: [],
 };
@@ -61,9 +61,17 @@ try {
   const {default:init, WgpuMatmul} = await import("/module/spiraltorch_wasm.js");
   stage("initialize WASM");
   await init();
+  const tileSpec = new URL(location.href).searchParams.get("tiles") ?? "8,8,16";
+  const tiles = tileSpec.split(";").map(part => part.split(",").map(Number));
+  if(tiles.some(tile=>tile.length!==3 || tile.some(x=>!Number.isInteger(x))) ||
+      new Set(tiles.map(tile=>tile.join("x"))).size!==tiles.length) throw Error("invalid tile list");
+  report.tiles_mnk=tiles;
   stage("invalid dimensions");
   for(const dim of [-1,0,1.5,NaN,Infinity,4294967296,"2",true]) {
     await rejects(()=>WgpuMatmul.create(dim,2,2), "reject invalid dimension "+String(dim));
+  }
+  for(const tile of [[0,8,16],[-1,8,16],[8,1.5,16],[32,32,16],[8,8,65],[8,"8",16]]) {
+    await rejects(()=>WgpuMatmul.createWithTile(2,3,2,...tile), "reject invalid tile "+tile.join(","));
   }
   const adapter = await navigator.gpu?.requestAdapter();
   if(!adapter) throw new Error("No browser WebGPU adapter; no CPU fallback");
@@ -77,8 +85,9 @@ try {
     maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize};
   stage("create Rust workspace");
   const [probe, concurrent] = await Promise.all([
-    WgpuMatmul.create(2,3,2), WgpuMatmul.create(2,2,1),
+    WgpuMatmul.create(2,3,2), WgpuMatmul.createWithTile(2,2,1,16,16,32),
   ]);
+  assert(Array.from(probe.tileMNK()).join(",")==="8,8,16", "default tile remains stable");
   report.rust_adapter = probe.adapterInfo();
   if(report.rust_adapter instanceof Map) report.rust_adapter = Object.fromEntries(report.rust_adapter);
   await rejects(()=>probe.dispatch(), "missing input rejected");
@@ -121,19 +130,31 @@ try {
     for(const seed of [17,29,43]) {
       stage(`matrix ${m}x${k}x${n}, seed ${seed}`);
       const a=fixture(m*k,seed), b=fixture(k*n,seed+1);
-      const workspace=await WgpuMatmul.create(m,k,n);
-      workspace.upload(a,b); workspace.dispatch();
-      const max_abs_error = check(await workspace.readback(),reference(a,b,m,k,n));
-      const run=async()=> {
-        for(let i=0;i<16;i++) workspace.dispatch();
-        await workspace.synchronize();
+      const expected=reference(a,b,m,k,n), variants=[];
+      for(const tile of tiles) {
+        const workspace=await WgpuMatmul.createWithTile(m,k,n,...tile);
+        assert(Array.from(workspace.tileMNK()).join(",")===tile.join(","), "actual tile matches request");
+        workspace.upload(a,b); workspace.dispatch();
+        const max_abs_error=check(await workspace.readback(),expected);
+        variants.push({workspace,tile,max_abs_error,samples:[]});
+      }
+      const run=async(variant)=> {
+        for(let i=0;i<16;i++) variant.workspace.dispatch();
+        await variant.workspace.synchronize();
       };
-      for(let i=0;i<5;i++) await run();
-      const samples=[];
-      for(let i=0;i<20;i++) { const start=performance.now(); await run(); samples.push(performance.now()-start); }
-      report.cases.push({shape_m_k_n:[m,k,n],seed,max_abs_error,dispatches:16,
-        status:"passed",timing:summary(samples)});
-      workspace.free();
+      for(const variant of variants) for(let i=0;i<5;i++) await run(variant);
+      let state=seed>>>0;
+      const random=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return(state>>>0)/4294967296;};
+      for(let i=0;i<20;i++) {
+        const order=[...variants];
+        for(let j=order.length-1;j>0;j--) { const k=Math.floor(random()*(j+1)); [order[j],order[k]]=[order[k],order[j]]; }
+        for(const variant of order) { const start=performance.now(); await run(variant); variant.samples.push(performance.now()-start); }
+      }
+      for(const variant of variants) {
+        report.cases.push({shape_m_k_n:[m,k,n],tile_mnk:variant.tile,seed,
+          max_abs_error:variant.max_abs_error,dispatches:16,status:"passed",timing:summary(variant.samples)});
+        variant.workspace.free();
+      }
     }
   }
   report.status="passed";

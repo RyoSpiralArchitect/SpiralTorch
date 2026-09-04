@@ -7,9 +7,9 @@ const crypto = require("node:crypto");
 const {chromium} = require("playwright");
 
 async function main() {
-  const [moduleDir, executablePath, outputPath] = process.argv.slice(2);
+  const [moduleDir, executablePath, outputPath, tiles] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK]");
   }
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
@@ -37,12 +37,13 @@ async function main() {
       wasm_sha256: crypto.createHash("sha256").update(wasm).digest("hex"),
       page_sha256: crypto.createHash("sha256").update(fs.readFileSync(files.get("/")[0])).digest("hex"),
       launch_flags: ["--enable-unsafe-webgpu"],
+      tiles_mnk_request: tiles ?? null,
       asset_sha256: Object.fromEntries([...files].map(([url,[file]])=>[
         url,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
       ])),
     };
     server = http.createServer((req,res)=>{
-      const file=files.get(req.url);
+      const file=files.get(new URL(req.url,"http://127.0.0.1").pathname);
       if(!file) { res.writeHead(404); res.end(); return; }
       res.setHeader("Content-Type",file[1]); res.end(fs.readFileSync(file[0]));
     });
@@ -60,7 +61,8 @@ async function main() {
         pageErrors.push(String(error)); rejectPageError(error);
       }
     });
-    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const query = tiles ? "?"+new URLSearchParams({tiles}).toString() : "";
+    await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);
     report = JSON.parse(await page.locator("#result").textContent());
     if(pageErrors.length) report.status="error";
