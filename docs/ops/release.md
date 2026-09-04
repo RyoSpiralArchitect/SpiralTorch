@@ -27,7 +27,7 @@ installed-wheel smoke, including complex-state forward and joint VJP replay.
 Legacy/versioned DLPack transfers, capsule single-use, explicit copies, and
 copy-on-write mutation are also exercised using the installed native wheel.
 Protected autograd snapshots, a complete 600-step nonlinear learning fixture,
-and a 300-step multiclass logits-loss fixture using Rust-owned atomic SGD run
+atomic SGD failure/ownership checks and a 300-step multiclass logits-loss fixture run
 on every installed release wheel before upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
 Catalog v4 records every normal-admission profile plus

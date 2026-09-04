@@ -179,6 +179,8 @@ overflow are errors, not partial updates. There is no momentum, clipping,
 implicit averaging, or WebGPU optimizer dispatch. Run
 `node bindings/st-wasm/tests/autograd_sgd.cjs /absolute/path/to/spiraltorch_wasm.js`
 for the failure/ownership checks; `classification.cjs` also uses the optimizer.
+Parameter indices must be finite nonnegative integers within the u32 range;
+fractional, NaN, and overflowing JS numbers are rejected before conversion.
 
 ## Shared Topos control and runtime routing
 

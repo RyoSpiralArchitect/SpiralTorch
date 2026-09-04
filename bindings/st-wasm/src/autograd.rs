@@ -410,9 +410,16 @@ impl AutogradSgd {
         self.inner.parameters().len()
     }
 
-    pub fn parameter(&self, index: usize) -> Result<AutogradTensor, JsValue> {
+    pub fn parameter(&self, index: f64) -> Result<AutogradTensor, JsValue> {
+        // Taking usize at the JS boundary would coerce NaN/fractions/2**32 to zero.
+        if !index.is_finite() || index < 0.0 || index.fract() != 0.0 || index > f64::from(u32::MAX)
+        {
+            return Err(js_error(
+                "autograd SGD parameter index must be a finite nonnegative u32 integer",
+            ));
+        }
         self.inner
-            .parameter(index)
+            .parameter(index as usize)
             .map(AutogradTransport::from_inner)
             .map(|transport| AutogradTensor { transport })
             .map_err(js_error)

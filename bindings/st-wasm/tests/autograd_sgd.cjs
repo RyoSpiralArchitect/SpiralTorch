@@ -29,6 +29,9 @@ try {
   assert.throws(() => optimizer.addParameter(keep(x.detach())), /trainable leaves/);
   assert.throws(() => optimizer.addParameter(keep(x.scale(2))), /trainable leaves/);
   assert.throws(() => optimizer.parameter(2), /out of bounds/);
+  for (const index of [-1, 0.5, NaN, Infinity, -Infinity, 2 ** 32, 2 ** 53, undefined]) {
+    assert.throws(() => optimizer.parameter(index), /index/);
+  }
   for (const rate of [0, -1, NaN, Infinity, -Infinity]) {
     assert.throws(() => new AutogradSgd(rate));
     assert.throws(() => optimizer.setLearningRate(rate));
