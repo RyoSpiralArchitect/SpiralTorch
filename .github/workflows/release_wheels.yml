@@ -282,6 +282,7 @@ jobs:
           python-version: "3.12"
       - uses: actions/download-artifact@v7
         with:
+          pattern: wheels-*
           path: dist
       - name: Collect wheels
         run: |
@@ -385,6 +386,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v7
         with:
+          pattern: wheels-*
           path: dist
       - name: Generate checksums for release wheels
         run: |
@@ -477,6 +479,12 @@ jobs:
             dist/*.json
             dist/spiraltorch-repo-license-manifest.json
             dist/spiraltorch-compliance-seal.json
+      - name: Retain exact signed payload before publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: signed-release-payload-${{ env.RELEASE_TAG }}
+          path: dist/
+          if-no-files-found: error
       - name: Attach verified draft assets and publish last
         uses: actions/github-script@v8
         with:

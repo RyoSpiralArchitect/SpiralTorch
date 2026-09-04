@@ -22,6 +22,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("await finalize({", workflow)
         self.assertIn("execFileSync('git', ['rev-parse', 'HEAD']", workflow)
         self.assertIn("actions/github-script@v8", workflow)
+        attach = workflow.partition("\n  attach:\n")[2]
+        self.assertIn("pattern: wheels-*", attach)
+        self.assertIn("name: signed-release-payload-", workflow)
+        self.assertLess(
+            workflow.index("Retain exact signed payload before publication"),
+            workflow.index("Attach verified draft assets and publish last"),
+        )
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("node --test tests/test_finalize_github_release.cjs", ci)
         runbook = (ROOT / "docs/ops/release.md").read_text()
