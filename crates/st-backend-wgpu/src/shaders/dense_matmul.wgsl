@@ -1,3 +1,4 @@
+// Shared by host-tensor and resident native/browser matmul.
 {f16_enable}
 struct MatmulUniforms {
     rows: u32,

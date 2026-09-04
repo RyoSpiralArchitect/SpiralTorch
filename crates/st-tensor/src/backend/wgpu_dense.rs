@@ -39,7 +39,6 @@ use super::lock_recover;
 mod indexing;
 pub use indexing::{gather_rows, scatter_add_rows};
 
-const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
@@ -4695,42 +4694,10 @@ impl WeightBuffers {
 }
 
 fn generate_matmul_shader(key: &PipelineKey) -> String {
-    let enable_f16 = "";
-    let rhs_storage_type = match key.dtype {
-        ScalarType::F32 => "array<f32>".to_string(),
-        ScalarType::QuantizedI8 => "array<u32>".to_string(),
-    };
-
-    let rhs_load_body = match key.dtype {
-        ScalarType::F32 => "return rhs_packed[k * params.cols + col];".to_string(),
-        ScalarType::QuantizedI8 => "let stride = (params.inner + 3u) / 4u;
-        let base = col * stride + (k >> 2u);
-        let word = rhs_packed[base];
-        let lane = (k & 3u) * 8u;
-        let byte_val = (word >> lane) & 0xFFu;
-        let signed_val = bitcast<i32>(byte_val << 24u) >> 24;
-        let scale = scales[col];
-        return f32(signed_val) * scale;"
-            .to_string(),
-    };
-
-    let fma_line = "acc = acc + lhs_val * rhs_val;";
-
-    let tile_mk = (key.tile_m as u64 * key.tile_k as u64) as u32;
-    let tile_nk = (key.tile_n as u64 * key.tile_k as u64) as u32;
-
-    MATMUL_WGSL_TEMPLATE
-        .replace("{f16_enable}", enable_f16)
-        .replace("{rhs_storage_type}", &rhs_storage_type)
-        .replace("{rhs_load_body}", &rhs_load_body)
-        .replace("{tile_m}", &key.tile_m.to_string())
-        .replace("{tile_n}", &key.tile_n.to_string())
-        .replace("{tile_k}", &key.tile_k.to_string())
-        .replace("{tile_mk}", &(tile_mk.to_string() + "u"))
-        .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
-        .replace("{workgroup_size_x}", &key.tile_n.to_string())
-        .replace("{workgroup_size_y}", &key.tile_m.to_string())
-        .replace("{fma_line}", fma_line)
+    st_backend_wgpu::shader_sources::dense_matmul_source(
+        [key.tile_m, key.tile_n, key.tile_k],
+        matches!(key.dtype, ScalarType::QuantizedI8),
+    )
 }
 
 fn create_wgsl_module(

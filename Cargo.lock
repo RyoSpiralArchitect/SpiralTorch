@@ -3107,11 +3107,13 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "st-backend-wgpu",
  "st-core",
  "st-frac",
  "st-tensor",
  "time",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -3151,6 +3153,7 @@ name = "st-backend-wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "futures-channel",
  "naga",
  "pollster",
  "st-kernel-contracts",
@@ -4105,8 +4108,6 @@ dependencies = [
 [[package]]
 name = "wgpu"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90e37c7b9921b75dfd26dd973fdcbce36f13dfa6e2dc82aece584e0ed48c355c"
 dependencies = [
  "arrayvec",
  "cfg-if",

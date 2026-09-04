@@ -43,6 +43,7 @@ mod theory;
 mod trainer;
 mod vision;
 mod wgpu;
+mod wgpu_resident;
 mod zpulse;
 mod zspace;
 mod zspace_generation_evidence;

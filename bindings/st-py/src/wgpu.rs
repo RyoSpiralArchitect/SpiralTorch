@@ -316,7 +316,12 @@ fn wgpu_softmax_kernel_report(
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "wgpu")?;
-    module.add("__doc__", "WGPU kernel catalog and selection reports")?;
+    module.add(
+        "__doc__",
+        "WGPU resident execution, kernel catalog and selection reports",
+    )?;
+    module.add_class::<crate::wgpu_resident::PyWgpuMatmul>()?;
+    parent.add_class::<crate::wgpu_resident::PyWgpuMatmul>()?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_reports_available, &module)?)?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_catalog, &module)?)?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_descriptor, &module)?)?;
@@ -329,6 +334,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add(
         "__all__",
         vec![
+            "WgpuMatmul",
             "wgpu_kernel_reports_available",
             "wgpu_kernel_catalog",
             "wgpu_kernel_descriptor",

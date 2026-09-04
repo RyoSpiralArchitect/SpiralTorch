@@ -1,2 +1,5 @@
 "LICENSE .txt" text eol=lf
 bindings/st-py/LICENSE.txt text eol=lf
+# Preserve the pinned upstream archive, including its CRLF and Markdown breaks.
+vendor/wgpu-0.20.1/** -text linguist-vendored whitespace=cr-at-eol
+vendor/wgpu-0.20.1/README.md whitespace=cr-at-eol,-blank-at-eol

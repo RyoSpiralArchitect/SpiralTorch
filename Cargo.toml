@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["vendor/wgpu-0.20.1"]
 members = [
   "crates/st-core",
   "crates/st-backend-hip",
@@ -64,3 +65,4 @@ resolver = "2"
 
 [patch.crates-io]
 spindle = { path = "vendor/spindle" }
+wgpu = { path = "vendor/wgpu-0.20.1" }
