@@ -4,6 +4,8 @@ use st_tensor::{
 };
 
 #[cfg(target_arch = "wasm32")]
+use js_sys::Number;
+#[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use serde_json::Value;
@@ -13,7 +15,7 @@ use st_tensor::AutogradSgd as RustAutogradSgd;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use crate::utils::js_error;
+use crate::utils::{js_error, js_i32, js_u32};
 
 #[derive(Clone)]
 struct AutogradTransport {
@@ -118,11 +120,13 @@ pub struct AutogradTensor {
 impl AutogradTensor {
     #[wasm_bindgen(constructor)]
     pub fn new(
-        rows: usize,
-        cols: usize,
+        rows: Number,
+        cols: Number,
         values: Vec<f32>,
         requires_grad: bool,
     ) -> Result<AutogradTensor, JsValue> {
+        let rows = js_u32(rows.as_ref(), "autograd rows")? as usize;
+        let cols = js_u32(cols.as_ref(), "autograd cols")? as usize;
         AutogradTransport::new(rows, cols, values, requires_grad)
             .map(|transport| Self { transport })
             .map_err(js_error)
@@ -263,9 +267,12 @@ impl AutogradTensor {
         &self,
         labels: Vec<i32>,
         reduction: Option<String>,
-        ignore_index: Option<i32>,
+        ignore_index: Option<Number>,
         label_smoothing: Option<f64>,
     ) -> Result<AutogradTensor, JsValue> {
+        let ignore_index = ignore_index
+            .map(|value| js_i32(value.as_ref(), "autograd ignore_index"))
+            .transpose()?;
         self.transport
             .cross_entropy_with_logits(labels, reduction, ignore_index, label_smoothing)
             .map(|transport| Self { transport })
@@ -410,14 +417,8 @@ impl AutogradSgd {
         self.inner.parameters().len()
     }
 
-    pub fn parameter(&self, index: f64) -> Result<AutogradTensor, JsValue> {
-        // Taking usize at the JS boundary would coerce NaN/fractions/2**32 to zero.
-        if !index.is_finite() || index < 0.0 || index.fract() != 0.0 || index > f64::from(u32::MAX)
-        {
-            return Err(js_error(
-                "autograd SGD parameter index must be a finite nonnegative u32 integer",
-            ));
-        }
+    pub fn parameter(&self, index: Number) -> Result<AutogradTensor, JsValue> {
+        let index = js_u32(index.as_ref(), "autograd SGD parameter index")?;
         self.inner
             .parameter(index as usize)
             .map(AutogradTransport::from_inner)

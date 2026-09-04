@@ -18,10 +18,10 @@ use crate::backend::wgpu_heuristics_generated as gen;
 use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
+use crate::util::clock::system_time_now;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 #[cfg(feature = "logic-learn")]
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 #[cfg(feature = "logic-learn")]
 use std::time::{Duration, Instant};
 
@@ -373,7 +373,7 @@ fn finalize_choice(
         choice: summary,
         score_hint,
         source,
-        issued_at: SystemTime::now(),
+        issued_at: system_time_now(),
     };
     let registry = EcosystemRegistry::global();
     let tag_sample = |sample: MetricSample| -> MetricSample {
