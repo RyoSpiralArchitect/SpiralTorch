@@ -9,6 +9,7 @@ pub mod fractional;
 
 pub mod autograd;
 pub mod backend;
+pub mod classification;
 pub mod compaction;
 pub mod dlpack;
 pub mod execution;
@@ -25,6 +26,7 @@ pub use autograd::{
     AUTOGRAD_SEMANTIC_OWNER,
 };
 pub use backend::faer_dense;
+pub use classification::{class_indices_from_tensor, CrossEntropyConfig, LossReduction};
 pub use execution::{
     emit_tensor_execution_receipt, prepare_tensor_execution, TensorExecutionCompletion,
     TensorExecutionContractError, TensorExecutionFallback, TensorExecutionFallbackReason,

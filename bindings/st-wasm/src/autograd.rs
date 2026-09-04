@@ -1,5 +1,5 @@
 use st_tensor::{
-    AutogradBackwardReport, AutogradTensor as RustAutogradTensor, Tensor,
+    AutogradBackwardReport, AutogradTensor as RustAutogradTensor, CrossEntropyConfig, Tensor,
     AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 
@@ -37,6 +37,29 @@ impl AutogradTransport {
 
     fn backward(&self) -> Result<AutogradBackwardReport, String> {
         self.inner.backward().map_err(|error| error.to_string())
+    }
+
+    fn cross_entropy_with_logits(
+        &self,
+        labels: Vec<i32>,
+        reduction: Option<String>,
+        ignore_index: Option<i32>,
+        label_smoothing: Option<f64>,
+    ) -> Result<Self, String> {
+        let config = CrossEntropyConfig {
+            reduction: reduction
+                .as_deref()
+                .unwrap_or("mean")
+                .parse()
+                .map_err(|error: st_tensor::TensorError| error.to_string())?,
+            ignore_index: i64::from(ignore_index.unwrap_or(-100)),
+            label_smoothing: label_smoothing.unwrap_or(0.0),
+        };
+        let labels: Vec<i64> = labels.into_iter().map(i64::from).collect();
+        self.inner
+            .cross_entropy_with_logits(&labels, config)
+            .map(Self::from_inner)
+            .map_err(|error| error.to_string())
     }
 
     fn backward_with_values(&self, values: Vec<f32>) -> Result<AutogradBackwardReport, String> {
@@ -222,6 +245,31 @@ impl AutogradTensor {
             .map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = rowLogSoftmax)]
+    pub fn row_log_softmax(&self) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .row_log_softmax()
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    /// Integer-label logits loss. Optional arguments default to mean, -100 and zero smoothing.
+    #[wasm_bindgen(js_name = crossEntropyWithLogits)]
+    pub fn cross_entropy_with_logits(
+        &self,
+        labels: Vec<i32>,
+        reduction: Option<String>,
+        ignore_index: Option<i32>,
+        label_smoothing: Option<f64>,
+    ) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .cross_entropy_with_logits(labels, reduction, ignore_index, label_smoothing)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
     pub fn hadamard(&self, rhs: &AutogradTensor) -> Result<AutogradTensor, JsValue> {
         self.transport
             .inner
@@ -334,6 +382,28 @@ impl AutogradTensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classification_transport_uses_core_defaults_and_validation() {
+        let input = AutogradTransport::new(3, 2, vec![0.0; 6], true).unwrap();
+        let output = input
+            .cross_entropy_with_logits(vec![0, -100, 1], None, None, Some(0.2))
+            .unwrap();
+        output.backward().unwrap();
+        let expected = [-0.2, 0.2, 0.0, 0.0, 0.2, -0.2];
+        for (&actual, expected) in input.inner.grad().unwrap().data().iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-7);
+        }
+        assert!(input
+            .cross_entropy_with_logits(vec![0, 0, 0], Some("avg".into()), None, None)
+            .is_err());
+        assert!(input
+            .cross_entropy_with_logits(vec![0, 0, 0], None, None, Some(f64::NAN))
+            .is_err());
+        assert!(input
+            .cross_entropy_with_logits(vec![-100; 3], None, None, None)
+            .is_err());
+    }
 
     #[test]
     fn wasm_transport_delegates_branching_gradients_to_rust() {

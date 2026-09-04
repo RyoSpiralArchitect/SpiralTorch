@@ -2409,16 +2409,25 @@ mod tests {
                 *op_name == "sum_axis0_scaled"
                     && data["rows"] == 2
                     && data["cols"] == 3
-                    && data["backend"] == "wgpu_dense"
+                    && data["event_phase"] == "completed"
+                    && data["backend"] == "wgpu"
+                    && data["kernel_backend"] == "wgpu_dense"
+                    && data["execution_receipt"]["executed_backend"] == "wgpu"
+                    && data["execution_receipt"]["route_status"] == "direct"
             })
             .count();
         assert!(
             scaled_wgpu_reductions >= 2,
             "expected WGPU gamma and beta reductions, saw {scaled_wgpu_reductions}"
         );
-        assert!(events
-            .iter()
-            .any(|(op_name, data)| { *op_name == "sum_axis0" && data["backend"] == "wgpu_dense" }));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "sum_axis0"
+                && data["event_phase"] == "completed"
+                && data["backend"] == "wgpu"
+                && data["kernel_backend"] == "wgpu_dense"
+                && data["execution_receipt"]["executed_backend"] == "wgpu"
+                && data["execution_receipt"]["route_status"] == "direct"
+        }));
         assert!(events
             .iter()
             .any(|(op_name, data)| { *op_name == "mul_row" && data["backend"] == "wgpu_dense" }));

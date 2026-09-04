@@ -1,5 +1,5 @@
 use crate::json::json_to_py;
-use crate::tensor::{tensor_err_to_py, PyTensor};
+use crate::tensor::{parse_cross_entropy_config, tensor_err_to_py, PyTensor};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use st_tensor::{
@@ -129,6 +129,27 @@ impl PyAutogradTensor {
     fn row_softmax(&self) -> PyResult<Self> {
         self.inner
             .row_softmax()
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn row_log_softmax(&self, py: Python<'_>) -> PyResult<Self> {
+        py.detach(|| self.inner.row_log_softmax())
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (labels, *, reduction="mean", ignore_index=-100, label_smoothing=0.0))]
+    fn cross_entropy_with_logits(
+        &self,
+        labels: Vec<i64>,
+        reduction: &str,
+        ignore_index: i64,
+        label_smoothing: f64,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        let config = parse_cross_entropy_config(reduction, ignore_index, label_smoothing)?;
+        py.detach(|| self.inner.cross_entropy_with_logits(&labels, config))
             .map(Self::from_inner)
             .map_err(tensor_err_to_py)
     }

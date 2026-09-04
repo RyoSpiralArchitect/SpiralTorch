@@ -126,7 +126,7 @@ jobs:
       - name: test upper stack
         if: matrix.run_upper_stack
         run: |
-          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib
+          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability
           cargo test -p st-nn --release --lib
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
@@ -159,6 +159,8 @@ jobs:
         env:
           SPIRALTORCH_STRICT_GPU: "1"
         run: cargo test --locked -p st-tensor --features wgpu --release --test autograd_nonlinear
+      - name: neural layers and losses with WGPU enabled
+        run: cargo test --locked -p st-nn --features wgpu --release --lib
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -387,5 +389,5 @@ jobs:
           python -m pip install numpy
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py bindings/st-py/tests/test_native_dlpack_versioned.py
           python -I tools/smoke_dlpack_interop.py
-          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py
           python -I tools/smoke_autograd.py

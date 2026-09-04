@@ -3138,6 +3138,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "RoundtableSchedule": ("RoundtableSchedule",),
         "EpochStats": ("EpochStats",),
         "MeanSquaredError": ("MeanSquaredError",),
+        "CrossEntropyWithLogits": ("CrossEntropyWithLogits",),
         "HyperbolicCrossEntropy": ("HyperbolicCrossEntropy",),
         "CrossEntropy": ("nn.HyperbolicCrossEntropy", "HyperbolicCrossEntropy"),
         "FocalLoss": ("FocalLoss",),

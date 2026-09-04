@@ -3028,7 +3028,26 @@ mod tests {
             cpu_layer.coherence().gradient().unwrap().data(),
             wgpu_layer.coherence().gradient().unwrap().data(),
         );
-        assert!((cpu_audit.final_norm_squared - wgpu_audit.final_norm_squared).abs() < 1e-5);
+        assert_eq!(
+            cpu_audit.initial_norm_squared,
+            wgpu_audit.initial_norm_squared
+        );
+        assert_eq!(
+            cpu_audit.expected_final_norm_squared,
+            wgpu_audit.expected_final_norm_squared
+        );
+        for audit in [cpu_audit, wgpu_audit] {
+            assert!(audit.aggregate_norm_error <= audit.aggregate_norm_tolerance);
+        }
+        // Both routes share the same expected norm; their row-wise error budgets add.
+        let norm_difference = (cpu_audit.final_norm_squared - wgpu_audit.final_norm_squared).abs();
+        let norm_tolerance =
+            cpu_audit.aggregate_norm_tolerance + wgpu_audit.aggregate_norm_tolerance;
+        assert!(
+            norm_difference <= norm_tolerance,
+            "CPU/WGPU total norm difference {norm_difference} exceeds {norm_tolerance}: \
+             CPU={cpu_audit:?}, WGPU={wgpu_audit:?}"
+        );
         assert!(wgpu_audit.max_row_norm_tolerance_ratio <= 1.0);
         assert!(wgpu_audit.max_formula_tolerance_ratio <= 1.0);
         assert_eq!(cpu_backward_audit.max_formula_tolerance_ratio, 0.0);

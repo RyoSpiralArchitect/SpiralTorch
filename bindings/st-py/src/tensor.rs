@@ -21,11 +21,25 @@ use st_tensor::dlpack::{
     USED_DLPACK_CAPSULE_NAME, USED_DLPACK_VERSIONED_CAPSULE_NAME,
 };
 use st_tensor::{
-    backend::cpu_dense, AttentionBackend, HardmaxBackend, Layout, MatmulBackend, SoftmaxBackend,
-    Tensor, TensorError,
+    backend::cpu_dense, AttentionBackend, CrossEntropyConfig, HardmaxBackend, Layout,
+    MatmulBackend, SoftmaxBackend, Tensor, TensorError,
 };
 use std::sync::Arc;
 use tracing::warn;
+
+pub(crate) fn parse_cross_entropy_config(
+    reduction: &str,
+    ignore_index: i64,
+    label_smoothing: f64,
+) -> PyResult<CrossEntropyConfig> {
+    let config = CrossEntropyConfig {
+        reduction: reduction.parse().map_err(tensor_err_to_py)?,
+        ignore_index,
+        label_smoothing,
+    };
+    config.validate().map_err(tensor_err_to_py)?;
+    Ok(config)
+}
 
 fn resolve_mps_matmul_backend() -> MatmulBackend {
     match resolve_backend(BackendKind::Mps).effective_backend {
@@ -1248,6 +1262,55 @@ impl PyTensor {
             .detach(|| self.inner.row_softmax_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
+    }
+
+    /// Stable CPU log-softmax with f64 row normalization.
+    pub fn row_log_softmax(&self, py: Python<'_>) -> PyResult<PyTensor> {
+        py.detach(|| self.inner.row_log_softmax())
+            .map(Self::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    /// VJP with respect to these logits, not an already normalized output.
+    pub fn row_log_softmax_backward(&self, seed: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
+        py.detach(|| self.inner.row_log_softmax_backward(&seed.inner))
+            .map(Self::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    /// Integer-label logits loss; all-ignored mean batches are rejected.
+    #[pyo3(signature = (labels, *, reduction="mean", ignore_index=-100, label_smoothing=0.0))]
+    pub fn cross_entropy_with_logits(
+        &self,
+        labels: Vec<i64>,
+        reduction: &str,
+        ignore_index: i64,
+        label_smoothing: f64,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let config = parse_cross_entropy_config(reduction, ignore_index, label_smoothing)?;
+        py.detach(|| self.inner.cross_entropy_with_logits(&labels, config))
+            .map(Self::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (labels, seed, *, reduction="mean", ignore_index=-100, label_smoothing=0.0))]
+    pub fn cross_entropy_with_logits_backward(
+        &self,
+        labels: Vec<i64>,
+        seed: &PyTensor,
+        reduction: &str,
+        ignore_index: i64,
+        label_smoothing: f64,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let config = parse_cross_entropy_config(reduction, ignore_index, label_smoothing)?;
+        py.detach(|| {
+            self.inner
+                .cross_entropy_with_logits_backward(&labels, config, &seed.inner)
+        })
+        .map(Self::from_tensor)
+        .map_err(tensor_err_to_py)
     }
 
     /// Row-wise softmax probabilities paired with hardmax mask.
