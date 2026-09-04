@@ -471,6 +471,25 @@ a partial update. Python and WASM classification fixtures use this path. See
 [atomic SGD](docs/autograd_contract.md#atomic-sgd-for-immutable-leaves) for the
 ownership rules and the distinction from Z-space optimizer tapes.
 
+Version 0.4.24 corrects the shared `st-frac::fft` radix-4 sign and binary-reversal
+ordering, including inverse transforms and singleton signals. The allocation-free
+mixed radix-2/4 path remains in place; Python and WASM use the same corrected Rust
+kernel rather than a client-side DFT fallback:
+
+```python
+import spiraltorch as st
+
+spectrum = st.frac.fft_real([1.0, 2.0, 3.0, 4.0])
+assert spectrum == [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)]
+restored = st.frac.fft_complex32(spectrum, inverse=True)
+```
+
+Forward uses the negative-exponent convention; inverse divides by the signal
+length. This fixes `fft_real`, `fft_complex32`, `fft_radix4`, WASM FFT helpers,
+and their Canvas/temporal-fusion callers. Earlier nontrivial FFT-derived results
+from these paths should be recomputed: impulse-only checks did not validate bin
+order or phase. These helpers remain CPU/WASM transforms, not WebGPU dispatch.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -930,7 +949,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.23
+VERSION=0.4.24
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

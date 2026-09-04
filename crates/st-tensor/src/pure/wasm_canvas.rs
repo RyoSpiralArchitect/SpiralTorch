@@ -2976,6 +2976,32 @@ mod tests {
     use super::*;
     use crate::pure::fractal::FractalPatch;
 
+    #[test]
+    fn canvas_fft_preserves_standard_bins_and_roundtrip() {
+        let original = [
+            Complex32::new(1.0, 0.0),
+            Complex32::new(2.0, 0.0),
+            Complex32::new(3.0, 0.0),
+            Complex32::new(4.0, 0.0),
+        ];
+        let mut values = original;
+        compute_fft(&mut values, false).unwrap();
+        assert_eq!(
+            values,
+            [
+                Complex32::new(10.0, 0.0),
+                Complex32::new(-2.0, 2.0),
+                Complex32::new(-2.0, 0.0),
+                Complex32::new(-2.0, -2.0),
+            ]
+        );
+        compute_fft(&mut values, true).unwrap();
+        assert_eq!(values, original);
+        let mut singleton = [Complex32::new(2.0, -0.5)];
+        compute_fft(&mut singleton, false).unwrap();
+        assert_eq!(singleton, [Complex32::new(2.0, -0.5)]);
+    }
+
     fn unwrap_ok<T>(result: PureResult<T>) -> T {
         match result {
             Ok(value) => value,

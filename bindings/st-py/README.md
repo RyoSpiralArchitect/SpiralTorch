@@ -203,6 +203,26 @@ explicitly isolates mutable aliases, and `is_snapshot()` reports that state.
 Normal `from_dlpack` Tensor sharing is unchanged. Snapshot capture is not a
 PyTorch autograd-graph transfer.
 
+## Shared FFT numerics
+
+Version 0.4.24 corrects radix-4 bin ordering and transform direction in
+`st-frac::fft`, shared by native Python, WASM, Canvas, and temporal fusion.
+The existing mixed radix-2/4 path is retained, without a Python DFT fallback.
+
+```python
+import spiraltorch as st
+
+spectrum = st.frac.fft_real([1.0, 2.0, 3.0, 4.0])
+assert spectrum == [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)]
+restored = st.frac.fft_complex32(spectrum, inverse=True)
+```
+
+Forward uses a negative exponent; inverse divides by the signal length.
+Positive power-of-two lengths are accepted, including the length-one identity.
+The root `st.fft_*` aliases use the same implementation. Earlier nontrivial
+FFT-derived results from these paths should be recomputed, because origin-impulse
+tests alone missed incorrect bin order and phase. This is not WebGPU dispatch.
+
 ## What's included
 
 - `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free

@@ -331,6 +331,26 @@ mod tests {
     }
 
     #[test]
+    fn spectrum_preserves_tone_frequency_and_energy() {
+        let series = (0..16)
+            .map(|j| (std::f64::consts::TAU * 3.0 * f64::from(j) / 16.0).cos() as f32)
+            .collect::<Vec<_>>();
+        let (spectral, frequency, tempo, energy) = compute_spectrum(&series).unwrap();
+        assert_eq!(frequency, 3.0 / 16.0);
+        assert!((spectral[3] - 8.0).abs() < 1e-5);
+        assert!((energy - 8.0).abs() < 1e-5);
+        assert!((tempo - 1.0).abs() < 1e-5);
+        for (index, magnitude) in spectral.iter().enumerate() {
+            if index != 3 {
+                assert!(
+                    magnitude.abs() < 1e-5,
+                    "spurious harmonic {index}: {magnitude}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn spectrum_handles_non_finite_samples_without_panicking() {
         let (spectral, dominant_frequency, tempo_hint, spectral_energy) =
             compute_spectrum(&[1.0, f32::NAN, 2.0, f32::INFINITY])
