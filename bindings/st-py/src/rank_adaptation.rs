@@ -9,7 +9,7 @@ use st_core::runtime::rank_adaptation::{
 };
 
 use crate::json::json_to_py;
-use crate::planner::PyRankPlan;
+use crate::planner::{rank_plan_contract_value, PyRankPlan};
 
 type RankPlanMetadata = (
     Option<&'static str>,
@@ -27,9 +27,17 @@ fn policy_from_str(policy: &str) -> PyResult<SoftBanditMode> {
     }
 }
 
-fn serialize_to_py<T: Serialize>(py: Python<'_>, value: &T) -> PyResult<Py<PyAny>> {
-    let value =
+fn adaptation_value<T: Serialize>(value: &T) -> PyResult<serde_json::Value> {
+    let mut value =
         serde_json::to_value(value).map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    value
+        .as_object_mut()
+        .expect("rank-adaptation artifact serializes as an object")
+        .insert("execution_client".into(), "python".into());
+    Ok(value)
+}
+
+fn value_to_py(py: Python<'_>, value: serde_json::Value) -> PyResult<Py<PyAny>> {
     json_to_py(py, &value)
 }
 
@@ -57,6 +65,11 @@ impl PyRankAdaptationSelection {
     }
 
     #[getter]
+    fn execution_signature(&self) -> &str {
+        &self.inner.receipt().execution_signature
+    }
+
+    #[getter]
     fn plan(&self) -> PyRankPlan {
         PyRankPlan::from_plan_with_metadata(
             self.inner.plan().clone(),
@@ -67,7 +80,11 @@ impl PyRankAdaptationSelection {
     }
 
     fn receipt(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        serialize_to_py(py, self.inner.receipt())
+        let mut value = adaptation_value(self.inner.receipt())?;
+        value["plan"] =
+            rank_plan_contract_value(self.inner.plan(), self.metadata.1, self.metadata.2)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        value_to_py(py, value)
     }
 }
 
@@ -97,15 +114,20 @@ impl PyRankAdaptationSession {
         })
     }
 
-    fn choose(&mut self) -> PyResult<PyRankAdaptationSelection> {
-        let inner = self
-            .inner
+    fn choose(&mut self, py: Python<'_>) -> PyResult<Py<PyRankAdaptationSelection>> {
+        let mut next = self.inner.clone();
+        let inner = next
             .try_choose()
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(PyRankAdaptationSelection {
-            inner,
-            metadata: self.metadata,
-        })
+        let selection = Py::new(
+            py,
+            PyRankAdaptationSelection {
+                inner,
+                metadata: self.metadata,
+            },
+        )?;
+        self.inner = next;
+        Ok(selection)
     }
 
     fn observe(
@@ -115,23 +137,42 @@ impl PyRankAdaptationSession {
         elapsed_ms: f64,
         correctness_passed: bool,
     ) -> PyResult<Py<PyAny>> {
-        let receipt = self
-            .inner
+        let mut next = self.inner.clone();
+        let receipt = next
             .try_observe(selection_id, elapsed_ms, correctness_passed)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        serialize_to_py(py, &receipt)
+        let value = value_to_py(py, adaptation_value(&receipt)?)?;
+        self.inner = next;
+        Ok(value)
     }
 
     fn abandon(&mut self, py: Python<'_>, selection_id: u64) -> PyResult<Py<PyAny>> {
-        let receipt = self
-            .inner
+        let mut next = self.inner.clone();
+        let receipt = next
             .try_abandon(selection_id)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        serialize_to_py(py, &receipt)
+        let value = value_to_py(py, adaptation_value(&receipt)?)?;
+        self.inner = next;
+        Ok(value)
     }
 
     fn snapshot(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        serialize_to_py(py, &self.inner.snapshot())
+        let mut value = adaptation_value(&self.inner.snapshot())?;
+        let candidates = value
+            .get_mut("candidates")
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("rank-adaptation snapshot contains candidates");
+        let plans = self.inner.candidate_plans().collect::<Vec<_>>();
+        if candidates.len() != plans.len() {
+            return Err(PyRuntimeError::new_err(
+                "rank-adaptation candidate snapshot is inconsistent",
+            ));
+        }
+        for (candidate, plan) in candidates.iter_mut().zip(plans) {
+            candidate["plan"] = rank_plan_contract_value(plan, self.metadata.1, self.metadata.2)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        }
+        value_to_py(py, value)
     }
 
     #[getter]

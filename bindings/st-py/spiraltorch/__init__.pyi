@@ -5852,6 +5852,41 @@ class RankPlan:
         max_events: int = ...,
     ) -> tuple[RankPlan, Dict[str, object], Dict[str, Any]]: ...
 
+RANK_ADAPTATION_CONTRACT_VERSION: Literal["spiraltorch.rank_adaptation.v1"]
+RANK_ADAPTATION_SEMANTIC_OWNER: Literal["st-core::runtime::rank_adaptation"]
+
+class RankAdaptationSelection:
+    selection_id: int
+    candidate_index: int
+    spiralk_source_sha256: str
+    execution_signature: str
+    plan: RankPlan
+
+    def receipt(self) -> Dict[str, Any]: ...
+
+class RankAdaptationSession:
+    pending_selection_id: int | None
+
+    def __init__(
+        self,
+        base_plan: RankPlan,
+        scripts: Sequence[str],
+        *,
+        policy: Literal[
+            "ucb", "upper_confidence_bound", "ts", "thompson_sampling"
+        ] = ...,
+        seed: int = ...,
+    ) -> None: ...
+    def choose(self) -> RankAdaptationSelection: ...
+    def observe(
+        self,
+        selection_id: int,
+        elapsed_ms: float,
+        correctness_passed: bool,
+    ) -> Dict[str, Any]: ...
+    def abandon(self, selection_id: int) -> Dict[str, Any]: ...
+    def snapshot(self) -> Dict[str, Any]: ...
+
 def from_dlpack(capsule: object) -> Tensor: ...
 
 def to_dlpack(tensor: Tensor) -> object: ...
@@ -11282,6 +11317,10 @@ selfsup: _SelfSupModule
 
 class _PlannerModule(ModuleType):
     RankPlan: type[RankPlan]
+    RankAdaptationSelection: type[RankAdaptationSelection]
+    RankAdaptationSession: type[RankAdaptationSession]
+    RANK_ADAPTATION_CONTRACT_VERSION: Literal["spiraltorch.rank_adaptation.v1"]
+    RANK_ADAPTATION_SEMANTIC_OWNER: Literal["st-core::runtime::rank_adaptation"]
 
     def plan(
         kind: Literal["topk", "midk", "bottomk", "fft"],

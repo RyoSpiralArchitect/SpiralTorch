@@ -1954,7 +1954,9 @@ declare module "spiraltorch-wasm" {
         posterior_mean: number;
         predictive_stddev: number;
         decision_score: number;
+        selection_attempts: number;
         observations: number;
+        quarantined: boolean;
         hinted: boolean;
     };
 
@@ -1965,9 +1967,11 @@ declare module "spiraltorch-wasm" {
         posterior_estimator: string;
         posterior_regularization: number;
         exploration_scale: number;
+        forced_exploration: boolean;
         sampling_applied: boolean;
         rng_algorithm: string | null;
-        rng_stream_seed: number | null;
+        /** Exact decimal u64 text; never rounded to a JavaScript number. */
+        rng_stream_seed: string | null;
         arms: RankAdaptationBanditArm[];
     };
 
@@ -1981,6 +1985,7 @@ declare module "spiraltorch-wasm" {
         selection_id: number;
         candidate_index: number;
         spiralk_source_sha256: string;
+        execution_signature: string;
         plan: RankPlanContract;
         decision: RankAdaptationBanditDecision;
     };
@@ -1996,9 +2001,11 @@ declare module "spiraltorch-wasm" {
         elapsed_ms: number;
         correctness_passed: boolean;
         credited: boolean;
+        candidate_quarantined: boolean;
         reward: number | null;
         reward_formula: "1 / (1 + elapsed_ms)";
         observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
     };
 
     export type RankAdaptationAbandonmentReceipt = {
@@ -2011,6 +2018,7 @@ declare module "spiraltorch-wasm" {
         candidate_index: number;
         credited: false;
         observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
     };
 
     export type RankAdaptationSessionSnapshot = {
@@ -2026,10 +2034,12 @@ declare module "spiraltorch-wasm" {
         candidates: Array<{
             index: number;
             spiralk_source_sha256: string;
+            execution_signature: string;
             plan: RankPlanContract;
         }>;
         choice_domains: Record<string, string[]>;
         observation_counts: Record<string, Record<string, number>>;
+        quarantined_choices: Record<string, string[]>;
         pending_selection_id: number | null;
     };
 

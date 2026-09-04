@@ -137,14 +137,128 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
         }
     };
     // No Black Cat decision is admitted until every candidate passes once.
+    let candidate_plans = adaptation.candidate_plans().cloned().collect::<Vec<_>>();
+    let candidate_snapshots = adaptation.snapshot().candidates;
     let mut first_call_ms = Vec::new();
-    for plan in adaptation.candidate_plans() {
+    for (candidate_index, plan) in candidate_plans.iter().enumerate() {
         let start = Instant::now();
-        let (values, indices) = launch(plan, backend, &request.input)?;
-        first_call_ms.push(start.elapsed().as_secs_f64() * 1000.0);
-        check(&values, &indices)?;
-        for _ in 0..request.warmup {
-            launch(plan, backend, &request.input)?;
+        let result = launch(plan, backend, &request.input);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        first_call_ms.push(json!({
+            "candidate_index": candidate_index,
+            "elapsed_ms": elapsed_ms,
+        }));
+        let (values, indices) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "candidate_preflight_launch",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "elapsed_ms": elapsed_ms,
+                    "first_call_ms": first_call_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
+        };
+        if let Err(error) = check(&values, &indices) {
+            return Ok(json!({
+                "status": "error",
+                "stage": "candidate_preflight_correctness",
+                "error": error,
+                "candidate": candidate_snapshots[candidate_index],
+                "elapsed_ms": elapsed_ms,
+                "actual_values": values,
+                "actual_indices": indices,
+                "expected_values": expected_values,
+                "expected_indices": expected_indices,
+                "first_call_ms": first_call_ms,
+                "rank_adaptation": adaptation.snapshot(),
+            }));
+        }
+        for warmup_index in 0..request.warmup {
+            let result = launch(plan, backend, &request.input);
+            let (values, indices) = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    return Ok(json!({
+                        "status": "error",
+                        "stage": "candidate_warmup_launch",
+                        "error": error,
+                        "candidate": candidate_snapshots[candidate_index],
+                        "warmup_index": warmup_index,
+                        "first_call_ms": first_call_ms,
+                        "rank_adaptation": adaptation.snapshot(),
+                    }));
+                }
+            };
+            if let Err(error) = check(&values, &indices) {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "candidate_warmup_correctness",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "warmup_index": warmup_index,
+                    "actual_values": values,
+                    "actual_indices": indices,
+                    "expected_values": expected_values,
+                    "expected_indices": expected_indices,
+                    "first_call_ms": first_call_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
+        }
+    }
+
+    // Measure every arm equally in a rotating order. These control samples are
+    // separate from the adaptive observations and never train the posterior.
+    let mut control_samples = Vec::new();
+    let candidate_count = candidate_plans.len();
+    let rotation = request.seed as usize % candidate_count;
+    for round in 0..request.iterations {
+        for offset in 0..candidate_count {
+            let candidate_index = (rotation + round + offset) % candidate_count;
+            let plan = &candidate_plans[candidate_index];
+            let started = Instant::now();
+            let result = launch(plan, backend, &request.input);
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let (values, indices) = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    return Ok(json!({
+                        "status": "error",
+                        "stage": "balanced_control_launch",
+                        "error": error,
+                        "candidate": candidate_snapshots[candidate_index],
+                        "round": round,
+                        "elapsed_ms": elapsed_ms,
+                        "rank_adaptation": adaptation.snapshot(),
+                    }));
+                }
+            };
+            if let Err(error) = check(&values, &indices) {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "balanced_control_correctness",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "round": round,
+                    "elapsed_ms": elapsed_ms,
+                    "actual_values": values,
+                    "actual_indices": indices,
+                    "expected_values": expected_values,
+                    "expected_indices": expected_indices,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
+            control_samples.push(json!({
+                "round": round,
+                "order_offset": offset,
+                "candidate_index": candidate_index,
+                "execution_signature": candidate_snapshots[candidate_index].execution_signature,
+                "elapsed_ms": elapsed_ms,
+            }));
         }
     }
     let mut samples = Vec::new();
@@ -157,10 +271,22 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
         let (values, indices) = match result {
             Ok(result) => result,
             Err(error) => {
-                adaptation
+                let abandonment = adaptation
                     .try_abandon(selection_id)
-                    .map_err(|e| e.to_string())?;
-                return Err(error);
+                    .map(|receipt| json!(receipt))
+                    .unwrap_or_else(|receipt_error| {
+                        json!({"status": "error", "error": receipt_error.to_string()})
+                    });
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "adaptive_launch",
+                    "error": error,
+                    "selection": selection.receipt(),
+                    "abandonment": abandonment,
+                    "elapsed_ms": elapsed_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                    "control_samples": control_samples,
+                }));
             }
         };
         let correctness = check(&values, &indices);
@@ -168,7 +294,19 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
             .try_observe(selection_id, elapsed_ms, correctness.is_ok())
             .map_err(|e| e.to_string())?;
         if let Err(error) = correctness {
-            return Err(error);
+            return Ok(json!({
+                "status": "error",
+                "stage": "adaptive_correctness",
+                "error": error,
+                "selection": selection.receipt(),
+                "observation": observation,
+                "actual_values": values,
+                "actual_indices": indices,
+                "expected_values": expected_values,
+                "expected_indices": expected_indices,
+                "rank_adaptation": adaptation.snapshot(),
+                "control_samples": control_samples,
+            }));
         }
         samples.push(json!({"selection": selection.receipt(), "observation": observation}));
     }
@@ -178,7 +316,9 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
         json!({"status": "passed", "backend": request.backend, "adapter": adapter,
         "kind": request.kind, "rows": request.rows, "cols": request.cols, "k": request.k,
         "scripts": request.scripts, "rank_adaptation": adaptation_snapshot,
-        "first_call_ms": first_call_ms, "samples": samples,
+        "first_call_ms": first_call_ms,
+        "control_design": "equal-count rotating round-robin; does not update Black Cat",
+        "control_samples": control_samples, "samples": samples,
         "blackcat_observation_counts": observation_counts,
         "values": expected_values, "indices": expected_indices,
         "boundary": "Rust host buffers -> strict GPU execution -> host buffers; planning excluded"}),
@@ -196,6 +336,9 @@ fn main() {
             failed = true;
             json!({"status": "error", "error": error})
         });
+        if report.get("status").and_then(|value| value.as_str()) == Some("error") {
+            failed = true;
+        }
         println!("{report}");
     }
     if failed {

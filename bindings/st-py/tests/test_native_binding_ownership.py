@@ -3,6 +3,7 @@
 import gc
 import importlib
 import unittest
+from pathlib import Path
 
 import spiraltorch as st
 import spiraltorch.spiralk as sk
@@ -66,11 +67,33 @@ class NativeBindingOwnershipTest(unittest.TestCase):
         )
 
         selection = session.choose()
+        selection_receipt = selection.receipt()
         self.assertEqual(selection.selection_id, 1)
         self.assertEqual(session.pending_selection_id, 1)
-        self.assertEqual(selection.plan.contract()["requested_backend"], "wgpu")
         self.assertEqual(
-            selection.receipt()["semantic_owner"],
+            selection.execution_signature,
+            selection_receipt["execution_signature"],
+        )
+        self.assertIn("backend=wgpu", selection.execution_signature)
+        self.assertEqual(selection.plan.contract()["requested_backend"], "wgpu")
+        self.assertEqual(selection_receipt["execution_client"], "python")
+        self.assertEqual(selection_receipt["plan"]["execution_client"], "python")
+        self.assertEqual(selection_receipt["plan"]["requested_backend"], "wgpu")
+        self.assertEqual(selection_receipt["plan"]["effective_backend"], "wgpu")
+        self.assertEqual(selection_receipt["policy"], "upper_confidence_bound")
+        self.assertEqual(
+            selection_receipt["decision"]["mode"], "upper_confidence_bound"
+        )
+        self.assertTrue(selection_receipt["decision"]["forced_exploration"])
+        self.assertEqual(
+            sum(
+                arm["selection_attempts"]
+                for arm in selection_receipt["decision"]["arms"]
+            ),
+            1,
+        )
+        self.assertEqual(
+            selection_receipt["semantic_owner"],
             "st-core::runtime::rank_adaptation",
         )
         with self.assertRaisesRegex(RuntimeError, "still awaiting observation"):
@@ -78,13 +101,38 @@ class NativeBindingOwnershipTest(unittest.TestCase):
 
         rejected = session.observe(selection.selection_id, 1.25, False)
         self.assertFalse(rejected["credited"])
+        self.assertTrue(rejected["candidate_quarantined"])
         self.assertIsNone(rejected["reward"])
+        self.assertEqual(
+            rejected["quarantined_choices"]["rank_plan_variant"],
+            [str(selection.candidate_index)],
+        )
         self.assertEqual(
             sum(session.snapshot()["observation_counts"]["rank_plan_variant"].values()),
             0,
         )
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["execution_client"], "python")
+        self.assertTrue(
+            all(
+                candidate["plan"]["execution_client"] == "python"
+                and candidate["plan"]["requested_backend"] == "wgpu"
+                for candidate in snapshot["candidates"]
+            )
+        )
 
         credited_selection = session.choose()
+        self.assertNotEqual(credited_selection.candidate_index, selection.candidate_index)
+        self.assertTrue(
+            credited_selection.receipt()["decision"]["forced_exploration"]
+        )
+        self.assertEqual(
+            sum(
+                arm["selection_attempts"]
+                for arm in credited_selection.receipt()["decision"]["arms"]
+            ),
+            2,
+        )
         credited = session.observe(credited_selection.selection_id, 4.0, True)
         self.assertTrue(credited["credited"])
         self.assertAlmostEqual(credited["reward"], 0.2)
@@ -94,6 +142,38 @@ class NativeBindingOwnershipTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "no pending selection"):
             session.abandon(credited_selection.selection_id)
+        follow_up = session.choose()
+        self.assertEqual(follow_up.candidate_index, credited_selection.candidate_index)
+        self.assertTrue(
+            follow_up.receipt()["decision"]["arms"][selection.candidate_index][
+                "quarantined"
+            ]
+        )
+        session.abandon(follow_up.selection_id)
+
+        stub = Path(st.__file__).resolve().with_name("__init__.pyi").read_text(
+            encoding="utf-8"
+        )
+        for symbol in (
+            "RankAdaptationSelection",
+            "RankAdaptationSession",
+            "RANK_ADAPTATION_CONTRACT_VERSION",
+            "RANK_ADAPTATION_SEMANTIC_OWNER",
+        ):
+            self.assertTrue(hasattr(st, symbol))
+            self.assertIn(symbol, st.__all__)
+            self.assertIn(symbol, stub)
+
+        planner_stub = stub.split("class _PlannerModule(ModuleType):", 1)[1].split(
+            "\nplanner: _PlannerModule", 1
+        )[0]
+        for symbol in (
+            "RankAdaptationSelection: type[RankAdaptationSelection]",
+            "RankAdaptationSession: type[RankAdaptationSession]",
+            "RANK_ADAPTATION_CONTRACT_VERSION:",
+            "RANK_ADAPTATION_SEMANTIC_OWNER:",
+        ):
+            self.assertIn(symbol, planner_stub)
 
     def test_torch_bridge_outlives_both_source_wrappers(self) -> None:
         try:

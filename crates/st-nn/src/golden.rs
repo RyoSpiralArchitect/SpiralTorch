@@ -30,8 +30,9 @@ use crate::roundtable::{HeurOp, HeurOpKind, HeurOpLog, ModeratorMinutes};
 use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
+use serde::Serialize;
 use st_core::backend::{device_caps::DeviceCaps, unison_heuristics::RankKind};
-use st_core::ops::rank_entry::try_plan_rank;
+use st_core::ops::rank_entry::{try_plan_rank, RankPlan, RankPlanSnapshot};
 use st_core::runtime::golden::{
     GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, GoldenTaskError, SpiralMutex,
 };
@@ -40,6 +41,33 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime};
+
+pub const GOLDEN_BARYCENTER_CONTRACT_VERSION: &str = "spiraltorch.golden_barycenter.v1";
+pub const GOLDEN_BARYCENTER_KIND: &str = "spiraltorch.golden_barycenter";
+pub const GOLDEN_BARYCENTER_SEMANTIC_OWNER: &str = "st-nn::golden::GoldenRetriever";
+pub const GOLDEN_BARYCENTER_SEMANTIC_BACKEND: &str = "rust";
+pub const GOLDEN_BARYCENTER_CANDIDATE_CONTRACT_VERSION: &str =
+    "spiraltorch.golden_barycenter_candidate.v1";
+pub const GOLDEN_BARYCENTER_DEFAULT_ATOL: f32 = 1.0e-6;
+pub const GOLDEN_BARYCENTER_DEFAULT_RTOL: f32 = 1.0e-6;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GoldenBarycenterReceipt {
+    pub kind: &'static str,
+    pub contract_version: &'static str,
+    pub semantic_owner: &'static str,
+    pub semantic_backend: &'static str,
+    pub partial_count: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub requested_rank: u32,
+    pub effective_rank: u32,
+    pub plan_source: &'static str,
+    pub plan_role: &'static str,
+    pub plan_executed: bool,
+    pub guard: f32,
+    pub plan: Option<RankPlanSnapshot>,
+}
 
 #[derive(Debug, Clone)]
 pub struct GoldenRetrieverConfig {
@@ -724,25 +752,76 @@ impl GoldenRetriever {
     }
 
     pub fn sync_z_barycenter(&mut self, partials: &[Tensor], rank: u32) -> PureResult<Tensor> {
-        if partials.is_empty() {
-            return Err(TensorError::EmptyInput("golden_z_barycenter"));
-        }
-        let (rows, cols) = partials[0].shape();
-        for tensor in partials.iter().skip(1) {
-            if tensor.shape() != (rows, cols) {
-                return Err(TensorError::ShapeMismatch {
-                    left: (rows, cols),
-                    right: tensor.shape(),
-                });
-            }
+        self.sync_z_barycenter_with_receipt(partials, rank)
+            .map(|(tensor, _)| tensor)
+    }
+
+    /// Uses the canonical portable WGPU plan and returns its planning receipt.
+    pub fn sync_z_barycenter_with_receipt(
+        &mut self,
+        partials: &[Tensor],
+        rank: u32,
+    ) -> PureResult<(Tensor, GoldenBarycenterReceipt)> {
+        let (rows, cols) = golden_barycenter_shape(partials)?;
+        if rows == 0 || cols == 0 {
+            return Ok((
+                Tensor::zeros(rows, cols)?,
+                golden_barycenter_receipt(
+                    partials.len(),
+                    rows,
+                    cols,
+                    rank,
+                    0,
+                    "canonical_wgpu_default",
+                    0.0,
+                    None,
+                ),
+            ));
         }
 
+        let invalid = golden_barycenter_invalid;
+        let rows_u32 = u32::try_from(rows).map_err(|_| invalid("rows exceed u32"))?;
+        let cols_u32 = u32::try_from(cols).map_err(|_| invalid("columns exceed u32"))?;
+        let effective_rank = rank.max(1).min(cols_u32);
+        let plan = try_plan_rank(
+            RankKind::TopK,
+            rows_u32,
+            cols_u32,
+            effective_rank,
+            DeviceCaps::wgpu(32, true, 256),
+        )
+        .map_err(|error| invalid(&error.to_string()))?;
+        self.sync_z_barycenter_with_plan_source(partials, rank, &plan, "canonical_wgpu_default")
+    }
+
+    /// Applies a validated plan selected by SpiralK or another Rust-owned controller.
+    ///
+    /// The plan parameterizes the barycenter guard; it is not executed as a rank
+    /// kernel. The returned receipt makes that boundary explicit.
+    pub fn sync_z_barycenter_with_plan(
+        &mut self,
+        partials: &[Tensor],
+        rank: u32,
+        plan: &RankPlan,
+    ) -> PureResult<(Tensor, GoldenBarycenterReceipt)> {
+        self.sync_z_barycenter_with_plan_source(partials, rank, plan, "caller_supplied")
+    }
+
+    fn sync_z_barycenter_with_plan_source(
+        &mut self,
+        partials: &[Tensor],
+        rank: u32,
+        plan: &RankPlan,
+        plan_source: &'static str,
+    ) -> PureResult<(Tensor, GoldenBarycenterReceipt)> {
+        let (rows, cols) = golden_barycenter_shape(partials)?;
+        let invalid = golden_barycenter_invalid;
         if rows == 0 || cols == 0 {
-            return Tensor::zeros(rows, cols);
+            return Err(invalid("a rank plan cannot describe an empty tensor"));
         }
-        let invalid = |message: &str| TensorError::IoError {
-            message: format!("golden_z_barycenter: {message}"),
-        };
+
+        let (effective_rank, guard) = golden_barycenter_plan_parameters(rows, cols, rank, plan)?;
+
         let mut accum = vec![0.0f64; rows * cols];
         for tensor in partials {
             let logical = tensor.to_layout(st_tensor::Layout::RowMajor)?;
@@ -753,26 +832,7 @@ impl GoldenRetriever {
                 *dst += f64::from(*src);
             }
         }
-        let rows_u32 = u32::try_from(rows).map_err(|_| invalid("rows exceed u32"))?;
-        let cols_u32 = u32::try_from(cols).map_err(|_| invalid("columns exceed u32"))?;
-        // Rank controls the curvature gain; the planning-only selection must fit
-        // the tensor width even when the caller requests a higher latent rank.
-        let rank = rank.max(1);
-        let plan = try_plan_rank(
-            RankKind::TopK,
-            rows_u32,
-            cols_u32,
-            rank.min(cols_u32),
-            DeviceCaps::wgpu(32, true, 256),
-        )
-        .map_err(|error| invalid(&error.to_string()))?;
-        let leech_bias = (plan
-            .fft_plan()
-            .map_err(|error| invalid(&error.to_string()))?
-            .tile_cols() as f32)
-            .log2();
-        let curvature = 1.0 / rank as f32;
-        let guard = (leech_bias * curvature).tanh();
+
         let mut output = Vec::with_capacity(accum.len());
         for value in accum {
             let value = (value / partials.len() as f64 * f64::from(1.0 + guard)) as f32;
@@ -781,7 +841,18 @@ impl GoldenRetriever {
             }
             output.push(value);
         }
-        Tensor::from_vec(rows, cols, output)
+        let tensor = Tensor::from_vec(rows, cols, output)?;
+        let receipt = golden_barycenter_receipt(
+            partials.len(),
+            rows,
+            cols,
+            rank,
+            effective_rank,
+            plan_source,
+            guard,
+            Some(plan.snapshot()),
+        );
+        Ok((tensor, receipt))
     }
 
     pub fn absorb_digest(&mut self, digest: CouncilDigest) -> PureResult<()> {
@@ -1257,6 +1328,166 @@ impl GoldenRetriever {
             annotate_count,
             dominant_plan,
         }
+    }
+}
+
+fn golden_barycenter_invalid(message: &str) -> TensorError {
+    TensorError::IoError {
+        message: format!("golden_z_barycenter: {message}"),
+    }
+}
+
+fn golden_barycenter_shape(partials: &[Tensor]) -> PureResult<(usize, usize)> {
+    if partials.is_empty() {
+        return Err(TensorError::EmptyInput("golden_z_barycenter"));
+    }
+    let shape = partials[0].shape();
+    for tensor in partials.iter().skip(1) {
+        if tensor.shape() != shape {
+            return Err(TensorError::ShapeMismatch {
+                left: shape,
+                right: tensor.shape(),
+            });
+        }
+    }
+    Ok(shape)
+}
+
+fn golden_barycenter_plan_parameters(
+    rows: usize,
+    cols: usize,
+    rank: u32,
+    plan: &RankPlan,
+) -> PureResult<(u32, f32)> {
+    let invalid = golden_barycenter_invalid;
+    if rows == 0 || cols == 0 {
+        return Err(invalid("a rank plan cannot describe an empty tensor"));
+    }
+    let rows_u32 = u32::try_from(rows).map_err(|_| invalid("rows exceed u32"))?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| invalid("columns exceed u32"))?;
+    let effective_rank = rank.max(1).min(cols_u32);
+    plan.validate()
+        .map_err(|error| invalid(&error.to_string()))?;
+    if plan.kind != RankKind::TopK {
+        return Err(invalid("plan rank kind must be topk"));
+    }
+    if (plan.rows, plan.cols, plan.k) != (rows_u32, cols_u32, effective_rank) {
+        return Err(invalid(&format!(
+            "plan shape/rank ({}, {}, {}) does not match ({rows_u32}, {cols_u32}, {effective_rank})",
+            plan.rows, plan.cols, plan.k
+        )));
+    }
+    let tile_cols = plan
+        .fft_plan()
+        .map_err(|error| invalid(&error.to_string()))?
+        .tile_cols();
+    let guard = ((tile_cols as f32).log2() / rank.max(1) as f32).tanh();
+    Ok((effective_rank, guard))
+}
+
+/// Stable identity for the plan fields consumed by Golden's barycenter guard.
+pub fn golden_barycenter_execution_signature(
+    plan: &RankPlan,
+) -> Result<String, st_core::ops::rank_entry::RankPlanError> {
+    plan.validate()?;
+    let tile_cols = plan.fft_plan()?.tile_cols();
+    Ok(format!(
+        "{GOLDEN_BARYCENTER_CANDIDATE_CONTRACT_VERSION}/rows={}/cols={}/k={}/fft_tile={tile_cols}",
+        plan.rows, plan.cols, plan.k
+    ))
+}
+
+/// Builds a Black Cat session deduplicated by Golden's actual guard inputs.
+#[cfg(feature = "kdsl")]
+pub fn golden_barycenter_adaptation_session(
+    base: &RankPlan,
+    scripts: &[String],
+    policy: st_core::runtime::blackcat::bandit::SoftBanditMode,
+    seed: u64,
+) -> Result<
+    st_core::runtime::rank_adaptation::RankAdaptationSession,
+    st_core::runtime::rank_adaptation::RankAdaptationError,
+> {
+    st_core::runtime::rank_adaptation::RankAdaptationSession::try_from_spiralk_with_execution_signature(
+        base,
+        scripts,
+        policy,
+        seed,
+        golden_barycenter_execution_signature,
+    )
+}
+
+/// Independently recomputes the barycenter formula before posterior credit.
+pub fn validate_golden_barycenter_output(
+    partials: &[Tensor],
+    rank: u32,
+    plan: &RankPlan,
+    candidate: &Tensor,
+    atol: f32,
+    rtol: f32,
+) -> PureResult<bool> {
+    let invalid = golden_barycenter_invalid;
+    if !atol.is_finite() || atol < 0.0 || !rtol.is_finite() || rtol < 0.0 {
+        return Err(invalid(
+            "validation tolerances must be finite and non-negative",
+        ));
+    }
+    let (rows, cols) = golden_barycenter_shape(partials)?;
+    let (_, guard) = golden_barycenter_plan_parameters(rows, cols, rank, plan)?;
+    if candidate.shape() != (rows, cols) {
+        return Ok(false);
+    }
+    let candidate = candidate.to_layout(st_tensor::Layout::RowMajor)?;
+    let logical_partials = partials
+        .iter()
+        .map(|tensor| tensor.to_layout(st_tensor::Layout::RowMajor))
+        .collect::<PureResult<Vec<_>>>()?;
+    let scale = f64::from(1.0 + guard);
+    for index in 0..rows * cols {
+        let mut sum = 0.0f64;
+        for partial in &logical_partials {
+            let value = partial.data()[index];
+            if !value.is_finite() {
+                return Err(invalid("partials must be finite"));
+            }
+            sum += f64::from(value);
+        }
+        let expected = (sum / partials.len() as f64 * scale) as f32;
+        let actual = candidate.data()[index];
+        let tolerance = atol + rtol * expected.abs();
+        if !expected.is_finite() || !actual.is_finite() || (actual - expected).abs() > tolerance {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn golden_barycenter_receipt(
+    partial_count: usize,
+    rows: usize,
+    cols: usize,
+    requested_rank: u32,
+    effective_rank: u32,
+    plan_source: &'static str,
+    guard: f32,
+    plan: Option<RankPlanSnapshot>,
+) -> GoldenBarycenterReceipt {
+    GoldenBarycenterReceipt {
+        kind: GOLDEN_BARYCENTER_KIND,
+        contract_version: GOLDEN_BARYCENTER_CONTRACT_VERSION,
+        semantic_owner: GOLDEN_BARYCENTER_SEMANTIC_OWNER,
+        semantic_backend: GOLDEN_BARYCENTER_SEMANTIC_BACKEND,
+        partial_count,
+        rows,
+        cols,
+        requested_rank,
+        effective_rank,
+        plan_source,
+        plan_role: "barycenter_guard_parameterization",
+        plan_executed: false,
+        guard,
+        plan,
     }
 }
 
@@ -2184,6 +2415,61 @@ mod tests {
         assert_eq!(data.len(), 4);
         let avg = (partials[0].data()[0] + partials[1].data()[0]) / 2.0;
         assert!(data[0] >= avg * 0.9);
+        let (audited, receipt) = retriever
+            .sync_z_barycenter_with_receipt(&partials, 8)
+            .unwrap();
+        assert_eq!(audited.data(), data);
+        assert_eq!(receipt.contract_version, GOLDEN_BARYCENTER_CONTRACT_VERSION);
+        assert_eq!(receipt.semantic_owner, GOLDEN_BARYCENTER_SEMANTIC_OWNER);
+        assert_eq!(receipt.partial_count, 2);
+        assert_eq!((receipt.requested_rank, receipt.effective_rank), (8, 2));
+        assert_eq!(receipt.plan_source, "canonical_wgpu_default");
+        assert_eq!(receipt.plan_role, "barycenter_guard_parameterization");
+        assert!(!receipt.plan_executed);
+        assert_eq!(receipt.plan.as_ref().unwrap().device_caps.backend, "wgpu");
+
+        let caller_plan = try_plan_rank(
+            RankKind::TopK,
+            2,
+            2,
+            2,
+            DeviceCaps::cuda(32, 256, Some(48 * 1024)),
+        )
+        .unwrap();
+        let (caller_barycenter, caller_receipt) = retriever
+            .sync_z_barycenter_with_plan(&partials, 8, &caller_plan)
+            .unwrap();
+        assert_eq!(caller_receipt.plan_source, "caller_supplied");
+        assert_eq!(
+            caller_receipt.plan.as_ref().unwrap().device_caps.backend,
+            "cuda"
+        );
+        assert!(validate_golden_barycenter_output(
+            &partials,
+            8,
+            &caller_plan,
+            &caller_barycenter,
+            GOLDEN_BARYCENTER_DEFAULT_ATOL,
+            GOLDEN_BARYCENTER_DEFAULT_RTOL,
+        )
+        .unwrap());
+        let mut corrupted = caller_barycenter.data().to_vec();
+        corrupted[0] += 0.25;
+        let corrupted = Tensor::from_vec(2, 2, corrupted).unwrap();
+        assert!(!validate_golden_barycenter_output(
+            &partials,
+            8,
+            &caller_plan,
+            &corrupted,
+            GOLDEN_BARYCENTER_DEFAULT_ATOL,
+            GOLDEN_BARYCENTER_DEFAULT_RTOL,
+        )
+        .unwrap());
+        let wrong_shape =
+            try_plan_rank(RankKind::TopK, 1, 2, 2, DeviceCaps::wgpu(32, true, 256)).unwrap();
+        assert!(retriever
+            .sync_z_barycenter_with_plan(&partials, 8, &wrong_shape)
+            .is_err());
         let mixed_layout = vec![
             partials[0].to_layout(st_tensor::Layout::ColMajor).unwrap(),
             partials[1].clone(),
@@ -2206,12 +2492,94 @@ mod tests {
             retriever.sync_z_barycenter(&cancel, 8).unwrap().data(),
             &[0.0]
         );
+        let empty_partial = [Tensor::zeros(2, 0).unwrap()];
+        let (empty, empty_receipt) = retriever
+            .sync_z_barycenter_with_receipt(&empty_partial, 8)
+            .unwrap();
+        assert_eq!(empty.shape(), (2, 0));
+        assert_eq!(empty_receipt.effective_rank, 0);
+        assert!(empty_receipt.plan.is_none());
         assert_eq!(
             retriever
-                .sync_z_barycenter(&[Tensor::zeros(2, 0).unwrap()], 8)
+                .sync_z_barycenter(&empty_partial, 8)
                 .unwrap()
                 .shape(),
             (2, 0)
         );
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[test]
+    fn sync_z_barycenter_accepts_a_rank_adaptation_selection() {
+        use st_core::runtime::blackcat::bandit::SoftBanditMode;
+        use st_core::runtime::rank_adaptation::RankAdaptationError;
+
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let base = try_plan_rank(RankKind::TopK, 2, 256, 8, caps).unwrap();
+        let scripts = vec![
+            "u2: false; tile_cols: 64;".to_string(),
+            "u2: false; tile_cols: 256;".to_string(),
+        ];
+        let mut adaptation =
+            golden_barycenter_adaptation_session(&base, &scripts, SoftBanditMode::UCB, 17).unwrap();
+        assert!(matches!(
+            golden_barycenter_adaptation_session(
+                &base,
+                &[
+                    "u2: false; tile_cols: 64;".to_string(),
+                    "u2: true; tile_cols: 64;".to_string(),
+                ],
+                SoftBanditMode::UCB,
+                17,
+            ),
+            Err(RankAdaptationError::DuplicatePlan { .. })
+        ));
+        let trainers = vec![ModuleTrainer::new(caps, -1.0, 0.05, 0.01)];
+        let mut retriever =
+            GoldenRetriever::new(GoldenRetrieverConfig::default(), trainers).unwrap();
+        let partials = vec![
+            Tensor::from_vec(2, 256, vec![1.0; 512]).unwrap(),
+            Tensor::from_vec(2, 256, vec![3.0; 512]).unwrap(),
+        ];
+        let mut guards = Vec::new();
+        let mut fft_tiles = Vec::new();
+        for _ in 0..2 {
+            let selection = adaptation.try_choose().unwrap();
+            let started = std::time::Instant::now();
+            let result = retriever.sync_z_barycenter_with_plan(&partials, 8, selection.plan());
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+            let (barycenter, receipt) = result.unwrap();
+            let correctness_passed = validate_golden_barycenter_output(
+                &partials,
+                8,
+                selection.plan(),
+                &barycenter,
+                GOLDEN_BARYCENTER_DEFAULT_ATOL,
+                GOLDEN_BARYCENTER_DEFAULT_RTOL,
+            )
+            .unwrap();
+            assert!(correctness_passed);
+            assert_eq!(receipt.plan_source, "caller_supplied");
+            assert_eq!(receipt.plan.as_ref().unwrap(), &selection.receipt().plan);
+            assert!(!receipt.plan_executed);
+            guards.push(receipt.guard);
+            fft_tiles.push(receipt.plan.as_ref().unwrap().choice.fft_tile);
+            assert!(selection
+                .receipt()
+                .execution_signature
+                .starts_with(GOLDEN_BARYCENTER_CANDIDATE_CONTRACT_VERSION));
+
+            let observation = adaptation
+                .try_observe(
+                    selection.receipt().selection_id,
+                    elapsed_ms,
+                    correctness_passed,
+                )
+                .unwrap();
+            assert!(observation.credited);
+            assert!(observation.reward.is_some_and(|reward| reward > 0.0));
+        }
+        assert_ne!(fft_tiles[0], fft_tiles[1]);
+        assert_ne!(guards[0], guards[1]);
     }
 }

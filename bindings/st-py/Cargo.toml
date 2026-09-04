@@ -51,7 +51,7 @@ hip = ["st-core/hip", "st-tensor/hip"]
 "hip-real" = ["hip", "st-core/hip-real", "st-tensor/hip-real"]
 logic = ["st-core/logic"]
 "logic-learn" = ["st-core/logic-learn"]
-kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-spiral-rl/kdsl"]
+kdsl = ["dep:st-kdsl", "st-core/kdsl", "st-nn/kdsl", "st-spiral-rl/kdsl"]
 "kv-redis" = ["st-core/kv-redis", "dep:st-kv", "st-kv/redis"]
 "wgpu-frac" = ["wgpu"]
 

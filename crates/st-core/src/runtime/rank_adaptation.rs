@@ -11,6 +11,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::backend::{device_caps::BackendKind, unison_heuristics::RankKind};
 use crate::ops::rank_entry::{RankPlan, RankPlanError, RankPlanSnapshot};
 use crate::runtime::blackcat::{
     bandit::{BanditDecisionWitness, SoftBanditMode},
@@ -25,6 +26,7 @@ pub const RANK_ADAPTATION_REWARD_FORMULA: &str = "1 / (1 + elapsed_ms)";
 pub const RANK_ADAPTATION_MAX_CANDIDATES: usize = 32;
 pub const RANK_ADAPTATION_MAX_SCRIPT_BYTES: usize = 16 * 1024;
 pub const RANK_ADAPTATION_MAX_TOTAL_SCRIPT_BYTES: usize = 128 * 1024;
+pub const RANK_ADAPTATION_MAX_EXECUTION_SIGNATURE_BYTES: usize = 4 * 1024;
 pub const RANK_ADAPTATION_MAX_SAFE_SELECTION_ID: u64 = 9_007_199_254_740_991;
 
 const VARIANT_GROUP: &str = "rank_plan_variant";
@@ -34,6 +36,8 @@ const BANDIT_CONTEXT: [f64; 1] = [1.0];
 pub enum RankAdaptationError {
     #[error("rank adaptation requires at least one SpiralK candidate")]
     NoCandidates,
+    #[error("rank adaptation has no candidate left after correctness quarantine")]
+    NoEligibleCandidates,
     #[error("rank adaptation accepts at most {maximum} candidates, got {actual}")]
     TooManyCandidates { maximum: usize, actual: usize },
     #[error("SpiralK candidate {index} must not be empty")]
@@ -48,8 +52,20 @@ pub enum RankAdaptationError {
     TotalScriptBytesExceeded { maximum: usize, actual: usize },
     #[error("SpiralK candidate {duplicate} duplicates source from candidate {first}")]
     DuplicateScript { first: usize, duplicate: usize },
-    #[error("SpiralK candidate {duplicate} resolves to the same rank choice as candidate {first}")]
+    #[error(
+        "SpiralK candidate {duplicate} resolves to the same effective execution as candidate {first}"
+    )]
     DuplicatePlan { first: usize, duplicate: usize },
+    #[error("SpiralK candidate {index} produced an empty effective execution signature")]
+    EmptyExecutionSignature { index: usize },
+    #[error(
+        "SpiralK candidate {index} effective execution signature exceeds {maximum} bytes, got {actual}"
+    )]
+    ExecutionSignatureTooLarge {
+        index: usize,
+        maximum: usize,
+        actual: usize,
+    },
     #[error("SpiralK candidate {index} failed: {detail}")]
     SpiralK { index: usize, detail: String },
     #[error("SpiralK candidate {index} produced an invalid rank plan: {detail}")]
@@ -80,6 +96,7 @@ pub enum RankAdaptationError {
 pub struct RankAdaptationCandidateSnapshot {
     pub index: usize,
     pub spiralk_source_sha256: String,
+    pub execution_signature: String,
     pub plan: RankPlanSnapshot,
 }
 
@@ -93,6 +110,7 @@ pub struct RankAdaptationSelectionReceipt {
     pub selection_id: u64,
     pub candidate_index: usize,
     pub spiralk_source_sha256: String,
+    pub execution_signature: String,
     pub plan: RankPlanSnapshot,
     pub decision: BanditDecisionWitness,
 }
@@ -124,9 +142,11 @@ pub struct RankAdaptationObservationReceipt {
     pub elapsed_ms: f64,
     pub correctness_passed: bool,
     pub credited: bool,
+    pub candidate_quarantined: bool,
     pub reward: Option<f64>,
     pub reward_formula: &'static str,
     pub observation_counts: BTreeMap<String, BTreeMap<String, u64>>,
+    pub quarantined_choices: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -139,6 +159,7 @@ pub struct RankAdaptationAbandonmentReceipt {
     pub candidate_index: usize,
     pub credited: bool,
     pub observation_counts: BTreeMap<String, BTreeMap<String, u64>>,
+    pub quarantined_choices: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -154,12 +175,14 @@ pub struct RankAdaptationSessionSnapshot {
     pub candidates: Vec<RankAdaptationCandidateSnapshot>,
     pub choice_domains: BTreeMap<String, Vec<String>>,
     pub observation_counts: BTreeMap<String, BTreeMap<String, u64>>,
+    pub quarantined_choices: BTreeMap<String, Vec<String>>,
     pub pending_selection_id: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
 struct RankAdaptationCandidate {
     source_sha256: String,
+    execution_signature: String,
     plan: RankPlan,
 }
 
@@ -170,6 +193,7 @@ struct PendingSelection {
 }
 
 /// One-workload controller whose candidate and reward semantics stay in Rust.
+#[derive(Clone)]
 pub struct RankAdaptationSession {
     candidates: Vec<RankAdaptationCandidate>,
     bandit: MultiBandit,
@@ -187,11 +211,35 @@ impl RankAdaptationSession {
         policy: SoftBanditMode,
         seed: u64,
     ) -> Result<Self, RankAdaptationError> {
+        Self::try_from_spiralk_with_execution_signature(
+            base,
+            scripts,
+            policy,
+            seed,
+            effective_rank_execution_signature,
+        )
+    }
+
+    /// Evaluates candidates with a caller-owned Rust execution identity.
+    ///
+    /// This is for consumers that parameterize a different operation with a
+    /// rank plan. The identity must include exactly the knobs that operation
+    /// consumes so duplicate Black Cat arms cannot acquire separate rewards.
+    pub fn try_from_spiralk_with_execution_signature<F>(
+        base: &RankPlan,
+        scripts: &[String],
+        policy: SoftBanditMode,
+        seed: u64,
+        mut execution_signature_for: F,
+    ) -> Result<Self, RankAdaptationError>
+    where
+        F: FnMut(&RankPlan) -> Result<String, RankPlanError>,
+    {
         base.validate()?;
         validate_scripts(scripts)?;
         let context = base.spiralk_context()?;
         let mut source_digests = HashMap::<String, usize>::new();
-        let mut plan_choices = HashMap::new();
+        let mut execution_signatures = HashMap::new();
         let mut candidates = Vec::with_capacity(scripts.len());
 
         for (index, script) in scripts.iter().enumerate() {
@@ -215,12 +263,18 @@ impl RankAdaptationSession {
                     detail: error.to_string(),
                 }
             })?;
-            let choice_key = serde_json::to_string(&plan.snapshot().choice).map_err(|_| {
-                RankAdaptationError::InvalidState {
-                    field: "candidate.choice_serialization",
-                }
-            })?;
-            if let Some(first) = plan_choices.insert(choice_key, index) {
+            let execution_signature = execution_signature_for(&plan)?;
+            if execution_signature.trim().is_empty() {
+                return Err(RankAdaptationError::EmptyExecutionSignature { index });
+            }
+            if execution_signature.len() > RANK_ADAPTATION_MAX_EXECUTION_SIGNATURE_BYTES {
+                return Err(RankAdaptationError::ExecutionSignatureTooLarge {
+                    index,
+                    maximum: RANK_ADAPTATION_MAX_EXECUTION_SIGNATURE_BYTES,
+                    actual: execution_signature.len(),
+                });
+            }
+            if let Some(first) = execution_signatures.insert(execution_signature.clone(), index) {
                 return Err(RankAdaptationError::DuplicatePlan {
                     first,
                     duplicate: index,
@@ -228,6 +282,7 @@ impl RankAdaptationSession {
             }
             candidates.push(RankAdaptationCandidate {
                 source_sha256,
+                execution_signature,
                 plan,
             });
         }
@@ -264,7 +319,12 @@ impl RankAdaptationSession {
         }
 
         let mut next_bandit = self.bandit.clone();
-        let (picks, decisions) = next_bandit.try_select_all(&BANDIT_CONTEXT)?;
+        let (picks, decisions) = match next_bandit.try_select_all(&BANDIT_CONTEXT) {
+            Err(BlackCatError::InvalidAdaptationState {
+                field: "bandit.no_eligible_choices",
+            }) => return Err(RankAdaptationError::NoEligibleCandidates),
+            result => result?,
+        };
         let candidate_index = picks
             .get(VARIANT_GROUP)
             .ok_or(RankAdaptationError::InvalidState {
@@ -300,6 +360,7 @@ impl RankAdaptationSession {
             selection_id,
             candidate_index,
             spiralk_source_sha256: candidate.source_sha256.clone(),
+            execution_signature: candidate.execution_signature.clone(),
             plan: candidate.plan.snapshot(),
             decision,
         };
@@ -334,11 +395,12 @@ impl RankAdaptationSession {
             Some(reward)
         } else {
             next_bandit
-                .try_abandon_all()
+                .try_quarantine_all()
                 .map_err(|field| RankAdaptationError::InvalidState { field })?;
             None
         };
         let observation_counts = next_bandit.observation_counts();
+        let quarantined_choices = next_bandit.quarantined_choices();
         self.bandit = next_bandit;
         self.pending = None;
         Ok(RankAdaptationObservationReceipt {
@@ -351,9 +413,11 @@ impl RankAdaptationSession {
             elapsed_ms,
             correctness_passed,
             credited: correctness_passed,
+            candidate_quarantined: !correctness_passed,
             reward,
             reward_formula: RANK_ADAPTATION_REWARD_FORMULA,
             observation_counts,
+            quarantined_choices,
         })
     }
 
@@ -368,6 +432,7 @@ impl RankAdaptationSession {
             .try_abandon_all()
             .map_err(|field| RankAdaptationError::InvalidState { field })?;
         let observation_counts = next_bandit.observation_counts();
+        let quarantined_choices = next_bandit.quarantined_choices();
         self.bandit = next_bandit;
         self.pending = None;
         Ok(RankAdaptationAbandonmentReceipt {
@@ -379,6 +444,7 @@ impl RankAdaptationSession {
             candidate_index: pending.candidate_index,
             credited: false,
             observation_counts,
+            quarantined_choices,
         })
     }
 
@@ -399,11 +465,13 @@ impl RankAdaptationSession {
                 .map(|(index, candidate)| RankAdaptationCandidateSnapshot {
                     index,
                     spiralk_source_sha256: candidate.source_sha256.clone(),
+                    execution_signature: candidate.execution_signature.clone(),
                     plan: candidate.plan.snapshot(),
                 })
                 .collect(),
             choice_domains: self.bandit.choice_domains(),
             observation_counts: self.bandit.observation_counts(),
+            quarantined_choices: self.bandit.quarantined_choices(),
             pending_selection_id: self.pending.map(|pending| pending.selection_id),
         }
     }
@@ -441,6 +509,62 @@ impl RankAdaptationSession {
         }
         Ok(())
     }
+}
+
+/// Stable identity of the knobs consumed by SpiralTorch's built-in rank executor.
+///
+/// Shape and policy are included so the string remains meaningful outside one
+/// session. Built-in executors that ignore planner choices collapse to a
+/// shape-only signature; an unbound route retains the full tuple rather than
+/// claiming that its knobs are ignored.
+pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, RankPlanError> {
+    plan.validate()?;
+    let common = format!(
+        "spiraltorch.rank_execution.v1/backend={}/kind={}/rows={}/cols={}/k={}/fallback={}",
+        plan.device_caps.backend.as_str(),
+        plan.kind.as_str(),
+        plan.rows,
+        plan.cols,
+        plan.k,
+        plan.accelerator_fallback().as_str(),
+    );
+    let signature = match plan.device_caps.backend {
+        BackendKind::Cuda
+            if plan.k == 1 && matches!(plan.kind, RankKind::TopK | RankKind::BottomK) =>
+        {
+            format!("{common}/path=warp_bitonic/block=32")
+        }
+        BackendKind::Cuda => format!("{common}/path=workgroup_dispatch/wg={}", plan.choice.wg),
+        BackendKind::Wgpu if plan.choice.use_2ce => {
+            let requested_tile = match plan.kind {
+                RankKind::TopK => plan.choice.tile,
+                RankKind::MidK | RankKind::BottomK => plan.choice.ctile,
+            };
+            let tile = requested_tile.min(plan.cols.max(1));
+            format!("{common}/path=exact_2ce/tile={tile}")
+        }
+        BackendKind::Wgpu if matches!(plan.kind, RankKind::TopK | RankKind::BottomK) => {
+            let k_lane = plan.choice.kl.max(plan.k).max(1);
+            format!("{common}/path=direct/k_lane={k_lane}")
+        }
+        BackendKind::Wgpu => format!("{common}/path=direct"),
+        BackendKind::Cpu | BackendKind::Hip => format!("{common}/path=shape_only"),
+        BackendKind::Mps => format!(
+            "{common}/path=unbound/u2={}/wg={}/kl={}/ch={}/mk={}/mkd={}/tile={}/ctile={}/fft_tile={}/fft_radix={}/fft_segments={}",
+            plan.choice.use_2ce,
+            plan.choice.wg,
+            plan.choice.kl,
+            plan.choice.ch,
+            plan.choice.mk,
+            plan.choice.mkd,
+            plan.choice.tile,
+            plan.choice.ctile,
+            plan.choice.fft_tile,
+            plan.choice.fft_radix,
+            plan.choice.fft_segments,
+        ),
+    };
+    Ok(signature)
 }
 
 fn validate_scripts(scripts: &[String]) -> Result<(), RankAdaptationError> {
@@ -573,13 +697,27 @@ mod tests {
             .try_observe(first.receipt().selection_id, 2.0, false)
             .expect("rejected correctness");
         assert!(!rejected.credited);
+        assert!(rejected.candidate_quarantined);
         assert_eq!(rejected.reward, None);
+        assert_eq!(
+            rejected.quarantined_choices[VARIANT_GROUP],
+            [first.receipt().candidate_index.to_string()]
+        );
 
         let second = session.try_choose().expect("second selection");
+        assert_ne!(
+            second.receipt().candidate_index,
+            first.receipt().candidate_index
+        );
+        assert!(second.receipt().decision.forced_exploration);
         let abandoned = session
             .try_abandon(second.receipt().selection_id)
             .expect("abandonment");
         assert!(!abandoned.credited);
+        assert_eq!(
+            abandoned.quarantined_choices[VARIANT_GROUP],
+            [first.receipt().candidate_index.to_string()]
+        );
         assert_eq!(
             session
                 .snapshot()
@@ -588,6 +726,42 @@ mod tests {
                 .flat_map(|counts| counts.values())
                 .sum::<u64>(),
             0
+        );
+
+        for _ in 0..16 {
+            let eligible = session.try_choose().expect("eligible selection");
+            assert_eq!(
+                eligible.receipt().candidate_index,
+                second.receipt().candidate_index
+            );
+            session
+                .try_observe(eligible.receipt().selection_id, 100.0, true)
+                .expect("eligible observation");
+        }
+    }
+
+    #[test]
+    fn all_failed_candidates_stop_selection_explicitly() {
+        let mut session = RankAdaptationSession::try_from_spiralk(
+            &base_plan(),
+            &scripts(),
+            SoftBanditMode::UCB,
+            31,
+        )
+        .expect("session");
+        for _ in 0..2 {
+            let selection = session.try_choose().expect("untried candidate");
+            session
+                .try_observe(selection.receipt().selection_id, 1.0, false)
+                .expect("quarantine candidate");
+        }
+        assert!(matches!(
+            session.try_choose(),
+            Err(RankAdaptationError::NoEligibleCandidates)
+        ));
+        assert_eq!(
+            session.snapshot().quarantined_choices[VARIANT_GROUP].len(),
+            2
         );
     }
 
@@ -637,5 +811,107 @@ mod tests {
             ),
             Err(RankAdaptationError::DuplicatePlan { .. })
         ));
+    }
+
+    #[test]
+    fn custom_execution_signatures_are_bounded_and_nonempty() {
+        let base = base_plan();
+        let candidates = scripts();
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                &base,
+                &candidates,
+                SoftBanditMode::UCB,
+                1,
+                |_| Ok(String::new()),
+            ),
+            Err(RankAdaptationError::EmptyExecutionSignature { index: 0 })
+        ));
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                &base,
+                &candidates,
+                SoftBanditMode::UCB,
+                1,
+                |_| Ok("x".repeat(RANK_ADAPTATION_MAX_EXECUTION_SIGNATURE_BYTES + 1)),
+            ),
+            Err(RankAdaptationError::ExecutionSignatureTooLarge { index: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn cuda_candidates_are_deduplicated_by_consumed_workgroup() {
+        let base = try_plan_rank_with_config(
+            RankKind::TopK,
+            2,
+            256,
+            8,
+            BackendKind::Cuda.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+        )
+        .expect("CUDA plan");
+        let session = RankAdaptationSession::try_from_spiralk(
+            &base,
+            &["wg: 32;".to_owned(), "wg: 256;".to_owned()],
+            SoftBanditMode::UCB,
+            1,
+        )
+        .expect("distinct CUDA workgroups");
+        let signatures = session
+            .snapshot()
+            .candidates
+            .into_iter()
+            .map(|candidate| candidate.execution_signature)
+            .collect::<Vec<_>>();
+        assert_ne!(signatures[0], signatures[1]);
+
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk(
+                &base,
+                &["u2: false;".to_owned(), "u2: true;".to_owned()],
+                SoftBanditMode::UCB,
+                1,
+            ),
+            Err(RankAdaptationError::DuplicatePlan { .. })
+        ));
+    }
+
+    #[test]
+    fn cuda_k_one_ignores_workgroup_when_deduplicating_candidates() {
+        let base = try_plan_rank_with_config(
+            RankKind::TopK,
+            2,
+            256,
+            1,
+            BackendKind::Cuda.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+        )
+        .expect("CUDA k=1 plan");
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk(
+                &base,
+                &["wg: 32;".to_owned(), "wg: 256;".to_owned()],
+                SoftBanditMode::UCB,
+                1,
+            ),
+            Err(RankAdaptationError::DuplicatePlan { .. })
+        ));
+    }
+
+    #[test]
+    fn wgpu_two_stage_signature_uses_the_effective_tile() {
+        let mut first = base_plan();
+        first.choice.use_2ce = true;
+        first.choice.tile = first.cols * 2;
+        let mut second = first.clone();
+        second.choice.tile = first.cols * 4;
+
+        assert_eq!(
+            effective_rank_execution_signature(&first).unwrap(),
+            effective_rank_execution_signature(&second).unwrap()
+        );
+        assert!(effective_rank_execution_signature(&first)
+            .unwrap()
+            .ends_with("/path=exact_2ce/tile=256"));
     }
 }

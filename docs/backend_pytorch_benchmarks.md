@@ -64,16 +64,44 @@ These timings are **unpaired Rust/Python wrapper diagnostics**, not a direct
 kernel speed ratio. CUDA Tensor.matmul is not exposed by this experiment.
 
 SpiralK scripts produce the actual executed RankPlans. On supported WGPU cases,
-Black Cat's seeded MultiBandit chooses between direct and two-stage scripts,
-receiving `1 / (1 + elapsed_ms)` only after successful execution and correctness.
-Every candidate must pass before admission. This verifies live feedback, not
-convergence or a speed advantage from the controller. CUDA plan knobs that the
-current executor does not consume are not credited as optimizations.
+Black Cat's seeded MultiBandit chooses between direct and two-stage scripts. On
+CUDA it chooses real workgroups (`32`, `128`, or `256`) consumed by heap,
+exact-rescan, and MidK launches. Dynamic shared memory and heap capacity are
+derived from the selected workgroup and checked against both the plan's device
+caps and the verified no-opt-in envelope: at most 256 threads and 48 KiB of
+dynamic shared memory.
+
+UCB selects every arm once before comparing posterior scores. Selection attempts
+are distinct from observations: failed correctness or explicit abandonment
+advances initial exploration without training the posterior. The witness records
+both counts under Black Cat bandit witness contract v3. Correctness failure
+additionally quarantines the arm; abandonment does not. Candidate scripts are
+deduplicated by their effective kernel execution signature, not by unused plan
+fields. WGPU two-stage tiles are normalized to the row width, while CUDA `k=1`
+ignores the planner workgroup because the executor always launches one fixed
+warp. Reward remains `1 / (1 + elapsed_ms)` and is credited only after successful
+execution and correctness. This verifies live feedback, not convergence or a
+cross-runtime speed advantage.
+
+The v2 harness measures every admitted arm equally in a rotating round-robin
+control stream before the adaptive stream. Control timings never update the
+posterior, and candidate input order rotates across seeds. The retained artifact
+therefore separates arm performance from controller allocation while preserving
+both in one receipt. Process-level failures also produce an atomic v2 receipt
+with a named stage. Successful runs record the clean Git commit/tree and tracked
+diff identity, execute a private hardlink snapshot of the native binary, and
+verify source, path, inode, size, timestamp, and SHA-256 stability after the run.
 
 NVRTC rank kernels are header-independent in runtime compilation. The original
 heap remains in use where it is exact; wide rows with k > 8 use an exact rescan
 when eight retained candidates per thread can lose concentrated winners.
 This prioritizes correctness in that regime, not faster large-k CUDA execution.
+The `k=1` bitonic CUDA path still launches one fixed warp, so workgroup-only
+scripts collapse to one effective candidate instead of forming a false tuning
+domain.
+
+See the [RTX 5090 rank-adaptation receipt](../benchmarks/results/2026-09-04-rank-adaptation-furnace/README.md)
+for the retained 36-case WGPU/CUDA run and its unpaired PyTorch diagnostics.
 
 ## Actual WASM CPU Calls
 
@@ -125,5 +153,46 @@ hints above tensor width without panic, normalizes storage layout, accumulates
 in float64, and rejects nonfinite inputs/results.
 Additional coverage drops worker 0, reverses surviving IDs 1 and 2, and checks
 three epochs against sequential training with distinct per-worker learning rates.
+
+`sync_z_barycenter_with_receipt(...)` preserves the portable WGPU-first default
+and returns the exact planning snapshot, effective rank, guard, and semantic
+owner. Golden uses `golden_barycenter_adaptation_session(...)`, which deduplicates
+SpiralK candidates by the FFT tile actually consumed by the guard rather than by
+the unrelated rank-k kernel path:
+
+```rust,ignore
+let mut adaptation = golden_barycenter_adaptation_session(
+    &base_plan,
+    &scripts,
+    SoftBanditMode::UCB,
+    seed,
+)?;
+let selection = adaptation.try_choose()?;
+let (barycenter, receipt) = retriever.sync_z_barycenter_with_plan(
+    &partials,
+    rank,
+    selection.plan(),
+)?;
+let correctness_passed = validate_golden_barycenter_output(
+    &partials,
+    rank,
+    selection.plan(),
+    &barycenter,
+    GOLDEN_BARYCENTER_DEFAULT_ATOL,
+    GOLDEN_BARYCENTER_DEFAULT_RTOL,
+)?;
+adaptation.try_observe(
+    selection.receipt().selection_id,
+    elapsed_ms,
+    correctness_passed,
+)?;
+```
+
+The receipt states `plan_executed: false`: Golden consumes the plan only to
+parameterize its curvature guard. It does not claim a rank kernel launch.
+Golden integration coverage varies only a consumed FFT tile, rejects duplicate
+guards even when rank-k knobs differ, compares every candidate against an
+independently recomputed partial/guard formula, and credits measured wall time
+rather than a hard-coded reward.
 
 See the [measured pilot and retained failures](../benchmarks/results/2026-09-04-furnace-wgpu-first/README.md).

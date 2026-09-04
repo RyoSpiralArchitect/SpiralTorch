@@ -150,10 +150,13 @@ impl WasmRankAdaptationSession {
     }
 
     pub fn choose(&mut self) -> Result<JsValue, JsValue> {
-        let selection = self.inner.try_choose().map_err(js_error)?;
+        let mut next = self.inner.clone();
+        let selection = next.try_choose().map_err(js_error)?;
         let mut value = serde_json::to_value(selection.receipt()).map_err(js_error)?;
         decorate_selection(&mut value, self.requested_backend, self.effective_backend);
-        to_js(&value)
+        let value = to_js(&value)?;
+        self.inner = next;
+        Ok(value)
     }
 
     pub fn observe(
@@ -162,27 +165,27 @@ impl WasmRankAdaptationSession {
         elapsed_ms: f64,
         correctness_passed: bool,
     ) -> Result<JsValue, JsValue> {
-        let receipt = self
-            .inner
-            .try_observe(
-                safe_u64(selection_id, "selection_id").map_err(js_error)?,
-                elapsed_ms,
-                correctness_passed,
-            )
+        let selection_id = safe_u64(selection_id, "selection_id").map_err(js_error)?;
+        let mut next = self.inner.clone();
+        let receipt = next
+            .try_observe(selection_id, elapsed_ms, correctness_passed)
             .map_err(js_error)?;
         let mut value = serde_json::to_value(receipt).map_err(js_error)?;
         add_execution_client(&mut value);
-        to_js(&value)
+        let value = to_js(&value)?;
+        self.inner = next;
+        Ok(value)
     }
 
     pub fn abandon(&mut self, selection_id: f64) -> Result<JsValue, JsValue> {
-        let receipt = self
-            .inner
-            .try_abandon(safe_u64(selection_id, "selection_id").map_err(js_error)?)
-            .map_err(js_error)?;
+        let selection_id = safe_u64(selection_id, "selection_id").map_err(js_error)?;
+        let mut next = self.inner.clone();
+        let receipt = next.try_abandon(selection_id).map_err(js_error)?;
         let mut value = serde_json::to_value(receipt).map_err(js_error)?;
         add_execution_client(&mut value);
-        to_js(&value)
+        let value = to_js(&value)?;
+        self.inner = next;
+        Ok(value)
     }
 
     pub fn snapshot(&self) -> Result<JsValue, JsValue> {
@@ -209,7 +212,7 @@ mod tests {
                 "rows": 2,
                 "cols": 256,
                 "k": 8,
-                "backend": "cpu"
+                "backend": "wgpu"
             },
             "scripts": ["u2: false;", "u2: true;"],
             "policy": "ucb",
@@ -242,6 +245,9 @@ mod tests {
         let declarations = include_str!("../types/spiraltorch-wasm.d.ts");
         assert!(declarations.contains("export class RankAdaptationSession"));
         assert!(declarations.contains("RankAdaptationSelectionReceipt"));
+        assert!(declarations.contains("selection_attempts: number"));
+        assert!(declarations.contains("rng_stream_seed: string | null"));
+        assert!(declarations.contains("execution_signature: string"));
         assert!(declarations.contains("pendingSelectionId(): number | undefined"));
     }
 }
