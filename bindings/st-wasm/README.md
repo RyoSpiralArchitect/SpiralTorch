@@ -204,6 +204,19 @@ Run `node bindings/st-wasm/tests/numeric_boundaries.cjs
 this regression suite and the SGD, nonlinear autograd, and classification
 learning loops in the generated WASM, rather than checking compilation alone.
 
+## FFT numerics
+
+The low-level `fft_forward`, `fft_inverse`, and their `_in_place` variants share
+the corrected `st-frac::fft` mixed radix-2/4 CPU kernel. Buffers are interleaved
+real/imaginary `Float32Array`s with a positive power-of-two complex length;
+length one is the identity. Forward uses a negative exponent and inverse applies
+`1/n` normalization. Invalid lengths do not mutate in-place buffers. These
+functions compute in WASM, independently of emitted WebGPU FFT plans.
+
+`tests/fft_numerics.cjs` checks dense complex signals against an independent DFT,
+exact four-point bin order, inverse transforms, in-place roundtrips, and circular
+filtering. These checks replace reliance on origin-impulse fixtures alone.
+
 ## Shared Topos control and runtime routing
 
 Browser clients can derive a topology control signal and project a runtime profile through

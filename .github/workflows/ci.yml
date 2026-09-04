@@ -121,6 +121,7 @@ jobs:
         run: bash scripts/run_rust_clippy_strict.sh
       - name: build + test core
         run: |
+          cargo test --locked -p st-frac --release --test fft_numerics
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
       - name: test upper stack
@@ -142,6 +143,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build + test core
         run: |
+          cargo test --locked -p st-frac --release --test fft_numerics
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
   wgpu-macos:
@@ -192,6 +194,7 @@ jobs:
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-node"
           module="$RUNNER_TEMP/spiraltorch-wasm-node/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/numeric_boundaries.cjs "$module"
+          node bindings/st-wasm/tests/fft_numerics.cjs "$module"
           node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
           node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
@@ -410,3 +413,5 @@ jobs:
           python -I tools/smoke_dlpack_interop.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py bindings/st-py/tests/test_autograd_sgd.py
           python -I tools/smoke_autograd.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_fft_numerics.py
+          python -I tools/smoke_fft.py

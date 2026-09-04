@@ -75,9 +75,20 @@ pub fn radix2(a: Complex32, b: Complex32, twiddle: Complex32) -> (Complex32, Com
     (a.add(t), a.sub(t))
 }
 
-/// Radix-4 butterfly returning `[y0, y1, y2, y3]`.
+/// Forward radix-4 butterfly returning `[y0, y1, y2, y3]` in frequency order.
+/// Uses the negative-exponent convention without normalization. The three
+/// supplied twiddles multiply inputs 1, 2 and 3 before the four-point transform.
 #[inline]
 pub fn radix4(values: [Complex32; 4], twiddles: [Complex32; 3]) -> [Complex32; 4] {
+    radix4_direction(values, twiddles, false)
+}
+
+#[inline]
+fn radix4_direction(
+    values: [Complex32; 4],
+    twiddles: [Complex32; 3],
+    inverse: bool,
+) -> [Complex32; 4] {
     let a0 = values[0];
     let a1 = values[1].mul(twiddles[0]);
     let a2 = values[2].mul(twiddles[1]);
@@ -87,12 +98,17 @@ pub fn radix4(values: [Complex32; 4], twiddles: [Complex32; 3]) -> [Complex32; 4
     let t1 = a0.sub(a2);
     let t2 = a1.add(a3);
     let t3 = a1.sub(a3);
+    let quarter_turn = if inverse {
+        Complex32::new(-t3.im, t3.re)
+    } else {
+        Complex32::new(t3.im, -t3.re)
+    };
 
     [
         t0.add(t2),
-        Complex32::new(t1.re - t3.im, t1.im + t3.re),
+        t1.add(quarter_turn),
         t0.sub(t2),
-        Complex32::new(t1.re + t3.im, t1.im - t3.re),
+        t1.sub(quarter_turn),
     ]
 }
 
@@ -119,6 +135,8 @@ impl fmt::Display for FftError {
 /// In-place iterative FFT using a radix-4 kernel whenever possible and falling
 /// back to radix-2 stages for the tail factors.  The function accepts forward
 /// (`inverse = false`) and inverse (`inverse = true`) transforms.
+/// Forward uses `exp(-2*pi*i*j*k/n)`; inverse uses the opposite sign and `1/n`
+/// normalization. A singleton is the identity and invalid lengths are not mutated.
 pub fn fft_inplace(signal: &mut [Complex32], inverse: bool) -> Result<(), FftError> {
     let n = signal.len();
     if n == 0 {
@@ -127,11 +145,14 @@ pub fn fft_inplace(signal: &mut [Complex32], inverse: bool) -> Result<(), FftErr
     if !n.is_power_of_two() {
         return Err(FftError::NonPowerOfTwo);
     }
+    if n == 1 {
+        return Ok(());
+    }
 
     bit_reverse_permute(signal);
     let mut m = 1;
     while m < n {
-        if m * 4 <= n {
+        if m <= n / 4 {
             radix4_stage(signal, m, inverse);
             m *= 4;
         } else {
@@ -171,10 +192,11 @@ fn radix4_stage(buf: &mut [Complex32], quarter_stride: usize, inverse: bool) {
     for k in (0..buf.len()).step_by(step) {
         for j in 0..quarter_stride {
             let base = k + j;
+            // Binary bit reversal orders these subtransforms as 0, 2, 1, 3.
             let vals = [
                 buf[base],
-                buf[base + quarter_stride],
                 buf[base + 2 * quarter_stride],
+                buf[base + quarter_stride],
                 buf[base + 3 * quarter_stride],
             ];
             let tw = [
@@ -182,7 +204,7 @@ fn radix4_stage(buf: &mut [Complex32], quarter_stride: usize, inverse: bool) {
                 twiddle(2 * j, step, sign),
                 twiddle(3 * j, step, sign),
             ];
-            let out = radix4(vals, tw);
+            let out = radix4_direction(vals, tw, inverse);
             buf[base] = out[0];
             buf[base + quarter_stride] = out[1];
             buf[base + 2 * quarter_stride] = out[2];
