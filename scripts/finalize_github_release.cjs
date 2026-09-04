@@ -25,6 +25,28 @@ async function preflight({ github, repo, tag }) {
   return release;
 }
 
+async function recoveryArtifact({ github, repo, tag, sourceSha, runId }) {
+  if (!/^[1-9][0-9]*$/.test(String(runId)) || !Number.isSafeInteger(Number(runId))) {
+    throw new Error("Invalid source run id.");
+  }
+  const { data: run } = await github.rest.actions.getWorkflowRun({
+    ...repo, run_id: Number(runId),
+  });
+  if (run.path !== ".github/workflows/release_wheels.yml" || run.event !== "push" ||
+      run.head_branch !== tag || run.head_sha !== sourceSha || run.status !== "completed") {
+    throw new Error("Recovery requires a completed official tag-push build at the exact source.");
+  }
+  const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+    ...repo, run_id: Number(runId), per_page: 100,
+  });
+  const matches = artifacts.filter((item) => item.name === "signed-release-payload-" + tag);
+  if (matches.length !== 1 || matches[0].expired ||
+      !/^sha256:[a-f0-9]{64}$/.test(matches[0].digest || "")) {
+    throw new Error("Expected one retained, unexpired signed payload with a SHA-256 digest.");
+  }
+  return matches[0];
+}
+
 function collectPayload(dist, expectedWheels = 3) {
   const files = new Map();
   function visit(directory) {
@@ -122,4 +144,4 @@ async function finalize({ github, repo, tag, sourceSha, dist }) {
   })).data;
 }
 
-module.exports = { assertDraft, assertAssets, collectPayload, preflight, finalize };
+module.exports = { assertDraft, assertAssets, collectPayload, preflight, recoveryArtifact, finalize };

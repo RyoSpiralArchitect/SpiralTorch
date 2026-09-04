@@ -12,6 +12,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_draft_recovery_reads_exact_retained_payload_without_regeneration(self) -> None:
+        recovery = (ROOT / ".github/workflows/recover_github_release.yml").read_text()
+        self.assertIn("recoveryArtifact({", recovery)
+        self.assertIn("artifact-ids: ${{ steps.source.outputs.artifact_id }}", recovery)
+        self.assertIn("run-id: ${{ inputs.source_run_id }}", recovery)
+        self.assertIn("dist: 'retained-dist'", recovery)
+        self.assertIn("gh attestation verify", recovery)
+        self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', recovery)
+        self.assertIn('--source-digest "$SOURCE_SHA"', recovery)
+        self.assertIn("--deny-self-hosted-runners", recovery)
+        self.assertIn("group: release-wheels-${{ inputs.release_tag }}", recovery)
+        for forbidden in [
+            "cargo ", "maturin ", "generate_repo_manifest", "sbom-action",
+            "gh-action-sigstore-python", "attest-build-provenance",
+            "pypi-publish", "id-token: write",
+        ]:
+            self.assertNotIn(forbidden, recovery)
+
     def test_release_stages_verified_draft_before_publishing(self) -> None:
         workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text()
         self.assertNotIn("softprops/action-gh-release", workflow)

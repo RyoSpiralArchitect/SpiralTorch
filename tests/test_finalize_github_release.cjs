@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { preflight, collectPayload, finalize } = require("../scripts/finalize_github_release.cjs");
+const { preflight, collectPayload, recoveryArtifact, finalize } = require("../scripts/finalize_github_release.cjs");
 
 function fixture(t) {
   const dist = fs.mkdtempSync(path.join(os.tmpdir(), "release-contract-"));
@@ -139,6 +139,71 @@ test("uncertain publication is not retried", async (t) => {
   c.state.publishError = true;
   await assert.rejects(finalize({ ...c, dist: fixture(t) }), /uncertain publish/);
   assert.equal(c.state.events.filter(([op]) => op === "publish").length, 1);
+});
+
+test("explicit recovery uses retained bytes without reuploading or resigning", async (t) => {
+  const c = client();
+  const dist = fixture(t);
+  c.state.publishError = true;
+  await assert.rejects(finalize({ ...c, dist }), /uncertain publish/);
+  const uploads = c.state.events.filter(([op]) => op === "upload").length;
+  c.state.publishError = false;
+  await finalize({ ...c, dist });
+  assert.equal(c.state.events.filter(([op]) => op === "upload").length, uploads);
+  assert.equal(c.state.release.draft, false);
+});
+
+function recoveryClient() {
+  const run = {
+    path: ".github/workflows/release_wheels.yml", event: "push",
+    head_branch: "v1", head_sha: "commit", status: "completed", conclusion: "failure",
+  };
+  const artifact = {
+    id: 7, name: "signed-release-payload-v1", expired: false,
+    digest: "sha256:" + "a".repeat(64),
+  };
+  return {
+    run, artifact, repo: { owner: "test", repo: "repo" },
+    tag: "v1", sourceSha: "commit", runId: "123",
+    github: {
+      rest: { actions: {
+        getWorkflowRun: async () => ({ data: run }), listWorkflowRunArtifacts: () => {},
+      } },
+      paginate: async () => [artifact],
+    },
+  };
+}
+
+test("recovery selects a retained artifact from a failed exact-tag build", async () => {
+  const c = recoveryClient();
+  assert.equal((await recoveryArtifact(c)).id, 7);
+});
+
+for (const field of ["path", "event", "head_branch", "head_sha", "status"]) {
+  test("recovery rejects mismatched build identity: " + field, async () => {
+    const c = recoveryClient();
+    c.run[field] = "wrong";
+    await assert.rejects(recoveryArtifact(c), /exact source/);
+  });
+}
+
+for (const field of ["name", "expired", "digest"]) {
+  test("recovery rejects invalid retained artifact: " + field, async () => {
+    const c = recoveryClient();
+    c.artifact[field] = field === "expired" ? true : "wrong";
+    await assert.rejects(recoveryArtifact(c), /retained/);
+  });
+}
+
+test("recovery rejects missing/duplicate artifacts and malformed run ids", async () => {
+  const c = recoveryClient();
+  for (const artifacts of [[], [c.artifact, c.artifact]]) {
+    c.github.paginate = async () => artifacts;
+    await assert.rejects(recoveryArtifact(c), /retained/);
+  }
+  for (const runId of ["0", "-1", "../other", "9007199254740992"]) {
+    await assert.rejects(recoveryArtifact({ ...c, runId }), /run id/);
+  }
 });
 
 test("wrong tag source prevents draft creation", async (t) => {

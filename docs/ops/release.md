@@ -59,6 +59,24 @@ PyPI; 0.4.27 delivers the same LayerNorm implementation with this sequencing fix
 If an upload or publish response is uncertain, inspect the existing release
 before retrying; a notification or failed watcher is not evidence of non-delivery.
 
+For an unpublished partial draft, do not rerun the build/signing job: a fresh
+manifest timestamp or signature changes bytes and must be rejected. Instead,
+recover the `signed-release-payload-<tag>` artifact from the original completed
+tag-push run. Set `SOURCE_RUN_ID` to that verified run's numeric ID, then:
+
+```bash
+gh workflow run recover_github_release.yml --ref main \
+  -f release_tag="$TAG" -f source_run_id="$SOURCE_RUN_ID"
+```
+
+This route downloads the original artifact by ID, checks its original workflow,
+tag and source commit, verifies exact-tag wheel provenance, and passes the
+unchanged bytes to the same finalizer. It does not build, regenerate manifests,
+sign, or upload to PyPI. An expired/missing artifact or an already-published
+release requires inspection, not a silent rebuild or overwrite. This route is
+for retained payloads from 0.4.27 onward; it cannot repair the published empty
+0.4.26 release.
+
 ## Common Variables
 
 ```bash
