@@ -68,6 +68,20 @@ impl PyRankPlan {
         &self.inner
     }
 
+    pub(crate) fn metadata(
+        &self,
+    ) -> (
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+    ) {
+        (
+            self.kind_override,
+            self.requested_backend,
+            self.effective_backend,
+        )
+    }
+
     fn merge_kind(&self) -> &'static str {
         match self.inner.choice.mk {
             1 => "shared",

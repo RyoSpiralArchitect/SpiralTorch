@@ -10,8 +10,8 @@ use st_core::backend::rankk_launch::{
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::backend::wgpu_exec::WgpuExecutor;
 use st_core::ops::rank_entry::{execute_rank, try_plan_rank_with_config, RankPlan};
-use st_core::runtime::blackcat::{bandit::SoftBanditMode, ChoiceGroups, MultiBandit};
-use std::collections::HashMap;
+use st_core::runtime::blackcat::bandit::SoftBanditMode;
+use st_core::runtime::rank_adaptation::RankAdaptationSession;
 use std::io::{self, BufRead};
 use std::time::Instant;
 
@@ -100,16 +100,13 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
         ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
     )
     .map_err(|e| e.to_string())?;
-    let context = base.spiralk_context().map_err(|e| e.to_string())?;
-    let plans = request
-        .scripts
-        .iter()
-        .map(|script| {
-            let out = st_kdsl::eval_program(script, &context).map_err(|e| e.to_string())?;
-            base.try_with_spiralk_hard(&out.hard)
-                .map_err(|e| e.to_string())
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let mut adaptation = RankAdaptationSession::try_from_spiralk(
+        &base,
+        &request.scripts,
+        SoftBanditMode::UCB,
+        request.seed,
+    )
+    .map_err(|e| e.to_string())?;
     let mut expected_values = Vec::new();
     let mut expected_indices = Vec::new();
     for row in request.input.chunks_exact(request.cols as usize) {
@@ -139,9 +136,9 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
             Err(format!("rank correctness failed: values={values:?}, indices={indices:?}; expected indices={expected_indices:?}"))
         }
     };
-    // Every candidate must execute correctly before it enters the bandit's domain.
+    // No Black Cat decision is admitted until every candidate passes once.
     let mut first_call_ms = Vec::new();
-    for plan in &plans {
+    for plan in adaptation.candidate_plans() {
         let start = Instant::now();
         let (values, indices) = launch(plan, backend, &request.input)?;
         first_call_ms.push(start.elapsed().as_secs_f64() * 1000.0);
@@ -150,44 +147,39 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
             launch(plan, backend, &request.input)?;
         }
     }
-    let groups = ChoiceGroups {
-        groups: HashMap::from([(
-            "variant".to_owned(),
-            (0..plans.len()).map(|i| i.to_string()).collect(),
-        )]),
-    };
-    let mut bandit = MultiBandit::try_new_seeded(&groups, 1, SoftBanditMode::UCB, request.seed)
-        .map_err(|e| e.to_string())?;
     let mut samples = Vec::new();
     for _ in 0..request.iterations {
-        let (picks, _) = bandit.try_select_all(&[1.0]).map_err(|e| e.to_string())?;
-        let index: usize = picks["variant"].parse().map_err(|e| format!("{e}"))?;
+        let selection = adaptation.try_choose().map_err(|e| e.to_string())?;
+        let selection_id = selection.receipt().selection_id;
         let start = Instant::now();
-        let result = launch(&plans[index], backend, &request.input);
+        let result = launch(selection.plan(), backend, &request.input);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         let (values, indices) = match result {
             Ok(result) => result,
             Err(error) => {
-                bandit.try_abandon_all().map_err(str::to_owned)?;
+                adaptation
+                    .try_abandon(selection_id)
+                    .map_err(|e| e.to_string())?;
                 return Err(error);
             }
         };
-        if let Err(error) = check(&values, &indices) {
-            bandit.try_abandon_all().map_err(str::to_owned)?;
+        let correctness = check(&values, &indices);
+        let observation = adaptation
+            .try_observe(selection_id, elapsed_ms, correctness.is_ok())
+            .map_err(|e| e.to_string())?;
+        if let Err(error) = correctness {
             return Err(error);
         }
-        let reward = 1.0 / (1.0 + elapsed_ms);
-        bandit
-            .try_update_all(&[1.0], reward)
-            .map_err(str::to_owned)?;
-        samples.push(json!({"variant": index, "elapsed_ms": elapsed_ms, "reward": reward}));
+        samples.push(json!({"selection": selection.receipt(), "observation": observation}));
     }
+    let adaptation_snapshot = adaptation.snapshot();
+    let observation_counts = adaptation_snapshot.observation_counts.clone();
     Ok(
         json!({"status": "passed", "backend": request.backend, "adapter": adapter,
         "kind": request.kind, "rows": request.rows, "cols": request.cols, "k": request.k,
-        "scripts": request.scripts, "plans": plans.iter().map(RankPlan::snapshot).collect::<Vec<_>>(),
+        "scripts": request.scripts, "rank_adaptation": adaptation_snapshot,
         "first_call_ms": first_call_ms, "samples": samples,
-        "blackcat_observation_counts": bandit.observation_counts(),
+        "blackcat_observation_counts": observation_counts,
         "values": expected_values, "indices": expected_indices,
         "boundary": "Rust host buffers -> strict GPU execution -> host buffers; planning excluded"}),
     )

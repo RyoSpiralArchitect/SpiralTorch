@@ -53,6 +53,48 @@ class NativeBindingOwnershipTest(unittest.TestCase):
             st.Tensor.from_dlpack(capsule)
         self.assertEqual(restored.tolist(), [[3.0, 5.0]])
 
+    @unittest.skipUnless(
+        hasattr(st, "RankAdaptationSession"), "requires the kdsl feature"
+    )
+    def test_rank_adaptation_keeps_plan_provenance_and_reward_ownership(self) -> None:
+        base = st.plan("topk", 2, 256, 8, backend="wgpu")
+        session = st.RankAdaptationSession(
+            base,
+            ["u2: false;", "u2: true;"],
+            policy="ucb",
+            seed=17,
+        )
+
+        selection = session.choose()
+        self.assertEqual(selection.selection_id, 1)
+        self.assertEqual(session.pending_selection_id, 1)
+        self.assertEqual(selection.plan.contract()["requested_backend"], "wgpu")
+        self.assertEqual(
+            selection.receipt()["semantic_owner"],
+            "st-core::runtime::rank_adaptation",
+        )
+        with self.assertRaisesRegex(RuntimeError, "still awaiting observation"):
+            session.choose()
+
+        rejected = session.observe(selection.selection_id, 1.25, False)
+        self.assertFalse(rejected["credited"])
+        self.assertIsNone(rejected["reward"])
+        self.assertEqual(
+            sum(session.snapshot()["observation_counts"]["rank_plan_variant"].values()),
+            0,
+        )
+
+        credited_selection = session.choose()
+        credited = session.observe(credited_selection.selection_id, 4.0, True)
+        self.assertTrue(credited["credited"])
+        self.assertAlmostEqual(credited["reward"], 0.2)
+        self.assertEqual(
+            sum(session.snapshot()["observation_counts"]["rank_plan_variant"].values()),
+            1,
+        )
+        with self.assertRaisesRegex(RuntimeError, "no pending selection"):
+            session.abandon(credited_selection.selection_id)
+
     def test_torch_bridge_outlives_both_source_wrappers(self) -> None:
         try:
             import torch

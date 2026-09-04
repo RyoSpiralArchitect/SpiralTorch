@@ -26,6 +26,7 @@ python-default = [
     "text",
     "selfsup",
     "robotics",
+    "kdsl",
 ]
 extension-module = ["pyo3/extension-module"]
 psi = []
