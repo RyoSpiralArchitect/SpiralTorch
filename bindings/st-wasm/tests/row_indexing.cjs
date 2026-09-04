@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const { AutogradTensor, AutogradSgd } = require(process.argv[2]);
 const declarations = fs.readFileSync(path.join(__dirname, "../types/spiraltorch-wasm.d.ts"), "utf8");
 for (const method of ["gatherRows", "scatterAddRows"]) assert.ok(declarations.includes(`${method}(`));
@@ -19,6 +20,15 @@ try {
   assert.deepEqual(numbers(table.gradientValues()), [1, 1, 0, 0, 2, 2]);
   const scatter = keep(table.scatterAddRows(new Uint32Array([2, 0, 2]), 4));
   assert.deepEqual(numbers(scatter.values()), [3, 4, 0, 0, 6, 8, 0, 0]);
+  const foreignIds = vm.runInNewContext("new Uint32Array([2, 0, 2])");
+  assert.equal(foreignIds instanceof Uint32Array, false);
+  assert.deepEqual(numbers(keep(table.gatherRows(foreignIds)).values()), [5, 6, 1, 2, 5, 6]);
+  assert.deepEqual(numbers(keep(table.scatterAddRows(foreignIds, 4)).values()), numbers(scatter.values()));
+  const spoof = new Float32Array([1]);
+  Object.defineProperty(spoof, Symbol.toStringTag, { value: "Uint32Array" });
+  for (const bad of [spoof, new DataView(new ArrayBuffer(4)), vm.runInNewContext("new Float32Array([1])")]) {
+    assert.throws(() => table.gatherRows(bad), /Array or Uint32Array/);
+  }
   for (const bad of [-1, 0.5, NaN, Infinity, true, "1", 2 ** 32, 3, null, undefined]) {
     assert.throws(() => table.gatherRows([bad]));
     assert.throws(() => table.scatterAddRows([bad, 0, 1], 3));

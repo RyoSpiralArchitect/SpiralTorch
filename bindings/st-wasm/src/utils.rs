@@ -42,7 +42,23 @@ pub(crate) fn js_u32(value: &JsValue, context: &str) -> Result<u32, JsValue> {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn js_row_indices(value: &JsValue) -> Result<Vec<usize>, JsValue> {
     use wasm_bindgen::JsCast;
-    if !js_sys::Array::is_array(value) && !value.is_instance_of::<js_sys::Uint32Array>() {
+    // instanceof is realm-sensitive; use the intrinsic typed-array brand getter,
+    // not an object's spoofable Symbol.toStringTag or constructor name.
+    let is_u32_array = if js_sys::ArrayBuffer::is_view(value) {
+        let exemplar = js_sys::Uint32Array::new_with_length(0);
+        let prototype = js_sys::Object::get_prototype_of(exemplar.as_ref());
+        let typed_prototype = js_sys::Object::get_prototype_of(prototype.as_ref());
+        let descriptor = js_sys::Object::get_own_property_descriptor(
+            &typed_prototype,
+            js_sys::Symbol::to_string_tag().as_ref(),
+        );
+        let getter = js_sys::Reflect::get(&descriptor, &JsValue::from_str("get"))?
+            .dyn_into::<js_sys::Function>()?;
+        getter.call0(value)?.as_string().as_deref() == Some("Uint32Array")
+    } else {
+        false
+    };
+    if !js_sys::Array::is_array(value) && !is_u32_array {
         return Err(js_error("row indices must be an Array or Uint32Array"));
     }
     js_sys::Array::from(value)
