@@ -168,7 +168,7 @@ fn checked_f32(value: f64, label: &'static str) -> PureResult<f32> {
     Ok(value)
 }
 
-fn sum_cotangents(values: &[f32]) -> f64 {
+fn sum_cotangents(values: &[f32]) -> (f64, f64) {
     let mut sum: f64 = 0.0;
     let mut correction = 0.0;
     for &value in values {
@@ -182,7 +182,8 @@ fn sum_cotangents(values: &[f32]) -> f64 {
         };
         sum = next;
     }
-    sum + correction
+    // Keep the low part separate until the VJP subtracts the dominant contribution.
+    (sum, correction)
 }
 
 fn validate_labels(
@@ -286,12 +287,15 @@ impl Tensor {
                 .zip(seed.data().chunks_exact(cols))
             {
                 let partition = RowPartition::new(row);
-                let sum = sum_cotangents(upstream);
+                let (sum, correction) = sum_cotangents(upstream);
                 for (index, (&value, &gradient)) in row.iter().zip(upstream).enumerate() {
                     let gradient = if index == partition.maximum_index {
-                        (f64::from(gradient) - sum) + sum * partition.tail_probability()
+                        let tail = partition.tail_probability();
+                        let high = (f64::from(gradient) - sum) + sum * tail;
+                        high + (-correction + correction * tail)
                     } else {
-                        f64::from(gradient) - sum * partition.probability(value)
+                        let probability = partition.probability(value);
+                        (f64::from(gradient) - sum * probability) - correction * probability
                     };
                     values.push(checked_f32(gradient, "log_softmax_gradient")?);
                 }

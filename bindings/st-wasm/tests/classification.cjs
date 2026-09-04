@@ -48,6 +48,19 @@ try {
   assert.equal(cancellationGradient[0], maximum);
   assert.equal(cancellationGradient[2], -maximum);
 
+  for (const sign of [1, -1]) {
+    for (const [values, seed, expected] of [
+      [[0, -200], [maximum, 1], [-1, 1]],
+      [[-200, 0], [1, maximum], [1, -1]],
+      [[0, 0, -200], [maximum / 2, maximum / 2, 1], [-0.5, -0.5, 1]],
+    ]) {
+      const input = keep(new AutogradTensor(1, values.length, new Float32Array(values), true));
+      const output = keep(input.rowLogSoftmax());
+      close(output.vectorJacobianProduct(input, new Float32Array(seed.map(value => sign * value))),
+            expected.map(value => sign * value), 0);
+    }
+  }
+
   const features = keep(new AutogradTensor(3, 3, new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]), false));
   let weights = keep(new AutogradTensor(3, 3, new Float32Array(9), true));
   const targets = new Int32Array([0, 1, 2]);

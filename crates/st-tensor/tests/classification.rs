@@ -221,12 +221,17 @@ fn mean_is_narrowed_only_after_reduction() {
 
 #[test]
 fn extreme_seeds_are_reduced_in_f64() {
+    for cols in [2, 3] {
+        for sign in [1.0, -1.0] {
+            let logits = Tensor::zeros(1, cols).unwrap();
+            let seed = Tensor::from_vec(1, cols, vec![sign * f32::MAX; cols]).unwrap();
+            assert_eq!(
+                logits.row_log_softmax_backward(&seed).unwrap().data(),
+                vec![0.0; cols]
+            );
+        }
+    }
     let logits = Tensor::zeros(1, 2).unwrap();
-    let seed = Tensor::from_vec(1, 2, vec![f32::MAX; 2]).unwrap();
-    assert_eq!(
-        logits.row_log_softmax_backward(&seed).unwrap().data(),
-        &[0.0, 0.0]
-    );
     let grad = logits
         .cross_entropy_with_logits_backward(&[0], CrossEntropyConfig::default(), &scalar(f32::MAX))
         .unwrap();
@@ -246,6 +251,36 @@ fn log_softmax_retains_small_seeds_between_large_cancelling_terms() {
         for (&actual, value) in gradient.data().iter().zip(values) {
             let expected = if value == 1.0 { 2.0 / 3.0 } else { value };
             close(&[actual], &[expected], 1e-7);
+        }
+    }
+}
+
+#[test]
+fn log_softmax_retains_sum_correction_until_after_probability_scaling() {
+    for sign in [1.0, -1.0] {
+        for (logits, seed, expected) in [
+            (
+                vec![0.0, -200.0],
+                vec![sign * f32::MAX, sign],
+                vec![-sign, sign],
+            ),
+            (
+                vec![-200.0, 0.0],
+                vec![sign, sign * f32::MAX],
+                vec![sign, -sign],
+            ),
+            (
+                vec![0.0, 0.0, -200.0],
+                vec![sign * (f32::MAX / 2.0), sign * (f32::MAX / 2.0), sign],
+                vec![-0.5 * sign, -0.5 * sign, sign],
+            ),
+        ] {
+            let logits = Tensor::from_vec(1, logits.len(), logits).unwrap();
+            let seed = Tensor::from_vec(1, seed.len(), seed).unwrap();
+            assert_eq!(
+                logits.row_log_softmax_backward(&seed).unwrap().data(),
+                expected
+            );
         }
     }
 }
