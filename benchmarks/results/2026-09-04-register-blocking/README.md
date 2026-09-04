@@ -80,6 +80,35 @@ Each native report passes 12 shape/seed cases, each with 12 SpiralTorch
 variants and a PyTorch control. The harness keyword `auto` means the API
 default, not autotuning; these measurements request both kernels explicitly.
 
+## Long-K Precision Follow-Up: Not Yet Qualified
+
+An additional Transformer-shaped sweep uses 1x768x768, 32x768x768,
+128x768x3072, and 128x3072x768. `native-transformer-shapes.json.gz` retains
+all 12 cases: **10 pass, two fail** the unchanged `rtol=1e-4, atol=1e-5`
+float64-reference gate. The failing FFN-contraction cases use K=3072 with
+seeds 17 and 43. No timings are admitted for those failed cases.
+
+`diagnose_long_k.py` bypasses the benchmark's early correctness stop to inspect
+both kernels at 8x8x16 and 16x16x16, plus a CPU sequential-f32 accumulator
+and PyTorch CUDA. It records errors, not performance claims. The exact same
+script and inputs also run against the pre-change PR #2061 wheel; its native
+hash matches `../2026-09-04-resident-tiles/native-six-tiles-row-major.json`.
+The baseline's `None` kernel label means its constructor has no kernel option.
+
+| Seed | Baseline / current WGPU failed cells | WGPU max absolute error | PyTorch CUDA failed cells |
+| --- | ---: | ---: | ---: |
+| 17 | 1 / 1 | 4.49e-5 | 0 |
+| 29 | 0 / 0 | 4.18e-5 | 0 |
+| 43 | 2 / 2 | 3.96e-5 | 0 |
+
+Both current kernels and the older scalar wheel reproduce the same error
+metrics and worst failing-cell values. Sequential CPU f32 also fails this
+gate (it is not bitwise identical to the GPU). This is evidence of an existing
+long-reduction accuracy limitation, not a new register-blocking regression.
+Do not use this comparison to relax the tolerance or claim all FFN shapes
+are qualified. A more stable Rust/WASM accumulation path, benchmarked against
+the unchanged fast path, remains follow-up work.
+
 ## Negative Prototype And Provenance
 
 The first prototype automatically enabled blocking for even tiles with at
@@ -103,6 +132,7 @@ Build/test logs and private wheels are under
 - Rust resident backend: six tests pass with real NVIDIA/Vulkan opted in,
   including both kernels, odd tile rejection, edge outputs, shared-memory
   geometry, chained workspaces and independent snapshot lifetimes.
+- All 991 `st-core` library tests pass.
 - Host Tensor: 46 matmul-filtered library tests plus the f32 precision
   integration test pass. Eight tile geometries execute real scalar f32/int8
   fixtures. Blocked int8 is shader-validated only, not runtime-qualified or

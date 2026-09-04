@@ -175,6 +175,11 @@ winner or faster-than-PyTorch claim is implied by the explicit override.
 The [same-binary register-blocking comparison](../benchmarks/results/2026-09-04-register-blocking/README.md)
 retains both browser improvements and native NVIDIA regressions. It motivates
 explicit kernel selection, not an automatic browser or CUDA policy.
+That report also retains an unresolved long-K precision boundary: the old
+and current kernels fail the unchanged float64-reference benchmark gate for
+two of three 128x3072x768 seeds. Register blocking preserves, but does not
+improve, the existing f32 accumulation accuracy; larger FFN shapes are not
+generally qualified by the smaller passing fixtures.
 
 The PyTorch comparison uses identical float32 input bytes and float64 reference
 gates. Both sides preallocate output and run the same number of Python-loop
