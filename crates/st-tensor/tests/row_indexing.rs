@@ -228,7 +228,7 @@ fn tied_embedding_learns_token_transitions() {
         } else {
             let final_loss = loss.item_f32().unwrap();
             assert!(final_loss < initial * 0.1, "{initial} -> {final_loss}");
-            for (row, &label) in logits.value().data().chunks_exact(4).zip(&labels) {
+            for (row, &label) in logits.value().data().as_chunks::<4>().0.iter().zip(&labels) {
                 let prediction = (0..4).max_by(|&a, &b| row[a].total_cmp(&row[b])).unwrap();
                 assert_eq!(prediction as i64, label);
             }
