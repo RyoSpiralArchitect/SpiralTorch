@@ -1,0 +1,147 @@
+{
+  "numerical_gates_passed": 288,
+  "statistic": "median of six per-seed medians across two operation orders; unpaired runtime timings",
+  "scope": "WASM CPU forward calls; same source, portable versus +simd128 build",
+  "cases": {
+    "matmul": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.009645000000002568,
+          "torch_ms": 0.00175325
+        },
+        "simd": {
+          "wasm_ms": 0.008573249999997756,
+          "torch_ms": 0.00176275
+        },
+        "wasm_speedup": 1.1250109351768691
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.05240350000000582,
+          "torch_ms": 0.0054855
+        },
+        "simd": {
+          "wasm_ms": 0.02890599999999921,
+          "torch_ms": 0.00547775
+        },
+        "wasm_speedup": 1.812893516917154
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.37358125000000086,
+          "torch_ms": 0.03802775
+        },
+        "simd": {
+          "wasm_ms": 0.17008949999999956,
+          "torch_ms": 0.038905999999999996
+        },
+        "wasm_speedup": 2.196380435006287
+      }
+    },
+    "matmul_prepacked": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.009585249999997103,
+          "torch_ms": 0.0022892500000000005
+        },
+        "simd": {
+          "wasm_ms": 0.009006250000002325,
+          "torch_ms": 0.00228875
+        },
+        "wasm_speedup": 1.0642886884102294
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.048825500000003075,
+          "torch_ms": 0.00701475
+        },
+        "simd": {
+          "wasm_ms": 0.023107249999998913,
+          "torch_ms": 0.0056085
+        },
+        "wasm_speedup": 2.112994839282276
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.3658940000000044,
+          "torch_ms": 0.0289095
+        },
+        "simd": {
+          "wasm_ms": 0.16266275000000263,
+          "torch_ms": 0.028956
+        },
+        "wasm_speedup": 2.2494025214746367
+      }
+    },
+    "gather": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.00444050000000118,
+          "torch_ms": 0.00178325
+        },
+        "simd": {
+          "wasm_ms": 0.004496000000003164,
+          "torch_ms": 0.0018035
+        },
+        "wasm_speedup": 0.9876556939497452
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.008471499999998855,
+          "torch_ms": 0.00195225
+        },
+        "simd": {
+          "wasm_ms": 0.007816000000001821,
+          "torch_ms": 0.001963
+        },
+        "wasm_speedup": 1.0838664278399284
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.016621250000000032,
+          "torch_ms": 0.0027955000000000002
+        },
+        "simd": {
+          "wasm_ms": 0.01654674999999628,
+          "torch_ms": 0.0027925
+        },
+        "wasm_speedup": 1.0045023947303107
+      }
+    },
+    "scatter": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.007182999999997719,
+          "torch_ms": 0.00330425
+        },
+        "simd": {
+          "wasm_ms": 0.007361499999996468,
+          "torch_ms": 0.00331975
+        },
+        "wasm_speedup": 0.9757522244109441
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.017454250000000116,
+          "torch_ms": 0.0037815
+        },
+        "simd": {
+          "wasm_ms": 0.014170250000001161,
+          "torch_ms": 0.0037784999999999997
+        },
+        "wasm_speedup": 1.2317531447926948
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.04446724999999674,
+          "torch_ms": 0.005457
+        },
+        "simd": {
+          "wasm_ms": 0.04449700000000689,
+          "torch_ms": 0.005425
+        },
+        "wasm_speedup": 0.9993314156008237
+      }
+    }
+  }
+}

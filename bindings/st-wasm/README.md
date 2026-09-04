@@ -18,11 +18,22 @@ Build the WebAssembly package (and copy the bundled TypeScript declarations) wit
 ```bash
 ./scripts/build_wasm_web.sh --dev
 # or: ./scripts/build_wasm_web.sh --release
+# optional modern-browser profile: ./scripts/build_wasm_web.sh --release --simd128
 ```
+
+The portable profile remains the default. `--simd128` opts into WebAssembly SIMD
+and produces a module that will not instantiate in engines without that feature;
+serve a portable fallback when supporting older clients. On supported engines it
+allows LLVM to vectorise Rust CPU kernels used by browser autograd and tensor ops.
+The build helper sets the target-specific flag itself and strips ambient host or
+target Rust flags. It explicitly sets `RUSTFLAGS` for both profiles so Cargo
+configuration cannot silently change the selected target contract.
 
 If you have `vcpkg`-style host linker flags exported in your shell (for example via
 `RUSTFLAGS`), prefer the helper script above (it sanitises the environment for wasm
-builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH …`.
+builds) or unset `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`,
+target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invoking
+`wasm-pack` directly.
 
 ## Examples
 

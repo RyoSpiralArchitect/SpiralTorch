@@ -7,6 +7,16 @@ CRATE_DIR="${CRATE_DIR:-"$ROOT/bindings/st-wasm"}"
 OUT_DIR="${OUT_DIR:-"$ROOT/bindings/st-wasm/examples/pkg"}"
 EXAMPLES_DIR="${EXAMPLES_DIR:-"$ROOT/bindings/st-wasm/examples"}"
 
+simd128=0
+wasm_pack_args=()
+for arg in "$@"; do
+  if [[ "$arg" == "--simd128" ]]; then
+    simd128=1
+  else
+    wasm_pack_args+=("$arg")
+  fi
+done
+
 if ! command -v wasm-pack >/dev/null 2>&1; then
   echo "[SpiralTorch] error: wasm-pack was not found on PATH." >&2
   echo "Install it with: cargo install wasm-pack" >&2
@@ -16,11 +26,28 @@ fi
 echo "[SpiralTorch] building spiraltorch-wasm (web) ..."
 echo "  crate:   $CRATE_DIR"
 echo "  out_dir: $OUT_DIR"
+if [[ "$simd128" == 1 ]]; then
+  echo "  profile: simd128 (requires WebAssembly SIMD)"
+else
+  echo "  profile: portable"
+fi
 echo
-echo "[SpiralTorch] note: sanitising env (RUSTFLAGS/LIBRARY_PATH/PKG_CONFIG_PATH) for wasm builds"
+echo "[SpiralTorch] note: sanitising host Rust/linker flags for wasm builds"
 
-env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH \
-  wasm-pack build "$CRATE_DIR" --target web --out-dir "$OUT_DIR" "$@"
+build_env=(env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+  -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS \
+  -u LIBRARY_PATH -u PKG_CONFIG_PATH)
+if [[ "$simd128" == 1 ]]; then
+  build_env+=(RUSTFLAGS=-Ctarget-feature=+simd128)
+else
+  # A present empty RUSTFLAGS overrides rustflags inherited from Cargo config.
+  build_env+=(RUSTFLAGS=)
+fi
+wasm_pack_command=(wasm-pack build "$CRATE_DIR" --target web --out-dir "$OUT_DIR")
+if [[ "${#wasm_pack_args[@]}" -gt 0 ]]; then
+  wasm_pack_command+=("${wasm_pack_args[@]}")
+fi
+"${build_env[@]}" "${wasm_pack_command[@]}"
 
 echo "[SpiralTorch] copying TypeScript declarations..."
 cp "$ROOT/bindings/st-wasm/types/spiraltorch-wasm.d.ts" "$OUT_DIR/"
