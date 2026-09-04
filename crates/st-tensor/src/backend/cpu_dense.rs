@@ -339,7 +339,9 @@ unsafe fn microkernel_8x12_scalar(
     debug_assert_eq!(lda, M8N12_TM);
     debug_assert_eq!(ldb, k);
     debug_assert!(ldc >= M8N12_TN);
-    let mut acc = [[0.0f32; M8N12_TN]; M8N12_TM];
+    // Match the packed A lanes: adjacent rows are independent accumulators,
+    // so vectorization does not need to reassociate the K reduction.
+    let mut acc = [[0.0f32; M8N12_TM]; M8N12_TN];
 
     for p in 0..k {
         let mut b_ptr = b.add(p);
@@ -348,16 +350,15 @@ unsafe fn microkernel_8x12_scalar(
             b_ptr = b_ptr.add(ldb);
             for row in 0..M8N12_TM {
                 let a_val = *a.add(p * lda + row);
-                acc[row][col] += a_val * b_val;
+                acc[col][row] += a_val * b_val;
             }
         }
     }
 
     for row in 0..M8N12_TM {
-        let row_acc = acc[row];
         let dst_row = c.add(row * ldc);
         for col in 0..M8N12_TN {
-            *dst_row.add(col) += row_acc[col];
+            *dst_row.add(col) += acc[col][row];
         }
     }
 }
@@ -436,7 +437,7 @@ unsafe fn microkernel_4x16_scalar(
     debug_assert_eq!(lda, M4N16_TM);
     debug_assert_eq!(ldb, k);
     debug_assert!(ldc >= M4N16_TN);
-    let mut acc = [[0.0f32; M4N16_TN]; M4N16_TM];
+    let mut acc = [[0.0f32; M4N16_TM]; M4N16_TN];
 
     for p in 0..k {
         let mut b_ptr = b.add(p);
@@ -445,16 +446,15 @@ unsafe fn microkernel_4x16_scalar(
             b_ptr = b_ptr.add(ldb);
             for row in 0..M4N16_TM {
                 let a_val = *a.add(p * lda + row);
-                acc[row][col] += a_val * b_val;
+                acc[col][row] += a_val * b_val;
             }
         }
     }
 
     for row in 0..M4N16_TM {
-        let row_acc = acc[row];
         let dst_row = c.add(row * ldc);
         for col in 0..M4N16_TN {
-            *dst_row.add(col) += row_acc[col];
+            *dst_row.add(col) += acc[col][row];
         }
     }
 }
@@ -695,7 +695,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 1;
+const CPU_AUTOTUNE_REVISION: u64 = 2;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -1139,5 +1139,51 @@ mod tests {
         let mut dst = vec![0.0f32; rows * cols];
         matmul_with_kernel_spec(&MICROKERNELS[1], &mut dst, &lhs, &rhs, rows, inner, cols);
         assert_close(&dst, &expected);
+    }
+
+    #[test]
+    fn every_kernel_preserves_sequential_reduction_with_tails() {
+        for spec in MICROKERNELS {
+            for (rows, inner, cols) in [
+                (spec.tm, 1, spec.tn),
+                (spec.tm * 2 + 1, 37, spec.tn * 2 + 3),
+                (spec.tm + 1, 1025, spec.tn + 1),
+            ] {
+                let lhs: Vec<f32> = (0..rows * inner)
+                    .map(|i| ((i * 17 % 127) as f32 - 63.0) / 31.0)
+                    .collect();
+                let rhs: Vec<f32> = (0..inner * cols)
+                    .map(|i| ((i * 29 % 131) as f32 - 65.0) / 37.0)
+                    .collect();
+                let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+                let packed = unwrap_ok(prepack_rhs(&rhs, inner, cols));
+                for use_packed in [false, true] {
+                    let mut actual = vec![0.25; rows * cols];
+                    if use_packed {
+                        matmul_packed_with_kernel_spec(
+                            spec,
+                            &mut actual,
+                            &lhs,
+                            &packed,
+                            rows,
+                            inner,
+                            cols,
+                        );
+                    } else {
+                        matmul_with_kernel_spec(spec, &mut actual, &lhs, &rhs, rows, inner, cols);
+                    }
+                    for (index, (&actual, &expected)) in
+                        actual.iter().zip(expected.iter()).enumerate()
+                    {
+                        assert_eq!(
+                            actual.to_bits(),
+                            (0.25 + expected).to_bits(),
+                            "{} {rows}x{inner}x{cols}, packed={use_packed}, index={index}",
+                            spec.name,
+                        );
+                    }
+                }
+            }
+        }
     }
 }

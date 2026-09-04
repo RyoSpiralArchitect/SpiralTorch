@@ -227,6 +227,7 @@ jobs:
           node bindings/st-wasm/tests/fft_numerics.cjs "$module"
           node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
           node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
+          node bindings/st-wasm/tests/cpu_dense_matmul.cjs "$module"
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
           node bindings/st-wasm/tests/row_indexing.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"

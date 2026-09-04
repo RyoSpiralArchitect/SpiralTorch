@@ -1,0 +1,112 @@
+{
+  "cpu.matmul.v01|x86_64|linux|avx2+fma+avx+sse4_2|128x128x128|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1788542644,
+        "score": 0.000346632,
+        "params": {
+          "kernel": "m8n12"
+        },
+        "context": {
+          "cols": 128,
+          "inner": 128,
+          "revision": 1,
+          "rows": 128,
+          "runs": 3,
+          "sample_cols": 128,
+          "sample_inner": 128,
+          "sample_rows": 128
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 128.0
+          },
+          {
+            "key": "inner",
+            "value": 128.0
+          },
+          {
+            "key": "revision",
+            "value": 1.0
+          },
+          {
+            "key": "rows",
+            "value": 128.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 128.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 128.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 128.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v01|x86_64|linux|avx2+fma+avx+sse4_2|256x256x256|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1788542644,
+        "score": 0.004774424,
+        "params": {
+          "kernel": "m8n12"
+        },
+        "context": {
+          "cols": 256,
+          "inner": 256,
+          "revision": 1,
+          "rows": 256,
+          "runs": 3,
+          "sample_cols": 256,
+          "sample_inner": 256,
+          "sample_rows": 256
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 256.0
+          },
+          {
+            "key": "inner",
+            "value": 256.0
+          },
+          {
+            "key": "revision",
+            "value": 1.0
+          },
+          {
+            "key": "rows",
+            "value": 256.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 256.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 256.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 256.0
+          }
+        ]
+      }
+    ]
+  }
+}
