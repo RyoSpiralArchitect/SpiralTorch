@@ -529,6 +529,14 @@ pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, Ran
         plan.accelerator_fallback().as_str(),
     );
     let signature = match plan.device_caps.backend {
+        BackendKind::Cuda if !cfg!(feature = "cuda") => format!(
+            "{common}/path={}",
+            if plan.accelerator_fallback().allows_fallback() {
+                "software_fallback"
+            } else {
+                "unavailable"
+            }
+        ),
         BackendKind::Cuda
             if plan.k == 1 && matches!(plan.kind, RankKind::TopK | RankKind::BottomK) =>
         {
@@ -839,6 +847,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn cuda_candidates_are_deduplicated_by_consumed_workgroup() {
         let base = try_plan_rank_with_config(
@@ -874,6 +883,41 @@ mod tests {
             ),
             Err(RankAdaptationError::DuplicatePlan { .. })
         ));
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn cuda_candidates_collapse_when_native_execution_is_not_compiled() {
+        for fallback in [AcceleratorFallback::Allow, AcceleratorFallback::Forbid] {
+            let base = try_plan_rank_with_config(
+                RankKind::TopK,
+                2,
+                256,
+                8,
+                BackendKind::Cuda.default_caps(),
+                ExecutionConfig::new(fallback, 1024),
+            )
+            .expect("CUDA plan");
+            let result = RankAdaptationSession::try_from_spiralk(
+                &base,
+                &["wg: 32;".to_owned(), "wg: 256;".to_owned()],
+                SoftBanditMode::UCB,
+                1,
+            );
+            assert!(matches!(
+                result,
+                Err(RankAdaptationError::DuplicatePlan { .. })
+            ));
+
+            let signature = effective_rank_execution_signature(&base).unwrap();
+            let expected_path = if fallback.allows_fallback() {
+                "/path=software_fallback"
+            } else {
+                "/path=unavailable"
+            };
+            assert!(signature.ends_with(expected_path));
+            assert!(!signature.contains("/wg="));
+        }
     }
 
     #[test]

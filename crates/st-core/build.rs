@@ -22,6 +22,7 @@ fn main() {
 }
 
 fn emit_build_info() {
+    emit_git_rerun_paths();
     let user = env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "unknown".into());
@@ -92,11 +93,65 @@ fn emit_build_info() {
             dest_path.display()
         );
     }
-
-    println!("cargo:rerun-if-changed=build.rs");
 }
 
-fn git_capture<const N: usize>(args: [&'static str; N]) -> Option<String> {
+fn emit_git_rerun_paths() {
+    println!("cargo:rerun-if-changed=build.rs");
+    let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) else {
+        return;
+    };
+    let Some(repo_root) = git_capture(["rev-parse", "--show-toplevel"]).map(PathBuf::from) else {
+        return;
+    };
+
+    for git_path in ["HEAD", "index", "packed-refs"] {
+        if let Some(path) = git_capture([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            git_path,
+        ]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+    if let Some(head_ref) = git_capture(["symbolic-ref", "-q", "HEAD"]) {
+        if let Some(path) = git_capture([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            head_ref.as_str(),
+        ]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+
+    let Ok(output) = Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&manifest_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    for relative in output.stdout.split(|byte| *byte == 0) {
+        if relative.is_empty() {
+            continue;
+        }
+        let Ok(relative) = std::str::from_utf8(relative) else {
+            continue;
+        };
+        println!(
+            "cargo:rerun-if-changed={}",
+            repo_root.join(relative).display()
+        );
+    }
+}
+
+fn git_capture<const N: usize>(args: [&str; N]) -> Option<String> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").ok()?;
     let output = Command::new("git")
         .args(args)
