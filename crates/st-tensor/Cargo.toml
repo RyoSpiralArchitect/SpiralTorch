@@ -74,7 +74,8 @@ naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
 pollster = "0.3"
 # Keep Criterion's Rayon default off so the benchmark target remains checkable on WASM.
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
-plotters = { version = "0.3" }
+# SVG diagnostics keep headless/WASM test builds independent of system fonts.
+plotters = { version = "0.3", default-features = false, features = ["svg_backend"] }
 
 [[bench]]
 name = "random_init"

@@ -3287,6 +3287,32 @@ mod tests {
     }
 
     #[test]
+    fn matmul_autotune_separates_precision_across_bucket_boundary() {
+        let first = quantized_problem(64, 63, 65);
+        let second = quantized_problem(64, 64, 64);
+        assert_eq!(first, second);
+        let first_int8 = quantize_for_shape(true, 63, 65);
+        let second_int8 = quantize_for_shape(true, 64, 64);
+        assert!(!first_int8);
+        assert!(second_int8);
+        assert!(!quantize_for_shape(false, 64, 64));
+        let info = wgpu::AdapterInfo {
+            name: "precision-fixture".into(),
+            vendor: 0,
+            device: 0,
+            device_type: wgpu::DeviceType::Cpu,
+            driver: "fixture".into(),
+            driver_info: String::new(),
+            backend: wgpu::Backend::Vulkan,
+        };
+        let fp32_key = matmul_autotune_key(&info, first.0, first.1, first.2, first_int8);
+        let int8_key = matmul_autotune_key(&info, second.0, second.1, second.2, second_int8);
+        assert_ne!(fp32_key, int8_key);
+        assert!(fp32_key.contains("|int8false|"));
+        assert!(int8_key.contains("|int8true|"));
+    }
+
+    #[test]
     fn prepacked_f32_upload_matches_shader_row_major_contract() {
         let rhs = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
@@ -4761,7 +4787,16 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 }
 
 fn should_quantize(inner: usize, cols: usize) -> bool {
-    inner.saturating_mul(cols) >= QUANTIZATION_MIN_VOLUME
+    // Float32 tensors must not silently become lossy int8 weights based on size.
+    // Freeze the explicit opt-in for this process so cached plans remain coherent.
+    static ALLOW_INT8: OnceLock<bool> = OnceLock::new();
+    let enabled =
+        *ALLOW_INT8.get_or_init(|| env::var("SPIRALTORCH_WGPU_ALLOW_INT8").as_deref() == Ok("1"));
+    quantize_for_shape(enabled, inner, cols)
+}
+
+fn quantize_for_shape(enabled: bool, inner: usize, cols: usize) -> bool {
+    enabled && inner.saturating_mul(cols) >= QUANTIZATION_MIN_VOLUME
 }
 
 struct QuantizedWeights {
@@ -4852,7 +4887,17 @@ impl RhsCacheKey {
 }
 
 fn upload_weights(device: &Device, rhs: &[f32], inner: usize, cols: usize) -> WeightBuffers {
-    if should_quantize(inner, cols) {
+    upload_weights_with_precision(device, rhs, inner, cols, should_quantize(inner, cols))
+}
+
+fn upload_weights_with_precision(
+    device: &Device,
+    rhs: &[f32],
+    inner: usize,
+    cols: usize,
+    int8: bool,
+) -> WeightBuffers {
+    if int8 {
         let quantized = QuantizedWeights::from_f32(rhs, inner, cols);
         let buffer = Arc::new(
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -10572,7 +10617,7 @@ fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     TileConfig::new(16, 16, 16)
 }
 
-const MATMUL_AUTOTUNE_REVISION: u64 = 1;
+const MATMUL_AUTOTUNE_REVISION: u64 = 3;
 const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
 const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
 const AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -10617,7 +10662,17 @@ fn autotune_tile_config(
     }
 
     let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
-    let (key, path) = matmul_autotune_key(ctx, bucket_rows, bucket_inner, bucket_cols)?;
+    // Bucketing can cross the quantization threshold. Both the key and the
+    // synthetic sample must use the real operation's precision.
+    let int8 = should_quantize(inner, cols);
+    let path = autotune_store_path()?;
+    let key = matmul_autotune_key(
+        ctx.adapter_info(),
+        bucket_rows,
+        bucket_inner,
+        bucket_cols,
+        int8,
+    );
 
     if let Some(tile) = lock_recover(&ctx.autotune_cache).get(&key).copied() {
         return Some(tile);
@@ -10634,6 +10689,7 @@ fn autotune_tile_config(
         sample_rows: sample_rows.min(AUTOTUNE_SAMPLE_MAX_DIM),
         sample_inner: sample_inner.min(AUTOTUNE_SAMPLE_MAX_DIM),
         sample_cols: sample_cols.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        int8,
         revision: MATMUL_AUTOTUNE_REVISION,
         runs: AUTOTUNE_SAMPLE_RUNS as u32,
     };
@@ -10666,7 +10722,8 @@ fn autotune_tile_config(
     let lhs_data = vec![0.0f32; lhs_len];
     let rhs_data = vec![0.0f32; rhs_len];
     let lhs_buf = upload_lhs(device, "st.tensor.wgpu_dense.autotune.lhs", &lhs_data);
-    let rhs_buffers = upload_weights(device, &rhs_data, sample_inner, sample_cols);
+    let rhs_buffers =
+        upload_weights_with_precision(device, &rhs_data, sample_inner, sample_cols, int8);
     let out_buf = allocate_output(device, "st.tensor.wgpu_dense.autotune.out", out_len);
 
     let mut best: Option<(TileConfig, f64)> = None;
@@ -10856,6 +10913,7 @@ struct MatmulAutotuneContext {
     sample_rows: usize,
     sample_inner: usize,
     sample_cols: usize,
+    int8: bool,
     revision: u64,
     runs: u32,
 }
@@ -10954,23 +11012,21 @@ fn encode_component(value: &str) -> String {
 }
 
 fn matmul_autotune_key(
-    ctx: &GpuContext,
+    info: &wgpu::AdapterInfo,
     rows: usize,
     inner: usize,
     cols: usize,
-) -> Option<(String, PathBuf)> {
-    let path = autotune_store_path()?;
-    let info = ctx.adapter_info();
+    int8: bool,
+) -> String {
     let backend = encode_component(&format!("{:?}", info.backend));
     let driver = encode_component(&info.driver);
     let driver_info = encode_component(&info.driver_info);
     let name = encode_component(&info.name);
-    let key = format!(
-        "wgpu.matmul.v{MATMUL_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{inner}x{cols}|runs{AUTOTUNE_SAMPLE_RUNS}",
+    format!(
+        "wgpu.matmul.v{MATMUL_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{inner}x{cols}|int8{int8}|runs{AUTOTUNE_SAMPLE_RUNS}",
         vendor = info.vendor,
         device = info.device,
-    );
-    Some((key, path))
+    )
 }
 
 fn autotune_env_enabled() -> bool {

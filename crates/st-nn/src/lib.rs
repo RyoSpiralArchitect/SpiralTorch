@@ -80,7 +80,7 @@ pub use gnn::{
 pub use golden::{
     CouncilDigest, CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective,
     GoldenCouncilSnapshot, GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig,
-    GoldenSelfRewriteConfig,
+    GoldenSelfRewriteConfig, GoldenTrainedWorker, GoldenTrainingOutput, GoldenWorkerEpoch,
 };
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;

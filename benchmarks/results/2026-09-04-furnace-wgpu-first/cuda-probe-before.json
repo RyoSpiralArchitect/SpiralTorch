@@ -1,0 +1,36 @@
+{
+  "backend": "cuda",
+  "kind": "topk",
+  "rows": 2,
+  "cols": 32,
+  "k": 4,
+  "strict_success": false,
+  "non_strict_success": true,
+  "gpu_path_available": false,
+  "used_fallback": true,
+  "hip_real_enabled": false,
+  "strict_values": null,
+  "strict_indices": null,
+  "strict_error": "cuda launch failed (cuda nvrtc compile failed: CompileError { nvrtc: NvrtcError(NVRTC_ERROR_COMPILATION), options: [], log: \"default_program(4): catastrophic error: could not open source file \\\"cuda_runtime.h\\\" (no directories in search list)\\n  #include <cuda_runtime.h>\\n                           ^\\n\\n1 catastrophic error detected in the compilation of \\\"default_program\\\".\\nCompilation terminated.\\n\" }); fallback disabled",
+  "non_strict_values": [
+    15.0,
+    14.0,
+    13.0,
+    12.0,
+    15.125,
+    14.125,
+    13.125,
+    12.125
+  ],
+  "non_strict_indices": [
+    31,
+    30,
+    29,
+    28,
+    31,
+    30,
+    29,
+    28
+  ],
+  "non_strict_error": null
+}

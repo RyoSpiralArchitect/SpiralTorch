@@ -328,6 +328,29 @@ fn blocking_readback_error(operation: &'static str) -> WgpuRuntimeError {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn host_poll_delay(elapsed: Duration, timeout: Duration) -> Duration {
+    if elapsed < Duration::from_micros(200) {
+        Duration::ZERO
+    } else {
+        (elapsed / 8)
+            .min(Duration::from_millis(1))
+            .min(timeout.saturating_sub(elapsed))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pause_host_poll(started: Instant, timeout: Duration) {
+    // Short kernels should not pay a fixed millisecond per completion check.
+    // Back off on long work without replacing the bounded poll by an unbounded wait.
+    let delay = host_poll_delay(started.elapsed(), timeout);
+    if delay.is_zero() {
+        std::thread::yield_now();
+    } else {
+        std::thread::sleep(delay);
+    }
+}
+
 /// Submit command buffers and bound host polling by an explicit timeout.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn submit_with_timeout(
@@ -349,7 +372,7 @@ pub fn submit_with_timeout(
         match receiver.try_recv() {
             Ok(()) => return Ok(()),
             Err(mpsc::TryRecvError::Empty) if started.elapsed() < timeout => {
-                std::thread::sleep(Duration::from_millis(1));
+                pause_host_poll(started, timeout);
             }
             Err(mpsc::TryRecvError::Empty) => {
                 return Err(WgpuRuntimeError::SubmitTimeout { operation, timeout });
@@ -431,7 +454,7 @@ pub fn map_read_bytes_with_timeout(
                 break;
             }
             Err(mpsc::TryRecvError::Empty) if started.elapsed() < timeout => {
-                std::thread::sleep(Duration::from_millis(1));
+                pause_host_poll(started, timeout);
             }
             Err(mpsc::TryRecvError::Empty) => {
                 buffer.unmap();
@@ -626,6 +649,33 @@ pub fn read_buffer<T: Pod>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn host_poll_backoff_keeps_fast_path_and_deadline() {
+        let timeout = Duration::from_secs(1);
+        assert_eq!(
+            host_poll_delay(Duration::from_micros(100), timeout),
+            Duration::ZERO
+        );
+        assert_eq!(
+            host_poll_delay(Duration::from_micros(400), timeout),
+            Duration::from_micros(50)
+        );
+        assert_eq!(
+            host_poll_delay(Duration::from_millis(20), timeout),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            host_poll_delay(timeout - Duration::from_micros(10), timeout),
+            Duration::from_micros(10)
+        );
+        assert_eq!(host_poll_delay(timeout, timeout), Duration::ZERO);
+        assert_eq!(
+            host_poll_delay(timeout + Duration::from_secs(1), timeout),
+            Duration::ZERO
+        );
+    }
 
     #[test]
     fn checked_byte_len_rejects_unaddressable_storage() {

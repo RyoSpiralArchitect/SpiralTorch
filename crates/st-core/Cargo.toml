@@ -108,3 +108,8 @@ path = "../../examples/custom_operator_demo.rs"
 [[example]]
 name = "plugin_system_demo"
 path = "../../examples/plugin_system_demo.rs"
+
+[[example]]
+name = "backend_rank_bench"
+path = "../../examples/backend_rank_bench.rs"
+required-features = ["cuda", "wgpu-rt", "kdsl"]
