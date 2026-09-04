@@ -927,6 +927,9 @@ fn validated_tensor_execution_plan_binding(
 ///
 /// The observation is a separate Rust-owned committed contract. Validation
 /// replays that contract without querying the receiving process's device.
+/// Tensor capabilities follow the provider's compiled features, which Cargo
+/// may enable independently of this crate's integration features. Observing a
+/// ready tensor kernel does not authorize local policy materialization.
 pub fn observe_runtime_execution_plan_capabilities(
     mut request: RuntimeExecutionPlanRequest,
 ) -> Result<RuntimeExecutionPlanRequest, RuntimeExecutionPlanError> {
@@ -2545,23 +2548,57 @@ mod tests {
             .expect("plan replay uses committed evidence instead of the live device");
     }
 
-    #[cfg(not(feature = "wgpu"))]
     #[test]
-    fn feature_disabled_observer_commits_not_built_instead_of_native() {
+    fn wgpu_observer_preserves_tensor_provider_capability() {
+        use st_tensor::execution_capability::{
+            observe_tensor_execution_capability, TensorExecutionCapabilityStatus,
+            TensorExecutionReadyProof,
+        };
+
+        // Another dependency may enable st-tensor/wgpu_dense without st-core/wgpu.
+        let provider = observe_tensor_execution_capability(
+            TensorExecutionBackend::Wgpu,
+            TensorExecutionWorkload::Softmax { rows: 2, cols: 4 },
+        );
+        let (expected_status, expected_state) = match provider.status {
+            TensorExecutionCapabilityStatus::Ready => (
+                RuntimeComponentCapabilityStatus::Ready,
+                RuntimeComponentCapabilityState::Ready,
+            ),
+            TensorExecutionCapabilityStatus::Unavailable => (
+                RuntimeComponentCapabilityStatus::Unavailable,
+                RuntimeComponentCapabilityState::Unavailable,
+            ),
+            TensorExecutionCapabilityStatus::NotBuilt => (
+                RuntimeComponentCapabilityStatus::NotBuilt,
+                RuntimeComponentCapabilityState::NotBuilt,
+            ),
+            TensorExecutionCapabilityStatus::Unsupported => (
+                RuntimeComponentCapabilityStatus::Unsupported,
+                RuntimeComponentCapabilityState::Unsupported,
+            ),
+        };
+        let expected_proof = provider.ready_proof.map(|proof| match proof {
+            TensorExecutionReadyProof::StaticHostContract => {
+                RuntimeComponentReadyProof::StaticHostContract
+            }
+            TensorExecutionReadyProof::RuntimeDispatchSentinel => {
+                RuntimeComponentReadyProof::RuntimeDispatchSentinel
+            }
+        });
         let mut request =
             execution_request(probe_for(BackendKind::Wgpu), AcceleratorFallback::Allow);
         request.component_workloads = vec![RuntimeComponentWorkload::Softmax { rows: 2, cols: 4 }];
         let observed = observe_runtime_execution_plan_capabilities(request)
-            .expect("feature-disabled observation remains inspectable");
-        assert_eq!(
-            observed
-                .component_capability_observation
-                .as_ref()
-                .expect("committed observation")
-                .capabilities[0]
-                .status,
-            RuntimeComponentCapabilityStatus::NotBuilt
-        );
+            .expect("provider observation remains inspectable");
+        let evidence = &observed
+            .component_capability_observation
+            .as_ref()
+            .expect("committed observation")
+            .capabilities[0];
+        assert_eq!(evidence.status, expected_status);
+        assert_eq!(evidence.ready_proof, expected_proof);
+        assert_eq!(evidence.backend, RuntimeTensorBackend::Wgpu);
 
         let plan = evaluate_runtime_execution_plan(observed).expect("plan evaluates");
         let softmax = plan
@@ -2569,15 +2606,26 @@ mod tests {
             .iter()
             .find(|route| route.component == RuntimeExecutionComponent::Softmax)
             .expect("softmax route");
-        assert_eq!(
-            softmax.capability_state,
-            RuntimeComponentCapabilityState::NotBuilt
-        );
-        assert!(!softmax.native);
-        assert!(!plan.execution_allowed);
-        assert!(plan
-            .blockers
-            .contains(&"component_capability_unready:softmax:not_built".to_owned()));
+        assert_eq!(softmax.capability_state, expected_state);
+        let ready = provider.status == TensorExecutionCapabilityStatus::Ready;
+        assert_eq!(softmax.native, ready);
+        if !ready {
+            assert!(!plan.execution_allowed);
+            assert!(plan.blockers.contains(&format!(
+                "component_capability_unready:softmax:{}",
+                expected_state.as_str()
+            )));
+        }
+        if !cfg!(feature = "wgpu") {
+            assert!(!plan.runtime_ready);
+            assert!(!plan.execution_allowed);
+            assert!(matches!(
+                BackendPolicy::try_from_runtime_plan(&plan),
+                Err(RuntimeExecutionPlanError::ExecutionBlocked { .. })
+            ));
+        }
+        plan.validate()
+            .expect("provider evidence replays unchanged");
     }
 
     #[test]

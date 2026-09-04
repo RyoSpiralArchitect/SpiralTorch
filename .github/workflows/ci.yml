@@ -157,6 +157,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build tensor + wgpu
         run: cargo build -p st-tensor --features wgpu --release
+      - name: Tensor provider feature unification without core WGPU integration
+        run: cargo test --locked -p st-core -p st-tensor --release --lib wgpu_observer_preserves_tensor_provider_capability
       - name: nonlinear autograd on strict WGPU paths
         env:
           SPIRALTORCH_STRICT_GPU: "1"
