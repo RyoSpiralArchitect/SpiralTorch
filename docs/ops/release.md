@@ -77,6 +77,14 @@ release requires inspection, not a silent rebuild or overwrite. This route is
 for retained payloads from 0.4.27 onward; it cannot repair the published empty
 0.4.26 release.
 
+Recovery tooling is pinned to the dispatched workflow commit. A separate
+checkout resolves the original release tag; all artifact identity and wheel
+provenance checks remain pinned to that original source, never to the newer
+tooling revision. This allows fixing the recovery mechanism without moving
+the release tag or rebuilding its payload. Draft lookup uses authenticated
+release enumeration because the tag lookup endpoint omits unpublished drafts;
+final publication rechecks the known release ID.
+
 ## Common Variables
 
 ```bash

@@ -30,8 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Resolve the original source separately from recovery tooling
+        uses: actions/checkout@v5
+        with:
           ref: ${{ inputs.release_tag }}
           persist-credentials: false
+          path: release-source
       - name: Validate original build and locate exact retained artifact
         id: source
         uses: actions/github-script@v8
@@ -39,7 +45,9 @@ jobs:
           script: |
             const { preflight, recoveryArtifact } = require('./scripts/finalize_github_release.cjs');
             const sourceSha = require('node:child_process')
-              .execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+              .execFileSync('git', ['rev-parse', 'HEAD'], {
+                cwd: 'release-source', encoding: 'utf8',
+              }).trim();
             await preflight({ github, repo: context.repo, tag: process.env.RELEASE_TAG });
             const artifact = await recoveryArtifact({
               github, repo: context.repo, tag: process.env.RELEASE_TAG,
@@ -67,7 +75,6 @@ jobs:
               --source-digest "$SOURCE_SHA" \
               --signer-digest "$SOURCE_SHA" \
               --source-ref "refs/tags/$RELEASE_TAG" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml" \
               --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml@refs/tags/$RELEASE_TAG" \
               --deny-self-hosted-runners
           done < <(find retained-dist -type f -name '*.whl' -print0)

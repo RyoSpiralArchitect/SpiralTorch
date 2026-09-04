@@ -14,9 +14,15 @@ async function getRelease(github, repo, tag) {
   try {
     return (await github.rest.repos.getReleaseByTag({ ...repo, tag })).data;
   } catch (error) {
-    if (error.status === 404) return null;
-    throw error;
+    if (error.status !== 404) throw error;
   }
+  // The tag endpoint exposes published releases, not drafts. Enumerate with
+  // authenticated access before treating a 404 as an absent release.
+  const matches = (await github.paginate(github.rest.repos.listReleases, {
+    ...repo, per_page: 100,
+  })).filter((release) => release.tag_name === tag);
+  if (matches.length > 1) throw new Error("Ambiguous release identity for tag.");
+  return matches[0] || null;
 }
 
 async function preflight({ github, repo, tag }) {
@@ -134,7 +140,9 @@ async function finalize({ github, repo, tag, sourceSha, dist }) {
     });
   }
   assertAssets(await listAssets(), files, true);
-  const latest = await getRelease(github, repo, tag);
+  const { data: latest } = await github.rest.repos.getRelease({
+    ...repo, release_id: release.id,
+  });
   if (!latest || latest.id !== release.id) throw new Error("Release identity changed.");
   assertDraft(latest, tag);
   await checkSource();

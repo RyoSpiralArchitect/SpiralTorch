@@ -15,6 +15,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_draft_recovery_reads_exact_retained_payload_without_regeneration(self) -> None:
         recovery = (ROOT / ".github/workflows/recover_github_release.yml").read_text()
         self.assertIn("recoveryArtifact({", recovery)
+        self.assertIn("ref: ${{ github.sha }}", recovery)
+        self.assertIn("ref: ${{ inputs.release_tag }}", recovery)
+        self.assertIn("path: release-source", recovery)
+        self.assertIn("cwd: 'release-source'", recovery)
         self.assertIn("artifact-ids: ${{ steps.source.outputs.artifact_id }}", recovery)
         self.assertIn("run-id: ${{ inputs.source_run_id }}", recovery)
         self.assertIn("dist: 'retained-dist'", recovery)
@@ -24,6 +28,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', recovery)
         self.assertIn('--source-digest "$SOURCE_SHA"', recovery)
         self.assertIn("--deny-self-hosted-runners", recovery)
+        self.assertIn("--cert-identity ", recovery)
+        self.assertNotIn("--signer-workflow ", recovery)
+        self.assertNotIn("--signer-repo ", recovery)
+        self.assertNotIn("--cert-identity-regex ", recovery)
         self.assertIn("group: release-wheels-${{ inputs.release_tag }}", recovery)
         for forbidden in [
             "cargo ", "maturin ", "generate_repo_manifest", "sbom-action",
