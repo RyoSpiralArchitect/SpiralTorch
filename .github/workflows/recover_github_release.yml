@@ -75,7 +75,6 @@ jobs:
               --source-digest "$SOURCE_SHA" \
               --signer-digest "$SOURCE_SHA" \
               --source-ref "refs/tags/$RELEASE_TAG" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml" \
               --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml@refs/tags/$RELEASE_TAG" \
               --deny-self-hosted-runners
           done < <(find retained-dist -type f -name '*.whl' -print0)

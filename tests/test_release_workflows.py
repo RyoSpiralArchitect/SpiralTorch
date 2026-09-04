@@ -28,6 +28,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', recovery)
         self.assertIn('--source-digest "$SOURCE_SHA"', recovery)
         self.assertIn("--deny-self-hosted-runners", recovery)
+        self.assertIn("--cert-identity ", recovery)
+        self.assertNotIn("--signer-workflow ", recovery)
+        self.assertNotIn("--signer-repo ", recovery)
+        self.assertNotIn("--cert-identity-regex ", recovery)
         self.assertIn("group: release-wheels-${{ inputs.release_tag }}", recovery)
         for forbidden in [
             "cargo ", "maturin ", "generate_repo_manifest", "sbom-action",
