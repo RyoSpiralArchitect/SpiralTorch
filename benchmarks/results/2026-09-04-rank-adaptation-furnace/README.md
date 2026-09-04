@@ -48,30 +48,30 @@ intervals or a cross-runtime speed comparison.
 
 | Native case | Candidate medians (ms) | Black Cat selections |
 | --- | --- | --- |
-| CUDA TopK, 256 cols | wg32 0.0928; wg128 0.1789; wg256 0.2934 | 30 / 3 / 3 |
-| CUDA BottomK, 256 cols | wg32 0.0930; wg128 0.1789; wg256 0.2935 | 30 / 3 / 3 |
-| CUDA TopK, 2048 cols | wg32 0.1308; wg128 0.1205; wg256 1.0525 | 15 / 18 / 3 |
-| CUDA BottomK, 2048 cols | wg32 0.1306; wg128 0.1204; wg256 1.0524 | 15 / 18 / 3 |
-| CUDA MidK, 256 cols | wg32 0.0928; wg128 0.0477; wg256 0.0478 | 3 / 14 / 19 |
-| CUDA MidK, 2048 cols | wg32 3.6590; wg128 1.0184; wg256 0.6347 | 3 / 9 / 24 |
-| WGPU TopK, 256 cols | direct 0.8450; two-stage 0.8603 | 17 / 19 |
-| WGPU BottomK, 256 cols | direct 0.8308; two-stage 0.8561 | 18 / 18 |
-| WGPU MidK, 256 cols | direct 1.5182; two-stage 0.8491 | 9 / 27 |
+| CUDA TopK, 256 cols | wg32 0.0931; wg128 0.1789; wg256 0.2919 | 30 / 3 / 3 |
+| CUDA BottomK, 256 cols | wg32 0.0928; wg128 0.1790; wg256 0.2922 | 30 / 3 / 3 |
+| CUDA TopK, 2048 cols | wg32 0.1308; wg128 0.1207; wg256 1.0524 | 15 / 18 / 3 |
+| CUDA BottomK, 2048 cols | wg32 0.1308; wg128 0.1207; wg256 1.0527 | 15 / 18 / 3 |
+| CUDA MidK, 256 cols | wg32 0.0927; wg128 0.0477; wg256 0.0479 | 3 / 9 / 24 |
+| CUDA MidK, 2048 cols | wg32 3.6575; wg128 1.0157; wg256 0.6345 | 3 / 9 / 24 |
+| WGPU TopK, 256 cols | direct 0.8376; two-stage 0.8560 | 17 / 19 |
+| WGPU BottomK, 256 cols | direct 0.8360; two-stage 0.8495 | 18 / 18 |
+| WGPU MidK, 256 cols | direct 1.5182; two-stage 0.8529 | 9 / 27 |
 
-The sole exact WGPU arm at 2048 columns measured 0.8547 ms for TopK, 0.8561 ms
-for BottomK, and 2.0190 ms for MidK. PyTorch CUDA host-to-host medians range from
-0.0304 to 0.0594 ms. Most
+The sole exact WGPU arm at 2048 columns measured 0.8533 ms for TopK, 0.8836 ms
+for BottomK, and 2.0132 ms for MidK. PyTorch CUDA host-to-host medians range from
+0.0303 to 0.0590 ms. Most
 SpiralTorch cases, especially WGPU and wide MidK, remain slower at this boundary.
 The useful win here is narrower: the controller now finds materially different
 native optima by shape instead of "tuning" knobs that CUDA ignored.
 
 ## Receipts
 
-- Artifact SHA-256: `33e06b3b9d13e190b5c4b3b86f2644369ead45e5cdf67816f68b9a30a7380e9b`
-- Native executable SHA-256: `541b3d2816a50eff2302adec34128b5b7db843d9662fbcf15b9c77be2ecb74ff`
+- Artifact SHA-256: `932e8a47d97b43c1d670af98bfcbf60e81be30ca13f976a0994464c1e2cf71e1`
+- Native executable SHA-256: `02592b704490a494e610410ad49c5ed8cc2f1b06fb5b7c168d838b0bacb0eb54`
 - Request SHA-256: `f38179b7b3bad24ebd983bbadf6b0faaec68b5c98054a4ba3b3da43a749c7ffe`
-- Source commit: `b1581bf7e032e2e517cdbe86dfaaf699c9c533d8`
-- Source tree: `400c1f23c0e9cc83425460a9125f85f4a29d33ad`
+- Source commit: `307733f8af125668bbd7ae23bb9ed90a48492133`
+- Source tree: `b816e51f4ce0c2b89642d05e7af6cf7ef81a5f30`
 - Tracked status/diff SHA-256: both the empty-input digest
   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
   with `tracked_dirty: false` before and after execution.
