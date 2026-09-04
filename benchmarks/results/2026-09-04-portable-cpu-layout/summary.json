@@ -1,0 +1,128 @@
+{
+  "numerical_gates_passed": 288,
+  "statistic": "median of six per-seed medians across two process runs",
+  "native": {
+    "128": {
+      "baseline": {
+        "st_packed_out": 0.33258699999999997,
+        "st_faer_out": 0.048955,
+        "torch_cpu_out": 0.0282555
+      },
+      "candidate": {
+        "st_packed_out": 0.13072075,
+        "st_faer_out": 0.048853,
+        "torch_cpu_out": 0.0282585
+      }
+    },
+    "256": {
+      "baseline": {
+        "st_packed_out": 4.182902749999999,
+        "st_faer_out": 0.35970824999999995,
+        "torch_cpu_out": 0.22868824999999998
+      },
+      "candidate": {
+        "st_packed_out": 1.63995075,
+        "st_faer_out": 0.35169175,
+        "torch_cpu_out": 0.21664125
+      }
+    }
+  },
+  "wasm": {
+    "matmul": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.01639750000000184,
+          "torch_ms": 0.0022855
+        },
+        "candidate": {
+          "wasm_ms": 0.01626149999999882,
+          "torch_ms": 0.00228525
+        }
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.05271874999999859,
+          "torch_ms": 0.007059
+        },
+        "candidate": {
+          "wasm_ms": 0.05241849999999815,
+          "torch_ms": 0.0070465
+        }
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.388150999999997,
+          "torch_ms": 0.047560000000000005
+        },
+        "candidate": {
+          "wasm_ms": 0.3875100000000007,
+          "torch_ms": 0.0476765
+        }
+      }
+    },
+    "gather": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.005704499999996671,
+          "torch_ms": 0.002324
+        },
+        "candidate": {
+          "wasm_ms": 0.005760749999993209,
+          "torch_ms": 0.00231425
+        }
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.011821249999997008,
+          "torch_ms": 0.0025564999999999997
+        },
+        "candidate": {
+          "wasm_ms": 0.011805250000001877,
+          "torch_ms": 0.00255975
+        }
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.016373500000000263,
+          "torch_ms": 0.0035122499999999997
+        },
+        "candidate": {
+          "wasm_ms": 0.016651249999998896,
+          "torch_ms": 0.003496
+        }
+      }
+    },
+    "scatter": {
+      "32": {
+        "baseline": {
+          "wasm_ms": 0.006557999999998287,
+          "torch_ms": 0.00423275
+        },
+        "candidate": {
+          "wasm_ms": 0.006699499999996306,
+          "torch_ms": 0.00423575
+        }
+      },
+      "64": {
+        "baseline": {
+          "wasm_ms": 0.019316499999998626,
+          "torch_ms": 0.00485625
+        },
+        "candidate": {
+          "wasm_ms": 0.019579000000000235,
+          "torch_ms": 0.00479075
+        }
+      },
+      "128": {
+        "baseline": {
+          "wasm_ms": 0.04346925000000468,
+          "torch_ms": 0.006854249999999999
+        },
+        "candidate": {
+          "wasm_ms": 0.04426600000000036,
+          "torch_ms": 0.0068235
+        }
+      }
+    }
+  }
+}
