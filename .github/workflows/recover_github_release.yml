@@ -14,6 +14,7 @@ on:
 
 permissions:
   actions: read
+  attestations: read
   contents: write
 
 concurrency:

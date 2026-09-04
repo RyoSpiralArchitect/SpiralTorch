@@ -19,6 +19,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("run-id: ${{ inputs.source_run_id }}", recovery)
         self.assertIn("dist: 'retained-dist'", recovery)
         self.assertIn("gh attestation verify", recovery)
+        self.assertIn("attestations: read", recovery)
+        self.assertNotIn("attestations: write", recovery)
         self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', recovery)
         self.assertIn('--source-digest "$SOURCE_SHA"', recovery)
         self.assertIn("--deny-self-hosted-runners", recovery)
