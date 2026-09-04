@@ -38,7 +38,10 @@ build_env=(env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS 
   -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS \
   -u LIBRARY_PATH -u PKG_CONFIG_PATH)
 if [[ "$simd128" == 1 ]]; then
-  build_env+=(CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS=-Ctarget-feature=+simd128)
+  build_env+=(RUSTFLAGS=-Ctarget-feature=+simd128)
+else
+  # A present empty RUSTFLAGS overrides rustflags inherited from Cargo config.
+  build_env+=(RUSTFLAGS=)
 fi
 wasm_pack_command=(wasm-pack build "$CRATE_DIR" --target web --out-dir "$OUT_DIR")
 if [[ "${#wasm_pack_args[@]}" -gt 0 ]]; then

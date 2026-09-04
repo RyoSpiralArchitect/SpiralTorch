@@ -65,7 +65,7 @@ touch "$out/spiraltorch_wasm.js"
     def test_portable_profile_strips_all_rust_flag_sources(self):
         capture = self.run_profile("--dev")
         self.assertIn(
-            "rust=unset\nencoded=unset\nbuild=unset\ntarget=unset\nlibrary=unset\npkg_config=unset\n",
+            "rust=\nencoded=unset\nbuild=unset\ntarget=unset\nlibrary=unset\npkg_config=unset\n",
             capture,
         )
         self.assertIn("--dev", capture)
@@ -77,7 +77,8 @@ touch "$out/spiraltorch_wasm.js"
 
     def test_simd128_profile_is_explicit_and_not_forwarded_to_wasm_pack(self):
         capture = self.run_profile("--release", "--simd128")
-        self.assertIn("target=-Ctarget-feature=+simd128", capture)
+        self.assertIn("rust=-Ctarget-feature=+simd128", capture)
+        self.assertIn("target=unset", capture)
         self.assertIn("--release", capture)
         self.assertNotIn("--simd128", capture)
 

@@ -26,7 +26,8 @@ and produces a module that will not instantiate in engines without that feature;
 serve a portable fallback when supporting older clients. On supported engines it
 allows LLVM to vectorise Rust CPU kernels used by browser autograd and tensor ops.
 The build helper sets the target-specific flag itself and strips ambient host or
-target Rust flags, so the selected profile is explicit and replayable.
+target Rust flags. It explicitly sets `RUSTFLAGS` for both profiles so Cargo
+configuration cannot silently change the selected target contract.
 
 If you have `vcpkg`-style host linker flags exported in your shell (for example via
 `RUSTFLAGS`), prefer the helper script above (it sanitises the environment for wasm
