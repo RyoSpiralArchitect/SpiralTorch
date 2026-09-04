@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.4.25
+
+- Correct affine LayerNorm variance on CPU and WGPU for large offsets and wide
+  finite ranges. Use centered f64 CPU moments and scaled Welford GPU reductions;
+  avoid overflowing/subnormal GPU reciprocals without a CPU fallback.
+- Share the same normalized rows and inverse standard deviations with
+  `nn.LayerNorm.backward()`, preserving its existing gradient backend routes and
+  affine-gradient scaling. Expose `Tensor.layer_norm_stats(epsilon=...)` in
+  Rust and Python for native training-state reuse.
+- Reject undefined constant-row/zero-epsilon normalization and overflowing
+  fused residual values before dispatch. Add numerical, gradient translation,
+  real-WGPU receipt, NumPy/PyTorch, and installed-wheel regression checks.
+
 ## 0.4.21
 
 - Extend the Rust-owned autograd graph with broadcast row bias, ReLU,

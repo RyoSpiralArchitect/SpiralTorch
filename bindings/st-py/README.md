@@ -223,6 +223,30 @@ The root `st.fft_*` aliases use the same implementation. Earlier nontrivial
 FFT-derived results from these paths should be recomputed, because origin-impulse
 tests alone missed incorrect bin order and phase. This is not WebGPU dispatch.
 
+## Stable LayerNorm statistics
+
+Version 0.4.25 replaces cancellation-prone raw second moments in affine
+LayerNorm. CPU uses centered f64 moments; WGPU uses a centered, scaled Welford
+reduction without a CPU fallback. `nn.LayerNorm.backward()` shares the Rust
+statistics rather than reconstructing a rounded f32 mean.
+
+```python
+import spiraltorch as st
+
+x = st.Tensor(1, 4, [10000.0, 10001.0, 10002.0, 10003.0])
+normalized, inverse_std = x.layer_norm_stats(epsilon=1e-5)
+assert normalized.shape() == (1, 4)
+assert inverse_std.shape() == (1, 1)
+```
+
+`layer_norm_stats` is a CPU helper returning two native tensors, with f64
+intermediates and finite f32 outputs. It accepts logical column-major inputs,
+preserves empty row batches, and rejects zero-column tensors, non-finite input,
+invalid epsilon, unrepresentable inverse standard deviations, or constant rows
+with zero epsilon. Affine forward keeps its existing backend selection and
+fused residual-add API. Recheck earlier results on large-offset inputs; fixing
+the operator does not by itself establish an LLM/FT quality improvement.
+
 ## What's included
 
 - `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free

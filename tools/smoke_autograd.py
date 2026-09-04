@@ -1,4 +1,5 @@
 """Check the installed native graph boundary and a complete nonlinear training loop."""
+
 import importlib
 import json
 from pathlib import Path
@@ -9,6 +10,15 @@ import spiraltorch as st
 
 def main():
     native = importlib.import_module("spiraltorch.spiraltorch")
+    shifted = st.Tensor(1, 4, [10000, 10001, 10002, 10003])
+    normalized, inverse_std = shifted.layer_norm_stats(epsilon=1e-5)
+    affine = shifted.layer_norm_affine(
+        st.Tensor(1, 4, [1, 1, 1, 1]), st.Tensor(1, 4, [0, 0, 0, 0]), epsilon=1e-5
+    )
+    expected = [-1.34163542, -0.44721181, 0.44721181, 1.34163542]
+    for result in [normalized, affine]:
+        assert all(abs(x - y) < 3e-5 for x, y in zip(result.tolist()[0], expected))
+    assert abs(inverse_std.tolist()[0][0] - 0.89442361) < 2e-6
     source = st.Tensor(1, 2, [2.0, 3.0])
     assert isinstance(source, native.Tensor)
     leaf = st.AutogradTensor.variable(source)
@@ -56,8 +66,17 @@ def main():
     result = runpy.run_path(str(example))["run"]()
     classification = example.with_name("autograd_classification.py")
     classification_result = runpy.run_path(str(classification))["run"]()
-    print(json.dumps({"snapshot_boundary": "ok", "atomic_sgd_boundary": "ok", "training": result,
-                      "classification": classification_result}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "snapshot_boundary": "ok",
+                "atomic_sgd_boundary": "ok",
+                "training": result,
+                "classification": classification_result,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

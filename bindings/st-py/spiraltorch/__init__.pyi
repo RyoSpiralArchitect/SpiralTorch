@@ -2957,6 +2957,7 @@ class Tensor:
         attn_bias: Tensor | None = ...,
         backend: str | None = ...,
     ) -> Tensor: ...
+    def layer_norm_stats(self, *, epsilon: float = ...) -> tuple[Tensor, Tensor]: ...
     def layer_norm_affine(
         self,
         gamma: Tensor,

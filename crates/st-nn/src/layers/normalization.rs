@@ -1999,46 +1999,9 @@ impl Module for LayerNorm {
         }
         let gamma = self.gamma.value().data().to_vec();
         validate_finite_slice("layernorm_gamma", &gamma)?;
-        let mut normed_values = vec![0.0f32; rows * cols];
-        let mut inv_std = vec![0.0f32; rows];
-
-        for r in 0..rows {
-            let offset = r * cols;
-            let slice = &input.data()[offset..offset + cols];
-            let mean =
-                checked_sum("layernorm_backward_mean_sum", slice.iter().copied())? / cols as f32;
-            validate_finite_value("layernorm_backward_mean", mean)?;
-            let variance_sum = checked_sum(
-                "layernorm_backward_variance_sum",
-                slice.iter().map(|&value| {
-                    let centered = value - mean;
-                    centered * centered
-                }),
-            )?;
-            let variance =
-                checked_finite_value("layernorm_backward_variance", variance_sum / cols as f32)?;
-            let denom =
-                checked_finite_value("layernorm_backward_denom", (variance + epsilon).sqrt())?;
-            if denom <= 0.0 {
-                return Err(TensorError::InvalidValue {
-                    label: "layernorm_backward_denom",
-                });
-            }
-            let inv_denom = checked_finite_value("layernorm_backward_inv_denom", 1.0 / denom)?;
-            inv_std[r] = inv_denom;
-            for c in 0..cols {
-                let normed = checked_finite_value(
-                    "layernorm_backward_normed",
-                    (slice[c] - mean) * inv_denom,
-                )?;
-                normed_values[offset + c] = normed;
-            }
-        }
+        let (normed, inv_std) = input.layer_norm_stats(epsilon)?;
 
         let gradient_scale = 1.0 / rows as f32;
-        validate_finite_slice("layernorm_backward_normed", &normed_values)?;
-        validate_finite_slice("layernorm_backward_inv_denom", &inv_std)?;
-        let normed = Tensor::from_vec(rows, cols, normed_values)?;
         let input_gradient_backend =
             current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let grad_normed = backend_grad_normed(
@@ -2051,7 +2014,7 @@ impl Module for LayerNorm {
         let output = backend_layer_axis_input_gradient(
             &grad_normed,
             &normed,
-            &inv_std,
+            inv_std.data(),
             input_gradient_backend,
             "layernorm_backward_input_grad",
         )?;
@@ -2508,17 +2471,60 @@ mod tests {
     }
 
     #[test]
+    fn layer_norm_backward_is_invariant_to_large_representable_offsets() {
+        let mut centered = LayerNorm::new("centered", 4, -1.0, 1e-5).unwrap();
+        let mut shifted = LayerNorm::new("shifted", 4, -1.0, 1e-5).unwrap();
+        for layer in [&mut centered, &mut shifted] {
+            layer
+                .gamma
+                .value_mut()
+                .data_mut()
+                .copy_from_slice(&[0.5, -1.0, 2.0, 0.0]);
+        }
+        let input = Tensor::from_vec(1, 4, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+        let large = Tensor::from_vec(1, 4, vec![1e7, 1e7 + 1.0, 1e7 + 2.0, 1e7 + 3.0]).unwrap();
+        let seed = Tensor::from_vec(1, 4, vec![0.2, -0.3, 0.7, 1.1]).unwrap();
+        let expected = centered.backward(&input, &seed).unwrap();
+        let actual = shifted.backward(&large, &seed).unwrap();
+        assert_eq!(actual.data(), expected.data());
+        assert_eq!(
+            shifted.gamma.gradient().unwrap().data(),
+            centered.gamma.gradient().unwrap().data()
+        );
+        assert_eq!(
+            shifted.beta.gradient().unwrap().data(),
+            centered.beta.gradient().unwrap().data()
+        );
+    }
+
+    #[test]
+    fn layer_norm_backward_accepts_finite_variance_beyond_f32() {
+        let mut layer = LayerNorm::new("wide", 3, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(1, 3, vec![f32::MAX, -f32::MAX, 0.0]).unwrap();
+        let seed = Tensor::from_vec(1, 3, vec![0.1, -0.2, 0.3]).unwrap();
+        let gradient = layer.backward(&input, &seed).unwrap();
+        assert!(gradient.data().iter().all(|value| value.is_finite()));
+        let gamma = layer.gamma.gradient().unwrap();
+        let expected = [0.1 * 1.5_f32.sqrt(), 0.2 * 1.5_f32.sqrt(), 0.0];
+        for (actual, expected) in gamma.data().iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        assert_eq!(layer.beta.gradient().unwrap().data(), seed.data());
+    }
+
+    #[test]
     fn layer_norm_backward_rejects_overflow_without_accumulating() {
         let mut layer = LayerNorm::new("ln", 3, -1.0, 1e-5).unwrap();
-        let input = Tensor::from_vec(1, 3, vec![f32::MAX, -f32::MAX, 0.0]).unwrap();
-        let grad_output = Tensor::from_vec(1, 3, vec![0.1, -0.2, 0.3]).unwrap();
+        layer.gamma.value_mut().data_mut().fill(f32::MAX);
+        let input = Tensor::from_vec(1, 3, vec![1.0, -1.0, 0.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 3, vec![2.0, -2.0, 3.0]).unwrap();
 
         let err = layer.backward(&input, &grad_output).unwrap_err();
 
         assert!(matches!(
             err,
             TensorError::NonFiniteValue {
-                label: "layernorm_backward_variance_sum",
+                label: "layernorm_backward_grad_normed",
                 value,
             } if value.is_infinite()
         ));
