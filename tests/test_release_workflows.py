@@ -12,6 +12,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_stages_verified_draft_before_publishing(self) -> None:
+        workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text()
+        self.assertNotIn("softprops/action-gh-release", workflow)
+        self.assertNotIn("overwrite_files", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("inputs.release_tag || github.ref_name", workflow)
+        self.assertIn("await preflight({ github, repo: context.repo", workflow)
+        self.assertIn("await finalize({", workflow)
+        self.assertIn("execFileSync('git', ['rev-parse', 'HEAD']", workflow)
+        self.assertIn("actions/github-script@v8", workflow)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("node --test tests/test_finalize_github_release.cjs", ci)
+        runbook = (ROOT / "docs/ops/release.md").read_text()
+        self.assertIn('--verify-tag --draft', runbook)
+        self.assertIn("Do not publish an empty release", runbook)
+
     def test_release_docs_match_active_package_version(self) -> None:
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)

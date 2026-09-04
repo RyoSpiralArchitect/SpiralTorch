@@ -33,6 +33,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-wheels-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release_contract:
     name: Validate release source contract
@@ -77,6 +81,16 @@ jobs:
           fi
 
           echo "release source contract ok: version=$package_version tag=${release_tag:-preflight} source=$source_ref"
+
+      - name: Reject already published release before building
+        if: github.event_name != 'workflow_dispatch' || inputs.release_tag != ''
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        with:
+          script: |
+            const { preflight } = require('./scripts/finalize_github_release.cjs');
+            await preflight({ github, repo: context.repo, tag: process.env.RELEASE_TAG });
 
   wheels:
     name: Build ${{ matrix.label }} / py${{ matrix.py }}
@@ -463,10 +477,14 @@ jobs:
             dist/*.json
             dist/spiraltorch-repo-license-manifest.json
             dist/spiraltorch-compliance-seal.json
-      - name: Create/Update GitHub Release with assets
-        uses: softprops/action-gh-release@v2
+      - name: Attach verified draft assets and publish last
+        uses: actions/github-script@v8
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          overwrite_files: true
-          files: |
-            dist/**/*
+          script: |
+            const { finalize } = require('./scripts/finalize_github_release.cjs');
+            const sourceSha = require('node:child_process')
+              .execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+            await finalize({
+              github, repo: context.repo, tag: process.env.RELEASE_TAG,
+              sourceSha, dist: 'dist',
+            });

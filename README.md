@@ -510,7 +510,7 @@ its WGPU kernel. Constant rows require positive epsilon. Recheck earlier
 LayerNorm-derived results on offset-heavy inputs; this is a numerical correction,
 not evidence of improved LLM fine-tuning quality.
 
-Version 0.4.26 connects affine LayerNorm to the native reverse-mode graph:
+Version 0.4.27 connects affine LayerNorm to the native reverse-mode graph:
 `x.layer_norm_affine(gamma, beta)` now works on `AutogradTensor` in Python,
 with the same Rust VJP exposed as WASM `layerNormAffine`. All three operands
 can learn; affine gradients sum rows without hidden batch averaging.
@@ -979,7 +979,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.26
+VERSION=0.4.27
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

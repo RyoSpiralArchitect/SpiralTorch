@@ -42,10 +42,27 @@ exactly. Manual recovery with a non-empty `release_tag` also requires
 compliance manifests, signatures, and publication helpers on one source ref.
 Leave both inputs empty for a build-only branch preflight.
 
+### Immutable GitHub Releases
+
+Do not publish an empty release before the official wheel job finishes.
+The workflow creates a draft, attaches all signed assets, verifies their names,
+sizes and SHA-256 digests, and only then publishes. An existing draft may be
+resumed only when its assets match exactly; published releases are never
+overwritten. Tag/source identity is checked again before publication.
+
+If preparing notes in advance, use `gh release create "$TAG" --verify-tag --draft`
+with explicit title/notes arguments. Never drop `--draft` before assets exist.
+Published immutable releases cannot accept new assets. Leave a failed release
+and its tag intact, record the failure in its notes, and use a new package
+version. In particular, 0.4.26 has no release wheels and was not uploaded to
+PyPI; 0.4.27 delivers the same LayerNorm implementation with this sequencing fix.
+If an upload or publish response is uncertain, inspect the existing release
+before retrying; a notification or failed watcher is not evidence of non-delivery.
+
 ## Common Variables
 
 ```bash
-VERSION=0.4.26
+VERSION=0.4.27
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -63,7 +80,7 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-Expected pre-publish shape for `0.4.26` is:
+Expected pre-publish shape for `0.4.27` is:
 
 ```text
 local_versions ... consistent=yes
@@ -76,8 +93,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.26 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.26 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```

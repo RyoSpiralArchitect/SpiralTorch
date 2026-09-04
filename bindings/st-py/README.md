@@ -249,7 +249,7 @@ the operator does not by itself establish an LLM/FT quality improvement.
 
 ## Differentiable LayerNorm
 
-Version 0.4.26 adds affine LayerNorm to the Rust-owned reverse-mode graph:
+Version 0.4.27 adds affine LayerNorm to the Rust-owned reverse-mode graph:
 
 ```python
 import spiraltorch as st

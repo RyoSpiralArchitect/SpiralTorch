@@ -204,6 +204,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Immutable release publication state machine
+        run: node --test tests/test_finalize_github_release.cjs
       - name: Install matching WASM JavaScript generator
         run: cargo install wasm-bindgen-cli --version 0.2.104 --locked
       - name: Exercise real WASM bindings and learning loops
