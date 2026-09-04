@@ -97,9 +97,6 @@ fn emit_build_info() {
 
 fn emit_git_rerun_paths() {
     println!("cargo:rerun-if-changed=build.rs");
-    let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) else {
-        return;
-    };
     let Some(repo_root) = git_capture(["rev-parse", "--show-toplevel"]).map(PathBuf::from) else {
         return;
     };
@@ -127,7 +124,7 @@ fn emit_git_rerun_paths() {
 
     let Ok(output) = Command::new("git")
         .args(["ls-files", "-z"])
-        .current_dir(&manifest_dir)
+        .current_dir(&repo_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
