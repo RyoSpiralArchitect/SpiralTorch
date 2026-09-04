@@ -15,6 +15,7 @@ pub mod dlpack;
 pub mod execution;
 pub mod execution_capability;
 mod hardmax;
+mod indexing;
 mod memory;
 mod normalization;
 pub mod observability;

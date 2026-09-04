@@ -59,6 +59,8 @@ declare module "spiraltorch-wasm" {
         matmul(rhs: AutogradTensor): AutogradTensor;
         /** Affine gradients sum rows; defaults to epsilon=1e-5. */
         layerNormAffine(gamma: AutogradTensor, beta: AutogradTensor, epsilon?: number | null): AutogradTensor;
+        gatherRows(indices: number[] | Uint32Array): AutogradTensor;
+        scatterAddRows(indices: number[] | Uint32Array, outputRows: number): AutogradTensor;
         scale(factor: number): AutogradTensor;
         transpose(): AutogradTensor;
         sum(): AutogradTensor;

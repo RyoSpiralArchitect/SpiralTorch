@@ -15,7 +15,7 @@ use st_tensor::AutogradSgd as RustAutogradSgd;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use crate::utils::{js_error, js_i32, js_u32};
+use crate::utils::{js_error, js_i32, js_row_indices, js_u32};
 
 #[derive(Clone)]
 struct AutogradTransport {
@@ -218,6 +218,33 @@ impl AutogradTensor {
         self.transport
             .inner
             .add_row(&bias.transport.inner)
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = gatherRows)]
+    pub fn gather_rows(&self, indices: JsValue) -> Result<AutogradTensor, JsValue> {
+        let indices = js_row_indices(&indices)?;
+        self.transport
+            .inner
+            .gather_rows(&indices)
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = scatterAddRows)]
+    pub fn scatter_add_rows(
+        &self,
+        indices: JsValue,
+        output_rows: Number,
+    ) -> Result<AutogradTensor, JsValue> {
+        let indices = js_row_indices(&indices)?;
+        let output_rows = js_u32(output_rows.as_ref(), "scatter output_rows")? as usize;
+        self.transport
+            .inner
+            .scatter_add_rows(&indices, output_rows)
             .map(AutogradTransport::from_inner)
             .map(|transport| Self { transport })
             .map_err(js_error)

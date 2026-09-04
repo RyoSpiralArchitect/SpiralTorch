@@ -129,6 +129,14 @@ enum AutogradOperation {
     Transpose {
         input: AutogradTensor,
     },
+    GatherRows {
+        input: AutogradTensor,
+        indices: Arc<[usize]>,
+    },
+    ScatterAddRows {
+        input: AutogradTensor,
+        indices: Arc<[usize]>,
+    },
     Relu {
         input: AutogradTensor,
     },
@@ -191,6 +199,8 @@ impl AutogradOperation {
             Self::Matmul { .. } => "matmul",
             Self::Scale { .. } => "scale",
             Self::Transpose { .. } => "transpose",
+            Self::GatherRows { .. } => "gather_rows",
+            Self::ScatterAddRows { .. } => "scatter_add_rows",
             Self::Relu { .. } => "relu",
             Self::Gelu { .. } => "gelu",
             Self::LayerNormAffine { .. } => "layer_norm_affine",
@@ -215,6 +225,8 @@ impl AutogradOperation {
             } => vec![input.clone(), gamma.clone(), beta.clone()],
             Self::Scale { input, .. }
             | Self::Transpose { input }
+            | Self::GatherRows { input, .. }
+            | Self::ScatterAddRows { input, .. }
             | Self::Relu { input }
             | Self::Gelu { input }
             | Self::RowSoftmax { input, .. }
@@ -260,6 +272,13 @@ impl AutogradOperation {
             }
             Self::Scale { input, factor } => Ok(vec![(input.clone(), upstream.scale(*factor)?)]),
             Self::Transpose { input } => Ok(vec![(input.clone(), upstream.transpose())]),
+            Self::GatherRows { input, indices } => Ok(vec![(
+                input.clone(),
+                upstream.scatter_add_rows(indices, input.shape().0)?,
+            )]),
+            Self::ScatterAddRows { input, indices } => {
+                Ok(vec![(input.clone(), upstream.gather_rows(indices)?)])
+            }
             Self::Relu { input } => {
                 let mask = Tensor::from_vec(
                     input.shape().0,
@@ -519,6 +538,30 @@ impl AutogradTensor {
             AutogradOperation::AddRow {
                 input: self.clone(),
                 bias: bias.clone(),
+            },
+        )
+    }
+
+    /// Row gather with an immutable integer-ID snapshot and scatter-add VJP.
+    /// Repeated IDs sum their contributions; no batch averaging is introduced.
+    /// Graph execution uses the stable CPU implementation.
+    pub fn gather_rows(&self, indices: &[usize]) -> PureResult<Self> {
+        Self::from_operation(
+            self.value().gather_rows(indices)?,
+            AutogradOperation::GatherRows {
+                input: self.clone(),
+                indices: indices.into(),
+            },
+        )
+    }
+
+    /// Sum rows into a new table, with gather as its first-order VJP.
+    pub fn scatter_add_rows(&self, indices: &[usize], output_rows: usize) -> PureResult<Self> {
+        Self::from_operation(
+            self.value().scatter_add_rows(indices, output_rows)?,
+            AutogradOperation::ScatterAddRows {
+                input: self.clone(),
+                indices: indices.into(),
             },
         )
     }

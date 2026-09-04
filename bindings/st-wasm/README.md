@@ -102,6 +102,21 @@ is recomputed by `st-core` from the forward request and is never accepted from
 the browser. Receipts certify the stated numerical transition and derivative,
 not physical fidelity or training efficacy.
 
+## Integer Row Indexing (Source Builds)
+
+`AutogradTensor.gatherRows(ids)` accepts an Array of validated u32 integers or a
+`Uint32Array`. `scatterAddRows(ids, outputRows)` adds rows into a new zero table.
+Both preserve duplicate IDs and share Rust forward/VJP semantics. Unlike an ABI
+`Vec<u32>` conversion, fractional/negative IDs and non-numeric Array elements
+are rejected before coercion. Values already coerced by the caller's own
+`Uint32Array` construction cannot be recovered or validated retroactively.
+These graph operations execute on CPU; native Rust/Python Tensor utilities
+separately expose strict WGPU dispatch. They do not imply a browser GPU graph.
+
+`node bindings/st-wasm/tests/row_indexing.cjs /path/to/spiraltorch_wasm.js` executes
+the generated WASM, checks boundary failures, and trains a shared embedding/output
+table for 400 synthetic token-transition steps. Free returned handles normally.
+
 ## Shared reverse-mode autograd
 
 `AutogradTensor` is a browser handle over the immutable graph implemented in
