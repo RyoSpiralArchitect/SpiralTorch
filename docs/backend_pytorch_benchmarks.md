@@ -20,6 +20,9 @@ Use `--st-backend faer --torch-device cpu` for a CPU comparison, or
 harness; old implicit `auto`/fallback behavior is intentionally removed and
 `--output` is now required. A new output path is reserved without overwriting an
 earlier result. `--native-prefix /path/to/venv` can enforce import provenance.
+Faer only implements matmul here: gather/scatter use the explicit CPU indexing
+path. Every case records both `requested_st_backend` and `effective_st_backend`,
+including failed cases; this dispatch is not a GPU-error fallback.
 
 - Both runtimes receive identical float32 values, with fixture hashes and seeds.
 - Matmul, gather, and scatter must match a float64 CPU reference before timing.
@@ -38,6 +41,8 @@ lossy int8 machinery remains available through the process-level
 `SPIRALTORCH_WGPU_ALLOW_INT8=1` opt-in, read on first use. Set it before execution;
 changing it after initialization has no effect. This is an approximate mode,
 not a float32-parity optimization, and its autotune cache identity is separate.
+The precision bit comes from the original RHS dimensions, before shape
+bucketing; synthetic autotune samples use that same precision.
 The matched float32 harness explicitly disables this option.
 
 ## Strict Rank Execution And Control
@@ -95,11 +100,28 @@ report and drops the models on return. This new API is Rust-only for now.
 
 With dropout enabled, returned worker IDs remain stable and only successful
 workers are returned. Do not treat a partial result as a dense replacement for
-all configured workers. Errors do not imply rollback of completed updates.
+all configured workers. Use `run_epoch_workers` to continue with survivors:
+
+```rust,ignore
+let next = output.trained.into_iter().map(|worker| {
+    let schedule = schedules[worker.worker].clone();
+    worker.with_epoch(make_loader(), schedule)
+}).collect();
+let output = retriever.run_epoch_workers(next)?;
+```
+
+This worker-ID-keyed input can be reordered. Sparse input requires
+`allow_dropout` and at least `min_successful_workers` participants; duplicate
+or unknown IDs are rejected before any epoch work starts. Omitted workers are
+not trained or counted as fresh dropouts. Failed module/loss state is not
+recoverable, and errors do not imply rollback of completed trainer updates.
+Do not attach a new model to a failed worker's partially advanced trainer.
 
 Regression coverage compares all parameters across three epochs of two-worker
 parallel and sequential training. Barycenter synchronization also handles rank
 hints above tensor width without panic, normalizes storage layout, accumulates
 in float64, and rejects nonfinite inputs/results.
+Additional coverage drops worker 0, reverses surviving IDs 1 and 2, and checks
+three epochs against sequential training with distinct per-worker learning rates.
 
 See the [measured pilot and retained failures](../benchmarks/results/2026-09-04-furnace-wgpu-first/README.md).

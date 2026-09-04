@@ -12,6 +12,12 @@ SPEC.loader.exec_module(bench)
 
 
 class BackendBenchmarkTests(unittest.TestCase):
+    def test_effective_backend_identifies_non_faer_indexing(self):
+        for operation in ("matmul", "gather", "scatter"):
+            for backend in ("cpu", "faer", "wgpu"):
+                expected = "cpu" if backend == "faer" and operation != "matmul" else backend
+                self.assertEqual(bench.effective_backend(operation, backend), expected)
+
     def test_shapes(self):
         self.assertEqual(bench.parse_sizes("32,32;7,64x64,65"), [(32, 32, 32), (7, 64, 65)])
         for invalid in ("0,0", "2,3", "2,3x4,5", "", "-1,-1"):

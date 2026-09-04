@@ -42,6 +42,13 @@ exploratory rerun (`wgpu-vs-cuda-fixed2.json`, 30 samples) is also retained;
   Black Cat observations follow executed, verified variants. The small trial
   does not establish bandit convergence or controller speedup.
 - `faer-vs-torch-cpu.json`: 36/36 separate CPU controls passed with the same fixture generator.
+  This original report only records the requested Faer backend: its matmul
+  uses Faer, but gather/scatter use ST's CPU indexing implementation, not Faer.
+  It is retained unchanged as the pre-review provenance fixture.
+- `faer-vs-torch-cpu-review.json`: 36/36 rerun gates passed, with requested and
+  effective backends recorded in every case: matmul=faer, gather/scatter=cpu.
+  This reruns the corrected harness against the same private native wheel;
+  it is not a new wheel build or evidence for a backend speed change.
 - `macos-wasm-vs-torch.json`: actual WASM CPU, 27/27 cases passed. At size 128,
   WASM matmul/gather/scatter medians were 0.474/0.022/0.042 ms, versus PyTorch
   CPU 0.004/0.002/0.017 ms. Browser WebGPU throughput was not measured.
@@ -80,6 +87,24 @@ the old benchmark PNG renderer. Histogram output is now SVG, and the Plotters
 development dependency is headless. Cargo regenerated the lockfile offline;
 unused font dependencies were removed, with no dependency-version upgrades or
 system package installation.
+
+## Review Follow-Up
+
+The quantization cache now uses the original RHS precision decision even when
+63x65 and 64x64 map to the same bucket. Synthetic autotune samples use the same
+decision; cache revision 3 prevents reuse of the earlier ambiguous entries.
+
+Golden now accepts worker-ID-keyed epoch input. With dropout allowed and quorum
+maintained, surviving workers can continue without replacement models or
+positional reassignment. Regression tests drop ID 0, reorder IDs 1/2, and compare
+all weights with sequential training using distinct per-worker learning rates.
+
+Furnace follow-up validation passed: 13 Golden tests, 44 matmul-filtered unit
+tests, and 8 row-indexing/precision integration tests with real WGPU enabled,
+strict GPU execution, and the NVIDIA Vulkan ICD pinned. The SVG random-init
+benchmark also executed successfully (`cargo bench -- --test`). The local
+standard-library benchmark harness suite passed all 5 tests. Logs are retained
+under the same durable audit directory with the `review-` prefix.
 
 Next priorities are asynchronous browser WebGPU resident workloads, upload and
 readback reuse with explicit lifetimes, and larger model-shaped matmul/rank

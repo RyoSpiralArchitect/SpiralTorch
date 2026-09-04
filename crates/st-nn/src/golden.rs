@@ -530,14 +530,17 @@ impl GoldenScheduleSignal {
     }
 
     fn from_slice(schedules: &[RoundtableSchedule]) -> Self {
-        if schedules.is_empty() {
-            return Self::neutral();
-        }
+        Self::from_iter(schedules.iter())
+    }
+
+    fn from_iter<'a>(schedules: impl Iterator<Item = &'a RoundtableSchedule>) -> Self {
         let mut above = 0.0f32;
         let mut here = 0.0f32;
         let mut beneath = 0.0f32;
         let mut depth = 0.0f32;
+        let mut count = 0usize;
         for schedule in schedules {
+            count += 1;
             let a = schedule.above().k as f32;
             let h = schedule.here().k as f32;
             let b = schedule.beneath().k as f32;
@@ -546,13 +549,16 @@ impl GoldenScheduleSignal {
             beneath += b;
             depth += a + h + b;
         }
+        if count == 0 {
+            return Self::neutral();
+        }
         let total = depth.max(1.0);
         let above_ratio = (above / total).clamp(0.0, 1.0);
         let here_ratio = (here / total).clamp(0.0, 1.0);
         let beneath_ratio = (beneath / total).clamp(0.0, 1.0);
         let balance =
             1.0 - ((above_ratio - here_ratio).abs() + (here_ratio - beneath_ratio).abs()) * 0.5;
-        let depth_mean = depth / schedules.len() as f32;
+        let depth_mean = depth / count as f32;
         Self {
             exploration: (above_ratio * 1.4 + 0.3).clamp(0.2, 1.8),
             optimization: (depth_mean / 48.0 + 0.3).clamp(0.2, 2.4),
@@ -811,6 +817,8 @@ impl GoldenRetriever {
 
     /// Returns successful workers' trained models and loss state for the next epoch.
     /// Failed workers are recorded in the report, not returned as trained models.
+    /// After a tolerated dropout, continue via worker-ID-keyed `run_epoch_workers`,
+    /// not by packing the survivors into this dense, positional API.
     /// Like `run_epoch`, an error does not roll back completed trainer updates.
     pub fn run_epoch_owned<M, L>(
         &mut self,
@@ -836,24 +844,83 @@ impl GoldenRetriever {
             });
         }
 
+        let inputs = modules
+            .into_iter()
+            .zip(losses)
+            .zip(loaders)
+            .zip(schedules)
+            .enumerate()
+            .map(
+                |(worker, (((module, loss), loader), schedule))| GoldenWorkerEpoch {
+                    trained: GoldenTrainedWorker {
+                        worker,
+                        module,
+                        loss,
+                    },
+                    loader,
+                    schedule,
+                },
+            )
+            .collect();
+        self.run_epoch_workers(inputs)
+    }
+
+    /// Runs an epoch with explicit worker identities, preserving trainer ownership
+    /// when successful workers are reordered or survivors continue after dropout.
+    /// Sparse input requires `allow_dropout` and the configured minimum quorum.
+    /// Omitted workers are not trained and are not counted as new dropouts.
+    /// Failed model/loss state is not recoverable; do not substitute fresh state
+    /// for that worker's partially advanced trainer. Continue with survivors.
+    /// Input identities are checked before any task or epoch state is changed.
+    pub fn run_epoch_workers<M, L>(
+        &mut self,
+        inputs: Vec<GoldenWorkerEpoch<M, L>>,
+    ) -> PureResult<GoldenTrainingOutput<M, L>>
+    where
+        M: Module + Send + 'static,
+        L: Loss + Send + 'static,
+    {
+        let expected = inputs.len();
+        if expected < self.min_successful_workers
+            || (!self.allow_dropout && expected != self.workers.len())
+        {
+            return Err(TensorError::IoError {
+                message: format!(
+                    "golden retriever received {expected} participants (minimum required {}, total {}; sparse input requires allow_dropout)",
+                    self.min_successful_workers, self.workers.len()
+                ),
+            });
+        }
+        let mut identities = HashSet::with_capacity(expected);
+        for input in &inputs {
+            let id = input.trained.worker;
+            if id >= self.workers.len() || !identities.insert(id) {
+                return Err(TensorError::IoError {
+                    message: format!("golden retriever invalid or duplicate worker ID {id}"),
+                });
+            }
+        }
+
         self.last_dropouts.clear();
         self.epoch = self.epoch.wrapping_add(1);
         let current_epoch = self.epoch;
         let schedule_signal = self
             .self_rewrite
             .as_ref()
-            .map(|_| GoldenScheduleSignal::from_slice(&schedules));
+            .map(|_| GoldenScheduleSignal::from_iter(inputs.iter().map(|input| &input.schedule)));
         let mut handles = Vec::with_capacity(expected);
-        let mut module_iter = modules.into_iter();
-        let mut loss_iter = losses.into_iter();
-        let mut loader_iter = loaders.into_iter();
-        let mut schedule_iter = schedules.into_iter();
-
-        for worker in self.workers.iter() {
-            let mut module = module_iter.next().expect("module length checked");
-            let mut loss = loss_iter.next().expect("loss length checked");
-            let loader = loader_iter.next().expect("loader length checked");
-            let schedule = schedule_iter.next().expect("schedule length checked");
+        for input in inputs {
+            let GoldenWorkerEpoch {
+                trained,
+                loader,
+                schedule,
+            } = input;
+            let GoldenTrainedWorker {
+                worker: id,
+                mut module,
+                mut loss,
+            } = trained;
+            let worker = &self.workers[id];
             let trainer = worker.trainer.clone();
             let handle = self
                 .runtime
@@ -1214,6 +1281,27 @@ pub struct GoldenTrainedWorker<M, L> {
     pub loss: L,
 }
 
+impl<M, L> GoldenTrainedWorker<M, L> {
+    /// Attaches the next epoch's data without changing this worker's identity.
+    pub fn with_epoch(
+        self,
+        loader: DataLoader,
+        schedule: RoundtableSchedule,
+    ) -> GoldenWorkerEpoch<M, L> {
+        GoldenWorkerEpoch {
+            trained: self,
+            loader,
+            schedule,
+        }
+    }
+}
+
+pub struct GoldenWorkerEpoch<M, L> {
+    pub trained: GoldenTrainedWorker<M, L>,
+    pub loader: DataLoader,
+    pub schedule: RoundtableSchedule,
+}
+
 pub struct GoldenTrainingOutput<M, L> {
     pub report: GoldenEpochReport,
     pub trained: Vec<GoldenTrainedWorker<M, L>>,
@@ -1454,6 +1542,137 @@ mod tests {
                 modules.push(worker.module);
                 losses.push(worker.loss);
             }
+        }
+    }
+
+    fn owned_worker_fixture(id: usize) -> (ModuleTrainer, Linear, RoundtableSchedule) {
+        // Distinct learning rates make positional trainer reassignment observable.
+        let rate = 0.02 * (id + 1) as f32;
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, rate, rate / 5.0);
+        let mut module = Linear::new("survivor", 2, 1).unwrap();
+        module
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.value_mut().data_mut().fill(0.1 * (id + 1) as f32);
+                Ok(())
+            })
+            .unwrap();
+        trainer.prepare(&mut module).unwrap();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        (trainer, module, schedule)
+    }
+
+    fn owned_worker_loader() -> DataLoader {
+        Dataset::from_vec(
+            (0..8)
+                .map(|i| {
+                    let x = i as f32 / 8.0;
+                    (
+                        Tensor::from_vec(1, 2, vec![x, 1.0 - x]).unwrap(),
+                        Tensor::from_vec(1, 1, vec![0.5 * x]).unwrap(),
+                    )
+                })
+                .collect(),
+        )
+        .loader()
+        .batched(1)
+    }
+
+    #[test]
+    fn owned_survivors_continue_by_id_after_dropout_and_reordering() {
+        let mut sequential = [owned_worker_fixture(1), owned_worker_fixture(2)];
+        let mut sequential_losses = [MaybeFailingLoss::healthy(), MaybeFailingLoss::healthy()];
+        let mut trainers = Vec::new();
+        let mut inputs = Vec::new();
+        let mut schedules = Vec::new();
+        for id in 0..3 {
+            let (trainer, module, schedule) = owned_worker_fixture(id);
+            trainers.push(trainer);
+            schedules.push(schedule.clone());
+            inputs.push(
+                GoldenTrainedWorker {
+                    worker: id,
+                    module,
+                    loss: if id == 0 {
+                        MaybeFailingLoss::failing()
+                    } else {
+                        MaybeFailingLoss::healthy()
+                    },
+                }
+                .with_epoch(owned_worker_loader(), schedule),
+            );
+        }
+        let config = GoldenRetrieverConfig {
+            allow_dropout: true,
+            min_successful_workers: 2,
+            ..GoldenRetrieverConfig::default()
+        };
+        let mut retriever = GoldenRetriever::new(config, trainers).unwrap();
+        for epoch in 0..3 {
+            for ((trainer, module, schedule), loss) in
+                sequential.iter_mut().zip(&mut sequential_losses)
+            {
+                trainer
+                    .train_epoch(module, loss, owned_worker_loader(), schedule)
+                    .unwrap();
+            }
+            let output = retriever.run_epoch_workers(inputs).unwrap();
+            assert_eq!(output.trained.len(), 2);
+            assert_eq!(output.report.batches, 16);
+            assert_eq!(output.report.dropouts.len(), usize::from(epoch == 0));
+            if epoch == 0 {
+                assert_eq!(output.report.dropouts[0].worker, 0);
+            }
+            inputs = Vec::new();
+            for worker in output.trained {
+                assert!(worker.worker == 1 || worker.worker == 2);
+                let expected = &sequential[worker.worker - 1].1;
+                assert_eq!(
+                    worker.module.weight().value().data(),
+                    expected.weight().value().data()
+                );
+                assert_eq!(
+                    worker.module.bias().value().data(),
+                    expected.bias().value().data()
+                );
+                let schedule = schedules[worker.worker].clone();
+                inputs.push(worker.with_epoch(owned_worker_loader(), schedule));
+            }
+            inputs.reverse();
+        }
+        assert_eq!(retriever.epoch, 3);
+    }
+
+    #[test]
+    fn owned_epoch_rejects_invalid_participants_before_advancing() {
+        for (ids, allow_dropout, minimum) in [
+            (vec![0, 0], true, 1),
+            (vec![0, 2], true, 1),
+            (vec![], true, 1),
+            (vec![1], true, 2),
+            (vec![1], false, 1),
+        ] {
+            let trainers = (0..2).map(|id| owned_worker_fixture(id).0).collect();
+            let config = GoldenRetrieverConfig {
+                allow_dropout,
+                min_successful_workers: minimum,
+                ..GoldenRetrieverConfig::default()
+            };
+            let mut retriever = GoldenRetriever::new(config, trainers).unwrap();
+            let inputs = ids
+                .into_iter()
+                .map(|id| {
+                    let (_, module, schedule) = owned_worker_fixture(id);
+                    GoldenTrainedWorker {
+                        worker: id,
+                        module,
+                        loss: MaybeFailingLoss::healthy(),
+                    }
+                    .with_epoch(owned_worker_loader(), schedule)
+                })
+                .collect();
+            assert!(retriever.run_epoch_workers(inputs).is_err());
+            assert_eq!(retriever.epoch, 0);
+            assert!(retriever.last_dropouts().is_empty());
         }
     }
 

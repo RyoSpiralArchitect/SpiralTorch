@@ -84,7 +84,13 @@ def correctness(actual, expected, torch, rtol, atol):
     return result
 
 
+def effective_backend(operation, requested):
+    # Faer implements matmul, not row indexing. Keep that distinction in each case.
+    return "cpu" if requested == "faer" and operation in ("gather", "scatter") else requested
+
+
 def benchmark_case(operation, shape, seed, args, st, torch, device):
+    backend = effective_backend(operation, args.st_backend)
     m, k, n = shape
     values, digest = fixture((m if operation == "scatter" else k) * n if operation != "matmul" else m * k, seed)
     ids = torch.tensor([(i * 17 + seed) % k for i in range(m)], dtype=torch.int64)
@@ -96,18 +102,17 @@ def benchmark_case(operation, shape, seed, args, st, torch, device):
         hosts = [torch.tensor(values, dtype=torch.float32).reshape(m, k),
                  torch.tensor(other, dtype=torch.float32).reshape(k, n)]
         native = [st.Tensor(m, k, values), st.Tensor(k, n, other)]
-        st_fn = lambda: native[0].matmul(native[1], backend=args.st_backend)
+        st_fn = lambda: native[0].matmul(native[1], backend=backend)
         torch_op = lambda inputs, _: torch.mm(*inputs)
     else:
         rows = m if operation == "scatter" else k
         hosts = [torch.tensor(values, dtype=torch.float32).reshape(rows, n)]
         native = st.Tensor(rows, n, values)
-        util_backend = "cpu" if args.st_backend == "faer" else args.st_backend
         if operation == "gather":
-            st_fn = lambda: native.gather_rows(ids_list, backend=util_backend)
+            st_fn = lambda: native.gather_rows(ids_list, backend=backend)
             torch_op = lambda inputs, index: inputs[0].index_select(0, index)
         else:
-            st_fn = lambda: native.scatter_add_rows(ids_list, k, backend=util_backend)
+            st_fn = lambda: native.scatter_add_rows(ids_list, k, backend=backend)
             torch_op = lambda inputs, index: inputs[0].new_zeros((k, n)).index_add_(0, index, inputs[0])
         hashes.append(hashlib.sha256(array("q", ids_list).tobytes()).hexdigest())
 
@@ -140,6 +145,7 @@ def benchmark_case(operation, shape, seed, args, st, torch, device):
     st_ms = timings["spiraltorch_host_to_host"]["median_ms"]
     torch_ms = timings["torch_host_to_host"]["median_ms"]
     return {"operation": operation, "shape_m_k_n": shape, "seed": seed,
+            "effective_st_backend": backend, "requested_st_backend": args.st_backend,
             "input_sha256": hashes, "status": "passed", "correctness": checks,
             "first_call_ms": cold, "timings": timings,
             "torch_over_st_host_to_host": torch_ms / st_ms,
@@ -199,6 +205,8 @@ def run(args):
                     case = benchmark_case(operation, shape, seed, args, st, torch, device)
                 except Exception as error:
                     case = {"operation": operation, "shape_m_k_n": shape, "seed": seed,
+                            "effective_st_backend": effective_backend(operation, args.st_backend),
+                            "requested_st_backend": args.st_backend,
                             "status": "error", "error": f"{type(error).__name__}: {error}"}
                 report["cases"].append(case)
                 print(json.dumps(case, allow_nan=False), flush=True)
