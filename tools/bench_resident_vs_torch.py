@@ -25,6 +25,13 @@ def validate_cuda_identity(device_count, device_name, expected_adapter):
         raise RuntimeError("CUDA device does not match expected WGPU adapter")
 
 
+def parse_tiles(spec):
+    tiles = [tuple(int(x) for x in part.split(",")) for part in spec.split(";")]
+    if any(len(tile) != 3 for tile in tiles) or len(set(tiles)) != len(tiles):
+        raise ValueError("tiles must be unique M,N,K triples")
+    return tiles
+
+
 def run(args):
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "RAYON_NUM_THREADS"):
         os.environ[name] = "1"
@@ -48,7 +55,8 @@ def run(args):
     if args.native_prefix and not native.is_relative_to(args.native_prefix.resolve()):
         raise RuntimeError("native extension outside expected prefix")
     report = {
-        "schema": "spiraltorch.resident_matmul_bench.v1",
+        "schema": "spiraltorch.resident_matmul_bench.v2",
+        "tiles_mnk": parse_tiles(args.tiles_mnk),
         "platform": platform.platform(), "host": platform.node(), "python": sys.version,
         "torch": torch.__version__, "torch_device": str(device),
         "torch_gpu": torch.cuda.get_device_name() if device.type == "cuda" else "MPS",
@@ -71,41 +79,53 @@ def run(args):
                 a, ha = fixture(m * k, seed)
                 b, hb = fixture(k * n, seed + 1)
                 case["input_sha256"] = [ha, hb]
-                workspace = st.WgpuMatmul(m, k, n)
-                info = workspace.adapter_info()
-                case["wgpu_adapter"] = info
-                if info["device_type"] == "Cpu":
-                    raise RuntimeError("software WGPU adapter is not admitted as GPU timing")
-                if args.expected_adapter not in info["name"]:
-                    raise RuntimeError("WGPU adapter does not match expected adapter")
-                workspace.upload(st.Tensor(m, k, a), st.Tensor(k, n, b))
                 ta = torch.tensor(a, dtype=torch.float32).reshape(m, k).to(device)
                 tb = torch.tensor(b, dtype=torch.float32).reshape(k, n).to(device)
                 out = torch.empty((m, n), dtype=torch.float32, device=device)
                 reference = ta.cpu().double() @ tb.cpu().double()
-                workspace.dispatch()
                 torch.mm(ta, tb, out=out)
                 case["correctness"] = {
-                    "spiraltorch": correctness(torch.tensor(workspace.readback().tolist(), dtype=torch.float64), reference, torch, 1e-4, 1e-5),
                     "torch": correctness(out, reference, torch, 1e-4, 1e-5),
                 }
-
-                def st_batch():
-                    for _ in range(args.dispatches):
-                        workspace.dispatch()
-                    workspace.synchronize()
-
                 def torch_batch():
                     for _ in range(args.dispatches):
                         torch.mm(ta, tb, out=out)
                     torch_sync()
 
-                workspace.synchronize()
+                functions = {"torch_resident": torch_batch}
+                case["wgpu_variants"] = {}
+                for tile in parse_tiles(args.tiles_mnk):
+                    workspace = st.WgpuMatmul(m, k, n, tile_mnk=tile)
+                    name = "st_" + "x".join(map(str, tile))
+                    info = workspace.adapter_info()
+                    if info["device_type"] == "Cpu":
+                        raise RuntimeError("software WGPU adapter is not admitted as GPU timing")
+                    if args.expected_adapter not in info["name"]:
+                        raise RuntimeError("WGPU adapter does not match expected adapter")
+                    if tuple(workspace.tile_mnk) != tile:
+                        raise RuntimeError("actual tile does not match requested tile")
+                    case["wgpu_variants"][name] = {"tile_mnk": tile, "adapter": info}
+                    workspace.upload(st.Tensor(m, k, a), st.Tensor(k, n, b))
+                    workspace.dispatch()
+                    case["correctness"][name] = correctness(
+                        torch.tensor(workspace.readback().tolist(), dtype=torch.float64),
+                        reference, torch, 1e-4, 1e-5)
+
+                    def st_batch(workspace=workspace):
+                        for _ in range(args.dispatches):
+                            workspace.dispatch()
+                        workspace.synchronize()
+
+                    functions[name] = st_batch
+                    workspace.synchronize()
                 torch_sync()
-                timings = paired_timings({"spiraltorch_resident": st_batch, "torch_resident": torch_batch},
+                timings = paired_timings(functions,
                                          args.warmup, args.iters, lambda: None, seed)
                 case["timings"] = timings
-                case["torch_over_st_resident_batch"] = timings["torch_resident"]["median_ms"] / timings["spiraltorch_resident"]["median_ms"]
+                case["torch_over_st_resident_batch"] = {
+                    name: timings["torch_resident"]["median_ms"] / timings[name]["median_ms"]
+                    for name in case["wgpu_variants"]
+                }
                 case["status"] = "passed"
             except Exception as error:
                 case.update(status="error", error=f"{type(error).__name__}: {error}")
@@ -121,6 +141,7 @@ def main():
     parser.add_argument("--iters", type=int, default=20)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--dispatches", type=int, default=16)
+    parser.add_argument("--tiles-mnk", default="8,8,16")
     parser.add_argument("--torch-device", choices=["cuda", "mps"], default="cuda")
     parser.add_argument("--expected-adapter", required=True)
     parser.add_argument("--native-prefix", type=Path)
@@ -129,6 +150,7 @@ def main():
     if min(args.iters, args.dispatches) < 1 or args.dispatches > 1024 or args.warmup < 0:
         parser.error("positive iterations, 1..1024 dispatches, nonnegative warmup required")
     parse_sizes(args.sizes)
+    parse_tiles(args.tiles_mnk)
     with args.output.open("x") as stream:
         try:
             report = run(args)

@@ -11,6 +11,12 @@ spec.loader.exec_module(bench)
 
 
 class DeviceIdentityTests(unittest.TestCase):
+    def test_tile_parser_preserves_mnk_order_and_rejects_duplicate_labels(self):
+        self.assertEqual(bench.parse_tiles("8,16,32;16,8,64"), [(8,16,32),(16,8,64)])
+        for invalid in ("", "8,8", "8,8,16;8,8,16", "8,8,16;"):
+            with self.subTest(spec=invalid), self.assertRaises(ValueError):
+                bench.parse_tiles(invalid)
+
     def test_single_matching_device(self):
         bench.validate_cuda_identity(1, "NVIDIA GeForce RTX 5090", "RTX 5090")
 

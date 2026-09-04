@@ -1,6 +1,6 @@
 use js_sys::{Float32Array, Number, Promise};
 use st_backend_wgpu::{
-    resident_matmul::{MatmulShape, ResidentMatmul},
+    resident_matmul::{MatmulShape, MatmulTile, ResidentMatmul},
     runtime,
 };
 use wasm_bindgen::prelude::*;
@@ -31,6 +31,23 @@ pub struct WasmWgpuMatmul {
     inner: ResidentMatmul,
 }
 
+async fn create_workspace(shape: MatmulShape, tile: MatmulTile) -> Result<WasmWgpuMatmul, JsValue> {
+    let runtime = match runtime::default_runtime() {
+        Some(runtime) => runtime,
+        None => {
+            let candidate = runtime::WgpuRuntime::request_headless("wasm.resident.matmul")
+                .await
+                .map_err(error)?;
+            // Concurrent create() promises share whichever runtime installed first.
+            let _ = runtime::install_default_runtime(candidate);
+            runtime::default_runtime().ok_or_else(|| error("WebGPU runtime installation failed"))?
+        }
+    };
+    Ok(WasmWgpuMatmul {
+        inner: ResidentMatmul::with_tile(runtime, shape, tile).map_err(error)?,
+    })
+}
+
 #[wasm_bindgen(js_class = WgpuMatmul)]
 impl WasmWgpuMatmul {
     #[wasm_bindgen(js_name = create)]
@@ -45,21 +62,36 @@ impl WasmWgpuMatmul {
             dimension(cols.as_ref())?,
         )
         .map_err(error)?;
-        let runtime = match runtime::default_runtime() {
-            Some(runtime) => runtime,
-            None => {
-                let candidate = runtime::WgpuRuntime::request_headless("wasm.resident.matmul")
-                    .await
-                    .map_err(error)?;
-                // Concurrent create() promises share whichever runtime installed first.
-                let _ = runtime::install_default_runtime(candidate);
-                runtime::default_runtime()
-                    .ok_or_else(|| error("WebGPU runtime installation failed"))?
-            }
-        };
-        Ok(Self {
-            inner: ResidentMatmul::new(runtime, shape).map_err(error)?,
-        })
+        create_workspace(shape, MatmulTile::default()).await
+    }
+
+    #[wasm_bindgen(js_name = createWithTile)]
+    pub async fn create_with_tile(
+        rows: Number,
+        inner: Number,
+        cols: Number,
+        tile_m: Number,
+        tile_n: Number,
+        tile_k: Number,
+    ) -> Result<WasmWgpuMatmul, JsValue> {
+        let shape = MatmulShape::new(
+            dimension(rows.as_ref())?,
+            dimension(inner.as_ref())?,
+            dimension(cols.as_ref())?,
+        )
+        .map_err(error)?;
+        let tile = MatmulTile::new(
+            dimension(tile_m.as_ref())? as u32,
+            dimension(tile_n.as_ref())? as u32,
+            dimension(tile_k.as_ref())? as u32,
+        )
+        .map_err(error)?;
+        create_workspace(shape, tile).await
+    }
+
+    #[wasm_bindgen(js_name = tileMNK)]
+    pub fn tile_mnk(&self) -> Vec<u32> {
+        self.inner.tile().dimensions().to_vec()
     }
 
     #[wasm_bindgen(js_name = shape)]

@@ -3261,6 +3261,85 @@ mod tests {
     }
 
     #[test]
+    fn matmul_shared_tile_layout_matches_f32_and_int8_on_device() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let ctx = dense_context().expect("real WGPU matmul test requires a device");
+        assert_ne!(ctx.adapter_info.device_type, wgpu::DeviceType::Cpu);
+        let (rows, inner, cols) = (7, 65, 67);
+        let lhs: Vec<_> = (0..rows * inner)
+            .map(|i| ((i * 11 % 63) as f32 - 31.0) / 64.0)
+            .collect();
+        // Each column has abs-max 127/128 and dyadic values, so int8 is exact.
+        // This tests shared-memory addressing without hiding it in quantization error.
+        let rhs: Vec<_> = (0..inner * cols)
+            .map(|i| {
+                let row = i / cols;
+                let value = match row {
+                    0 => -127,
+                    1 => 127,
+                    _ => ((row + i % cols * 37) % 255) as i32 - 127,
+                };
+                value as f32 / 128.0
+            })
+            .collect();
+        let device = ctx.device();
+        let lhs_buffer = upload_lhs(device, "layout-test.lhs", &lhs);
+        for int8 in [false, true] {
+            let weights = upload_weights_with_precision(device, &rhs, inner, cols, int8);
+            let (rhs_buffer, dtype, scales) = weights.as_binding();
+            assert_eq!(
+                dtype,
+                if int8 {
+                    ScalarType::QuantizedI8
+                } else {
+                    ScalarType::F32
+                }
+            );
+            for [m, n, k] in [[8, 8, 16], [16, 8, 16], [16, 16, 64], [3, 5, 7]] {
+                let output = allocate_output(device, "layout-test.out", rows * cols);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                dispatch_matmul(
+                    &ctx,
+                    &mut encoder,
+                    &lhs_buffer,
+                    rhs_buffer,
+                    dtype,
+                    scales,
+                    &output,
+                    rows,
+                    inner,
+                    cols,
+                    TileConfig::new(m, n, k),
+                    false,
+                    0,
+                    None,
+                    None,
+                    false,
+                    1.0,
+                )
+                .unwrap();
+                ctx.queue().submit(Some(encoder.finish()));
+                let actual = readback_f32(device, ctx.queue(), &output, rows * cols).unwrap();
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let expected: f64 = (0..inner)
+                            .map(|i| {
+                                f64::from(lhs[row * inner + i]) * f64::from(rhs[i * cols + col])
+                            })
+                            .sum();
+                        assert!(
+                            (f64::from(actual[row * cols + col]) - expected).abs() < 1e-5,
+                            "int8={int8}, tile={m}x{n}x{k}, row={row}, col={col}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn matmul_shader_keeps_edge_tile_invocations_until_final_write() {
         let key = PipelineKey::new(
             ScalarType::F32,
@@ -10584,7 +10663,7 @@ fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     TileConfig::new(16, 16, 16)
 }
 
-const MATMUL_AUTOTUNE_REVISION: u64 = 3;
+const MATMUL_AUTOTUNE_REVISION: u64 = 4;
 const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
 const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
 const AUTOTUNE_WARMUP_RUNS: usize = 1;
