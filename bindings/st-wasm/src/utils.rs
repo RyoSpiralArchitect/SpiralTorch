@@ -6,6 +6,44 @@ use std::fmt;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
+fn checked_u32(value: f64, context: &str) -> Result<u32, String> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > f64::from(u32::MAX) {
+        return Err(format!(
+            "{context} must be a finite nonnegative u32 integer"
+        ));
+    }
+    Ok(value as u32)
+}
+
+fn checked_i32(value: f64, context: &str) -> Result<i32, String> {
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || value < f64::from(i32::MIN)
+        || value > f64::from(i32::MAX)
+    {
+        return Err(format!("{context} must be a finite i32 integer"));
+    }
+    Ok(value as i32)
+}
+
+// Inspect the original JS value, not an ABI integer or a coerced Number(value).
+#[cfg(target_arch = "wasm32")]
+fn js_number(value: &JsValue, context: &str) -> Result<f64, JsValue> {
+    value
+        .as_f64()
+        .ok_or_else(|| js_error(format!("{context} must be a number")))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn js_u32(value: &JsValue, context: &str) -> Result<u32, JsValue> {
+    checked_u32(js_number(value, context)?, context).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn js_i32(value: &JsValue, context: &str) -> Result<i32, JsValue> {
+    checked_i32(js_number(value, context)?, context).map_err(js_error)
+}
+
 struct JsonParseBudget<'a> {
     nodes: u64,
     maximum_nodes: u64,
@@ -386,6 +424,48 @@ pub(crate) fn snapshot_json_compatible_js_value(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn unsigned_integer_transport_rejects_truncation_and_wraparound() {
+        for invalid in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.0,
+            -0.5,
+            0.5,
+            f64::MIN_POSITIVE,
+            f64::from(u32::MAX) + 1.0,
+            f64::MAX,
+        ] {
+            let error = checked_u32(invalid, "dimension").unwrap_err();
+            assert!(error.contains("dimension"));
+        }
+        for valid in [0, 1, i32::MAX as u32, u32::MAX] {
+            assert_eq!(checked_u32(f64::from(valid), "dimension"), Ok(valid));
+        }
+        assert_eq!(checked_u32(-0.0, "dimension"), Ok(0));
+    }
+
+    #[test]
+    fn signed_integer_transport_preserves_sentinels_and_exact_bounds() {
+        for invalid in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -100.5,
+            0.9,
+            f64::MIN_POSITIVE,
+            f64::from(i32::MIN) - 1.0,
+            f64::from(i32::MAX) + 1.0,
+        ] {
+            assert!(checked_i32(invalid, "ignore_index").is_err());
+        }
+        for valid in [i32::MIN, -100, 0, 1, i32::MAX] {
+            assert_eq!(checked_i32(f64::from(valid), "ignore_index"), Ok(valid));
+        }
+        assert_eq!(checked_i32(-0.0, "ignore_index"), Ok(0));
+    }
 
     #[test]
     fn bounded_json_parser_charges_nodes_and_depth_during_materialization() {

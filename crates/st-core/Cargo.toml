@@ -80,6 +80,7 @@ st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+js-sys = "0.3"
 st-tensor = { path = "../st-tensor", default-features = false }
 
 [target.'cfg(windows)'.dependencies]

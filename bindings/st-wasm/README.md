@@ -179,8 +179,30 @@ overflow are errors, not partial updates. There is no momentum, clipping,
 implicit averaging, or WebGPU optimizer dispatch. Run
 `node bindings/st-wasm/tests/autograd_sgd.cjs /absolute/path/to/spiraltorch_wasm.js`
 for the failure/ownership checks; `classification.cjs` also uses the optimizer.
-Parameter indices must be finite nonnegative integers within the u32 range;
-fractional, NaN, and overflowing JS numbers are rejected before conversion.
+
+### Numeric argument boundaries
+
+`AutogradTensor` rows/columns, `AutogradSgd.parameter(index)`, and all scalar
+indices and workload dimensions in `WasmTuner`/`baseChoice` require primitive
+JavaScript numbers that are finite integers in `[0, 2**32 - 1]`. Strings,
+booleans, boxed numbers, fractions, NaN, and overflowing numbers are rejected
+before Rust receives an integer. Invalid tuner mutations leave its records
+unchanged; valid out-of-bounds indices still return `undefined`/`false`.
+
+`crossEntropyWithLogits` applies the same non-coercing check to `ignore_index`
+with the signed i32 range. Omitted, `undefined`, or `null` keeps the `-100`
+default. Labels remain an `Int32Array`; values truncated while constructing
+that array cannot be recovered by the binding. TypeScript signatures remain
+`number` (and optional `number | null` for the sentinel).
+
+The tuner fallback still runs the shared Rust heuristics and records ecosystem
+metrics. On WASM, these observations use the JavaScript host's `Date.now()`;
+native Rust keeps its system wall clock. This is not a monotonic timing source.
+
+Run `node bindings/st-wasm/tests/numeric_boundaries.cjs
+/absolute/path/to/spiraltorch_wasm.js` against a nodejs-target build. CI runs
+this regression suite and the SGD, nonlinear autograd, and classification
+learning loops in the generated WASM, rather than checking compilation alone.
 
 ## Shared Topos control and runtime routing
 

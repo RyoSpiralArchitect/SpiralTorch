@@ -178,8 +178,23 @@ jobs:
           cargo clippy --locked -p st-frac --target wasm32-unknown-unknown --all-targets --features wgpu -- -D warnings
           cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu -- -D warnings
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
+          cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
       - name: build (wasm32)
-        run: cargo build -p spiraltorch-wasm --target wasm32-unknown-unknown --release
+        run: cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install matching WASM JavaScript generator
+        run: cargo install wasm-bindgen-cli --version 0.2.104 --locked
+      - name: Exercise real WASM bindings and learning loops
+        run: |
+          wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
+            --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-node"
+          module="$RUNNER_TEMP/spiraltorch-wasm-node/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/numeric_boundaries.cjs "$module"
+          node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
+          node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
+          node bindings/st-wasm/tests/classification.cjs "$module"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)

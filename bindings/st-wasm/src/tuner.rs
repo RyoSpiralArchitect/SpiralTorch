@@ -1,3 +1,4 @@
+use js_sys::Number;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use st_core::backend::device_caps::DeviceCaps;
@@ -7,7 +8,7 @@ use st_core::backend::wgpu_heuristics::{self, Choice};
 use wasm_bindgen::prelude::*;
 
 use crate::fft::{WasmFftPlan, WasmFftPlanSerde};
-use crate::utils::js_error;
+use crate::utils::{js_error, js_u32};
 
 #[wasm_bindgen]
 pub struct WasmTuner {
@@ -74,7 +75,8 @@ impl WasmTuner {
 
     /// Retrieve a record by index. Returns `undefined` when the index is out of bounds.
     #[wasm_bindgen(js_name = recordAt)]
-    pub fn record_at(&self, index: u32) -> Result<JsValue, JsValue> {
+    pub fn record_at(&self, index: Number) -> Result<JsValue, JsValue> {
+        let index = js_u32(index.as_ref(), "tuner record index")?;
         match self.table.get(index as usize) {
             Some(record) => record_to_js(record),
             None => Ok(JsValue::UNDEFINED),
@@ -85,11 +87,12 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = findRecord)]
     pub fn find_record(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         match self
             .table
             .find_record(rows as usize, cols as usize, k as usize, subgroup)
@@ -119,14 +122,16 @@ impl WasmTuner {
 
     /// Replace the record at the provided index. Returns `true` when the index existed.
     #[wasm_bindgen(js_name = replaceIndex)]
-    pub fn replace_index(&mut self, index: u32, record: JsValue) -> Result<bool, JsValue> {
+    pub fn replace_index(&mut self, index: Number, record: JsValue) -> Result<bool, JsValue> {
+        let index = js_u32(index.as_ref(), "tuner record index")?;
         let record = parse_record(record)?;
         Ok(self.table.replace(index as usize, record))
     }
 
-    /// Remove the record at the provided index and return it. Returns `undefined` when the index was invalid.
+    /// Remove a record by index. Returns `undefined` for an out-of-bounds integer index.
     #[wasm_bindgen(js_name = removeIndex)]
-    pub fn remove_index(&mut self, index: u32) -> Result<JsValue, JsValue> {
+    pub fn remove_index(&mut self, index: Number) -> Result<JsValue, JsValue> {
+        let index = js_u32(index.as_ref(), "tuner record index")?;
         match self.table.remove(index as usize) {
             Some(record) => {
                 let js = record_to_js(&record)?;
@@ -140,11 +145,12 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = removeRecord)]
     pub fn remove_record(
         &mut self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         match self
             .table
             .remove_matching(rows as usize, cols as usize, k as usize, subgroup)
@@ -175,7 +181,14 @@ impl WasmTuner {
     }
 
     /// Query the tuner for a given workload. Returns `undefined` when no override matches.
-    pub fn choose(&self, rows: u32, cols: u32, k: u32, subgroup: bool) -> Result<JsValue, JsValue> {
+    pub fn choose(
+        &self,
+        rows: Number,
+        cols: Number,
+        k: Number,
+        subgroup: bool,
+    ) -> Result<JsValue, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         let base = base_choice(rows as usize, cols as usize, k as usize, subgroup);
         let chosen = self
             .table
@@ -190,11 +203,12 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFft)]
     pub fn plan_fft(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<Option<WasmFftPlan>, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         let base = base_choice(rows as usize, cols as usize, k as usize, subgroup);
         let Some(choice) =
             self.table
@@ -211,9 +225,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftJson)]
     pub fn plan_fft_json(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<Option<String>, JsValue> {
         match self.plan_fft(rows, cols, k, subgroup)? {
@@ -226,9 +240,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftObject)]
     pub fn plan_fft_object(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
         match self.plan_fft(rows, cols, k, subgroup)? {
@@ -242,11 +256,12 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftWithFallback)]
     pub fn plan_fft_with_fallback(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<WasmFftPlan, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         let (choice, _, _) = self.resolve_fft_choice(rows, cols, k, subgroup);
         WasmFftPlan::from_choice(choice, subgroup).map_err(js_error)
     }
@@ -255,9 +270,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftWithFallbackJson)]
     pub fn plan_fft_with_fallback_json(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<String, JsValue> {
         let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup)?;
@@ -268,9 +283,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftWithFallbackObject)]
     pub fn plan_fft_with_fallback_object(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
         let plan = self.plan_fft_with_fallback(rows, cols, k, subgroup)?;
@@ -282,11 +297,12 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftResolution)]
     pub fn plan_fft_resolution(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<ResolvedWasmFftPlan, JsValue> {
+        let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
         let (choice, source, heuristic_used) = self.resolve_fft_choice(rows, cols, k, subgroup);
         let plan = WasmFftPlan::from_choice(choice, subgroup).map_err(js_error)?;
         Ok(ResolvedWasmFftPlan::new(plan, source, heuristic_used))
@@ -296,9 +312,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftResolutionJson)]
     pub fn plan_fft_resolution_json(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<String, JsValue> {
         let resolved = self.plan_fft_resolution(rows, cols, k, subgroup)?;
@@ -309,9 +325,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftResolutionObject)]
     pub fn plan_fft_resolution_object(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
         let resolved = self.plan_fft_resolution(rows, cols, k, subgroup)?;
@@ -323,9 +339,9 @@ impl WasmTuner {
     #[wasm_bindgen(js_name = planFftReport)]
     pub fn plan_fft_report(
         &self,
-        rows: u32,
-        cols: u32,
-        k: u32,
+        rows: Number,
+        cols: Number,
+        k: Number,
         subgroup: bool,
     ) -> Result<JsValue, JsValue> {
         self.plan_fft_resolution_object(rows, cols, k, subgroup)
@@ -334,12 +350,26 @@ impl WasmTuner {
 
 /// Compute the baseline WGPU choice without consulting an override table.
 #[wasm_bindgen(js_name = baseChoice)]
-pub fn base_choice_js(rows: u32, cols: u32, k: u32, subgroup: bool) -> Result<JsValue, JsValue> {
+pub fn base_choice_js(
+    rows: Number,
+    cols: Number,
+    k: Number,
+    subgroup: bool,
+) -> Result<JsValue, JsValue> {
+    let (rows, cols, k) = workload_dimensions(rows, cols, k)?;
     choice_to_js(base_choice(
         rows as usize,
         cols as usize,
         k as usize,
         subgroup,
+    ))
+}
+
+fn workload_dimensions(rows: Number, cols: Number, k: Number) -> Result<(u32, u32, u32), JsValue> {
+    Ok((
+        js_u32(rows.as_ref(), "tuner rows")?,
+        js_u32(cols.as_ref(), "tuner cols")?,
+        js_u32(k.as_ref(), "tuner k")?,
     ))
 }
 
@@ -673,12 +703,12 @@ mod tests {
         let mut tuner = empty_tuner();
         tuner.table.push_sorted(override_record());
         let plan = tuner
-            .plan_fft_with_fallback(512, 4096, 128, true)
+            .plan_fft_with_fallback(512.into(), 4096.into(), 128.into(), true)
             .expect("valid fallback plan");
         assert_eq!(plan.tile_cols(), 2048);
         assert_eq!(plan.radix(), 4);
         let resolved = tuner
-            .plan_fft_resolution(512, 4096, 128, true)
+            .plan_fft_resolution(512.into(), 4096.into(), 128.into(), true)
             .expect("valid resolution");
         assert!(resolved.override_applied());
         assert_eq!(resolved.plan().tile_cols(), 2048);
@@ -693,7 +723,7 @@ mod tests {
     fn fallback_plan_handles_missing_override() {
         let tuner = empty_tuner();
         let resolved = tuner
-            .plan_fft_resolution(512, 4096, 128, true)
+            .plan_fft_resolution(512.into(), 4096.into(), 128.into(), true)
             .expect("valid resolution");
         assert!(!resolved.override_applied());
         assert!(matches!(
@@ -711,19 +741,19 @@ mod tests {
         let mut tuner = empty_tuner();
         tuner.table.push_sorted(override_record());
         let json = tuner
-            .plan_fft_json(512, 4096, 128, true)
+            .plan_fft_json(512.into(), 4096.into(), 128.into(), true)
             .expect("json result")
             .expect("override json");
-        let parsed: WasmFftPlanSerde = serde_json::from_str(&json).expect("parse json");
-        assert_eq!(parsed.tile_cols, 2048);
-        assert_eq!(parsed.radix, 4);
+        let parsed = WasmFftPlan::from_json(&json).expect("parse json");
+        assert_eq!(parsed.tile_cols(), 2048);
+        assert_eq!(parsed.radix(), 4);
     }
 
     #[test]
     fn plan_fft_json_absent_without_override() {
         let tuner = empty_tuner();
         let json = tuner
-            .plan_fft_json(512, 4096, 128, true)
+            .plan_fft_json(512.into(), 4096.into(), 128.into(), true)
             .expect("json result");
         assert!(json.is_none());
     }
@@ -732,15 +762,15 @@ mod tests {
     fn plan_fft_with_fallback_json_matches_object() {
         let tuner = empty_tuner();
         let json = tuner
-            .plan_fft_with_fallback_json(512, 4096, 128, true)
+            .plan_fft_with_fallback_json(512.into(), 4096.into(), 128.into(), true)
             .expect("json");
         let object = tuner
-            .plan_fft_with_fallback_object(512, 4096, 128, true)
+            .plan_fft_with_fallback_object(512.into(), 4096.into(), 128.into(), true)
             .expect("object");
-        let parsed_json: WasmFftPlanSerde = serde_json::from_str(&json).expect("parse json");
-        let parsed_object: WasmFftPlanSerde = object.into_serde().expect("parse object");
-        assert_eq!(parsed_json.tile_cols, parsed_object.tile_cols);
-        assert_eq!(parsed_json.radix, parsed_object.radix);
+        let parsed_json = WasmFftPlan::from_json(&json).expect("parse json");
+        let parsed_object = WasmFftPlan::from_object(&object).expect("parse object");
+        assert_eq!(parsed_json.tile_cols(), parsed_object.tile_cols());
+        assert_eq!(parsed_json.radix(), parsed_object.radix());
     }
 
     #[test]
@@ -748,14 +778,20 @@ mod tests {
         let mut tuner = empty_tuner();
         tuner.table.push_sorted(override_record());
         let json = tuner
-            .plan_fft_resolution_json(512, 4096, 128, true)
+            .plan_fft_resolution_json(512.into(), 4096.into(), 128.into(), true)
             .expect("json");
         let report = tuner
-            .plan_fft_resolution_object(512, 4096, 128, true)
+            .plan_fft_resolution_object(512.into(), 4096.into(), 128.into(), true)
             .expect("object");
-        let parsed_json: ResolvedPlanSerde = serde_json::from_str(&json).expect("parse json");
-        let parsed_report: ResolvedPlanSerde = report.into_serde().expect("parse object");
-        assert_eq!(parsed_json.plan.tile_cols, parsed_report.plan.tile_cols);
-        assert_eq!(parsed_json.override_applied, parsed_report.override_applied);
+        let parsed_json = ResolvedWasmFftPlan::from_json(&json).expect("parse json");
+        let parsed_report = ResolvedWasmFftPlan::from_object(&report).expect("parse object");
+        assert_eq!(
+            parsed_json.plan().tile_cols(),
+            parsed_report.plan().tile_cols()
+        );
+        assert_eq!(
+            parsed_json.override_applied(),
+            parsed_report.override_applied()
+        );
     }
 }

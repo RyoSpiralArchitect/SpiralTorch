@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::unison_heuristics::RankKind;
+use crate::util::clock::system_time_now;
 
 /// Source that produced a heuristic decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,7 +112,7 @@ impl MetricSample {
             value,
             tags: HashMap::new(),
             unit: None,
-            issued_at: SystemTime::now(),
+            issued_at: system_time_now(),
         }
     }
 
