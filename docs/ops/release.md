@@ -27,8 +27,8 @@ installed-wheel smoke, including complex-state forward and joint VJP replay.
 Legacy/versioned DLPack transfers, capsule single-use, explicit copies, and
 copy-on-write mutation are also exercised using the installed native wheel.
 Protected autograd snapshots, a complete 600-step nonlinear learning fixture,
-and a 300-step multiclass logits-loss fixture run on every installed release
-wheel before upload. This is a mechanics gate,
+and a 300-step multiclass logits-loss fixture using Rust-owned atomic SGD run
+on every installed release wheel before upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
 Catalog v4 records every normal-admission profile plus
 Rust-owned byte/node/depth limits
@@ -44,7 +44,7 @@ Leave both inputs empty for a build-only branch preflight.
 ## Common Variables
 
 ```bash
-VERSION=0.4.22
+VERSION=0.4.23
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -60,7 +60,7 @@ python scripts/release_status.py \
   --expected-wheels 3
 ```
 
-Expected pre-publish shape for `0.4.22` is:
+Expected pre-publish shape for `0.4.23` is:
 
 ```text
 local_versions ... consistent=yes
@@ -73,8 +73,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.22 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.22 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.23 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.23 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```

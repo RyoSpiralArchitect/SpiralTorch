@@ -167,15 +167,31 @@ def test_readonly_import_preserves_flags_and_detaches_before_rust_mutation():
 
 @pytest.mark.skipif(not _numpy_versioned, reason="NumPy 1.x has no explicit DLPack copy parameter")
 @pytest.mark.parametrize("readonly", [False, True])
-def test_numpy_explicit_copy_is_writable_and_independent(readonly):
+def test_numpy_explicit_copy_is_independent_and_respects_consumer_policy(readonly):
     array = np.array([[1., 2.]], dtype=np.float32)
     array.flags.writeable = not readonly
     tensor = st.from_dlpack(array)
+    control = np.from_dlpack(array, copy=True)
+    capsule = tensor.__dlpack__(max_version=(1, 0), copy=True)
+    assert snapshot(capsule)["flags"] == 2  # IS_COPIED, without READ_ONLY.
+    assert snapshot(capsule)["data"] != array.__array_interface__["data"][0]
+    native_copy = st.from_dlpack(capsule)
+    native_copy.add_row_inplace([10., 20.])
+    assert native_copy.tolist() == [[11., 22.]]
     copied = np.from_dlpack(tensor, copy=True)
-    assert copied.flags.writeable
+    # Some NumPy 2.x consumers expose even their own explicit copies read-only.
+    assert copied.flags.writeable == control.flags.writeable
     assert not np.shares_memory(array, copied)
-    copied[0, 0] = 42.
+    np.testing.assert_array_equal(copied, [[1., 2.]])
+    if copied.flags.writeable:
+        copied[0, 0] = 42.
+    else:
+        with pytest.raises(ValueError, match="read-only"):
+            copied[0, 0] = 42.
     assert tensor.tolist() == [[1., 2.]]
+    array.flags.writeable = True
+    array[0, 1] = 99.
+    assert copied[0, 1] == control[0, 1] == 2.
 
 
 @pytest.mark.parametrize("shape", [(0, 0), (0, 3), (2, 0), (1, 4), (4, 1)])

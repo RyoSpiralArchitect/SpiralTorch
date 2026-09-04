@@ -8,6 +8,8 @@ use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use serde_json::Value;
 #[cfg(target_arch = "wasm32")]
+use st_tensor::AutogradSgd as RustAutogradSgd;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -376,6 +378,65 @@ impl AutogradTensor {
     #[wasm_bindgen(js_name = graphSummary)]
     pub fn graph_summary(&self) -> Result<JsValue, JsValue> {
         to_json_compatible_js(&self.transport.inner.graph_summary().contract_payload())
+    }
+}
+
+/// Plain CPU SGD with fresh immutable parameter handles after every step.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct AutogradSgd {
+    inner: RustAutogradSgd,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl AutogradSgd {
+    #[wasm_bindgen(constructor)]
+    pub fn new(learning_rate: f32) -> Result<AutogradSgd, JsValue> {
+        RustAutogradSgd::new(Vec::new(), learning_rate)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = addParameter)]
+    pub fn add_parameter(&mut self, parameter: &AutogradTensor) -> Result<usize, JsValue> {
+        self.inner
+            .add_parameter(&parameter.transport.inner)
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = parameterCount)]
+    pub fn parameter_count(&self) -> usize {
+        self.inner.parameters().len()
+    }
+
+    pub fn parameter(&self, index: usize) -> Result<AutogradTensor, JsValue> {
+        self.inner
+            .parameter(index)
+            .map(AutogradTransport::from_inner)
+            .map(|transport| AutogradTensor { transport })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = learningRate)]
+    pub fn learning_rate(&self) -> f32 {
+        self.inner.learning_rate()
+    }
+
+    #[wasm_bindgen(js_name = setLearningRate)]
+    pub fn set_learning_rate(&mut self, learning_rate: f32) -> Result<(), JsValue> {
+        self.inner
+            .set_learning_rate(learning_rate)
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = zeroGrad)]
+    pub fn zero_grad(&self) {
+        self.inner.zero_grad();
+    }
+
+    pub fn step(&mut self) -> Result<(), JsValue> {
+        self.inner.step().map_err(js_error)
     }
 }
 

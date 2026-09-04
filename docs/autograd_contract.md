@@ -14,6 +14,7 @@ The current contract is `spiraltorch.autograd.v1`, with semantic owner
 |---|---|---|
 | `st-tensor::Tensor` | Copy-on-write 2D storage, protected snapshots, and backend-dispatched tensor operations | Compute-graph or optimizer semantics |
 | `st-tensor::AutogradTensor` | Immutable graph nodes, local VJP rules, atomic reverse-mode accumulation | Training-loop policy or higher-order solver choice |
+| `st-tensor::AutogradSgd` | Atomic replacement of a parameter collection using plain CPU SGD | Graph mutation, Z-space controls, or training schedules |
 | `st-core::autograd::hypergrad` | Unrolled and implicit higher-order differentiation over `AutogradTensor` | Primitive tensor derivative formulas |
 | `AmegaHypergrad` / `AmegaRealgrad` | Z-space gradient accumulation and optimizer application | Compute-graph autograd |
 | WGPU/CPU/device backends | Execute `Tensor` operations selected by the runtime | Change graph semantics or receipt fields |
@@ -66,7 +67,9 @@ the input and isolates it; an existing snapshot is cheap to clone.
 `AutogradTensor::value()`, `grad()`, and `detach()` can share snapshot storage.
 Rust mutation uses copy-on-write. Versioned DLPack exports mark it read-only;
 legacy consumers receive a copy, or a copy-forbidden request fails. Explicit
-copies remain writable. This protection applies to compliant DLPack consumers,
+copy capsules are marked writable; a consumer may still expose them read-only
+(as some NumPy 2.x versions do even for NumPy-to-NumPy copies).
+This protection applies to compliant DLPack consumers,
 not unsafe writes that ignore read-only flags or storage lifetimes.
 
 Ordinary mutable Tensor DLPack sharing is unchanged. These snapshots capture
@@ -189,6 +192,63 @@ WASM exposes `rowLogSoftmax()` and
 `crossEntropyWithLogits(Int32Array, reduction?, ignoreIndex?, labelSmoothing?)`.
 Its executable `bindings/st-wasm/tests/classification.cjs` checks real WASM
 exports, masking, tiny residuals, VJPs, and a 180-step classifier.
+
+## Atomic SGD for immutable leaves
+
+`AutogradSgd` owns the current trainable leaves, not the forward graph. Rust,
+Python, and WASM use the same implementation. It applies the existing checked
+CPU `Tensor::add_scaled_with_backend` update; no Python/JavaScript parameter
+arithmetic is needed. This is ordinary f32 SGD, with no momentum, weight decay,
+clipping, implicit averaging, or Z-space control. It is deliberately not named
+as a replacement for `ZSpaceParameterOptimizer` or the Amega tapes.
+
+Fetch fresh parameter handles at every forward pass:
+
+```python
+optimizer = st.AutogradSgd([
+    st.AutogradTensor.variable(st.Tensor.randn(2, 3, seed=31)),
+    st.AutogradTensor.variable(st.Tensor.zeros(1, 3)),
+], learning_rate=0.1)
+inputs = st.AutogradTensor.constant(st.Tensor(2, 2, [1., 0., 0., 1.]))
+for _ in range(100):
+    weights, bias = optimizer.parameters()
+    loss = inputs.matmul(weights).add_row(bias).cross_entropy_with_logits([0, 1])
+    loss.backward()
+    optimizer.step()
+```
+
+Rust uses `AutogradSgd::new(Vec<AutogradTensor>, learning_rate)`, `parameters()`,
+and `step()`. WASM constructs `new AutogradSgd(learningRate)`, registers borrowed
+handles with `addParameter(leaf)`, and retrieves them with `parameter(index)`.
+Registration rejects constants, intermediate graph nodes, and duplicate leaves.
+An empty collection can be built incrementally, but cannot step.
+
+A step snapshots all gradients together, serialized against backward and
+`zero_grad()`, prepares every update, and replaces the collection only on
+success. A missing gradient or a non-finite update leaves all parameters and
+gradients unchanged. Unused parameters need an explicit zero gradient; they
+are not silently skipped. Finish gradient accumulation before stepping.
+Repeated backward passes accumulate without averaging.
+
+New leaves have no gradients. Old handles, graphs, and gradients remain
+unchanged, so a backward pass through an old graph cannot update the new
+parameters. This is intentional immutable-graph behavior, unlike in-place
+parameter optimizers. `zero_grad()` clears only the current collection; it is
+useful for cancelling accumulated microbatches, not required immediately after
+a successful step. `set_learning_rate()` rejects nonpositive/non-finite rates
+without changing configuration.
+
+Python preserves the common Tensor error mapping: invalid rates and non-finite
+updates raise `ValueError`; missing gradients, duplicate/non-leaf registration,
+and out-of-bounds parameter lookup raise `RuntimeError`.
+
+The step is explicitly CPU; other graph operations keep their own backend
+dispatch. Per-kernel events from a failed candidate are not optimizer success.
+The `autograd_sgd_step` event is emitted only after the entire collection commits.
+Observers run after graph locks are released, including on failure.
+
+The Python 300-step and WASM 180-step classification fixtures now use this
+optimizer. These remain mechanics checks, not evidence for Z-space efficacy.
 
 ## Direct Rust graph use
 

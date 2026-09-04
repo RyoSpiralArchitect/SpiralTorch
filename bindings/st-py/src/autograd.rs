@@ -3,8 +3,8 @@ use crate::tensor::{parse_cross_entropy_config, tensor_err_to_py, PyTensor};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use st_tensor::{
-    AutogradBackwardReport, AutogradGraphSummary, AutogradTensor, AUTOGRAD_CONTRACT_VERSION,
-    AUTOGRAD_SEMANTIC_OWNER,
+    AutogradBackwardReport, AutogradGraphSummary, AutogradSgd, AutogradTensor,
+    AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 
 fn graph_summary_to_py(py: Python<'_>, summary: AutogradGraphSummary) -> PyResult<Py<PyAny>> {
@@ -258,8 +258,71 @@ impl PyAutogradTensor {
     }
 }
 
+/// Rust-owned plain SGD. Fetch parameters again for every forward pass.
+#[pyclass(module = "spiraltorch", name = "AutogradSgd")]
+pub(crate) struct PyAutogradSgd {
+    inner: AutogradSgd,
+}
+
+#[pymethods]
+impl PyAutogradSgd {
+    #[new]
+    fn new(parameters: Vec<PyAutogradTensor>, learning_rate: f32) -> PyResult<Self> {
+        AutogradSgd::new(
+            parameters
+                .into_iter()
+                .map(|parameter| parameter.inner)
+                .collect(),
+            learning_rate,
+        )
+        .map(|inner| Self { inner })
+        .map_err(tensor_err_to_py)
+    }
+
+    fn add_parameter(&mut self, parameter: &PyAutogradTensor) -> PyResult<usize> {
+        self.inner
+            .add_parameter(&parameter.inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn parameters(&self) -> Vec<PyAutogradTensor> {
+        self.inner
+            .parameters()
+            .iter()
+            .cloned()
+            .map(PyAutogradTensor::from_inner)
+            .collect()
+    }
+
+    fn parameter(&self, index: usize) -> PyResult<PyAutogradTensor> {
+        self.inner
+            .parameter(index)
+            .map(PyAutogradTensor::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn learning_rate(&self) -> f32 {
+        self.inner.learning_rate()
+    }
+
+    fn set_learning_rate(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .set_learning_rate(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn zero_grad(&self) {
+        self.inner.zero_grad();
+    }
+
+    fn step(&mut self, py: Python<'_>) -> PyResult<()> {
+        py.detach(|| self.inner.step()).map_err(tensor_err_to_py)
+    }
+}
+
 pub(crate) fn register(_py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyAutogradTensor>()?;
+    module.add_class::<PyAutogradSgd>()?;
     module.add("AUTOGRAD_CONTRACT_VERSION", AUTOGRAD_CONTRACT_VERSION)?;
     module.add("AUTOGRAD_SEMANTIC_OWNER", AUTOGRAD_SEMANTIC_OWNER)?;
     Ok(())
