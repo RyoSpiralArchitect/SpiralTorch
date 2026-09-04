@@ -35,6 +35,9 @@ SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 \
 ```
 
 The existing macOS WGPU job now runs this family with real-GPU tests enabled.
+With the opt-in value `1`, missing adapters, device-request failures and software
+adapters fail the fixture instead of silently skipping. A dependency-free
+negative unit test exercises the required-device failure path.
 This receipt is NVIDIA/Vulkan correctness evidence, not a throughput win,
 subgroup-path qualification, or a browser execution result for this family.
 Full local build/test logs are in

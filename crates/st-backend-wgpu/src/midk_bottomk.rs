@@ -652,13 +652,10 @@ mod tests {
 
     #[test]
     fn multi_tile_compaction_preserves_row_stride_when_runtime_enabled() {
-        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
             return;
         }
-        let Some((device, queue)) = test_device() else {
-            eprintln!("skipping compaction runtime test: no WGPU adapter");
-            return;
-        };
+        let (device, queue) = require_runtime_device(test_device());
         let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
         let pipelines = Builder::new(&device, shader_dir)
             .build()
@@ -743,13 +740,10 @@ mod tests {
 
     #[test]
     fn portable_scan_matches_stable_compaction_across_tile_and_block_edges() {
-        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
             return;
         }
-        let Some((device, queue)) = test_device() else {
-            eprintln!("skipping compaction runtime test: no WGPU adapter");
-            return;
-        };
+        let (device, queue) = require_runtime_device(test_device());
         let pipelines = Builder::new(
             &device,
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/shaders"),
@@ -839,13 +833,27 @@ mod tests {
         }
     }
 
-    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    fn require_runtime_device<T>(result: Result<T, String>) -> T {
+        result.expect("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 requires a real WGPU device")
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a real WGPU device")]
+    fn explicitly_requested_runtime_does_not_skip_missing_device() {
+        require_runtime_device::<()>(Err("no adapter".into()));
+    }
+
+    fn test_device() -> Result<(wgpu::Device, wgpu::Queue), String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: None,
             force_fallback_adapter: false,
-        }))?;
+        }))
+        .ok_or_else(|| "no WGPU adapter".to_owned())?;
+        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+            return Err("software WGPU adapter is not admitted as real-GPU coverage".into());
+        }
         let features = adapter.features() & wgpu::Features::SUBGROUP;
         pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
@@ -855,7 +863,7 @@ mod tests {
             },
             None,
         ))
-        .ok()
+        .map_err(|error| error.to_string())
     }
 
     fn initialized_storage<T: bytemuck::Pod>(
