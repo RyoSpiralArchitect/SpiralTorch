@@ -234,6 +234,23 @@ fn extreme_seeds_are_reduced_in_f64() {
 }
 
 #[test]
+fn log_softmax_retains_small_seeds_between_large_cancelling_terms() {
+    let logits = Tensor::zeros(1, 3).unwrap();
+    for values in [
+        vec![f32::MAX, 1.0, -f32::MAX],
+        vec![1.0, f32::MAX, -f32::MAX],
+        vec![f32::MAX, -f32::MAX, 1.0],
+    ] {
+        let seed = Tensor::from_vec(1, 3, values.clone()).unwrap();
+        let gradient = logits.row_log_softmax_backward(&seed).unwrap();
+        for (&actual, value) in gradient.data().iter().zip(values) {
+            let expected = if value == 1.0 { 2.0 / 3.0 } else { value };
+            close(&[actual], &[expected], 1e-7);
+        }
+    }
+}
+
+#[test]
 fn all_ignored_and_empty_batches_have_explicit_semantics() {
     for rows in [0, 2] {
         let logits = Tensor::zeros(rows, 3).unwrap();

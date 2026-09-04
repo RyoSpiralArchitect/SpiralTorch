@@ -168,6 +168,23 @@ fn checked_f32(value: f64, label: &'static str) -> PureResult<f32> {
     Ok(value)
 }
 
+fn sum_cotangents(values: &[f32]) -> f64 {
+    let mut sum: f64 = 0.0;
+    let mut correction = 0.0;
+    for &value in values {
+        let value = f64::from(value);
+        let next = sum + value;
+        // Neumaier compensation retains a small seed between large cancelling terms.
+        correction += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + correction
+}
+
 fn validate_labels(
     logits: &Tensor,
     labels: &[i64],
@@ -269,7 +286,7 @@ impl Tensor {
                 .zip(seed.data().chunks_exact(cols))
             {
                 let partition = RowPartition::new(row);
-                let sum: f64 = upstream.iter().map(|&value| f64::from(value)).sum();
+                let sum = sum_cotangents(upstream);
                 for (index, (&value, &gradient)) in row.iter().zip(upstream).enumerate() {
                     let gradient = if index == partition.maximum_index {
                         (f64::from(gradient) - sum) + sum * partition.tail_probability()

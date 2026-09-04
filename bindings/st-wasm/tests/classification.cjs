@@ -39,6 +39,15 @@ try {
   close(logProbabilities.values(), [-tinyLoss.values()[0], -80], 0);
   close(logProbabilities.vectorJacobianProduct(tiny, new Float32Array([1, 0])), [tinyLoss.values()[0], -tinyLoss.values()[0]], 0);
 
+  const maximum = (2 - 2 ** -23) * 2 ** 127;
+  const cancellation = keep(new AutogradTensor(1, 3, new Float32Array(3), true));
+  const cancellationOutput = keep(cancellation.rowLogSoftmax());
+  const cancellationSeed = new Float32Array([maximum, 1, -maximum]);
+  const cancellationGradient = cancellationOutput.vectorJacobianProduct(cancellation, cancellationSeed);
+  close([cancellationGradient[1]], [2 / 3]);
+  assert.equal(cancellationGradient[0], maximum);
+  assert.equal(cancellationGradient[2], -maximum);
+
   const features = keep(new AutogradTensor(3, 3, new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]), false));
   let weights = keep(new AutogradTensor(3, 3, new Float32Array(9), true));
   const targets = new Int32Array([0, 1, 2]);

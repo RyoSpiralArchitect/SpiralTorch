@@ -83,6 +83,17 @@ def test_tiny_tail_is_not_rounded_to_zero():
     assert flat(logits.row_log_softmax()) == [-loss, -80.0]
 
 
+def test_log_softmax_retains_small_cotangents_between_large_cancelling_terms():
+    maximum = (2.0 - 2.0**-23) * 2.0**127
+    logits = tensor([[0.0, 0.0, 0.0]])
+    seed = tensor([[maximum, 1.0, -maximum]])
+    expected = [maximum, 2.0 / 3.0, -maximum]
+    assert flat(logits.row_log_softmax_backward(seed)) == pytest.approx(expected, rel=1e-7)
+    leaf = st.AutogradTensor.variable(logits)
+    leaf.row_log_softmax().backward(seed)
+    assert flat(leaf.grad()) == pytest.approx(expected, rel=1e-7)
+
+
 @pytest.mark.parametrize("options", [
     {"reduction": "avg"}, {"label_smoothing": -0.1},
     {"label_smoothing": 1.1}, {"label_smoothing": math.nan},

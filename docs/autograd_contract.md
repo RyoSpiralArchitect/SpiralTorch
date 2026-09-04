@@ -136,6 +136,8 @@ the caller's responsibility.
 - CPU f64 row partitions use a shifted `log1p` tail and only narrow the final
   reduction to f32. Large common offsets and tiny dominant-class residuals
   do not disappear through `log(softmax(...))` or subtraction of rounded ones.
+  Log-softmax uses a compensated f64 cotangent sum so small seeds survive
+  cancellation between large positive and negative upstream values.
 - Direct Tensor backward methods take the original logits and a seed matching
   the loss output shape. Autograd owns labels/configuration and delegates these
   VJPs to the same kernels; clients do not implement another derivative.
