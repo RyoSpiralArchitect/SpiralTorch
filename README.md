@@ -490,6 +490,26 @@ and their Canvas/temporal-fusion callers. Earlier nontrivial FFT-derived results
 from these paths should be recomputed: impulse-only checks did not validate bin
 order or phase. These helpers remain CPU/WASM transforms, not WebGPU dispatch.
 
+Version 0.4.25 stabilizes affine LayerNorm on CPU and WGPU, including large
+offsets with small variance and finite values whose variance exceeds f32.
+`nn.LayerNorm` backward now uses the same Rust-owned centered moments.
+Python can reuse the un-affined normalized values and per-row inverse standard
+deviation directly:
+
+```python
+import spiraltorch as st
+
+x = st.Tensor(1, 4, [10000.0, 10001.0, 10002.0, 10003.0])
+normalized, inverse_std = x.layer_norm_stats(epsilon=1e-5)
+assert normalized.shape() == (1, 4)
+assert inverse_std.shape() == (1, 1)
+```
+
+The statistics helper is CPU/f64 with finite f32 outputs; affine forward retains
+its WGPU kernel. Constant rows require positive epsilon. Recheck earlier
+LayerNorm-derived results on offset-heavy inputs; this is a numerical correction,
+not evidence of improved LLM fine-tuning quality.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -949,7 +969,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.24
+VERSION=0.4.25
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

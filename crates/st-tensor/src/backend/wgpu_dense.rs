@@ -3802,7 +3802,7 @@ struct LayerNormParams {
     cols: u32,
     flags: u32,
     _pad0: u32,
-    epsilon: f32,
+    epsilon_sqrt: f32,
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
@@ -8720,6 +8720,11 @@ fn layer_norm_internal(
     if rows > u32::MAX as usize || cols > u32::MAX as usize {
         return Err("layer norm dimensions exceed u32 dispatch range".into());
     }
+    crate::normalization::validate_layer_norm_values(input, residual, cols, epsilon)
+        .map_err(|error| error.to_string())?;
+    if !gamma.iter().chain(beta).all(|value| value.is_finite()) {
+        return Err("layer norm affine parameters must be finite".into());
+    }
 
     let rows_u32 =
         u32::try_from(rows).map_err(|_| "layer norm rows exceed u32 dispatch range".to_string())?;
@@ -8765,7 +8770,7 @@ fn layer_norm_internal(
         cols: cols_u32,
         flags,
         _pad0: 0,
-        epsilon,
+        epsilon_sqrt: epsilon.sqrt(),
         _pad1: 0.0,
         _pad2: 0.0,
         _pad3: 0.0,

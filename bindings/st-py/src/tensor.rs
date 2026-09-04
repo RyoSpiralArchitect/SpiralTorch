@@ -1399,6 +1399,18 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// CPU normalized rows and inverse standard deviations, using centered f64 moments.
+    #[pyo3(signature = (*, epsilon=1e-5))]
+    pub fn layer_norm_stats(&self, epsilon: f32, py: Python<'_>) -> PyResult<(PyTensor, PyTensor)> {
+        let (normalized, inverse_std) = py
+            .detach(|| self.inner.layer_norm_stats(epsilon))
+            .map_err(tensor_err_to_py)?;
+        Ok((
+            PyTensor::from_tensor(normalized),
+            PyTensor::from_tensor(inverse_std),
+        ))
+    }
+
     /// Layer normalisation with affine parameters.
     #[pyo3(signature = (gamma, beta, *, epsilon=1e-5))]
     pub fn layer_norm_affine(

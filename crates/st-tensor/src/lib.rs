@@ -16,6 +16,7 @@ pub mod execution;
 pub mod execution_capability;
 mod hardmax;
 mod memory;
+mod normalization;
 pub mod observability;
 
 #[cfg(feature = "wgpu_frac")]

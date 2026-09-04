@@ -3676,6 +3676,12 @@ impl Tensor {
         } else {
             None
         };
+        crate::normalization::validate_layer_norm_values(
+            self.data(),
+            residual_data,
+            cols,
+            epsilon,
+        )?;
         let execution = prepare_component_execution(
             TensorExecutionWorkload::LayerNorm {
                 rows: execution_dimension(rows)?,
@@ -3889,41 +3895,18 @@ impl Tensor {
         epsilon: f32,
     ) -> PureResult<Tensor> {
         let (rows, cols) = self.shape();
-        let cols_f = cols as f32;
         let mut output = vec![0.0f32; rows * cols];
         let input = self.data();
 
         for r in 0..rows {
             let offset = r * cols;
-            let mut sum = 0.0f32;
-            let mut sumsq = 0.0f32;
+            let row = &input[offset..offset + cols];
+            let row_residual = residual.map(|values| &values[offset..offset + cols]);
+            let stats = crate::normalization::LayerNormRowStats::new(row, row_residual, epsilon);
             for c in 0..cols {
                 let idx = offset + c;
-                let mut v = input[idx];
-                if let Some(residual) = residual {
-                    v += residual[idx];
-                }
-                Self::validate_finite_tensor_util_value("layer_norm_value", v)?;
-                sum += v;
-                Self::validate_finite_tensor_util_value("layer_norm_sum", sum)?;
-                sumsq += v * v;
-                Self::validate_finite_tensor_util_value("layer_norm_sumsq", sumsq)?;
-            }
-            let mean = sum / cols_f;
-            Self::validate_finite_tensor_util_value("layer_norm_mean", mean)?;
-            let raw_var = sumsq / cols_f - mean * mean;
-            Self::validate_finite_tensor_util_value("layer_norm_variance", raw_var)?;
-            let var = raw_var.max(0.0);
-            let denom = (var + epsilon).sqrt();
-            Self::validate_finite_tensor_util_value("layer_norm_denom", denom)?;
-            for c in 0..cols {
-                let idx = offset + c;
-                let mut v = input[idx];
-                if let Some(residual) = residual {
-                    v += residual[idx];
-                }
-                Self::validate_finite_tensor_util_value("layer_norm_value", v)?;
-                let normed = (v - mean) / denom;
+                let normed =
+                    stats.normalize(crate::normalization::layer_norm_value(row, row_residual, c));
                 Self::validate_finite_tensor_util_value("layer_norm_normed", normed)?;
                 output[idx] = normed * gamma[c] + beta[c];
                 Self::validate_finite_tensor_util_value("layer_norm_output", output[idx])?;
@@ -15405,25 +15388,19 @@ mod tests {
     }
 
     #[test]
-    fn layer_norm_rejects_overflowing_cpu_variance() {
+    fn layer_norm_normalizes_finite_values_whose_variance_exceeds_f32() {
         let input = unwrap_ok(Tensor::from_vec(1, 2, vec![f32::MAX, -f32::MAX]));
         let gamma = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 1.0]));
         let beta = unwrap_ok(Tensor::zeros(1, 2));
 
-        let err = unwrap_err(input.layer_norm_affine_with_backend(
+        let output = unwrap_ok(input.layer_norm_affine_with_backend(
             &gamma,
             &beta,
             1.0e-5,
             LayerNormBackend::Cpu,
         ));
 
-        assert!(matches!(
-            err,
-            TensorError::NonFiniteValue {
-                label: "layer_norm_sumsq",
-                value,
-            } if value.is_infinite()
-        ));
+        assert_eq!(output.data(), &[1.0, -1.0]);
     }
 
     #[test]
