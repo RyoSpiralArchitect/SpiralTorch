@@ -30,8 +30,9 @@ target Rust flags, so the selected profile is explicit and replayable.
 
 If you have `vcpkg`-style host linker flags exported in your shell (for example via
 `RUSTFLAGS`), prefer the helper script above (it sanitises the environment for wasm
-builds) or unset `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, target-specific Rust flags,
-`LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invoking `wasm-pack` directly.
+builds) or unset `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`,
+target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invoking
+`wasm-pack` directly.
 
 ## Examples
 

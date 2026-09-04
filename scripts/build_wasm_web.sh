@@ -34,7 +34,7 @@ fi
 echo
 echo "[SpiralTorch] note: sanitising host Rust/linker flags for wasm builds"
 
-build_env=(env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+build_env=(env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
   -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS \
   -u LIBRARY_PATH -u PKG_CONFIG_PATH)
 if [[ "$simd128" == 1 ]]; then
