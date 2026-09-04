@@ -13,6 +13,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+mod optim;
+pub use optim::AutogradSgd;
+
 /// Versioned semantic contract shared by native and binding surfaces.
 pub const AUTOGRAD_CONTRACT_VERSION: &str = "spiraltorch.autograd.v1";
 /// Crate that owns graph construction and reverse-mode semantics.

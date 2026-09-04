@@ -1,6 +1,6 @@
 // Real wasm-pack nodejs output is required. No JS loss/derivative implementation.
 const assert = require("node:assert/strict");
-const { AutogradTensor } = require(process.argv[2]);
+const { AutogradTensor, AutogradSgd } = require(process.argv[2]);
 const owned = [];
 const keep = (value) => { owned.push(value); return value; };
 const close = (actual, expected, tolerance = 1e-6) => {
@@ -68,20 +68,25 @@ try {
   }
 
   const features = keep(new AutogradTensor(3, 3, new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]), false));
-  let weights = keep(new AutogradTensor(3, 3, new Float32Array(9), true));
+  const optimizer = keep(new AutogradSgd(0.5));
+  optimizer.addParameter(keep(new AutogradTensor(3, 3, new Float32Array(9), true)));
   const targets = new Int32Array([0, 1, 2]);
   let initial;
   for (let step = 0; step < 180; step++) {
-    const output = keep(features.matmul(weights));
-    const objective = keep(output.crossEntropyWithLogits(targets));
-    if (step === 0) initial = objective.values()[0];
-    objective.backward();
-    const values = weights.values();
-    const gradient = weights.gradientValues();
-    for (let index = 0; index < values.length; index++) values[index] -= 0.5 * gradient[index];
-    weights = keep(new AutogradTensor(3, 3, values, true));
+    const weights = optimizer.parameter(0);
+    const output = features.matmul(weights);
+    const objective = output.crossEntropyWithLogits(targets);
+    try {
+      if (step === 0) initial = objective.values()[0];
+      objective.backward();
+      optimizer.step();
+    } finally {
+      objective.free();
+      output.free();
+      weights.free();
+    }
   }
-  const finalLoss = keep(keep(features.matmul(weights)).crossEntropyWithLogits(targets)).values()[0];
+  const finalLoss = keep(keep(features.matmul(keep(optimizer.parameter(0)))).crossEntropyWithLogits(targets)).values()[0];
   assert.ok(finalLoss < 0.03 && finalLoss < initial / 20);
   console.log(JSON.stringify({ wasmClassification: "passed", steps: 180, initial, finalLoss }));
 } finally {

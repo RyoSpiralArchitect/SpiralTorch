@@ -22,8 +22,8 @@ pub mod observability;
 mod util;
 
 pub use autograd::{
-    AutogradBackwardReport, AutogradGraphSummary, AutogradTensor, AUTOGRAD_CONTRACT_VERSION,
-    AUTOGRAD_SEMANTIC_OWNER,
+    AutogradBackwardReport, AutogradGraphSummary, AutogradSgd, AutogradTensor,
+    AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 pub use backend::faer_dense;
 pub use classification::{class_indices_from_tensor, CrossEntropyConfig, LossReduction};

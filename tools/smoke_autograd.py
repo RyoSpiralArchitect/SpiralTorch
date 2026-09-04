@@ -29,11 +29,34 @@ def main():
         pass
     else:
         raise AssertionError("legacy export exposed a writable graph alias")
+    assert st.AutogradSgd is native.AutogradSgd
+    maximum = float.fromhex("0x1.fffffep+127")
+    last = st.AutogradTensor.variable(st.Tensor(1, 1, [maximum]))
+    last.backward(st.Tensor(1, 1, [-maximum]))
+    failed = st.AutogradSgd([leaf, last], learning_rate=1.0)
+    identities = [parameter.id() for parameter in failed.parameters()]
+    try:
+        failed.step()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("overflowing grouped SGD step succeeded")
+    assert [parameter.id() for parameter in failed.parameters()] == identities
+    assert leaf.value().tolist() == [[2.0, 3.0]]
+    assert leaf.grad().tolist() == [[4.0, 6.0]]
+    assert last.value().tolist() == [[maximum]]
+    assert last.grad().tolist() == [[-maximum]]
+    optimizer = st.AutogradSgd([leaf], learning_rate=0.5)
+    optimizer.step()
+    assert optimizer.parameter(0).value().tolist() == [[0.0, 0.0]]
+    assert optimizer.parameter(0).grad() is None
+    assert optimizer.parameter(0).id() != leaf.id()
+    assert leaf.value().tolist() == [[2.0, 3.0]]
     example = Path(__file__).resolve().parents[1] / "examples" / "autograd_xor.py"
     result = runpy.run_path(str(example))["run"]()
     classification = example.with_name("autograd_classification.py")
     classification_result = runpy.run_path(str(classification))["run"]()
-    print(json.dumps({"snapshot_boundary": "ok", "training": result,
+    print(json.dumps({"snapshot_boundary": "ok", "atomic_sgd_boundary": "ok", "training": result,
                       "classification": classification_result}, sort_keys=True))
 
 

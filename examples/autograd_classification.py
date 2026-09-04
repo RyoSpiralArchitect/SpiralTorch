@@ -37,8 +37,10 @@ def run(steps=300):
         variable(st.Tensor.randn(12, 3, std=0.4, seed=37)),
         variable(st.Tensor.zeros(1, 3)),
     ]
+    optimizer = st.AutogradSgd(parameters, learning_rate=0.2)
 
     def predict(batch):
+        parameters = optimizer.parameters()
         return (batch.matmul(parameters[0]).add_row(parameters[1]).gelu()
                 .matmul(parameters[2]).add_row(parameters[3]))
 
@@ -47,10 +49,7 @@ def run(steps=300):
         loss = predict(inputs).cross_entropy_with_logits(labels, label_smoothing=0.05)
         receipt = loss.backward()
         assert receipt["leaf_gradient_count"] == 4
-        parameters = [
-            variable(parameter.value().sub(parameter.grad().scale(0.2)))
-            for parameter in parameters
-        ]
+        optimizer.step()
     final = predict(inputs).cross_entropy_with_logits(labels, label_smoothing=0.05).item()
     output = predict(held_out)
     validation_nll = output.cross_entropy_with_logits(validation_labels).item()

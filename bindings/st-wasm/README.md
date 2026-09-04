@@ -145,6 +145,43 @@ not WebGPU dispatch. Run `node bindings/st-wasm/tests/classification.cjs
 /absolute/path/to/spiraltorch_wasm.js` against an actual nodejs-target build for
 masking, gradient, and 180-step learning checks.
 
+### Atomic parameter updates
+
+`AutogradSgd` delegates plain CPU SGD to Rust and replaces all registered leaves
+only when every update is valid. It does not mutate old graph handles. Fetch
+`parameter(index)` again for every forward pass, then free temporary JS handles:
+
+```ts
+import { AutogradSgd, AutogradTensor } from "spiraltorch-wasm";
+
+const optimizer = new AutogradSgd(0.1);
+const initial = new AutogradTensor(1, 2, new Float32Array([2, -3]), true);
+optimizer.addParameter(initial); // Borrowed, not consumed.
+initial.free();
+for (let step = 0; step < 100; step++) {
+  const parameter = optimizer.parameter(0);
+  const squared = parameter.hadamard(parameter);
+  const loss = squared.mean();
+  try {
+    loss.backward();
+    optimizer.step();
+  } finally {
+    loss.free();
+    squared.free();
+    parameter.free();
+  }
+}
+optimizer.free();
+```
+
+Duplicate/non-leaf parameters, missing gradients, invalid learning rates and
+overflow are errors, not partial updates. There is no momentum, clipping,
+implicit averaging, or WebGPU optimizer dispatch. Run
+`node bindings/st-wasm/tests/autograd_sgd.cjs /absolute/path/to/spiraltorch_wasm.js`
+for the failure/ownership checks; `classification.cjs` also uses the optimizer.
+Parameter indices must be finite nonnegative integers within the u32 range;
+fractional, NaN, and overflowing JS numbers are rejected before conversion.
+
 ## Shared Topos control and runtime routing
 
 Browser clients can derive a topology control signal and project a runtime profile through

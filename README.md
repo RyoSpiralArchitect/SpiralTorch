@@ -463,6 +463,14 @@ connects it to `ModuleTrainer`. The [classification contract](docs/autograd_cont
 explains the boundaries. `python examples/autograd_classification.py` runs a
 300-step, three-class learning fixture without NumPy or PyTorch.
 
+Version 0.4.23 adds `st.AutogradSgd(parameters, learning_rate=0.1)`
+for plain Rust-owned CPU updates. Fetch `optimizer.parameters()` for each forward
+pass, call `loss.backward()`, then `optimizer.step()`. All parameters are replaced
+with fresh immutable leaves together; missing gradients or overflow cannot leave
+a partial update. Python and WASM classification fixtures use this path. See
+[atomic SGD](docs/autograd_contract.md#atomic-sgd-for-immutable-leaves) for the
+ownership rules and the distinction from Z-space optimizer tapes.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -922,7 +930,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.22
+VERSION=0.4.23
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.
