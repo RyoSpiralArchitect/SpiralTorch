@@ -18,14 +18,14 @@ fn unwrap_ok<T, E: core::fmt::Debug>(context: &str, result: Result<T, E>) -> T {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn render_histogram(samples: &[f32]) {
-    let path = Path::new("target/criterion/random_init/histogram.png");
+    let path = Path::new("target/criterion/random_init/histogram.svg");
     if let Some(parent) = path.parent() {
         unwrap_ok(
             "failed to create histogram directory",
             std::fs::create_dir_all(parent),
         );
     }
-    let root = BitMapBackend::new(path, (640, 480)).into_drawing_area();
+    let root = SVGBackend::new(path, (640, 480)).into_drawing_area();
     unwrap_ok("failed to clear canvas", root.fill(&WHITE));
     let mut chart = unwrap_ok(
         "failed to build chart",

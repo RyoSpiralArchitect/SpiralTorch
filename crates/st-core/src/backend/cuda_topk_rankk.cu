@@ -1,9 +1,15 @@
 // cuda_topk_rankk.cu
 // Rowwise TopK / BottomK / MidK kernels for CUDA (float32).
 
+// NVRTC supplies device builtins, but does not search toolkit/host headers.
+#if defined(__CUDACC_RTC__)
+#define CUDART_INF_F __int_as_float(0x7f800000)
+#define CUDART_NAN_F __int_as_float(0x7fffffff)
+#else
 #include <cuda_runtime.h>
 #include <cstddef>
 #include <math_constants.h>
+#endif
 
 extern "C" {
 
@@ -72,6 +78,63 @@ __device__ __forceinline__ bool asc_out_of_order(
     return false;
   }
   return left_i > right_i;
+}
+
+// Exact wide-row path when a fixed per-thread heap cannot retain every winner.
+// The previous (value, index) tuple excludes precisely the already emitted prefix.
+__device__ void exact_rescan_rowwise(
+    const float* X, int rows, int cols, int k,
+    float* out_vals, int* out_idx, bool descending) {
+  int row = linear_row_index();
+  if (row >= rows || k <= 0) return;
+  int tid = threadIdx.x;
+  int stride = blockDim.x;
+  size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+  const float* input = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+  extern __shared__ unsigned char scratch[];
+  float* candidates = reinterpret_cast<float*>(scratch);
+  int* candidate_ids = reinterpret_cast<int*>(candidates + stride);
+  for (int oi = 0; oi < k; ++oi) {
+    float best = descending ? -CUDART_INF_F : CUDART_INF_F;
+    int best_id = -1;
+    for (int col = tid; col < cols; col += stride) {
+      float value = input[col];
+      if (oi > 0) {
+        float previous = out_vals[out_base + oi - 1];
+        int previous_id = out_idx[out_base + oi - 1];
+        bool after = descending ? prefer_desc(previous, previous_id, value, col)
+                                : prefer_asc(previous, previous_id, value, col);
+        if (!after) continue;
+      }
+      bool better = descending ? prefer_desc(value, col, best, best_id)
+                               : prefer_asc(value, col, best, best_id);
+      if (better) { best = value; best_id = col; }
+    }
+    candidates[tid] = best;
+    candidate_ids[tid] = best_id;
+    __syncthreads();
+    if (tid == 0) {
+      best_id = -1;
+      for (int slot = 0; slot < stride; ++slot) {
+        bool better = descending ? prefer_desc(candidates[slot], candidate_ids[slot], best, best_id)
+                                 : prefer_asc(candidates[slot], candidate_ids[slot], best, best_id);
+        if (better) { best = candidates[slot]; best_id = candidate_ids[slot]; }
+      }
+      out_vals[out_base + oi] = best_id >= 0 ? best : CUDART_NAN_F;
+      out_idx[out_base + oi] = best_id;
+    }
+    __syncthreads();
+  }
+}
+
+__global__ void topk_exact_rescan_rowwise_kernel(
+    const float* X, int rows, int cols, int k, float* out_vals, int* out_idx) {
+  exact_rescan_rowwise(X, rows, cols, k, out_vals, out_idx, true);
+}
+
+__global__ void bottomk_exact_rescan_rowwise_kernel(
+    const float* X, int rows, int cols, int k, float* out_vals, int* out_idx) {
+  exact_rescan_rowwise(X, rows, cols, k, out_vals, out_idx, false);
 }
 
 __device__ __forceinline__ void fill_row_with_nan(

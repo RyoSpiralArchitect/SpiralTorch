@@ -129,7 +129,7 @@ jobs:
         if: matrix.run_upper_stack
         run: |
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership
-          cargo test -p st-nn --release --lib
+          cargo test -p st-nn --release --features golden --lib
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
 
@@ -173,7 +173,7 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
-        run: cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing
+        run: cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_matmul_precision
       - name: nonlinear autograd on strict WGPU paths
         env:
           SPIRALTORCH_STRICT_GPU: "1"
@@ -406,6 +406,7 @@ jobs:
           python -P tests/test_runtime_imports.py
           python -P tests/test_verify_release.py
           python -P tests/test_verify_pypi_release.py
+          python -P tests/test_backend_benchmark.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

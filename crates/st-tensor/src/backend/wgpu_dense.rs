@@ -4761,7 +4761,12 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 }
 
 fn should_quantize(inner: usize, cols: usize) -> bool {
-    inner.saturating_mul(cols) >= QUANTIZATION_MIN_VOLUME
+    // Float32 tensors must not silently become lossy int8 weights based on size.
+    // Freeze the explicit opt-in for this process so cached plans remain coherent.
+    static ALLOW_INT8: OnceLock<bool> = OnceLock::new();
+    let enabled =
+        *ALLOW_INT8.get_or_init(|| env::var("SPIRALTORCH_WGPU_ALLOW_INT8").as_deref() == Ok("1"));
+    enabled && inner.saturating_mul(cols) >= QUANTIZATION_MIN_VOLUME
 }
 
 struct QuantizedWeights {
@@ -10572,7 +10577,7 @@ fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     TileConfig::new(16, 16, 16)
 }
 
-const MATMUL_AUTOTUNE_REVISION: u64 = 1;
+const MATMUL_AUTOTUNE_REVISION: u64 = 2;
 const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
 const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
 const AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -10966,9 +10971,10 @@ fn matmul_autotune_key(
     let driver_info = encode_component(&info.driver_info);
     let name = encode_component(&info.name);
     let key = format!(
-        "wgpu.matmul.v{MATMUL_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{inner}x{cols}|runs{AUTOTUNE_SAMPLE_RUNS}",
+        "wgpu.matmul.v{MATMUL_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{inner}x{cols}|int8{int8}|runs{AUTOTUNE_SAMPLE_RUNS}",
         vendor = info.vendor,
         device = info.device,
+        int8 = should_quantize(inner, cols),
     );
     Some((key, path))
 }

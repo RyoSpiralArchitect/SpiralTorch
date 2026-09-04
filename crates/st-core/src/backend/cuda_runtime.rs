@@ -19,12 +19,16 @@ const BOTTOMK_KERNEL: &str = "bottomk_warp_heap_rowwise_kernel";
 const MIDK_KERNEL: &str = "midk_shared_odd_even_rowwise_kernel";
 const TOP_BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
 const BOTTOM_BITONIC_KERNEL: &str = "bottomk_warp_bitonic_rowwise_kernel";
+const TOP_RESCAN_KERNEL: &str = "topk_exact_rescan_rowwise_kernel";
+const BOTTOM_RESCAN_KERNEL: &str = "bottomk_exact_rescan_rowwise_kernel";
 const MODULE_KERNELS: &[&str] = &[
     TOPK_KERNEL,
     BOTTOMK_KERNEL,
     MIDK_KERNEL,
     TOP_BITONIC_KERNEL,
     BOTTOM_BITONIC_KERNEL,
+    TOP_RESCAN_KERNEL,
+    BOTTOM_RESCAN_KERNEL,
 ];
 const CUDA_SOURCE: &str = include_str!("cuda_topk_rankk.cu");
 const WARP_LANES: usize = 32;
@@ -57,10 +61,37 @@ pub fn run_selection(
         Selection::Bottom if plan.k == 1 => {
             launch_bitonic_kernel(plan, buffers, BOTTOM_BITONIC_KERNEL)
         }
+        Selection::Top if needs_exact_rescan(plan.cols, plan.k) => {
+            launch_rescan_kernel(plan, buffers, TOP_RESCAN_KERNEL)
+        }
+        Selection::Bottom if needs_exact_rescan(plan.cols, plan.k) => {
+            launch_rescan_kernel(plan, buffers, BOTTOM_RESCAN_KERNEL)
+        }
         Selection::Top => launch_heap_kernel(plan, buffers, TOPK_KERNEL),
         Selection::Bottom => launch_heap_kernel(plan, buffers, BOTTOMK_KERNEL),
         Selection::Mid => launch_midk_kernel(plan, buffers),
     }
+}
+
+fn needs_exact_rescan(cols: u32, k: u32) -> bool {
+    // A thread may own every winner. Retaining eight per thread is exact only
+    // when k <= eight or the complete row fits in the retained candidates.
+    k as usize > PER_THREAD_KEEP && cols as usize > THREADS_PER_BLOCK * PER_THREAD_KEEP
+}
+
+fn launch_rescan_kernel(
+    plan: &RankPlan,
+    buffers: &mut LaunchSlices<'_>,
+    kernel: &'static str,
+) -> Result<(), String> {
+    launch_cuda_kernel(
+        plan,
+        buffers,
+        kernel,
+        (THREADS_PER_BLOCK as u32, 1, 1),
+        (THREADS_PER_BLOCK * (std::mem::size_of::<f32>() + std::mem::size_of::<i32>())) as u32,
+        Some(SUPPORTED_K),
+    )
 }
 
 fn launch_heap_kernel(
@@ -258,6 +289,65 @@ mod tests {
     use crate::backend::device_caps::DeviceCaps;
     use crate::backend::unison_heuristics::RankKind;
     use crate::ops::rank_entry::plan_rank;
+
+    #[test]
+    fn concentrated_winners_require_rescan_only_beyond_heap_capacity() {
+        assert!(!needs_exact_rescan(2048, 8));
+        assert!(!needs_exact_rescan(1024, 1024));
+        assert!(needs_exact_rescan(1025, 9));
+        assert!(needs_exact_rescan(2048, 16));
+    }
+
+    #[test]
+    fn real_cuda_rank_keeps_concentrated_winners_and_ties() {
+        if std::env::var("SPIRALTORCH_RUN_CUDA_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        for (kind, selection, sign) in [
+            (RankKind::TopK, Selection::Top, 1.0),
+            (RankKind::BottomK, Selection::Bottom, -1.0),
+        ] {
+            for (cols, k) in [(256, 8), (2048, 8), (1025, 9), (2048, 16)] {
+                let mut input = vec![0.0; cols];
+                let winners = cols.div_ceil(128);
+                for i in 0..winners {
+                    input[i * 128] = sign * (100.0 + (i / 2) as f32);
+                }
+                let mut expected: Vec<usize> = (0..cols).collect();
+                expected.sort_by(|&a, &b| {
+                    (sign * input[b])
+                        .total_cmp(&(sign * input[a]))
+                        .then(a.cmp(&b))
+                });
+                let mut values = vec![0.0; k];
+                let mut indices = vec![0; k];
+                let plan = plan_rank(
+                    kind,
+                    1,
+                    cols as u32,
+                    k as u32,
+                    DeviceCaps::cuda(32, 1024, None),
+                );
+                let mut slices = LaunchSlices {
+                    input: &input,
+                    out_vals: &mut values,
+                    out_idx: &mut indices,
+                    rows: 1,
+                    cols: cols as u32,
+                    k: k as u32,
+                };
+                run_selection(selection, &plan, &mut slices).unwrap();
+                assert_eq!(
+                    indices,
+                    expected[..k].iter().map(|&i| i as i32).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    values,
+                    expected[..k].iter().map(|&i| input[i]).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
 
     fn plan_midk(rows: u32, cols: u32, k: u32) -> RankPlan {
         plan_rank(
