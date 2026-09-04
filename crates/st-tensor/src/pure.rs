@@ -3088,6 +3088,13 @@ impl Tensor {
             }
         }
 
+        if cpu_dense::should_use(rows, inner, cols)
+            && cpu_dense::matmul_packed_into(dst, self.data(), packed.as_slice(), rows, inner, cols)
+                .is_ok()
+        {
+            return Ok("cpu_simd");
+        }
+
         matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
         Ok("naive")
     }
@@ -3142,6 +3149,14 @@ impl Tensor {
                 add_bias_inplace(dst, rows, cols, bias);
                 return Ok("faer");
             }
+        }
+
+        if cpu_dense::should_use(rows, inner, cols)
+            && cpu_dense::matmul_packed_into(dst, self.data(), packed.as_slice(), rows, inner, cols)
+                .is_ok()
+        {
+            add_bias_inplace(dst, rows, cols, bias);
+            return Ok("cpu_simd");
         }
 
         matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);

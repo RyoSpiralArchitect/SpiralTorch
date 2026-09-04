@@ -115,6 +115,35 @@ pub struct AutogradTensor {
     transport: AutogradTransport,
 }
 
+/// Frozen RHS whose source graph and packed storage are both owned by Rust.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct AutogradPackedRhs {
+    inner: st_tensor::AutogradPackedRhs,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl AutogradPackedRhs {
+    #[wasm_bindgen(js_name = sourceId)]
+    pub fn source_id(&self) -> String {
+        self.inner.source_id().to_string()
+    }
+
+    pub fn rows(&self) -> usize {
+        self.inner.shape().0
+    }
+
+    pub fn cols(&self) -> usize {
+        self.inner.shape().1
+    }
+
+    #[wasm_bindgen(js_name = requiresGrad)]
+    pub fn requires_grad(&self) -> bool {
+        self.inner.requires_grad()
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl AutogradTensor {
@@ -339,6 +368,25 @@ impl AutogradTensor {
         self.transport
             .inner
             .matmul(&rhs.transport.inner)
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = prepackRhs)]
+    pub fn prepack_rhs(&self) -> Result<AutogradPackedRhs, JsValue> {
+        self.transport
+            .inner
+            .prepack_rhs()
+            .map(|inner| AutogradPackedRhs { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = matmulPrepacked)]
+    pub fn matmul_prepacked(&self, rhs: &AutogradPackedRhs) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .matmul_prepacked(&rhs.inner)
             .map(AutogradTransport::from_inner)
             .map(|transport| Self { transport })
             .map_err(js_error)

@@ -33,6 +33,16 @@ declare module "spiraltorch-wasm" {
     /** Return the crate that owns graph and reverse-mode semantics. */
     export function autogradSemanticOwner(): "st-tensor";
 
+    /** Frozen packed source. Repack new optimizer parameters explicitly. */
+    export class AutogradPackedRhs {
+        private constructor();
+        free(): void;
+        sourceId(): string;
+        rows(): number;
+        cols(): number;
+        requiresGrad(): boolean;
+    }
+
     /** Thin browser handle over the Rust-owned reverse-mode graph. */
     export class AutogradTensor {
         constructor(rows: number, cols: number, values: Float32Array, requires_grad: boolean);
@@ -57,6 +67,8 @@ declare module "spiraltorch-wasm" {
         sub(rhs: AutogradTensor): AutogradTensor;
         hadamard(rhs: AutogradTensor): AutogradTensor;
         matmul(rhs: AutogradTensor): AutogradTensor;
+        prepackRhs(): AutogradPackedRhs;
+        matmulPrepacked(rhs: AutogradPackedRhs): AutogradTensor;
         /** Affine gradients sum rows; defaults to epsilon=1e-5. */
         layerNormAffine(gamma: AutogradTensor, beta: AutogradTensor, epsilon?: number | null): AutogradTensor;
         gatherRows(indices: number[] | Uint32Array): AutogradTensor;

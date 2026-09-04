@@ -13,10 +13,18 @@ for (const line of fs.readFileSync(0, "utf8").trim().split("\n")) {
       return tensor;
     };
     const a = make(r.input_rows, r.input_cols, r.values);
-    let fn;
-    if (r.operation === "matmul") {
+    let fn, prepackMs = null;
+    if (r.operation === "matmul" || r.operation === "matmul_prepacked") {
       const b = make(r.input_cols, r.output_cols, r.other);
-      fn = () => a.matmul(b);
+      if (r.operation === "matmul_prepacked") {
+        const start = performance.now();
+        const packed = b.prepackRhs();
+        prepackMs = performance.now() - start;
+        owned.push(packed);
+        fn = () => a.matmulPrepacked(packed);
+      } else {
+        fn = () => a.matmul(b);
+      }
     } else if (r.operation === "gather") {
       fn = () => a.gatherRows(r.ids);
     } else if (r.operation === "scatter") {
@@ -38,7 +46,8 @@ for (const line of fs.readFileSync(0, "utf8").trim().split("\n")) {
       output.free();
     }
     console.log(JSON.stringify({ status: "passed", values, samples_ms: samples,
-      first_call_ms: firstCall, node: process.version, boundary: "WASM host tensors -> tensor; JS conversion excluded" }));
+      first_call_ms: firstCall, prepack_ms: prepackMs, node: process.version,
+      boundary: "WASM host tensors -> tensor; JS conversion and optional one-time RHS packing excluded" }));
   } catch (error) {
     failed = true;
     console.log(JSON.stringify({ status: "error", error: String(error) }));

@@ -7,7 +7,9 @@
 //! backward pass never commits a partial gradient set. Python and WASM clients
 //! should expose this contract rather than rebuilding graph semantics.
 
-use crate::{CrossEntropyConfig, Layout, PureResult, Tensor, TensorError, TensorUtilBackend};
+use crate::{
+    CrossEntropyConfig, Layout, PackedB, PureResult, Tensor, TensorError, TensorUtilBackend, Tile,
+};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -89,6 +91,31 @@ impl AutogradBackwardReport {
 #[derive(Clone)]
 pub struct AutogradTensor {
     node: Arc<AutogradNode>,
+}
+
+/// Reusable packed snapshot of one immutable graph node's right-hand operand.
+///
+/// Packing does not detach the source: backward still reaches its original
+/// graph, including non-leaf operations. After an optimizer replaces a leaf,
+/// pack the new leaf explicitly; this handle intentionally retains the old one.
+#[derive(Clone, Debug)]
+pub struct AutogradPackedRhs {
+    source: AutogradTensor,
+    packed: PackedB,
+}
+
+impl AutogradPackedRhs {
+    pub fn source_id(&self) -> u64 {
+        self.source.id()
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.source.shape()
+    }
+
+    pub fn requires_grad(&self) -> bool {
+        self.source.requires_grad()
+    }
 }
 
 struct AutogradNode {
@@ -659,6 +686,27 @@ impl AutogradTensor {
         )
     }
 
+    /// Packs this immutable node for repeated use as a matmul right-hand side.
+    pub fn prepack_rhs(&self) -> PureResult<AutogradPackedRhs> {
+        Ok(AutogradPackedRhs {
+            source: self.clone(),
+            packed: PackedB::from_tensor(self.value(), Tile::col_major())?,
+        })
+    }
+
+    /// Uses the Tensor prepacked dispatch while retaining ordinary matmul gradients.
+    /// The packed source is a snapshot, not a live cache of optimizer parameters.
+    pub fn matmul_prepacked(&self, rhs: &AutogradPackedRhs) -> PureResult<Self> {
+        let value = self.value().matmul_prepacked(&rhs.packed)?;
+        Self::from_operation(
+            value,
+            AutogradOperation::Matmul {
+                lhs: self.clone(),
+                rhs: rhs.source.clone(),
+            },
+        )
+    }
+
     pub fn scale(&self, factor: f32) -> PureResult<Self> {
         let value = self.value().scale(factor)?;
         Self::from_operation(
@@ -1026,6 +1074,85 @@ mod tests {
         assert_close(variable.grad().unwrap().data(), &[-1.0, 4.0, 9.0], 1e-6);
         assert_eq!(report.graph.trainable_leaf_count, 1);
         assert_eq!(report.leaf_gradient_count, 1);
+    }
+
+    #[test]
+    fn prepacked_matmul_retains_nonleaf_source_and_reused_gradients() {
+        let lhs =
+            AutogradTensor::variable(tensor(2, 3, vec![1.0, 2.0, -1.0, 0.5, -2.0, 3.0])).unwrap();
+        let base =
+            AutogradTensor::variable(tensor(3, 2, vec![2.0, -1.0, 0.0, 3.0, 1.5, 2.0])).unwrap();
+        let rhs = base.scale(0.5).unwrap();
+        let packed = rhs.prepack_rhs().unwrap();
+        assert_eq!(packed.source_id(), rhs.id());
+        assert_eq!(packed.shape(), (3, 2));
+        assert!(packed.requires_grad());
+        assert_eq!(
+            packed.clone().packed.as_slice().as_ptr(),
+            packed.packed.as_slice().as_ptr()
+        );
+        let expected = lhs.matmul(&rhs).unwrap();
+        let first = lhs.matmul_prepacked(&packed).unwrap();
+        let second = lhs.matmul_prepacked(&packed).unwrap();
+        assert_eq!(first.operation_name(), "matmul");
+        assert_close(first.value().data(), expected.value().data(), 1e-6);
+        let report = first
+            .add(&second)
+            .unwrap()
+            .sum()
+            .unwrap()
+            .backward()
+            .unwrap();
+        assert_eq!(report.leaf_gradient_count, 2);
+        assert_close(
+            lhs.grad().unwrap().data(),
+            &[1.0, 3.0, 3.5, 1.0, 3.0, 3.5],
+            1e-6,
+        );
+        assert_close(
+            base.grad().unwrap().data(),
+            &[1.5, 1.5, 0.0, 0.0, 2.0, 2.0],
+            1e-6,
+        );
+    }
+
+    #[test]
+    fn prepacked_matmul_handles_shared_leaf_empty_and_invalid_shapes() {
+        let x = AutogradTensor::variable(tensor(1, 1, vec![2.0])).unwrap();
+        let packed = x.prepack_rhs().unwrap();
+        x.matmul_prepacked(&packed).unwrap().backward().unwrap();
+        assert_eq!(x.grad().unwrap().data(), &[4.0]);
+        let invalid = AutogradTensor::constant(tensor(1, 2, vec![1.0, 2.0])).unwrap();
+        assert!(invalid.matmul_prepacked(&packed).is_err());
+        assert_eq!(x.grad().unwrap().data(), &[4.0]);
+        for (rows, inner, cols) in [(0, 3, 2), (2, 0, 3), (2, 3, 0)] {
+            let lhs = AutogradTensor::variable(Tensor::zeros(rows, inner).unwrap()).unwrap();
+            let rhs = AutogradTensor::variable(Tensor::zeros(inner, cols).unwrap()).unwrap();
+            let output = lhs.matmul_prepacked(&rhs.prepack_rhs().unwrap()).unwrap();
+            assert_eq!(output.shape(), (rows, cols));
+            output.sum().unwrap().backward().unwrap();
+            assert_eq!(lhs.grad().unwrap().shape(), (rows, inner));
+            assert_eq!(rhs.grad().unwrap().shape(), (inner, cols));
+        }
+    }
+
+    #[test]
+    fn prepacked_matmul_is_an_explicit_optimizer_snapshot() {
+        let x = AutogradTensor::constant(tensor(1, 1, vec![2.0])).unwrap();
+        let weight = AutogradTensor::variable(tensor(1, 1, vec![3.0])).unwrap();
+        let packed = weight.prepack_rhs().unwrap();
+        let mut optimizer = AutogradSgd::new(vec![weight.clone()], 0.5).unwrap();
+        x.matmul_prepacked(&packed).unwrap().backward().unwrap();
+        optimizer.step().unwrap();
+        let updated = optimizer.parameter(0).unwrap();
+        let refreshed = updated.prepack_rhs().unwrap();
+        assert_ne!(packed.source_id(), refreshed.source_id());
+        assert_eq!(x.matmul_prepacked(&packed).unwrap().value().data(), &[6.0]);
+        let output = x.matmul_prepacked(&refreshed).unwrap();
+        assert_eq!(output.value().data(), &[4.0]);
+        output.backward().unwrap();
+        assert_eq!(weight.grad().unwrap().data(), &[2.0]);
+        assert_eq!(updated.grad().unwrap().data(), &[2.0]);
     }
 
     #[test]

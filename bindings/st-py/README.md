@@ -172,6 +172,26 @@ invariants, not Python-side conventions. Use
 does not read or mutate accumulated gradients and returns zero when `input` is
 disconnected.
 
+Repeated projections can reuse a Rust-owned packed RHS without detaching its
+source graph:
+
+```python
+weights = st.AutogradTensor.constant(st.Tensor(3, 2, [1, 0, 0, 1, 1, 1]))
+packed = weights.prepack_rhs()  # AutogradPackedRhs; pack once for frozen weights
+hidden = st.AutogradTensor.variable(st.Tensor(1, 3, [1, 2, 3]))
+projected = hidden.matmul_prepacked(packed)
+projected.sum().backward()
+print(projected.value().tolist(), hidden.grad().tolist())
+```
+
+Trainable and non-leaf RHS nodes retain their original gradient paths too.
+`source_id()`, `shape()` and `requires_grad()` describe that immutable snapshot.
+After `AutogradSgd.step()`, fetch the new parameter and call `prepack_rhs()` again
+if that RHS was updated; an old packed handle deliberately keeps the old value
+and graph. This uses the existing Rust Tensor **prepacked Auto dispatch**, which
+can choose a different backend from ordinary matmul. Packing is not a promise
+of GPU residency or faster training; measure the actual workload.
+
 Native graphs also expose `add_row(bias)`, `relu()`, `gelu()` (tanh
 approximation), and `row_softmax()`. Bias gradients sum over rows; any averaging
 belongs to the loss. See [the nonlinear learning example](../../examples/autograd_xor.py)
