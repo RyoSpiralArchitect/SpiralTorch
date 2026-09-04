@@ -11,13 +11,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseRunbookTests(unittest.TestCase):
+    def test_index_lag_recovery_does_not_repeat_the_upload(self) -> None:
+        runbook = (ROOT / "docs" / "ops" / "release.md").read_text(encoding="utf-8")
+        self.assertIn("gh workflow run verify_pypi_release.yml", runbook)
+        self.assertIn("--require-simple-index", runbook)
+        self.assertIn("Do not rerun the upload", runbook)
+
     def test_pypi_secret_setup_uses_supported_gh_stdin_path(self) -> None:
-        helper = (ROOT / "scripts" / "configure_pypi_token_secret.py").read_text(encoding="utf-8")
+        helper = (ROOT / "scripts" / "configure_pypi_token_secret.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('"secret"', helper)
         self.assertIn('"set"', helper)
-        self.assertIn('secret_name,', helper)
+        self.assertIn("secret_name,", helper)
         self.assertIn('"--env"', helper)
-        self.assertIn('input=token', helper)
+        self.assertIn("input=token", helper)
         self.assertIn("getpass.getpass", helper)
         self.assertNotIn("--body-file", helper)
 

@@ -354,6 +354,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --expected-wheels 3 \
             --require-latest \
+            --require-simple-index \
             --timeout 240
 
   attach:

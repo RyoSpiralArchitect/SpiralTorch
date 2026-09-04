@@ -1,0 +1,100 @@
+name: Verify Published PyPI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to verify, without publishing or rebuilding"
+        required: true
+        type: string
+      expected_wheels:
+        description: "Expected number of release wheels"
+        default: "3"
+        type: string
+      require_latest:
+        description: "Require this version to be PyPI's current latest"
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      expected_wheels:
+        default: "3"
+        type: string
+      require_latest:
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify index readiness and installed wheel
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      EXPECTED_WHEELS: ${{ inputs.expected_wheels }}
+      REQUIRE_LATEST: ${{ inputs.require_latest }}
+      PYTHONNOUSERSITE: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Wait for matching release JSON and Simple index
+        env:
+          PYPI_REQUIREMENTS: ${{ runner.temp }}/spiraltorch-pypi-requirements.txt
+        run: |
+          set -euo pipefail
+          args=(
+            --version "${RELEASE_TAG#v}"
+            --release-tag "$RELEASE_TAG"
+            --repo "$GITHUB_REPOSITORY"
+            --expected-wheels "$EXPECTED_WHEELS"
+            --require-simple-index
+            --pip-requirements "$PYPI_REQUIREMENTS"
+            --timeout 240
+          )
+          if [ "$REQUIRE_LATEST" = "true" ]; then
+            args+=(--require-latest)
+          fi
+          python scripts/security/verify_pypi_release.py "${args[@]}"
+      - name: Install and smoke the exact public version
+        env:
+          PYPI_REQUIREMENTS: ${{ runner.temp }}/spiraltorch-pypi-requirements.txt
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/spiraltorch-pypi-smoke.XXXXXX")"
+          run_dir="$(mktemp -d "$RUNNER_TEMP/spiraltorch-pypi-smoke-cwd.XXXXXX")"
+          trap 'rm -rf "$smoke_dir" "$run_dir"' EXIT
+          python -m pip install --upgrade pip
+          python -m pip install \
+            --no-cache-dir \
+            --no-deps \
+            --require-hashes \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: \
+            --target "$smoke_dir" \
+            --requirement "$PYPI_REQUIREMENTS"
+          cd "$run_dir"
+          EXPECTED_VERSION="${RELEASE_TAG#v}" SPIRALTORCH_SMOKE_TARGET="$smoke_dir" PYTHONPATH="$smoke_dir" python -P - <<'PY'
+          import os
+          from pathlib import Path
+          import spiraltorch as st
+
+          target = Path(os.environ["SPIRALTORCH_SMOKE_TARGET"]).resolve()
+          assert target in Path(st.__file__).resolve().parents, st.__file__
+          assert st.__version__ == os.environ["EXPECTED_VERSION"]
+          assert st._rs is not None
+          assert target in Path(st._rs.__file__).resolve().parents, st._rs.__file__
+          layer = st.nn.Linear(2, 2, name="pypi_workflow_smoke")
+          state = dict(layer.state_dict())
+          assert "pypi_workflow_smoke::weight" in state
+          print("pypi workflow smoke ok", st.__version__, st.__file__)
+          PY

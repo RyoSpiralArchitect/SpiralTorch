@@ -170,6 +170,51 @@ gh workflow run publish_pypi_from_release.yml \
 Use `publish_method=trusted` only after PyPI Trusted Publishing is configured
 for the matching workflow and environment.
 
+## Verify Without Republishing
+
+An upload can finish before pip's index reflects the version. Release JSON and
+the [Simple API](https://packaging.python.org/en/latest/specifications/simple-repository-api/)
+are checked independently: every expected wheel name and SHA-256 must match.
+The readiness verifier uses a monotonic retry budget, caps socket timeouts by
+the remaining budget, and retries only temporary availability failures.
+Malformed responses, unexpected files, mismatched hashes, yanked release wheels,
+authentication failures and TLS certificate failures remain terminal.
+
+The normal publish workflow calls a separate read-only verification job after
+upload. To recover from a post-upload check failure, verify the existing release
+without giving the job a PyPI token or upload authority:
+
+```bash
+gh workflow run verify_pypi_release.yml \
+  --ref main \
+  -f release_tag="$TAG" \
+  -f expected_wheels=3 \
+  -f require_latest=true
+```
+
+Omit `require_latest=true` when intentionally checking a historical release.
+The job waits for the index, writes a version/hash-pinned requirements file,
+installs from PyPI with `--require-hashes` in an isolated target, and verifies
+the imported native package's path and version. A new index entry cannot
+substitute a wheel outside the approved release hashes.
+It neither rebuilds nor replaces release assets. A failed import remains a
+failure; it is not treated as publication lag.
+
+The availability/hash check can also run locally, without installing anything:
+
+```bash
+python scripts/security/verify_pypi_release.py \
+  --version "$VERSION" \
+  --release-tag "$TAG" \
+  --expected-wheels 3 \
+  --require-latest \
+  --require-simple-index \
+  --timeout 240
+```
+
+Do not rerun the upload merely because an index-readiness or import check failed.
+Keep the failed run as evidence and use the verification-only workflow above.
+
 ## Local Dry-Run Or Emergency Manual Upload
 
 Download the release payload:
