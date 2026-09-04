@@ -7,7 +7,7 @@
 //! backward pass never commits a partial gradient set. Python and WASM clients
 //! should expose this contract rather than rebuilding graph semantics.
 
-use crate::{CrossEntropyConfig, Layout, PureResult, Tensor, TensorError};
+use crate::{CrossEntropyConfig, Layout, PureResult, Tensor, TensorError, TensorUtilBackend};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -135,6 +135,12 @@ enum AutogradOperation {
     Gelu {
         input: AutogradTensor,
     },
+    LayerNormAffine {
+        input: AutogradTensor,
+        gamma: AutogradTensor,
+        beta: AutogradTensor,
+        epsilon: f32,
+    },
     RowSoftmax {
         input: AutogradTensor,
         probabilities: Tensor,
@@ -187,6 +193,7 @@ impl AutogradOperation {
             Self::Transpose { .. } => "transpose",
             Self::Relu { .. } => "relu",
             Self::Gelu { .. } => "gelu",
+            Self::LayerNormAffine { .. } => "layer_norm_affine",
             Self::RowSoftmax { .. } => "row_softmax",
             Self::RowLogSoftmax { .. } => "row_log_softmax",
             Self::CrossEntropyWithLogits { .. } => "cross_entropy_with_logits",
@@ -203,6 +210,9 @@ impl AutogradOperation {
             | Self::Hadamard { lhs, rhs }
             | Self::Matmul { lhs, rhs } => vec![lhs.clone(), rhs.clone()],
             Self::AddRow { input, bias } => vec![input.clone(), bias.clone()],
+            Self::LayerNormAffine {
+                input, gamma, beta, ..
+            } => vec![input.clone(), gamma.clone(), beta.clone()],
             Self::Scale { input, .. }
             | Self::Transpose { input }
             | Self::Relu { input }
@@ -267,6 +277,29 @@ impl AutogradOperation {
                 input.clone(),
                 input.value().gelu_backward(upstream)?,
             )]),
+            Self::LayerNormAffine {
+                input,
+                gamma,
+                beta,
+                epsilon,
+            } => {
+                let parents = [input, gamma, beta];
+                let gradients = input.value().layer_norm_vjp(
+                    gamma.value(),
+                    upstream,
+                    *epsilon,
+                    1.0,
+                    TensorUtilBackend::Cpu,
+                    parents.map(|parent| parent.requires_grad()),
+                )?;
+                Ok(parents
+                    .into_iter()
+                    .zip(gradients)
+                    .filter_map(|(parent, gradient)| {
+                        gradient.map(|gradient| (parent.clone(), gradient))
+                    })
+                    .collect())
+            }
             Self::RowSoftmax {
                 input,
                 probabilities,
@@ -448,6 +481,24 @@ impl AutogradTensor {
             AutogradOperation::Add {
                 lhs: self.clone(),
                 rhs: rhs.clone(),
+            },
+        )
+    }
+
+    /// Row LayerNorm with trainable `(1, cols)` gamma and beta. Affine VJPs
+    /// sum rows without introducing a second batch average. Forward follows
+    /// Tensor dispatch; backward uses the shared centered-f64 CPU VJP.
+    pub fn layer_norm_affine(&self, gamma: &Self, beta: &Self, epsilon: f32) -> PureResult<Self> {
+        let value = self
+            .value()
+            .layer_norm_affine(gamma.value(), beta.value(), epsilon)?;
+        Self::from_operation(
+            value,
+            AutogradOperation::LayerNormAffine {
+                input: self.clone(),
+                gamma: gamma.clone(),
+                beta: beta.clone(),
+                epsilon,
             },
         )
     }

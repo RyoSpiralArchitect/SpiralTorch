@@ -66,6 +66,8 @@ def main():
     result = runpy.run_path(str(example))["run"]()
     classification = example.with_name("autograd_classification.py")
     classification_result = runpy.run_path(str(classification))["run"]()
+    layer_norm = example.with_name("autograd_layer_norm.py")
+    layer_norm_result = runpy.run_path(str(layer_norm))["run"]()
     print(
         json.dumps(
             {
@@ -73,6 +75,7 @@ def main():
                 "atomic_sgd_boundary": "ok",
                 "training": result,
                 "classification": classification_result,
+                "layer_norm": layer_norm_result,
             },
             sort_keys=True,
         )

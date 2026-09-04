@@ -133,6 +133,22 @@ impl PyAutogradTensor {
             .map_err(tensor_err_to_py)
     }
 
+    #[pyo3(signature = (gamma, beta, *, epsilon=1e-5))]
+    fn layer_norm_affine(
+        &self,
+        gamma: &Self,
+        beta: &Self,
+        epsilon: f32,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        py.detach(|| {
+            self.inner
+                .layer_norm_affine(&gamma.inner, &beta.inner, epsilon)
+        })
+        .map(Self::from_inner)
+        .map_err(tensor_err_to_py)
+    }
+
     fn row_log_softmax(&self, py: Python<'_>) -> PyResult<Self> {
         py.detach(|| self.inner.row_log_softmax())
             .map(Self::from_inner)

@@ -46,7 +46,7 @@ fn emit_normalization_backward_meta(
     emit_tensor_op(op_name, &[rows, cols], &[rows, cols]);
     emit_tensor_op_meta(op_name, || {
         serde_json::json!({
-            "backend": "hybrid",
+            "backend": if input_gradient_backend.as_deref() == Some("cpu") { "cpu" } else { "hybrid" },
             "requested_backend": requested_backend,
             "rows": rows,
             "cols": cols,
@@ -1997,29 +1997,19 @@ impl Module for LayerNorm {
             );
             return Ok(output);
         }
-        let gamma = self.gamma.value().data().to_vec();
-        validate_finite_slice("layernorm_gamma", &gamma)?;
-        let (normed, inv_std) = input.layer_norm_stats(epsilon)?;
-
         let gradient_scale = 1.0 / rows as f32;
         let input_gradient_backend =
             current_tensor_util_backend_for_values(rows.saturating_mul(cols));
-        let grad_normed = backend_grad_normed(
-            grad_output,
-            &gamma,
-            None,
-            input_gradient_backend,
-            "layernorm_backward_grad_normed",
-        )?;
-        let output = backend_layer_axis_input_gradient(
-            &grad_normed,
-            &normed,
-            inv_std.data(),
-            input_gradient_backend,
-            "layernorm_backward_input_grad",
-        )?;
-        let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
-            backend_affine_gradients(grad_output, &normed, gradient_scale)?;
+        let (output, grad_gamma_tensor, grad_beta_tensor) = input
+            .layer_norm_affine_backward_with_backend(
+                self.gamma.value(),
+                grad_output,
+                epsilon,
+                gradient_scale,
+                input_gradient_backend,
+            )?;
+        let uses_gpu = matches!(input_gradient_backend, TensorUtilBackend::GpuWgpu);
+        let utility_label = if uses_gpu { "wgpu" } else { "cpu" };
         self.gamma.accumulate_euclidean(&grad_gamma_tensor)?;
         self.beta.accumulate_euclidean(&grad_beta_tensor)?;
 
@@ -2031,10 +2021,10 @@ impl Module for LayerNorm {
             epsilon,
             false,
             Some(gradient_scale),
-            Some("hybrid".to_string()),
-            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(if uses_gpu { "hybrid" } else { "cpu" }.to_string()),
+            Some(utility_label),
             Some("cpu"),
-            Some(affine_gradient_backend),
+            Some(utility_label.to_string()),
         );
         Ok(output)
     }
@@ -2292,33 +2282,23 @@ mod tests {
                 *op_name == "layer_norm_backward" && data["rows"] == 2 && data["cols"] == 3
             })
             .expect("layer norm backward metadata event");
-        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["backend"], "cpu");
         assert_eq!(meta.1["requested_backend"], "auto");
-        assert_eq!(meta.1["input_gradient_backend"], "hybrid");
-        assert_eq!(meta.1["input_gradient_reduction_backend"], "auto");
+        assert_eq!(meta.1["input_gradient_backend"], "cpu");
+        assert_eq!(meta.1["input_gradient_reduction_backend"], "cpu");
         assert_eq!(meta.1["normalization_backend"], "cpu");
         assert_eq!(meta.1["input_gradient_axis"], "feature");
         assert_eq!(meta.1["input_gradient_formula"], "affine_norm_vjp");
-        assert_eq!(meta.1["affine_gradient_backend"], "auto");
+        assert_eq!(meta.1["affine_gradient_backend"], "cpu");
         assert_eq!(meta.1["gradient_scale"], 0.5);
         assert_eq!(meta.1["parameter_gradient_scale"], 0.5);
         assert_eq!(meta.1["input_gradient_scale"], 1.0);
         assert!(events.iter().any(|(op_name, data)| {
-            *op_name == "hadamard" && data["rows"] == 2 && data["cols"] == 3
+            *op_name == "layer_norm_affine_backward"
+                && data["semantic_owner"] == "st-tensor"
+                && data["parameter_gradient_scale"] == 0.5
+                && data["backend"] == "cpu"
         }));
-        let scaled_reductions = events
-            .iter()
-            .filter(|(op_name, data)| {
-                *op_name == "sum_axis0_scaled"
-                    && data["rows"] == 2
-                    && data["cols"] == 3
-                    && data["scale"] == 0.5
-            })
-            .count();
-        assert!(
-            scaled_reductions >= 2,
-            "expected gamma and beta reductions, saw {scaled_reductions}"
-        );
     }
 
     #[cfg(feature = "wgpu")]
@@ -2524,7 +2504,7 @@ mod tests {
         assert!(matches!(
             err,
             TensorError::NonFiniteValue {
-                label: "layernorm_backward_grad_normed",
+                label: "layernorm_backward_input_grad",
                 value,
             } if value.is_infinite()
         ));

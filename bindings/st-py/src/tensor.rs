@@ -1411,6 +1411,28 @@ impl PyTensor {
         ))
     }
 
+    /// CPU LayerNorm VJP; returns input, gamma and beta gradients without batch averaging.
+    #[pyo3(signature = (gamma, upstream, *, epsilon=1e-5))]
+    pub fn layer_norm_affine_backward(
+        &self,
+        gamma: &PyTensor,
+        upstream: &PyTensor,
+        epsilon: f32,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor)> {
+        let (input, gamma, beta) = py
+            .detach(|| {
+                self.inner
+                    .layer_norm_affine_backward(&gamma.inner, &upstream.inner, epsilon)
+            })
+            .map_err(tensor_err_to_py)?;
+        Ok((
+            PyTensor::from_tensor(input),
+            PyTensor::from_tensor(gamma),
+            PyTensor::from_tensor(beta),
+        ))
+    }
+
     /// Layer normalisation with affine parameters.
     #[pyo3(signature = (gamma, beta, *, epsilon=1e-5))]
     pub fn layer_norm_affine(
