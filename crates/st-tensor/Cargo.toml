@@ -18,9 +18,9 @@ simd = []
 # crates can opt into a uniform interface when selecting backends.
 cpu = []
 
-# Keep the granular feature name for the fractional WGPU kernels while also
-# providing the alias expected by the Python bindings (and end users invoking
-# `--features wgpu`).
+# `wgpu_frac` owns fractional kernels and shared GPU dependencies; `wgpu_dense`
+# owns dense Tensor APIs and dispatch. The public `wgpu` feature is only an
+# alias: using the granular owner must expose the same implementation.
 wgpu_frac = [
     "dep:wgpu",
     "dep:bytemuck",

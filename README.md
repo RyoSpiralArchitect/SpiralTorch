@@ -3339,6 +3339,12 @@ Need a bootstrap-friendly learning loop without heavyweight dependencies?
 `st-nn` layers sit directly on top of the `st-tensor::pure` stack so you can
 train, schedule, and log every A/B/C decision entirely in Rust.
 
+For direct Rust use, `st-tensor`'s `wgpu_dense` feature owns the dense Tensor
+GPU APIs and dispatch; `wgpu` is a compatibility alias, not an additional
+requirement. Defaults include the dense provider, while `wgpu_frac` alone does
+not claim dense execution. See [Tensor backend features](docs/development/tensor_backend_features.md)
+for the isolated build matrix and runtime checks.
+
 Geometry-aware policy loops now broadcast their feedback as loopback envelopes,
 so reinforcement learners automatically feed their learning-rate modulation
 into the global telemetry hub for other SpiralTorch nodes to replay.

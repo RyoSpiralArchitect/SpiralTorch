@@ -96,6 +96,7 @@ jobs:
           cargo clippy --locked -p st-backend-wgpu --all-targets -- -D warnings
           cargo clippy --locked -p st-frac --all-targets --features wgpu -- -D warnings
           cargo clippy --locked -p st-tensor --all-targets --no-default-features --features cpu,wgpu -- -D warnings
+          cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu_frac --test wgpu_feature_ownership
           cargo clippy --locked -p st-core --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
       - name: Python text feature isolation
         if: matrix.run_lints
@@ -127,7 +128,7 @@ jobs:
       - name: test upper stack
         if: matrix.run_upper_stack
         run: |
-          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics
+          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test wgpu_feature_ownership
           cargo test -p st-nn --release --lib
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
@@ -159,6 +160,15 @@ jobs:
         run: cargo build -p st-tensor --features wgpu --release
       - name: Tensor provider feature unification without core WGPU integration
         run: cargo test --locked -p st-core -p st-tensor --release --lib wgpu_observer_preserves_tensor_provider_capability
+      - name: Dense WGPU feature ownership and typed Tensor dispatch
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+          SPIRALTORCH_STRICT_GPU: "1"
+        run: |
+          SPIRALTORCH_EXPECT_NO_WGPU_ALIAS=1 cargo test --locked -p st-tensor --release --test wgpu_feature_ownership --test layer_norm_numerics
+          SPIRALTORCH_EXPECT_NO_WGPU_ALIAS=1 cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu_dense --release --test wgpu_feature_ownership
+          SPIRALTORCH_EXPECT_NO_WGPU_ALIAS=1 cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu_f16 --release --test wgpu_feature_ownership
+          cargo test --locked -p st-tensor --no-default-features --features cpu,wgpu --release --test wgpu_feature_ownership
       - name: Stable LayerNorm on real WGPU without fallback
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
@@ -186,6 +196,7 @@ jobs:
           cargo clippy --locked -p st-backend-wgpu --target wasm32-unknown-unknown --all-targets -- -D warnings
           cargo clippy --locked -p st-frac --target wasm32-unknown-unknown --all-targets --features wgpu -- -D warnings
           cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu -- -D warnings
+          cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu_dense -- -D warnings
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
       - name: build (wasm32)

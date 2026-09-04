@@ -61,7 +61,7 @@ pub use self::topos::{
 
 #[cfg(feature = "hip")]
 use crate::backend::hip_dense;
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 use crate::backend::wgpu_dense;
 use crate::backend::{cpu_dense, faer_dense};
 use crate::dlpack::{
@@ -356,7 +356,7 @@ pub enum MatmulBackend {
     /// Always fallback to the scalar implementation.
     CpuNaive,
     /// Force the compute-path GEMM running through WGPU.
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     GpuWgpu,
     /// Execute GEMM via the HIP backend when available.
     #[cfg(feature = "hip")]
@@ -371,7 +371,7 @@ impl MatmulBackend {
             MatmulBackend::CpuFaer => "faer",
             MatmulBackend::CpuSimd => "cpu_simd",
             MatmulBackend::CpuNaive => "naive",
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             MatmulBackend::GpuWgpu => "wgpu",
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => "hip",
@@ -384,7 +384,7 @@ impl MatmulBackend {
             Self::CpuFaer => TensorExecutionBackend::Faer,
             Self::CpuSimd => TensorExecutionBackend::CpuSimd,
             Self::CpuNaive => TensorExecutionBackend::Naive,
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             Self::GpuWgpu => TensorExecutionBackend::Wgpu,
             #[cfg(feature = "hip")]
             Self::GpuHip => TensorExecutionBackend::Hip,
@@ -423,7 +423,7 @@ impl FusedMatmulExecution {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     const fn wgpu() -> Self {
         Self {
             backend: "wgpu",
@@ -444,12 +444,12 @@ impl FusedMatmulExecution {
     }
 }
 
-#[cfg(any(feature = "wgpu", feature = "hip", test))]
+#[cfg(any(feature = "wgpu_dense", feature = "hip", test))]
 fn strict_gpu_path() -> bool {
     crate::execution::current_accelerator_fallback().is_strict()
 }
 
-#[cfg(any(feature = "wgpu", feature = "hip"))]
+#[cfg(any(feature = "wgpu_dense", feature = "hip"))]
 fn strict_gpu_fallback_error(
     backend: &'static str,
     op: &'static str,
@@ -461,7 +461,7 @@ fn strict_gpu_fallback_error(
     }
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn wgpu_runtime_unavailable(message: &str) -> bool {
     message.contains("no suitable WGPU adapter")
         || message.contains("failed to initialize WGPU")
@@ -485,7 +485,7 @@ fn wgpu_runtime_fallback_meta(
     serde_json::Value::Object(data)
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn wgpu_backend_runtime_unavailable(error: &TensorError) -> bool {
     matches!(
         error,
@@ -553,7 +553,7 @@ pub enum SoftmaxBackend {
     /// Force the pure Rust implementation.
     Cpu,
     /// Execute on the WGPU accelerator backend when available.
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     GpuWgpu,
 }
 
@@ -563,7 +563,7 @@ impl SoftmaxBackend {
         match self {
             SoftmaxBackend::Auto => "auto",
             SoftmaxBackend::Cpu => "cpu",
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             SoftmaxBackend::GpuWgpu => "wgpu",
         }
     }
@@ -572,7 +572,7 @@ impl SoftmaxBackend {
         match self {
             Self::Auto => TensorExecutionBackend::Auto,
             Self::Cpu => TensorExecutionBackend::Cpu,
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             Self::GpuWgpu => TensorExecutionBackend::Wgpu,
         }
     }
@@ -1120,7 +1120,7 @@ fn emit_tensor_util_cpu_op_meta<F>(
         kind,
         |data| {
             extra(data);
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             if requested_backend == "wgpu" && !data.contains_key("fallback") {
                 data.insert(
                     "fallback".to_string(),
@@ -1184,7 +1184,7 @@ fn emit_cpu_tensor_op_meta<F>(
     );
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn row_l2_projection_stats(data: &[f32], rows: usize, cols: usize) -> (usize, f32) {
     let mut nonzero_rows = 0usize;
     let mut max_row_l2 = 0.0f32;
@@ -1204,7 +1204,7 @@ fn porous_mix_value(value: f32, saturation: f32, porosity: f32) -> f32 {
     topos::porous_mix(value, saturation, porosity)
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 #[allow(clippy::too_many_arguments)]
 fn emit_wgpu_tensor_op_meta<F>(
     op_name: &'static str,
@@ -1944,13 +1944,13 @@ impl Tensor {
         let lhs = self.data();
         let mut scratch = aligned_zeroed(rows * cols);
         let work_slice = scratch.as_mut_slice();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let completion = if rows == 0 || cols == 0 {
@@ -1998,7 +1998,7 @@ impl Tensor {
                     })?;
                     "faer"
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 MatmulBackend::GpuWgpu => {
                     if !matches!(other.layout, Layout::RowMajor) {
                         return Err(TensorError::UnsupportedLayout {
@@ -2107,13 +2107,13 @@ impl Tensor {
 
         let lhs = self.data();
         let dst_slice = tensor.data_mut();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let completion = if rows == 0 || cols == 0 {
@@ -2164,7 +2164,7 @@ impl Tensor {
                     scale_inplace(dst_slice, scale);
                     "faer"
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 MatmulBackend::GpuWgpu => {
                     if !matches!(other.layout, Layout::RowMajor) {
                         return Err(TensorError::UnsupportedLayout {
@@ -2279,13 +2279,13 @@ impl Tensor {
         )?;
 
         let dst_slice = tensor.data_mut();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
         let completion = if rows == 0 || cols == 0 {
             completed_no_op_execution(execution)?
@@ -2347,7 +2347,7 @@ impl Tensor {
                     scale_inplace(dst_slice, scale);
                     "faer"
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 MatmulBackend::GpuWgpu => {
                     match matmul_lhs_transpose_scaled_wgpu(
                         self.data(),
@@ -2496,13 +2496,13 @@ impl Tensor {
 
         let lhs = self.data();
         let dst_slice = tensor.data_mut();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let completion = if rows == 0 || cols == 0 {
@@ -2557,7 +2557,7 @@ impl Tensor {
                     add_bias_inplace(dst_slice, rows, cols, bias);
                     "faer"
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 MatmulBackend::GpuWgpu => {
                     match wgpu_dense::matmul_prepacked_bias(lhs, packed, bias, rows, inner, cols) {
                         Ok(buffer) => {
@@ -2678,13 +2678,13 @@ impl Tensor {
         let lhs = self.data();
         let mut scratch = aligned_zeroed(rows * cols);
         let work_slice = scratch.as_mut_slice();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let completion = if rows == 0 || cols == 0 {
@@ -2737,7 +2737,7 @@ impl Tensor {
                     })?;
                     "faer"
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 MatmulBackend::GpuWgpu => {
                     match wgpu_dense::matmul_prepacked(lhs, packed, rows, inner, cols) {
                         Ok(buffer) => {
@@ -2822,7 +2822,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<&'static str> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(other.layout, Layout::RowMajor)
                 && wgpu_dense::is_available()
@@ -2878,7 +2878,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<&'static str> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(other.layout, Layout::RowMajor)
                 && wgpu_dense::is_available()
@@ -2963,7 +2963,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<&'static str> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_lhs_transpose_scaled(
@@ -3053,7 +3053,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<&'static str> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_prepacked(self.data(), packed, rows, inner, cols) {
@@ -3101,7 +3101,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<&'static str> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_prepacked_bias(
@@ -3184,7 +3184,7 @@ impl Tensor {
                     Tensor::from_vec(rows, cols, buffer)
                         .map(|tensor| (tensor, "cpu", None::<&'static str>))
                 }
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 SoftmaxBackend::GpuWgpu => self.row_softmax_wgpu_or_cpu(rows, cols),
             }?;
             let completion =
@@ -3238,7 +3238,7 @@ impl Tensor {
                 self.fusion_pair_to_tensors(rows, cols, result)
                     .map(|pair| (pair, backend_used, fallback_reason))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             SoftmaxBackend::GpuWgpu => {
                 let result =
                     self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::SoftmaxAndMask)?;
@@ -3298,7 +3298,7 @@ impl Tensor {
                 self.fusion_pair_to_spiral(rows, cols, result)
                     .map(|spiral| (spiral, backend_used, fallback_reason))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             SoftmaxBackend::GpuWgpu => {
                 let result =
                     self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::SoftmaxAndMask)?;
@@ -3361,7 +3361,7 @@ impl Tensor {
                 Tensor::from_vec(rows, cols, result.hardmax)
                     .map(|tensor| (tensor, backend_used, fallback_reason))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             HardmaxBackend::GpuWgpu => {
                 let result = self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::MaskOnly)?;
                 let backend_used = result.backend;
@@ -3389,7 +3389,7 @@ impl Tensor {
         Ok(output)
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn row_softmax_wgpu_or_cpu(
         &self,
         rows: usize,
@@ -3411,7 +3411,7 @@ impl Tensor {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn hardmax_fusion_wgpu_or_cpu(
         &self,
         rows: usize,
@@ -3430,7 +3430,7 @@ impl Tensor {
     }
 
     fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, &'static str)> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax(rows, cols) {
                 match wgpu_dense::row_softmax(self.data(), rows, cols, self.layout) {
@@ -3719,19 +3719,19 @@ impl Tensor {
 
         let gamma_slice = gamma.data();
         let beta_slice = beta.data();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let (tensor, backend_used): (Tensor, &'static str) = match backend {
             LayerNormBackend::Auto => {
                 let prefer_wgpu = volume >= 4096;
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 {
                     if prefer_wgpu
                         && wgpu_dense::is_available()
@@ -3771,7 +3771,7 @@ impl Tensor {
                         )
                     }
                 }
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 {
                     let _ = prefer_wgpu;
                     (
@@ -3785,7 +3785,7 @@ impl Tensor {
                 "cpu",
             ),
             LayerNormBackend::GpuWgpu => {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 {
                     if !wgpu_dense::supports_layer_norm(rows, cols) {
                         return Err(TensorError::BackendFailure {
@@ -3827,7 +3827,7 @@ impl Tensor {
                         }
                     }
                 }
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 {
                     return Err(TensorError::BackendFailure {
                         backend: "wgpu",
@@ -3860,7 +3860,7 @@ impl Tensor {
         Ok(tensor)
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn layer_norm_wgpu(
         input: &[f32],
         residual: Option<&[f32]>,
@@ -4053,13 +4053,13 @@ impl Tensor {
         let queries = self.data();
         let keys_data = keys.data();
         let values_data = values.data();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_reason: Option<&'static str> = None;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut fallback_message: Option<String> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_reason: Option<&'static str> = None;
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let fallback_message: Option<String> = None;
 
         let make_tensor = |buffer: Vec<f32>| {
@@ -4073,7 +4073,7 @@ impl Tensor {
         let (tensor, backend_used): (Tensor, &'static str) = match backend {
             AttentionBackend::Auto => {
                 let wgpu_tensor: Option<Tensor> = {
-                    #[cfg(feature = "wgpu")]
+                    #[cfg(feature = "wgpu_dense")]
                     {
                         if wgpu_dense::is_available()
                             && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
@@ -4103,7 +4103,7 @@ impl Tensor {
                             None
                         }
                     }
-                    #[cfg(not(feature = "wgpu"))]
+                    #[cfg(not(feature = "wgpu_dense"))]
                     {
                         None
                     }
@@ -4140,7 +4140,7 @@ impl Tensor {
                 )?;
                 make_tensor(buffer).map(|tensor| (tensor, "cpu"))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             AttentionBackend::GpuWgpu => {
                 match wgpu_dense::fused_attention(
                     queries,
@@ -4176,7 +4176,7 @@ impl Tensor {
                     }),
                 }
             }
-            #[cfg(not(feature = "wgpu"))]
+            #[cfg(not(feature = "wgpu_dense"))]
             AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
                 backend: "wgpu",
                 message: "wgpu backend disabled at compile time".into(),
@@ -4213,7 +4213,7 @@ impl Tensor {
     }
 
     /// Matrix multiply using the WGPU backend when available.
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     pub fn matmul_wgpu(&self, other: &Tensor) -> PureResult<Tensor> {
         if self.cols != other.rows {
             return Err(TensorError::ShapeMismatch {
@@ -4358,7 +4358,7 @@ impl Tensor {
                 add_bias_relu_inplace(work_slice, rows, cols, bias);
                 FusedMatmulExecution::host("faer")
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             MatmulBackend::GpuWgpu => {
                 let data = wgpu_dense::matmul_bias_relu(
                     self.data(),
@@ -4417,7 +4417,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<FusedMatmulExecution> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_bias_relu(
@@ -4548,7 +4548,7 @@ impl Tensor {
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
                 (buffer, FusedMatmulExecution::host("faer"))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             MatmulBackend::GpuWgpu => {
                 let buffer = wgpu_dense::matmul_bias_gelu(
                     self.data(),
@@ -4606,7 +4606,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<(Vec<f32>, FusedMatmulExecution)> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_bias_gelu(
@@ -4799,7 +4799,7 @@ impl Tensor {
                 add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
                 FusedMatmulExecution::host("faer")
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             MatmulBackend::GpuWgpu => {
                 let data = wgpu_dense::matmul_bias_add_relu(
                     self.data(),
@@ -4862,7 +4862,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<FusedMatmulExecution> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_bias_add_relu(
@@ -5010,7 +5010,7 @@ impl Tensor {
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
                 (buffer, FusedMatmulExecution::host("faer"))
             }
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             MatmulBackend::GpuWgpu => {
                 let buffer = wgpu_dense::matmul_bias_add_gelu(
                     self.data(),
@@ -5071,7 +5071,7 @@ impl Tensor {
         inner: usize,
         cols: usize,
     ) -> PureResult<(Vec<f32>, FusedMatmulExecution)> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
                 match wgpu_dense::matmul_bias_add_gelu(
@@ -5163,10 +5163,10 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5243,7 +5243,7 @@ impl Tensor {
                     "rhs_layout".to_string(),
                     serde_json::json!(other.layout.as_str()),
                 );
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -5276,10 +5276,10 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5356,7 +5356,7 @@ impl Tensor {
                     "rhs_layout".to_string(),
                     serde_json::json!(other.layout.as_str()),
                 );
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -5496,10 +5496,10 @@ impl Tensor {
             "scale",
             _backend.tensor_execution_backend(),
         )?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5576,9 +5576,9 @@ impl Tensor {
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             data.insert("scale".to_owned(), serde_json::json!(value));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -5606,10 +5606,10 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5686,7 +5686,7 @@ impl Tensor {
                     "rhs_layout".to_string(),
                     serde_json::json!(other.layout.as_str()),
                 );
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -5720,10 +5720,10 @@ impl Tensor {
             });
         }
         Self::validate_mul_row_outputs(self.rows, self.cols, self.data(), row)?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5794,7 +5794,7 @@ impl Tensor {
             "broadcast",
             |data| {
                 data.insert("rhs_cols".to_string(), serde_json::json!(row.len()));
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -5835,10 +5835,10 @@ impl Tensor {
             });
         }
         Self::validate_row_affine_outputs(self.rows, self.cols, self.data(), scale_row, bias_row)?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -5918,7 +5918,7 @@ impl Tensor {
             |data| {
                 data.insert("scale_cols".to_string(), serde_json::json!(scale_row.len()));
                 data.insert("bias_cols".to_string(), serde_json::json!(bias_row.len()));
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -5953,10 +5953,10 @@ impl Tensor {
             });
         }
         Self::validate_add_scaled_outputs(self.data(), other.data(), scale)?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -6035,7 +6035,7 @@ impl Tensor {
                     serde_json::json!(other.layout.as_str()),
                 );
                 data.insert("scale".to_string(), serde_json::json!(scale));
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -6099,10 +6099,10 @@ impl Tensor {
             });
             return Ok(());
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
                 match wgpu_dense::add_row(input, bias, rows, cols) {
@@ -6162,9 +6162,9 @@ impl Tensor {
             data.insert("bias_cols".to_owned(), serde_json::json!(bias.len()));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -6207,10 +6207,10 @@ impl Tensor {
 
     /// Return a ReLU-activated tensor with an explicit utility backend selection.
     pub fn relu_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Tensor> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -6270,7 +6270,7 @@ impl Tensor {
             _backend.label(),
             "activation",
             |_meta| {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     _meta.insert(
                         "fallback".to_string(),
@@ -6347,13 +6347,13 @@ impl Tensor {
             return Tensor::zeros(rows, cols);
         }
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
         match backend {
             TensorUtilBackend::Auto =>
             {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if wgpu_dense::is_available() {
                     match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
                         Ok(buffer) => {
@@ -6392,7 +6392,7 @@ impl Tensor {
             }
             TensorUtilBackend::Cpu => {}
             TensorUtilBackend::GpuWgpu => {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 {
                     match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
                         Ok(buffer) => {
@@ -6424,7 +6424,7 @@ impl Tensor {
                         }
                     }
                 }
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 {
                     return Err(TensorError::BackendFailure {
                         backend: "wgpu",
@@ -6440,13 +6440,13 @@ impl Tensor {
         }
         Self::validate_finite_tensor_util_slice("gelu_backward_output", &data)?;
         let output = Tensor::from_vec(rows, cols, data)?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let (fallback_from, fallback_message) = if let Some(message) = wgpu_failure.as_deref() {
             (Some("wgpu"), Some(message))
         } else {
             (None, None)
         };
-        #[cfg(not(feature = "wgpu"))]
+        #[cfg(not(feature = "wgpu_dense"))]
         let (fallback_from, fallback_message): (Option<&str>, Option<&str>) = (None, None);
 
         crate::emit_tensor_op(
@@ -6477,10 +6477,10 @@ impl Tensor {
 
     /// Returns the transpose of the tensor with an explicit utility backend selection.
     pub fn transpose_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Tensor> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -6546,7 +6546,7 @@ impl Tensor {
             _backend.label(),
             "layout",
             |_data| {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     _data.insert(
                         "fallback".to_string(),
@@ -6619,10 +6619,10 @@ impl Tensor {
             "max_axis0",
             _backend.tensor_execution_backend(),
         )?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.cols > 0
@@ -6699,9 +6699,9 @@ impl Tensor {
             data.insert("axis".to_owned(), serde_json::json!(0));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -6747,10 +6747,10 @@ impl Tensor {
             "max_axis0_backward",
             _backend.tensor_execution_backend(),
         )?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.cols > 0
@@ -6864,9 +6864,9 @@ impl Tensor {
             data.insert("tie_policy".to_owned(), serde_json::json!("equal_split"));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -6920,7 +6920,7 @@ impl Tensor {
             "sum_axis0",
             _backend.tensor_execution_backend(),
         )?;
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
         if cols == 0 {
             let completion = completed_no_op_execution(execution)?;
@@ -6933,7 +6933,7 @@ impl Tensor {
             });
             return Ok(Vec::new());
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && rows > 0
@@ -6986,9 +6986,9 @@ impl Tensor {
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             data.insert("accumulator_dtype".to_owned(), serde_json::json!("f64"));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -7036,7 +7036,7 @@ impl Tensor {
             _backend.tensor_execution_backend(),
         )?;
         let mut sums = vec![0.0; cols];
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
         if cols == 0 {
             let completion = completed_no_op_execution(execution)?;
@@ -7050,7 +7050,7 @@ impl Tensor {
             });
             return Ok(sums);
         }
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && rows > 0
@@ -7109,9 +7109,9 @@ impl Tensor {
             data.insert("scale".to_owned(), serde_json::json!(scale));
             data.insert("kernel".to_owned(), serde_json::json!("scalar"));
             if runtime_fallback {
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 let message = wgpu_failure.as_deref();
-                #[cfg(not(feature = "wgpu"))]
+                #[cfg(not(feature = "wgpu_dense"))]
                 let message = Some("WGPU support is not compiled into this build");
                 data.insert(
                     "fallback".to_owned(),
@@ -7259,10 +7259,10 @@ impl Tensor {
 
     /// Computes the squared L2 norm with an explicit utility backend.
     pub fn squared_l2_norm_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<f32> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -7311,11 +7311,11 @@ impl Tensor {
         }
 
         Ok(self.squared_l2_norm_cpu(_backend.label(), {
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             {
                 wgpu_failure.as_deref()
             }
-            #[cfg(not(feature = "wgpu"))]
+            #[cfg(not(feature = "wgpu_dense"))]
             {
                 None
             }
@@ -7361,10 +7361,10 @@ impl Tensor {
 
     /// Computes the L1 sum of absolute values with an explicit utility backend.
     pub fn sum_abs_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<f32> {
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -7403,11 +7403,11 @@ impl Tensor {
         }
 
         Ok(self.sum_abs_cpu(_backend.label(), {
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             {
                 wgpu_failure.as_deref()
             }
-            #[cfg(not(feature = "wgpu"))]
+            #[cfg(not(feature = "wgpu_dense"))]
             {
                 None
             }
@@ -7429,10 +7429,10 @@ impl Tensor {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         let scale = (-curvature).sqrt();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -7529,7 +7529,7 @@ impl Tensor {
                 data.insert("scale".to_string(), serde_json::json!(scale));
                 data.insert("nonzero_rows".to_string(), serde_json::json!(nonzero_rows));
                 data.insert("max_row_l2".to_string(), serde_json::json!(max_row_l2));
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -7572,10 +7572,10 @@ impl Tensor {
             });
         }
         let scale = (-curvature).sqrt();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(_backend, TensorUtilBackend::GpuWgpu)
                 && self.rows > 0
@@ -7683,7 +7683,7 @@ impl Tensor {
                 data.insert("porosity".to_string(), serde_json::json!(porosity));
                 data.insert("gate_cols".to_string(), serde_json::json!(gate.len()));
                 data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -10538,10 +10538,10 @@ impl AmegaHypergrad {
             .iter()
             .filter(|value| !value.is_finite())
             .count();
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if matches!(backend, TensorUtilBackend::GpuWgpu)
                 && !values.is_empty()
@@ -10687,7 +10687,7 @@ impl AmegaHypergrad {
                     "gradient_non_finite_values_repaired".to_string(),
                     serde_json::json!(repaired_gradient_values),
                 );
-                #[cfg(feature = "wgpu")]
+                #[cfg(feature = "wgpu_dense")]
                 if let Some(message) = wgpu_failure.as_deref() {
                     data.insert(
                         "fallback".to_string(),
@@ -12003,7 +12003,7 @@ fn add_bias_residual_gelu_inplace(
     }
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn matmul_wgpu(
     lhs: &[f32],
     rhs: &[f32],
@@ -12017,7 +12017,7 @@ fn matmul_wgpu(
     })
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn matmul_scaled_wgpu(
     lhs: &[f32],
     rhs: &[f32],
@@ -12034,7 +12034,7 @@ fn matmul_scaled_wgpu(
     })
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 fn matmul_lhs_transpose_scaled_wgpu(
     lhs: &[f32],
     rhs: &[f32],
@@ -12112,12 +12112,12 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn wgpu_unavailable(error: &TensorError) -> bool {
         matches!(error, TensorError::BackendFailure { backend, .. } if *backend == "wgpu")
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn run_wgpu_runtime_tests() -> bool {
         std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS")
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
@@ -12150,7 +12150,7 @@ mod tests {
         assert_eq!(LayerNormBackend::Cpu.execution_id(), "cpu");
         assert_eq!(AttentionBackend::GpuWgpu.execution_id(), "wgpu");
         assert_eq!(TensorUtilBackend::GpuWgpu.execution_id(), "wgpu");
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         assert_eq!(SoftmaxBackend::GpuWgpu.execution_id(), "wgpu");
         #[cfg(feature = "hip")]
         assert_eq!(MatmulBackend::GpuHip.execution_id(), "hip");
@@ -12202,7 +12202,7 @@ mod tests {
         with_strict_gpu_env(Some("yes"), || assert!(!strict_gpu_path()));
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn wgpu_runtime_tests_env_is_opt_in() {
         let _lock = env_lock();
@@ -12615,7 +12615,7 @@ mod tests {
         assert_eq!(gelu_backward.1["backend"], "cpu");
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn wgpu_fused_gelu_backward_matches_cpu() {
         if !wgpu_dense::is_available() {
@@ -12655,7 +12655,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn wgpu_tensor_utils_match_cpu_reference_on_sequence_shapes() {
         if !wgpu_dense::is_available() {
@@ -13793,7 +13793,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn tensor_utility_methods_emit_wgpu_backend_when_available() {
         if !wgpu_dense::is_available() {
@@ -13996,7 +13996,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn matmul_bias_fused_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -15815,7 +15815,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn matmul_prepacked_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -15843,7 +15843,7 @@ mod tests {
         assert_tensor_close(&cpu, &wgpu, 1e-4);
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn matmul_scaled_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -15870,7 +15870,7 @@ mod tests {
         assert_tensor_close(&cpu, &wgpu, 1e-4);
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn matmul_lhs_transpose_scaled_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -15903,7 +15903,7 @@ mod tests {
         assert_tensor_close(&cpu, &wgpu, 1e-4);
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn matmul_prepacked_bias_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -16091,9 +16091,9 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "wgpu"))]
+    #[cfg(not(feature = "wgpu_dense"))]
     #[test]
-    fn explicit_wgpu_scale_without_wgpu_feature_emits_typed_cpu_fallback() {
+    fn explicit_wgpu_scale_without_dense_feature_emits_typed_cpu_fallback() {
         let _lock = observer_lock();
         let _fallback = crate::execution::push_accelerator_fallback(
             crate::execution::AcceleratorFallback::Allow,
@@ -16172,7 +16172,7 @@ mod tests {
         assert_eq!(softmax.1["layout"], "row_major");
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn live_wgpu_components_emit_one_completed_receipt_after_prepared_dispatch() {
         if !wgpu_dense::is_available() {
@@ -16257,7 +16257,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn forced_wgpu_softmax_reports_cpu_fallback_when_runtime_missing() {
         if !run_wgpu_runtime_tests() {
@@ -17028,7 +17028,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     #[test]
     fn hypergrad_accumulate_wave_can_emit_wgpu_backend_when_forced() {
         if !wgpu_dense::is_available() {

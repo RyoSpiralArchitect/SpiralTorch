@@ -152,7 +152,7 @@ fn layer_norm_rejects_degenerate_and_overflowed_fused_values() {
     }
 }
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 #[test]
 fn wgpu_layer_norm_preserves_variance_without_cpu_fallback() {
     use std::sync::{Arc, Mutex};

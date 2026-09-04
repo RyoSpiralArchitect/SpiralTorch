@@ -18,6 +18,7 @@ check_graph() {
   echo "CPU feature isolation ok: $label"
 }
 
+check_graph "st-tensor" -p st-tensor --no-default-features --features cpu,faer
 check_graph "st-core" -p st-core --no-default-features --features cpu
 check_graph "st-nn" -p st-nn --no-default-features
 check_graph \
