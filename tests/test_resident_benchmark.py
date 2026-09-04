@@ -1,7 +1,10 @@
 """Dependency-free preflight gates for the resident PyTorch comparison."""
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 
 path = Path(__file__).resolve().parents[1] / "tools" / "bench_resident_vs_torch.py"
@@ -11,6 +14,16 @@ spec.loader.exec_module(bench)
 
 
 class DeviceIdentityTests(unittest.TestCase):
+    def test_bad_kernel_lists_fail_before_import_or_output_creation(self):
+        for kernels in (["scalar", "scalar"], ["unknown"]):
+            args = [str(path), "--expected-adapter", "fixture", "--output", "unused.json", "--kernels", *kernels]
+            with self.subTest(kernels=kernels), patch.object(bench.sys, "argv", args), \
+                    patch.object(Path, "open") as output, contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                bench.main()
+            self.assertEqual(raised.exception.code, 2)
+            output.assert_not_called()
+
     def test_tile_parser_preserves_mnk_order_and_rejects_duplicate_labels(self):
         self.assertEqual(bench.parse_tiles("8,16,32;16,8,64"), [(8,16,32),(16,8,64)])
         for invalid in ("", "8,8", "8,8,16;8,8,16", "8,8,16;"):

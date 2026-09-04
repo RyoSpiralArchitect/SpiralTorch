@@ -42,6 +42,24 @@ the actual device's dispatch, workgroup and scratch-storage limits are also
 checked before allocation. Invalid requests fail, rather than silently changing
 the tile or running CPU math. Matrix shape is M/K/N; the tile tuple is M/N/K.
 
+An explicit register-blocked kernel computes four output cells per invocation:
+
+```python
+workspace = WgpuMatmul(512, 512, 512, tile_mnk=(16, 16, 16),
+                       kernel="register_2x2")
+print(workspace.kernel)              # register_2x2
+print(workspace.workgroup_size)      # (8, 8, 1), X/Y/Z invocations
+print(workspace.outputs_per_thread)  # (2, 2), M/N output cells
+```
+
+`kernel="scalar"` selects one output cell per invocation; omitting `kernel`
+keeps that scalar default on every target. The blocked kernel requires even
+M/N tile dimensions, rejects incompatible requests, and preserves each output's
+ascending-K float32 accumulation. Kernel selection and actual geometry belong
+to Rust, not a Python heuristic. Different kernels can participate in one GPU
+chain. Explicit choice matters: the blocked kernel helps large matrices in
+the measured Mac browser but regresses some smaller native NVIDIA workloads.
+
 ## Browser / WASM
 
 Build with the explicit `webgpu` feature and a matching wasm-bindgen CLI:
@@ -88,6 +106,17 @@ Dimensions and tile axes remain TypeScript numbers but are checked as original
 JS values before conversion. Workspaces with different tiles can be chained
 when their matrix shapes and device/queue agree.
 
+The explicit equivalent is
+`await WgpuMatmul.createWithKernel(512, 512, 512, 16, 16, 16, "register_2x2")`.
+`kernel`, `workgroupSize()` and `outputsPerThread()` expose the resolved kernel
+and geometry. The older `create` and `createWithTile` constructors keep the
+scalar default. Unknown kernel strings and odd blocked tiles fail explicitly.
+
+Rust callers use `ResidentMatmul::with_kernel(runtime, shape, tile,
+MatmulKernel::Register2x2)` from `st_backend_wgpu::resident_matmul`, then the
+same upload/dispatch/snapshot/chain methods. Its `kernel()`, `workgroup_size()`
+and `outputs_per_thread()` are the source of the binding metadata.
+
 ## Execution Boundaries
 
 - This is a fixed-shape 2D execution workspace, not an autograd graph. It does
@@ -115,21 +144,26 @@ SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 \
 python tools/bench_resident_vs_torch.py \
   --torch-device cuda --expected-adapter "NVIDIA GeForce RTX 5090" \
   --tiles-mnk '8,8,16;16,16,16;16,16,32;16,16,64' \
+  --kernels scalar register_2x2 \
   --output resident-vs-torch.json
 node tools/test_resident_browser.cjs /absolute/wasm-webgpu \
   /absolute/chrome-executable /absolute/new-browser-result.json \
-  '8,8,16;16,16,16;16,16,32;16,16,64'
+  '8,8,16;16,16,16;16,16,32;16,16,64' 'scalar;register_2x2'
 ```
 
 The browser runner needs Playwright and launches an isolated headless test
 profile. It does not inspect existing browser sessions. Its
 `--enable-unsafe-webgpu` flag is recorded; no CPU computation fallback is used.
 The page runs numerical, ownership, and invalid-input gates before timing.
-Multi-tile runs randomize variant order in each measurement iteration, rather
+Multi-tile/kernel runs randomize variant order in each measurement iteration, rather
 than timing complete variants sequentially. Every variant uses the same input
 bytes, a float64 reference, float32 GPU arithmetic and 16 separate dispatch
-calls. The native report schema is v2 and keeps each variant's actual tile,
-adapter and raw samples; previous v1 reports remain immutable historical data.
+calls. Both report schemas are v3 and keep each variant's requested/actual
+kernel, output tile, invocation workgroup, output cells per thread, and raw
+samples. Previous v1/v2 reports remain immutable historical data. The harness
+keyword `auto` means "use the API default", not "autotune or pick the fastest".
+Both explicit kernels are compared within the same binary and run, not by
+swapping wheels or inferring performance from a backend label.
 
 The shared shader keeps RHS workgroup memory contiguous across output columns.
 This does not change global RHS packing, f32 accumulation, or fused operations.
@@ -137,6 +171,10 @@ The host Tensor autotune revision is bumped so older layout timings are not
 reused. See the [six-tile measurements](../benchmarks/results/2026-09-04-resident-tiles/README.md)
 for before/after browser and same-GPU PyTorch comparisons. No universal tile
 winner or faster-than-PyTorch claim is implied by the explicit override.
+
+The [same-binary register-blocking comparison](../benchmarks/results/2026-09-04-register-blocking/README.md)
+retains both browser improvements and native NVIDIA regressions. It motivates
+explicit kernel selection, not an automatic browser or CUDA policy.
 
 The PyTorch comparison uses identical float32 input bytes and float64 reference
 gates. Both sides preallocate output and run the same number of Python-loop

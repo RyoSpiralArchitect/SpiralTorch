@@ -5,6 +5,7 @@
 //! This is an execution workspace, not an autograd tape or a backend selector.
 
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
+pub use crate::shader_sources::MatmulKernel;
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 
@@ -17,6 +18,8 @@ pub enum MatmulError {
     InvalidShape,
     #[error("tile axes must be in 1..=64 with at most 256 output lanes")]
     InvalidTile,
+    #[error("register_2x2 requires even output tile dimensions")]
+    UnsupportedKernelTile,
     #[error("resident matmul exceeds device limit: {0}")]
     DeviceLimit(&'static str),
     #[error("{operand} requires {expected} elements, received {actual}")]
@@ -108,8 +111,16 @@ impl MatmulShape {
         ]
     }
 
-    fn validate(self, limits: &wgpu::Limits, tile: MatmulTile) -> Result<(), MatmulError> {
+    fn validate(
+        self,
+        limits: &wgpu::Limits,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+    ) -> Result<(), MatmulError> {
         let [tile_m, tile_n, tile_k] = tile.dimensions();
+        let [wg_x, wg_y, _] = kernel
+            .workgroup_size(tile.dimensions())
+            .ok_or(MatmulError::UnsupportedKernelTile)?;
         for len in self.lengths() {
             let bytes = runtime::checked_byte_len::<f32>("resident matmul", len)?;
             if bytes > limits.max_buffer_size
@@ -123,9 +134,9 @@ impl MatmulShape {
         {
             return Err(MatmulError::DeviceLimit("dispatch workgroups"));
         }
-        if limits.max_compute_workgroup_size_x < tile_n
-            || limits.max_compute_workgroup_size_y < tile_m
-            || limits.max_compute_invocations_per_workgroup < tile_m * tile_n
+        if limits.max_compute_workgroup_size_x < wg_x
+            || limits.max_compute_workgroup_size_y < wg_y
+            || limits.max_compute_invocations_per_workgroup < wg_x * wg_y
             || limits.max_compute_workgroup_storage_size < (tile_m + tile_n) * tile_k * 4
             || limits.max_storage_buffers_per_shader_stage < 6
             || limits.max_uniform_buffers_per_shader_stage < 1
@@ -154,6 +165,7 @@ pub struct ResidentMatmul {
     runtime: WgpuRuntime,
     shape: MatmulShape,
     tile: MatmulTile,
+    kernel: MatmulKernel,
     lhs: wgpu::Buffer,
     rhs: wgpu::Buffer,
     output: wgpu::Buffer,
@@ -174,9 +186,18 @@ impl ResidentMatmul {
         shape: MatmulShape,
         tile: MatmulTile,
     ) -> Result<Self, MatmulError> {
+        Self::with_kernel(runtime, shape, tile, MatmulKernel::Scalar)
+    }
+
+    pub fn with_kernel(
+        runtime: WgpuRuntime,
+        shape: MatmulShape,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+    ) -> Result<Self, MatmulError> {
         let context = runtime.context();
         let device = context.device();
-        shape.validate(&device.limits(), tile)?;
+        shape.validate(&device.limits(), tile, kernel)?;
         let [lhs_len, rhs_len, out_len] = shape.lengths();
         let storage = wgpu::BufferUsages::STORAGE;
         let lhs = runtime::empty_buffer::<f32>(
@@ -242,7 +263,13 @@ impl ResidentMatmul {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("resident.matmul.shader"),
             source: wgpu::ShaderSource::Wgsl(
-                crate::shader_sources::dense_matmul_source(tile.dimensions(), false).into(),
+                crate::shader_sources::dense_matmul_source_with_kernel(
+                    tile.dimensions(),
+                    false,
+                    kernel,
+                )
+                .map_err(|_| MatmulError::UnsupportedKernelTile)?
+                .into(),
             ),
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -270,6 +297,7 @@ impl ResidentMatmul {
             runtime,
             shape,
             tile,
+            kernel,
             lhs,
             rhs,
             output,
@@ -286,6 +314,17 @@ impl ResidentMatmul {
     }
     pub fn tile(&self) -> MatmulTile {
         self.tile
+    }
+    pub fn kernel(&self) -> MatmulKernel {
+        self.kernel
+    }
+    pub fn workgroup_size(&self) -> [u32; 3] {
+        self.kernel
+            .workgroup_size(self.tile.dimensions())
+            .expect("validated workspace geometry")
+    }
+    pub fn outputs_per_thread(&self) -> [u32; 2] {
+        self.kernel.outputs_per_thread()
     }
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         self.runtime.adapter_info()
@@ -537,29 +576,88 @@ mod tests {
         let shape = MatmulShape::new(7, 63, 65).unwrap();
         assert_eq!(shape.lengths(), [441, 4095, 455]);
         let mut limits = wgpu::Limits::default();
-        shape.validate(&limits, MatmulTile::default()).unwrap();
+        shape
+            .validate(&limits, MatmulTile::default(), MatmulKernel::Scalar)
+            .unwrap();
         limits.max_storage_buffer_binding_size = 1024;
-        assert!(shape.validate(&limits, MatmulTile::default()).is_err());
+        assert!(shape
+            .validate(&limits, MatmulTile::default(), MatmulKernel::Scalar)
+            .is_err());
         limits = wgpu::Limits::default();
         limits.max_compute_workgroups_per_dimension = 1;
-        assert!(shape.validate(&limits, MatmulTile::default()).is_err());
+        assert!(shape
+            .validate(&limits, MatmulTile::default(), MatmulKernel::Scalar)
+            .is_err());
     }
 
     #[test]
     fn shared_shader_variants_validate() {
-        for int8 in [false, true] {
-            let source = crate::shader_sources::dense_matmul_source(
-                MatmulTile::default().dimensions(),
-                int8,
-            );
-            let module = naga::front::wgsl::parse_str(&source).unwrap();
-            naga::valid::Validator::new(
-                naga::valid::ValidationFlags::all(),
-                naga::valid::Capabilities::all(),
-            )
-            .validate(&module)
-            .unwrap();
+        for tile in [
+            [8, 8, 16],
+            [16, 16, 64],
+            [64, 4, 16],
+            [4, 64, 16],
+            [3, 5, 7],
+        ] {
+            for int8 in [false, true] {
+                for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+                    let Ok(source) =
+                        crate::shader_sources::dense_matmul_source_with_kernel(tile, int8, kernel)
+                    else {
+                        assert!(kernel.workgroup_size(tile).is_none());
+                        continue;
+                    };
+                    let module = naga::front::wgsl::parse_str(&source).unwrap();
+                    naga::valid::Validator::new(
+                        naga::valid::ValidationFlags::all(),
+                        naga::valid::Capabilities::all(),
+                    )
+                    .validate(&module)
+                    .unwrap();
+                }
+            }
         }
+    }
+
+    #[test]
+    fn output_tile_and_invocation_geometry_agree() {
+        for m in 1..=64 {
+            for n in 1..=64 {
+                let Ok(tile) = MatmulTile::new(m, n, 16) else {
+                    continue;
+                };
+                for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+                    let Some([x, y, z]) = kernel.workgroup_size(tile.dimensions()) else {
+                        assert!(!m.is_multiple_of(2) || !n.is_multiple_of(2));
+                        continue;
+                    };
+                    let [thread_m, thread_n] = kernel.outputs_per_thread();
+                    assert_eq!([y * thread_m, x * thread_n, z], [m, n, 1]);
+                }
+            }
+        }
+        let blocked = MatmulTile::new(16, 16, 16).unwrap();
+        assert_eq!(
+            MatmulKernel::Register2x2.workgroup_size(blocked.dimensions()),
+            Some([8, 8, 1])
+        );
+        assert_eq!(MatmulKernel::Register2x2.outputs_per_thread(), [2, 2]);
+        assert!("auto".parse::<MatmulKernel>().is_err());
+        let shape = MatmulShape::new(7, 63, 65).unwrap();
+        let mut limits = wgpu::Limits {
+            max_compute_invocations_per_workgroup: 64,
+            ..wgpu::Limits::default()
+        };
+        shape
+            .validate(&limits, blocked, MatmulKernel::Register2x2)
+            .unwrap();
+        assert!(shape
+            .validate(&limits, blocked, MatmulKernel::Scalar)
+            .is_err());
+        limits.max_compute_invocations_per_workgroup = 63;
+        assert!(shape
+            .validate(&limits, blocked, MatmulKernel::Register2x2)
+            .is_err());
     }
 
     #[test]
@@ -578,10 +676,12 @@ mod tests {
         let tile = MatmulTile::new(16, 16, 64).unwrap();
         let shape = MatmulShape::new(7, 63, 65).unwrap();
         let mut limits = wgpu::Limits::default();
-        shape.validate(&limits, tile).unwrap();
+        shape.validate(&limits, tile, MatmulKernel::Scalar).unwrap();
         limits.max_compute_workgroup_storage_size = 4096;
-        assert!(shape.validate(&limits, tile).is_err());
-        shape.validate(&limits, MatmulTile::default()).unwrap();
+        assert!(shape.validate(&limits, tile, MatmulKernel::Scalar).is_err());
+        shape
+            .validate(&limits, MatmulTile::default(), MatmulKernel::Scalar)
+            .unwrap();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -604,20 +704,28 @@ mod tests {
             [3, 5, 7],
         ] {
             let tile = MatmulTile::new(m, n, k).unwrap();
-            let mut workspace = ResidentMatmul::with_tile(runtime.clone(), shape, tile).unwrap();
-            assert_eq!(workspace.tile(), tile);
-            workspace.upload(&lhs, &rhs).unwrap();
-            workspace.dispatch(2).unwrap();
-            let actual = workspace.snapshot().unwrap().read().unwrap();
-            for row in 0..7 {
-                for col in 0..65 {
-                    let expected: f64 = (0..63)
-                        .map(|i| f64::from(lhs[row * 63 + i]) * f64::from(rhs[i * 65 + col]))
-                        .sum();
-                    assert!(
-                        (f64::from(actual[row * 65 + col]) - expected).abs() < 1e-5,
-                        "tile={tile:?} row={row} col={col}"
-                    );
+            for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+                let candidate = ResidentMatmul::with_kernel(runtime.clone(), shape, tile, kernel);
+                if kernel.workgroup_size(tile.dimensions()).is_none() {
+                    assert!(matches!(candidate, Err(MatmulError::UnsupportedKernelTile)));
+                    continue;
+                }
+                let mut workspace = candidate.unwrap();
+                assert_eq!(workspace.tile(), tile);
+                assert_eq!(workspace.kernel(), kernel);
+                workspace.upload(&lhs, &rhs).unwrap();
+                workspace.dispatch(2).unwrap();
+                let actual = workspace.snapshot().unwrap().read().unwrap();
+                for row in 0..7 {
+                    for col in 0..65 {
+                        let expected: f64 = (0..63)
+                            .map(|i| f64::from(lhs[row * 63 + i]) * f64::from(rhs[i * 65 + col]))
+                            .sum();
+                        assert!(
+                            (f64::from(actual[row * 65 + col]) - expected).abs() < 1e-5,
+                            "tile={tile:?} row={row} col={col}"
+                        );
+                    }
                 }
             }
         }
