@@ -12,6 +12,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_draft_recovery_reads_exact_retained_payload_without_regeneration(self) -> None:
+        recovery = (ROOT / ".github/workflows/recover_github_release.yml").read_text()
+        self.assertIn("recoveryArtifact({", recovery)
+        self.assertIn("artifact-ids: ${{ steps.source.outputs.artifact_id }}", recovery)
+        self.assertIn("run-id: ${{ inputs.source_run_id }}", recovery)
+        self.assertIn("dist: 'retained-dist'", recovery)
+        self.assertIn("gh attestation verify", recovery)
+        self.assertIn("attestations: read", recovery)
+        self.assertNotIn("attestations: write", recovery)
+        self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', recovery)
+        self.assertIn('--source-digest "$SOURCE_SHA"', recovery)
+        self.assertIn("--deny-self-hosted-runners", recovery)
+        self.assertIn("group: release-wheels-${{ inputs.release_tag }}", recovery)
+        for forbidden in [
+            "cargo ", "maturin ", "generate_repo_manifest", "sbom-action",
+            "gh-action-sigstore-python", "attest-build-provenance",
+            "pypi-publish", "id-token: write",
+        ]:
+            self.assertNotIn(forbidden, recovery)
+
+    def test_release_stages_verified_draft_before_publishing(self) -> None:
+        workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text()
+        self.assertNotIn("softprops/action-gh-release", workflow)
+        self.assertNotIn("overwrite_files", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("inputs.release_tag || github.ref_name", workflow)
+        self.assertIn("await preflight({ github, repo: context.repo", workflow)
+        self.assertIn("await finalize({", workflow)
+        self.assertIn("execFileSync('git', ['rev-parse', 'HEAD']", workflow)
+        self.assertIn("actions/github-script@v8", workflow)
+        attach = workflow.partition("\n  attach:\n")[2]
+        self.assertIn("pattern: wheels-*", attach)
+        self.assertIn("name: signed-release-payload-", workflow)
+        self.assertLess(
+            workflow.index("Retain exact signed payload before publication"),
+            workflow.index("Attach verified draft assets and publish last"),
+        )
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("node --test tests/test_finalize_github_release.cjs", ci)
+        runbook = (ROOT / "docs/ops/release.md").read_text()
+        self.assertIn('--verify-tag --draft', runbook)
+        self.assertIn("Do not publish an empty release", runbook)
+
     def test_release_docs_match_active_package_version(self) -> None:
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)

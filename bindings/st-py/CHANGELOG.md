@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.27
+
+- Deliver the native LayerNorm autograd APIs from 0.4.26 through a corrected
+  immutable-release workflow. Version 0.4.26 was tagged but was not published
+  to PyPI: its empty GitHub Release was finalized before attaching assets.
+- Stage signed assets on a draft, require matching asset names, sizes and
+  SHA-256 digests, then publish last. Refuse already-published releases and
+  conflicting draft assets instead of replacing them or moving tags.
+
 ## 0.4.26
 
 - Expose affine LayerNorm on the Rust-owned autograd graph through Python and

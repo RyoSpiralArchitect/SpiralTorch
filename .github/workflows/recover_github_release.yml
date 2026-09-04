@@ -1,0 +1,84 @@
+name: Recover Retained GitHub Release Payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag whose unpublished signed payload should be recovered"
+        required: true
+        type: string
+      source_run_id:
+        description: "Completed Release Wheels tag-push run containing the exact signed payload"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: read
+  contents: write
+
+concurrency:
+  group: release-wheels-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
+      - name: Validate original build and locate exact retained artifact
+        id: source
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { preflight, recoveryArtifact } = require('./scripts/finalize_github_release.cjs');
+            const sourceSha = require('node:child_process')
+              .execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+            await preflight({ github, repo: context.repo, tag: process.env.RELEASE_TAG });
+            const artifact = await recoveryArtifact({
+              github, repo: context.repo, tag: process.env.RELEASE_TAG,
+              sourceSha, runId: process.env.SOURCE_RUN_ID,
+            });
+            core.setOutput('artifact_id', artifact.id);
+            core.setOutput('source_sha', sourceSha);
+            core.info('Retained archive digest: ' + artifact.digest);
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ steps.source.outputs.artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: retained-dist
+          merge-multiple: true
+      - name: Verify original exact-tag wheel provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' wheel; do
+            gh attestation verify "$wheel" \
+              --repo "$GITHUB_REPOSITORY" \
+              --source-digest "$SOURCE_SHA" \
+              --signer-digest "$SOURCE_SHA" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml" \
+              --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release_wheels.yml@refs/tags/$RELEASE_TAG" \
+              --deny-self-hosted-runners
+          done < <(find retained-dist -type f -name '*.whl' -print0)
+      - name: Finalize unchanged retained bytes without rebuilding or resigning
+        uses: actions/github-script@v8
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        with:
+          script: |
+            const { finalize } = require('./scripts/finalize_github_release.cjs');
+            await finalize({
+              github, repo: context.repo, tag: process.env.RELEASE_TAG,
+              sourceSha: process.env.SOURCE_SHA, dist: 'retained-dist',
+            });

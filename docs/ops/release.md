@@ -42,10 +42,45 @@ exactly. Manual recovery with a non-empty `release_tag` also requires
 compliance manifests, signatures, and publication helpers on one source ref.
 Leave both inputs empty for a build-only branch preflight.
 
+### Immutable GitHub Releases
+
+Do not publish an empty release before the official wheel job finishes.
+The workflow creates a draft, attaches all signed assets, verifies their names,
+sizes and SHA-256 digests, and only then publishes. An existing draft may be
+resumed only when its assets match exactly; published releases are never
+overwritten. Tag/source identity is checked again before publication.
+
+If preparing notes in advance, use `gh release create "$TAG" --verify-tag --draft`
+with explicit title/notes arguments. Never drop `--draft` before assets exist.
+Published immutable releases cannot accept new assets. Leave a failed release
+and its tag intact, record the failure in its notes, and use a new package
+version. In particular, 0.4.26 has no release wheels and was not uploaded to
+PyPI; 0.4.27 delivers the same LayerNorm implementation with this sequencing fix.
+If an upload or publish response is uncertain, inspect the existing release
+before retrying; a notification or failed watcher is not evidence of non-delivery.
+
+For an unpublished partial draft, do not rerun the build/signing job: a fresh
+manifest timestamp or signature changes bytes and must be rejected. Instead,
+recover the `signed-release-payload-<tag>` artifact from the original completed
+tag-push run. Set `SOURCE_RUN_ID` to that verified run's numeric ID, then:
+
+```bash
+gh workflow run recover_github_release.yml --ref main \
+  -f release_tag="$TAG" -f source_run_id="$SOURCE_RUN_ID"
+```
+
+This route downloads the original artifact by ID, checks its original workflow,
+tag and source commit, verifies exact-tag wheel provenance, and passes the
+unchanged bytes to the same finalizer. It does not build, regenerate manifests,
+sign, or upload to PyPI. An expired/missing artifact or an already-published
+release requires inspection, not a silent rebuild or overwrite. This route is
+for retained payloads from 0.4.27 onward; it cannot repair the published empty
+0.4.26 release.
+
 ## Common Variables
 
 ```bash
-VERSION=0.4.26
+VERSION=0.4.27
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -63,7 +98,7 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-Expected pre-publish shape for `0.4.26` is:
+Expected pre-publish shape for `0.4.27` is:
 
 ```text
 local_versions ... consistent=yes
@@ -76,8 +111,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.26 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.26 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```
