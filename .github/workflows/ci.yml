@@ -218,6 +218,8 @@ jobs:
           node-version: "22"
       - name: Immutable release publication state machine
         run: node --test tests/test_finalize_github_release.cjs
+      - name: WASM build profiles sanitize host flags
+        run: python3 -S tests/test_build_wasm_web.py
       - name: Install matching WASM JavaScript generator
         run: cargo install wasm-bindgen-cli --version 0.2.104 --locked
       - name: Exercise real WASM bindings and learning loops

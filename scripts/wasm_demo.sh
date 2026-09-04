@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 example="${1:-mellin-log-grid}"
 mode="${2:-dev}"
+profile="${3:-portable}"
 
 example_dir="$ROOT/bindings/st-wasm/examples/$example"
 
@@ -15,7 +16,18 @@ if [[ ! -d "$example_dir" ]]; then
 fi
 
 echo "[SpiralTorch] building spiraltorch-wasm package..."
-"$ROOT/scripts/build_wasm_web.sh" --dev
+case "$profile" in
+  portable)
+    "$ROOT/scripts/build_wasm_web.sh" --dev
+    ;;
+  simd128)
+    "$ROOT/scripts/build_wasm_web.sh" --dev --simd128
+    ;;
+  *)
+    echo "[SpiralTorch] profile must be portable or simd128: $profile" >&2
+    exit 2
+    ;;
+esac
 
 pushd "$example_dir" >/dev/null
 
@@ -45,7 +57,7 @@ case "$mode" in
     ;;
   *)
     echo "[SpiralTorch] usage:"
-    echo "  bash scripts/wasm_demo.sh <example> [dev|build|preview]"
+    echo "  bash scripts/wasm_demo.sh <example> [dev|build|preview] [portable|simd128]"
     exit 2
     ;;
 esac
