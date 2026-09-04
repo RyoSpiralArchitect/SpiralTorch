@@ -24,7 +24,7 @@ pub mod observability;
 mod util;
 
 pub use autograd::{
-    AutogradBackwardReport, AutogradGraphSummary, AutogradSgd, AutogradTensor,
+    AutogradBackwardReport, AutogradGraphSummary, AutogradPackedRhs, AutogradSgd, AutogradTensor,
     AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 pub use backend::faer_dense;

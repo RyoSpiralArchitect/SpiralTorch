@@ -1,0 +1,159 @@
+{
+  "numerical_gates_passed": 288,
+  "statistic": "median of six per-seed medians across two operation orders; unpaired runtime timings",
+  "scope": "WASM CPU forward AutogradTensor calls, not backward or browser WebGPU; one-time packing excluded",
+  "cases": {
+    "matmul": {
+      "32": {
+        "before_cpu_route": {
+          "wasm_ms": 0.019317000000015128,
+          "torch_ms": 0.0017694999999999998,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.009241249999995205,
+          "torch_ms": 0.0017507500000000001,
+          "one_time_pack_ms": null
+        }
+      },
+      "64": {
+        "before_cpu_route": {
+          "wasm_ms": 0.05381175000000127,
+          "torch_ms": 0.005567,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.04863125000000856,
+          "torch_ms": 0.005463249999999999,
+          "one_time_pack_ms": null
+        }
+      },
+      "128": {
+        "before_cpu_route": {
+          "wasm_ms": 0.3695087499999943,
+          "torch_ms": 0.0379825,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.36604475000000747,
+          "torch_ms": 0.02843925,
+          "one_time_pack_ms": null
+        }
+      }
+    },
+    "matmul_prepacked": {
+      "32": {
+        "before_cpu_route": {
+          "wasm_ms": 0.014069499999997959,
+          "torch_ms": 0.002295,
+          "one_time_pack_ms": 0.003976500000007377
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.01058699999999746,
+          "torch_ms": 0.0012100000000000001,
+          "one_time_pack_ms": 0.003872000000001208
+        }
+      },
+      "64": {
+        "before_cpu_route": {
+          "wasm_ms": 0.054024500000000586,
+          "torch_ms": 0.0070209999999999995,
+          "one_time_pack_ms": 0.008081000000004224
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.04769700000000299,
+          "torch_ms": 0.0039285,
+          "one_time_pack_ms": 0.007683499999998844
+        }
+      },
+      "128": {
+        "before_cpu_route": {
+          "wasm_ms": 0.4418572499999982,
+          "torch_ms": 0.029677250000000002,
+          "one_time_pack_ms": 0.034557999999989875
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.35816524999999544,
+          "torch_ms": 0.0284335,
+          "one_time_pack_ms": 0.03473900000000185
+        }
+      }
+    },
+    "gather": {
+      "32": {
+        "before_cpu_route": {
+          "wasm_ms": 0.0043905000000030725,
+          "torch_ms": 0.0017907500000000002,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.004322250000001304,
+          "torch_ms": 0.00176725,
+          "one_time_pack_ms": null
+        }
+      },
+      "64": {
+        "before_cpu_route": {
+          "wasm_ms": 0.00866424999999893,
+          "torch_ms": 0.0020055,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.008520750000009514,
+          "torch_ms": 0.00194425,
+          "one_time_pack_ms": null
+        }
+      },
+      "128": {
+        "before_cpu_route": {
+          "wasm_ms": 0.016616249999998445,
+          "torch_ms": 0.002896,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.016596250000002755,
+          "torch_ms": 0.0020795,
+          "one_time_pack_ms": null
+        }
+      }
+    },
+    "scatter": {
+      "32": {
+        "before_cpu_route": {
+          "wasm_ms": 0.007490750000005875,
+          "torch_ms": 0.0033365,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.007237500000005781,
+          "torch_ms": 0.0033485,
+          "one_time_pack_ms": null
+        }
+      },
+      "64": {
+        "before_cpu_route": {
+          "wasm_ms": 0.014728999999999104,
+          "torch_ms": 0.00385475,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.014723000000000042,
+          "torch_ms": 0.00381775,
+          "one_time_pack_ms": null
+        }
+      },
+      "128": {
+        "before_cpu_route": {
+          "wasm_ms": 0.04539724999999706,
+          "torch_ms": 0.00550975,
+          "one_time_pack_ms": null
+        },
+        "after_cpu_route": {
+          "wasm_ms": 0.044599999999999085,
+          "torch_ms": 0.005463,
+          "one_time_pack_ms": null
+        }
+      }
+    }
+  }
+}

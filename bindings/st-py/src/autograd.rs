@@ -3,7 +3,7 @@ use crate::tensor::{parse_cross_entropy_config, parse_row_indices, tensor_err_to
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use st_tensor::{
-    AutogradBackwardReport, AutogradGraphSummary, AutogradSgd, AutogradTensor,
+    AutogradBackwardReport, AutogradGraphSummary, AutogradPackedRhs, AutogradSgd, AutogradTensor,
     AUTOGRAD_CONTRACT_VERSION, AUTOGRAD_SEMANTIC_OWNER,
 };
 
@@ -13,6 +13,28 @@ fn graph_summary_to_py(py: Python<'_>, summary: AutogradGraphSummary) -> PyResul
 
 fn backward_report_to_py(py: Python<'_>, report: AutogradBackwardReport) -> PyResult<Py<PyAny>> {
     json_to_py(py, &report.contract_payload())
+}
+
+/// Immutable Rust-owned packed RHS; obtain it from AutogradTensor.prepack_rhs().
+#[pyclass(module = "spiraltorch", name = "AutogradPackedRhs", from_py_object)]
+#[derive(Clone)]
+pub(crate) struct PyAutogradPackedRhs {
+    inner: AutogradPackedRhs,
+}
+
+#[pymethods]
+impl PyAutogradPackedRhs {
+    fn source_id(&self) -> u64 {
+        self.inner.source_id()
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        self.inner.shape()
+    }
+
+    fn requires_grad(&self) -> bool {
+        self.inner.requires_grad()
+    }
 }
 
 /// Thin Python handle over the Rust-owned reverse-mode graph.
@@ -203,6 +225,18 @@ impl PyAutogradTensor {
             .map_err(tensor_err_to_py)
     }
 
+    fn prepack_rhs(&self, py: Python<'_>) -> PyResult<PyAutogradPackedRhs> {
+        py.detach(|| self.inner.prepack_rhs())
+            .map(|inner| PyAutogradPackedRhs { inner })
+            .map_err(tensor_err_to_py)
+    }
+
+    fn matmul_prepacked(&self, py: Python<'_>, rhs: &PyAutogradPackedRhs) -> PyResult<Self> {
+        py.detach(|| self.inner.matmul_prepacked(&rhs.inner))
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
     fn scale(&self, factor: f32) -> PyResult<Self> {
         self.inner
             .scale(factor)
@@ -357,6 +391,7 @@ impl PyAutogradSgd {
 
 pub(crate) fn register(_py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyAutogradTensor>()?;
+    module.add_class::<PyAutogradPackedRhs>()?;
     module.add_class::<PyAutogradSgd>()?;
     module.add("AUTOGRAD_CONTRACT_VERSION", AUTOGRAD_CONTRACT_VERSION)?;
     module.add("AUTOGRAD_SEMANTIC_OWNER", AUTOGRAD_SEMANTIC_OWNER)?;

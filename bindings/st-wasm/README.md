@@ -141,6 +141,31 @@ report `spiraltorch.autograd.v1` with semantic owner `st-tensor`. For probes tha
 must not touch accumulated state, use `output.vectorJacobianProduct(input, seed)`;
 a disconnected input returns an all-zero gradient.
 
+`rhs.prepackRhs()` returns a Rust-owned `AutogradPackedRhs` for repeated
+`lhs.matmulPrepacked(packed)` calls. It retains the original source node and
+its backward graph, even for trainable or non-leaf RHS values. Use `sourceId()`,
+`rows()`, `cols()` and `requiresGrad()` to inspect its identity. Free packed
+handles normally; outputs retain their own graph dependencies.
+
+```ts
+const weights = new AutogradTensor(3, 2, new Float32Array([1, 0, 0, 1, 1, 1]), false);
+const packed = weights.prepackRhs();
+const hidden = new AutogradTensor(1, 3, new Float32Array([1, 2, 3]), true);
+const projected = hidden.matmulPrepacked(packed);
+const projectedLoss = projected.sum();
+projectedLoss.backward();
+console.log(projected.values(), hidden.gradientValues());
+projectedLoss.free(); projected.free(); hidden.free(); packed.free(); weights.free();
+```
+
+This is an immutable snapshot, not a live optimizer cache: after changing a
+trainable RHS with `AutogradSgd.step()`, fetch and pack the new parameter.
+Frozen projections may reuse one packed handle across training steps. The
+existing Tensor prepacked Auto dispatch owns execution; browser autograd here
+remains CPU, not a WebGPU-resident graph. Benchmark reuse and its one-time pack
+cost with `tools/bench_wasm_vs_torch.py --prepacked` (and reverse the operation
+order with `--reverse-operations` to check warmup effects).
+
 Classification uses the same stable CPU kernels as native Rust and Python:
 
 ```ts

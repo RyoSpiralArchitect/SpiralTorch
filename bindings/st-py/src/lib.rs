@@ -339,6 +339,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     let mut exports = vec![
         "Tensor",
         "AutogradTensor",
+        "AutogradPackedRhs",
         "AUTOGRAD_CONTRACT_VERSION",
         "AUTOGRAD_SEMANTIC_OWNER",
         "from_dlpack",

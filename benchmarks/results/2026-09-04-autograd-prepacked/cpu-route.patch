@@ -1,0 +1,33 @@
+diff --git a/crates/st-tensor/src/pure.rs b/crates/st-tensor/src/pure.rs
+index 4c7ff3b8..6e2a2313 100644
+--- a/crates/st-tensor/src/pure.rs
++++ b/crates/st-tensor/src/pure.rs
+@@ -3088,6 +3088,13 @@ impl Tensor {
+             }
+         }
+ 
++        if cpu_dense::should_use(rows, inner, cols)
++            && cpu_dense::matmul_packed_into(dst, self.data(), packed.as_slice(), rows, inner, cols)
++                .is_ok()
++        {
++            return Ok("cpu_simd");
++        }
++
+         matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
+         Ok("naive")
+     }
+@@ -3144,6 +3151,14 @@ impl Tensor {
+             }
+         }
+ 
++        if cpu_dense::should_use(rows, inner, cols)
++            && cpu_dense::matmul_packed_into(dst, self.data(), packed.as_slice(), rows, inner, cols)
++                .is_ok()
++        {
++            add_bias_inplace(dst, rows, cols, bias);
++            return Ok("cpu_simd");
++        }
++
+         matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
+         add_bias_inplace(dst, rows, cols, bias);
+         Ok("naive")

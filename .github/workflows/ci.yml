@@ -75,7 +75,9 @@ jobs:
           cargo +nightly-2026-04-15 fmt --all -- --check
       - name: CPU feature isolation
         if: matrix.run_lints
-        run: bash scripts/check_cpu_feature_isolation.sh
+        run: |
+          bash scripts/check_cpu_feature_isolation.sh
+          cargo test --locked -p st-tensor --no-default-features --features cpu --test prepacked_cpu_dispatch
       - name: Kernel and HIP contract isolation
         if: matrix.run_lints
         env:
@@ -174,7 +176,7 @@ jobs:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
         run: |
-          cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_matmul_precision
+          cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_matmul_precision --test autograd_prepacked_wgpu
           cargo test --locked -p st-tensor --features wgpu --release --lib matmul
       - name: nonlinear autograd on strict WGPU paths
         env:
@@ -228,6 +230,7 @@ jobs:
           node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
           node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
           node bindings/st-wasm/tests/cpu_dense_matmul.cjs "$module"
+          node bindings/st-wasm/tests/autograd_prepacked.cjs "$module"
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
           node bindings/st-wasm/tests/row_indexing.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
@@ -414,6 +417,7 @@ jobs:
           python -P bindings/st-py/tests/test_unittest_smoke.py
           python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P bindings/st-py/tests/test_tensor_out.py
+          python -P bindings/st-py/tests/test_autograd_prepacked.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
           python -P tests/test_publish_pypi_wheels.py
