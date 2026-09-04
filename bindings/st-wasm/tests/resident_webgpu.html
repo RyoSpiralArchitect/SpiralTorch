@@ -6,7 +6,7 @@
 <script type="module">
 const output = document.querySelector("#result");
 const report = {
-  schema: "spiraltorch.browser_resident_matmul.v2",
+  schema: "spiraltorch.browser_resident_matmul.v3",
   boundary: "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
   dtype: "float32", user_agent: navigator.userAgent, cases: [], assertions: [],
 };
@@ -66,6 +66,9 @@ try {
   if(tiles.some(tile=>tile.length!==3 || tile.some(x=>!Number.isInteger(x))) ||
       new Set(tiles.map(tile=>tile.join("x"))).size!==tiles.length) throw Error("invalid tile list");
   report.tiles_mnk=tiles;
+  const kernels = (new URL(location.href).searchParams.get("kernels") ?? "auto").split(";");
+  if(kernels.some(k=>!["auto","scalar","register_2x2"].includes(k)) || new Set(kernels).size!==kernels.length) throw Error("invalid kernel list");
+  report.kernels_requested=kernels;
   stage("invalid dimensions");
   for(const dim of [-1,0,1.5,NaN,Infinity,4294967296,"2",true]) {
     await rejects(()=>WgpuMatmul.create(dim,2,2), "reject invalid dimension "+String(dim));
@@ -73,6 +76,10 @@ try {
   for(const tile of [[0,8,16],[-1,8,16],[8,1.5,16],[32,32,16],[8,8,65],[8,"8",16]]) {
     await rejects(()=>WgpuMatmul.createWithTile(2,3,2,...tile), "reject invalid tile "+tile.join(","));
   }
+  for(const kernel of ["unknown","auto",true,0,null,{},new String("scalar")]) {
+    await rejects(()=>WgpuMatmul.createWithKernel(2,3,2,16,16,16,kernel), "reject invalid kernel "+String(kernel));
+  }
+  await rejects(()=>WgpuMatmul.createWithKernel(2,3,2,3,5,7,"register_2x2"), "reject odd blocked tile");
   const adapter = await navigator.gpu?.requestAdapter();
   if(!adapter) throw new Error("No browser WebGPU adapter; no CPU fallback");
   report.browser_adapter = {
@@ -85,9 +92,11 @@ try {
     maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize};
   stage("create Rust workspace");
   const [probe, concurrent] = await Promise.all([
-    WgpuMatmul.create(2,3,2), WgpuMatmul.createWithTile(2,2,1,16,16,32),
+    WgpuMatmul.create(2,3,2), WgpuMatmul.createWithKernel(2,2,1,16,16,32,"register_2x2"),
   ]);
   assert(Array.from(probe.tileMNK()).join(",")==="8,8,16", "default tile remains stable");
+  assert(probe.kernel === "scalar" && Array.from(probe.workgroupSize()).join(",")==="8,8,1", "small default keeps scalar geometry");
+  assert(concurrent.kernel === "register_2x2" && Array.from(concurrent.outputsPerThread()).join(",")==="2,2", "explicit blocked workspace reports actual geometry");
   report.rust_adapter = probe.adapterInfo();
   if(report.rust_adapter instanceof Map) report.rust_adapter = Object.fromEntries(report.rust_adapter);
   await rejects(()=>probe.dispatch(), "missing input rejected");
@@ -131,12 +140,17 @@ try {
       stage(`matrix ${m}x${k}x${n}, seed ${seed}`);
       const a=fixture(m*k,seed), b=fixture(k*n,seed+1);
       const expected=reference(a,b,m,k,n), variants=[];
-      for(const tile of tiles) {
-        const workspace=await WgpuMatmul.createWithTile(m,k,n,...tile);
+      for(const tile of tiles) for(const kernel of kernels) {
+        const workspace=kernel === "auto"
+          ? await WgpuMatmul.createWithTile(m,k,n,...tile)
+          : await WgpuMatmul.createWithKernel(m,k,n,...tile,kernel);
         assert(Array.from(workspace.tileMNK()).join(",")===tile.join(","), "actual tile matches request");
+        if(kernel!=="auto") assert(workspace.kernel===kernel,"actual kernel matches request");
+        const geometry={kernel_request:kernel,kernel:workspace.kernel,
+          workgroup_size:Array.from(workspace.workgroupSize()),outputs_per_thread:Array.from(workspace.outputsPerThread())};
         workspace.upload(a,b); workspace.dispatch();
         const max_abs_error=check(await workspace.readback(),expected);
-        variants.push({workspace,tile,max_abs_error,samples:[]});
+        variants.push({workspace,tile,max_abs_error,geometry,samples:[]});
       }
       const run=async(variant)=> {
         for(let i=0;i<16;i++) variant.workspace.dispatch();
@@ -151,7 +165,7 @@ try {
         for(const variant of order) { const start=performance.now(); await run(variant); variant.samples.push(performance.now()-start); }
       }
       for(const variant of variants) {
-        report.cases.push({shape_m_k_n:[m,k,n],tile_mnk:variant.tile,seed,
+        report.cases.push({shape_m_k_n:[m,k,n],tile_mnk:variant.tile,seed,...variant.geometry,
           max_abs_error:variant.max_abs_error,dispatches:16,status:"passed",timing:summary(variant.samples)});
         variant.workspace.free();
       }

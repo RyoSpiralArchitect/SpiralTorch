@@ -19,6 +19,16 @@ class WgpuResidentSurface(unittest.TestCase):
         first = st.WgpuMatmul(2, 3, 2)
         self.assertEqual(first.shape, (2, 3, 2))
         self.assertEqual(first.tile_mnk, (8, 8, 16))
+        self.assertEqual(first.workgroup_size, (8, 8, 1))
+        self.assertEqual(first.outputs_per_thread, (1, 1))
+        self.assertEqual(first.kernel, "scalar")
+        native = st.WgpuMatmul(2, 3, 2, tile_mnk=(16, 16, 16))
+        self.assertEqual(native.kernel, "scalar")
+        self.assertEqual(native.workgroup_size, (16, 16, 1))
+        with self.assertRaises(ValueError):
+            st.WgpuMatmul(2, 3, 2, kernel="unknown")
+        with self.assertRaises(ValueError):
+            st.WgpuMatmul(2, 3, 2, tile_mnk=(3, 5, 7), kernel="register_2x2")
         for tile in ((0, 8, 16), (32, 32, 16), (8, 8, 65)):
             with self.assertRaises(ValueError):
                 st.WgpuMatmul(2, 3, 2, tile_mnk=tile)
@@ -40,8 +50,11 @@ class WgpuResidentSurface(unittest.TestCase):
         for invalid in (0, 1025):
             with self.assertRaises(ValueError):
                 first.dispatch(invalid)
-        next_layer = st.WgpuMatmul(2, 2, 1, tile_mnk=(16, 16, 32))
+        next_layer = st.WgpuMatmul(2, 2, 1, tile_mnk=(16, 16, 32), kernel="register_2x2")
         self.assertEqual(next_layer.tile_mnk, (16, 16, 32))
+        self.assertEqual(next_layer.workgroup_size, (8, 8, 1))
+        self.assertEqual(next_layer.outputs_per_thread, (2, 2))
+        self.assertEqual(next_layer.kernel, "register_2x2")
         next_layer.upload_rhs(st.Tensor(2, 1, [1., 1.]))
         next_layer.set_lhs_from(first)
         next_layer.dispatch(3)

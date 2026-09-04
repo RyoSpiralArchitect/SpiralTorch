@@ -55,8 +55,9 @@ def run(args):
     if args.native_prefix and not native.is_relative_to(args.native_prefix.resolve()):
         raise RuntimeError("native extension outside expected prefix")
     report = {
-        "schema": "spiraltorch.resident_matmul_bench.v2",
+        "schema": "spiraltorch.resident_matmul_bench.v3",
         "tiles_mnk": parse_tiles(args.tiles_mnk),
+        "kernels_requested": args.kernels,
         "platform": platform.platform(), "host": platform.node(), "python": sys.version,
         "torch": torch.__version__, "torch_device": str(device),
         "torch_gpu": torch.cuda.get_device_name() if device.type == "cuda" else "MPS",
@@ -94,9 +95,11 @@ def run(args):
 
                 functions = {"torch_resident": torch_batch}
                 case["wgpu_variants"] = {}
-                for tile in parse_tiles(args.tiles_mnk):
-                    workspace = st.WgpuMatmul(m, k, n, tile_mnk=tile)
-                    name = "st_" + "x".join(map(str, tile))
+                for tile, kernel in ((tile, kernel) for tile in parse_tiles(args.tiles_mnk)
+                                     for kernel in args.kernels):
+                    workspace = st.WgpuMatmul(m, k, n, tile_mnk=tile,
+                                             kernel=None if kernel == "auto" else kernel)
+                    name = "st_" + kernel + "_" + "x".join(map(str, tile))
                     info = workspace.adapter_info()
                     if info["device_type"] == "Cpu":
                         raise RuntimeError("software WGPU adapter is not admitted as GPU timing")
@@ -104,7 +107,13 @@ def run(args):
                         raise RuntimeError("WGPU adapter does not match expected adapter")
                     if tuple(workspace.tile_mnk) != tile:
                         raise RuntimeError("actual tile does not match requested tile")
-                    case["wgpu_variants"][name] = {"tile_mnk": tile, "adapter": info}
+                    if kernel != "auto" and workspace.kernel != kernel:
+                        raise RuntimeError("actual kernel does not match requested kernel")
+                    case["wgpu_variants"][name] = {
+                        "tile_mnk": tile, "adapter": info, "kernel_request": kernel,
+                        "kernel": workspace.kernel, "workgroup_size": workspace.workgroup_size,
+                        "outputs_per_thread": workspace.outputs_per_thread,
+                    }
                     workspace.upload(st.Tensor(m, k, a), st.Tensor(k, n, b))
                     workspace.dispatch()
                     case["correctness"][name] = correctness(
@@ -142,6 +151,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--dispatches", type=int, default=16)
     parser.add_argument("--tiles-mnk", default="8,8,16")
+    parser.add_argument("--kernels", nargs="+", choices=["auto", "scalar", "register_2x2"], default=["auto"])
     parser.add_argument("--torch-device", choices=["cuda", "mps"], default="cuda")
     parser.add_argument("--expected-adapter", required=True)
     parser.add_argument("--native-prefix", type=Path)
@@ -151,6 +161,8 @@ def main():
         parser.error("positive iterations, 1..1024 dispatches, nonnegative warmup required")
     parse_sizes(args.sizes)
     parse_tiles(args.tiles_mnk)
+    if len(set(args.kernels)) != len(args.kernels):
+        parser.error("kernel choices must be unique")
     with args.output.open("x") as stream:
         try:
             report = run(args)

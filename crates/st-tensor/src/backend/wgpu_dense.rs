@@ -3297,7 +3297,16 @@ mod tests {
                     ScalarType::F32
                 }
             );
-            for [m, n, k] in [[8, 8, 16], [16, 8, 16], [16, 16, 64], [3, 5, 7]] {
+            for [m, n, k] in [
+                [8, 8, 16],
+                [16, 8, 16],
+                [16, 16, 64],
+                [3, 5, 7],
+                [32, 8, 16],
+                [8, 32, 16],
+                [64, 4, 16],
+                [4, 64, 16],
+            ] {
                 let output = allocate_output(device, "layout-test.out", rows * cols);
                 let mut encoder = device.create_command_encoder(&Default::default());
                 dispatch_matmul(
@@ -3362,6 +3371,37 @@ mod tests {
         let candidates = candidate_tiles(256, 8, 256, &[]);
         assert!(!candidates.is_empty());
         assert!(candidates.contains(&TileConfig::new(16, 16, 16)));
+    }
+
+    #[test]
+    fn matmul_candidates_check_real_invocations_and_scratch() {
+        let mut limits = wgpu::Limits::default();
+        assert!(!tile_supported_by_limits(
+            &limits,
+            TileConfig::new(24, 12, 16)
+        ));
+        for [m, n, k] in [[0, 16, 16], [16, 0, 16], [16, 16, 0], [u32::MAX; 3]] {
+            assert!(!tile_supported_by_limits(&limits, TileConfig::new(m, n, k)));
+        }
+        limits.max_compute_invocations_per_workgroup = 64;
+        assert!(!tile_supported_by_limits(
+            &limits,
+            TileConfig::new(16, 16, 64)
+        ));
+        assert!(!tile_supported_by_limits(
+            &limits,
+            TileConfig::new(24, 12, 16)
+        ));
+        limits.max_compute_workgroup_storage_size = 4096;
+        limits.max_compute_invocations_per_workgroup = 256;
+        assert!(!tile_supported_by_limits(
+            &limits,
+            TileConfig::new(16, 16, 64)
+        ));
+        assert!(tile_supported_by_limits(
+            &limits,
+            TileConfig::new(16, 16, 16)
+        ));
     }
 
     #[test]
@@ -10663,7 +10703,7 @@ fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     TileConfig::new(16, 16, 16)
 }
 
-const MATMUL_AUTOTUNE_REVISION: u64 = 4;
+const MATMUL_AUTOTUNE_REVISION: u64 = 5;
 const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
 const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
 const AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -10866,13 +10906,24 @@ fn sample_dimension(value: usize) -> usize {
 }
 
 fn tile_supported(device: &Device, tile: TileConfig) -> bool {
-    let limits = device.limits();
-    let wg_x = tile.tile_n();
-    let wg_y = tile.tile_m();
-    let invocations = wg_x.saturating_mul(wg_y);
-    wg_x <= limits.max_compute_workgroup_size_x
+    tile_supported_by_limits(&device.limits(), tile)
+}
+
+fn tile_supported_by_limits(limits: &wgpu::Limits, tile: TileConfig) -> bool {
+    let [m, n, k] = [tile.tile_m(), tile.tile_n(), tile.tile_k()];
+    let [wg_x, wg_y] = [n, m];
+    let invocations = u64::from(wg_x) * u64::from(wg_y);
+    let scratch = (u64::from(m) + u64::from(n))
+        .checked_mul(u64::from(k))
+        .and_then(|elements| elements.checked_mul(4));
+    m > 0
+        && n > 0
+        && k > 0
+        && wg_x <= limits.max_compute_workgroup_size_x
         && wg_y <= limits.max_compute_workgroup_size_y
-        && invocations <= limits.max_compute_invocations_per_workgroup
+        && invocations <= u64::from(limits.max_compute_invocations_per_workgroup)
+        && scratch
+            .is_some_and(|bytes| bytes <= u64::from(limits.max_compute_workgroup_storage_size))
 }
 
 fn candidate_tiles(

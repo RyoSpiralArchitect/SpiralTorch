@@ -1,0 +1,239 @@
+{
+  "schema": "spiraltorch.long_k_diagnostic.v1",
+  "native": "/home/ryospiralarchitect/.local/state/spiraltorch/benchmarks/resident-tiles-v1/venv/lib/python3.14/site-packages/spiraltorch/spiraltorch.abi3.so",
+  "native_sha256": "7e893ee5a9f13538731035934e7745964c16139a7a9b410c4c211d0ff8609580",
+  "script_sha256": "830f0ef6d8351824dbf7fc1d1127044ea42c616ac832c82ef5e6a862a683f170",
+  "helper_sha256": "7401f011fc7cfe4a7704918afc82bb76bbbeadc027c580e3d4715921bf984e64",
+  "shape_m_k_n": [
+    128,
+    3072,
+    768
+  ],
+  "cases": [
+    {
+      "seed": 17,
+      "input_sha256": [
+        "30ad45f6200fe98dcf51f1b000385dd5b1e09890b551683edb7f2adf1b456206",
+        "db1c56082b57686920fb29c437d8850969f03fa4f49610b3337c4fe0e7697009"
+      ],
+      "cpu_sequential_f32": {
+        "max_abs_error": 4.4885883285772366e-05,
+        "failed_cells": 1,
+        "worst_gate_ratio": 1.2040678119286696,
+        "worst_gate_cell": [
+          11,
+          100
+        ],
+        "worst_actual": -0.0157376229763031,
+        "worst_reference": -0.015751560249090746
+      },
+      "torch_cuda": {
+        "max_abs_error": 6.8864363798049055e-06,
+        "failed_cells": 0,
+        "worst_gate_ratio": 0.3713441848577929,
+        "worst_gate_cell": [
+          101,
+          99
+        ],
+        "worst_actual": 0.008176326751708984,
+        "worst_reference": 0.008180343965873749
+      },
+      "variants": {
+        "(8, 8, 16):None": {
+          "max_abs_error": 4.4885883285772366e-05,
+          "failed_cells": 1,
+          "worst_gate_ratio": 1.0017945166447983,
+          "worst_gate_cell": [
+            11,
+            100
+          ],
+          "worst_actual": -0.015739964321255684,
+          "worst_reference": -0.015751560249090746,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 8.58306884765625e-06,
+          "equal_cpu_sequential": false
+        },
+        "(16, 16, 16):None": {
+          "max_abs_error": 4.4885883285772366e-05,
+          "failed_cells": 1,
+          "worst_gate_ratio": 1.0017945166447983,
+          "worst_gate_cell": [
+            11,
+            100
+          ],
+          "worst_actual": -0.015739964321255684,
+          "worst_reference": -0.015751560249090746,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 8.58306884765625e-06,
+          "equal_cpu_sequential": false
+        }
+      }
+    },
+    {
+      "seed": 29,
+      "input_sha256": [
+        "8f031e328a9dd0a717d020227640dcbd9f76ede82e5473786a6f44bc7860b61b",
+        "9385da1763e6cf63436a0029e678ef54694ef1e748e32e647de45e2630295465"
+      ],
+      "cpu_sequential_f32": {
+        "max_abs_error": 4.367407298744297e-05,
+        "failed_cells": 1,
+        "worst_gate_ratio": 1.15648316007438,
+        "worst_gate_cell": [
+          72,
+          68
+        ],
+        "worst_actual": 0.05243757367134094,
+        "worst_reference": 0.052419946561195196
+      },
+      "torch_cuda": {
+        "max_abs_error": 6.374090961602796e-06,
+        "failed_cells": 0,
+        "worst_gate_ratio": 0.5206657065239303,
+        "worst_gate_cell": [
+          41,
+          38
+        ],
+        "worst_actual": 0.0012329816818237305,
+        "worst_reference": 0.0012382528104664114
+      },
+      "variants": {
+        "(8, 8, 16):None": {
+          "max_abs_error": 4.176672435463047e-05,
+          "failed_cells": 0,
+          "worst_gate_ratio": 0.9973724899151417,
+          "worst_gate_cell": [
+            72,
+            68
+          ],
+          "worst_actual": 0.052435148507356644,
+          "worst_reference": 0.052419946561195196,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 9.5367431640625e-06,
+          "equal_cpu_sequential": false
+        },
+        "(16, 16, 16):None": {
+          "max_abs_error": 4.176672435463047e-05,
+          "failed_cells": 0,
+          "worst_gate_ratio": 0.9973724899151417,
+          "worst_gate_cell": [
+            72,
+            68
+          ],
+          "worst_actual": 0.052435148507356644,
+          "worst_reference": 0.052419946561195196,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 9.5367431640625e-06,
+          "equal_cpu_sequential": false
+        }
+      }
+    },
+    {
+      "seed": 43,
+      "input_sha256": [
+        "9ae3c96f3a9e70aff3bf06693bd5cee0f91db98b0eadb9a6c8964ed24fdf7b7b",
+        "fa5aebb7159643fae375857abeef961c450aa5d69b23ae929c3fc02af52a348a"
+      ],
+      "cpu_sequential_f32": {
+        "max_abs_error": 4.11411113958593e-05,
+        "failed_cells": 2,
+        "worst_gate_ratio": 1.2037431570830857,
+        "worst_gate_cell": [
+          84,
+          416
+        ],
+        "worst_actual": 0.01965353637933731,
+        "worst_reference": 0.019639134900341748
+      },
+      "torch_cuda": {
+        "max_abs_error": 7.323733536068744e-06,
+        "failed_cells": 0,
+        "worst_gate_ratio": 0.3795004709045091,
+        "worst_gate_cell": [
+          0,
+          14
+        ],
+        "worst_actual": 0.006551265716552734,
+        "worst_reference": 0.006547222244451201
+      },
+      "variants": {
+        "(8, 8, 16):None": {
+          "max_abs_error": 3.955468186234157e-05,
+          "failed_cells": 2,
+          "worst_gate_ratio": 1.2024976481443708,
+          "worst_gate_cell": [
+            84,
+            416
+          ],
+          "worst_actual": 0.019653521478176117,
+          "worst_reference": 0.019639134900341748,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 8.58306884765625e-06,
+          "equal_cpu_sequential": false
+        },
+        "(16, 16, 16):None": {
+          "max_abs_error": 3.955468186234157e-05,
+          "failed_cells": 2,
+          "worst_gate_ratio": 1.2024976481443708,
+          "worst_gate_cell": [
+            84,
+            416
+          ],
+          "worst_actual": 0.019653521478176117,
+          "worst_reference": 0.019639134900341748,
+          "adapter": {
+            "name": "NVIDIA GeForce RTX 5090",
+            "vendor": 4318,
+            "device": 11141,
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "driver": "NVIDIA",
+            "driver_info": "595.84"
+          },
+          "max_abs_vs_cpu_sequential": 8.58306884765625e-06,
+          "equal_cpu_sequential": false
+        }
+      }
+    }
+  ]
+}

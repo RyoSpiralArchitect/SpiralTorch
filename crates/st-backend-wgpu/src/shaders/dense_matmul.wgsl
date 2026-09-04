@@ -67,13 +67,13 @@ fn main(
 ) {
     let tile_row = wid.y * TILE_M;
     let tile_col = wid.x * TILE_N;
-    let local_row = lid.y;
-    let local_col = lid.x;
+    let local_row = lid.y * {thread_m}u;
+    let local_col = lid.x * {thread_n}u;
     let global_row = tile_row + local_row;
     let global_col = tile_col + local_col;
     let in_bounds = global_row < params.rows && global_col < params.cols;
 
-    var acc : f32 = 0.0;
+    {accumulator_declarations}
     let tiles = (params.inner + TILE_K - 1u) / TILE_K;
     var tile_index : u32 = 0u;
     loop {
@@ -82,12 +82,12 @@ fn main(
         }
         let k_base = tile_index * TILE_K;
 
-        var load_row = local_row;
+        var load_row = lid.y;
         loop {
             if (load_row >= TILE_M) {
                 break;
             }
-            var load_k = local_col;
+            var load_k = lid.x;
             loop {
                 if (load_k >= TILE_K) {
                     break;
@@ -108,12 +108,12 @@ fn main(
             load_row = load_row + WG_SIZE_Y;
         }
 
-        var load_col = local_col;
+        var load_col = lid.x;
         loop {
             if (load_col >= TILE_N) {
                 break;
             }
-            var load_k = local_row;
+            var load_k = lid.y;
             loop {
                 if (load_k >= TILE_K) {
                     break;
@@ -137,9 +137,7 @@ fn main(
             if (k >= TILE_K || (k_base + k) >= params.inner) {
                 break;
             }
-            let lhs_val = tile_a[local_row * TILE_K + k];
-            let rhs_val = tile_b[k * TILE_N + local_col];
-            {fma_line}
+            {accumulate}
             k = k + 1u;
         }
 
@@ -147,8 +145,5 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
-    if (in_bounds) {
-        let index = global_row * params.cols + global_col;
-        out[index] = apply_fusions(acc, index, global_col);
-    }
+    {write_output}
 }
