@@ -112,6 +112,17 @@ def test_log_softmax_preserves_sum_correction_after_probability_scaling(sign, va
     assert flat(leaf.grad()) == expected
 
 
+@pytest.mark.parametrize("classes", [49, 257, 50_000])
+@pytest.mark.parametrize("seed_value", [F32_MAX, -F32_MAX])
+def test_uniform_logits_and_cotangents_have_zero_vjp_at_vocabulary_width(classes, seed_value):
+    logits = st.Tensor(1, classes, [0.0] * classes)
+    seed = st.Tensor(1, classes, [seed_value] * classes)
+    assert flat(logits.row_log_softmax_backward(seed)) == [0.0] * classes
+    leaf = st.AutogradTensor.variable(logits)
+    leaf.row_log_softmax().backward(seed)
+    assert flat(leaf.grad()) == [0.0] * classes
+
+
 @pytest.mark.parametrize("options", [
     {"reduction": "avg"}, {"label_smoothing": -0.1},
     {"label_smoothing": 1.1}, {"label_smoothing": math.nan},

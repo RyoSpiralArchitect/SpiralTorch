@@ -221,10 +221,17 @@ fn mean_is_narrowed_only_after_reduction() {
 
 #[test]
 fn extreme_seeds_are_reduced_in_f64() {
-    for cols in [2, 3] {
-        for sign in [1.0, -1.0] {
+    for cols in [1, 2, 3, 7, 49, 257, 1024, 50_000] {
+        for seed_value in [
+            f32::MAX,
+            -f32::MAX,
+            1.0,
+            -1.0,
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+        ] {
             let logits = Tensor::zeros(1, cols).unwrap();
-            let seed = Tensor::from_vec(1, cols, vec![sign * f32::MAX; cols]).unwrap();
+            let seed = Tensor::from_vec(1, cols, vec![seed_value; cols]).unwrap();
             assert_eq!(
                 logits.row_log_softmax_backward(&seed).unwrap().data(),
                 vec![0.0; cols]

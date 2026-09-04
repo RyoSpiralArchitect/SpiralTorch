@@ -49,6 +49,12 @@ try {
   assert.equal(cancellationGradient[2], -maximum);
 
   for (const sign of [1, -1]) {
+    for (const classes of [49, 257, 50_000]) {
+      const input = keep(new AutogradTensor(1, classes, new Float32Array(classes), true));
+      const output = keep(input.rowLogSoftmax());
+      const seed = new Float32Array(classes).fill(sign * maximum);
+      close(output.vectorJacobianProduct(input, seed), new Float32Array(classes), 0);
+    }
     for (const [values, seed, expected] of [
       [[0, -200], [maximum, 1], [-1, 1]],
       [[-200, 0], [1, maximum], [1, -1]],

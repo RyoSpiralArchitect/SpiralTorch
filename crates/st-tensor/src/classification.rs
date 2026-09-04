@@ -288,15 +288,13 @@ impl Tensor {
             {
                 let partition = RowPartition::new(row);
                 let (sum, correction) = sum_cotangents(upstream);
-                for (index, (&value, &gradient)) in row.iter().zip(upstream).enumerate() {
-                    let gradient = if index == partition.maximum_index {
-                        let tail = partition.tail_probability();
-                        let high = (f64::from(gradient) - sum) + sum * tail;
-                        high + (-correction + correction * tail)
-                    } else {
-                        let probability = partition.probability(value);
-                        (f64::from(gradient) - sum * probability) - correction * probability
-                    };
+                for (&value, &gradient) in row.iter().zip(upstream) {
+                    let weight = (f64::from(value) - partition.maximum).exp();
+                    let gradient = f64::from(gradient);
+                    // Cancel before dividing by the partition, so wide uniform rows
+                    // never subtract independently rounded normalized probabilities.
+                    let high = (gradient - sum * weight) + gradient * partition.tail;
+                    let gradient = (high - correction * weight) / (1.0 + partition.tail);
                     values.push(checked_f32(gradient, "log_softmax_gradient")?);
                 }
             }

@@ -40,10 +40,12 @@ def test_cross_entropy_value_and_vjp_match_float64_pytorch(shape, smoothing, red
 
 
 @pytest.mark.parametrize("scale", [1.0, 50.0, 1e6])
-def test_log_softmax_and_vjp_match_float64_pytorch(scale):
+@pytest.mark.parametrize("classes", [37, 49, 50_000])
+def test_log_softmax_and_vjp_match_float64_pytorch(scale, classes):
     generator = torch.Generator().manual_seed(11)
-    values = (torch.randn((5, 37), generator=generator, dtype=torch.float32) * scale).double().requires_grad_()
-    seed = torch.randn((5, 37), generator=generator, dtype=torch.float32).double()
+    shape = (5, classes)
+    values = (torch.randn(shape, generator=generator, dtype=torch.float32) * scale).double().requires_grad_()
+    seed = torch.randn(shape, generator=generator, dtype=torch.float32).double()
     reference = torch.nn.functional.log_softmax(values, dim=1)
     reference.backward(seed)
     logits = native(values)
