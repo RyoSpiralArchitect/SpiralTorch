@@ -86,7 +86,7 @@ async function finalize({ github, repo, tag, sourceSha, dist }) {
   // Validate locally before making any remote mutation.
   const files = collectPayload(dist);
   const checkSource = async () => {
-    const { data } = await github.rest.repos.getCommit({ ...repo, ref: tag });
+    const { data } = await github.rest.repos.getCommit({ ...repo, ref: "refs/tags/" + tag });
     if (data.sha !== sourceSha) throw new Error("Release tag changed or does not match the build.");
   };
   await checkSource();

@@ -30,7 +30,10 @@ function client() {
       if (!state.release) throw Object.assign(new Error("missing"), { status: 404 });
       return { data: state.release };
     },
-    getCommit: async () => ({ data: { sha: state.sha } }),
+    getCommit: async (args) => {
+      assert.equal(args.ref, "refs/tags/v1");
+      return { data: { sha: state.sha } };
+    },
     createRelease: async (args) => {
       state.events.push(["create", args]);
       state.release = { ...args, id: 1, immutable: false };
