@@ -321,3 +321,40 @@ points. A future device-resident Krylov solver belongs behind the canonical
 `st-core::autograd::hypergrad` contract, with the same equation-residual
 diagnostics and backend parity tests; it must not return as a parallel ops
 module.
+## Integer Row Indexing
+
+Source builds add `Tensor::gather_rows(&[usize])` and
+`Tensor::scatter_add_rows(&[usize], output_rows)`. Gather selects logical rows in
+the supplied order; scatter sums each source row into a fresh zero output table.
+There is no rounding, clamping, overwrite-on-duplicate, or implicit averaging.
+Bounds are checked even for zero-column tensors. Shape multiplication is checked
+before allocation. Selected gather values, all scatter inputs, and final outputs
+must be finite. Both operations preserve inputs and understand column-major storage.
+
+`AutogradTensor` captures IDs by value; gather's VJP is scatter and scatter's VJP
+is gather. Shared/tied leaves receive contributions from all paths. Existing
+failure-atomic backward and immutable optimizer replacement continue to apply.
+IDs are not trainable. CPU/f64 graph VJPs are first-order, not a GPU graph.
+
+Explicit `*_with_backend` Tensor variants support CPU and WGPU (`Auto` is CPU).
+Nonempty WGPU requests fail if unavailable or beyond device/u32 bounds; there is
+no hidden CPU numerical fallback. Empty outputs perform no dispatch. GPU IDs use
+real u32 storage, not f32 values or float bit reinterpretation. Scatter builds
+stable CSR offsets/positions on the host, then performs the sums on GPU in
+O((output_rows + tokens) * columns) work including output zeroing, not a vocabulary-by-token scan.
+CPU uses f64 intermediate sums and scales before final f32 storage. WGPU uses f32
+ordered sums; extreme cancellation/overflow can therefore differ and is not
+claimed equivalent. Nonfinite GPU results fail. Neither path mutates the source.
+
+Legacy `nn::Embedding` delegates to these primitives while retaining its float ID
+repair statistics, flattened `(batch, steps * dimension)` shape, and explicit
+batch-average parameter gradient. Its caller-owned fallback policy remains in
+`st-nn`; strict requests propagate GPU failures, while permitted fallback is reported.
+The new typed API deliberately does not inherit that legacy ID repair policy.
+
+Python exposes both Tensor and AutogradTensor methods with snake_case names;
+WASM exposes `gatherRows`/`scatterAddRows` on AutogradTensor. JS validates raw
+Array elements before integer conversion (or accepts already-typed Uint32Array).
+See `examples/autograd_tied_embedding.py` and the equivalent actual-WASM fixture
+for a tied input/output embedding learning cycle. They test synthetic learning
+mechanics only, not an LLM fine-tuning benefit. These APIs are not in PyPI 0.4.27.

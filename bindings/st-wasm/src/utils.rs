@@ -40,6 +40,18 @@ pub(crate) fn js_u32(value: &JsValue, context: &str) -> Result<u32, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) fn js_row_indices(value: &JsValue) -> Result<Vec<usize>, JsValue> {
+    use wasm_bindgen::JsCast;
+    if !js_sys::Array::is_array(value) && !value.is_instance_of::<js_sys::Uint32Array>() {
+        return Err(js_error("row indices must be an Array or Uint32Array"));
+    }
+    js_sys::Array::from(value)
+        .iter()
+        .map(|value| js_u32(&value, "row index").map(|index| index as usize))
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn js_i32(value: &JsValue, context: &str) -> Result<i32, JsValue> {
     checked_i32(js_number(value, context)?, context).map_err(js_error)
 }

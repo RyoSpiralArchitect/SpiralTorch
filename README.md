@@ -520,6 +520,14 @@ core while retaining its existing WGPU utility path and parameter-update scale.
 See the [contract and examples](docs/autograd_contract.md#affine-layernorm), or
 run `python examples/autograd_layer_norm.py` for a 400-step learning fixture.
 
+Source builds also expose exact integer row indexing: `Tensor.gather_rows(ids)`
+and `scatter_add_rows(ids, output_rows)`, plus the same differentiable operations
+on `AutogradTensor`. Repeated IDs accumulate rather than overwrite; IDs are never
+rounded or clamped. `python examples/autograd_tied_embedding.py` learns a small
+token-transition fixture with one embedding table shared by lookup and output
+projection. See [row indexing](docs/autograd_contract.md#integer-row-indexing)
+for CPU/WGPU precision and browser boundaries. This addition is not in PyPI 0.4.27.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:

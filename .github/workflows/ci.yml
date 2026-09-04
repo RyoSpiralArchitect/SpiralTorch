@@ -128,7 +128,7 @@ jobs:
       - name: test upper stack
         if: matrix.run_upper_stack
         run: |
-          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test wgpu_feature_ownership
+          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership
           cargo test -p st-nn --release --lib
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
@@ -173,7 +173,7 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
           SPIRALTORCH_STRICT_GPU: "1"
-        run: cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd
+        run: cargo test --locked -p st-tensor --features wgpu --release --test layer_norm_numerics --test layer_norm_autograd --test row_indexing
       - name: nonlinear autograd on strict WGPU paths
         env:
           SPIRALTORCH_STRICT_GPU: "1"
@@ -218,6 +218,7 @@ jobs:
           node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
           node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
+          node bindings/st-wasm/tests/row_indexing.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
 
   python-docs-smoke:
@@ -434,7 +435,8 @@ jobs:
           python -I -c 'import torch; print(torch.__version__)'
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_stub_bridge_isolation.py bindings/st-py/tests/test_tensor_dlpack.py bindings/st-py/tests/test_tensor_stub_methods.py bindings/st-py/tests/test_native_binding_ownership.py bindings/st-py/tests/test_native_dlpack_versioned.py
           python -I tools/smoke_dlpack_interop.py
-          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py bindings/st-py/tests/test_autograd_sgd.py bindings/st-py/tests/test_layer_norm.py bindings/st-py/tests/test_layer_norm_autograd.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py bindings/st-py/tests/test_autograd_sgd.py bindings/st-py/tests/test_layer_norm.py bindings/st-py/tests/test_layer_norm_autograd.py bindings/st-py/tests/test_row_indexing.py
+          python -I examples/autograd_tied_embedding.py
           python -I tools/smoke_autograd.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_fft_numerics.py
           python -I tools/smoke_fft.py

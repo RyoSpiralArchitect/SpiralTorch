@@ -35,6 +35,10 @@ use wgpu::{
 
 use super::lock_recover;
 
+#[path = "wgpu_indexing.rs"]
+mod indexing;
+pub use indexing::{gather_rows, scatter_add_rows};
+
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
 const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
@@ -381,6 +385,8 @@ enum TensorUtilKernel {
     Transpose,
     EmbeddingGather,
     EmbeddingScatterAdd,
+    GatherRows,
+    ScatterAddRows,
     HypergradAccumulateWave,
     Relu,
     ReluBackward,
@@ -410,7 +416,7 @@ enum TensorUtilKernel {
 
 impl TensorUtilKernel {
     #[cfg(test)]
-    const ALL: [Self; 47] = [
+    const ALL: [Self; 49] = [
         Self::Scale,
         Self::Add,
         Self::Hadamard,
@@ -433,6 +439,8 @@ impl TensorUtilKernel {
         Self::Transpose,
         Self::EmbeddingGather,
         Self::EmbeddingScatterAdd,
+        Self::GatherRows,
+        Self::ScatterAddRows,
         Self::HypergradAccumulateWave,
         Self::Relu,
         Self::ReluBackward,
@@ -484,6 +492,8 @@ impl TensorUtilKernel {
             Self::Transpose => "transpose",
             Self::EmbeddingGather => "embedding_gather",
             Self::EmbeddingScatterAdd => "embedding_scatter_add",
+            Self::GatherRows => "gather_rows",
+            Self::ScatterAddRows => "scatter_add_rows",
             Self::HypergradAccumulateWave => "hypergrad_accumulate_wave",
             Self::Relu => "relu",
             Self::ReluBackward => "relu_backward",
@@ -517,6 +527,7 @@ struct TensorUtilPipelineCache {
     device: Arc<Device>,
     layout: Arc<PipelineLayout>,
     shader: OnceLock<ShaderCacheEntry>,
+    indexing_shader: OnceLock<ShaderCacheEntry>,
     pipelines: Mutex<HashMap<TensorUtilKernel, Arc<OnceLock<PipelineCacheEntry>>>>,
 }
 
@@ -527,6 +538,7 @@ impl TensorUtilPipelineCache {
             device,
             layout,
             shader: OnceLock::new(),
+            indexing_shader: OnceLock::new(),
             pipelines: Mutex::new(HashMap::new()),
         }
     }
@@ -540,11 +552,22 @@ impl TensorUtilPipelineCache {
                 .clone()
         };
 
-        let shader = match self.shader.get_or_init(|| {
+        let (cache, source) = if matches!(
+            kernel,
+            TensorUtilKernel::GatherRows | TensorUtilKernel::ScatterAddRows
+        ) {
+            (
+                &self.indexing_shader,
+                include_str!("../wgpu_shaders/row_indexing.wgsl"),
+            )
+        } else {
+            (&self.shader, TENSOR_UTILS_WGSL)
+        };
+        let shader = match cache.get_or_init(|| {
             create_wgsl_module(
                 self.device.as_ref(),
                 "st.tensor.wgpu_dense.tensor_util",
-                TENSOR_UTILS_WGSL,
+                source,
             )
             .map(Arc::new)
             .map_err(|error| error.to_string())
@@ -3372,9 +3395,16 @@ mod tests {
     fn tensor_utils_shader_wgsl_is_valid() {
         let module = parse_str(TENSOR_UTILS_WGSL)
             .unwrap_or_else(|error| panic!("tensor utils failed: {error}"));
+        let indexing_module = parse_str(include_str!("../wgpu_shaders/row_indexing.wgsl"))
+            .expect("row indexing shader must parse");
+        assert_parses(
+            "row indexing",
+            include_str!("../wgpu_shaders/row_indexing.wgsl"),
+        );
         let actual = module
             .entry_points
             .iter()
+            .chain(indexing_module.entry_points.iter())
             .map(|entry| entry.name.as_str())
             .collect::<HashSet<_>>();
         let expected = TensorUtilKernel::ALL

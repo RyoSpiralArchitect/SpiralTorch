@@ -274,6 +274,30 @@ parameter-only averaging policy.
 The repository's `examples/autograd_layer_norm.py` runs a 400-step native SGD
 fixture. This checks learning mechanics, not LLM/FT quality.
 
+## Integer Embeddings (Source Builds)
+
+```python
+import spiraltorch as st
+
+table = st.AutogradTensor.variable(st.Tensor(3, 2, [1, 2, 3, 4, 5, 6]))
+table.gather_rows([2, 0, 2]).sum().backward()
+assert table.grad().tolist() == [[1, 1], [0, 0], [2, 2]]
+```
+
+`gather_rows` captures exact nonnegative integer IDs. Repeated IDs sum gradients;
+there is no implicit batch average. `scatter_add_rows(ids, output_rows)` is the
+transpose operation and also supports autograd. Invalid IDs, floats and booleans
+are rejected rather than repaired. Graph semantics and both VJPs live in Rust.
+Plain `Tensor` methods additionally accept `backend="cpu"`, `"auto"` (CPU), or
+`"wgpu"` (strict). WGPU carries integer u32 IDs and groups scatter contributions
+without float atomics; CPU sums in f64, WGPU in f32. Graph VJPs remain CPU.
+Legacy `nn.Embedding` retains its float-token repair and batch-average policy
+but delegates its numerical operations to these kernels.
+
+Run `python examples/autograd_tied_embedding.py` for a 400-step tied-weight
+token-transition fixture. This verifies mechanics, not language-model quality.
+These APIs are not in the published 0.4.27 wheel yet.
+
 ## What's included
 
 - `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free

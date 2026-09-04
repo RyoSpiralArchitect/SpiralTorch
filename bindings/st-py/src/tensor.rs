@@ -27,6 +27,32 @@ use st_tensor::{
 use std::sync::Arc;
 use tracing::warn;
 
+pub(crate) fn parse_row_indices(value: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
+    value
+        .try_iter()?
+        .map(|item| {
+            let item = item?;
+            if item.is_instance_of::<pyo3::types::PyBool>() {
+                return Err(PyTypeError::new_err(
+                    "row indices must be integers, not bool",
+                ));
+            }
+            item.extract::<usize>()
+        })
+        .collect()
+}
+
+fn parse_row_index_backend(value: &str) -> PyResult<st_tensor::TensorUtilBackend> {
+    match value {
+        "cpu" => Ok(st_tensor::TensorUtilBackend::Cpu),
+        "auto" => Ok(st_tensor::TensorUtilBackend::Auto),
+        "wgpu" => Ok(st_tensor::TensorUtilBackend::GpuWgpu),
+        _ => Err(PyValueError::new_err(
+            "row indexing backend must be cpu, auto, or wgpu",
+        )),
+    }
+}
+
 pub(crate) fn parse_cross_entropy_config(
     reduction: &str,
     ignore_index: i64,
@@ -1397,6 +1423,39 @@ impl PyTensor {
             })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
+    }
+
+    /// Exact row IDs; explicit WGPU requests never silently fall back.
+    #[pyo3(signature = (indices, *, backend="cpu"))]
+    pub fn gather_rows(
+        &self,
+        indices: &Bound<'_, PyAny>,
+        backend: &str,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        let indices = parse_row_indices(indices)?;
+        let backend = parse_row_index_backend(backend)?;
+        py.detach(|| self.inner.gather_rows_with_backend(&indices, backend))
+            .map(Self::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (indices, output_rows, *, backend="cpu"))]
+    pub fn scatter_add_rows(
+        &self,
+        indices: &Bound<'_, PyAny>,
+        output_rows: usize,
+        backend: &str,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        let indices = parse_row_indices(indices)?;
+        let backend = parse_row_index_backend(backend)?;
+        py.detach(|| {
+            self.inner
+                .scatter_add_rows_with_backend(&indices, output_rows, backend)
+        })
+        .map(Self::from_tensor)
+        .map_err(tensor_err_to_py)
     }
 
     /// CPU normalized rows and inverse standard deviations, using centered f64 moments.

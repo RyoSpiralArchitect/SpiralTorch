@@ -6,9 +6,9 @@
 use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
-#[cfg(feature = "wgpu")]
+#[cfg(all(test, feature = "wgpu"))]
 use st_tensor::wgpu_dense;
-use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, Layout, TensorUtilBackend};
 
 fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
     if !value.is_finite() {
@@ -105,7 +105,7 @@ fn collect_token_indices(
     batch: usize,
     steps: usize,
     vocab_size: usize,
-) -> (Vec<f32>, TokenIndexStats) {
+) -> (Vec<usize>, TokenIndexStats) {
     let mut indices = Vec::with_capacity(batch.saturating_mul(steps));
     let mut stats = TokenIndexStats::default();
     let mut seen = vec![false; vocab_size];
@@ -115,7 +115,7 @@ fn collect_token_indices(
             let idx =
                 token_to_index_with_stats(input_data[row_offset + t], vocab_size, Some(&mut stats));
             observe_token_index(&mut stats, &mut seen, idx);
-            indices.push(idx as f32);
+            indices.push(idx);
         }
     }
     (indices, stats)
@@ -172,6 +172,10 @@ fn emit_embedding_meta(
         };
         serde_json::json!({
             "backend": backend,
+            "numeric_semantic_owner": "st-tensor",
+            "token_policy_owner": "st-nn",
+            "tensor_primitive": if backward { "scatter_add_rows" } else { "gather_rows" },
+            "index_dtype": "usize",
             "requested_backend": requested_backend,
             "kernel": kernel,
             "kind": if backward { "embedding_backward_scatter" } else { "embedding_forward_lookup" },
@@ -257,9 +261,21 @@ impl Embedding {
 impl Module for Embedding {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (batch, steps) = input.shape();
-        let output_cols = steps * self.embed_dim;
-        if steps == 0 {
-            let output = Tensor::zeros(batch, 0)?;
+        let output_cols =
+            steps
+                .checked_mul(self.embed_dim)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: batch,
+                    cols: steps,
+                })?;
+        batch
+            .checked_mul(output_cols)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: batch,
+                cols: output_cols,
+            })?;
+        if batch == 0 || steps == 0 {
+            let output = Tensor::zeros(batch, output_cols)?;
             emit_embedding_meta(
                 "embedding_forward",
                 input.shape(),
@@ -277,9 +293,10 @@ impl Module for Embedding {
             );
             return Ok(output);
         }
-        let weights = self.weight.value().data();
-        validate_finite_slice("embedding_weight", weights)?;
-        let input_data = input.data();
+        let weights = self.weight.value();
+        validate_finite_tensor("embedding_weight", weights)?;
+        let row_input = input.to_layout(Layout::RowMajor)?;
+        let input_data = row_input.data();
         let (indices, stats) = collect_token_indices(input_data, batch, steps, self.vocab_size);
         let route_backend =
             current_tensor_util_backend_for_values(batch.saturating_mul(output_cols));
@@ -289,12 +306,10 @@ impl Module for Embedding {
 
         #[cfg(feature = "wgpu")]
         {
-            if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
-                match wgpu_dense::embedding_gather(&indices, weights, indices.len(), self.embed_dim)
-                {
+            if matches!(route_backend, TensorUtilBackend::GpuWgpu) {
+                match weights.gather_rows_with_backend(&indices, TensorUtilBackend::GpuWgpu) {
                     Ok(out) => {
-                        validate_finite_slice("embedding_output", &out)?;
-                        let output = Tensor::from_vec(batch, output_cols, out)?;
+                        let output = out.reshape(batch, output_cols)?;
                         emit_embedding_meta(
                             "embedding_forward",
                             input.shape(),
@@ -313,22 +328,19 @@ impl Module for Embedding {
                         return Ok(output);
                     }
                     Err(message) if strict_gpu_path() => {
-                        return Err(embedding_wgpu_error("embedding_forward", message));
+                        return Err(embedding_wgpu_error(
+                            "embedding_forward",
+                            message.to_string(),
+                        ));
                     }
                     Err(message) => {
-                        wgpu_failure = Some(message);
+                        wgpu_failure = Some(message.to_string());
                     }
                 }
             }
         }
 
-        let mut out = Vec::with_capacity(batch * output_cols);
-        for &idx in &indices {
-            let start = idx as usize * self.embed_dim;
-            out.extend_from_slice(&weights[start..start + self.embed_dim]);
-        }
-        validate_finite_slice("embedding_output", &out)?;
-        let output = Tensor::from_vec(batch, output_cols, out)?;
+        let output = weights.gather_rows(&indices)?.reshape(batch, output_cols)?;
         emit_embedding_meta(
             "embedding_forward",
             input.shape(),
@@ -355,7 +367,13 @@ impl Module for Embedding {
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (batch, steps) = input.shape();
-        let output_cols = steps * self.embed_dim;
+        let output_cols =
+            steps
+                .checked_mul(self.embed_dim)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: batch,
+                    cols: steps,
+                })?;
         if grad_output.shape() != (batch, output_cols) {
             return Err(TensorError::ShapeMismatch {
                 left: grad_output.shape(),
@@ -382,33 +400,35 @@ impl Module for Embedding {
             return Ok(grad_input);
         }
 
-        let input_data = input.data();
-        let grad_data = grad_output.data();
+        let row_input = input.to_layout(Layout::RowMajor)?;
+        let input_data = row_input.data();
         validate_finite_tensor("embedding_grad_output", grad_output)?;
         let (indices, stats) = collect_token_indices(input_data, batch, steps, self.vocab_size);
         let scatter_backend =
             current_tensor_util_backend_for_values(self.vocab_size.saturating_mul(self.embed_dim));
         let requested_backend = tensor_util_backend_label(scatter_backend);
+        let gradient_scale = 1.0 / batch as f32;
+        let row_grad = grad_output.reshape(indices.len(), self.embed_dim)?;
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
         #[cfg(feature = "wgpu")]
-        let maybe_grad_weight = if matches!(scatter_backend, TensorUtilBackend::GpuWgpu)
-            && wgpu_dense::is_available()
-        {
-            match wgpu_dense::embedding_scatter_add(
+        let maybe_grad_weight = if matches!(scatter_backend, TensorUtilBackend::GpuWgpu) {
+            match row_grad.scatter_add_rows_scaled_with_backend(
                 &indices,
-                grad_data,
-                indices.len(),
                 self.vocab_size,
-                self.embed_dim,
+                gradient_scale,
+                TensorUtilBackend::GpuWgpu,
             ) {
                 Ok(grad_weight) => Some(grad_weight),
                 Err(message) if strict_gpu_path() => {
-                    return Err(embedding_wgpu_error("embedding_backward", message));
+                    return Err(embedding_wgpu_error(
+                        "embedding_backward",
+                        message.to_string(),
+                    ));
                 }
                 Err(message) => {
-                    wgpu_failure = Some(message);
+                    wgpu_failure = Some(message.to_string());
                     None
                 }
             }
@@ -417,38 +437,21 @@ impl Module for Embedding {
         };
 
         #[cfg(not(feature = "wgpu"))]
-        let maybe_grad_weight: Option<Vec<f32>> = None;
+        let maybe_grad_weight: Option<Tensor> = None;
 
         let (grad_weight, scatter_backend_label, scatter_kernel) =
             if let Some(grad_weight) = maybe_grad_weight {
-                validate_finite_slice("embedding_grad_weight", &grad_weight)?;
                 (grad_weight, "wgpu_dense", "embedding.wgpu_scatter_add")
             } else {
-                let mut grad_weight = vec![0.0f32; self.vocab_size * self.embed_dim];
-                for b in 0..batch {
-                    let grad_row = b * output_cols;
-                    for t in 0..steps {
-                        let idx = indices[b * steps + t] as usize;
-                        let gw_base = idx * self.embed_dim;
-                        let go_base = grad_row + t * self.embed_dim;
-                        for c in 0..self.embed_dim {
-                            let contribution = grad_data[go_base + c];
-                            validate_finite_value("embedding_grad_contribution", contribution)?;
-                            grad_weight[gw_base + c] += contribution;
-                            validate_finite_value(
-                                "embedding_grad_weight_sum",
-                                grad_weight[gw_base + c],
-                            )?;
-                        }
-                    }
-                }
+                let grad_weight = row_grad.scatter_add_rows_scaled_with_backend(
+                    &indices,
+                    self.vocab_size,
+                    gradient_scale,
+                    TensorUtilBackend::Cpu,
+                )?;
                 (grad_weight, "cpu", "embedding.cpu_scatter_add")
             };
-        validate_finite_slice("embedding_grad_weight", &grad_weight)?;
-        let grad_w = Tensor::from_vec(self.vocab_size, self.embed_dim, grad_weight)?;
-        let gradient_scale = 1.0 / batch as f32;
-        let gradient_backend = current_tensor_util_backend_for_values(grad_w.data().len());
-        let grad_w = grad_w.scale_with_backend(gradient_scale, gradient_backend)?;
+        let grad_w = grad_weight;
         validate_finite_tensor("embedding_grad_weight", &grad_w)?;
         let grad_input = Tensor::zeros(batch, steps)?;
         self.weight.accumulate_euclidean(&grad_w)?;
@@ -463,7 +466,14 @@ impl Module for Embedding {
             requested_backend,
             scatter_backend_label,
             scatter_kernel,
-            Some(gradient_backend.to_string()),
+            Some(
+                if scatter_backend_label == "wgpu_dense" {
+                    "wgpu"
+                } else {
+                    "cpu"
+                }
+                .to_string(),
+            ),
             Some(gradient_scale),
             #[cfg(feature = "wgpu")]
             wgpu_failure.as_ref().map(|_| "wgpu"),
@@ -601,11 +611,37 @@ mod tests {
         assert!(matches!(
             err,
             TensorError::NonFiniteValue {
-                label: "embedding_grad_weight_sum",
+                label: "scatter_add_rows_output",
                 value,
             } if value.is_infinite()
         ));
         assert!(layer.weight().gradient().is_none());
+    }
+
+    #[test]
+    fn embedding_preserves_logical_layout_and_scales_before_final_conversion() {
+        let mut layer = Embedding::new("emb", 3, 2).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0., 2., 1., 0.]).unwrap();
+        let expected = layer.forward(&input).unwrap();
+        let column_input = input.to_layout(Layout::ColMajor).unwrap();
+        assert_eq!(
+            layer.forward(&column_input).unwrap().data(),
+            expected.data()
+        );
+        let grad = Tensor::from_vec(2, 4, vec![1., 2., 3., 4., 5., 6., 7., 8.]).unwrap();
+        layer
+            .backward(&column_input, &grad.to_layout(Layout::ColMajor).unwrap())
+            .unwrap();
+        assert_eq!(
+            layer.weight().gradient().unwrap().data(),
+            &[4., 5., 2.5, 3., 1.5, 2.]
+        );
+
+        let mut layer = Embedding::new("large", 1, 1).unwrap();
+        let input = Tensor::from_vec(2, 1, vec![0.; 2]).unwrap();
+        let grad = Tensor::from_vec(2, 1, vec![f32::MAX; 2]).unwrap();
+        layer.backward(&input, &grad).unwrap();
+        assert_eq!(layer.weight().gradient().unwrap().data(), &[f32::MAX]);
     }
 
     #[test]
@@ -687,6 +723,8 @@ mod tests {
             .expect("embedding forward metadata event");
         assert_eq!(forward.1["backend"], "cpu");
         assert_eq!(forward.1["tokens"], 5);
+        assert_eq!(forward.1["numeric_semantic_owner"], "st-tensor");
+        assert_eq!(forward.1["tensor_primitive"], "gather_rows");
         assert_eq!(forward.1["unique_token_indices"], 3);
         assert_eq!(forward.1["repeated_token_indices"], 2);
         assert_eq!(forward.1["non_finite_tokens"], 1);
@@ -711,7 +749,7 @@ mod tests {
         assert_eq!(backward.1["rounded_tokens"], 1);
         assert_eq!(backward.1["clamped_low_tokens"], 1);
         assert_eq!(backward.1["clamped_high_tokens"], 1);
-        assert_eq!(backward.1["gradient_reduction_backend"], "auto");
+        assert_eq!(backward.1["gradient_reduction_backend"], "cpu");
         assert_eq!(backward.1["gradient_scale"], 1.0);
         assert_eq!(backward.1["grad_weight_values"], 8);
     }

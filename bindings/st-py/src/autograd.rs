@@ -1,5 +1,5 @@
 use crate::json::json_to_py;
-use crate::tensor::{parse_cross_entropy_config, tensor_err_to_py, PyTensor};
+use crate::tensor::{parse_cross_entropy_config, parse_row_indices, tensor_err_to_py, PyTensor};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use st_tensor::{
@@ -108,6 +108,25 @@ impl PyAutogradTensor {
     fn add_row(&self, bias: &Self) -> PyResult<Self> {
         self.inner
             .add_row(&bias.inner)
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn gather_rows(&self, indices: &Bound<'_, PyAny>, py: Python<'_>) -> PyResult<Self> {
+        let indices = parse_row_indices(indices)?;
+        py.detach(|| self.inner.gather_rows(&indices))
+            .map(Self::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn scatter_add_rows(
+        &self,
+        indices: &Bound<'_, PyAny>,
+        output_rows: usize,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        let indices = parse_row_indices(indices)?;
+        py.detach(|| self.inner.scatter_add_rows(&indices, output_rows))
             .map(Self::from_inner)
             .map_err(tensor_err_to_py)
     }
