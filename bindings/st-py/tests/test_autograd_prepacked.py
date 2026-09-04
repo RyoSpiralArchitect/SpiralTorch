@@ -1,5 +1,6 @@
 """Actual native packed graph handles, not Python fallback implementations."""
 import gc
+from importlib import import_module
 import unittest
 
 import spiraltorch as st
@@ -10,6 +11,14 @@ def node(rows, cols, values, trainable=True):
 
 
 class AutogradPrepackedTests(unittest.TestCase):
+    def test_public_export_is_the_native_class(self):
+        native = import_module("spiraltorch.spiraltorch")
+        self.assertIn("AutogradPackedRhs", native.__all__)
+        self.assertIn("AutogradPackedRhs", st.__all__)
+        namespace = {}
+        exec("from spiraltorch import *", namespace)
+        self.assertIs(namespace["AutogradPackedRhs"], native.AutogradPackedRhs)
+
     def test_nonleaf_source_lifetime_and_reused_gradients(self):
         x = node(2, 3, [1, 2, -1, 0.5, -2, 3])
         weight = node(3, 2, [2, -1, 0, 3, 1.5, 2])

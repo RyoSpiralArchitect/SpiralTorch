@@ -15,7 +15,7 @@ existing WGPU/Faer priority. Python/WASM implement no duplicate math or routing.
 
 The four raw reports retain both the negative candidate and the routing fix.
 At 128x128, prepacked WASM forward calls decreased from about 0.442 to 0.358 ms
-(about 19% less time). Ordinary matmul remains about 0.367 ms. This is evidence
+(about 19% less time). Ordinary matmul remains about 0.366 ms. This is evidence
 for fixing the missed route, not a general prepacking or training speedup.
 PyTorch CPU remains substantially faster, and the 32x32 measurements are highly
 JIT/order-sensitive. Reversed operation order also shifts the PyTorch control;
@@ -55,8 +55,12 @@ Private Python wheels remain 0.4.27 and were not published.
 
 - Rust CPU: 429 library tests plus one explicit prepacked CPU receipt test.
 - Rust strict CPU Clippy and repository rustfmt checks.
+- Actual private Python wheel: 54 tests (5 packed autograd, 6 tensor output,
+  6 native ownership, 37 smoke) pass. The public-export regression failed on
+  the initial wheel and passes after adding the class to native/facade exports.
 - Real Node WASM: nine scripts, including existing classification/indexing/
   layer-norm learning loops and the new 40-step frozen projection loop.
+- Generated WebGPU TypeScript contract validation passes.
 - The native WGPU integration test requires a real adapter and strict GPU mode.
   It checks numerical outputs and completed receipts for the prepacked forward
   and both backward matmuls, rather than treating a successful build as GPU use.
