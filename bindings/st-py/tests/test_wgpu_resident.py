@@ -22,11 +22,14 @@ class WgpuResidentSurface(unittest.TestCase):
         self.assertEqual(first.workgroup_size, (8, 8, 1))
         self.assertEqual(first.outputs_per_thread, (1, 1))
         self.assertEqual(first.kernel, "scalar")
+        self.assertEqual(first.accumulation, "sequential")
         native = st.WgpuMatmul(2, 3, 2, tile_mnk=(16, 16, 16))
         self.assertEqual(native.kernel, "scalar")
         self.assertEqual(native.workgroup_size, (16, 16, 1))
         with self.assertRaises(ValueError):
             st.WgpuMatmul(2, 3, 2, kernel="unknown")
+        with self.assertRaises(ValueError):
+            st.WgpuMatmul(2, 3, 2, accumulation="unknown")
         with self.assertRaises(ValueError):
             st.WgpuMatmul(2, 3, 2, tile_mnk=(3, 5, 7), kernel="register_2x2")
         for tile in ((0, 8, 16), (32, 32, 16), (8, 8, 65)):
@@ -50,7 +53,8 @@ class WgpuResidentSurface(unittest.TestCase):
         for invalid in (0, 1025):
             with self.assertRaises(ValueError):
                 first.dispatch(invalid)
-        next_layer = st.WgpuMatmul(2, 2, 1, tile_mnk=(16, 16, 32), kernel="register_2x2")
+        next_layer = st.WgpuMatmul(2, 2, 1, tile_mnk=(16, 16, 32), kernel="register_2x2", accumulation="tiled")
+        self.assertEqual(next_layer.accumulation, "tiled")
         self.assertEqual(next_layer.tile_mnk, (16, 16, 32))
         self.assertEqual(next_layer.workgroup_size, (8, 8, 1))
         self.assertEqual(next_layer.outputs_per_thread, (2, 2))
@@ -65,6 +69,17 @@ class WgpuResidentSurface(unittest.TestCase):
             next_layer.set_lhs_from(first)
         first.dispatch()
         self.assertEqual(first.readback().tolist(), [[0., 0.], [0., 0.]])
+
+    @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
+    def test_compensated_sum_recovers_cancellation(self):
+        for kernel in ("scalar", "register_2x2"):
+            workspace = st.WgpuMatmul(1, 3075, 1, tile_mnk=(16, 16, 16),
+                                     kernel=kernel, accumulation="compensated")
+            self.assertEqual(workspace.accumulation, "compensated")
+            workspace.upload(st.Tensor(1, 3075, [1e8, 1., -1e8] * 1025),
+                             st.Tensor(3075, 1, [1.] * 3075))
+            workspace.dispatch()
+            self.assertEqual(workspace.readback().tolist(), [[1025.]])
 
 
 if __name__ == "__main__":

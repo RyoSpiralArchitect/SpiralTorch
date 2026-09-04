@@ -11,6 +11,8 @@ assert.match(declaration, /createWithTile\(rows: number, inner: number, cols: nu
 assert.match(declaration, /tileMNK\(\): Uint32Array/);
 assert.match(declaration, /createWithKernel\(rows: number, inner: number, cols: number, tile_m: number, tile_n: number, tile_k: number, kernel: string\): Promise<WgpuMatmul>/);
 assert.match(declaration, /readonly kernel: string/);
+assert.match(declaration, /readonly accumulation: string/);
+assert.match(declaration, /createWithOptions\(rows: number, inner: number, cols: number, tile_m: number, tile_n: number, tile_k: number, kernel: string, accumulation: string\): Promise<WgpuMatmul>/);
 assert.match(declaration, /workgroupSize\(\): Uint32Array/);
 assert.match(declaration, /outputsPerThread\(\): Uint32Array/);
 assert.match(declaration, /upload\(lhs: Float32Array, rhs: Float32Array\): void/);

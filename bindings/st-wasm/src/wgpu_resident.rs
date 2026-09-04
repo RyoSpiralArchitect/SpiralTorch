@@ -1,6 +1,6 @@
 use js_sys::{Float32Array, JsString, Number, Promise};
 use st_backend_wgpu::{
-    resident_matmul::{MatmulKernel, MatmulShape, MatmulTile, ResidentMatmul},
+    resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulShape, MatmulTile, ResidentMatmul},
     runtime,
 };
 use wasm_bindgen::prelude::*;
@@ -35,6 +35,7 @@ async fn create_workspace(
     shape: MatmulShape,
     tile: MatmulTile,
     kernel: Option<MatmulKernel>,
+    accumulation: MatmulAccumulation,
 ) -> Result<WasmWgpuMatmul, JsValue> {
     let runtime = match runtime::default_runtime() {
         Some(runtime) => runtime,
@@ -48,10 +49,13 @@ async fn create_workspace(
         }
     };
     Ok(WasmWgpuMatmul {
-        inner: match kernel {
-            Some(kernel) => ResidentMatmul::with_kernel(runtime, shape, tile, kernel),
-            None => ResidentMatmul::with_tile(runtime, shape, tile),
-        }
+        inner: ResidentMatmul::with_options(
+            runtime,
+            shape,
+            tile,
+            kernel.unwrap_or(MatmulKernel::Scalar),
+            accumulation,
+        )
         .map_err(error)?,
     })
 }
@@ -70,7 +74,13 @@ impl WasmWgpuMatmul {
             dimension(cols.as_ref())?,
         )
         .map_err(error)?;
-        create_workspace(shape, MatmulTile::default(), None).await
+        create_workspace(
+            shape,
+            MatmulTile::default(),
+            None,
+            MatmulAccumulation::Sequential,
+        )
+        .await
     }
 
     #[wasm_bindgen(js_name = createWithTile)]
@@ -94,7 +104,7 @@ impl WasmWgpuMatmul {
             dimension(tile_k.as_ref())? as u32,
         )
         .map_err(error)?;
-        create_workspace(shape, tile, None).await
+        create_workspace(shape, tile, None, MatmulAccumulation::Sequential).await
     }
 
     #[wasm_bindgen(js_name = createWithKernel)]
@@ -124,7 +134,47 @@ impl WasmWgpuMatmul {
             .ok_or_else(|| error("kernel must be a string"))?
             .parse::<MatmulKernel>()
             .map_err(error)?;
-        create_workspace(shape, tile, Some(kernel)).await
+        create_workspace(shape, tile, Some(kernel), MatmulAccumulation::Sequential).await
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "JS ABI exposes original numeric axes and independent kernel/accumulation choices"
+    )]
+    #[wasm_bindgen(js_name = createWithOptions)]
+    pub async fn create_with_options(
+        rows: Number,
+        inner: Number,
+        cols: Number,
+        tile_m: Number,
+        tile_n: Number,
+        tile_k: Number,
+        kernel: JsString,
+        accumulation: JsString,
+    ) -> Result<WasmWgpuMatmul, JsValue> {
+        let shape = MatmulShape::new(
+            dimension(rows.as_ref())?,
+            dimension(inner.as_ref())?,
+            dimension(cols.as_ref())?,
+        )
+        .map_err(error)?;
+        let tile = MatmulTile::new(
+            dimension(tile_m.as_ref())? as u32,
+            dimension(tile_n.as_ref())? as u32,
+            dimension(tile_k.as_ref())? as u32,
+        )
+        .map_err(error)?;
+        let kernel = kernel
+            .as_string()
+            .ok_or_else(|| error("kernel must be a string"))?
+            .parse::<MatmulKernel>()
+            .map_err(error)?;
+        let accumulation = accumulation
+            .as_string()
+            .ok_or_else(|| error("accumulation must be a string"))?
+            .parse::<MatmulAccumulation>()
+            .map_err(error)?;
+        create_workspace(shape, tile, Some(kernel), accumulation).await
     }
 
     #[wasm_bindgen(js_name = tileMNK)]
@@ -145,6 +195,11 @@ impl WasmWgpuMatmul {
     #[wasm_bindgen(getter)]
     pub fn kernel(&self) -> String {
         self.inner.kernel().as_str().to_owned()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn accumulation(&self) -> String {
+        self.inner.accumulation().as_str().to_owned()
     }
 
     #[wasm_bindgen(js_name = shape)]

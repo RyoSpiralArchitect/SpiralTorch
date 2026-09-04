@@ -1,0 +1,109 @@
+{
+  "schema": "spiraltorch.browser_resident_matmul.v4",
+  "boundary": "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
+  "dtype": "float32",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+  "cases": [],
+  "assertions": [
+    "reject invalid dimension -1",
+    "reject invalid dimension 0",
+    "reject invalid dimension 1.5",
+    "reject invalid dimension NaN",
+    "reject invalid dimension Infinity",
+    "reject invalid dimension 4294967296",
+    "reject invalid dimension 2",
+    "reject invalid dimension true",
+    "reject invalid tile 0,8,16",
+    "reject invalid tile -1,8,16",
+    "reject invalid tile 8,1.5,16",
+    "reject invalid tile 32,32,16",
+    "reject invalid tile 8,8,65",
+    "reject invalid tile 8,8,16",
+    "reject invalid kernel unknown",
+    "reject invalid kernel auto",
+    "reject invalid kernel true",
+    "reject invalid kernel 0",
+    "reject invalid kernel null",
+    "reject invalid kernel [object Object]",
+    "reject invalid kernel scalar",
+    "reject odd blocked tile",
+    "reject invalid accumulation unknown",
+    "reject invalid accumulation auto",
+    "reject invalid accumulation true",
+    "reject invalid accumulation 0",
+    "reject invalid accumulation null",
+    "reject invalid accumulation [object Object]",
+    "reject invalid accumulation compensated",
+    "default tile remains stable",
+    "small default keeps scalar geometry",
+    "default accumulation remains sequential",
+    "explicit blocked workspace reports actual geometry",
+    "GPU chain permits distinct accumulation policies",
+    "actual accumulation matches request"
+  ],
+  "stage": "create Rust workspace",
+  "tiles_mnk": [
+    [
+      16,
+      16,
+      16
+    ]
+  ],
+  "kernels_requested": [
+    "scalar",
+    "register_2x2"
+  ],
+  "accumulations_requested": [
+    "sequential",
+    "tiled",
+    "compensated"
+  ],
+  "shapes_m_k_n": [
+    [
+      7,
+      3073,
+      65
+    ],
+    [
+      64,
+      64,
+      64
+    ],
+    [
+      128,
+      3072,
+      768
+    ]
+  ],
+  "browser_adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "is_fallback_adapter": false
+  },
+  "adapter_identity_boundary": "Browser adapter probe is separate from the Rust runtime; wgpu 0.20 reports no exact browser adapter identity",
+  "browser_limits": {
+    "maxBufferSize": 4294967292,
+    "maxStorageBufferBindingSize": 4294967292
+  },
+  "status": "error",
+  "error": "Error: compensated cancellation scalar\n    at assert (http://127.0.0.1:55421/?tiles=16%2C16%2C16&kernels=scalar%3Bregister_2x2&accumulations=sequential%3Btiled%3Bcompensated&shapes=7%2C3073%2C65%3B64%2C64%2C64%3B128%2C3072%2C768:18:18)\n    at http://127.0.0.1:55421/?tiles=16%2C16%2C16&kernels=scalar%3Bregister_2x2&accumulations=sequential%3Btiled%3Bcompensated&shapes=7%2C3073%2C65%3B64%2C64%2C64%3B128%2C3072%2C768:119:5",
+  "wasm_sha256": "0acc7ea429531958a2c8e76271f6596176653240f7f017ca8fe4e4fbbe2a9560",
+  "page_sha256": "6ad8685bcb74140cd5195ef76075421e66f22a219d5d225cea928de84db70859",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "16,16,16",
+  "kernels_request": "scalar;register_2x2",
+  "accumulations_request": "sequential;tiled;compensated",
+  "shapes_request": "7,3073,65;64,64,64;128,3072,768",
+  "asset_sha256": {
+    "/": "6ad8685bcb74140cd5195ef76075421e66f22a219d5d225cea928de84db70859",
+    "/module/spiraltorch_wasm.js": "cd75429c08bf155c8a542d70299d666b2cf778a8c0d0912f64386b77d9def4a4",
+    "/module/spiraltorch_wasm_bg.wasm": "0acc7ea429531958a2c8e76271f6596176653240f7f017ca8fe4e4fbbe2a9560",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "152.0.7977.77",
+  "page_errors": []
+}

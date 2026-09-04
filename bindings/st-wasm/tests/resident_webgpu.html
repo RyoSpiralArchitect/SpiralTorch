@@ -6,7 +6,7 @@
 <script type="module">
 const output = document.querySelector("#result");
 const report = {
-  schema: "spiraltorch.browser_resident_matmul.v3",
+  schema: "spiraltorch.browser_resident_matmul.v4",
   boundary: "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
   dtype: "float32", user_agent: navigator.userAgent, cases: [], assertions: [],
 };
@@ -69,6 +69,14 @@ try {
   const kernels = (new URL(location.href).searchParams.get("kernels") ?? "auto").split(";");
   if(kernels.some(k=>!["auto","scalar","register_2x2"].includes(k)) || new Set(kernels).size!==kernels.length) throw Error("invalid kernel list");
   report.kernels_requested=kernels;
+  const accumulations=(new URL(location.href).searchParams.get("accumulations") ?? "sequential").split(";");
+  if(accumulations.some(a=>!["sequential","tiled","compensated"].includes(a)) || new Set(accumulations).size!==accumulations.length) throw Error("invalid accumulation list");
+  if(kernels.includes("auto") && accumulations.some(a=>a!=="sequential")) throw Error("non-default accumulation benchmark requires an explicit kernel");
+  report.accumulations_requested=accumulations;
+  const shapes=(new URL(location.href).searchParams.get("shapes") ?? "7,63,65;64,64,64;256,256,256;512,512,512;1024,64,32")
+    .split(";").map(shape=>shape.split(",").map(Number));
+  if(shapes.some(shape=>shape.length!==3 || shape.some(x=>!Number.isSafeInteger(x)||x<1)) || new Set(shapes.map(shape=>shape.join(","))).size!==shapes.length) throw Error("invalid shape list");
+  report.shapes_m_k_n=shapes;
   stage("invalid dimensions");
   for(const dim of [-1,0,1.5,NaN,Infinity,4294967296,"2",true]) {
     await rejects(()=>WgpuMatmul.create(dim,2,2), "reject invalid dimension "+String(dim));
@@ -80,6 +88,9 @@ try {
     await rejects(()=>WgpuMatmul.createWithKernel(2,3,2,16,16,16,kernel), "reject invalid kernel "+String(kernel));
   }
   await rejects(()=>WgpuMatmul.createWithKernel(2,3,2,3,5,7,"register_2x2"), "reject odd blocked tile");
+  for(const accumulation of ["unknown","auto",true,0,null,{},new String("compensated")]) {
+    await rejects(()=>WgpuMatmul.createWithOptions(2,3,2,16,16,16,"scalar",accumulation), "reject invalid accumulation "+String(accumulation));
+  }
   const adapter = await navigator.gpu?.requestAdapter();
   if(!adapter) throw new Error("No browser WebGPU adapter; no CPU fallback");
   report.browser_adapter = {
@@ -92,11 +103,22 @@ try {
     maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize};
   stage("create Rust workspace");
   const [probe, concurrent] = await Promise.all([
-    WgpuMatmul.create(2,3,2), WgpuMatmul.createWithKernel(2,2,1,16,16,32,"register_2x2"),
+    WgpuMatmul.create(2,3,2), WgpuMatmul.createWithOptions(2,2,1,16,16,32,"register_2x2","tiled"),
   ]);
   assert(Array.from(probe.tileMNK()).join(",")==="8,8,16", "default tile remains stable");
   assert(probe.kernel === "scalar" && Array.from(probe.workgroupSize()).join(",")==="8,8,1", "small default keeps scalar geometry");
+  assert(probe.accumulation === "sequential", "default accumulation remains sequential");
   assert(concurrent.kernel === "register_2x2" && Array.from(concurrent.outputsPerThread()).join(",")==="2,2", "explicit blocked workspace reports actual geometry");
+  assert(concurrent.accumulation === "tiled", "GPU chain permits distinct accumulation policies");
+  for(const kernel of ["scalar", "register_2x2"]) {
+    const stable=await WgpuMatmul.createWithOptions(3,3075,5,16,16,16,kernel,"compensated");
+    assert(stable.accumulation === "compensated", "actual accumulation matches request");
+    const a=new Float32Array(3*3075), b=new Float32Array(3075*5).fill(1);
+    for(let i=0;i<a.length;i++) a[i]=[1e8,1,-1e8][i%3];
+    stable.upload(a,b); stable.dispatch();
+    assert(Array.from(await stable.readback()).every(x=>x===1025), "compensated cancellation "+kernel);
+    stable.free();
+  }
   report.rust_adapter = probe.adapterInfo();
   if(report.rust_adapter instanceof Map) report.rust_adapter = Object.fromEntries(report.rust_adapter);
   await rejects(()=>probe.dispatch(), "missing input rejected");
@@ -135,21 +157,30 @@ try {
   next.free(); probe.free(); frame.remove();
   check(await chained,new Float64Array([9,21]));
   assert(true,"GPU chain and pending readback survive workspace free");
-  for(const [m,k,n] of [[7,63,65],[64,64,64],[256,256,256],[512,512,512],[1024,64,32]]) {
+  for(const [m,k,n] of shapes) {
     for(const seed of [17,29,43]) {
       stage(`matrix ${m}x${k}x${n}, seed ${seed}`);
       const a=fixture(m*k,seed), b=fixture(k*n,seed+1);
       const expected=reference(a,b,m,k,n), variants=[];
-      for(const tile of tiles) for(const kernel of kernels) {
-        const workspace=kernel === "auto"
+      for(const tile of tiles) for(const kernel of kernels) for(const accumulation of accumulations) {
+        const workspace=kernel === "auto" && accumulation === "sequential"
           ? await WgpuMatmul.createWithTile(m,k,n,...tile)
-          : await WgpuMatmul.createWithKernel(m,k,n,...tile,kernel);
+          : await WgpuMatmul.createWithOptions(m,k,n,...tile,kernel,accumulation);
         assert(Array.from(workspace.tileMNK()).join(",")===tile.join(","), "actual tile matches request");
         if(kernel!=="auto") assert(workspace.kernel===kernel,"actual kernel matches request");
+        assert(workspace.accumulation===accumulation,"actual accumulation matches request");
         const geometry={kernel_request:kernel,kernel:workspace.kernel,
+          accumulation:workspace.accumulation,
           workgroup_size:Array.from(workspace.workgroupSize()),outputs_per_thread:Array.from(workspace.outputsPerThread())};
         workspace.upload(a,b); workspace.dispatch();
-        const max_abs_error=check(await workspace.readback(),expected);
+        const actual=await workspace.readback();
+        let max_abs_error;
+        try { max_abs_error=check(actual,expected); }
+        catch(error) {
+          report.cases.push({shape_m_k_n:[m,k,n],tile_mnk:tile,seed,...geometry,status:"correctness_error",error:String(error)});
+          workspace.free();
+          continue;
+        }
         variants.push({workspace,tile,max_abs_error,geometry,samples:[]});
       }
       const run=async(variant)=> {
@@ -171,7 +202,7 @@ try {
       }
     }
   }
-  report.status="passed";
+  report.status=report.cases.every(x=>x.status==="passed") ? "passed" : "correctness_error";
   report.stage="complete";
 } catch(error) {
   report.status="error"; report.error=String(error.stack||error);

@@ -3713,7 +3713,8 @@ mod tests {
     #[test]
     fn component_preflights_reject_invalid_shapes_before_runtime_initialization() {
         assert_eq!(selected_matmul_scalar_type(63, 64), ScalarType::F32);
-        assert_eq!(selected_matmul_scalar_type(64, 64), ScalarType::QuantizedI8);
+        assert!(!quantize_for_shape(false, 64, 64));
+        assert!(quantize_for_shape(true, 64, 64));
         assert!(!supports_matmul(0, 4, 4));
         assert!(!supports_prepacked_matmul(4, 0, 4, false));
         assert!(!supports_layer_norm(4, 0));
