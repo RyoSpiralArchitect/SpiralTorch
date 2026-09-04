@@ -89,6 +89,7 @@ jobs:
           assert target in Path(st.__file__).resolve().parents, st.__file__
           assert st.__version__ == os.environ["EXPECTED_VERSION"]
           assert st._rs is not None
+          assert target in Path(st._rs.__file__).resolve().parents, st._rs.__file__
           layer = st.nn.Linear(2, 2, name="pypi_workflow_smoke")
           state = dict(layer.state_dict())
           assert "pypi_workflow_smoke::weight" in state

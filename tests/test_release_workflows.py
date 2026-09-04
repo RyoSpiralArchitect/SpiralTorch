@@ -132,6 +132,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--no-deps", workflow)
         self.assertIn("target in Path(st.__file__).resolve().parents", workflow)
         self.assertIn("assert st._rs is not None", workflow)
+        self.assertIn("target in Path(st._rs.__file__).resolve().parents", workflow)
         self.assertNotIn("|| true", workflow)
 
     def test_all_wheels_execute_nonlinear_training_before_upload(self) -> None:
