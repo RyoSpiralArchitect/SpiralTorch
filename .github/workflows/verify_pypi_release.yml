@@ -39,7 +39,6 @@ jobs:
       RELEASE_TAG: ${{ inputs.release_tag }}
       EXPECTED_WHEELS: ${{ inputs.expected_wheels }}
       REQUIRE_LATEST: ${{ inputs.require_latest }}
-      PYPI_REQUIREMENTS: ${{ runner.temp }}/spiraltorch-pypi-requirements.txt
       PYTHONNOUSERSITE: "1"
     steps:
       - uses: actions/checkout@v5
@@ -49,6 +48,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Wait for matching release JSON and Simple index
+        env:
+          PYPI_REQUIREMENTS: ${{ runner.temp }}/spiraltorch-pypi-requirements.txt
         run: |
           set -euo pipefail
           args=(
@@ -65,6 +66,8 @@ jobs:
           fi
           python scripts/security/verify_pypi_release.py "${args[@]}"
       - name: Install and smoke the exact public version
+        env:
+          PYPI_REQUIREMENTS: ${{ runner.temp }}/spiraltorch-pypi-requirements.txt
         run: |
           set -euo pipefail
           smoke_dir="$(mktemp -d "$RUNNER_TEMP/spiraltorch-pypi-smoke.XXXXXX")"

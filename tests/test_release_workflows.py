@@ -115,6 +115,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertIn("timeout-minutes: 10", workflow)
         self.assertIn("persist-credentials: false", workflow)
+        job_env = workflow.partition("    env:\n")[2].partition("    steps:\n")[0]
+        self.assertTrue(job_env)
+        self.assertNotIn("${{ runner.", job_env)
+        self.assertEqual(
+            workflow.count("          PYPI_REQUIREMENTS: ${{ runner.temp }}"), 2
+        )
         for upload_authority in [
             "secrets.",
             "secrets:",
