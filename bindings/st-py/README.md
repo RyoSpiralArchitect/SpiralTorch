@@ -247,6 +247,33 @@ with zero epsilon. Affine forward keeps its existing backend selection and
 fused residual-add API. Recheck earlier results on large-offset inputs; fixing
 the operator does not by itself establish an LLM/FT quality improvement.
 
+## Differentiable LayerNorm
+
+Version 0.4.26 adds affine LayerNorm to the Rust-owned reverse-mode graph:
+
+```python
+import spiraltorch as st
+
+x = st.AutogradTensor.variable(st.Tensor(2, 3, [0, 1, 2, 2, 1, 0]))
+gamma = st.AutogradTensor.variable(st.Tensor(1, 3, [1, 1, 1]))
+beta = st.AutogradTensor.variable(st.Tensor.zeros(1, 3))
+x.layer_norm_affine(gamma, beta, epsilon=1e-5).sum().backward()
+assert beta.grad().tolist() == [[2, 2, 2]]
+```
+
+Input, gamma and beta can all learn. Affine VJPs sum rows without hidden batch
+averaging. Frozen parents skip unused gradients, shared parents accumulate
+every path, and failed backward passes preserve existing gradients.
+Plain `Tensor.layer_norm_affine_backward(gamma, upstream, epsilon=...)` returns
+the three gradients without constructing a graph. Both use the shared Rust
+CPU/f64 VJP; forward retains Tensor backend selection. The explicit Rust WGPU
+backward path remains a hybrid of CPU moments and GPU utilities, not a fused
+backward shader. Native `nn.LayerNorm` reuses the core with its existing
+parameter-only averaging policy.
+
+The repository's `examples/autograd_layer_norm.py` runs a 400-step native SGD
+fixture. This checks learning mechanics, not LLM/FT quality.
+
 ## What's included
 
 - `Tensor`, `AutogradTensor`, `ComplexTensor`, and `OpenTopos` for dependency-free

@@ -261,6 +261,26 @@ impl AutogradTensor {
             .map_err(js_error)
     }
 
+    /// Affine row LayerNorm; omitted epsilon defaults to 1e-5.
+    #[wasm_bindgen(js_name = layerNormAffine)]
+    pub fn layer_norm_affine(
+        &self,
+        gamma: &AutogradTensor,
+        beta: &AutogradTensor,
+        epsilon: Option<f32>,
+    ) -> Result<AutogradTensor, JsValue> {
+        self.transport
+            .inner
+            .layer_norm_affine(
+                &gamma.transport.inner,
+                &beta.transport.inner,
+                epsilon.unwrap_or(1e-5),
+            )
+            .map(AutogradTransport::from_inner)
+            .map(|transport| Self { transport })
+            .map_err(js_error)
+    }
+
     /// Integer-label logits loss. Optional arguments default to mean, -100 and zero smoothing.
     #[wasm_bindgen(js_name = crossEntropyWithLogits)]
     pub fn cross_entropy_with_logits(

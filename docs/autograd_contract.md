@@ -118,6 +118,47 @@ wasm-pack build bindings/st-wasm --target nodejs --out-dir /tmp/spiraltorch-wasm
 node bindings/st-wasm/tests/autograd_nonlinear.cjs /tmp/spiraltorch-wasm/spiraltorch_wasm.js
 ```
 
+## Affine LayerNorm
+
+`AutogradTensor::layer_norm_affine(gamma, beta, epsilon)` is a three-parent
+operation owned by `st-tensor`. Python exposes the same name with keyword-only
+`epsilon=1e-5`; WASM exposes `layerNormAffine(gamma, beta, epsilon?)`.
+Gamma and beta have shape `(1, cols)`. Zero-row batches are valid, zero-width
+rows are not, and constant rows require positive epsilon.
+
+The VJP uses centered f64 moments and weighted-seed reductions, with finite f32
+outputs. Gamma/beta gradients **sum** rows. A mean loss supplies its reduction
+in the upstream seed; the primitive does not average again. Frozen parents
+have no gradient computed, shared parents receive every contribution, VJP
+queries do not mutate gradients, and failed backward passes commit nothing.
+
+Plain `Tensor.layer_norm_affine_backward(gamma, upstream, epsilon)` returns
+the input, gamma and beta VJPs without constructing a graph. Rust also exposes
+`layer_norm_affine_backward_with_backend` for explicit parameter-gradient
+scaling and utility-backend selection. `st-nn::LayerNorm` delegates here and
+retains its existing affine-only `1 / rows` scale; it never scales input VJPs.
+
+Autograd backward and the plain Python VJP use CPU/f64. Forward retains Tensor
+dispatch. The explicit Rust WGPU backward path retains CPU moments plus GPU
+tensor utilities; it is not a new fused shader or GPU-resident graph, and its
+f32 intermediate range is narrower than the CPU/f64 path.
+
+```python
+import spiraltorch as st
+
+x = st.AutogradTensor.variable(st.Tensor(2, 3, [0, 1, 2, 2, 1, 0]))
+gamma = st.AutogradTensor.variable(st.Tensor(1, 3, [1, 1, 1]))
+beta = st.AutogradTensor.variable(st.Tensor.zeros(1, 3))
+y = x.layer_norm_affine(gamma, beta)
+y.sum().backward()
+assert beta.grad().tolist() == [[2, 2, 2]]
+```
+
+`examples/autograd_layer_norm.py` trains native affine parameters for 400 SGD
+steps. Matching Rust and real WASM tests cover the same fixture; finite
+differences and PyTorch float64 parity independently check all three VJPs.
+These validate learning mechanics, not LLM fine-tuning quality.
+
 ## Classification from logits
 
 `Tensor` and `AutogradTensor` both expose `row_log_softmax()` and

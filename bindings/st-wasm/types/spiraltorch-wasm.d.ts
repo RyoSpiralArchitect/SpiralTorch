@@ -48,9 +48,17 @@ declare module "spiraltorch-wasm" {
         zeroGrad(): void;
         zeroGradGraph(): void;
         add(rhs: AutogradTensor): AutogradTensor;
+        addRow(bias: AutogradTensor): AutogradTensor;
+        relu(): AutogradTensor;
+        gelu(): AutogradTensor;
+        rowSoftmax(): AutogradTensor;
+        rowLogSoftmax(): AutogradTensor;
+        crossEntropyWithLogits(labels: Int32Array, reduction?: string | null, ignore_index?: number | null, label_smoothing?: number | null): AutogradTensor;
         sub(rhs: AutogradTensor): AutogradTensor;
         hadamard(rhs: AutogradTensor): AutogradTensor;
         matmul(rhs: AutogradTensor): AutogradTensor;
+        /** Affine gradients sum rows; defaults to epsilon=1e-5. */
+        layerNormAffine(gamma: AutogradTensor, beta: AutogradTensor, epsilon?: number | null): AutogradTensor;
         scale(factor: number): AutogradTensor;
         transpose(): AutogradTensor;
         sum(): AutogradTensor;

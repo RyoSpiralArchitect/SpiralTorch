@@ -510,6 +510,16 @@ its WGPU kernel. Constant rows require positive epsilon. Recheck earlier
 LayerNorm-derived results on offset-heavy inputs; this is a numerical correction,
 not evidence of improved LLM fine-tuning quality.
 
+Version 0.4.26 connects affine LayerNorm to the native reverse-mode graph:
+`x.layer_norm_affine(gamma, beta)` now works on `AutogradTensor` in Python,
+with the same Rust VJP exposed as WASM `layerNormAffine`. All three operands
+can learn; affine gradients sum rows without hidden batch averaging.
+Plain tensors expose `layer_norm_affine_backward(gamma, upstream)` for a
+graph-free VJP. CPU backward keeps f64 intermediates; `nn.LayerNorm` shares the
+core while retaining its existing WGPU utility path and parameter-update scale.
+See the [contract and examples](docs/autograd_contract.md#affine-layernorm), or
+run `python examples/autograd_layer_norm.py` for a 400-step learning fixture.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -969,7 +979,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.25
+VERSION=0.4.26
 TAG="v${VERSION}"
 
 # Snapshot release readiness without exposing any secret values.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -11,6 +12,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_docs_match_active_package_version(self) -> None:
+        metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
+        version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
+        for path in ["README.md", "docs/ops/release.md"]:
+            with self.subTest(path=path):
+                text = (ROOT / path).read_text(encoding="utf-8")
+                versions = re.findall(r"\b(?:VERSION=|release_tag=v)(\d+\.\d+\.\d+)", text)
+                self.assertTrue(versions)
+                self.assertEqual(set(versions), {version})
+        runbook = (ROOT / "docs/ops/release.md").read_text(encoding="utf-8")
+        self.assertIn(f"Expected pre-publish shape for `{version}`", runbook)
+        self.assertIn("--no-clipboard", runbook)
+        package_readme = (ROOT / "bindings/st-py/README.md").read_text(encoding="utf-8")
+        self.assertIn(f"Version {version}", package_readme)
+        changelog = (ROOT / "bindings/st-py/CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"## {version}\n", changelog)
+
+    def test_wheel_smoke_includes_native_layer_norm_learning(self) -> None:
+        smoke = (ROOT / "tools/smoke_autograd.py").read_text(encoding="utf-8")
+        self.assertIn('example.with_name("autograd_layer_norm.py")', smoke)
+        self.assertIn('runpy.run_path(str(layer_norm))["run"]()', smoke)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("test_layer_norm_autograd.py", ci)
+        self.assertIn("--test layer_norm_autograd", ci)
+        self.assertIn("node bindings/st-wasm/tests/layer_norm_autograd.cjs", ci)
+
     def test_official_actions_use_node24_generation(self) -> None:
         workflow_dir = ROOT / ".github" / "workflows"
         workflow_text = "\n".join(

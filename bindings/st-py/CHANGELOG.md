@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.26
+
+- Expose affine LayerNorm on the Rust-owned autograd graph through Python and
+  WASM. Add a graph-free Python Tensor VJP and complete the related WASM
+  nonlinear/classification TypeScript declarations.
+- Share the input/gamma/beta VJP with native `nn.LayerNorm`. Preserve explicit
+  affine-only scaling in `st-nn`; autograd sums affine gradients without a
+  second batch average. Keep CPU intermediates in f64 and retain the existing
+  hybrid WGPU tensor-utility path.
+- Cover frozen/shared parents, finite large cancellation, tiny variance,
+  invalid inputs and failure atomicity. Validate against finite differences,
+  PyTorch float64 and a normalized residual classifier; run a 400-step native
+  LayerNorm fixture in Python, WASM and release-wheel smoke tests.
+
 ## 0.4.25
 
 - Correct affine LayerNorm variance on CPU and WGPU for large offsets and wide
