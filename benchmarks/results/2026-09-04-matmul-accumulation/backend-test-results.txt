@@ -1,0 +1,11 @@
+test resident_matmul::tests::output_tile_and_invocation_geometry_agree ... ok
+test resident_matmul::tests::tile_checks_are_structural_and_device_specific ... ok
+test resident_matmul::tests::shape_checks_shader_addressing_and_device_limits ... ok
+test resident_matmul::tests::shared_shader_variants_validate ... ok
+test resident_matmul::tests::rounded_add_bits_matches_f32_when_enabled ... ok
+test resident_matmul::tests::resident_device_reuse_snapshots_and_chaining ... ok
+test resident_matmul::tests::resident_compensation_recovers_small_terms_when_enabled ... ok
+test resident_matmul::tests::resident_browser_long_k_frozen_cells_match_reference_when_enabled ... ok
+test resident_matmul::tests::resident_tiles_match_f64_reference_when_enabled ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.61s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

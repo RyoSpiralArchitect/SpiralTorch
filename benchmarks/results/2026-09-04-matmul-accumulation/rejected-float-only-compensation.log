@@ -1,0 +1,17 @@
+failures:
+
+---- resident_matmul::tests::resident_compensation_recovers_small_terms_when_enabled stdout ----
+
+thread 'resident_matmul::tests::resident_compensation_recovers_small_terms_when_enabled' (3307512) panicked at crates/st-backend-wgpu/src/resident_matmul.rs:758:21:
+assertion `left == right` failed: Scalar
+  left: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ right: [1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0, 1025.0]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    resident_matmul::tests::resident_compensation_recovers_small_terms_when_enabled
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.24s
+
+error: test failed, to rerun pass `-p st-backend-wgpu --lib`

@@ -5,7 +5,7 @@
 //! This is an execution workspace, not an autograd tape or a backend selector.
 
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
-pub use crate::shader_sources::MatmulKernel;
+pub use crate::shader_sources::{MatmulAccumulation, MatmulKernel};
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 
@@ -166,6 +166,7 @@ pub struct ResidentMatmul {
     shape: MatmulShape,
     tile: MatmulTile,
     kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
     lhs: wgpu::Buffer,
     rhs: wgpu::Buffer,
     output: wgpu::Buffer,
@@ -194,6 +195,16 @@ impl ResidentMatmul {
         shape: MatmulShape,
         tile: MatmulTile,
         kernel: MatmulKernel,
+    ) -> Result<Self, MatmulError> {
+        Self::with_options(runtime, shape, tile, kernel, MatmulAccumulation::Sequential)
+    }
+
+    pub fn with_options(
+        runtime: WgpuRuntime,
+        shape: MatmulShape,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+        accumulation: MatmulAccumulation,
     ) -> Result<Self, MatmulError> {
         let context = runtime.context();
         let device = context.device();
@@ -263,10 +274,11 @@ impl ResidentMatmul {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("resident.matmul.shader"),
             source: wgpu::ShaderSource::Wgsl(
-                crate::shader_sources::dense_matmul_source_with_kernel(
+                crate::shader_sources::dense_matmul_source_with_options(
                     tile.dimensions(),
                     false,
                     kernel,
+                    accumulation,
                 )
                 .map_err(|_| MatmulError::UnsupportedKernelTile)?
                 .into(),
@@ -298,6 +310,7 @@ impl ResidentMatmul {
             shape,
             tile,
             kernel,
+            accumulation,
             lhs,
             rhs,
             output,
@@ -317,6 +330,9 @@ impl ResidentMatmul {
     }
     pub fn kernel(&self) -> MatmulKernel {
         self.kernel
+    }
+    pub fn accumulation(&self) -> MatmulAccumulation {
+        self.accumulation
     }
     pub fn workgroup_size(&self) -> [u32; 3] {
         self.kernel
@@ -601,19 +617,28 @@ mod tests {
         ] {
             for int8 in [false, true] {
                 for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
-                    let Ok(source) =
-                        crate::shader_sources::dense_matmul_source_with_kernel(tile, int8, kernel)
-                    else {
-                        assert!(kernel.workgroup_size(tile).is_none());
-                        continue;
-                    };
-                    let module = naga::front::wgsl::parse_str(&source).unwrap();
-                    naga::valid::Validator::new(
-                        naga::valid::ValidationFlags::all(),
-                        naga::valid::Capabilities::all(),
-                    )
-                    .validate(&module)
-                    .unwrap();
+                    for accumulation in [
+                        MatmulAccumulation::Sequential,
+                        MatmulAccumulation::Tiled,
+                        MatmulAccumulation::Compensated,
+                    ] {
+                        let Ok(source) = crate::shader_sources::dense_matmul_source_with_options(
+                            tile,
+                            int8,
+                            kernel,
+                            accumulation,
+                        ) else {
+                            assert!(kernel.workgroup_size(tile).is_none());
+                            continue;
+                        };
+                        let module = naga::front::wgsl::parse_str(&source).unwrap();
+                        naga::valid::Validator::new(
+                            naga::valid::ValidationFlags::all(),
+                            naga::valid::Capabilities::all(),
+                        )
+                        .validate(&module)
+                        .unwrap();
+                    }
                 }
             }
         }
@@ -621,6 +646,18 @@ mod tests {
 
     #[test]
     fn output_tile_and_invocation_geometry_agree() {
+        assert_eq!(
+            MatmulAccumulation::default(),
+            MatmulAccumulation::Sequential
+        );
+        assert_eq!(
+            "compensated"
+                .parse::<MatmulAccumulation>()
+                .unwrap()
+                .as_str(),
+            "compensated"
+        );
+        assert!("auto".parse::<MatmulAccumulation>().is_err());
         for m in 1..=64 {
             for n in 1..=64 {
                 let Ok(tile) = MatmulTile::new(m, n, 16) else {
@@ -686,6 +723,218 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn resident_browser_long_k_frozen_cells_match_reference_when_enabled() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        fn next_value(state: &mut u32) -> f32 {
+            *state ^= *state << 13;
+            *state ^= *state >> 17;
+            *state ^= *state << 5;
+            (f64::from(*state) / 4_294_967_296.0 - 0.5) as f32
+        }
+        let (runtime, _) =
+            runtime::ensure_default_runtime_blocking("resident.long-k.test").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        // Browser xorshift inputs, not the Python benchmark's random.Random inputs.
+        // These sequential failures were captured at 128x3072x768 on Apple WebGPU.
+        for (seed, row, col, frozen_reference) in [
+            (29, 124, 630, 0.008646938055694997),
+            (43, 26, 183, 0.01428703216586541),
+        ] {
+            let mut state = seed;
+            let lhs: Vec<_> = (0..(row + 1) * 3072)
+                .map(|_| next_value(&mut state))
+                .skip(row * 3072)
+                .collect();
+            state = seed + 1;
+            let rhs: Vec<_> = (0..3072 * 768)
+                .map(|_| next_value(&mut state))
+                .enumerate()
+                .filter_map(|(i, value)| (i % 768 == col).then_some(value))
+                .collect();
+            let expected: f64 = lhs
+                .iter()
+                .zip(&rhs)
+                .map(|(&a, &b)| f64::from(a) * f64::from(b))
+                .sum();
+            assert!((expected - frozen_reference).abs() < 1e-12);
+            for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+                for accumulation in [MatmulAccumulation::Tiled, MatmulAccumulation::Compensated] {
+                    let mut workspace = ResidentMatmul::with_options(
+                        runtime.clone(),
+                        MatmulShape::new(1, 3072, 1).unwrap(),
+                        MatmulTile::new(16, 16, 16).unwrap(),
+                        kernel,
+                        accumulation,
+                    )
+                    .unwrap();
+                    workspace.upload(&lhs, &rhs).unwrap();
+                    workspace.dispatch(1).unwrap();
+                    let actual = f64::from(workspace.snapshot().unwrap().read().unwrap()[0]);
+                    assert!(
+                        (actual - expected).abs() <= 1e-5 + 1e-4 * expected.abs(),
+                        "seed={seed} {kernel:?} {accumulation:?}: {actual} != {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rounded_add_bits_matches_f32_when_enabled() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = runtime::ensure_default_runtime_blocking("rounded-add.test").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let boundary = [
+            0, 1, 0x7fffff, 0x800000, 0x3f800000, 0x33800000, 0x3f800001, 0x7f7fffff, 0x7f800000,
+            0x7fc00000,
+        ];
+        let mut pairs = Vec::new();
+        for a in boundary {
+            for b in boundary {
+                for sign_a in [0, 0x80000000] {
+                    for sign_b in [0, 0x80000000] {
+                        pairs.push([a | sign_a, b | sign_b]);
+                    }
+                }
+            }
+        }
+        let mut state = 17u32;
+        for _ in 0..16_384 {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            let a = state;
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            pairs.push([a, state]);
+        }
+        let source = format!(
+            "{}\n{}",
+            crate::shader_sources::ROUNDED_ADD_WGSL,
+            r#"
+@group(0) @binding(0) var<storage, read> pairs: array<vec2<u32>>;
+@group(0) @binding(1) var<storage, read_write> output: array<u32>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x < arrayLength(&pairs)) {
+        output[id.x] = rounded_add_bits(pairs[id.x].x, pairs[id.x].y);
+    }
+}"#
+        );
+        let ctx = runtime.context();
+        let device = ctx.device();
+        let input = runtime::upload_slice(
+            device,
+            "rounded-add.inputs",
+            &pairs,
+            wgpu::BufferUsages::STORAGE,
+        )
+        .unwrap();
+        let output = runtime::empty_buffer::<u32>(
+            device,
+            "rounded-add.output",
+            pairs.len(),
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        )
+        .unwrap();
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rounded-add.shader"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("rounded-add.pipeline"),
+            layout: None,
+            module: &module,
+            entry_point: "main",
+            compilation_options: Default::default(),
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rounded-add.group"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups((pairs.len() as u32).div_ceil(64), 1, 1);
+        }
+        ctx.queue().submit(Some(encoder.finish()));
+        let actual = runtime::read_buffer::<u32>(
+            device,
+            ctx.queue(),
+            &output,
+            pairs.len(),
+            "rounded-add.read",
+        )
+        .unwrap();
+        for ([a, b], actual) in pairs.into_iter().zip(actual) {
+            let expected = f32::from_bits(a) + f32::from_bits(b);
+            if expected.is_nan() {
+                assert!(f32::from_bits(actual).is_nan());
+            } else {
+                assert_eq!(actual, expected.to_bits(), "a={a:08x} b={b:08x}");
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn resident_compensation_recovers_small_terms_when_enabled() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) =
+            runtime::ensure_default_runtime_blocking("resident.compensation.test").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let shape = MatmulShape::new(3, 3075, 5).unwrap();
+        let lhs: Vec<_> = (0..3 * 3075)
+            .map(|index| match index % 3 {
+                0 => 100_000_000.0,
+                1 => 1.0,
+                _ => -100_000_000.0,
+            })
+            .collect();
+        let rhs = vec![1.0; 3075 * 5];
+        for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+            for accumulation in [
+                MatmulAccumulation::Sequential,
+                MatmulAccumulation::Compensated,
+            ] {
+                let mut workspace = ResidentMatmul::with_options(
+                    runtime.clone(),
+                    shape,
+                    MatmulTile::new(16, 16, 16).unwrap(),
+                    kernel,
+                    accumulation,
+                )
+                .unwrap();
+                workspace.upload(&lhs, &rhs).unwrap();
+                workspace.dispatch(2).unwrap();
+                let values = workspace.snapshot().unwrap().read().unwrap();
+                assert_eq!(workspace.accumulation(), accumulation);
+                if accumulation == MatmulAccumulation::Compensated {
+                    assert_eq!(values, vec![1025.0; 15], "{kernel:?}");
+                } else {
+                    assert!(values.iter().all(|v| v.is_finite()));
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn resident_tiles_match_f64_reference_when_enabled() {
         if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
             return;
@@ -705,26 +954,41 @@ mod tests {
         ] {
             let tile = MatmulTile::new(m, n, k).unwrap();
             for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
-                let candidate = ResidentMatmul::with_kernel(runtime.clone(), shape, tile, kernel);
-                if kernel.workgroup_size(tile.dimensions()).is_none() {
-                    assert!(matches!(candidate, Err(MatmulError::UnsupportedKernelTile)));
-                    continue;
-                }
-                let mut workspace = candidate.unwrap();
-                assert_eq!(workspace.tile(), tile);
-                assert_eq!(workspace.kernel(), kernel);
-                workspace.upload(&lhs, &rhs).unwrap();
-                workspace.dispatch(2).unwrap();
-                let actual = workspace.snapshot().unwrap().read().unwrap();
-                for row in 0..7 {
-                    for col in 0..65 {
-                        let expected: f64 = (0..63)
-                            .map(|i| f64::from(lhs[row * 63 + i]) * f64::from(rhs[i * 65 + col]))
-                            .sum();
-                        assert!(
-                            (f64::from(actual[row * 65 + col]) - expected).abs() < 1e-5,
-                            "tile={tile:?} row={row} col={col}"
-                        );
+                for accumulation in [
+                    MatmulAccumulation::Sequential,
+                    MatmulAccumulation::Tiled,
+                    MatmulAccumulation::Compensated,
+                ] {
+                    let candidate = ResidentMatmul::with_options(
+                        runtime.clone(),
+                        shape,
+                        tile,
+                        kernel,
+                        accumulation,
+                    );
+                    if kernel.workgroup_size(tile.dimensions()).is_none() {
+                        assert!(matches!(candidate, Err(MatmulError::UnsupportedKernelTile)));
+                        continue;
+                    }
+                    let mut workspace = candidate.unwrap();
+                    assert_eq!(workspace.tile(), tile);
+                    assert_eq!(workspace.kernel(), kernel);
+                    assert_eq!(workspace.accumulation(), accumulation);
+                    workspace.upload(&lhs, &rhs).unwrap();
+                    workspace.dispatch(2).unwrap();
+                    let actual = workspace.snapshot().unwrap().read().unwrap();
+                    for row in 0..7 {
+                        for col in 0..65 {
+                            let expected: f64 = (0..63)
+                                .map(|i| {
+                                    f64::from(lhs[row * 63 + i]) * f64::from(rhs[i * 65 + col])
+                                })
+                                .sum();
+                            assert!(
+                                (f64::from(actual[row * 65 + col]) - expected).abs() < 1e-5,
+                                "tile={tile:?} accumulation={accumulation:?} row={row} col={col}"
+                            );
+                        }
                     }
                 }
             }

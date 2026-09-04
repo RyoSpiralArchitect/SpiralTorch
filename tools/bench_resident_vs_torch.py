@@ -55,9 +55,10 @@ def run(args):
     if args.native_prefix and not native.is_relative_to(args.native_prefix.resolve()):
         raise RuntimeError("native extension outside expected prefix")
     report = {
-        "schema": "spiraltorch.resident_matmul_bench.v3",
+        "schema": "spiraltorch.resident_matmul_bench.v4",
         "tiles_mnk": parse_tiles(args.tiles_mnk),
         "kernels_requested": args.kernels,
+        "accumulations_requested": args.accumulations,
         "platform": platform.platform(), "host": platform.node(), "python": sys.version,
         "torch": torch.__version__, "torch_device": str(device),
         "torch_gpu": torch.cuda.get_device_name() if device.type == "cuda" else "MPS",
@@ -95,11 +96,13 @@ def run(args):
 
                 functions = {"torch_resident": torch_batch}
                 case["wgpu_variants"] = {}
-                for tile, kernel in ((tile, kernel) for tile in parse_tiles(args.tiles_mnk)
-                                     for kernel in args.kernels):
+                for tile, kernel, accumulation in ((tile, kernel, accumulation)
+                                     for tile in parse_tiles(args.tiles_mnk)
+                                     for kernel in args.kernels for accumulation in args.accumulations):
                     workspace = st.WgpuMatmul(m, k, n, tile_mnk=tile,
-                                             kernel=None if kernel == "auto" else kernel)
-                    name = "st_" + kernel + "_" + "x".join(map(str, tile))
+                                             kernel=None if kernel == "auto" else kernel,
+                                             accumulation=accumulation)
+                    name = "st_" + kernel + "_" + "x".join(map(str, tile)) + "_" + accumulation
                     info = workspace.adapter_info()
                     if info["device_type"] == "Cpu":
                         raise RuntimeError("software WGPU adapter is not admitted as GPU timing")
@@ -109,16 +112,24 @@ def run(args):
                         raise RuntimeError("actual tile does not match requested tile")
                     if kernel != "auto" and workspace.kernel != kernel:
                         raise RuntimeError("actual kernel does not match requested kernel")
+                    if workspace.accumulation != accumulation:
+                        raise RuntimeError("actual accumulation does not match requested accumulation")
                     case["wgpu_variants"][name] = {
                         "tile_mnk": tile, "adapter": info, "kernel_request": kernel,
                         "kernel": workspace.kernel, "workgroup_size": workspace.workgroup_size,
+                        "accumulation": workspace.accumulation,
                         "outputs_per_thread": workspace.outputs_per_thread,
                     }
                     workspace.upload(st.Tensor(m, k, a), st.Tensor(k, n, b))
                     workspace.dispatch()
-                    case["correctness"][name] = correctness(
-                        torch.tensor(workspace.readback().tolist(), dtype=torch.float64),
-                        reference, torch, 1e-4, 1e-5)
+                    try:
+                        case["correctness"][name] = correctness(
+                            torch.tensor(workspace.readback().tolist(), dtype=torch.float64),
+                            reference, torch, 1e-4, 1e-5)
+                    except ValueError as error:
+                        # A failed variant never enters timing, but must not hide a valid one.
+                        case["correctness"][name] = {"passed": False, "error": str(error)}
+                        continue
 
                     def st_batch(workspace=workspace):
                         for _ in range(args.dispatches):
@@ -133,9 +144,10 @@ def run(args):
                 case["timings"] = timings
                 case["torch_over_st_resident_batch"] = {
                     name: timings["torch_resident"]["median_ms"] / timings[name]["median_ms"]
-                    for name in case["wgpu_variants"]
+                    for name in case["wgpu_variants"] if name in timings
                 }
-                case["status"] = "passed"
+                case["status"] = ("passed" if all(value["passed"] for value in case["correctness"].values())
+                                  else "correctness_error")
             except Exception as error:
                 case.update(status="error", error=f"{type(error).__name__}: {error}")
             report["cases"].append(case)
@@ -152,6 +164,7 @@ def main():
     parser.add_argument("--dispatches", type=int, default=16)
     parser.add_argument("--tiles-mnk", default="8,8,16")
     parser.add_argument("--kernels", nargs="+", choices=["auto", "scalar", "register_2x2"], default=["auto"])
+    parser.add_argument("--accumulations", nargs="+", choices=["sequential", "tiled", "compensated"], default=["sequential"])
     parser.add_argument("--torch-device", choices=["cuda", "mps"], default="cuda")
     parser.add_argument("--expected-adapter", required=True)
     parser.add_argument("--native-prefix", type=Path)
@@ -163,6 +176,8 @@ def main():
     parse_tiles(args.tiles_mnk)
     if len(set(args.kernels)) != len(args.kernels):
         parser.error("kernel choices must be unique")
+    if len(set(args.accumulations)) != len(args.accumulations):
+        parser.error("accumulation choices must be unique")
     with args.output.open("x") as stream:
         try:
             report = run(args)

@@ -1,5 +1,6 @@
 // Shared by host-tensor and resident native/browser matmul.
 {f16_enable}
+{accumulation_helpers}
 struct MatmulUniforms {
     rows: u32,
     cols: u32,
@@ -132,6 +133,7 @@ fn main(
 
         workgroupBarrier();
 
+        {tile_accumulator_declarations}
         var k : u32 = 0u;
         loop {
             if (k >= TILE_K || (k_base + k) >= params.inner) {
@@ -141,6 +143,7 @@ fn main(
             k = k + 1u;
         }
 
+        {tile_accumulator_finish}
         workgroupBarrier();
         tile_index = tile_index + 1u;
     }

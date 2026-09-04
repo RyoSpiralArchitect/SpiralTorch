@@ -7,9 +7,9 @@ const crypto = require("node:crypto");
 const {chromium} = require("playwright");
 
 async function main() {
-  const [moduleDir, executablePath, outputPath, tiles, kernels] = process.argv.slice(2);
+  const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN]");
   }
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
@@ -39,6 +39,8 @@ async function main() {
       launch_flags: ["--enable-unsafe-webgpu"],
       tiles_mnk_request: tiles ?? null,
       kernels_request: kernels ?? null,
+      accumulations_request: accumulations ?? null,
+      shapes_request: shapes ?? null,
       asset_sha256: Object.fromEntries([...files].map(([url,[file]])=>[
         url,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
       ])),
@@ -65,6 +67,8 @@ async function main() {
     const params = new URLSearchParams();
     if(tiles) params.set("tiles",tiles);
     if(kernels) params.set("kernels",kernels);
+    if(accumulations) params.set("accumulations",accumulations);
+    if(shapes) params.set("shapes",shapes);
     const query = "?"+params.toString();
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);

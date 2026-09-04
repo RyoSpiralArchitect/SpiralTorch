@@ -14,6 +14,16 @@ spec.loader.exec_module(bench)
 
 
 class DeviceIdentityTests(unittest.TestCase):
+    def test_bad_accumulation_lists_fail_before_import_or_output_creation(self):
+        for choices in (["sequential", "sequential"], ["unknown"]):
+            args = [str(path), "--expected-adapter", "fixture", "--output", "unused.json", "--accumulations", *choices]
+            with self.subTest(choices=choices), patch.object(bench.sys, "argv", args), \
+                    patch.object(Path, "open") as output, contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                bench.main()
+            self.assertEqual(raised.exception.code, 2)
+            output.assert_not_called()
+
     def test_bad_kernel_lists_fail_before_import_or_output_creation(self):
         for kernels in (["scalar", "scalar"], ["unknown"]):
             args = [str(path), "--expected-adapter", "fixture", "--output", "unused.json", "--kernels", *kernels]

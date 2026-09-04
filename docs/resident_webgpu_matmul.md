@@ -54,11 +54,39 @@ print(workspace.outputs_per_thread)  # (2, 2), M/N output cells
 
 `kernel="scalar"` selects one output cell per invocation; omitting `kernel`
 keeps that scalar default on every target. The blocked kernel requires even
-M/N tile dimensions, rejects incompatible requests, and preserves each output's
-ascending-K float32 accumulation. Kernel selection and actual geometry belong
+M/N tile dimensions and rejects incompatible requests. With the default
+sequential accumulation, both kernels preserve each output's ascending-K
+float32 accumulation. Kernel selection and actual geometry belong
 to Rust, not a Python heuristic. Different kernels can participate in one GPU
 chain. Explicit choice matters: the blocked kernel helps large matrices in
 the measured Mac browser but regresses some smaller native NVIDIA workloads.
+
+Accumulation is an independent Rust-owned choice:
+
+```python
+workspace = WgpuMatmul(128, 3072, 768, tile_mnk=(16, 16, 16),
+                       kernel="register_2x2", accumulation="compensated")
+print(workspace.accumulation)  # compensated
+```
+
+`sequential` remains the default, including host Tensor matmul. `compensated`
+uses a Neumaier correction for each output. The running sum and subtraction
+boundaries use integer-defined round-to-nearest-even f32 addition: a naive
+float-only compensation expression can be erased by the
+[reassociation allowed in WGSL](https://www.w3.org/TR/WGSL/#floating-point-evaluation).
+The correction is applied before output fusions, not after activation/scaling.
+This is not float64 arithmetic or an exact dot-product guarantee: product
+rounding, correction accumulation, subnormal behavior and non-finite arithmetic
+remain distinct boundaries. Extra integer operations also have a cost; kernel
+geometry and accumulation policy must be benchmarked independently.
+
+`accumulation="tiled"` provides a cheaper two-level sum: each K tile starts a
+fresh f32 partial sum, then adds that partial to the output accumulator. It
+shortens the uninterrupted accumulation chain without integer compensation.
+Tile K therefore affects numerical grouping as well as performance. This is
+not a balanced reduction tree or an exact-cancellation guarantee; use the
+unchanged reference gate to qualify each workload rather than assuming that
+every tile or input benefits.
 
 ## Browser / WASM
 
@@ -112,10 +140,19 @@ The explicit equivalent is
 and geometry. The older `create` and `createWithTile` constructors keep the
 scalar default. Unknown kernel strings and odd blocked tiles fail explicitly.
 
+The accumulation-aware factory is
+`await WgpuMatmul.createWithOptions(128, 3072, 768, 16, 16, 16, "register_2x2", "compensated")`.
+Its readonly `accumulation` property reports the Rust choice. Both option
+values must be primitive strings; unknown choices fail rather than falling
+back. The older constructors retain sequential accumulation.
+
 Rust callers use `ResidentMatmul::with_kernel(runtime, shape, tile,
 MatmulKernel::Register2x2)` from `st_backend_wgpu::resident_matmul`, then the
 same upload/dispatch/snapshot/chain methods. Its `kernel()`, `workgroup_size()`
 and `outputs_per_thread()` are the source of the binding metadata.
+Rust callers select accumulation with `ResidentMatmul::with_options(runtime,
+shape, tile, kernel, MatmulAccumulation::Compensated)` and inspect
+`accumulation()`. No Python/WASM summation heuristic is involved.
 
 ## Execution Boundaries
 
@@ -145,10 +182,12 @@ python tools/bench_resident_vs_torch.py \
   --torch-device cuda --expected-adapter "NVIDIA GeForce RTX 5090" \
   --tiles-mnk '8,8,16;16,16,16;16,16,32;16,16,64' \
   --kernels scalar register_2x2 \
+  --accumulations sequential tiled compensated \
   --output resident-vs-torch.json
 node tools/test_resident_browser.cjs /absolute/wasm-webgpu \
   /absolute/chrome-executable /absolute/new-browser-result.json \
-  '8,8,16;16,16,16;16,16,32;16,16,64' 'scalar;register_2x2'
+  '16,16,16' 'scalar;register_2x2' 'sequential;tiled;compensated' \
+  '7,3073,65;64,64,64'
 ```
 
 The browser runner needs Playwright and launches an isolated headless test
@@ -158,12 +197,16 @@ The page runs numerical, ownership, and invalid-input gates before timing.
 Multi-tile/kernel runs randomize variant order in each measurement iteration, rather
 than timing complete variants sequentially. Every variant uses the same input
 bytes, a float64 reference, float32 GPU arithmetic and 16 separate dispatch
-calls. Both report schemas are v3 and keep each variant's requested/actual
+calls. Both report schemas are v4 and keep each variant's requested/actual
 kernel, output tile, invocation workgroup, output cells per thread, and raw
-samples. Previous v1/v2 reports remain immutable historical data. The harness
+samples, plus its accumulation policy. Previous v1/v2/v3 reports remain immutable historical data. The harness
 keyword `auto` means "use the API default", not "autotune or pick the fastest".
 Both explicit kernels are compared within the same binary and run, not by
 swapping wheels or inferring performance from a backend label.
+The browser's optional final argument selects M/K/N shapes; non-default
+accumulation runs require explicit kernels. A candidate that fails correctness is retained but
+excluded from timing; other passing candidates can still be measured. The
+run's status/exit code remains unsuccessful if any requested candidate fails.
 
 The shared shader keeps RHS workgroup memory contiguous across output columns.
 This does not change global RHS packing, f32 accumulation, or fused operations.
@@ -175,11 +218,20 @@ winner or faster-than-PyTorch claim is implied by the explicit override.
 The [same-binary register-blocking comparison](../benchmarks/results/2026-09-04-register-blocking/README.md)
 retains both browser improvements and native NVIDIA regressions. It motivates
 explicit kernel selection, not an automatic browser or CUDA policy.
-That report also retains an unresolved long-K precision boundary: the old
+That report also retains a long-K precision boundary in sequential accumulation: the old
 and current kernels fail the unchanged float64-reference benchmark gate for
 two of three 128x3072x768 seeds. Register blocking preserves, but does not
 improve, the existing f32 accumulation accuracy; larger FFN shapes are not
 generally qualified by the smaller passing fixtures.
+
+The [accumulation comparison](../benchmarks/results/2026-09-04-matmul-accumulation/README.md)
+adds explicit `tiled` and `compensated` paths without changing the default.
+Tiled accumulation passes all 40 NVIDIA variants in a ten-seed, two-shape
+follow-up, including long-K cells that sequential accumulation fails. It keeps
+roughly the same measured throughput, but remains slower than PyTorch CUDA.
+Compensation passes the captured cancellation fixture on both browser and
+native GPUs at a substantial cost. Neither mode is a universal precision or
+speed guarantee; failed sequential variants remain visible and untimed.
 
 The PyTorch comparison uses identical float32 input bytes and float64 reference
 gates. Both sides preallocate output and run the same number of Python-loop

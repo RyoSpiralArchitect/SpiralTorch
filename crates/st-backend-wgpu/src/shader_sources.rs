@@ -12,6 +12,39 @@ pub const SOFTMAX_SPIRAL_CONSENSUS_WGSL: &str =
 pub const FUSED_ATTENTION_ONLINE_WGSL: &str = include_str!("shaders/fused_attention_online.wgsl");
 
 pub const DENSE_MATMUL_WGSL: &str = include_str!("shaders/dense_matmul.wgsl");
+pub const ROUNDED_ADD_WGSL: &str = include_str!("shaders/rounded_add.wgsl");
+
+/// Accumulation policy is independent of the output tile and thread geometry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MatmulAccumulation {
+    #[default]
+    Sequential,
+    Tiled,
+    Compensated,
+}
+
+impl std::str::FromStr for MatmulAccumulation {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "sequential" => Ok(Self::Sequential),
+            "tiled" => Ok(Self::Tiled),
+            "compensated" => Ok(Self::Compensated),
+            _ => Err("accumulation must be sequential, tiled, or compensated"),
+        }
+    }
+}
+
+impl MatmulAccumulation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sequential => "sequential",
+            Self::Tiled => "tiled",
+            Self::Compensated => "compensated",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MatmulKernel {
@@ -69,12 +102,23 @@ pub fn dense_matmul_source_with_kernel(
     int8: bool,
     kernel: MatmulKernel,
 ) -> Result<String, &'static str> {
+    dense_matmul_source_with_options(tile, int8, kernel, MatmulAccumulation::Sequential)
+}
+
+pub fn dense_matmul_source_with_options(
+    tile: [u32; 3],
+    int8: bool,
+    kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
+) -> Result<String, &'static str> {
     let [m, n, k] = tile;
     let [thread_m, thread_n] = kernel.outputs_per_thread();
     let [wg_x, wg_y, _] = kernel
         .workgroup_size(tile)
         .ok_or("kernel requires positive dimensions and an evenly divisible output tile")?;
     let mut declarations = String::new();
+    let mut tile_declarations = String::new();
+    let mut tile_finish = String::new();
     let mut accumulate = String::new();
     let mut write_output = String::new();
     for row in 0..thread_m {
@@ -90,9 +134,41 @@ pub fn dense_matmul_source_with_kernel(
     for row in 0..thread_m {
         for col in 0..thread_n {
             declarations.push_str(&format!("var acc_{row}_{col}: f32 = 0.0;\n"));
-            accumulate.push_str(&format!(
-                "acc_{row}_{col} = acc_{row}_{col} + a{row} * b{col};\n"
-            ));
+            let value = match accumulation {
+                MatmulAccumulation::Sequential => {
+                    accumulate.push_str(&format!(
+                        "acc_{row}_{col} = acc_{row}_{col} + a{row} * b{col};\n"
+                    ));
+                    format!("acc_{row}_{col}")
+                }
+                MatmulAccumulation::Tiled => {
+                    tile_declarations.push_str(&format!("var partial_{row}_{col}: f32 = 0.0;\n"));
+                    accumulate.push_str(&format!(
+                        "partial_{row}_{col} = partial_{row}_{col} + a{row} * b{col};\n"
+                    ));
+                    tile_finish.push_str(&format!(
+                        "acc_{row}_{col} = acc_{row}_{col} + partial_{row}_{col};\n"
+                    ));
+                    format!("acc_{row}_{col}")
+                }
+                MatmulAccumulation::Compensated => {
+                    declarations.push_str(&format!("var correction_{row}_{col}: f32 = 0.0;\n"));
+                    // Preserve all three rounding boundaries: a float residual add
+                    // regressed the browser cancellation fixture under reassociation.
+                    accumulate.push_str(&format!(
+                        "let product_{row}_{col} = a{row} * b{col};\n\
+                         let total_{row}_{col} = rounded_add(acc_{row}_{col}, product_{row}_{col});\n\
+                         let dominant_{row}_{col} = select(product_{row}_{col}, acc_{row}_{col},\n\
+                             abs(acc_{row}_{col}) >= abs(product_{row}_{col}));\n\
+                         let smaller_{row}_{col} = select(acc_{row}_{col}, product_{row}_{col},\n\
+                             abs(acc_{row}_{col}) >= abs(product_{row}_{col}));\n\
+                         let error_{row}_{col} = rounded_add(rounded_add(dominant_{row}_{col}, -total_{row}_{col}), smaller_{row}_{col});\n\
+                         correction_{row}_{col} = correction_{row}_{col} + error_{row}_{col};\n\
+                         acc_{row}_{col} = total_{row}_{col};\n"
+                    ));
+                    format!("acc_{row}_{col} + correction_{row}_{col}")
+                }
+            };
             let guard = if row == 0 && col == 0 {
                 "in_bounds".to_owned()
             } else {
@@ -101,7 +177,7 @@ pub fn dense_matmul_source_with_kernel(
             write_output.push_str(&format!(
                 "if ({guard}) {{\n\
                  let index = (global_row + {row}u) * params.cols + global_col + {col}u;\n\
-                 out[index] = apply_fusions(acc_{row}_{col}, index, global_col + {col}u);\n\
+                 out[index] = apply_fusions({value}, index, global_col + {col}u);\n\
                  }}\n"
             ));
         }
@@ -119,6 +195,14 @@ pub fn dense_matmul_source_with_kernel(
         "return rhs_packed[k * params.cols + col];"
     };
     Ok(DENSE_MATMUL_WGSL
+        .replace(
+            "{accumulation_helpers}",
+            if accumulation == MatmulAccumulation::Compensated {
+                ROUNDED_ADD_WGSL
+            } else {
+                ""
+            },
+        )
         .replace("{f16_enable}", "")
         .replace(
             "{rhs_storage_type}",
@@ -135,6 +219,8 @@ pub fn dense_matmul_source_with_kernel(
         .replace("{thread_m}", &thread_m.to_string())
         .replace("{thread_n}", &thread_n.to_string())
         .replace("{accumulator_declarations}", &declarations)
+        .replace("{tile_accumulator_declarations}", &tile_declarations)
+        .replace("{tile_accumulator_finish}", &tile_finish)
         .replace("{accumulate}", &accumulate)
         .replace("{write_output}", &write_output))
 }

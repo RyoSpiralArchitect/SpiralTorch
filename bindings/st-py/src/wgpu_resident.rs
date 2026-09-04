@@ -9,7 +9,9 @@ use pyo3::{
 };
 #[cfg(feature = "wgpu")]
 use st_backend_wgpu::{
-    resident_matmul::{MatmulError, MatmulKernel, MatmulShape, MatmulTile, ResidentMatmul},
+    resident_matmul::{
+        MatmulAccumulation, MatmulError, MatmulKernel, MatmulShape, MatmulTile, ResidentMatmul,
+    },
     runtime,
 };
 
@@ -31,7 +33,7 @@ pub(crate) struct PyWgpuMatmul {
 #[pymethods]
 impl PyWgpuMatmul {
     #[new]
-    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None, kernel=None))]
+    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None, kernel=None, accumulation=None))]
     fn new(
         py: Python<'_>,
         rows: usize,
@@ -39,6 +41,7 @@ impl PyWgpuMatmul {
         cols: usize,
         tile_mnk: Option<(u32, u32, u32)>,
         kernel: Option<&str>,
+        accumulation: Option<&str>,
     ) -> PyResult<Self> {
         let shape = MatmulShape::new(rows, inner, cols).map_err(error)?;
         let tile = match tile_mnk {
@@ -49,14 +52,22 @@ impl PyWgpuMatmul {
             .map(|value| value.parse::<MatmulKernel>())
             .transpose()
             .map_err(PyValueError::new_err)?;
+        let accumulation = accumulation
+            .map(|value| value.parse::<MatmulAccumulation>())
+            .transpose()
+            .map_err(PyValueError::new_err)?
+            .unwrap_or_default();
         py.detach(move || {
             let (runtime, _) = runtime::ensure_default_runtime_blocking("python.resident.matmul")
                 .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
             Ok(Self {
-                inner: match kernel {
-                    Some(kernel) => ResidentMatmul::with_kernel(runtime, shape, tile, kernel),
-                    None => ResidentMatmul::with_tile(runtime, shape, tile),
-                }
+                inner: ResidentMatmul::with_options(
+                    runtime,
+                    shape,
+                    tile,
+                    kernel.unwrap_or(MatmulKernel::Scalar),
+                    accumulation,
+                )
                 .map_err(error)?,
             })
         })
@@ -88,6 +99,11 @@ impl PyWgpuMatmul {
     #[getter]
     fn kernel(&self) -> &'static str {
         self.inner.kernel().as_str()
+    }
+
+    #[getter]
+    fn accumulation(&self) -> &'static str {
+        self.inner.accumulation().as_str()
     }
 
     #[getter]
@@ -179,15 +195,16 @@ pub(crate) struct PyWgpuMatmul;
 #[pymethods]
 impl PyWgpuMatmul {
     #[new]
-    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None, kernel=None))]
+    #[pyo3(signature = (rows, inner, cols, *, tile_mnk=None, kernel=None, accumulation=None))]
     fn new(
         rows: usize,
         inner: usize,
         cols: usize,
         tile_mnk: Option<(u32, u32, u32)>,
         kernel: Option<&str>,
+        accumulation: Option<&str>,
     ) -> PyResult<Self> {
-        let _ = (rows, inner, cols, tile_mnk, kernel);
+        let _ = (rows, inner, cols, tile_mnk, kernel, accumulation);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "WgpuMatmul requires a wheel built with the 'wgpu' feature",
         ))
