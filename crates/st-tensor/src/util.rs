@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 // crates/st-tensor/src/util.rs
-#![cfg(any(feature = "wgpu", feature = "wgpu_frac"))]
+#![cfg(feature = "wgpu_frac")]
 use wgpu::{Buffer, Device, Queue};
 
 pub fn readback_f32(

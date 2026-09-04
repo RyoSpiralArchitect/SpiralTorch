@@ -8,11 +8,11 @@
 //! API agnostic of where the computation runs while still surfacing metadata
 //! describing the dynamic-programming reductions that happen along the way.
 
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 use crate::backend::wgpu_dense;
-#[cfg(not(feature = "wgpu"))]
+#[cfg(not(feature = "wgpu_dense"))]
 use crate::pure::{Layout, PureResult};
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "wgpu_dense")]
 use crate::pure::{Layout, PureResult, TensorError};
 use core::fmt;
 use rayon::{current_num_threads, prelude::*};
@@ -30,7 +30,7 @@ pub enum HardmaxBackend {
     /// Force the pure Rust implementation.
     Cpu,
     /// Execute on the WGPU accelerator backend when available.
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     GpuWgpu,
 }
 
@@ -39,7 +39,7 @@ impl HardmaxBackend {
         match self {
             HardmaxBackend::Auto => "auto",
             HardmaxBackend::Cpu => "cpu",
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             HardmaxBackend::GpuWgpu => "wgpu",
         }
     }
@@ -114,7 +114,7 @@ impl<'a> HardmaxFusionPlan<'a> {
         match self.backend {
             HardmaxBackend::Auto => self.execute_auto(),
             HardmaxBackend::Cpu => self.execute_cpu(),
-            #[cfg(feature = "wgpu")]
+            #[cfg(feature = "wgpu_dense")]
             HardmaxBackend::GpuWgpu => self.execute_gpu(),
         }
     }
@@ -125,7 +125,7 @@ impl<'a> HardmaxFusionPlan<'a> {
             return self.execute_cpu();
         }
 
-        #[cfg(feature = "wgpu")]
+        #[cfg(feature = "wgpu_dense")]
         {
             if self.gpu_supported() {
                 return self.execute_gpu();
@@ -169,7 +169,7 @@ impl<'a> HardmaxFusionPlan<'a> {
         })
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn execute_gpu(&self) -> PureResult<HardmaxFusionResult> {
         if !wgpu_dense::is_available() {
             return Err(TensorError::BackendFailure {
@@ -228,12 +228,12 @@ impl<'a> HardmaxFusionPlan<'a> {
         }
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn gpu_supported(&self) -> bool {
         wgpu_dense::is_available() && self.gpu_shape_supported()
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "wgpu_dense")]
     fn gpu_shape_supported(&self) -> bool {
         match self.mode {
             HardmaxMode::SoftmaxAndMask => {
