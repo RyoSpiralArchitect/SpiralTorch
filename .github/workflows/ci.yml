@@ -178,6 +178,10 @@ jobs:
         env:
           SPIRALTORCH_STRICT_GPU: "1"
         run: cargo test --locked -p st-tensor --features wgpu --release --test autograd_nonlinear
+      - name: Resident GPU ownership and matrix chaining
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+        run: cargo test --locked --release -p st-backend-wgpu resident_matmul
       - name: neural layers and losses with WGPU enabled
         run: cargo test --locked -p st-nn --features wgpu --release --lib
 
@@ -220,6 +224,13 @@ jobs:
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
           node bindings/st-wasm/tests/row_indexing.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
+      - name: Browser WebGPU binding build
+        run: |
+          cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
+          cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features webgpu
+          wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
+            --target web --out-dir "$RUNNER_TEMP/spiraltorch-wasm-webgpu"
+          node bindings/st-wasm/tests/resident_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
@@ -407,6 +418,8 @@ jobs:
           python -P tests/test_verify_release.py
           python -P tests/test_verify_pypi_release.py
           python -P tests/test_backend_benchmark.py
+          python -P tests/test_resident_benchmark.py
+          python -P bindings/st-py/tests/test_wgpu_resident.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

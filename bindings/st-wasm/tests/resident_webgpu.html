@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SpiralTorch resident WebGPU validation</title>
+<h1>Resident WebGPU validation</h1>
+<pre id="result" data-status="running">Running</pre>
+<script type="module">
+const output = document.querySelector("#result");
+const report = {
+  schema: "spiraltorch.browser_resident_matmul.v1",
+  boundary: "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
+  dtype: "float32", user_agent: navigator.userAgent, cases: [], assertions: [],
+};
+function stage(name) {
+  report.stage=name;
+  output.textContent=JSON.stringify(report,null,2);
+}
+function assert(ok, message) {
+  if (!ok) throw new Error(message);
+  report.assertions.push(message);
+}
+async function rejects(fn, message) {
+  let rejected = false;
+  try { await fn(); } catch (_) { rejected = true; }
+  assert(rejected, message);
+}
+function fixture(n, seed) {
+  let state = seed >>> 0;
+  return Float32Array.from({length:n}, () => {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+    return (state >>> 0) / 4294967296 - 0.5;
+  });
+}
+function reference(a, b, m, k, n) {
+  const out = new Float64Array(m*n);
+  for (let row=0; row<m; row++) for(let col=0; col<n; col++) {
+    let sum=0;
+    for(let i=0;i<k;i++) sum += a[row*k+i]*b[i*n+col];
+    out[row*n+col]=sum;
+  }
+  return out;
+}
+function check(actual, expected) {
+  if (actual.length !== expected.length) throw new Error("output length mismatch");
+  let max = 0;
+  for(let i=0;i<actual.length;i++) {
+    const error = Math.abs(actual[i]-expected[i]);
+    if(!Number.isFinite(actual[i]) || error > 1e-5+1e-4*Math.abs(expected[i])) {
+      throw new Error(`element ${i}: ${actual[i]} != ${expected[i]}`);
+    }
+    max=Math.max(max,error);
+  }
+  return max;
+}
+function summary(samples) {
+  const ordered = [...samples].sort((a,b)=>a-b), i=Math.floor(ordered.length/2);
+  return {samples_ms:samples, median_ms:(ordered[i-1]+ordered[i])/2,
+    p95_ms:ordered[Math.ceil(ordered.length*.95)-1]};
+}
+try {
+  stage("module import");
+  const {default:init, WgpuMatmul} = await import("/module/spiraltorch_wasm.js");
+  stage("initialize WASM");
+  await init();
+  stage("invalid dimensions");
+  for(const dim of [-1,0,1.5,NaN,Infinity,4294967296,"2",true]) {
+    await rejects(()=>WgpuMatmul.create(dim,2,2), "reject invalid dimension "+String(dim));
+  }
+  const adapter = await navigator.gpu?.requestAdapter();
+  if(!adapter) throw new Error("No browser WebGPU adapter; no CPU fallback");
+  report.browser_adapter = {
+    vendor:adapter.info?.vendor, architecture:adapter.info?.architecture,
+    device:adapter.info?.device, description:adapter.info?.description,
+    is_fallback_adapter:adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter,
+  };
+  report.adapter_identity_boundary = "Browser adapter probe is separate from the Rust runtime; wgpu 0.20 reports no exact browser adapter identity";
+  report.browser_limits = {maxBufferSize:adapter.limits.maxBufferSize,
+    maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize};
+  stage("create Rust workspace");
+  const [probe, concurrent] = await Promise.all([
+    WgpuMatmul.create(2,3,2), WgpuMatmul.create(2,2,1),
+  ]);
+  report.rust_adapter = probe.adapterInfo();
+  if(report.rust_adapter instanceof Map) report.rust_adapter = Object.fromEntries(report.rust_adapter);
+  await rejects(()=>probe.dispatch(), "missing input rejected");
+  await rejects(()=>probe.readback(), "uncomputed output rejected");
+  const a = new Float32Array([1,2,3,4,5,6]);
+  const b = new Float32Array([1,0,0,1,1,1]);
+  for(const bad of [Array.from(a),new Float64Array(a),new Uint32Array(a),{}]) {
+    await rejects(()=>probe.upload(bad,b), "reject non-Float32Array operand");
+  }
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const foreign = new frame.contentWindow.Float32Array(a);
+  probe.upload(foreign,b);
+  probe.dispatch();
+  const generation = probe.generation;
+  await rejects(()=>probe.upload(a,b.subarray(1)), "invalid upload rejected atomically");
+  assert(probe.generation === generation && probe.outputIsCurrent, "invalid upload preserves generation/output");
+  for(const count of [-1,0,1.5,1025,4294967296,NaN,"1"]) {
+    await rejects(()=>probe.dispatch(count), "reject invalid repetition "+String(count));
+  }
+  stage("overlapping snapshots");
+  const before = probe.readback();
+  probe.upload(new Float32Array(6),b);
+  await rejects(()=>probe.readback(), "updated input invalidates output");
+  probe.dispatch();
+  const after = probe.readback();
+  check(await after,new Float64Array(4));
+  check(await before,new Float64Array([4,5,10,11]));
+  assert(true,"overlapping readbacks preserve snapshot generations");
+  probe.upload(a,b); probe.dispatch();
+  stage("GPU chaining");
+  const next = concurrent;
+  next.uploadRhs(new Float32Array([1,1]));
+  next.setLhsFrom(probe); next.dispatch(3);
+  const chained = next.readback();
+  next.free(); probe.free(); frame.remove();
+  check(await chained,new Float64Array([9,21]));
+  assert(true,"GPU chain and pending readback survive workspace free");
+  for(const [m,k,n] of [[7,63,65],[64,64,64],[256,256,256],[512,512,512],[1024,64,32]]) {
+    for(const seed of [17,29,43]) {
+      stage(`matrix ${m}x${k}x${n}, seed ${seed}`);
+      const a=fixture(m*k,seed), b=fixture(k*n,seed+1);
+      const workspace=await WgpuMatmul.create(m,k,n);
+      workspace.upload(a,b); workspace.dispatch();
+      const max_abs_error = check(await workspace.readback(),reference(a,b,m,k,n));
+      const run=async()=> {
+        for(let i=0;i<16;i++) workspace.dispatch();
+        await workspace.synchronize();
+      };
+      for(let i=0;i<5;i++) await run();
+      const samples=[];
+      for(let i=0;i<20;i++) { const start=performance.now(); await run(); samples.push(performance.now()-start); }
+      report.cases.push({shape_m_k_n:[m,k,n],seed,max_abs_error,dispatches:16,
+        status:"passed",timing:summary(samples)});
+      workspace.free();
+    }
+  }
+  report.status="passed";
+  report.stage="complete";
+} catch(error) {
+  report.status="error"; report.error=String(error.stack||error);
+}
+output.textContent=JSON.stringify(report,null,2);
+output.dataset.status=report.status;
+</script>

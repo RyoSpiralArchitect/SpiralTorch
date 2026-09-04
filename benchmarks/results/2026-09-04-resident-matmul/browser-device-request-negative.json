@@ -1,0 +1,43 @@
+{
+  "schema": "spiraltorch.browser_resident_matmul.v1",
+  "boundary": "resident dispatch then four-byte map completion fence; upload/allocation/full readback excluded",
+  "dtype": "float32",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+  "cases": [],
+  "assertions": [
+    "reject invalid dimension -1",
+    "reject invalid dimension 0",
+    "reject invalid dimension 1.5",
+    "reject invalid dimension NaN",
+    "reject invalid dimension Infinity",
+    "reject invalid dimension 4294967296",
+    "reject invalid dimension 2",
+    "reject invalid dimension true"
+  ],
+  "stage": "create Rust workspace",
+  "browser_adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": ""
+  },
+  "browser_limits": {
+    "maxBufferSize": 4294967292,
+    "maxStorageBufferBindingSize": 4294967292
+  },
+  "status": "error",
+  "error": "Error: WGPU device request failed: JsValue(OperationError: Failed to execute 'requestDevice' on 'GPUAdapter': The limit \"maxInterStageShaderComponents\" with a non-undefined value is not recognized.\nOperationError: Failed to execute 'requestDevice' on 'GPUAdapter': The limit \"maxInterStageShaderComponents\" with a non-undefined value is not recognized.\n    at imports.wbg.__wbg_requestDevice_09a893eceaf71338 (http://127.0.0.1:53689/module/spiraltorch_wasm.js:8300:26)\n    at spiraltorch_wasm.wasm.__wbg_requestDevice_09a893eceaf71338 externref shim (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7399]:0x473acc)\n    at spiraltorch_wasm.wasm.<wgpu[7a00298ac9b9686e]::backend::webgpu::ContextWebGpu as wgpu[7a00298ac9b9686e]::context::Context>::adapter_request_device (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[375]:0xf198e)\n    at spiraltorch_wasm.wasm.<wgpu[7a00298ac9b9686e]::backend::webgpu::ContextWebGpu as wgpu[7a00298ac9b9686e]::context::DynContext>::adapter_request_device (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[5690]:0x454c6e)\n    at spiraltorch_wasm.wasm.<wgpu[7a00298ac9b9686e]::Adapter>::request_device (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[5544]:0x44faad)\n    at spiraltorch_wasm.wasm.wasm_bindgen_futures[b815638e19d27ba3]::future_to_promise::<<spiraltorch_wasm[c26851b641041c29]::wgpu_resident::WasmWgpuMatmul>::create::{closure#0}::_::__wasm_bindgen_generated_WgpuMatmul_create::{closure#0}>::{closure#0}::{closure#0} (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[369]:0xeb221)\n    at spiraltorch_wasm.wasm.<wasm_bindgen_futures[b815638e19d27ba3]::queue::Queue>::new::{closure#0} (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[2753]:0x386440)\n    at spiraltorch_wasm.wasm.wasm_bindgen[710950fbc9f77c55]::convert::closures::_::invoke::<wasm_bindgen[710950fbc9f77c55]::JsValue, ()> (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7336]:0x47335d)\n    at spiraltorch_wasm.wasm.closure531 externref shim (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7602]:0x474f26)\n    at __wbg_adapter_6 (http://127.0.0.1:53689/module/spiraltorch_wasm.js:3533:10))\n    at imports.wbg.__wbg_new_da9dc54c5db29dfa (http://127.0.0.1:53689/module/spiraltorch_wasm.js:8202:21)\n    at spiraltorch_wasm.wasm.__wbg_new_da9dc54c5db29dfa externref shim (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7483]:0x47438a)\n    at spiraltorch_wasm.wasm.<js_sys[f40e8e1aa80d80af]::Error>::new (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[8353]:0x477802)\n    at spiraltorch_wasm.wasm.spiraltorch_wasm[c26851b641041c29]::wgpu_resident::error::<st_backend_wgpu[213d27731a499109]::runtime::WgpuRuntimeError> (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[4404]:0x414640)\n    at spiraltorch_wasm.wasm.wasm_bindgen_futures[b815638e19d27ba3]::future_to_promise::<<spiraltorch_wasm[c26851b641041c29]::wgpu_resident::WasmWgpuMatmul>::create::{closure#0}::_::__wasm_bindgen_generated_WgpuMatmul_create::{closure#0}>::{closure#0}::{closure#0} (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[369]:0xeb76f)\n    at spiraltorch_wasm.wasm.<wasm_bindgen_futures[b815638e19d27ba3]::queue::Queue>::new::{closure#0} (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[2753]:0x386440)\n    at spiraltorch_wasm.wasm.wasm_bindgen[710950fbc9f77c55]::convert::closures::_::invoke::<wasm_bindgen[710950fbc9f77c55]::JsValue, ()> (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7336]:0x47335d)\n    at spiraltorch_wasm.wasm.closure531 externref shim (http://127.0.0.1:53689/module/spiraltorch_wasm_bg.wasm:wasm-function[7602]:0x474f26)\n    at __wbg_adapter_6 (http://127.0.0.1:53689/module/spiraltorch_wasm.js:3533:10)\n    at real (http://127.0.0.1:53689/module/spiraltorch_wasm.js:248:20)",
+  "wasm_sha256": "9a79267aa096d04d1cd121681f51768c61c06a2c2deeb19dba7dd260ce7d4711",
+  "page_sha256": "55ea4ad0d9294002212793f44b339b2637971265019a384e1a9d5e4a2d44b01d",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "asset_sha256": {
+    "/": "55ea4ad0d9294002212793f44b339b2637971265019a384e1a9d5e4a2d44b01d",
+    "/module/spiraltorch_wasm.js": "0fac5a287f8d73100498d107bea20cdbcd0784556a7ed3917ea677345d18b1e5",
+    "/module/spiraltorch_wasm_bg.wasm": "9a79267aa096d04d1cd121681f51768c61c06a2c2deeb19dba7dd260ce7d4711",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "152.0.7977.77",
+  "page_errors": []
+}

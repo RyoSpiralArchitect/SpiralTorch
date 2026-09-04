@@ -12,6 +12,9 @@ crate-type = ["cdylib", "rlib"]
 name = "spiraltorch_wasm"
 path = "src/lib.rs"
 
+[features]
+webgpu = ["dep:st-backend-wgpu", "dep:wasm-bindgen-futures"]
+
 [dependencies]
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-core   = { path = "../../crates/st-core" }
@@ -31,3 +34,5 @@ web-sys = { version = "0.3", features = [
 ] }
 serde-wasm-bindgen = "0.5"
 getrandom = { version = "0.2", features = ["js"] }
+st-backend-wgpu = { path = "../../crates/st-backend-wgpu", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }

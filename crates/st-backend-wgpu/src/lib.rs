@@ -16,6 +16,7 @@ pub mod nd_indexer;
 pub mod nerf;
 pub mod rankk_exact_2ce;
 pub mod render;
+pub mod resident_matmul;
 pub mod runtime;
 pub mod shader_sources;
 pub mod softmax;

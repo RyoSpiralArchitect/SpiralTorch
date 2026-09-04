@@ -47,6 +47,10 @@ mod mellin;
 #[cfg(target_arch = "wasm32")]
 mod tuner;
 mod utils;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+mod wgpu_resident;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+pub use wgpu_resident::*;
 
 pub use api_llm_policy::*;
 pub use autograd::*;

@@ -1,0 +1,1165 @@
+{
+  "schema": "spiraltorch.resident_matmul_bench.v1",
+  "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.43",
+  "host": "spiralreality",
+  "python": "3.14.4 (main, Jun 18 2026, 14:25:02) [GCC 15.2.0]",
+  "torch": "2.13.0+cu132",
+  "torch_device": "cuda",
+  "torch_gpu": "NVIDIA GeForce RTX 5090",
+  "visible_cuda_devices": 1,
+  "device_identity_boundary": "single visible CUDA GPU plus matching adapter names; no cross-API UUID attestation",
+  "spiraltorch_native": "/home/ryospiralarchitect/.local/state/spiraltorch/benchmarks/resident-matmul-v1/venv/lib/python3.14/site-packages/spiraltorch/spiraltorch.abi3.so",
+  "spiraltorch_native_sha256": "8c0faeefcbdeebc6db812ced4f40fa66ed5f7592b25ffdcf007a371576929948",
+  "script_sha256": "079a9afc6791f017f9114e648c8c01caf916da8dc72fe4ff9711900c06a7848a",
+  "helper_sha256": "7401f011fc7cfe4a7704918afc82bb76bbbeadc027c580e3d4715921bf984e64",
+  "iterations": 20,
+  "warmup": 5,
+  "dispatches_per_sample": 16,
+  "dtype": "float32",
+  "tf32": false,
+  "int8": false,
+  "boundary": "equal Python-loop resident matmul calls then backend synchronize; allocation/upload/readback excluded",
+  "notes": "includes API/queue/host synchronization costs; not GPU timestamp or model-quality evidence",
+  "cases": [
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "b3e57b6190a676ada27712c6aa6d7c4982af4e10c0b8fcd63ac4ba1afa0e6679",
+        "fdfb578edf294fb06454d01b7e4dac2ff1cf2b0b48d356f9cba6ae6728ba91fc"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 6.890617407773192e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.207449325888124e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.337281,
+          "p95_ms": 0.610906,
+          "min_ms": 0.264362,
+          "samples_ms": [
+            0.343098,
+            0.330084,
+            0.327389,
+            0.327131,
+            0.327444,
+            0.331464,
+            0.710637,
+            0.368097,
+            0.266215,
+            0.394253,
+            0.327351,
+            0.392271,
+            0.392179,
+            0.384345,
+            0.388995,
+            0.264362,
+            0.610906,
+            0.269663,
+            0.396102,
+            0.265478
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1254495,
+          "p95_ms": 0.138006,
+          "min_ms": 0.096141,
+          "samples_ms": [
+            0.127359,
+            0.125158,
+            0.127229,
+            0.124353,
+            0.096141,
+            0.124749,
+            0.145803,
+            0.100536,
+            0.129846,
+            0.128125,
+            0.126348,
+            0.127191,
+            0.124079,
+            0.128991,
+            0.09735,
+            0.124276,
+            0.096173,
+            0.138006,
+            0.100174,
+            0.125741
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.37194357227356417,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "6115239cb384931d43fa149d47371f92c6f8c7587a286894e48768c61fd0850d",
+        "ac620b21142a70465fe5170fa499dc6e410fc93ef136791f130280dbc5519fa5"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 8.283623698090992e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.174129402123583e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.387764,
+          "p95_ms": 0.395825,
+          "min_ms": 0.26235,
+          "samples_ms": [
+            0.399335,
+            0.393109,
+            0.395825,
+            0.264336,
+            0.346435,
+            0.385839,
+            0.353575,
+            0.388828,
+            0.26235,
+            0.392602,
+            0.384604,
+            0.264427,
+            0.38635,
+            0.38865,
+            0.389533,
+            0.394179,
+            0.386878,
+            0.264585,
+            0.389021,
+            0.391872
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1268935,
+          "p95_ms": 0.129967,
+          "min_ms": 0.093107,
+          "samples_ms": [
+            0.094146,
+            0.129904,
+            0.127197,
+            0.126156,
+            0.130225,
+            0.127343,
+            0.126243,
+            0.094597,
+            0.125086,
+            0.094901,
+            0.129967,
+            0.126299,
+            0.127003,
+            0.093107,
+            0.127239,
+            0.12794,
+            0.129884,
+            0.127018,
+            0.126784,
+            0.093141
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.3272441485026975,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        64,
+        64,
+        64
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "52d195316339c1b009409992cd8cda4b03b280db7a42dff273a16cbbc58f90d6",
+        "b6d4002a204ac0045248bc89f676f6a89ee854bc179825398b5c10a46f7ad82c"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 5.60575179830991e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 4.151576624700226e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.384779,
+          "p95_ms": 0.394496,
+          "min_ms": 0.264116,
+          "samples_ms": [
+            0.394496,
+            0.392194,
+            0.267807,
+            0.384647,
+            2.007165,
+            0.384989,
+            0.390524,
+            0.384911,
+            0.266951,
+            0.382734,
+            0.382323,
+            0.387317,
+            0.388935,
+            0.385264,
+            0.265851,
+            0.381696,
+            0.264116,
+            0.389121,
+            0.38417,
+            0.26431
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1278875,
+          "p95_ms": 0.129571,
+          "min_ms": 0.094073,
+          "samples_ms": [
+            0.094073,
+            0.129281,
+            0.127812,
+            0.129571,
+            0.147464,
+            0.097674,
+            0.128784,
+            0.128919,
+            0.125056,
+            0.128379,
+            0.127963,
+            0.129187,
+            0.129144,
+            0.095153,
+            0.125468,
+            0.096184,
+            0.124301,
+            0.128639,
+            0.095507,
+            0.12408
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.3323661114561865,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "4d575d2919aa712ae560c77958e835abb28d5079ef24eaee4936f79cf5b14857",
+        "36b76dd83906169e4231472dcad3b75935a3380a607b98118d62409c58a4b878"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 4.5230099470217056e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.539388335469738e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.5734395,
+          "p95_ms": 0.632543,
+          "min_ms": 0.560805,
+          "samples_ms": [
+            0.615608,
+            0.566155,
+            0.57902,
+            0.576604,
+            0.574653,
+            0.632543,
+            0.572422,
+            0.575935,
+            0.569677,
+            2.190382,
+            0.576226,
+            0.574457,
+            0.572178,
+            0.572119,
+            0.560805,
+            0.568587,
+            0.576922,
+            0.569857,
+            0.57079,
+            0.568466
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1581975,
+          "p95_ms": 0.160688,
+          "min_ms": 0.097008,
+          "samples_ms": [
+            0.169089,
+            0.160455,
+            0.158261,
+            0.158531,
+            0.098501,
+            0.157568,
+            0.15902,
+            0.099233,
+            0.159076,
+            0.159243,
+            0.157608,
+            0.158134,
+            0.157721,
+            0.15856,
+            0.098156,
+            0.157812,
+            0.099964,
+            0.160688,
+            0.097008,
+            0.159293
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.275874787139707,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "ed7a9e47122947dfa5806610b2d61ae831d6b09ea633316deccf759dcf630fb0",
+        "f93ca3fd30995f64c7db55489ada678c66f5b6cf181017b217e23a93b2d6bb63"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 3.032932706759084e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7382140691246661e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.570561,
+          "p95_ms": 0.624518,
+          "min_ms": 0.559523,
+          "samples_ms": [
+            0.583848,
+            0.576838,
+            0.571574,
+            0.568842,
+            0.571342,
+            0.56916,
+            0.570814,
+            0.57204,
+            0.569972,
+            0.57046,
+            0.559523,
+            0.568659,
+            0.570495,
+            0.624518,
+            2.269319,
+            0.570627,
+            0.570043,
+            0.568267,
+            0.571633,
+            0.568425
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.157746,
+          "p95_ms": 0.160501,
+          "min_ms": 0.096267,
+          "samples_ms": [
+            0.096848,
+            0.160501,
+            0.157163,
+            0.15791,
+            0.15637,
+            0.159703,
+            0.158922,
+            0.096744,
+            0.157582,
+            0.097575,
+            0.159861,
+            0.160258,
+            0.159296,
+            0.096267,
+            0.156131,
+            0.159421,
+            0.15676,
+            0.160526,
+            0.160472,
+            0.096696
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.2764752585613107,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        256,
+        256,
+        256
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "07508975c6b36e355e37fae2713539446452f2c14acb4975a38427c67b11bea7",
+        "f046396efbd671f5f1329b715f0d3dca451a719c99a1b184a21545d10e4d14ad"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 3.4355560103449534e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7729489574236368e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.575306,
+          "p95_ms": 0.58472,
+          "min_ms": 0.567904,
+          "samples_ms": [
+            0.58472,
+            0.57534,
+            0.568234,
+            0.573026,
+            0.571503,
+            0.575149,
+            0.576049,
+            0.580683,
+            0.573987,
+            0.57553,
+            0.575272,
+            0.574146,
+            0.576355,
+            0.567904,
+            0.573219,
+            0.576135,
+            0.57241,
+            0.575423,
+            0.576125,
+            2.26738
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.158313,
+          "p95_ms": 0.16013,
+          "min_ms": 0.096179,
+          "samples_ms": [
+            0.096179,
+            0.16144,
+            0.158402,
+            0.157518,
+            0.158486,
+            0.103671,
+            0.158345,
+            0.157763,
+            0.15952,
+            0.158086,
+            0.153013,
+            0.158719,
+            0.158704,
+            0.098389,
+            0.15863,
+            0.098745,
+            0.159586,
+            0.158281,
+            0.10006,
+            0.16013
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.2751805126315387,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "936bdd058177dd9215bbc5036298f58bc5bd7d166d306383e977b6ccd3c1ea41",
+        "60ab77ffcfbfc7bad903515f7394ede88ce4e3a44e0c78a17931b0e8fd41955f"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 8.307406419660879e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.9233052439560083e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 1.9082325,
+          "p95_ms": 1.950328,
+          "min_ms": 1.696647,
+          "samples_ms": [
+            1.974716,
+            1.917888,
+            1.909476,
+            1.887385,
+            1.941858,
+            1.948287,
+            1.77759,
+            1.950328,
+            1.696647,
+            1.927694,
+            1.938623,
+            1.89378,
+            1.903786,
+            1.851019,
+            1.906989,
+            1.932358,
+            1.949309,
+            1.697836,
+            1.888797,
+            1.69701
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.238141,
+          "p95_ms": 0.240342,
+          "min_ms": 0.17295,
+          "samples_ms": [
+            0.241948,
+            0.239883,
+            0.23725,
+            0.240342,
+            0.173294,
+            0.237331,
+            0.238441,
+            0.173189,
+            0.23822,
+            0.240284,
+            0.239862,
+            0.238064,
+            0.239755,
+            0.2399,
+            0.17295,
+            0.238191,
+            0.172962,
+            0.235453,
+            0.172992,
+            0.238091
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.12479663772627286,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "131214ac4dd99870bc784b621f865b7453a129b7a7e52d2431d0b124f3e9be74",
+        "06f469495ca67233c2ebece33d0971135000c7f7e049ddc34b1aa3ba28d72d42"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 8.167319900387326e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.7502088267562499e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 1.9173795,
+          "p95_ms": 1.954515,
+          "min_ms": 1.688279,
+          "samples_ms": [
+            1.957163,
+            1.953496,
+            1.952884,
+            1.92964,
+            1.95122,
+            1.954515,
+            1.885264,
+            1.95157,
+            1.905121,
+            1.782615,
+            1.950997,
+            1.896055,
+            1.8877,
+            1.929638,
+            1.863155,
+            1.900662,
+            1.83289,
+            1.688279,
+            1.871445,
+            1.951396
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.2378405,
+          "p95_ms": 0.239905,
+          "min_ms": 0.172489,
+          "samples_ms": [
+            0.177856,
+            0.237851,
+            0.237353,
+            0.240521,
+            0.237871,
+            0.238446,
+            0.236888,
+            0.172489,
+            0.237425,
+            0.172748,
+            0.239045,
+            0.238624,
+            0.23972,
+            0.172818,
+            0.239654,
+            0.239905,
+            0.23213,
+            0.23783,
+            0.238639,
+            0.172763
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.12404456186164503,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        512,
+        512,
+        512
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "cef45f14702390daac7dc2e6f6438069ee46ceb302eb1a83ab6e0076ab67c8ee",
+        "2f30dc1979a15f5130a170c9e1228006f272f15b20fbaef42f85c3f6d0777a4a"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 7.724724564894814e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 1.799131400304077e-06,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 1.9242745,
+          "p95_ms": 1.951866,
+          "min_ms": 1.695338,
+          "samples_ms": [
+            1.942183,
+            1.899225,
+            1.697728,
+            2.365762,
+            1.947502,
+            1.951819,
+            1.912565,
+            1.877889,
+            1.700206,
+            1.940307,
+            1.863703,
+            1.902641,
+            1.950907,
+            1.951866,
+            1.695338,
+            1.935984,
+            1.695594,
+            1.948738,
+            1.949027,
+            1.880439
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.238451,
+          "p95_ms": 0.240995,
+          "min_ms": 0.173115,
+          "samples_ms": [
+            0.175096,
+            0.240409,
+            0.238571,
+            0.238198,
+            0.239935,
+            0.173115,
+            0.237349,
+            0.240995,
+            0.239897,
+            0.239885,
+            0.238331,
+            0.23788,
+            0.239197,
+            0.17316,
+            0.237664,
+            0.173334,
+            0.241878,
+            0.238841,
+            0.173518,
+            0.240039
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.1239173517083971,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 17,
+      "input_sha256": [
+        "4d575d2919aa712ae560c77958e835abb28d5079ef24eaee4936f79cf5b14857",
+        "124c6e774410da7f0a536768790deedad89fc95c5f9b0906c81de3de7575a935"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 7.685046883310065e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.383789,
+          "p95_ms": 0.39985,
+          "min_ms": 0.279401,
+          "samples_ms": [
+            0.39985,
+            0.389581,
+            0.384414,
+            0.384015,
+            0.384917,
+            0.385371,
+            0.279401,
+            0.384309,
+            1.979736,
+            0.389013,
+            0.3858,
+            0.382775,
+            0.383456,
+            0.383563,
+            0.382358,
+            0.281528,
+            0.381688,
+            0.279876,
+            0.383502,
+            0.281462
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.1187115,
+          "p95_ms": 0.121291,
+          "min_ms": 0.0694,
+          "samples_ms": [
+            0.121291,
+            0.121479,
+            0.120122,
+            0.119397,
+            0.069444,
+            0.119514,
+            0.117142,
+            0.0694,
+            0.119925,
+            0.119204,
+            0.120271,
+            0.119206,
+            0.118734,
+            0.118689,
+            0.070289,
+            0.117003,
+            0.070106,
+            0.117195,
+            0.069457,
+            0.116848
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.30931449311991743,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 29,
+      "input_sha256": [
+        "ed7a9e47122947dfa5806610b2d61ae831d6b09ea633316deccf759dcf630fb0",
+        "cc1da591c5ee334098da7563f2e304b83b8f5790477530bb6675a2670b958163"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 9.141620038732867e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.38344,
+          "p95_ms": 0.396838,
+          "min_ms": 0.28387,
+          "samples_ms": [
+            0.396838,
+            0.384196,
+            0.388919,
+            0.285517,
+            0.384348,
+            0.383786,
+            0.388918,
+            0.367447,
+            0.28411,
+            0.383968,
+            0.385325,
+            0.284561,
+            0.382582,
+            1.99545,
+            0.382994,
+            0.392968,
+            0.382762,
+            0.28387,
+            0.381467,
+            0.383094
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.117742,
+          "p95_ms": 0.119621,
+          "min_ms": 0.069302,
+          "samples_ms": [
+            0.07106,
+            0.120908,
+            0.119621,
+            0.117397,
+            0.119299,
+            0.118602,
+            0.119373,
+            0.069302,
+            0.118087,
+            0.070105,
+            0.114733,
+            0.116799,
+            0.119214,
+            0.071679,
+            0.117113,
+            0.118377,
+            0.118879,
+            0.116756,
+            0.119096,
+            0.069863
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.30706759858126437,
+      "status": "passed"
+    },
+    {
+      "shape_m_k_n": [
+        1024,
+        64,
+        32
+      ],
+      "seed": 43,
+      "input_sha256": [
+        "07508975c6b36e355e37fae2713539446452f2c14acb4975a38427c67b11bea7",
+        "b44c155ba93e4839f9d278f82dad291ab54729241cf16db3731d84bdb6319864"
+      ],
+      "wgpu_adapter": {
+        "name": "NVIDIA GeForce RTX 5090",
+        "vendor": 4318,
+        "device": 11141,
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "driver": "NVIDIA",
+        "driver_info": "595.84"
+      },
+      "correctness": {
+        "spiraltorch": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        },
+        "torch": {
+          "passed": true,
+          "max_abs_error": 8.338345112157697e-07,
+          "rtol": 0.0001,
+          "atol": 1e-05
+        }
+      },
+      "timings": {
+        "spiraltorch_resident": {
+          "n": 20,
+          "median_ms": 0.382867,
+          "p95_ms": 0.392388,
+          "min_ms": 0.279105,
+          "samples_ms": [
+            0.392388,
+            0.385877,
+            0.286097,
+            0.382826,
+            0.384397,
+            0.383999,
+            0.387227,
+            0.38399,
+            0.281402,
+            0.383047,
+            0.382551,
+            0.382908,
+            0.382586,
+            0.382592,
+            0.279105,
+            0.388233,
+            0.284023,
+            0.382532,
+            2.022372,
+            0.281316
+          ]
+        },
+        "torch_resident": {
+          "n": 20,
+          "median_ms": 0.118187,
+          "p95_ms": 0.120051,
+          "min_ms": 0.06821,
+          "samples_ms": [
+            0.078178,
+            0.121754,
+            0.116768,
+            0.117975,
+            0.11994,
+            0.06821,
+            0.119464,
+            0.120006,
+            0.117081,
+            0.117568,
+            0.119985,
+            0.11996,
+            0.119469,
+            0.072055,
+            0.118589,
+            0.071581,
+            0.117307,
+            0.120051,
+            0.069876,
+            0.118399
+          ]
+        }
+      },
+      "torch_over_st_resident_batch": 0.30868944045843594,
+      "status": "passed"
+    }
+  ]
+}

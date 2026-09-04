@@ -57,6 +57,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 - 🔄 **[PyTorch Migration Guide](docs/pytorch-migration-guide.md)** - Seamless transition from PyTorch  
 - 📖 **[Example Gallery](docs/example-gallery.md)** - 18+ examples across vision, NLP, RL, and more
 - **[Backend vs PyTorch benchmarks](docs/backend_pytorch_benchmarks.md)** - Matched inputs, strict execution, actual WASM/CUDA runs, and preserved failures.
+- **[Resident WebGPU matmul](docs/resident_webgpu_matmul.md)** - Shared Rust execution from Python/browser WASM, GPU chaining, and asynchronous snapshots.
 - 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
 
 **Already familiar?** Jump to [Installation](#install-pip) or explore [Latest Highlights](#-latest-spiraltorch-highlights).
