@@ -27,7 +27,14 @@ function client() {
   const repos = {
     getReleaseByTag: async () => {
       if (state.readError) throw state.readError;
-      if (!state.release) throw Object.assign(new Error("missing"), { status: 404 });
+      if (!state.release || state.release.draft) {
+        throw Object.assign(new Error("tag endpoint does not expose drafts"), { status: 404 });
+      }
+      return { data: state.release };
+    },
+    listReleases: () => {},
+    getRelease: async (args) => {
+      assert.equal(args.release_id, state.release.id);
       return { data: state.release };
     },
     getCommit: async (args) => {
@@ -58,7 +65,9 @@ function client() {
       return { data: state.release };
     },
   };
-  const github = { rest: { repos }, paginate: async () => state.assets };
+  const github = { rest: { repos }, paginate: async (method) => (
+    method === repos.listReleases ? (state.release ? [state.release] : []) : state.assets
+  ) };
   return { state, github, repo: { owner: "test", repo: "repo" }, tag: "v1", sourceSha: "commit" };
 }
 
@@ -79,13 +88,27 @@ test("published or immutable releases are rejected without writes", async () => 
     { draft: false, immutable: true },
     { draft: false, immutable: false },
     { draft: true, immutable: true },
-    { draft: true, immutable: false, tag_name: "other" },
   ]) {
     const c = client();
     c.state.release = { tag_name: c.tag, ...release };
     await assert.rejects(preflight(c), /Refusing/);
     assert.deepEqual(c.state.events, []);
   }
+});
+
+test("authenticated pagination discovers a draft hidden by the tag endpoint", async () => {
+  const c = client();
+  c.state.release = { id: 9, tag_name: c.tag, draft: true };
+  assert.equal((await preflight(c)).id, 9);
+  assert.deepEqual(c.state.events, []);
+});
+
+test("ambiguous draft lookup is rejected instead of creating another release", async () => {
+  const c = client();
+  c.state.release = { id: 9, tag_name: c.tag, draft: true };
+  c.github.paginate = async () => [c.state.release, { ...c.state.release, id: 10 }];
+  await assert.rejects(preflight(c), /Ambiguous/);
+  assert.deepEqual(c.state.events, []);
 });
 
 test("non-404 lookup errors are not interpreted as missing", async () => {
