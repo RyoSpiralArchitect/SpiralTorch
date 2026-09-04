@@ -15,7 +15,9 @@ class BackendBenchmarkTests(unittest.TestCase):
     def test_effective_backend_identifies_non_faer_indexing(self):
         for operation in ("matmul", "gather", "scatter"):
             for backend in ("cpu", "faer", "wgpu"):
-                expected = "cpu" if backend == "faer" and operation != "matmul" else backend
+                expected = "faer" if operation == "matmul" and backend in ("cpu", "faer") else (
+                    "cpu" if backend == "faer" else backend
+                )
                 self.assertEqual(bench.effective_backend(operation, backend), expected)
 
     def test_shapes(self):

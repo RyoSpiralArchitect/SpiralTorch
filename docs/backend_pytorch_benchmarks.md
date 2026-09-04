@@ -23,6 +23,8 @@ earlier result. `--native-prefix /path/to/venv` can enforce import provenance.
 Faer only implements matmul here: gather/scatter use the explicit CPU indexing
 path. Every case records both `requested_st_backend` and `effective_st_backend`,
 including failed cases; this dispatch is not a GPU-error fallback.
+The Python matmul label `cpu` is also a Faer alias and is reported as
+`effective_st_backend: "faer"`, not as a distinct CPU implementation.
 
 - Both runtimes receive identical float32 values, with fixture hashes and seeds.
 - Matmul, gather, and scatter must match a float64 CPU reference before timing.

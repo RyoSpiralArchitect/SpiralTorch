@@ -86,6 +86,8 @@ def correctness(actual, expected, torch, rtol, atol):
 
 def effective_backend(operation, requested):
     # Faer implements matmul, not row indexing. Keep that distinction in each case.
+    if operation == "matmul" and requested == "cpu":
+        return "faer"
     return "cpu" if requested == "faer" and operation in ("gather", "scatter") else requested
 
 
