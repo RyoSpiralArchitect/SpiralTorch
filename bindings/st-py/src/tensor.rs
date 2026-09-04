@@ -257,22 +257,17 @@ enum F32Input {
     Owned(Vec<f32>),
 }
 
-unsafe impl Send for F32Input {}
-
-#[derive(Clone, Copy)]
-struct TensorOutPtr(usize);
-
-unsafe impl Send for TensorOutPtr {}
-unsafe impl Sync for TensorOutPtr {}
-
-impl TensorOutPtr {
-    unsafe fn as_mut_ptr(self) -> *mut Tensor {
-        self.0 as *mut Tensor
-    }
-
-    unsafe fn clone_tensor(self) -> Tensor {
-        (*self.as_mut_ptr()).clone()
-    }
+fn with_tensor_out(
+    py: Python<'_>,
+    cell: &Bound<'_, PyAny>,
+    operation: impl FnOnce(&mut Tensor) -> PyResult<()> + Send,
+) -> PyResult<PyTensor> {
+    let mut destination = cell.extract::<PyRefMut<PyTensor>>()?;
+    // Keep the Python borrow guard alive while only the Rust tensor crosses
+    // detach. Concurrent/reentrant Python access must not alias this write.
+    let tensor = &mut destination.inner;
+    py.detach(move || operation(tensor))?;
+    Ok(PyTensor::from_tensor(destination.inner.clone()))
 }
 
 #[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs", from_py_object)]
@@ -984,62 +979,41 @@ impl PyTensor {
         let lhs = self.inner.clone();
 
         if let Some(cell) = out {
-            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-            if dst.inner.shape() != (rows, cols) {
-                return Err(PyValueError::new_err(format!(
-                    "destination shape {:?} does not match ({}, {})",
-                    dst.inner.shape(),
-                    rows,
-                    cols
-                )));
-            }
-            if !matches!(dst.inner.layout(), Layout::RowMajor) {
-                return Err(PyValueError::new_err(
-                    "cpu-simd matmul expects a row-major destination tensor",
-                ));
-            }
-
-            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
-            drop(dst);
-
-            let rows_cl = rows;
-            let inner_cl = inner;
-            let cols_cl = cols;
-            let dst_ptr_closure = dst_ptr;
-
-            py.detach(move || unsafe {
-                let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+            return with_tensor_out(py, cell, move |tensor| {
+                if tensor.shape() != (rows, cols) {
+                    return Err(PyValueError::new_err(format!(
+                        "destination shape {:?} does not match ({}, {})",
+                        tensor.shape(),
+                        rows,
+                        cols
+                    )));
+                }
+                if !matches!(tensor.layout(), Layout::RowMajor) {
+                    return Err(PyValueError::new_err(
+                        "cpu-simd matmul expects a row-major destination tensor",
+                    ));
+                }
                 cpu_dense::matmul_packed_into(
                     tensor.data_mut(),
                     lhs.data(),
                     packed_buf.as_ref(),
-                    rows_cl,
-                    inner_cl,
-                    cols_cl,
+                    rows,
+                    inner,
+                    cols,
                 )
-            })
-            .map_err(PyRuntimeError::new_err)?;
-
-            let tensor = unsafe { dst_ptr.clone_tensor() };
-            return Ok(PyTensor { inner: tensor });
+                .map_err(PyRuntimeError::new_err)
+            });
         }
 
         let mut dst_tensor = Tensor::zeros(rows, cols).map_err(tensor_err_to_py)?;
-        let dst_ptr = TensorOutPtr((&mut dst_tensor as *mut Tensor) as usize);
-        let rows_cl = rows;
-        let inner_cl = inner;
-        let cols_cl = cols;
-        let dst_ptr_closure = dst_ptr;
-
-        py.detach(move || unsafe {
-            let tensor = &mut *dst_ptr_closure.as_mut_ptr();
+        py.detach(|| {
             cpu_dense::matmul_packed_into(
-                tensor.data_mut(),
+                dst_tensor.data_mut(),
                 lhs.data(),
                 packed_buf.as_ref(),
-                rows_cl,
-                inner_cl,
-                cols_cl,
+                rows,
+                inner,
+                cols,
             )
         })
         .map_err(PyRuntimeError::new_err)?;
@@ -1058,28 +1032,11 @@ impl PyTensor {
     ) -> PyResult<PyTensor> {
         let backend = parse_backend(backend);
         if let Some(cell) = out {
-            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
-            drop(dst);
-
-            // SAFETY: `dst_ptr` points to the destination tensor owned by the Python
-            // object. We drop the `PyRefMut` before releasing the GIL, ensuring there
-            // are no outstanding Rust borrows when the computation runs.
-            let dst_ptr_closure = dst_ptr;
-            py.detach(move || unsafe {
-                self.inner.matmul_into_with_backend(
-                    &other.inner,
-                    &mut *dst_ptr_closure.as_mut_ptr(),
-                    backend,
-                )
-            })
-            .map_err(tensor_err_to_py)?;
-
-            // SAFETY: `dst_ptr` still references the tensor stored in the Python
-            // object. Cloning after the computation completes is sound and gives us
-            // a handle to return to Python while leaving the buffer in place.
-            let tensor = unsafe { dst_ptr.clone_tensor() };
-            return Ok(PyTensor { inner: tensor });
+            return with_tensor_out(py, cell, |tensor| {
+                self.inner
+                    .matmul_into_with_backend(&other.inner, tensor, backend)
+                    .map_err(tensor_err_to_py)
+            });
         }
 
         let tensor = py
@@ -1102,27 +1059,12 @@ impl PyTensor {
         let bias = borrow_f32_argument(bias)?;
 
         if let Some(cell) = out {
-            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
-            drop(dst);
-
             let slice = bias.as_slice();
-            // SAFETY: see the explanation in `matmul`; we drop the borrow before
-            // releasing the GIL and only touch the tensor through `dst_ptr`.
-            let dst_ptr_closure = dst_ptr;
-            py.detach(move || unsafe {
-                self.inner.matmul_bias_relu_into_with_backend(
-                    &other.inner,
-                    slice,
-                    &mut *dst_ptr_closure.as_mut_ptr(),
-                    backend,
-                )
-            })
-            .map_err(tensor_err_to_py)?;
-
-            // SAFETY: `dst_ptr` remains valid for the duration of the call.
-            let tensor = unsafe { dst_ptr.clone_tensor() };
-            return Ok(PyTensor { inner: tensor });
+            return with_tensor_out(py, cell, |tensor| {
+                self.inner
+                    .matmul_bias_relu_into_with_backend(&other.inner, slice, tensor, backend)
+                    .map_err(tensor_err_to_py)
+            });
         }
 
         let slice = bias.as_slice();
@@ -1149,23 +1091,13 @@ impl PyTensor {
         let bias = borrow_f32_argument(bias)?;
 
         if let Some(cell) = out {
-            let bias_owned = bias.clone();
-            let tensor = py
-                .detach(move || {
-                    self.inner.matmul_bias_gelu_with_backend(
-                        &other.inner,
-                        bias_owned.as_slice(),
-                        backend,
-                    )
-                })
-                .map_err(tensor_err_to_py)?;
-
-            {
-                let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-                dst.inner = tensor.clone();
-            }
-
-            return Ok(PyTensor { inner: tensor });
+            return with_tensor_out(py, cell, |tensor| {
+                *tensor = self
+                    .inner
+                    .matmul_bias_gelu_with_backend(&other.inner, bias.as_slice(), backend)
+                    .map_err(tensor_err_to_py)?;
+                Ok(())
+            });
         }
 
         let slice = bias.as_slice();
@@ -1193,28 +1125,18 @@ impl PyTensor {
         let bias = borrow_f32_argument(bias)?;
 
         if let Some(cell) = out {
-            let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-            let dst_ptr = TensorOutPtr((&mut dst.inner as *mut Tensor) as usize);
-            drop(dst);
-
             let slice = bias.as_slice();
-            // SAFETY: identical reasoning to `matmul` — the raw pointer targets the
-            // tensor inside `out` and no Rust borrow lives across the GIL release.
-            let dst_ptr_closure = dst_ptr;
-            py.detach(move || unsafe {
-                self.inner.matmul_bias_add_relu_into_with_backend(
-                    &other.inner,
-                    slice,
-                    &residual.inner,
-                    &mut *dst_ptr_closure.as_mut_ptr(),
-                    backend,
-                )
-            })
-            .map_err(tensor_err_to_py)?;
-
-            // SAFETY: `dst_ptr` still points to the tensor owned by Python.
-            let tensor = unsafe { dst_ptr.clone_tensor() };
-            return Ok(PyTensor { inner: tensor });
+            return with_tensor_out(py, cell, |tensor| {
+                self.inner
+                    .matmul_bias_add_relu_into_with_backend(
+                        &other.inner,
+                        slice,
+                        &residual.inner,
+                        tensor,
+                        backend,
+                    )
+                    .map_err(tensor_err_to_py)
+            });
         }
 
         let slice = bias.as_slice();
@@ -1246,24 +1168,18 @@ impl PyTensor {
         let bias = borrow_f32_argument(bias)?;
 
         if let Some(cell) = out {
-            let bias_owned = bias.clone();
-            let tensor = py
-                .detach(move || {
-                    self.inner.matmul_bias_add_gelu_with_backend(
+            return with_tensor_out(py, cell, |tensor| {
+                *tensor = self
+                    .inner
+                    .matmul_bias_add_gelu_with_backend(
                         &other.inner,
-                        bias_owned.as_slice(),
+                        bias.as_slice(),
                         &residual.inner,
                         backend,
                     )
-                })
-                .map_err(tensor_err_to_py)?;
-
-            {
-                let mut dst = cell.extract::<PyRefMut<PyTensor>>()?;
-                dst.inner = tensor.clone();
-            }
-
-            return Ok(PyTensor { inner: tensor });
+                    .map_err(tensor_err_to_py)?;
+                Ok(())
+            });
         }
 
         let slice = bias.as_slice();
@@ -2011,6 +1927,60 @@ mod tests {
             // Python stays reproducible in `cargo test`.
             std::env::set_var("PYTHONNOUSERSITE", "1");
             Python::initialize();
+        });
+    }
+
+    #[test]
+    fn tensor_out_guard_blocks_reentrant_and_concurrent_borrows() {
+        ensure_python_initialized();
+        Python::attach(|py| {
+            let out = Py::new(py, PyTensor::zeros(1, 1).unwrap()).unwrap();
+            let original_pointer = out.borrow(py).inner.data().as_ptr() as usize;
+            let reentrant = out.clone_ref(py);
+            let concurrent = out.clone_ref(py);
+            let worker = std::thread::spawn(move || {
+                Python::attach(|py| {
+                    assert!(concurrent.try_borrow(py).is_err());
+                    assert!(concurrent.try_borrow_mut(py).is_err());
+                });
+            });
+            let result = with_tensor_out(py, out.bind(py).as_any(), move |tensor| {
+                // The worker can acquire the GIL only after detach, when the
+                // destination's exclusive borrow must already be installed.
+                worker.join().unwrap();
+                Python::attach(|py| {
+                    assert!(reentrant.try_borrow(py).is_err());
+                    assert!(reentrant.try_borrow_mut(py).is_err());
+                });
+                tensor.data_mut()[0] = 7.0;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(out.borrow(py).inner.data(), &[7.0]);
+            assert_eq!(result.inner.data(), &[7.0]);
+            assert_eq!(
+                out.borrow(py).inner.data().as_ptr() as usize,
+                original_pointer
+            );
+            assert!(out.try_borrow_mut(py).is_ok());
+        });
+    }
+
+    #[test]
+    fn tensor_out_guard_releases_after_error_and_rejects_wrong_types() {
+        ensure_python_initialized();
+        Python::attach(|py| {
+            let out = Py::new(py, PyTensor::zeros(1, 1).unwrap()).unwrap();
+            let result = with_tensor_out(py, out.bind(py).as_any(), |_| {
+                Err(PyValueError::new_err("synthetic operation failure"))
+            });
+            assert!(result.err().unwrap().is_instance_of::<PyValueError>(py));
+            assert_eq!(out.borrow(py).inner.data(), &[0.0]);
+            assert!(out.try_borrow_mut(py).is_ok());
+            assert!(with_tensor_out(py, PyList::empty(py).as_any(), |_| {
+                panic!("invalid out must be rejected before invoking the operation")
+            })
+            .is_err());
         });
     }
 
