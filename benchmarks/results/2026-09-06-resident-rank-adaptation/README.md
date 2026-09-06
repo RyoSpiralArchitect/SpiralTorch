@@ -74,6 +74,12 @@ A fresh baseline target reproduced exactly the same messages and locations;
 the candidate adds zero. The first shared-target baseline attempt reused stale
 SpiralK metadata and is retained as an invalid build attempt, not a baseline.
 
+CI additionally caught a missing optional field in a WASM-only test initializer.
+That test fixture is fixed; both default and WebGPU `wasm32 --all-targets` checks
+now pass locally. [ci-validation.tar.gz](ci-validation.tar.gz) preserves the
+initial CI failure and both successful checks, plus strict SpiralK Clippy.
+No measured runtime code changed in this follow-up.
+
 ## Provenance
 
 Native executable and browser WASM were built from clean

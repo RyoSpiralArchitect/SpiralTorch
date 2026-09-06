@@ -689,6 +689,7 @@ mod tests {
             subgroup: Some(true),
             algo_topk: None,
             ctile: None,
+            rank_tile: None,
             wg: Some(128),
             kl: None,
             ch: None,
