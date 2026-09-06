@@ -528,9 +528,8 @@ impl RankAdaptationSession {
 /// Stable identity of the knobs consumed by SpiralTorch's built-in rank executor.
 ///
 /// Shape and policy are included so the string remains meaningful outside one
-/// session. Built-in executors that ignore planner choices collapse to a
-/// shape-only signature; an unbound route retains the full tuple rather than
-/// claiming that its knobs are ignored.
+/// session. Built-in executors that ignore planner choices collapse to one
+/// signature; unbound routes cannot create distinct native execution arms.
 pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, RankPlanError> {
     plan.validate()?;
     let common = rank_execution_signature_prefix(plan);
@@ -538,20 +537,7 @@ pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, Ran
         BackendKind::Cuda => cuda_rank_execution_signature(plan, &common),
         BackendKind::Wgpu => wgpu_rank_execution_signature(plan, &common),
         BackendKind::Cpu | BackendKind::Hip => format!("{common}/path=shape_only"),
-        BackendKind::Mps => format!(
-            "{common}/path=unbound/u2={}/wg={}/kl={}/ch={}/mk={}/mkd={}/tile={}/ctile={}/fft_tile={}/fft_radix={}/fft_segments={}",
-            plan.choice.use_2ce,
-            plan.choice.wg,
-            plan.choice.kl,
-            plan.choice.ch,
-            plan.choice.mk,
-            plan.choice.mkd,
-            plan.choice.tile,
-            plan.choice.ctile,
-            plan.choice.fft_tile,
-            plan.choice.fft_radix,
-            plan.choice.fft_segments,
-        ),
+        BackendKind::Mps => non_native_rank_execution_signature(plan, &common),
     };
     Ok(signature)
 }
@@ -1061,6 +1047,36 @@ mod tests {
             ),
             Err(RankAdaptationError::DuplicatePlan { .. })
         ));
+    }
+
+    #[test]
+    fn unbound_mps_candidates_cannot_create_distinct_arms() {
+        for fallback in [AcceleratorFallback::Allow, AcceleratorFallback::Forbid] {
+            let base = try_plan_rank_with_config(
+                RankKind::TopK,
+                2,
+                256,
+                8,
+                BackendKind::Mps.default_caps(),
+                ExecutionConfig::new(fallback, 1024),
+            )
+            .unwrap();
+            assert!(matches!(
+                RankAdaptationSession::try_from_spiralk(
+                    &base,
+                    &["wg: 32;".to_owned(), "wg: 128;".to_owned()],
+                    SoftBanditMode::UCB,
+                    1,
+                ),
+                Err(RankAdaptationError::DuplicatePlan { .. })
+            ));
+            let signature = effective_rank_execution_signature(&base).unwrap();
+            assert!(signature.ends_with(if fallback.is_strict() {
+                "/path=unavailable"
+            } else {
+                "/path=software_fallback"
+            }));
+        }
     }
 
     #[test]
