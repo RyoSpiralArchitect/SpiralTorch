@@ -197,6 +197,13 @@ not trained or counted as fresh dropouts. Failed module/loss state is not
 recoverable, and errors do not imply rollback of completed trainer updates.
 Do not attach a new model to a failed worker's partially advanced trainer.
 
+All three epoch entry points wait for every submitted task before returning,
+even when submission fails or a worker errors or panics. Tasks still execute
+concurrently; this completion boundary does not add cancellation or rollback.
+Without dropout, the first error in input/join order is retained (a submission
+error takes precedence), and no successful epoch report or cooperative pulse
+is published. With dropout, the existing survivor and quorum rules still apply.
+
 Regression coverage compares all parameters across three epochs of two-worker
 parallel and sequential training. Barycenter synchronization also handles rank
 hints above tensor width without panic, normalizes storage layout, accumulates
