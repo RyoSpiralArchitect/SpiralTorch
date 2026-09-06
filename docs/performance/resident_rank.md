@@ -32,6 +32,9 @@ new dispatch is rejected. Failed input-length validation preserves prior state.
 The shared shader writes value bits as `u32`, avoiding browser rejection of a
 constant NaN expression, and uses `workgroupUniformLoad` for the merge-loop bound.
 Neither change disables shader validation or changes the CPU ordering contract.
+For MidK with at most 32 tiles, candidates find their global rank through
+parallel binary searches over the sorted tiles. This avoids serially discarding
+half of each row. More fragmented geometries retain the existing GPU merge.
 
 ## Python And Rust
 

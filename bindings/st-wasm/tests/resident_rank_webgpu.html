@@ -37,7 +37,7 @@ try {
   }
   await rejects(()=>WgpuRank.create("unknown",1,8,2),"invalid kind");
   await rejects(()=>WgpuRank.create("topk",1,8,9),"k exceeds columns");
-  for(const kind of ["topk","midk","bottomk"]) for(const tile of [70,128,257,1024]) {
+  for(const kind of ["topk","midk","bottomk"]) for(const tile of [8,70,128,257,1024]) {
     const rows=2, cols=513, k=7;
     const input=Float32Array.from({length:rows*cols},(_,i)=>(i*37%101-50)/7);
     input[0]=-0; input[1]=0; input[2]=Infinity; input.fill(NaN,cols); input[cols+1]=1;

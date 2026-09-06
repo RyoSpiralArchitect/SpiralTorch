@@ -371,7 +371,7 @@ mod tests {
         let runtime = pollster::block_on(WgpuRuntime::request_headless("resident.rank.test"))
             .expect("requested runtime test requires a WGPU adapter");
         for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-            for tile in [70, 128, 257, 1024] {
+            for tile in [8, 70, 128, 257, 1024] {
                 let plan = Plan::try_new(kind, 2, 513, 7, tile).unwrap();
                 let mut input = (0..1026)
                     .map(|i| ((i * 37 % 101) as f32 - 50.0) / 7.0)

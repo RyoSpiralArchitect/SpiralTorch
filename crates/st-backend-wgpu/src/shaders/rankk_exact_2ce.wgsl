@@ -224,6 +224,53 @@ fn rankk_exact_2ce_row_merge(
     workgroupBarrier();
     // Make the data-dependent loop bound provably uniform to browser validators.
     let rank_end = workgroupUniformLoad(&merge_end);
+    let rank_start = workgroupUniformLoad(&merge_start);
+
+    if (params.kind == KIND_MIDK && params.tiles_x <= 32u) {
+        // Every tile is sorted by the same total (value, source-index) order.
+        // Binary-search other tiles to compute each candidate's global rank,
+        // avoiding a serial merge through half the row just to discard it.
+        // Keep the original merge for extremely fragmented tile geometries.
+        var candidate_slot = local_id.x;
+        let row_slots = params.tiles_x * params.tile_stride;
+        loop {
+            if (candidate_slot >= row_slots) { break; }
+            let own_tile = candidate_slot / params.tile_stride;
+            let own_offset = candidate_slot % params.tile_stride;
+            if (own_offset < tile_counts[row * params.tiles_x + own_tile]) {
+                let address = row * row_slots + candidate_slot;
+                let value = scratch_values[address];
+                let index = scratch_indices[address];
+                var global_rank = own_offset;
+                for (var other = 0u; other < params.tiles_x; other = other + 1u) {
+                    if (other != own_tile) {
+                        let state = row * params.tiles_x + other;
+                        let base = state * params.tile_stride;
+                        var low = 0u;
+                        var high = tile_counts[state];
+                        loop {
+                            if (low >= high) { break; }
+                            let middle = low + (high - low) / 2u;
+                            if (candidate_before(scratch_values[base + middle],
+                                scratch_indices[base + middle], value, index)) {
+                                low = middle + 1u;
+                            } else {
+                                high = middle;
+                            }
+                        }
+                        global_rank = global_rank + low;
+                    }
+                }
+                if (global_rank >= rank_start && global_rank < rank_end) {
+                    let destination = row * params.k + global_rank - rank_start;
+                    output_values[destination] = bitcast<u32>(value);
+                    output_indices[destination] = index;
+                }
+            }
+            candidate_slot = candidate_slot + 256u;
+        }
+        return;
+    }
 
     var rank = 0u;
     loop {
