@@ -365,6 +365,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ZSpaceBarycenter",
         "BarycenterIntermediate",
         "z_space_barycenter",
+        "mean_tensors_scaled",
         "RankPlan",
         "plan",
         "plan_topk",

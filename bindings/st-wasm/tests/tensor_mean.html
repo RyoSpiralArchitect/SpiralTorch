@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Portable ordered-f64 tensor mean</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {TensorMeanBatch} from "/module/spiraltorch_wasm.js";
+const out=document.querySelector("#result");
+const report={schema:"spiraltorch.tensor_mean_browser.v1",status:"running",cases:[],
+  execution:"wasm_cpu",boundary:"inputs loaded once; reduction plus new Float32Array output; no GPU",
+  warmup:3,samples:16};
+function assert(ok,message) { if(!ok) throw Error(message); }
+function reject(fn) { let failed=false; try { fn(); } catch { failed=true; } assert(failed,"expected rejection"); }
+function reference(data,count,len,scale) {
+  const sums=new Float64Array(len),result=new Float32Array(len);
+  for(let p=0;p<count;p++) for(let i=0;i<len;i++) sums[i]+=data[p*len+i];
+  for(let i=0;i<len;i++) result[i]=sums[i]/count*Math.fround(scale);
+  return result;
+}
+function check(actual,expected) {
+  assert(actual instanceof Float32Array && actual.length===expected.length,"typed result shape");
+  for(let i=0;i<actual.length;i++) assert(Object.is(actual[i],expected[i]),"value mismatch "+i);
+}
+function checksum(data) {
+  let hash=2166136261;
+  for(const bits of new Uint32Array(data.buffer,data.byteOffset,data.length)) hash=Math.imul(hash^bits,16777619)>>>0;
+  return hash;
+}
+try {
+  await init();
+  reject(()=>new TensorMeanBatch(1,1,0,new Float32Array()));
+  reject(()=>new TensorMeanBatch(1,2,2,new Float32Array(2)));
+  reject(()=>new TensorMeanBatch(1,1,1,new Float32Array([NaN])));
+  for(const bad of [-1,0.5,NaN,Infinity,4294967296,"1",null,true]) {
+    reject(()=>new TensorMeanBatch(bad,0,1,new Float32Array()));
+    reject(()=>new TensorMeanBatch(0,bad,1,new Float32Array()));
+    reject(()=>new TensorMeanBatch(0,0,bad,new Float32Array()));
+  }
+  const edge=new TensorMeanBatch(1,4,3,new Float32Array([
+    16777216,2**60,3.4028234663852886e38,2**-149,
+    1,1,3.4028234663852886e38,2**-149,
+    -16777216,-(2**60),-3.4028234663852886e38,2**-149]));
+  try {
+    check(edge.meanScaled(1),new Float32Array([1/3,0,3.4028234663852886e38/3,2**-149]));
+    reject(()=>edge.meanScaled(Infinity));
+    const before=edge.meanScaled(1); before.fill(0);
+    assert(edge.meanScaled(1)[0]!==0,"returned output aliases stored inputs");
+  } finally { edge.free(); }
+  const empty=new TensorMeanBatch(0,3,4294967295,new Float32Array());
+  try { assert(empty.meanScaled(1).length===0,"empty mean"); reject(()=>empty.meanScaled(NaN)); }
+  finally { empty.free(); }
+  for(const seed of [17,29,43]) for(const count of [4,16,64]) for(const [rows,cols] of [[1,1025],[32,2048],[128,2048]]) {
+    const len=rows*cols,scale=1.25;
+    const data=Float32Array.from({length:count*len},(_,index)=>{
+      const p=Math.floor(index/len),i=index%len;
+      return ((i*17+p*131+seed*73)%4093-2046)/64;
+    });
+    const expected=reference(data,count,len,scale);
+    const batch=new TensorMeanBatch(rows,cols,count,data);
+    try {
+      data[0]=NaN;
+      check(batch.meanScaled(scale),expected);
+      data[0]=((seed*73)%4093-2046)/64;
+      const wasm_ms=[],javascript_ms=[],repetitions=len<2048 ? 16 : 1;
+      for(let sample=0;sample<report.warmup+report.samples;sample++) {
+        for(const arm of sample%2===0 ? ["wasm","javascript"] : ["javascript","wasm"]) {
+          const start=performance.now();
+          let result;
+          for(let rep=0;rep<repetitions;rep++) result=arm==="wasm" ? batch.meanScaled(scale) : reference(data,count,len,scale);
+          const elapsed=(performance.now()-start)/repetitions;
+          check(result,expected);
+          if(sample>=report.warmup) (arm==="wasm" ? wasm_ms : javascript_ms).push(elapsed);
+        }
+      }
+      report.cases.push({rows,cols,count,seed,scale,checksum:checksum(expected),wasm_ms,javascript_ms,repetitions,status:"passed"});
+    } finally { batch.free(); }
+  }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

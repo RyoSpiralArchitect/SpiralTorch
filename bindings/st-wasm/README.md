@@ -128,6 +128,30 @@ separately expose strict WGPU dispatch. They do not imply a browser GPU graph.
 the generated WASM, checks boundary failures, and trains a shared embedding/output
 table for 400 synthetic token-transition steps. Free returned handles normally.
 
+## Portable Tensor Means (Source Builds)
+
+`TensorMeanBatch` copies partial-major, row-major data once into WASM linear
+memory and computes signed-vector arithmetic means with the Rust reducer used by
+GoldenRetriever. This is not the probability/KL `z_space_barycenter` solver or a
+GPU kernel. Dimension/count arguments are validated u32 integers before coercion.
+
+```ts
+import { TensorMeanBatch } from "spiraltorch-wasm";
+
+const partials = new TensorMeanBatch(1, 2, 2, new Float32Array([1, -2, 3, 4]));
+try {
+    console.log(partials.meanScaled(1)); // Float32Array [2, 1]
+    console.log(partials.meanScaled(1.25)); // Float32Array [2.5, 1.25]
+} finally { partials.free(); }
+```
+
+Each coordinate starts at positive zero, adds partials in input order in f64,
+then divides by count and multiplies by the f32 scale in f64 before rounding to
+f32. Non-finite inputs, scales and outputs are errors, even at scale zero.
+Repeated calls return independent output arrays; this value operator does not
+record an autograd graph. Run the isolated browser fixture with
+`node tools/test_resident_browser.cjs MODULE_DIR CHROME NEW_OUTPUT '' '' '' '' tensor-mean`.
+
 ## Shared reverse-mode autograd
 
 `AutogradTensor` is a browser handle over the immutable graph implemented in

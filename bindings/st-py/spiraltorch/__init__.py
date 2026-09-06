@@ -1505,6 +1505,7 @@ _EXTRAS = [
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","mps_probe","probe_gpu_path","z_space_barycenter",
+    "mean_tensors_scaled",
     "hypergrad","realgrad","hypergrad_topos","topos_control_signal",
     "topos_optimizer_snapshot",
     "topos_training_hints","topos_training_plan",

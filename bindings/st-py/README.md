@@ -421,6 +421,14 @@ These APIs are not in the published 0.4.27 wheel yet.
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
   priors and chart couplings directly from Python.
+- Source builds also expose `mean_tensors_scaled(partials, scale=1.0)` for
+  signed-vector arithmetic means. For example,
+  `st.mean_tensors_scaled([st.Tensor(1, 2, [1, -2]), st.Tensor(1, 2, [3, 4])])`
+  returns `[[2, 1]]` via `.tolist()`. GoldenRetriever and WASM `TensorMeanBatch`
+  share this Rust CPU reducer: input-order f64 addition, divide by count,
+  multiply by the f32 scale promoted to f64, then round to f32. It rejects
+  non-finite inputs/scales/outputs and does not dispatch a rank kernel, execute
+  a probability barycenter, or construct an autograd graph.
 - Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
   into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
   same Z-space corridor as the solver.
