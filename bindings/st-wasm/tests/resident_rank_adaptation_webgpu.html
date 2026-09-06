@@ -36,7 +36,7 @@ try {
     }
     for(let index=0;index<tiles.length;index++) {
       const ws=await WgpuRank.createFromAdaptation(session,index);
-      assert(ws.kind===kind && JSON.stringify(ws.shape())===JSON.stringify([rows,cols,k]),"Rust candidate shape/kind");
+      assert(ws.kind===kind && JSON.stringify(Array.from(ws.shape()))===JSON.stringify([rows,cols,k]),"Rust candidate shape/kind");
       assert(ws.tileCols===Math.min(tiles[index],cols),"Rust effective tile");
       report.adapter ??= ws.adapterInfo();
       ws.upload(input); ws.dispatch(); check(await ws.readback()); workspaces.push(ws);
