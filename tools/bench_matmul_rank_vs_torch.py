@@ -18,6 +18,30 @@ def require_canonical_indices(actual, expected):
         raise RuntimeError("CUDA rank indices differ from the canonical stable selection")
 
 
+def run_native_pass(image, payload, probe_only=False):
+    native = subprocess.run([str(image)] + (["--readback-probe"] if probe_only else []),
+        input=payload, text=True, capture_output=True, timeout=180)
+    if native.returncode or native.stderr:
+        raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
+    return [json.loads(line) for line in native.stdout.splitlines()]
+
+
+def collect_readback_diagnostics(image, payload, requests, comparisons):
+    results = run_native_pass(image, payload, probe_only=True)
+    if len(results) != len(requests) or len(comparisons) != len(requests):
+        raise RuntimeError("native diagnostic cardinality mismatch")
+    for request, result, comparison in zip(requests, results, comparisons):
+        if (result.get("status") != "passed" or result.get("mode") != "probe_only"
+                or result.get("samples_ms") is not None
+                or any(result.get(key) != request[key] for key in ("rows", "inner", "cols", "k", "kind", "seed"))
+                or any(result.get(key) != comparison[key] for key in ("values", "indices", "adapter"))
+                or not isinstance(result.get("readback_probe"), dict)
+                or result["readback_probe"].get("status") != "passed"):
+            raise RuntimeError("native diagnostic contract mismatch")
+    return dict(boundary="separate native process after ALL native and CUDA comparison samples; not comparison timing",
+                results=results)
+
+
 def run(executable, readback_probe=False):
     require_uncontended_gpu()
     import torch
@@ -45,11 +69,7 @@ def run(executable, readback_probe=False):
         binding = audit.validate_source_binding(identity, before)
         if not binding["valid"]:
             raise RuntimeError(f"source/build mismatch: {binding}")
-        native = subprocess.run([str(image)] + (["--readback-probe"] if readback_probe else []),
-            input=payload, text=True, capture_output=True, timeout=180)
-        if native.returncode or native.stderr:
-            raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
-        results = [json.loads(line) for line in native.stdout.splitlines()]
+        results = run_native_pass(image, payload)
         if len(results) != len(requests):
             raise RuntimeError("native result cardinality mismatch")
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="passed",
@@ -74,8 +94,6 @@ def run(executable, readback_probe=False):
                     raise RuntimeError("native result/request mismatch")
                 if result["adapter"]["name"] != torch.cuda.get_device_name():
                     raise RuntimeError("WGPU and CUDA must select the same named GPU")
-                if readback_probe and result.get("readback_probe", {}).get("status") != "passed":
-                    raise RuntimeError("readback control did not pass")
                 left = torch.tensor(r["lhs"], dtype=torch.float32).reshape(r["rows"], r["inner"])
                 right = torch.tensor(r["rhs"], dtype=torch.float32).reshape(r["inner"], r["cols"])
                 reference = left @ right
@@ -111,6 +129,9 @@ def run(executable, readback_probe=False):
                 samples["torch_resident_per_op"] = bench.summarize([v/16 for v in timing["samples_ms"]])
                 report["cases"].append(dict(request={k:v for k,v in r.items() if k not in ("lhs","rhs")}, native=result, timings=samples,
                     cuda_rank_contract="stable sort; selected values and indices match the canonical reference"))
+        if readback_probe:
+            require_uncontended_gpu()
+            report["readback_diagnostics"] = collect_readback_diagnostics(image, payload, requests, results)
         after = audit.source_identity()
         require_uncontended_gpu()
         report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"
@@ -126,7 +147,7 @@ def main():
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--readback-probe", action="store_true",
-                        help="add native allocation/copy/map controls; not GPU-event times")
+                        help="run separate diagnostic process AFTER all native/CUDA samples; not comparison timing")
     args = parser.parse_args()
     try:
         report = run(args.executable.resolve(strict=True), args.readback_probe)

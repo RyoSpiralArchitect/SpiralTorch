@@ -141,7 +141,8 @@ mod native {
         rank.dispatch(1)?;
         let expected = rank.snapshot()?.read()?;
         let mut samples: [Vec<f64>; 6] = std::array::from_fn(|_| Vec::new());
-        for block in 0..14 {
+        let timing_blocks = if probe { 0 } else { 14 };
+        for block in 0..timing_blocks {
             for slot in 0..6 {
                 let mode = (slot + block + r.seed as usize % 6) % 6;
                 rank.synchronize()?;
@@ -245,10 +246,11 @@ mod native {
             json!({"status":"passed", "kind":r.kind,"rows":r.rows,"inner":r.inner,"cols":r.cols,"k":r.k,"seed":r.seed,
             "matmul_kernel":matmul.kernel().as_str(),"matmul_accumulation":matmul.accumulation().as_str(),
             "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
+            "mode":if probe { "probe_only" } else { "comparison" },
             "readback_probe":readback_probe,
             "values":expected.values,"indices":expected.indices,"resident_repetitions":16,
-            "samples_ms":{"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2],
-                "single_submit_bridge":samples[3],"resident_single_submit_per_op":samples[4],"resident_batched_submit_per_op":samples[5]}}),
+            "samples_ms":if probe { None } else { Some(json!({"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2],
+                "single_submit_bridge":samples[3],"resident_single_submit_per_op":samples[4],"resident_batched_submit_per_op":samples[5]})) }}),
         )
     }
 

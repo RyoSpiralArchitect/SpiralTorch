@@ -165,8 +165,11 @@ submission. All resident intervals end at a completion fence and exclude maps;
 every mode is checked against the reference after timing. Separate calls and
 batched replay remain distinct metrics rather than being pooled into one speedup.
 
-The native executable and Python wrapper both accept `--readback-probe` to add
-host-side stage diagnostics after normal timing. Extra completion fences separate projection,
+With `--readback-probe`, the Python wrapper first completes **all** normal native
+and CUDA comparisons, then starts a separate native process for diagnostics.
+The native executable's flag is probe-only: it emits no comparison timings.
+Diagnostics are stored separately under `readback_diagnostics`, never mixed
+into comparison samples. Extra completion fences separate projection,
 copy, rank and snapshot submission/read; these are not GPU-event times and do
 not reproduce the unfenced critical path. The synthetic byte-copy control holds
 another MAP_READ buffer alive in **all** modes, so its fresh-allocation cost is
