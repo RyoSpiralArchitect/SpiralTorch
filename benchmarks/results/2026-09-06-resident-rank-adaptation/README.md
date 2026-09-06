@@ -80,16 +80,58 @@ now pass locally. [ci-validation.tar.gz](ci-validation.tar.gz) preserves the
 initial CI failure and both successful checks, plus strict SpiralK Clippy.
 No measured runtime code changed in this follow-up.
 
+## Review Fix and Separate Replay
+
+Review found that the TopK-only `rank_tile` hint also replaced the generic tile
+used by BottomK refinement. A regression reproduced `ctile` changing from 512
+to 128 from that hint alone. Commit
+`5caf31829ecc668493e2a08d832b7e611745fd10` gates the hint on TopK in both heuristic
+conversion and explicit RankPlan rewrites. MidK/BottomK keep their existing
+tile sources; no default tile or GPU fallback policy was changed.
+
+Fresh artifacts from that clean source passed a separate replay:
+
+- Furnace: 36 cases and 2,304 correctness-gated adaptive observations.
+- Browser: 18 cases and 432 observations, with exact values/stable indices.
+- Packaged Python, Apple M4/Metal: 24 passed, one optional PyTorch test skipped.
+- macOS Rust: st-core 1,027 and st-kdsl 78 passed. Linux with `wgpu-rt,kdsl`:
+  st-core 1,053 passed, one live-adapter test ignored, and st-kdsl 78 passed.
+- Native example and SpiralK strict Clippy, WASM/WebGPU all-targets check,
+  formatting, and 21 rank benchmark admission tests passed.
+
+Large MidK/UCB's mean ratio is 0.656 (range 0.646-0.713 across three seeds).
+Large TopK/BottomK still pay exploration cost: 1.057-1.125 across both policies.
+The hindsight-best fixed WGPU control remains 1.69-5.37x slower than CUDA.
+This is one post-fix repetition, not additional independent seeds or a pooled
+extension of the earlier table. The same timing exclusions still apply.
+
+[review-replay-summary.json](review-replay-summary.json) records every case,
+native source/build identity, Python extension identity, browser asset hashes,
+and log hashes. [review-replay.tar.gz](review-replay.tar.gz) retains raw reports,
+the failing regressions, successful checks, build logs, and the recomputation
+script. The first regression attempt failed to compile because the test tried
+to compare a type without PartialEq; the second reproduced the actual bugs.
+After extraction, run
+`python -I analyze-review-fix.py --repo /path/to/SpiralTorch`.
+Python/WASM source labels rely on retained build logs and artifact hashes;
+unlike the native executable, they do not claim embedded Git attestation.
+
+Replay archive SHA-256:
+`480a03fd9fb72e837b36dfa96f904564154e992713d70881d27075ea6f7ca1b0`.
+Replay summary SHA-256:
+`fac378126b809d25919c004c7495c5f700b3ecbdad4272ef4ebd197c412f9074`.
+
 ## Provenance
 
-Native executable and browser WASM were built from clean
+The original table's native executable and browser WASM were built from clean
 `510a3b0487ea4959e34071d3e555d1e1191e12b7`.
 Both native reports validate the embedded Rust build manifest against the exact
 clean checkout before and after execution, and hash the copied execution image.
 The private final Python wheel uses `365cd1fdebd3da7a450b5ccf1ae586f0da2cccb7`,
 which adds the Python hint-field admission; native measured code is unchanged.
 The browser fixture's typed-array comparison was corrected at
-`25cd923c3ea0fc346c0da4b8c6ec3903756fcb90`. Subsequent changes are tests/CI/docs.
+`25cd923c3ea0fc346c0da4b8c6ec3903756fcb90`. Later tests/CI/docs changes precede
+the runtime review fix and its separate replay described above.
 Raw failed fixture attempts remain preserved and are not counted as passed runs.
 
 [summary.json](summary.json) contains all per-case means, medians, choices,
