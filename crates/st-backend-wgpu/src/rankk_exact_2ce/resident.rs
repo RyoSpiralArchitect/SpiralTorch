@@ -6,6 +6,7 @@ use crate::runtime::timestamps::{
     PassTimestampRecorder, PassTimestamps, TimestampErrorScopes, TimestampReadback,
 };
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -49,6 +50,7 @@ pub struct ResidentRank {
     bind_group: wgpu::BindGroup,
     generation: u64,
     output_generation: Option<u64>,
+    pending_profile: Option<runtime::Shared<AtomicBool>>,
     readback_pool: runtime::ReadbackPool,
 }
 
@@ -155,6 +157,7 @@ impl ResidentRank {
             bind_group,
             generation: 0,
             output_generation: None,
+            pending_profile: None,
             readback_pool,
         })
     }
@@ -167,6 +170,10 @@ impl ResidentRank {
     }
     pub fn output_is_current(&self) -> bool {
         self.output_generation == Some(self.generation)
+            && self
+                .pending_profile
+                .as_ref()
+                .is_none_or(|status| status.load(Ordering::Acquire))
     }
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         self.runtime.adapter_info()
@@ -190,6 +197,7 @@ impl ResidentRank {
             .write_buffer(&self.input, 0, bytemuck::cast_slice(input));
         self.generation = generation;
         self.output_generation = None;
+        self.pending_profile = None;
         Ok(())
     }
 
@@ -219,6 +227,7 @@ impl ResidentRank {
         context.queue().submit(Some(encoder.finish()));
         self.generation = generation;
         self.output_generation = None;
+        self.pending_profile = None;
         Ok(())
     }
 
@@ -259,6 +268,7 @@ impl ResidentRank {
         source.mark_dispatched();
         self.generation = generation;
         self.output_generation = Some(generation);
+        self.pending_profile = None;
         Ok(generation)
     }
 
@@ -275,6 +285,7 @@ impl ResidentRank {
         self.encode_dispatch(&mut encoder, repetitions);
         context.queue().submit(Some(encoder.finish()));
         self.output_generation = Some(self.generation);
+        self.pending_profile = None;
         Ok(self.generation)
     }
 
@@ -299,6 +310,10 @@ impl ResidentRank {
     /// This diagnostic uses up to 256 repetitions per submission; native Metal
     /// waits between chunks to bound command-buffer pressure. It is not the
     /// ordinary single-pass dispatch, and its intervals are not fast-path costs.
+    /// Native calls sharing a device reject overlapping diagnostic encoding before
+    /// allocating queries or submitting work. Pending reads do not hold this guard.
+    /// Profiled output stays stale until its readback succeeds. Uploads, newer
+    /// profiles and ordinary dispatches detach this profile's publication token.
     pub fn dispatch_profiled(
         &mut self,
         repetitions: u32,
@@ -310,7 +325,7 @@ impl ResidentRank {
             return Err(ResidentRankError::MissingInput);
         }
         let context = self.runtime.context();
-        let errors = TimestampErrorScopes::new(context.clone());
+        let errors = TimestampErrorScopes::try_new(context.clone())?;
         let timestamps = PassTimestampRecorder::new(context.clone(), repetitions * 2)?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         for start in (0..repetitions).step_by(PROFILE_REPETITIONS_PER_SUBMISSION as usize) {
@@ -338,9 +353,12 @@ impl ResidentRank {
         let mut readback = timestamps.resolve(&mut encoder);
         context.queue().submit(Some(encoder.finish()));
         readback.validate(errors.finish());
+        let validated = runtime::Shared::new(AtomicBool::new(false));
         self.output_generation = Some(self.generation);
+        self.pending_profile = Some(validated.clone());
         Ok(RankProfileReadback {
             readback,
+            validated,
             plan: self.plan,
             generation: self.generation,
             repetitions,
@@ -449,6 +467,7 @@ impl ResidentRank {
 /// GPU query results remain tied to the dispatch generation after later uploads.
 pub struct RankProfileReadback {
     readback: TimestampReadback,
+    validated: runtime::Shared<AtomicBool>,
     plan: Plan,
     generation: u64,
     repetitions: u32,
@@ -458,23 +477,27 @@ pub struct RankProfileReadback {
 impl RankProfileReadback {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read(self) -> Result<RankGpuProfile, ResidentRankError> {
+        let timestamps = self.readback.read()?;
+        self.validated.store(true, Ordering::Release);
         Ok(RankGpuProfile {
             plan: self.plan,
             generation: self.generation,
             repetitions: self.repetitions,
             host_paced_chunks: self.host_paced_chunks,
-            timestamps: self.readback.read()?,
+            timestamps,
         })
     }
 
     #[cfg(target_arch = "wasm32")]
     pub async fn read_async(self) -> Result<RankGpuProfile, ResidentRankError> {
+        let timestamps = self.readback.read_async().await?;
+        self.validated.store(true, Ordering::Release);
         Ok(RankGpuProfile {
             plan: self.plan,
             generation: self.generation,
             repetitions: self.repetitions,
             host_paced_chunks: self.host_paced_chunks,
-            timestamps: self.readback.read_async().await?,
+            timestamps,
         })
     }
 }
@@ -596,6 +619,117 @@ mod profiling_tests {
     use crate::rankk_exact_2ce::Kind;
 
     #[test]
+    fn profile_output_is_published_only_by_the_latest_successful_read() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            WgpuRuntime::request_profiled_headless_blocking("profile.publication").unwrap();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap()).unwrap();
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        let first = rank.dispatch_profiled(1).unwrap();
+        assert!(!rank.output_is_current());
+        assert!(matches!(
+            rank.snapshot(),
+            Err(ResidentRankError::StaleOutput)
+        ));
+        let latest = rank.dispatch_profiled(1).unwrap();
+        first.read().unwrap();
+        assert!(!rank.output_is_current());
+        latest.read().unwrap();
+        assert!(rank.output_is_current());
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [7., 6.]);
+        let old_generation = rank.dispatch_profiled(1).unwrap();
+        rank.upload(&[-1.; 8]).unwrap();
+        old_generation.read().unwrap();
+        assert!(!rank.output_is_current());
+        drop(rank.dispatch_profiled(1).unwrap());
+        assert!(!rank.output_is_current());
+        rank.dispatch(1).unwrap();
+        assert!(rank.output_is_current());
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [-1., -1.]);
+    }
+
+    #[test]
+    fn failed_profile_validation_cannot_publish_output_or_invalidate_later_dispatch() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime = WgpuRuntime::request_profiled_headless_blocking("profile.failed").unwrap();
+        let context = runtime.context().clone();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap()).unwrap();
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        for later_dispatch in [false, true] {
+            let mut pending = rank.dispatch_profiled(1).unwrap();
+            let scope = TimestampErrorScopes::try_new(context.clone()).unwrap();
+            let _invalid = context
+                .device()
+                .create_query_set(&wgpu::QuerySetDescriptor {
+                    label: None,
+                    ty: wgpu::QueryType::Timestamp,
+                    count: wgpu::QUERY_SET_MAX_QUERIES + 1,
+                });
+            pending.readback.validate(scope.finish());
+            assert!(!rank.output_is_current());
+            assert!(matches!(
+                rank.snapshot(),
+                Err(ResidentRankError::StaleOutput)
+            ));
+            if later_dispatch {
+                rank.dispatch(1).unwrap();
+            }
+            assert!(pending.read().is_err());
+            assert_eq!(rank.output_is_current(), later_dispatch);
+        }
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [7., 6.]);
+    }
+
+    #[test]
+    fn shared_device_profile_contention_preserves_state_and_normal_dispatch() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            WgpuRuntime::request_profiled_headless_blocking("profile.contention").unwrap();
+        let context = runtime.context().clone();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap()).unwrap();
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        rank.dispatch(1).unwrap();
+        let scope = TimestampErrorScopes::try_new(context).unwrap();
+        assert!(matches!(
+            rank.dispatch_profiled(1),
+            Err(ResidentRankError::Runtime(
+                WgpuRuntimeError::TimestampProfilingBusy
+            ))
+        ));
+        assert!(rank.output_is_current());
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [7., 6.]);
+        rank.upload(&[-1.; 8]).unwrap();
+        assert!(matches!(
+            rank.dispatch_profiled(1),
+            Err(ResidentRankError::Runtime(
+                WgpuRuntimeError::TimestampProfilingBusy
+            ))
+        ));
+        assert!(!rank.output_is_current());
+        assert_eq!(rank.generation(), 2);
+        rank.dispatch(1).unwrap();
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [-1., -1.]);
+        drop(scope);
+        assert_eq!(
+            rank.dispatch_profiled(1)
+                .unwrap()
+                .read()
+                .unwrap()
+                .generation(),
+            2
+        );
+    }
+
+    #[test]
     fn default_runtime_rejects_profiling_without_mutating_output() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
@@ -641,6 +775,10 @@ mod profiling_tests {
         assert!(!rank.output_is_current());
         let first = rank.dispatch_profiled(1).unwrap();
         let second = rank.dispatch_profiled(16).unwrap();
+        assert!(!rank.output_is_current());
+        // A later ordinary dispatch can publish output without consuming either
+        // owned profile; their eventual reads must not own this freshness state.
+        rank.dispatch(1).unwrap();
         let snapshot = rank.snapshot().unwrap();
         rank.upload(&vec![-3.; 8193]).unwrap();
         rank.dispatch(1).unwrap();

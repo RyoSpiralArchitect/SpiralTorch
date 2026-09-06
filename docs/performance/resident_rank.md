@@ -169,6 +169,23 @@ cancellation, rather than waiting for JavaScript garbage collection. This uses
 a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal
 query-handle Drop and all non-profiled execution retain their existing behavior.
 
+Native Rust callers sharing one device cannot overlap profile **encoding**:
+another active timestamp scope returns `TimestampProfilingBusy` before query
+allocation, submission or freshness changes. The guard ends when scopes are
+popped, not when readback completes. Distinct devices and ordinary dispatch
+remain unrestricted. Caller-owned device error scopes must not interleave
+with diagnostics, since wgpu's error-scope stack is device-wide. Python factories
+already create separate profiled devices; WASM pops scopes synchronously before
+returning a promise and its device handles are single-threaded.
+
+Profiled output remains stale until the corresponding query read and captured
+validation succeed. `synchronize()` alone does not publish it. Failed or dropped
+Rust readbacks cannot expose output, and an older profile cannot publish after
+a newer profile, upload, copy or ordinary dispatch supersedes it. Python's
+blocking `profile()` and an awaited successful WASM `profile()` publish the
+same state. Ordinary dispatch keeps its existing submission-freshness contract
+and does not allocate or read a diagnostic publication token.
+
 The [single-pass comparison and stage study](../../benchmarks/results/2026-09-07-rank-single-pass/README.md)
 retain repeated RTX 5090/PyTorch CUDA controls, matched browser and A/A runs,
 raw query intervals, and the rejected allocation-failure prototype. Native

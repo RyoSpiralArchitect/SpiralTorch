@@ -166,6 +166,8 @@ impl WgpuRuntime {
 pub enum WgpuRuntimeError {
     #[error("GPU timestamp queries are not enabled; use an explicitly profiled runtime")]
     TimestampQueriesUnavailable,
+    #[error("another timestamp profile is currently encoding on this device; no profile commands were submitted")]
+    TimestampProfilingBusy,
     #[error("invalid GPU timestamp data: {message}")]
     InvalidTimestamps { message: String },
     #[error("no suitable headless WGPU adapter is available")]

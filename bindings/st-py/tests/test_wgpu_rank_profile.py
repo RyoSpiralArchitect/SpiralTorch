@@ -38,6 +38,7 @@ def test_profile_is_exact_and_uses_rust_stage_selection(kind, tile):
             workspace.profile(invalid)
     assert not workspace.output_is_current
     report = workspace.profile(16)
+    assert workspace.output_is_current
     assert report["schema"] == "spiraltorch.rank_gpu_profile.v1"
     assert report["instrumented"] and report["generation"] == "1"
     assert report["repetitions"] == 16 and len(report["passes"]) == 32

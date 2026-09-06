@@ -99,6 +99,47 @@ try {
   const b=await second,a=await first;
   validate(a,1); validate(b,2);
   assert(a.generation==="1" && b.generation==="2","owned pending profiles");
+  const publication=await WgpuRank.create("topk",1,8,2,4,true);
+  publication.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  const initial=publication.profile(1);
+  assert(!publication.outputIsCurrent,"unvalidated profile cannot publish output");
+  await initial;
+  assert(publication.outputIsCurrent,"validated profile publishes output");
+  await check(publication,{values:[7,6],indices:[7,6]});
+  const old=publication.profile(1);
+  publication.upload(new Float32Array(8).fill(-1));
+  await old;
+  assert(!publication.outputIsCurrent,"old profile cannot publish a newer upload");
+  await rejects(()=>publication.readback());
+  const earlier=publication.profile(1),latest=publication.profile(2);
+  assert(!publication.outputIsCurrent,"latest profile starts unvalidated");
+  await latest;
+  assert(publication.outputIsCurrent,"latest profile publishes");
+  await earlier;
+  assert(publication.outputIsCurrent,"older read cannot invalidate the latest output");
+  await check(publication,{values:[-1,-1],indices:[0,1]});
+  publication.free();
+  // Inject a real WebGPU validation failure without exhausting driver memory.
+  const faulted=await WgpuRank.create("topk",1,8,2,4,true);
+  faulted.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  const createQuerySet=GPUDevice.prototype.createQuerySet;
+  let calls=0,failed;
+  GPUDevice.prototype.createQuerySet=function(descriptor) {
+    calls++;
+    return Reflect.apply(createQuerySet,this,[{...descriptor,count:8193}]);
+  };
+  try { failed=faulted.profile(1); }
+  finally { GPUDevice.prototype.createQuerySet=createQuerySet; }
+  assert(calls===1 && !faulted.outputIsCurrent,"rejected command cannot expose output");
+  let failure;
+  try { await failed; } catch(error) { failure=String(error); }
+  assert(failure?.includes("GPU timestamp execution failed"),"captured query validation must reject the profile");
+  assert(!faulted.outputIsCurrent,"failed profile must remain stale");
+  await rejects(()=>faulted.readback());
+  faulted.dispatch(1);
+  await check(faulted,{values:[7,6],indices:[7,6]});
+  faulted.free();
+  report.publication_validation={status:"passed",injected_query_calls:calls,error:failure};
   const unchanged=await WgpuRank.create("topk",1,8,2);
   assert(!unchanged.timestampQueriesEnabled,"profiled factories cannot replace global runtime");
   unchanged.free();
