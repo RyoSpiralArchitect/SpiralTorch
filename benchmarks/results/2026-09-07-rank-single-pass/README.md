@@ -183,3 +183,33 @@ The original archive and summary were not replaced.
 
 Review archive SHA-256: `a098243828e9c3b59c2853f0ca460214f209c0dd03586ae0ae8f76c353b5c711`.
 Review summary SHA-256: `1d0b40ce49e712b0de82c31befbc2caa74d515bc37ff4ad0f44273c7063061d0`.
+
+## Internal-Error Review
+
+A second review found that diagnostic scopes omitted `wgpu::Error::Internal`.
+`d8749294c6266f8b43668fc2fbe566146460ac3d` adds the third scope and checks all
+three results before publication. The pinned browser converter also maps the
+`GPUError` base type to a typed internal failure rather than trapping when its
+generated web-sys snapshot lacks `GPUInternalError`.
+
+The regression performs real scope push/pop calls and substitutes a synthetic
+`GPUInternalError` result for the Internal scope. This is **not an induced driver
+fault**. The frozen old module lacks that scope and publishes output; the fixed
+module rejects with the injected message, keeps output stale and recovers through
+ordinary dispatch. The separate real invalid-query Validation test still passes.
+
+Fresh products pass 87 live backend tests plus WGSL parsing on each native host,
+103 packaged Python tests, generated TypeScript contracts, 72 native profile
+cases and 12 browser profile cases. Another 1,009 timestamp reports revalidate.
+Native/WASM backend strict Clippy also passes. Ordinary rank dispatch and shader
+code are unchanged from `b7999e8f`; this adds no normal-path speedup claim.
+
+[internal-error-summary.json](internal-error-summary.json) and
+[internal-error-logs.tar.xz](internal-error-logs.tar.xz) retain red/green reports,
+builds, tests, product hashes and `analyze_internal.py`. After extraction, run
+that analyzer with `--repo /path/to/SpiralTorch --output recomputed.json`.
+Extraction and recomputation reproduced the summary byte-for-byte. Earlier
+archives remain unchanged.
+
+Internal-error archive SHA-256: `f66a5712dd6b10862307ef406f8a8a262e2bda05aa721aa61ebcc291895269ec`.
+Internal-error summary SHA-256: `fd174c52c69643785733be9f96e1973eb3ddd2f6e709228ce256986bc059b6bc`.
