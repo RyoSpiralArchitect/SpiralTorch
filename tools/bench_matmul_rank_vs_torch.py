@@ -13,6 +13,11 @@ import bench_rank_vs_torch as audit
 from bench_resident_rank_vs_torch import require_uncontended_gpu
 
 
+def require_canonical_indices(actual, expected):
+    if actual != expected:
+        raise RuntimeError("CUDA rank indices differ from the canonical stable selection")
+
+
 def run(executable):
     require_uncontended_gpu()
     import torch
@@ -56,7 +61,7 @@ def run(executable):
                 "host_bridge":"resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
                 "device_copy_bridge":"resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
                 "resident_copy_bridge_per_op":"16 matmul/copy/rank chains then completion fence; divided by 16, no maps",
-                "torch_resident_per_op":"16 matmul/rank chains with preallocated CUDA outputs then synchronize; divided by 16, no maps",
+                "torch_resident_per_op":"16 matmul/stable-sort chains with preallocated CUDA outputs then synchronize; divided by 16, no maps",
             }, cases=[])
         with torch.inference_mode():
             for r, result in zip(requests, results):
@@ -75,16 +80,13 @@ def run(executable):
                     raise RuntimeError("native projection/rank differs from canonical PyTorch reference")
                 left, right = left.cuda(), right.cuda()
                 logits = torch.empty_like(reference, device="cuda")
-                shape = logits.shape if r["kind"] == "midk" else expected.shape
+                shape = logits.shape
                 values = torch.empty(shape, dtype=torch.float32, device="cuda")
                 indices = torch.empty(shape, dtype=torch.int64, device="cuda")
 
                 def op():
                     torch.mm(left, right, out=logits)
-                    if r["kind"] == "midk":
-                        torch.sort(logits, dim=1, stable=True, out=(values, indices))
-                    else:
-                        torch.topk(logits, r["k"], dim=1, largest=r["kind"] == "topk", sorted=True, out=(values, indices))
+                    torch.sort(logits, dim=1, descending=r["kind"] == "topk", stable=True, out=(values, indices))
 
                 def repeated():
                     for _ in range(16):
@@ -92,14 +94,16 @@ def run(executable):
 
                 op()
                 bench.correctness(logits, reference.double(), torch, 0, 0)
-                selected = values[:, start:start+r["k"]] if r["kind"] == "midk" else values
+                selected = values[:, start:start+r["k"]]
                 bench.correctness(selected, expected.double(), torch, 0, 0)
+                require_canonical_indices(indices[:, start:start+r["k"]].cpu().tolist(), expected_ids.tolist())
                 if not torch.equal(logits.gather(1, indices), values):
                     raise RuntimeError("PyTorch indices do not refer to returned logits")
                 timing = bench.paired_timings({"torch":repeated}, 2, 12, torch.cuda.synchronize, r["seed"])["torch"]
                 samples = {name:bench.summarize(v) for name,v in result["samples_ms"].items()}
                 samples["torch_resident_per_op"] = bench.summarize([v/16 for v in timing["samples_ms"]])
-                report["cases"].append(dict(request={k:v for k,v in r.items() if k not in ("lhs","rhs")}, native=result, timings=samples))
+                report["cases"].append(dict(request={k:v for k,v in r.items() if k not in ("lhs","rhs")}, native=result, timings=samples,
+                    cuda_rank_contract="stable sort; selected values and indices match the canonical reference"))
         after = audit.source_identity()
         require_uncontended_gpu()
         report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"

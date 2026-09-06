@@ -18,7 +18,9 @@ jobs:
       - name: Test workspace inventory resolver
         run: python3 -m unittest tests/test_list_workspace_crates.py
       - name: Test resident benchmark admission
-        run: python3 -I tests/test_resident_rank_bench.py
+        run: |
+          python3 -I tests/test_resident_rank_bench.py
+          python3 -I tests/test_matmul_rank_bench.py
       - name: Verify generated workspace inventory
         run: python3 tools/list_workspace_crates.py --check-doc docs/development/workspace_crates.md
 
@@ -184,10 +186,12 @@ jobs:
         env:
           SPIRALTORCH_STRICT_GPU: "1"
         run: cargo test --locked -p st-tensor --features wgpu --release --test autograd_nonlinear
-      - name: Resident GPU ownership and matrix chaining
+      - name: Resident GPU ownership and matrix/rank chaining
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
-        run: cargo test --locked --release -p st-backend-wgpu resident_matmul
+        run: |
+          cargo test --locked --release -p st-backend-wgpu resident_matmul
+          cargo test --locked --release -p st-backend-wgpu rankk_exact_2ce
       - name: Portable GPU compaction across tile and row-prefix blocks
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"

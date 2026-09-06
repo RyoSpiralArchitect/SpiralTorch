@@ -105,7 +105,8 @@ python tools/bench_matmul_rank_vs_torch.py \
 
 This harness compares the intermediate host bridge against the GPU copy bridge,
 including the same final rank readback. It also measures resident chains against
-preallocated PyTorch CUDA matmul/rank with TF32 disabled. Inputs are bounded
+preallocated PyTorch CUDA matmul/stable-sort with TF32 disabled. All three rank
+kinds check both values and canonical indices, including cutoff ties. Inputs are bounded
 integers to make fp32 projection and stable tie-order checks exact; these
 fixtures do not establish arbitrary floating-point rank stability or model
 quality. Source/image binding and foreign-GPU-process gates match the rank-only
