@@ -44,6 +44,24 @@ class RankSuiteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             list(bench.requests_for(None, "unknown"))
 
+    def test_cuda_controls_preserve_source_index_order(self):
+        for kind in ["topk", "bottomk", "midk"]:
+            for values, tied in [([1., 2., 3., 4.], False),
+                                ([1., 1., 3., 4.], True),
+                                ([1., 2., 3., 3.], True)]:
+                request = dict(kind=kind, rows=2, cols=2, input=values)
+                self.assertEqual(bench.cuda_rank_operation(request),
+                                 "stable_sort" if tied or kind == "midk" else "topk")
+        # Equal values in different rows are not ties within a rank operation.
+        self.assertEqual(bench.cuda_rank_operation(dict(kind="topk", rows=2, cols=2,
+                                                       input=[1., 2., 1., 2.])), "topk")
+
+    def test_tied_cuda_selection_cannot_pass_on_values_alone(self):
+        bench.require_canonical_indices([[0, 1], [0, 1]], [[0, 1], [0, 1]])
+        for actual in [[[0, 2], [0, 1]], [[1, 0], [0, 1]], [[0], [0, 1]]]:
+            with self.assertRaisesRegex(RuntimeError, "canonical stable"):
+                bench.require_canonical_indices(actual, [[0, 1], [0, 1]])
+
     def test_native_boundary_and_effective_tile_are_checked(self):
         request = dict(kind="midk", rows=2, cols=256, k=8, seed=17, tile=512)
         result = dict(request, tile=256, status="passed", mode="resident_only",

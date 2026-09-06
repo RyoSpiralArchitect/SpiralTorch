@@ -56,6 +56,22 @@ def validate_native_result(result, request, resident_only):
         raise RuntimeError("native resident-only boundary mismatch")
 
 
+def cuda_rank_operation(request):
+    if request["kind"] == "midk":
+        return "stable_sort"
+    cols = request["cols"]
+    for row in range(request["rows"]):
+        values = request["input"][row * cols:(row + 1) * cols]
+        if len(set(values)) != cols:
+            return "stable_sort"
+    return "topk"
+
+
+def require_canonical_indices(actual, expected):
+    if actual != expected:
+        raise RuntimeError("CUDA rank differs from canonical stable source indices")
+
+
 def run(executable, suite="standard", resident_only=False):
     require_uncontended_gpu()
     import torch
@@ -106,13 +122,16 @@ def run(executable, suite="standard", resident_only=False):
                 if result["values"] != expected.flatten().tolist() or result["indices"] != expected_ids.flatten().tolist():
                     raise RuntimeError("native output differs from canonical PyTorch reference")
                 device = host.cuda()
-                shape = device.shape if r["kind"] == "midk" else (r["rows"], r["k"])
+                operation = cuda_rank_operation(r)
+                stable_sort = operation == "stable_sort"
+                shape = device.shape if stable_sort else (r["rows"], r["k"])
                 out_values = torch.empty(shape, dtype=torch.float32, device="cuda")
                 out_ids = torch.empty(shape, dtype=torch.int64, device="cuda")
 
                 def op():
-                    if r["kind"] == "midk":
-                        torch.sort(device, dim=1, stable=True, out=(out_values, out_ids))
+                    if stable_sort:
+                        torch.sort(device, dim=1, descending=r["kind"] == "topk",
+                                   stable=True, out=(out_values, out_ids))
                     else:
                         torch.topk(device, r["k"], dim=1, largest=r["kind"] == "topk", sorted=True, out=(out_values, out_ids))
 
@@ -121,14 +140,22 @@ def run(executable, suite="standard", resident_only=False):
                         op()
 
                 op()
-                view = out_values[:, start:start + r["k"]] if r["kind"] == "midk" else out_values
-                bench.correctness(view, expected.double(), torch, 0, 0)
-                if not torch.equal(device.gather(1, out_ids), out_values):
-                    raise RuntimeError("PyTorch rank indices do not point to returned values")
+                def validate_cuda():
+                    view = out_values[:, start:start + r["k"]] if stable_sort else out_values
+                    ids = out_ids[:, start:start + r["k"]] if stable_sort else out_ids
+                    bench.correctness(view, expected.double(), torch, 0, 0)
+                    require_canonical_indices(ids.cpu().tolist(), expected_ids.tolist())
+                    if not torch.equal(device.gather(1, out_ids), out_values):
+                        raise RuntimeError("PyTorch rank indices do not point to returned values")
+
+                validate_cuda()
                 timing = bench.paired_timings({"torch": repeated}, 2, 12, torch.cuda.synchronize, r["seed"])["torch"]
+                validate_cuda()
                 samples = {key: bench.summarize(v) for key, v in result["samples_ms"].items()}
                 samples["torch_resident_per_op"] = bench.summarize([v / 16 for v in timing["samples_ms"]])
-                report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"}, "native": result, "timings": samples})
+                report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"},
+                    "native": result, "timings": samples, "torch_operation": operation,
+                    "torch_canonical_indices": "checked before and after all timing intervals"})
         after = audit.source_identity()
         require_uncontended_gpu()
         report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"
