@@ -1110,6 +1110,74 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parallel_midk_rank_bounds_preserve_total_order_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime = pollster::block_on(WgpuRuntime::request_headless("midk.rank.bounds"))
+            .expect("requested runtime test requires WGPU");
+        let extremes = [
+            -f32::MAX,
+            -f32::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+        ];
+        for (cols, tile) in [
+            (513, 1024),
+            (1023, 257),
+            (513, 32),
+            (1024, 32),
+            (8191, 256),
+            (8193, 512),
+            (16383, 512),
+            (8193, 256),
+        ] {
+            for k in [1, 65, cols] {
+                let plan = Plan::try_new(Kind::MidK, 3, cols, k, tile).unwrap();
+                let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();
+                for pattern in 0..6 {
+                    let input = (0..3 * cols)
+                        .map(|i| {
+                            let column = i % cols;
+                            match pattern {
+                                0 => column as f32,
+                                1 => (cols - column) as f32,
+                                2 => {
+                                    if column % 3 == 0 {
+                                        -0.0
+                                    } else {
+                                        0.0
+                                    }
+                                }
+                                3 => extremes[(i as usize * 37) % extremes.len()],
+                                4 => ((i * 73 % 127) as f32 - 63.) / 8.,
+                                _ => f32::NAN,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let expected = cpu_reference(Kind::MidK, 3, cols, k, &input);
+                    rank.upload(&input).unwrap();
+                    rank.dispatch(2).unwrap();
+                    let result = rank.snapshot().unwrap().read().unwrap();
+                    assert_eq!(
+                        result.indices, expected.indices,
+                        "cols={cols} tile={tile} k={k} pattern={pattern}"
+                    );
+                    for (a, b) in result.values.iter().zip(expected.values) {
+                        assert!((a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn combined_readback_preserves_float_bits_and_signed_indices() {
         let words = [(-0.0f32).to_bits(), f32::NAN.to_bits(), 7u32, u32::MAX];
         let output = decode(bytemuck::cast_slice(&words));
