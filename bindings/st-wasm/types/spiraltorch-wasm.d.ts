@@ -12,6 +12,7 @@ declare module "spiraltorch-wasm" {
     /** Explicit WebGPU feature; exact two-stage rank, no CPU fallback. */
     export class WgpuRank {
         static create(kind: "topk" | "midk" | "bottomk", rows: number, cols: number, k: number, tile_cols?: number): Promise<WgpuRank>;
+        static createFromAdaptation(session: RankAdaptationSession, candidate_index: number): Promise<WgpuRank>;
         free(): void;
         readonly kind: string;
         readonly tileCols: number;
@@ -4419,6 +4420,7 @@ declare module "spiraltorch-wasm" {
         subgroup?: boolean | null;
         algo_topk?: number;
         ctile?: number;
+        rank_tile?: number | null;
         wg?: number;
         kl?: number;
         ch?: number;
@@ -4437,6 +4439,7 @@ declare module "spiraltorch-wasm" {
         ch: number;
         algo_topk: number;
         ctile: number;
+        rank_tile?: number | null;
         mode_midk: number;
         mode_bottomk: number;
         tile_cols: number;

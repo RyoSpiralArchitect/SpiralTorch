@@ -125,6 +125,59 @@ It measures single-threaded WASM CPU calls versus PyTorch CPU, **not browser
 WebGPU**, and does not include JS transport in tensor-call timing. The new
 native host-poll backoff does not block or replace the browser event loop.
 
+## Resident Rank Adaptation
+
+`RankAdaptationSession::wgpu_resident_candidate(index)` resolves a candidate
+into the exact resident WGPU parameters in Rust. Python exposes allocation as
+`WgpuRank.from_adaptation(session, index)`; WASM uses
+`await WgpuRank.createFromAdaptation(session, index)`. Create/upload all
+workspaces before timing and select them by the returned `candidate_index`.
+Allocation neither chooses nor credits an arm. Only strict WGPU two-command
+rank candidates are accepted; direct paths, fallback-enabled plans, unrelated
+execution identities, and out-of-range indices are rejected before allocation.
+Device readiness and limits are checked by the actual workspace constructor.
+
+SpiralK's `rank_tile` controls the TopK sweep tile. `ctile` still controls
+MidK/BottomK compaction and `tile_cols` still controls FFT. The new hard/soft
+field does not change existing scripts' defaults. Explicit RankPlan rewrites
+validate `rank_tile > 0`; runtime heuristic suggestions retain their existing
+selection/refinement policy. Effective tile clamping still deduplicates arms.
+
+```python
+import spiraltorch as st
+
+base = st.plan("topk", 2, 257, 7, backend="wgpu", strict_accelerator=True)
+session = st.RankAdaptationSession(
+    base, [f"u2: true; rank_tile: {tile};" for tile in (32, 128, 256, 512)],
+    seed=17,
+)
+workspaces = [st.WgpuRank.from_adaptation(session, i) for i in range(4)]
+# Upload the same input and validate every workspace before measuring.
+selection = session.choose()
+workspace = workspaces[selection.candidate_index]
+# dispatch(16), synchronize(), and time the completed batch outside policy work.
+# Validate its readback, then pass whole-batch elapsed_ms and correctness to observe().
+```
+
+`resident_rank_adaptation_bench` and
+`tools/bench_resident_rank_adaptation_vs_torch.py` run rotating equal-count
+controls followed by a separately credited policy loop against identical input.
+The policy receives whole-batch latency (16 pairs); reports also divide by 16
+for per-operation diagnostics. Validation readbacks occur between batches,
+outside timing. CUDA reference work runs only after the native GPU process
+exits. These are separate-process wrapper diagnostics, not GPU-event timing,
+cross-framework interleaving, proof of convergence, or training-quality gains.
+
+The browser fixture is selected with `rank-adaptation` in
+`tools/test_resident_browser.cjs`; it exercises real WebGPU dispatch and both
+UCB and Thompson sampling through the same Rust session.
+
+The [resident adaptation receipt](../benchmarks/results/2026-09-06-resident-rank-adaptation/README.md)
+retains 72 Furnace cases, 4,608 adaptive observations, and 18 browser cases.
+Large MidK improves relative to fixed tile 256, while large TopK/BottomK retain
+exploration regressions. All fixed WGPU controls remain slower than their CUDA
+references; see the mean-time and timing-boundary qualifications in the receipt.
+
 ## Golden Training Continuation
 
 Rust `GoldenRetriever::run_epoch_owned(...)` returns a `GoldenTrainingOutput`

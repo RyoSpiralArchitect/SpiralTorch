@@ -262,6 +262,7 @@ impl BucketStats {
         };
 
         let mut record = WasmTunerRecord {
+            rank_tile: None,
             rows_min,
             rows_max,
             cols_min,

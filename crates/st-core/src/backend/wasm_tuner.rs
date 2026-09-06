@@ -51,6 +51,9 @@ pub struct WasmTunerRecord {
     /// Override for the compaction tile size (`ctile`).
     #[serde(default, alias = "tile")]
     pub ctile: Option<u32>,
+    /// Override for the TopK rank tile, independent of FFT tile columns.
+    #[serde(default)]
+    pub rank_tile: Option<u32>,
     /// Override for the work-group size.
     #[serde(default)]
     pub wg: Option<u32>,
@@ -132,6 +135,9 @@ impl WasmTunerRecord {
         }
         if let Some(value) = self.ctile {
             choice.ctile = value;
+        }
+        if self.rank_tile.is_some() {
+            choice.rank_tile = self.rank_tile;
         }
         if let Some(value) = self.mode_midk {
             choice.mode_midk = value;
@@ -364,6 +370,7 @@ fn emit_wasm_tuner_choice_meta(
             ch: 0,
             algo_topk: 0,
             ctile: 0,
+            rank_tile: None,
             mode_midk: 0,
             mode_bottomk: 0,
             tile_cols: 0,
@@ -390,6 +397,7 @@ fn emit_wasm_tuner_choice_meta(
             "mode_midk": choice.mode_midk,
             "mode_bottomk": choice.mode_bottomk,
             "compaction_tile": choice.ctile,
+            "rank_tile": choice.rank_tile,
             "tile_cols": choice.tile_cols,
             "fft_radix": choice.radix,
             "fft_segments": choice.segments,
@@ -410,6 +418,7 @@ mod tests {
             ch: 0,
             algo_topk: 0,
             ctile: 256,
+            rank_tile: None,
             mode_midk: 0,
             mode_bottomk: 0,
             tile_cols: 512,
@@ -452,6 +461,21 @@ mod tests {
     }
 
     #[test]
+    fn optional_rank_tile_roundtrips_without_overwriting_fft() {
+        for rank_tile in [None, Some(64)] {
+            let mut entry = record(None, None, 0, usize::MAX, None);
+            entry.rank_tile = rank_tile;
+            let table = WasmTunerTable::from_records(vec![entry]);
+            let encoded = table.to_json().unwrap();
+            let restored = WasmTunerTable::from_json_str(&encoded).unwrap();
+            let choice = restored.choose(base_choice(), 2, 256, 7, false).unwrap();
+            assert_eq!(choice.rank_tile, rank_tile);
+            assert_eq!(choice.tile_cols, 512);
+            assert_eq!(choice.ctile, 256);
+        }
+    }
+
+    #[test]
     fn tuner_records_transport_fft_values_without_reinterpreting_them() {
         let mut override_record = record(None, None, 0, usize::MAX, None);
         override_record.tile_cols = Some(1536);
@@ -485,6 +509,7 @@ mod tests {
             subgroup,
             algo_topk: None,
             ctile: None,
+            rank_tile: None,
             wg: None,
             kl: None,
             ch: None,
@@ -549,6 +574,7 @@ mod tests {
                 subgroup: Some(true),
                 algo_topk: None,
                 ctile: Some(512),
+                rank_tile: None,
                 wg: Some(256),
                 kl: Some(16),
                 ch: None,
@@ -569,6 +595,7 @@ mod tests {
                 subgroup: Some(false),
                 algo_topk: Some(1),
                 ctile: Some(1024),
+                rank_tile: None,
                 wg: Some(128),
                 kl: None,
                 ch: None,
@@ -634,6 +661,7 @@ mod tests {
             subgroup: Some(true),
             algo_topk: Some(2),
             ctile: Some(512),
+            rank_tile: None,
             wg: Some(256),
             kl: Some(16),
             ch: None,
@@ -694,6 +722,7 @@ mod tests {
             subgroup: Some(true),
             algo_topk: Some(2),
             ctile: Some(512),
+            rank_tile: None,
             wg: Some(256),
             kl: Some(16),
             ch: None,

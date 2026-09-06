@@ -2110,6 +2110,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 | SoftRule::Midk { w, .. }
                 | SoftRule::Bottomk { w, .. }
                 | SoftRule::Ctile { w, .. }
+                | SoftRule::RankTile { w, .. }
                 | SoftRule::TileCols { w, .. }
                 | SoftRule::Radix { w, .. }
                 | SoftRule::Segments { w, .. } => *w,

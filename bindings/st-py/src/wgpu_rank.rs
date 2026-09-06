@@ -34,6 +34,18 @@ mod enabled {
         inner: ResidentRank,
     }
 
+    impl PyWgpuRank {
+        fn from_kernel_plan(py: Python<'_>, plan: Plan) -> PyResult<Self> {
+            py.detach(move || {
+                let (runtime, _) = runtime::ensure_default_runtime_blocking("python.resident.rank")
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                Ok(Self {
+                    inner: ResidentRank::new(runtime, plan).map_err(error)?,
+                })
+            })
+        }
+    }
+
     #[pymethods]
     impl PyWgpuRank {
         #[new]
@@ -59,13 +71,29 @@ mod enabled {
                     "rank workspace dimensions must be positive",
                 ));
             }
-            py.detach(move || {
-                let (runtime, _) = runtime::ensure_default_runtime_blocking("python.resident.rank")
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                Ok(Self {
-                    inner: ResidentRank::new(runtime, plan).map_err(error)?,
-                })
-            })
+            Self::from_kernel_plan(py, plan)
+        }
+
+        #[cfg(feature = "kdsl")]
+        #[staticmethod]
+        fn from_adaptation(
+            py: Python<'_>,
+            session: &crate::rank_adaptation::PyRankAdaptationSession,
+            candidate_index: usize,
+        ) -> PyResult<Self> {
+            let spec = session.wgpu_resident_candidate(candidate_index)?;
+            let plan = Plan::try_new(spec.kind, spec.rows, spec.cols, spec.k, spec.tile_cols)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Self::from_kernel_plan(py, plan)
+        }
+
+        #[cfg(not(feature = "kdsl"))]
+        #[staticmethod]
+        fn from_adaptation(session: &Bound<'_, PyAny>, candidate_index: usize) -> PyResult<Self> {
+            let _ = (session, candidate_index);
+            Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "resident rank adaptation requires the 'kdsl' feature",
+            ))
         }
         #[getter]
         fn shape(&self) -> (u32, u32, u32) {
@@ -162,6 +190,14 @@ pub(crate) struct PyWgpuRank;
 #[cfg(not(feature = "wgpu"))]
 #[pymethods]
 impl PyWgpuRank {
+    #[staticmethod]
+    fn from_adaptation(session: &Bound<'_, PyAny>, candidate_index: usize) -> PyResult<Self> {
+        let _ = (session, candidate_index);
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "WgpuRank requires a wheel built with the 'wgpu' feature",
+        ))
+    }
+
     #[new]
     #[pyo3(signature = (kind, rows, cols, k, *, tile_cols=256))]
     fn new(kind: &str, rows: u32, cols: u32, k: u32, tile_cols: u32) -> PyResult<Self> {

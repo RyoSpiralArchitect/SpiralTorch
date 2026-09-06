@@ -94,6 +94,18 @@ pub(crate) struct PyRankAdaptationSession {
     metadata: RankPlanMetadata,
 }
 
+#[cfg(feature = "wgpu")]
+impl PyRankAdaptationSession {
+    pub(crate) fn wgpu_resident_candidate(
+        &self,
+        index: usize,
+    ) -> PyResult<st_core::backend::rank_support::WgpuResidentRankSpec> {
+        self.inner
+            .wgpu_resident_candidate(index)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+}
+
 #[pymethods]
 impl PyRankAdaptationSession {
     #[new]

@@ -340,6 +340,7 @@ impl AssignStmt {
             Field::Midk => hard.midk = Some(value.as_u8()?),
             Field::Bottomk => hard.bottomk = Some(value.as_u8()?),
             Field::Ctile => hard.ctile = Some(value.as_u32()?),
+            Field::RankTile => hard.rank_tile = Some(value.as_rank_tile()?),
             Field::TileCols => hard.tile_cols = Some(value.as_u32()?),
             Field::Radix => hard.radix = Some(value.as_u32()?),
             Field::Segments => hard.segments = Some(value.as_u32()?),
@@ -515,6 +516,10 @@ impl SoftStmt {
             }),
             Field::Ctile => soft.push(SoftRule::Ctile {
                 val: value.as_u32()?,
+                w: weight,
+            }),
+            Field::RankTile => soft.push(SoftRule::RankTile {
+                val: value.as_rank_tile()?,
                 w: weight,
             }),
             Field::TileCols => soft.push(SoftRule::TileCols {
@@ -705,6 +710,7 @@ enum Field {
     Midk,
     Bottomk,
     Ctile,
+    RankTile,
     TileCols,
     Radix,
     Segments,
@@ -721,6 +727,7 @@ impl Field {
             Field::Midk => "midk",
             Field::Bottomk => "bottomk",
             Field::Ctile => "ctile",
+            Field::RankTile => "rank_tile",
             Field::TileCols => "tile_cols",
             Field::Radix => "radix",
             Field::Segments => "segments",
@@ -1164,6 +1171,7 @@ impl Parser {
             Token::Id(id) if id == "midk" => Ok(Field::Midk),
             Token::Id(id) if id == "bottomk" => Ok(Field::Bottomk),
             Token::Id(id) if id == "ctile" => Ok(Field::Ctile),
+            Token::Id(id) if id == "rank_tile" => Ok(Field::RankTile),
             Token::Id(id) if id == "tile_cols" => Ok(Field::TileCols),
             Token::Id(id) if id == "radix" => Ok(Field::Radix),
             Token::Id(id) if id == "segments" => Ok(Field::Segments),
@@ -2193,6 +2201,20 @@ impl Value {
         Ok(self.as_f64()?.round() as u32)
     }
 
+    fn as_rank_tile(&self) -> Result<u32, EvalError> {
+        match self {
+            Value::F(value)
+                if value.is_finite()
+                    && *value >= 1.0
+                    && *value <= u32::MAX as f64
+                    && value.fract() == 0.0 =>
+            {
+                Ok(*value as u32)
+            }
+            _ => Err(EvalError::InvalidRankTile),
+        }
+    }
+
     fn as_u8(&self) -> Result<u8, EvalError> {
         Ok(self.as_f64()?.round() as u8)
     }
@@ -2803,6 +2825,33 @@ mod tests {
         let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(256));
         assert_eq!(out.hard.radix, Some(9));
+    }
+
+    #[test]
+    fn rank_tile_is_independent_of_fft_and_compaction_tiles() {
+        let program = Program::parse(
+            "rank_tile: 64; tile_cols: 512; ctile: 128; soft (rank_tile, 256, 0.75, true);",
+        )
+        .unwrap();
+        let out = program.evaluate(&ctx()).unwrap();
+        assert_eq!(out.hard.rank_tile, Some(64));
+        assert_eq!(out.hard.tile_cols, Some(512));
+        assert_eq!(out.hard.ctile, Some(128));
+        assert!(matches!(out.soft.as_slice(), [SoftRule::RankTile { val: 256, w }] if *w == 0.75));
+        for value in ["-1", "0", "1.5", "4294967296", "true"] {
+            for source in [
+                format!("rank_tile: {value};"),
+                format!("soft (rank_tile, {value}, 1, true);"),
+            ] {
+                assert_eq!(
+                    Program::parse(&source)
+                        .unwrap()
+                        .evaluate(&ctx())
+                        .unwrap_err(),
+                    EvalError::InvalidRankTile
+                );
+            }
+        }
     }
 
     #[test]

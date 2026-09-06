@@ -24,6 +24,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> GenChoice 
         ch,
         algo_topk: 0,
         ctile,
+        rank_tile: None,
         mode_midk: 0,
         mode_bottomk: 0,
         tile_cols: (cols.max(1).div_ceil(1024) * 1024) as u32,

@@ -65,6 +65,8 @@ pub struct Hard {
     pub midk: Option<u8>,
     pub bottomk: Option<u8>,
     pub ctile: Option<u32>,
+    /// TopK sweep tile; independent of FFT `tile_cols` and compaction `ctile`.
+    pub rank_tile: Option<u32>,
     pub tile_cols: Option<u32>,
     pub radix: Option<u32>,
     pub segments: Option<u32>,
@@ -80,6 +82,7 @@ pub enum SoftRule {
     Midk { val: u8, w: f32 },
     Bottomk { val: u8, w: f32 },
     Ctile { val: u32, w: f32 },
+    RankTile { val: u32, w: f32 },
     TileCols { val: u32, w: f32 },
     Radix { val: u32, w: f32 },
     Segments { val: u32, w: f32 },
@@ -102,6 +105,8 @@ pub enum EvalError {
     ExpectedList,
     #[error("encountered a non-finite numeric value")]
     NonFiniteNumber,
+    #[error("rank_tile must be a positive integer fitting u32")]
+    InvalidRankTile,
     #[error("list index {index} is out of bounds for length {len}")]
     ListIndexOutOfBounds { index: i64, len: usize },
     #[error("non-exhaustive match expression")]
