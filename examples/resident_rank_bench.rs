@@ -27,6 +27,7 @@ mod native {
     fn run(
         r: Request,
         runtime: &runtime::WgpuRuntime,
+        resident_only: bool,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         if r.rows == 0
             || r.cols == 0
@@ -66,8 +67,12 @@ mod native {
         let mut samples = [Vec::new(), Vec::new(), Vec::new()];
         for block in 0..14 {
             // Rotate within a block to reduce fixed-order bias between native boundaries.
-            for slot in 0..3 {
-                let mode = (slot + block + r.seed as usize % 3) % 3;
+            for slot in 0..if resident_only { 1 } else { 3 } {
+                let mode = if resident_only {
+                    2
+                } else {
+                    (slot + block + r.seed as usize % 3) % 3
+                };
                 workspace.synchronize()?;
                 let start = Instant::now();
                 let reps = if mode == 2 { 16 } else { 1 };
@@ -101,12 +106,23 @@ mod native {
         if final_output != actual {
             return Err("post-timing output changed".into());
         }
+        let samples = [
+            "host_api",
+            "resident_host_to_host",
+            "resident_dispatch_fence_per_op",
+        ]
+        .into_iter()
+        .zip(samples)
+        .filter(|(_, values)| !values.is_empty())
+        .collect::<std::collections::BTreeMap<_, _>>();
         Ok(
             json!({"status":"passed", "kind":r.kind, "rows":r.rows,"cols":r.cols,"k":r.k,
+        "mode":if resident_only {"resident_only"} else {"comparison"},
+        "validation_boundary":"fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
         "tile":plan.tile_cols(), "seed":r.seed,"create_ms":create_ms,
         "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
         "values":actual.values,"indices":actual.indices,
-        "samples_ms":{"host_api":samples[0],"resident_host_to_host":samples[1],"resident_dispatch_fence_per_op":samples[2]},
+        "samples_ms":samples,
         "resident_repetitions":16}),
         )
     }
@@ -122,8 +138,9 @@ mod native {
             );
             return Ok(());
         }
-        if !args.is_empty() {
-            return Err("usage: resident_rank_bench [--build-info]".into());
+        let resident_only = args == ["--resident-only"];
+        if !args.is_empty() && !resident_only {
+            return Err("usage: resident_rank_bench [--build-info | --resident-only]".into());
         }
         let (runtime, _) = runtime::ensure_default_runtime_blocking("resident.rank.bench")?;
         let mut failed = false;
@@ -131,7 +148,7 @@ mod native {
             let line = line?;
             let result = serde_json::from_str(&line)
                 .map_err(|e| e.into())
-                .and_then(|r| run(r, &runtime));
+                .and_then(|r| run(r, &runtime, resident_only));
             match result {
                 Ok(value) => println!("{value}"),
                 Err(error) => {

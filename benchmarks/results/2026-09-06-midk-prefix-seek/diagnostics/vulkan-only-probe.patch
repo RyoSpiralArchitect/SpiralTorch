@@ -1,0 +1,80 @@
+From 085376ccc396f907197ebbe56349e976de79e449 Mon Sep 17 00:00:00 2001
+From: Ryo Higa <ryospiralarchitect@Ryos-MacBook-Pro.local>
+Date: Sun, 6 Sep 2026 17:37:34 +0900
+Subject: [PATCH] diagnostic: isolate Vulkan-only runtime initialization on
+ Furnace
+
+---
+ crates/st-backend-wgpu/src/compaction.rs      | 5 ++++-
+ crates/st-backend-wgpu/src/midk_bottomk.rs    | 5 ++++-
+ crates/st-backend-wgpu/src/rankk_exact_2ce.rs | 5 ++++-
+ crates/st-backend-wgpu/src/runtime.rs         | 5 ++++-
+ 4 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/crates/st-backend-wgpu/src/compaction.rs b/crates/st-backend-wgpu/src/compaction.rs
+index 09fecd45..f57b7604 100644
+--- a/crates/st-backend-wgpu/src/compaction.rs
++++ b/crates/st-backend-wgpu/src/compaction.rs
+@@ -473,7 +473,10 @@ mod tests {
+     }
+ 
+     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
++        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
++            backends: wgpu::Backends::VULKAN,
++            ..Default::default()
++        });
+         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+             power_preference: wgpu::PowerPreference::LowPower,
+             compatible_surface: None,
+diff --git a/crates/st-backend-wgpu/src/midk_bottomk.rs b/crates/st-backend-wgpu/src/midk_bottomk.rs
+index 5686d5f7..af4f0659 100644
+--- a/crates/st-backend-wgpu/src/midk_bottomk.rs
++++ b/crates/st-backend-wgpu/src/midk_bottomk.rs
+@@ -844,7 +844,10 @@ mod tests {
+     }
+ 
+     fn test_device() -> Result<(wgpu::Device, wgpu::Queue), String> {
+-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
++        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
++            backends: wgpu::Backends::VULKAN,
++            ..Default::default()
++        });
+         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+             power_preference: wgpu::PowerPreference::LowPower,
+             compatible_surface: None,
+diff --git a/crates/st-backend-wgpu/src/rankk_exact_2ce.rs b/crates/st-backend-wgpu/src/rankk_exact_2ce.rs
+index 07055f02..6c0cc4ea 100644
+--- a/crates/st-backend-wgpu/src/rankk_exact_2ce.rs
++++ b/crates/st-backend-wgpu/src/rankk_exact_2ce.rs
+@@ -717,7 +717,10 @@ mod tests {
+     }
+ 
+     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
++        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
++            backends: wgpu::Backends::VULKAN,
++            ..Default::default()
++        });
+         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+             power_preference: wgpu::PowerPreference::LowPower,
+             compatible_surface: None,
+diff --git a/crates/st-backend-wgpu/src/runtime.rs b/crates/st-backend-wgpu/src/runtime.rs
+index 607301a7..43d7d02c 100644
+--- a/crates/st-backend-wgpu/src/runtime.rs
++++ b/crates/st-backend-wgpu/src/runtime.rs
+@@ -93,7 +93,10 @@ impl WgpuRuntime {
+ 
+     /// Request a headless adapter and enable SpiralTorch's supported optional features.
+     pub async fn request_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
+-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
++        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
++            backends: wgpu::Backends::VULKAN,
++            ..Default::default()
++        });
+         let mut selected = None;
+         for (power_preference, force_fallback_adapter) in [
+             (wgpu::PowerPreference::HighPerformance, false),
+-- 
+2.50.1 (Apple Git-155)
+

@@ -70,6 +70,43 @@ fn candidate_before(
     return left_key < right_key;
 }
 
+// Ascending lower bound in one finite sorted run, used only by MidK.
+fn tile_lower_bound(state: u32, key: u32, index: u32) -> u32 {
+    let base = state * params.tile_stride;
+    var low = 0u;
+    var high = tile_counts[state];
+    loop {
+        if (low >= high) { break; }
+        let middle = low + (high - low) / 2u;
+        let other_key = float_total_key(scratch_values[base + middle]);
+        if (other_key < key || (other_key == key && scratch_indices[base + middle] < index)) {
+            low = middle + 1u;
+        } else {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
+    var count = 0u;
+    for (var tile = lane; tile < params.tiles_x; tile = tile + 256u) {
+        count = count + tile_lower_bound(row * params.tiles_x + tile, key, index);
+    }
+    merge_indices[lane] = count;
+    workgroupBarrier();
+    for (var stride = 128u; stride > 0u; stride = stride >> 1u) {
+        if (lane < stride) {
+            merge_indices[lane] = merge_indices[lane] + merge_indices[lane + stride];
+        }
+        workgroupBarrier();
+    }
+    let total = workgroupUniformLoad(&merge_indices[0]);
+    // All lanes must finish reading before a later search reuses this scratch.
+    workgroupBarrier();
+    return total;
+}
+
 fn swap_scratch(left: u32, right: u32) {
     let value = scratch_values[left];
     let index = scratch_indices[left];
@@ -327,9 +364,38 @@ fn rankk_exact_2ce_row_merge(
         return;
     }
 
+    // Find the exact first retained (total-float-key, source-index) in at most
+    // 32 + ceil(log2(cols)) cooperative probes. This skips a large discarded
+    // prefix without changing the k-way merge or adding another dispatch.
+    // Short prefixes retain the cheaper direct merge.
+    let seek_prefix = params.kind == KIND_MIDK && rank_start >= 64u;
+    var cutoff_key = 0u;
+    var cutoff_index = 0u;
+    if (seek_prefix) {
+        for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
+            let probe = cutoff_key | bit;
+            if (row_count_before(row, probe, 0u, local_id.x) <= rank_start) {
+                cutoff_key = probe;
+            }
+        }
+        for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
+            if (bit < params.cols) {
+                let probe = cutoff_index | bit;
+                if (row_count_before(row, cutoff_key, probe, local_id.x) <= rank_start) {
+                    cutoff_index = probe;
+                }
+            }
+        }
+    }
+
     var tile = local_id.x;
     for (; tile < params.tiles_x; tile = tile + 256u) {
-        tile_cursors[row * params.tiles_x + tile] = 0u;
+        let state = row * params.tiles_x + tile;
+        var cursor = 0u;
+        if (seek_prefix) {
+            cursor = tile_lower_bound(state, cutoff_key, cutoff_index);
+        }
+        tile_cursors[state] = cursor;
     }
     for (var output_slot = local_id.x; output_slot < params.k; output_slot = output_slot + 256u) {
         output_values[row * params.k + output_slot] = 0x7fc00000u;
@@ -338,7 +404,7 @@ fn rankk_exact_2ce_row_merge(
     storageBarrier();
     workgroupBarrier();
 
-    var rank = 0u;
+    var rank = select(0u, rank_start, seek_prefix);
     loop {
         if (rank >= rank_end) {
             break;

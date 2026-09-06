@@ -1,0 +1,65 @@
+
+running 70 tests
+
+thread 'midk_bottomk::tests::explicitly_requested_runtime_does_not_skip_missing_device' (3725967) panicked at crates/st-backend-wgpu/src/midk_bottomk.rs:837:16:
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 requires a real WGPU device: "no adapter"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test attention::tests::rejects_multiple_query_tiles ... ok
+test attention::tests::params_layout_is_32_bytes ... ok
+test catalog::tests::rank_report_selects_exact_two_command_bottomk_geometry ... ok
+test catalog::tests::catalog_contains_core_wgpu_families ... ok
+test attention::tests::rejects_unsupported_dtype ... ok
+test compaction::tests::tile_counts_reduce_to_exact_rows ... ok
+test catalog::tests::softmax_report_sets_hardmax_mask_flags ... ok
+test catalog::tests::descriptor_matches_shader_basename ... ok
+test gelu_back::tests::fused_uniform_size ... ok
+test gelu_back::tests::geometry_autotune_clamps_to_tiny_limits ... ok
+test gelu_back::tests::geometry_autotune_prefers_wide_tiles_when_supported ... ok
+test gelu_back::tests::geometry_defaults_match_overrides ... ok
+test gelu_back::tests::reduce_uniform_size ... ok
+test gelu_back::tests::tiles_and_dispatch_match_reference ... ok
+test midk_bottomk::tests::element_counts_match_expected_values ... ok
+test midk_bottomk::tests::geometry_validation_flags_small_stride ... ok
+test midk_bottomk::tests::geometry_validation_accepts_valid_stride ... ok
+test midk_bottomk::tests::explicitly_requested_runtime_does_not_skip_missing_device - should panic ... ok
+test midk_bottomk::tests::row_prefix_dispatches_once_per_row_while_tile_stages_cover_every_tile ... ok
+test midk_bottomk::tests::tiles_for_cols_handles_zero ... ok
+test midk_bottomk::tests::tiles_for_cols_rounds_up ... ok
+test rankk_exact_2ce::resident::tests::combined_readback_preserves_float_bits_and_signed_indices ... ok
+test catalog::tests::catalog_entry_points_exist_in_owned_wgsl ... ok
+test rankk_exact_2ce::tests::plan_checks_local_sort_storage_before_pipeline_creation ... ok
+test rankk_exact_2ce::tests::plan_preserves_requested_tile_and_derives_exact_geometry ... ok
+test render::temporal::tests::rejects_mismatched_buffers ... ok
+test render::temporal::tests::rejects_overflowing_harmonic_shape_without_saturation ... ok
+test render::temporal::tests::renders_decay_and_harmonics ... ok
+test resident_matmul::tests::output_tile_and_invocation_geometry_agree ... ok
+test rankk_exact_2ce::tests::merge_grid_matches_bounded_midk_selection ... ok
+test rankk_exact_2ce::tests::plan_rejects_semantically_invalid_requests ... ok
+test resident_matmul::tests::shape_checks_shader_addressing_and_device_limits ... ok
+test resident_matmul::tests::tile_checks_are_structural_and_device_specific ... ok
+test rankk_exact_2ce::tests::exact_rank_2ce_wgsl_parses_and_validates ... ok
+test runtime::tests::checked_byte_len_preserves_exact_sizes ... ok
+test runtime::tests::host_poll_backoff_keeps_fast_path_and_deadline ... ok
+test softmax::tests::dispatch_matches_rows ... ok
+test softmax::tests::params_layout_is_32_bytes ... ok
+test runtime::tests::checked_byte_len_rejects_unaddressable_storage ... ok
+test transform::tests::image_geometry_reports_overflow_instead_of_panicking ... ok
+test transform::tests::empty_sequence_still_validates_input_contract ... ok
+test util::tests::apply_overrides_errors_when_constant_missing ... ok
+test util::tests::apply_overrides_replaces_matching_constants ... ok
+test util::tests::clear_prevents_inflight_source_from_repopulating_cache ... ok
+
+thread 'util::tests::source_cache_recovers_after_poison' (3726017) panicked at crates/st-backend-wgpu/src/util.rs:507:13:
+poison shader source cache
+test util::tests::cache_reuses_source_without_retouching_disk ... ok
+
+thread 'util::tests::source_loader_panic_does_not_poison_cache' (3726018) panicked at crates/st-backend-wgpu/src/util.rs:546:25:
+source loader failed
+test util::tests::source_cache_recovers_after_poison ... ok
+test util::tests::source_loader_panic_does_not_poison_cache ... ok
+test util::tests::prefetch_warms_cache_for_multiple_files ... ok
+test util::tests::source_loader_runs_outside_cache_lock ... ok
+test resident_matmul::tests::shared_shader_variants_validate ... ok
+test compaction::tests::runtime_matches_shared_reference_when_enabled ... ok
+matmul-rank adapter: AdapterInfo { name: "NVIDIA GeForce RTX 5090", vendor: 4318, device: 11141, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "595.84", backend: Vulkan }
+test runtime::tests::default_runtime_reuses_one_context_when_enabled ... ok

@@ -26,7 +26,53 @@ def require_uncontended_gpu():
         raise RuntimeError(f"timing admission blocked by other GPU compute processes: {foreign}")
 
 
-def run(executable):
+def requests_for(bench, suite):
+    if suite == "standard":
+        geometries = [(cols, k, tile) for cols, k in [(256, 8), (2048, 16)]
+                      for tile in [128, 256, 512]]
+    elif suite == "midk-boundary":
+        geometries = [(cols, 7, tile) for cols, tile in
+                      [(1024, 32), (1025, 32), (1025, 256), (4097, 128),
+                       (8193, 256), (257, 1), (1025, 8)]]
+    else:
+        raise ValueError(f"unknown rank suite: {suite}")
+    for seed in [17, 29, 43]:
+        for kind in ["topk", "midk", "bottomk"]:
+            for cols, k, tile in geometries:
+                values, _ = bench.fixture(2 * cols, seed)
+                if suite == "midk-boundary" and seed == 43:
+                    # Ties without mixed signed zeros, whose PyTorch order differs.
+                    values = [float(int(value * 8)) for value in values]
+                yield dict(kind=kind, rows=2, cols=cols, k=k, tile=tile, input=values, seed=seed)
+
+
+def validate_native_result(result, request, resident_only):
+    if (result.get("status") != "passed" or
+        any(result.get(k) != request[k] for k in ("rows", "cols", "k", "kind", "seed")) or
+        result.get("tile") != min(request["tile"], request["cols"])):
+        raise RuntimeError(f"native result mismatch: {result}")
+    if resident_only and (result.get("mode") != "resident_only" or
+                          set(result.get("samples_ms", {})) != {"resident_dispatch_fence_per_op"}):
+        raise RuntimeError("native resident-only boundary mismatch")
+
+
+def cuda_rank_operation(request):
+    if request["kind"] == "midk":
+        return "stable_sort"
+    cols = request["cols"]
+    for row in range(request["rows"]):
+        values = request["input"][row * cols:(row + 1) * cols]
+        if len(set(values)) != cols:
+            return "stable_sort"
+    return "topk"
+
+
+def require_canonical_indices(actual, expected):
+    if actual != expected:
+        raise RuntimeError("CUDA rank differs from canonical stable source indices")
+
+
+def run(executable, suite="standard", resident_only=False):
     require_uncontended_gpu()
     import torch
 
@@ -35,13 +81,7 @@ def run(executable):
     original = audit.file_identity(executable)
     if not torch.cuda.is_available():
         raise RuntimeError("this matched device comparison requires PyTorch CUDA")
-    requests = []
-    for seed in [17, 29, 43]:
-        for kind in ["topk", "midk", "bottomk"]:
-            for cols, k in [(256, 8), (2048, 16)]:
-                values, _ = bench.fixture(2 * cols, seed)
-                for tile in [128, 256, 512]:
-                    requests.append(dict(kind=kind, rows=2, cols=cols, k=k, tile=tile, input=values, seed=seed))
+    requests = list(requests_for(bench, suite))
     payload = "".join(json.dumps(r, allow_nan=False) + "\n" for r in requests)
     with tempfile.TemporaryDirectory(prefix="rank-execution-", dir=executable.parent) as directory:
         image = Path(directory) / "resident_rank_bench"
@@ -51,13 +91,15 @@ def run(executable):
         binding = audit.validate_source_binding(identity, before)
         if not binding["valid"]:
             raise RuntimeError(f"source/build identity mismatch: {binding}")
-        native = subprocess.run([str(image)], input=payload, text=True, capture_output=True, timeout=180)
+        native = subprocess.run([str(image)] + (["--resident-only"] if resident_only else []),
+                                input=payload, text=True, capture_output=True, timeout=300)
         if native.returncode or native.stderr:
             raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
         results = [json.loads(line) for line in native.stdout.splitlines()]
         if len(results) != len(requests):
             raise RuntimeError("native result cardinality mismatch")
         report = {"schema": "spiraltorch.resident_rank_comparison.v1", "status": "passed",
+                  "suite": suite, "resident_only_requested": resident_only,
                   "comparison": "separate-process wrapper diagnostics, not interleaved cross-framework or GPU-event timings",
                   "boundaries": {
                       "host_api": "upload, allocate outputs/scratch, two submits, two maps; pipelines prebuilt",
@@ -69,8 +111,7 @@ def run(executable):
                   "native_build_identity": identity, "build_source_binding": binding, "cases": []}
         with torch.inference_mode():
             for r, result in zip(requests, results):
-                if result.get("status") != "passed" or any(result.get(k) != r[k] for k in ("rows", "cols", "k", "kind", "seed")):
-                    raise RuntimeError(f"native result mismatch: {result}")
+                validate_native_result(result, r, resident_only)
                 if result["adapter"]["name"] != torch.cuda.get_device_name():
                     raise RuntimeError("WGPU and PyTorch must select the same named GPU")
                 host = torch.tensor(r["input"], dtype=torch.float32).reshape(r["rows"], r["cols"])
@@ -81,13 +122,16 @@ def run(executable):
                 if result["values"] != expected.flatten().tolist() or result["indices"] != expected_ids.flatten().tolist():
                     raise RuntimeError("native output differs from canonical PyTorch reference")
                 device = host.cuda()
-                shape = device.shape if r["kind"] == "midk" else (r["rows"], r["k"])
+                operation = cuda_rank_operation(r)
+                stable_sort = operation == "stable_sort"
+                shape = device.shape if stable_sort else (r["rows"], r["k"])
                 out_values = torch.empty(shape, dtype=torch.float32, device="cuda")
                 out_ids = torch.empty(shape, dtype=torch.int64, device="cuda")
 
                 def op():
-                    if r["kind"] == "midk":
-                        torch.sort(device, dim=1, stable=True, out=(out_values, out_ids))
+                    if stable_sort:
+                        torch.sort(device, dim=1, descending=r["kind"] == "topk",
+                                   stable=True, out=(out_values, out_ids))
                     else:
                         torch.topk(device, r["k"], dim=1, largest=r["kind"] == "topk", sorted=True, out=(out_values, out_ids))
 
@@ -96,14 +140,22 @@ def run(executable):
                         op()
 
                 op()
-                view = out_values[:, start:start + r["k"]] if r["kind"] == "midk" else out_values
-                bench.correctness(view, expected.double(), torch, 0, 0)
-                if not torch.equal(device.gather(1, out_ids), out_values):
-                    raise RuntimeError("PyTorch rank indices do not point to returned values")
+                def validate_cuda():
+                    view = out_values[:, start:start + r["k"]] if stable_sort else out_values
+                    ids = out_ids[:, start:start + r["k"]] if stable_sort else out_ids
+                    bench.correctness(view, expected.double(), torch, 0, 0)
+                    require_canonical_indices(ids.cpu().tolist(), expected_ids.tolist())
+                    if not torch.equal(device.gather(1, out_ids), out_values):
+                        raise RuntimeError("PyTorch rank indices do not point to returned values")
+
+                validate_cuda()
                 timing = bench.paired_timings({"torch": repeated}, 2, 12, torch.cuda.synchronize, r["seed"])["torch"]
+                validate_cuda()
                 samples = {key: bench.summarize(v) for key, v in result["samples_ms"].items()}
                 samples["torch_resident_per_op"] = bench.summarize([v / 16 for v in timing["samples_ms"]])
-                report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"}, "native": result, "timings": samples})
+                report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"},
+                    "native": result, "timings": samples, "torch_operation": operation,
+                    "torch_canonical_indices": "checked before and after all timing intervals"})
         after = audit.source_identity()
         require_uncontended_gpu()
         report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"
@@ -119,9 +171,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--suite", choices=["standard", "midk-boundary"], default="standard")
+    parser.add_argument("--resident-only", action="store_true")
     args = parser.parse_args()
     try:
-        report = run(args.executable.resolve(strict=True))
+        report = run(args.executable.resolve(strict=True), args.suite, args.resident_only)
     except Exception as error:
         report = {"schema": "spiraltorch.resident_rank_comparison.v1", "status": "error", "error": str(error)}
     audit.write_report_exclusive(args.output, report)

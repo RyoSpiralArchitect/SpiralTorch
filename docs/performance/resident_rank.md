@@ -47,7 +47,34 @@ workgroup scanning every tile in a row. The total (value, index) order gives eac
 valid candidate a unique output destination. Only the disjoint missing-value
 tail is initialized, so one workgroup cannot overwrite another's valid output.
 Host and resident execution share the same checked dispatch grid. More fragmented
-geometries retain the existing GPU merge; planner tile choices remain unchanged.
+geometries use one row workgroup. When at least 64 finite candidates precede the
+retained band, it first seeks the band's exact starting position: 32 total-float
+key probes and at most `ceil(log2(cols))` source-index probes count lower bounds
+across sorted tiles. The largest key/index with at most `start` predecessors is
+the first retained candidate; each tile cursor is set to its lower bound, then
+the existing k-way merge emits only the retained band. Ties, signed zeros and
+non-finite exclusion use the same ordering as the CPU reference. Short prefixes
+and full-width bands retain the direct merge. No extra dispatch, storage buffer,
+planner tile rewrite or language-specific selection policy is introduced.
+
+To reproduce the fragmented rank comparison against PyTorch CUDA on the same
+named GPU, build the native example and run:
+
+```bash
+cargo build -p st-core --no-default-features --features wgpu-rt --example resident_rank_bench --release
+python tools/bench_resident_rank_vs_torch.py --executable target/release/examples/resident_rank_bench --suite midk-boundary --resident-only --output /path/to/new-result.json
+```
+
+The suite crosses 5/32/33/129/257 tiles, three seeds, and TopK/MidK/BottomK controls;
+one seed is quantized to exercise ties. `--resident-only` excludes intervening
+host maps/uploads from the fixed-input timing intervals. Correctness is checked
+before and after all intervals. The default suite and rotated host/resident
+comparison remain available. These are host-API/fence timings, not GPU events.
+CUDA uses stable sort for MidK and for any TopK/BottomK row with tied values;
+tie-free TopK/BottomK retain `torch.topk`. Every timed CUDA case checks exact
+source indices as well as values before and after all intervals. Each report
+records the chosen CUDA operation; tied controls cannot receive credit for a
+weaker ordering contract.
 
 Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
 publishing their sorted run to global scratch only once. Larger tiles keep the

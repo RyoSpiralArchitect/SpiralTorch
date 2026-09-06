@@ -1,0 +1,158 @@
+{
+  "schema": "spiraltorch.midk_prefix_evidence.v1",
+  "native_sequence": [
+    "seek-canonical-baseline-quiet-82bdd5e2.json",
+    "seek-canonical-candidate-817af465.json",
+    "seek-canonical-candidate-repeat-817af465.json",
+    "seek-canonical-baseline-repeat-82bdd5e2.json"
+  ],
+  "browser_sequence": [
+    "seek-browser-baseline.json",
+    "seek-browser-candidate.json",
+    "seek-browser-candidate-repeat.json",
+    "seek-browser-baseline-repeat.json"
+  ],
+  "warning": "Passed fields in raw reports are not blanket admission. Excluded and diagnostic files must not be pooled with matched timings. Native and browser timings use different workloads and completion boundaries.",
+  "artifacts": [
+    {
+      "path": "diagnostics/baseline-parallel-control.log",
+      "sha256": "51a4848177b775a4575a414793bc97951d0bbc49aa64ea23021448a8b35b38b7",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/baseline-serial-control.log",
+      "sha256": "deb12c9af0fa9aa4138ddd7a8deb18b354b2083076419747b61a581120da0522",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/candidate-captured-parallel-control.log",
+      "sha256": "7594f3653cb2660362d9bbe23c7bd377dbcd857af3e9281317c3e6962bf06c6f",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/candidate-serial-control.log",
+      "sha256": "c398effa672be8e07b41e3decaf03a143a0af8280dfa7c87eba092735a186360",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/furnace-parallel-interrupted.log",
+      "sha256": "7bbf110aa450ad3bfdcf8031d838d83a56af608d40ac6ace1905eb3a1cbed978",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/parallel-strace-run.log",
+      "sha256": "3d9aad4bd821311ea9e925ae06b58be78966917f1b722ad472a644e37288b831",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/seek-parallel-trace-817af465.log.gz",
+      "sha256": "5a34e97bb1bac7630fda9b339f0d223bc20226736e2e4b986a52965a34e63f0c",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/vulkan-only-parallel-repeat.log",
+      "sha256": "49af31c4e3275a43466c7a31bc4cb211af3ed7a4b54ae8f08b4681f575a7687c",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/vulkan-only-parallel.log",
+      "sha256": "a7fed8bc4c630e28d0d7de5f5441500d636c35c24f74fc5c3f3401b761925fd4",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "diagnostics/vulkan-only-probe.patch",
+      "sha256": "cebf2883aefb37adae083a3bc5b1cd074a7df77ffe5de147bf45f38ced3e9997",
+      "role": "diagnostic_not_performance"
+    },
+    {
+      "path": "furnace-initial-suite.log",
+      "sha256": "cb8a0ae15d0c88282cc5babaac13a54d6222337802ecef8488b36a12ab58e676",
+      "role": "correctness_or_compatibility_only"
+    },
+    {
+      "path": "native-suite-verified.log",
+      "sha256": "058afea53bd24e8a42803ccd69db9ebf3a38ae6977072ff68bf4c855ddac211d",
+      "role": "correctness_or_compatibility_only"
+    },
+    {
+      "path": "python-tests.log",
+      "sha256": "bd275f76864ec78bfb25c9756be8c64db73c063e284d6cb313f836f5dc59f070",
+      "role": "correctness_or_compatibility_only"
+    },
+    {
+      "path": "seek-browser-baseline-repeat.json",
+      "sha256": "f41a4cd3c8f6953ec9ae85186546785143a69738c72061fe67f301647f5e1f45",
+      "role": "noisy_browser_observation"
+    },
+    {
+      "path": "seek-browser-baseline.json",
+      "sha256": "4fc7db017a5ced687efbd00ce9ad12e6852465e7b6f317cbcd7a4e15effbcf29",
+      "role": "noisy_browser_observation"
+    },
+    {
+      "path": "seek-browser-candidate-repeat.json",
+      "sha256": "06268559a02dc55a7c45c533c43e53f7a7ddad325c5dd685197d2eaf01b993e5",
+      "role": "noisy_browser_observation"
+    },
+    {
+      "path": "seek-browser-candidate.json",
+      "sha256": "7b02eab95e88ac9b7b21f33257d25fa04df7750247ec2754d22ec2249b01fdc0",
+      "role": "noisy_browser_observation"
+    },
+    {
+      "path": "seek-browser-chain.json",
+      "sha256": "7d7371b011b1db4fef3c96367fefb3db5071ca1eabf2419ce8d515ffe5ea24f3",
+      "role": "correctness_or_compatibility_only"
+    },
+    {
+      "path": "seek-canonical-baseline-quiet-82bdd5e2.json",
+      "sha256": "1e2c17c3db2fdbce6891414864733131f3c764d3e784369a505c4150fd14e86f",
+      "role": "admitted_native_comparison"
+    },
+    {
+      "path": "seek-canonical-baseline-repeat-82bdd5e2.json",
+      "sha256": "21505521d8b423caed1c0adba03eb07f7e5b6ea9f3912b5eda632a646020027d",
+      "role": "admitted_native_comparison"
+    },
+    {
+      "path": "seek-canonical-candidate-817af465.json",
+      "sha256": "b4ff09709c060aa6395c424402b1e351ca5ab6c7a226360dd5efe2a8daba2659",
+      "role": "admitted_native_comparison"
+    },
+    {
+      "path": "seek-canonical-candidate-repeat-817af465.json",
+      "sha256": "9dec9bfcb602f7ffffcd2dc47d6327a5290a57a354a63a3e42a95cfdc3b74931",
+      "role": "admitted_native_comparison"
+    },
+    {
+      "path": "seek-canonical-standard-817af465.json",
+      "sha256": "9a8d1099ced41dfca6531549c401c9360149bdb68df4cf96b9de330fe664c780",
+      "role": "correctness_or_compatibility_only"
+    },
+    {
+      "path": "superseded/seek-canonical-baseline-82bdd5e2.json",
+      "sha256": "50b56a230105a9f27796ab5162cf948c8cb403bb211862183a713a36ade0caae",
+      "role": "excluded_from_comparison"
+    },
+    {
+      "path": "superseded/seek-resident-baseline-40fb3b86.json",
+      "sha256": "fc846e9c3876a2045041d4a2833e39eb8e68e2a84174d7fff7bc2665e5e4f2b3",
+      "role": "excluded_from_comparison"
+    },
+    {
+      "path": "superseded/seek-resident-baseline-repeat-40fb3b86.json",
+      "sha256": "6690956f3f78f7ceef924700cf823ecd5a2d338f64f2076c07b7ea8682397a5b",
+      "role": "excluded_from_comparison"
+    },
+    {
+      "path": "superseded/seek-resident-candidate-1bfe12ef.json",
+      "sha256": "b115032ded51103c3218eef270d6825d862f944384d937e9efce8ad1f9458168",
+      "role": "excluded_from_comparison"
+    },
+    {
+      "path": "superseded/seek-resident-candidate-repeat-1bfe12ef.json",
+      "sha256": "4eb8517749890d3647aae654d34bf2f213ed08c3e5725759ff1efb6c12892ef6",
+      "role": "excluded_from_comparison"
+    }
+  ]
+}
