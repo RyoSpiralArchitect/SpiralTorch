@@ -2,11 +2,15 @@
 
 use super::{binding, storage_buffer, DispatchError, Output, Pipelines, Plan};
 use crate::resident_matmul::{MatmulError, ResidentMatmul};
+use crate::runtime::timestamps::{PassTimestampRecorder, PassTimestamps, TimestampReadback};
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 pub const MAX_REPETITIONS: u32 = 1024;
+// Portable pass-level instrumentation uses many more command buffers than the
+// ordinary single-pass path. Submit before Metal's command-buffer pool fills.
+const PROFILE_REPETITIONS_PER_SUBMISSION: u32 = 256;
 
 #[derive(Debug, Error)]
 pub enum ResidentRankError {
@@ -256,7 +260,7 @@ impl ResidentRank {
         Ok(generation)
     }
 
-    /// Enqueues repetitions as pairs of ordered compute passes in one submission.
+    /// Enqueues ordered sort/merge dispatches in one compute pass and submission.
     pub fn dispatch(&mut self, repetitions: u32) -> Result<u64, ResidentRankError> {
         if repetitions == 0 || repetitions > MAX_REPETITIONS {
             return Err(ResidentRankError::InvalidRepetitions);
@@ -274,19 +278,104 @@ impl ResidentRank {
 
     fn encode_dispatch(&self, encoder: &mut wgpu::CommandEncoder, repetitions: u32) {
         let (merge_x, merge_y) = self.plan.merge_workgroups();
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("resident.rank.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_bind_group(0, &self.bind_group, &[]);
         for _ in 0..repetitions {
-            // Separate passes provide the storage dependency between sort and merge.
-            for (pipeline, x, y) in [
+            // Each WebGPU dispatch is its own usage scope. wgpu inserts storage
+            // dependencies between dispatches, including reuse of scratch buffers.
+            pass.set_pipeline(&self.pipelines.tile_sort);
+            pass.dispatch_workgroups(self.plan.tiles_x(), self.plan.rows(), 1);
+            pass.set_pipeline(self.pipelines.merge_pipeline(self.plan));
+            pass.dispatch_workgroups(merge_x, merge_y, 1);
+        }
+    }
+
+    /// Profile the same kernels with separate passes for portable GPU timestamps.
+    /// This diagnostic uses up to 256 repetitions per submission; native Metal
+    /// waits between chunks to bound command-buffer pressure. It is not the
+    /// ordinary single-pass dispatch, and its intervals are not fast-path costs.
+    pub fn dispatch_profiled(
+        &mut self,
+        repetitions: u32,
+    ) -> Result<RankProfileReadback, ResidentRankError> {
+        if repetitions == 0 || repetitions > MAX_REPETITIONS {
+            return Err(ResidentRankError::InvalidRepetitions);
+        }
+        if self.generation == 0 {
+            return Err(ResidentRankError::MissingInput);
+        }
+        let context = self.runtime.context();
+        let timestamps = PassTimestampRecorder::new(context.clone(), repetitions * 2)?;
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        for start in (0..repetitions).step_by(PROFILE_REPETITIONS_PER_SUBMISSION as usize) {
+            let end = (start + PROFILE_REPETITIONS_PER_SUBMISSION).min(repetitions);
+            self.encode_profiled_dispatch(&mut encoder, start..end, &timestamps);
+            if end < repetitions {
+                let commands = [encoder.finish()];
+                #[cfg(not(target_arch = "wasm32"))]
+                if self.adapter_info().backend == wgpu::Backend::Metal {
+                    runtime::submit_with_timeout(
+                        context.device(),
+                        context.queue(),
+                        commands,
+                        std::time::Duration::from_secs(30),
+                        "resident.rank.profile.chunk",
+                    )?;
+                } else {
+                    context.queue().submit(commands);
+                }
+                #[cfg(target_arch = "wasm32")]
+                context.queue().submit(commands);
+                encoder = context.device().create_command_encoder(&Default::default());
+            }
+        }
+        let readback = timestamps.resolve(&mut encoder);
+        context.queue().submit(Some(encoder.finish()));
+        self.output_generation = Some(self.generation);
+        Ok(RankProfileReadback {
+            readback,
+            plan: self.plan,
+            generation: self.generation,
+            repetitions,
+            host_paced_chunks: cfg!(not(target_arch = "wasm32"))
+                && self.adapter_info().backend == wgpu::Backend::Metal
+                && repetitions > PROFILE_REPETITIONS_PER_SUBMISSION,
+        })
+    }
+
+    pub fn timestamp_queries_enabled(&self) -> bool {
+        self.runtime
+            .context()
+            .device()
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+    }
+
+    fn encode_profiled_dispatch(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        repetitions: std::ops::Range<u32>,
+        timestamps: &PassTimestampRecorder,
+    ) {
+        let (merge_x, merge_y) = self.plan.merge_workgroups();
+        for repetition in repetitions {
+            for (stage, (pipeline, x, y)) in [
                 (
                     &self.pipelines.tile_sort,
                     self.plan.tiles_x(),
                     self.plan.rows(),
                 ),
                 (self.pipelines.merge_pipeline(self.plan), merge_x, merge_y),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("resident.rank.pass"),
-                    timestamp_writes: None,
+                    timestamp_writes: Some(timestamps.writes(repetition * 2 + stage as u32)),
                 });
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
@@ -353,6 +442,99 @@ impl ResidentRank {
     }
 }
 
+/// GPU query results remain tied to the dispatch generation after later uploads.
+pub struct RankProfileReadback {
+    readback: TimestampReadback,
+    plan: Plan,
+    generation: u64,
+    repetitions: u32,
+    host_paced_chunks: bool,
+}
+
+impl RankProfileReadback {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read(self) -> Result<RankGpuProfile, ResidentRankError> {
+        Ok(RankGpuProfile {
+            plan: self.plan,
+            generation: self.generation,
+            repetitions: self.repetitions,
+            host_paced_chunks: self.host_paced_chunks,
+            timestamps: self.readback.read()?,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn read_async(self) -> Result<RankGpuProfile, ResidentRankError> {
+        Ok(RankGpuProfile {
+            plan: self.plan,
+            generation: self.generation,
+            repetitions: self.repetitions,
+            host_paced_chunks: self.host_paced_chunks,
+            timestamps: self.readback.read_async().await?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RankGpuProfile {
+    plan: Plan,
+    generation: u64,
+    repetitions: u32,
+    host_paced_chunks: bool,
+    timestamps: PassTimestamps,
+}
+
+impl RankGpuProfile {
+    pub fn plan(&self) -> Plan {
+        self.plan
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub fn repetitions(&self) -> u32 {
+        self.repetitions
+    }
+    pub fn timestamps(&self) -> &PassTimestamps {
+        &self.timestamps
+    }
+
+    /// Shared client schema; absolute u64 clocks and generations are decimal strings.
+    /// Timestamps perturb execution and may be quantized to zero by the browser.
+    pub fn report(&self) -> serde_json::Value {
+        let mut sort_ns = 0.0;
+        let mut merge_ns = 0.0;
+        let mut zero_intervals = 0;
+        let passes: Vec<_> = self.timestamps.passes.iter().enumerate().map(|(index, interval)| {
+            let sort = index % 2 == 0;
+            if sort { sort_ns += interval.elapsed_ns; } else { merge_ns += interval.elapsed_ns; }
+            zero_intervals += usize::from(interval.elapsed_ns == 0.0);
+            serde_json::json!({"repetition": index / 2, "stage": if sort { "tile_sort" } else { "row_merge" },
+                "start_tick": interval.start_tick.to_string(), "end_tick": interval.end_tick.to_string(), "elapsed_ns": interval.elapsed_ns})
+        }).collect();
+        let span = self
+            .timestamps
+            .passes
+            .first()
+            .zip(self.timestamps.passes.last())
+            .and_then(|(first, last)| last.end_tick.checked_sub(first.start_tick))
+            .map(|ticks| ticks as f64 * self.timestamps.timestamp_period_ns);
+        serde_json::json!({
+            "schema": "spiraltorch.rank_gpu_profile.v1", "instrumented": true,
+            "boundary": "Diagnostic separate-pass GPU timestamps, not the ordinary single-pass path; excludes uploads, query resolve/readback and CPU encoding; GPU span includes inter-pass and inter-submission gaps; instrumentation may perturb execution",
+            "compute_submissions": self.repetitions.div_ceil(PROFILE_REPETITIONS_PER_SUBMISSION),
+            "host_paced_chunks": self.host_paced_chunks,
+            "max_repetitions_per_submission": PROFILE_REPETITIONS_PER_SUBMISSION,
+            "generation": self.generation.to_string(), "repetitions": self.repetitions,
+            "kind": self.plan.kind().as_str(), "rows": self.plan.rows(), "cols": self.plan.cols(), "k": self.plan.k(), "tile_cols": self.plan.tile_cols(),
+            "merge_entry_point": self.plan.merge_mode().entry_point(),
+            "timestamp_period_ns": self.timestamps.timestamp_period_ns,
+            "zero_intervals": zero_intervals, "gpu_span_ns": span,
+            "tile_sort_total_ns": sort_ns, "row_merge_total_ns": merge_ns,
+            "passes": passes,
+        })
+    }
+}
+
 /// A snapshot remains valid after later uploads, dispatches, or workspace drop.
 pub struct RankReadback {
     context: WgpuContext,
@@ -401,6 +583,152 @@ fn decode(bytes: &[u8]) -> Output {
             .iter()
             .map(|v| i32::from_le_bytes(*v))
             .collect(),
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profiling_tests {
+    use super::*;
+    use crate::rankk_exact_2ce::Kind;
+
+    #[test]
+    fn default_runtime_rejects_profiling_without_mutating_output() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("profile.disabled")).unwrap();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::MidK, 1, 8, 2, 4).unwrap()).unwrap();
+        assert!(!rank.timestamp_queries_enabled());
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        assert!(matches!(
+            rank.dispatch_profiled(1),
+            Err(ResidentRankError::Runtime(
+                WgpuRuntimeError::TimestampQueriesUnavailable
+            ))
+        ));
+        assert!(!rank.output_is_current());
+        rank.dispatch(1).unwrap();
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [3., 4.]);
+    }
+
+    #[test]
+    fn timestamp_profiles_own_storage_and_survive_workspace_reuse_and_drop() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime = WgpuRuntime::request_profiled_headless_blocking("profile.owned").unwrap();
+        let plan = Plan::try_new(Kind::MidK, 1, 8193, 65, 256).unwrap();
+        let mut rank = ResidentRank::new(runtime, plan).unwrap();
+        assert!(rank.timestamp_queries_enabled());
+        assert!(matches!(
+            rank.dispatch_profiled(1),
+            Err(ResidentRankError::MissingInput)
+        ));
+        rank.upload(&(0..8193).map(|v| v as f32).collect::<Vec<_>>())
+            .unwrap();
+        for invalid in [0, MAX_REPETITIONS + 1] {
+            assert!(matches!(
+                rank.dispatch_profiled(invalid),
+                Err(ResidentRankError::InvalidRepetitions)
+            ));
+        }
+        assert!(!rank.output_is_current());
+        let first = rank.dispatch_profiled(1).unwrap();
+        let second = rank.dispatch_profiled(16).unwrap();
+        let snapshot = rank.snapshot().unwrap();
+        rank.upload(&vec![-3.; 8193]).unwrap();
+        rank.dispatch(1).unwrap();
+        drop(rank.dispatch_profiled(1).unwrap());
+        drop(rank);
+        let output = snapshot.read().unwrap();
+        assert_eq!(output.indices, (4064..4129).collect::<Vec<_>>());
+        assert_eq!(
+            output.values,
+            (4064..4129).map(|v| v as f32).collect::<Vec<_>>()
+        );
+        for (pending, repetitions) in [(second, 16), (first, 1)] {
+            let profile = pending.read().unwrap();
+            assert_eq!(profile.plan(), plan);
+            assert_eq!(profile.generation(), 1);
+            assert_eq!(profile.repetitions(), repetitions);
+            assert_eq!(
+                profile.timestamps().passes.len(),
+                (repetitions * 2) as usize
+            );
+            assert!(profile
+                .timestamps()
+                .passes
+                .iter()
+                .any(|p| p.elapsed_ns > 0.0));
+            let report = profile.report();
+            assert_eq!(report["generation"], "1");
+            assert_eq!(
+                report["merge_entry_point"],
+                "rankk_exact_2ce_midk_tournament"
+            );
+            assert!(report["passes"][0]["start_tick"].is_string());
+        }
+    }
+
+    #[test]
+    fn maximum_profile_query_budget_is_executable() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime = WgpuRuntime::request_profiled_headless_blocking("profile.budget").unwrap();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap()).unwrap();
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        let profile = rank
+            .dispatch_profiled(MAX_REPETITIONS)
+            .unwrap()
+            .read()
+            .unwrap();
+        assert_eq!(
+            profile.timestamps().passes.len(),
+            MAX_REPETITIONS as usize * 2
+        );
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [7., 6.]);
+        assert_eq!(profile.report()["compute_submissions"], 4);
+        assert_eq!(
+            profile.report()["host_paced_chunks"],
+            rank.adapter_info().backend == wgpu::Backend::Metal
+        );
+        assert!(profile
+            .timestamps()
+            .passes
+            .iter()
+            .all(|p| p.end_tick >= p.start_tick));
+    }
+
+    #[test]
+    fn maximum_ordinary_repetitions_reuse_scratch_in_one_pass() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("rank.single_pass.budget")).unwrap();
+        for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+            let plan = Plan::try_new(kind, 2, 65, 7, 32).unwrap();
+            let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();
+            let input: Vec<_> = (0..130)
+                .map(|i| {
+                    if i % 13 == 0 {
+                        f32::NAN
+                    } else {
+                        (i % 7) as f32
+                    }
+                })
+                .collect();
+            let expected = crate::rankk_exact_2ce::tests::cpu_reference(kind, 2, 65, 7, &input);
+            rank.upload(&input).unwrap();
+            rank.dispatch(MAX_REPETITIONS).unwrap();
+            let output = rank.snapshot().unwrap().read().unwrap();
+            assert_eq!(output.indices, expected.indices);
+            assert_eq!(output.values, expected.values);
+        }
     }
 }
 

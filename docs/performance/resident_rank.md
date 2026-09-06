@@ -23,6 +23,10 @@ rank.free();
 ```
 
 `dispatch(repetitions=1)` enqueues 1..1024 repetitions without reading back.
+All sort/merge dispatches share one compute pass and queue submission. Each
+dispatch is a separate [WebGPU usage scope](https://gpuweb.github.io/gpuweb/#synchronization);
+wgpu inserts the storage dependencies between dispatches, including scratch
+reuse. This avoids allocating a separate native pass for every kernel.
 `synchronize()` waits using a four-byte map completion fence. `readback()`
 immediately snapshots values and indices into one staging buffer, then returns
 an asynchronous mapping promise. Later uploads, dispatches or `free()` do not
@@ -108,6 +112,54 @@ assert result["indices"] == [4, 5, 0]
 that raises `NotImplementedError`, rather than silently executing on CPU.
 Rust callers construct `ResidentRank` from a `WgpuRuntime` and checked `Plan`,
 then use `upload`, `dispatch`, `snapshot().read()` and `synchronize` directly.
+
+## Opt-In GPU Stage Diagnostics
+
+Pass timestamps require a separate, explicitly profiled runtime. Default
+workspaces never request the feature or silently substitute wall-clock timing
+when it is unavailable. These factories do not replace the shared runtime.
+
+```js
+const rank = await WgpuRank.create("midk", 1, 8193, 65, 256, true);
+rank.upload(Float32Array.from({length: 8193}, (_, i) => i));
+const profile = await rank.profile(16);
+console.log(profile.tile_sort_total_ns, profile.row_merge_total_ns);
+rank.free();
+```
+
+```python
+rank = st.WgpuRank("midk", 1, 8193, 65, timestamp_queries=True)
+rank.upload(st.Tensor(1, 8193, list(map(float, range(8193)))))
+profile = rank.profile(16)
+```
+
+Rust uses `WgpuRuntime::request_profiled_headless(label).await`, then
+`ResidentRank::dispatch_profiled(n)?.read()?` (or `read_async().await?` on WASM).
+`createFromAdaptation(session, index, true)` / Python's
+`from_adaptation(session, index, timestamp_queries=True)` retain the same Rust
+candidate geometry, but do not feed diagnostic timings back to the policy.
+
+The shared Rust `spiraltorch.rank_gpu_profile.v1` report keeps per-pass raw
+ticks and generation as decimal strings, subtracts integer clocks before float
+conversion, and records timestamp period, zero/quantized intervals, stage sums,
+merge entry point, submission count and native host pacing. Pending reads own
+their query storage even after later uploads or workspace destruction.
+
+**This is a diagnostic execution path, not the ordinary fast path.** Portable
+stage timestamps require separate passes. Up to 256 repetitions fit each
+submission; larger calls use multiple submissions, and native Metal waits
+between chunks with a timeout to avoid exhausting its command-buffer pool.
+Browser timestamps may be quantized to zero. `gpu_span_ns` includes gaps between
+passes/submissions; stage sums exclude those gaps and query readback. Neither
+can be subtracted from host clocks to infer pure overhead. A profiled runtime
+also does not share device handles with default matmul workspaces.
+
+`resident_rank_profile_bench` pairs uninstrumented dispatch/completion with
+instrumented query readback, validating exact outputs outside timing. The
+isolated browser runner's `rank-profile` fixture exercises the same schema,
+ownership and 1024-repetition boundaries. Native/Python live timestamp tests
+require `SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS=1`; lack of capability is an error,
+not a CPU fallback or a successful zero-timing measurement.
 
 ## Projection To Rank Without Host Staging
 

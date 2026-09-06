@@ -66,6 +66,27 @@ async fn ensure_runtime() -> Result<runtime::WgpuRuntime, JsValue> {
     Ok(runtime)
 }
 
+fn timestamp_request(value: Option<js_sys::Boolean>) -> Result<bool, JsValue> {
+    value
+        .as_ref()
+        .map(|v| {
+            v.as_bool()
+                .ok_or_else(|| error("timestamp_queries must be a boolean"))
+        })
+        .transpose()
+        .map(|v| v.unwrap_or(false))
+}
+
+async fn rank_runtime(timestamps: bool) -> Result<runtime::WgpuRuntime, JsValue> {
+    if timestamps {
+        runtime::WgpuRuntime::request_profiled_headless("wasm.profiled.rank")
+            .await
+            .map_err(error)
+    } else {
+        ensure_runtime().await
+    }
+}
+
 #[wasm_bindgen(js_class = WgpuMatmul)]
 impl WasmWgpuMatmul {
     #[wasm_bindgen(js_name = create)]
@@ -305,7 +326,9 @@ impl WasmWgpuRank {
     pub async fn create_from_adaptation(
         session: &crate::rank_adaptation::WasmRankAdaptationSession,
         candidate_index: Number,
+        timestamp_queries: Option<js_sys::Boolean>,
     ) -> Result<WasmWgpuRank, JsValue> {
+        let timestamps = timestamp_request(timestamp_queries)?;
         let index = crate::utils::js_u32(candidate_index.as_ref(), "candidate index")?;
         let spec = session
             .wgpu_resident_candidate(index as usize)
@@ -313,7 +336,7 @@ impl WasmWgpuRank {
         let plan = Plan::try_new(spec.kind, spec.rows, spec.cols, spec.k, spec.tile_cols)
             .map_err(error)?;
         Ok(Self {
-            inner: ResidentRank::new_async(ensure_runtime().await?, plan)
+            inner: ResidentRank::new_async(rank_runtime(timestamps).await?, plan)
                 .await
                 .map_err(error)?,
         })
@@ -326,7 +349,9 @@ impl WasmWgpuRank {
         cols: Number,
         k: Number,
         tile_cols: Option<Number>,
+        timestamp_queries: Option<js_sys::Boolean>,
     ) -> Result<WasmWgpuRank, JsValue> {
+        let timestamps = timestamp_request(timestamp_queries)?;
         let kind = match kind.as_string().as_deref() {
             Some("topk") => Kind::TopK,
             Some("midk") => Kind::MidK,
@@ -347,7 +372,7 @@ impl WasmWgpuRank {
         )
         .map_err(error)?;
         Ok(Self {
-            inner: ResidentRank::new_async(ensure_runtime().await?, plan)
+            inner: ResidentRank::new_async(rank_runtime(timestamps).await?, plan)
                 .await
                 .map_err(error)?,
         })
@@ -373,6 +398,26 @@ impl WasmWgpuRank {
     #[wasm_bindgen(getter, js_name = outputIsCurrent)]
     pub fn output_is_current(&self) -> bool {
         self.inner.output_is_current()
+    }
+
+    #[wasm_bindgen(getter, js_name = timestampQueriesEnabled)]
+    pub fn timestamp_queries_enabled(&self) -> bool {
+        self.inner.timestamp_queries_enabled()
+    }
+
+    /// The promise owns query storage; later uploads or freeing the workspace are safe.
+    #[wasm_bindgen(unchecked_return_type = "Promise<Record<string, unknown>>")]
+    pub fn profile(&mut self, repetitions: Option<Number>) -> Result<Promise, JsValue> {
+        let reps = repetitions
+            .as_ref()
+            .map(|v| dimension(v.as_ref()))
+            .transpose()?
+            .unwrap_or(1);
+        let pending = self.inner.dispatch_profiled(reps as u32).map_err(error)?;
+        Ok(future_to_promise(async move {
+            let result = pending.read_async().await.map_err(error)?;
+            crate::utils::json_to_js_value(&result.report().to_string())
+        }))
     }
 
     #[wasm_bindgen(js_name = adapterInfo)]

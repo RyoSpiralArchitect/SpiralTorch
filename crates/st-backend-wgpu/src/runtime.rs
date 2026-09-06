@@ -18,6 +18,8 @@ use bytemuck::Pod;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+pub mod timestamps;
+
 #[cfg(not(target_arch = "wasm32"))]
 const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -93,6 +95,24 @@ impl WgpuRuntime {
 
     /// Request a headless adapter and enable SpiralTorch's supported optional features.
     pub async fn request_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
+        Self::request_headless_inner(label, false).await
+    }
+
+    /// Request a separate timestamp-enabled runtime, without replacing the default.
+    /// Unsupported devices fail explicitly instead of fabricating CPU-based GPU timings.
+    pub async fn request_profiled_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
+        Self::request_headless_inner(label, true).await
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn request_profiled_headless_blocking(label: &str) -> Result<Self, WgpuRuntimeError> {
+        pollster::block_on(Self::request_profiled_headless(label))
+    }
+
+    async fn request_headless_inner(
+        label: &str,
+        timestamps: bool,
+    ) -> Result<Self, WgpuRuntimeError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let mut selected = None;
         for (power_preference, force_fallback_adapter) in [
@@ -113,7 +133,13 @@ impl WgpuRuntime {
         let adapter = selected.ok_or(WgpuRuntimeError::NoAdapter)?;
         let adapter_info = adapter.get_info();
         let optional_features = wgpu::Features::SUBGROUP | wgpu::Features::SHADER_F16;
-        let required_features = adapter.features() & optional_features;
+        let mut required_features = adapter.features() & optional_features;
+        if timestamps {
+            if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+                return Err(WgpuRuntimeError::TimestampQueriesUnavailable);
+            }
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -138,6 +164,10 @@ impl WgpuRuntime {
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum WgpuRuntimeError {
+    #[error("GPU timestamp queries are not enabled; use an explicitly profiled runtime")]
+    TimestampQueriesUnavailable,
+    #[error("invalid GPU timestamp data: {message}")]
+    InvalidTimestamps { message: String },
     #[error("no suitable headless WGPU adapter is available")]
     NoAdapter,
     #[error("WGPU device request failed: {message}")]
@@ -656,7 +686,6 @@ pub(crate) struct ReadbackLease {
 }
 
 impl ReadbackLease {
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn unpooled(buffer: wgpu::Buffer) -> Self {
         Self {
             buffer: Some(buffer),
@@ -859,7 +888,7 @@ mod tests {
         let bytes = reused
             .read(context, Duration::from_secs(30), "pool.reused")
             .unwrap();
-        assert_eq!(bytes, bytemuck::cast_slice(&[99u32; 4]));
+        assert_eq!(bytes, bytemuck::cast_slice::<_, u8>(&[99u32; 4]));
         // Whether already completed or aborted, the old callback must settle.
         let _ = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
         drop(reused);
@@ -884,7 +913,7 @@ mod tests {
             survivor
                 .read(context, Duration::from_secs(30), "pool.survivor")
                 .unwrap(),
-            bytemuck::cast_slice(&[7u32; 4])
+            bytemuck::cast_slice::<_, u8>(&[7u32; 4])
         );
     }
 

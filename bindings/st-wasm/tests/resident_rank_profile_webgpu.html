@@ -1,0 +1,117 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Resident rank GPU pass timestamps</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {WgpuRank} from "/module/spiraltorch_wasm.js";
+const out=document.querySelector("#result");
+const report={schema:"spiraltorch.browser_rank_profile.v1",status:"running",cases:[],
+  boundary:"paired plain dispatch+completion versus instrumented dispatch+query readback; GPU pass clocks are diagnostic and may be quantized",repetitions:16,warmup_pairs:2,retained_pairs:12};
+function assert(ok, message) { if(!ok) throw Error(message); }
+async function rejects(fn) { let rejected=false; try { await fn(); } catch { rejected=true; } assert(rejected,"expected rejection"); }
+function reference(input,rows,cols,k,kind) {
+  const values=[],indices=[];
+  for(let row=0;row<rows;row++) {
+    const data=input.subarray(row*cols,(row+1)*cols);
+    const ids=Array.from({length:cols},(_,i)=>i).filter(i=>Number.isFinite(data[i]));
+    ids.sort((i,j)=>{let c=data[i]-data[j]; if(data[i]===0 && data[j]===0 && !Object.is(data[i],data[j])) c=Object.is(data[i],-0)?-1:1; return (kind==="topk"?-c:c)||i-j;});
+    const take=Math.min(k,ids.length),start=kind==="midk"?Math.floor((ids.length-take)/2):0;
+    for(const i of ids.slice(start,start+take)) { values.push(data[i]); indices.push(i); }
+    while(values.length<(row+1)*k) { values.push(NaN); indices.push(-1); }
+  }
+  return {values,indices};
+}
+async function check(ws, expected) {
+  const actual=await ws.readback();
+  assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed result");
+  assert(actual.values.length===expected.values.length && actual.indices.length===expected.indices.length,"result length");
+  expected.values.forEach((v,i)=>assert(Object.is(v,actual.values[i]) && expected.indices[i]===actual.indices[i],"canonical rank "+i));
+}
+function validate(profile,repetitions) {
+  assert(profile.schema==="spiraltorch.rank_gpu_profile.v1" && profile.instrumented,"Rust profile schema");
+  assert(profile.passes.length===repetitions*2 && profile.repetitions===repetitions,"query count");
+  assert(profile.compute_submissions===Math.ceil(repetitions/256) && !profile.host_paced_chunks,"browser submission boundary");
+  let zero=0,sort=0,merge=0;
+  profile.passes.forEach((p,i)=>{
+    assert(p.repetition===Math.floor(i/2) && p.stage===(i%2===0?"tile_sort":"row_merge"),"stage order");
+    assert(typeof p.start_tick==="string" && typeof p.end_tick==="string","lossless clock strings");
+    assert(Number.isFinite(p.elapsed_ns) && p.elapsed_ns>=0,"valid GPU duration");
+    assert(p.elapsed_ns===Number(BigInt(p.end_tick)-BigInt(p.start_tick))*profile.timestamp_period_ns,"integer delta before float");
+    if(p.elapsed_ns===0) zero++;
+    if(i%2===0) sort+=p.elapsed_ns; else merge+=p.elapsed_ns;
+  });
+  assert(zero===profile.zero_intervals && sort===profile.tile_sort_total_ns && merge===profile.row_merge_total_ns,"Rust stage totals");
+}
+try {
+  await init();
+  await rejects(()=>WgpuRank.create("midk",1,8,2,4,"true"));
+  const ordinary=await WgpuRank.create("midk",1,8,2,4);
+  assert(!ordinary.timestampQueriesEnabled,"default runtime must remain unprofiled");
+  ordinary.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  await rejects(()=>ordinary.profile(1));
+  assert(!ordinary.outputIsCurrent,"unsupported profile must be transactional");
+  ordinary.dispatch();
+  await check(ordinary,{values:[3,4],indices:[3,4]});
+  ordinary.free();
+  for(const kind of ["topk","midk","bottomk"]) for(const [cols,k,tile] of [[257,7,32],[8193,65,128],[8193,65,256],[8193,65,512]]) {
+    const rows=2, input=Float32Array.from({length:rows*cols},(_,i)=>i%251===0?NaN:i%127===0?-0:(i*73%127-63)/8);
+    const expected=reference(input,rows,cols,k,kind);
+    const ws=await WgpuRank.create(kind,rows,cols,k,tile,true);
+    try {
+      assert(ws.timestampQueriesEnabled,"explicit timestamps");
+      report.adapter=ws.adapterInfo();
+      await rejects(()=>ws.profile(1));
+      ws.upload(input);
+      for(const n of [0,1.5,1025,NaN]) await rejects(()=>ws.profile(n));
+      assert(!ws.outputIsCurrent,"invalid profile preserves output state");
+      const batches=[];
+      for(let batch=0;batch<14;batch++) {
+        const order=batch%2===0?["plain","profiled"]:["profiled","plain"],sample={order};
+        for(const arm of order) {
+          await ws.synchronize();
+          const began=performance.now();
+          if(arm==="plain") {
+            ws.dispatch(16);
+            const dispatched=performance.now()-began;
+            await ws.synchronize();
+            const total=performance.now()-began;
+            sample.plain={dispatch_call_ms:dispatched,completion_wait_ms:total-dispatched,total_ms:total};
+          } else {
+            const pending=ws.profile(16),dispatched=performance.now()-began;
+            const gpu=await pending,total=performance.now()-began;
+            sample.profiled={dispatch_call_ms:dispatched,query_readback_ms:total-dispatched,total_ms:total,gpu};
+            validate(gpu,16);
+            assert(gpu.generation==="1","profile generation");
+          }
+          await check(ws,expected);
+        }
+        if(batch>=2) batches.push(sample);
+      }
+      report.cases.push({kind,rows,cols,k,tile,status:"passed",batches});
+    } finally { ws.free(); }
+  }
+  const owned=await WgpuRank.create("midk",1,8193,65,256,true);
+  owned.upload(Float32Array.from({length:8193},(_,i)=>i));
+  const first=owned.profile(1);
+  owned.upload(new Float32Array(8193).fill(-3));
+  const second=owned.profile(2);
+  owned.free();
+  const b=await second,a=await first;
+  validate(a,1); validate(b,2);
+  assert(a.generation==="1" && b.generation==="2","owned pending profiles");
+  const unchanged=await WgpuRank.create("topk",1,8,2);
+  assert(!unchanged.timestampQueriesEnabled,"profiled factories cannot replace global runtime");
+  unchanged.free();
+  const maximum=await WgpuRank.create("topk",1,8,2,4,true);
+  maximum.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  const chunked=await maximum.profile(1024);
+  validate(chunked,1024);
+  await check(maximum,{values:[7,6],indices:[7,6]});
+  maximum.dispatch(1024);
+  await check(maximum,{values:[7,6],indices:[7,6]});
+  maximum.free();
+  report.maximum_repetitions={repetitions:1024,profile:chunked,status:"passed"};
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>
