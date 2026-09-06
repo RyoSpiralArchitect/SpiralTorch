@@ -96,6 +96,46 @@ projection with exact rank selection; it is not a complete language model or a
 fused single-dispatch kernel. The copy and the following rank dispatch are
 separate queue submissions.
 
+### One-Submission Composition
+
+`rank.dispatch_from_matmul(head, repetitions=1)` in Python, or
+`rank.dispatchFromMatmul(head, repetitions)` in JavaScript, computes the head,
+copies its output, and runs exact rank in one queue submission. No intermediate
+map or host upload occurs. It uses the head's configured kernel, tile and
+accumulation policy, rather than silently selecting a new one.
+Rust uses `rank.dispatch_from_matmul(&mut head, repetitions)` with the same
+implementation and state contract.
+
+```python
+head.upload(st.Tensor(1, 2, [1, 0]), st.Tensor(2, 4, [2, 7, 3, 1, 0, 0, 0, 0]))
+generation = rank.dispatch_from_matmul(head)  # no separate head/rank dispatch
+assert head.output_is_current and rank.output_is_current
+assert rank.readback()["generation"] == generation
+```
+
+```js
+const head = await WgpuMatmul.create(1, 2, 4);
+head.upload(new Float32Array([1, 0]), new Float32Array([2, 7, 3, 1, 0, 0, 0, 0]));
+const rank = await WgpuRank.create("topk", 1, 4, 2);
+rank.dispatchFromMatmul(head);
+head.free();
+const result = await rank.readback(); // indices: [1, 2]
+rank.free();
+```
+
+Both source operands must be uploaded, but its output need not be current:
+this method recomputes it. Invalid repetitions, missing operands, incompatible
+shape/device/queue, or exhausted rank generation leave both workspaces intact.
+Only successful submission marks both outputs current; this is still logical
+freshness, not completion attestation. The source input generation is unchanged,
+and the rank input generation advances once per call.
+
+Repetitions 1..1024 encode complete matmul/copy/rank chains with the **same
+operands**, not a recurrent model or a sequence of different token inputs.
+The rank input remains an owned copy, so later source updates/free do not affect
+it. Readback snapshots keep their prior ownership contract. One submission does
+not mean one shader dispatch or zero-copy aliasing.
+
 ```sh
 cargo build --release --locked -p st-core --features wgpu-rt --example resident_matmul_rank_bench
 python tools/bench_matmul_rank_vs_torch.py \
@@ -111,6 +151,11 @@ integers to make fp32 projection and stable tie-order checks exact; these
 fixtures do not establish arbitrary floating-point rank stability or model
 quality. Source/image binding and foreign-GPU-process gates match the rank-only
 harness; no exclusive GPU reservation or interleaved framework timing is claimed.
+The native diagnostic additionally rotates a one-submission/final-readback
+bridge, 16 one-submission calls, and a batch of 16 complete chains in one
+submission. All resident intervals end at a completion fence and exclude maps;
+every mode is checked against the reference after timing. Separate calls and
+batched replay remain distinct metrics rather than being pooled into one speedup.
 
 ## Measurement Boundaries
 

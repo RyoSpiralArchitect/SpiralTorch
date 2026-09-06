@@ -5,7 +5,7 @@
 <script type="module">
 const out = document.querySelector("#result");
 const report = {schema:"spiraltorch.browser_matmul_rank.v1",cases:[],assertions:[],
-  boundary:"resident operands; host bridge versus device-copy bridge; final rank readback included"};
+  boundary:"resident operands; host, GPU-copy and single-submit bridges; final rank readback included"};
 function assert(ok,label) { if(!ok) throw Error(label); report.assertions.push(label); }
 async function rejects(fn,label) { let failed=false; try { await fn(); } catch { failed=true; } assert(failed,label); }
 function reference(lhs,rhs,m,k,n,kind,take) {
@@ -28,13 +28,15 @@ function check(actual,expected) {
 }
 try {
   const {default:init,WgpuMatmul,WgpuRank}=await import("/module/spiraltorch_wasm.js"); await init();
-  for(const [m,k,n] of [[2,2,8],[2,32,257],[3,64,1025]]) for(const kind of ["topk","midk","bottomk"]) {
+  for(const [m,k,n] of [[2,2,8],[2,32,257],[3,64,1025]]) for(const kind of ["topk","midk","bottomk"])
+  for(const [kernel,accumulation] of [["scalar","sequential"],["register_2x2","tiled"],["register_2x2","compensated"]]) {
     const lhs=Float32Array.from({length:m*k},(_,i)=>i*7%5-2);
     const rhs=Float32Array.from({length:k*n},(_,i)=>i*11%7-3);
     const take=3, expected=reference(lhs,rhs,m,k,n,kind,take);
-    const source=await WgpuMatmul.create(m,k,n), rank=await WgpuRank.create(kind,m,n,take);
+    const source=await WgpuMatmul.createWithOptions(m,k,n,8,8,16,kernel,accumulation), rank=await WgpuRank.create(kind,m,n,take);
     report.adapter ??= rank.adapterInfo();
     await rejects(()=>rank.setInputFromMatmul(source),"unexecuted source rejected");
+    await rejects(()=>rank.dispatchFromMatmul(source),"chain missing operands rejected");
     source.upload(lhs,rhs); source.dispatch();
     rank.setInputFromMatmul(source); rank.dispatch(); check(await rank.readback(),expected);
     const initialGeneration=rank.generation;
@@ -46,23 +48,43 @@ try {
     await rejects(()=>rank.setInputFromMatmul(source),"invalidated source rejected");
     assert(rank.generation===initialGeneration && rank.outputIsCurrent,"failed copies preserve rank state");
     check(await rank.readback(),expected);
-    const times={host_bridge:[],device_copy_bridge:[]};
-    for(let block=0;block<10;block++) for(const mode of (block%2 ? [1,0] : [0,1])) {
+    for(const reps of [0,1025,-1,1.5,NaN,Infinity,2**32]) {
+      await rejects(()=>rank.dispatchFromMatmul(source,reps),"invalid chain repetitions rejected");
+      assert(!source.outputIsCurrent && rank.generation===initialGeneration && rank.outputIsCurrent,"chain validation preserves both states");
+    }
+    await rejects(()=>rank.dispatchFromMatmul({}),"chain wrong source type rejected");
+    const wrongChain=await WgpuMatmul.create(1,1,m*n);
+    wrongChain.upload(new Float32Array([1]),new Float32Array(m*n).fill(99));
+    await rejects(()=>rank.dispatchFromMatmul(wrongChain),"chain equal bytes wrong shape rejected");
+    assert(!wrongChain.outputIsCurrent && rank.generation===initialGeneration,"rejected chain does not dispatch source"); wrongChain.free();
+    assert(rank.dispatchFromMatmul(source,3)===initialGeneration+1n,"chain increments generation once per call");
+    assert(source.outputIsCurrent && rank.outputIsCurrent,"chain submits both outputs");
+    check(await rank.readback(),expected);
+    const oldSnapshot=rank.readback();
+    rank.dispatchFromMatmul(source,2);
+    check(await oldSnapshot,expected);
+    const times={host_bridge:[],device_copy_bridge:[],single_submit_bridge:[]};
+    for(let block=0;block<10;block++) for(let slot=0;slot<3;slot++) {
+      const mode=(slot+block)%3;
       const start=performance.now();
-      source.dispatch();
-      if(mode===0) rank.upload(await source.readback()); else rank.setInputFromMatmul(source);
-      rank.dispatch(); const result=await rank.readback();
+      if(mode===2) rank.dispatchFromMatmul(source);
+      else {
+        source.dispatch();
+        if(mode===0) rank.upload(await source.readback()); else rank.setInputFromMatmul(source);
+        rank.dispatch();
+      }
+      const result=await rank.readback();
       const elapsed=performance.now()-start;
       check(result,expected);
-      if(block>=2) times[mode===0 ? "host_bridge" : "device_copy_bridge"].push(elapsed);
+      if(block>=2) times[["host_bridge","device_copy_bridge","single_submit_bridge"][mode]].push(elapsed);
     }
-    source.dispatch(); rank.setInputFromMatmul(source);
+    rank.dispatchFromMatmul(source,16);
     const generation=rank.generation;
     source.uploadRhs(new Float32Array(k*n).fill(99)); source.dispatch(); source.free();
     rank.dispatch(2); const pending=rank.readback(); rank.free();
     const result=await pending; check(result,expected);
     assert(result.generation===generation,"copy and snapshot survive both workspace frees");
-    report.cases.push({m,k,n,kind,status:"passed",samples_ms:times});
+    report.cases.push({m,k,n,kind,kernel,accumulation,status:"passed",samples_ms:times});
   }
   report.status="passed";
 } catch(error) { report.status="error"; report.error=String(error.stack||error); }

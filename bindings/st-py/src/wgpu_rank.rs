@@ -19,6 +19,9 @@ mod enabled {
     fn error(err: ResidentRankError) -> PyErr {
         match err {
             ResidentRankError::Runtime(_)
+            | ResidentRankError::Matmul(st_backend_wgpu::resident_matmul::MatmulError::Runtime(
+                _,
+            ))
             | ResidentRankError::Dispatch(
                 DispatchError::Runtime(_) | DispatchError::PipelineBuild(_),
             ) => PyRuntimeError::new_err(err.to_string()),
@@ -119,6 +122,19 @@ mod enabled {
         fn dispatch(&mut self, py: Python<'_>, repetitions: u32) -> PyResult<u64> {
             py.detach(|| self.inner.dispatch(repetitions))
                 .map_err(error)
+        }
+        #[pyo3(signature = (source, repetitions=1))]
+        fn dispatch_from_matmul(
+            &mut self,
+            py: Python<'_>,
+            source: &mut crate::wgpu_resident::PyWgpuMatmul,
+            repetitions: u32,
+        ) -> PyResult<u64> {
+            py.detach(|| {
+                self.inner
+                    .dispatch_from_matmul(&mut source.inner, repetitions)
+            })
+            .map_err(error)
         }
         fn synchronize(&self, py: Python<'_>) -> PyResult<()> {
             py.detach(|| self.inner.synchronize()).map_err(error)

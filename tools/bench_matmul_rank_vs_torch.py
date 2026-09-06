@@ -61,6 +61,9 @@ def run(executable):
                 "host_bridge":"resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
                 "device_copy_bridge":"resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
                 "resident_copy_bridge_per_op":"16 matmul/copy/rank chains then completion fence; divided by 16, no maps",
+                "single_submit_bridge":"resident operands; one matmul/copy/rank submission, final rank map",
+                "resident_single_submit_per_op":"16 calls of one matmul/copy/rank submission then completion fence; divided by 16, no maps",
+                "resident_batched_submit_per_op":"16 complete matmul/copy/rank chains in one submission then completion fence; divided by 16, no maps",
                 "torch_resident_per_op":"16 matmul/stable-sort chains with preallocated CUDA outputs then synchronize; divided by 16, no maps",
             }, cases=[])
         with torch.inference_mode():
