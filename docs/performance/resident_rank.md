@@ -169,6 +169,12 @@ cancellation, rather than waiting for JavaScript garbage collection. This uses
 a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal
 query-handle Drop and all non-profiled execution retain their existing behavior.
 
+The [single-pass comparison and stage study](../../benchmarks/results/2026-09-07-rank-single-pass/README.md)
+retain repeated RTX 5090/PyTorch CUDA controls, matched browser and A/A runs,
+raw query intervals, and the rejected allocation-failure prototype. Native
+fixed controls improve at the median, but CUDA remains faster and browser
+timing noise prevents a general browser speedup claim.
+
 ## Projection To Rank Without Host Staging
 
 `set_input_from_matmul` (`setInputFromMatmul` in JavaScript) copies current
