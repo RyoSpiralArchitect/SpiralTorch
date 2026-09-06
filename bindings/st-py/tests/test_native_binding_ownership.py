@@ -57,8 +57,25 @@ class NativeBindingOwnershipTest(unittest.TestCase):
     @unittest.skipUnless(
         hasattr(st, "RankAdaptationSession"), "requires the kdsl feature"
     )
+    def test_rank_adaptation_rejects_fallback_and_unsupported_native_variants(self) -> None:
+        fallback = st.plan(
+            "topk", 2, 256, 8, backend="wgpu", strict_accelerator=False
+        )
+        with self.assertRaises(ValueError):
+            st.RankAdaptationSession(fallback, ["u2: false;", "u2: true;"])
+        wide = st.plan(
+            "topk", 2, 257, 8, backend="wgpu", strict_accelerator=True
+        )
+        with self.assertRaisesRegex(ValueError, "cols <= 256"):
+            st.RankAdaptationSession(wide, ["u2: false;", "u2: true;"])
+
+    @unittest.skipUnless(
+        hasattr(st, "RankAdaptationSession"), "requires the kdsl feature"
+    )
     def test_rank_adaptation_keeps_plan_provenance_and_reward_ownership(self) -> None:
-        base = st.plan("topk", 2, 256, 8, backend="wgpu")
+        base = st.plan(
+            "topk", 2, 256, 8, backend="wgpu", strict_accelerator=True
+        )
         session = st.RankAdaptationSession(
             base,
             ["u2: false;", "u2: true;"],
@@ -75,6 +92,7 @@ class NativeBindingOwnershipTest(unittest.TestCase):
             selection_receipt["execution_signature"],
         )
         self.assertIn("backend=wgpu", selection.execution_signature)
+        self.assertIn("scope=declared_native", selection.execution_signature)
         self.assertEqual(selection.plan.contract()["requested_backend"], "wgpu")
         self.assertEqual(selection_receipt["execution_client"], "python")
         self.assertEqual(selection_receipt["plan"]["execution_client"], "python")

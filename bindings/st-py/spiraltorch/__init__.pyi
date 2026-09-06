@@ -5917,6 +5917,7 @@ def plan(
     subgroup: Optional[bool] = ...,
     max_workgroup: Optional[int] = ...,
     shared_mem_per_workgroup: Optional[int] = ...,
+    strict_accelerator: Optional[bool] = ...,
     runtime_execution_plan: Mapping[str, Any] | None = ...,
 ) -> RankPlan: ...
 
@@ -5930,6 +5931,7 @@ def plan_topk(
     subgroup: Optional[bool] = ...,
     max_workgroup: Optional[int] = ...,
     shared_mem_per_workgroup: Optional[int] = ...,
+    strict_accelerator: Optional[bool] = ...,
     runtime_execution_plan: Mapping[str, Any] | None = ...,
 ) -> RankPlan: ...
 
@@ -11333,6 +11335,7 @@ class _PlannerModule(ModuleType):
         subgroup: Optional[bool] = ...,
         max_workgroup: Optional[int] = ...,
         shared_mem_per_workgroup: Optional[int] = ...,
+        strict_accelerator: Optional[bool] = ...,
     ) -> RankPlan: ...
 
     def plan_topk(
@@ -11345,6 +11348,7 @@ class _PlannerModule(ModuleType):
         subgroup: Optional[bool] = ...,
         max_workgroup: Optional[int] = ...,
         shared_mem_per_workgroup: Optional[int] = ...,
+        strict_accelerator: Optional[bool] = ...,
     ) -> RankPlan: ...
 
     def describe_device(

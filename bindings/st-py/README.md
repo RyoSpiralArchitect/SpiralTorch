@@ -405,7 +405,14 @@ These APIs are not in the published 0.4.27 wheel yet.
   These fields use Black Cat bandit witness contract v3. Candidate receipts
   expose the effective kernel execution signature, and every nested plan carries
   the same requested/effective Python client provenance as a directly created
-  `RankPlan`.
+  `RankPlan`. Use `plan(..., strict_accelerator=True)` before comparing multiple
+  candidates through a caller-owned native executor. This forbids a failed GPU
+  arm from silently becoming a software run with a separate posterior; a native
+  launch failure must be abandoned rather than credited. Fallback-allowed plans
+  are deduplicated by the route currently executable in the Rust build.
+  Strict WGPU signatures are marked `scope=declared_native`: they validate the
+  shared Rust kernel geometry but do not attest device initialization. Direct
+  lane hints are conservatively deduplicated because not all kernels consume them.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field

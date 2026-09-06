@@ -2043,7 +2043,12 @@ declare module "spiraltorch-wasm" {
         pending_selection_id: number | null;
     };
 
-    /** Rust-owned SpiralK candidate planner plus Black Cat feedback state. */
+    /**
+     * Rust-owned SpiralK candidate planner plus Black Cat feedback state.
+     * WGPU comparisons require strict_accelerator; declared_native signatures
+     * validate static geometry, not device readiness. The caller must execute
+     * without fallback and validate output before crediting an observation.
+     */
     export class RankAdaptationSession {
         constructor(request: RankAdaptationRequest);
         free(): void;

@@ -3,7 +3,8 @@ use serde_json::Value;
 use st_core::backend::device_caps::BackendKind;
 use st_core::runtime::blackcat::bandit::SoftBanditMode;
 use st_core::runtime::rank_adaptation::{
-    RankAdaptationSession, RANK_ADAPTATION_MAX_SAFE_SELECTION_ID,
+    declared_native_rank_execution_signature, RankAdaptationSession,
+    RANK_ADAPTATION_MAX_SAFE_SELECTION_ID,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -61,12 +62,19 @@ fn session_from_value(value: Value) -> Result<ResolvedRankAdaptationSession, Str
     let request = serde_json::from_value::<RankAdaptationRequest>(value)
         .map_err(|error| error.to_string())?;
     let resolved_plan = resolve_rank_plan_value(request.rank_plan)?;
-    let session = RankAdaptationSession::try_from_spiralk(
-        &resolved_plan.plan,
-        &request.scripts,
-        parse_policy(&request.policy)?,
-        safe_u64(request.seed, "seed")?,
-    )
+    let policy = parse_policy(&request.policy)?;
+    let seed = safe_u64(request.seed, "seed")?;
+    let session = if resolved_plan.plan.accelerator_fallback().is_strict() {
+        RankAdaptationSession::try_from_spiralk_with_execution_signature(
+            &resolved_plan.plan,
+            &request.scripts,
+            policy,
+            seed,
+            declared_native_rank_execution_signature,
+        )
+    } else {
+        RankAdaptationSession::try_from_spiralk(&resolved_plan.plan, &request.scripts, policy, seed)
+    }
     .map_err(|error| error.to_string())?;
     Ok(ResolvedRankAdaptationSession {
         session,
@@ -212,7 +220,8 @@ mod tests {
                 "rows": 2,
                 "cols": 256,
                 "k": 8,
-                "backend": "wgpu"
+                "backend": "wgpu",
+                "strict_accelerator": true
             },
             "scripts": ["u2: false;", "u2: true;"],
             "policy": "ucb",
@@ -249,5 +258,34 @@ mod tests {
         assert!(declarations.contains("rng_stream_seed: string | null"));
         assert!(declarations.contains("execution_signature: string"));
         assert!(declarations.contains("pendingSelectionId(): number | undefined"));
+    }
+
+    #[test]
+    fn wasm_admission_rejects_fallback_variants_and_unsupported_native_plans() {
+        let mut value = request();
+        value["rank_plan"]["strict_accelerator"] = json!(false);
+        assert!(session_from_value(value)
+            .err()
+            .unwrap()
+            .contains("same effective execution"));
+        let mut value = request();
+        value["rank_plan"]["cols"] = json!(257);
+        assert!(session_from_value(value)
+            .err()
+            .unwrap()
+            .contains("cols <= 256"));
+        let mut value = request();
+        value["rank_plan"]["cols"] = json!(257);
+        value["rank_plan"]["kind"] = json!("bottomk");
+        value["scripts"] = json!(["u2: true; ctile: 128;", "u2: true; ctile: 256;"]);
+        let session = session_from_value(value).unwrap().session;
+        assert_eq!(session.snapshot().candidates.len(), 2);
+        assert!(session
+            .snapshot()
+            .candidates
+            .iter()
+            .all(|candidate| candidate
+                .execution_signature
+                .contains("/scope=declared_native/")));
     }
 }

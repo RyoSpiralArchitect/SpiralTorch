@@ -36,6 +36,7 @@ julia-ffi = ["dep:julia-ffi-poc"]
 go-bridge = ["dep:ureq"]
 
 [dependencies]
+st-kernel-contracts = { path = "../st-kernel-contracts" }
 # Complex dynamics receipts require one transcendental implementation across targets.
 libm        = { version = "=0.2.16", default-features = false }
 thiserror   = "2"

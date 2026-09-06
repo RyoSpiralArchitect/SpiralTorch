@@ -4,8 +4,8 @@ use pyo3::types::{PyAny, PyModule};
 use serde::Serialize;
 use st_core::runtime::blackcat::bandit::SoftBanditMode;
 use st_core::runtime::rank_adaptation::{
-    RankAdaptationSelection, RankAdaptationSession, RANK_ADAPTATION_CONTRACT_VERSION,
-    RANK_ADAPTATION_SEMANTIC_OWNER,
+    declared_native_rank_execution_signature, RankAdaptationSelection, RankAdaptationSession,
+    RANK_ADAPTATION_CONTRACT_VERSION, RANK_ADAPTATION_SEMANTIC_OWNER,
 };
 
 use crate::json::json_to_py;
@@ -105,9 +105,18 @@ impl PyRankAdaptationSession {
         seed: u64,
     ) -> PyResult<Self> {
         let policy = policy_from_str(policy)?;
-        let inner =
+        let inner = if base_plan.plan().accelerator_fallback().is_strict() {
+            RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                base_plan.plan(),
+                &scripts,
+                policy,
+                seed,
+                declared_native_rank_execution_signature,
+            )
+        } else {
             RankAdaptationSession::try_from_spiralk(base_plan.plan(), &scripts, policy, seed)
-                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
             inner,
             metadata: base_plan.metadata(),

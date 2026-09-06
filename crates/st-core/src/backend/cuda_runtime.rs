@@ -48,7 +48,7 @@ pub fn run_selection(
     plan: &RankPlan,
     buffers: &mut LaunchSlices<'_>,
 ) -> Result<(), String> {
-    let workgroup = configured_workgroup_for_selection(plan, selection)?;
+    let workgroup = validate_native_selection(plan, selection)?;
     if plan.rows == 0 || plan.k == 0 {
         return Ok(());
     }
@@ -107,6 +107,49 @@ fn configured_workgroup_for_selection(
         ));
     }
     Ok(Some(workgroup))
+}
+
+/// Checks every selection constraint that is knowable before CUDA is initialized.
+///
+/// Adaptation uses this same gate so plans that the executor would route through
+/// software fallback cannot acquire independent native-kernel posteriors.
+pub(crate) fn validate_native_selection(
+    plan: &RankPlan,
+    selection: Selection,
+) -> Result<Option<u32>, String> {
+    let workgroup = configured_workgroup_for_selection(plan, selection)?;
+    if plan.rows == 0 || plan.k == 0 || plan.cols == 0 {
+        return Ok(workgroup);
+    }
+
+    match selection {
+        Selection::Top | Selection::Bottom if plan.k == 1 => {
+            validate_launch_requirements(plan, "rankk_bitonic", 0, Some(1))?;
+        }
+        Selection::Top | Selection::Bottom => {
+            let workgroup = workgroup.expect("non-k=1 rank selection has a workgroup");
+            if needs_exact_rescan(plan.cols, plan.k, workgroup) {
+                validate_launch_requirements(
+                    plan,
+                    "rankk_exact_rescan",
+                    rescan_shared_bytes(workgroup)?,
+                    Some(SUPPORTED_K),
+                )?;
+            } else {
+                validate_launch_requirements(
+                    plan,
+                    "rankk_warp_heap",
+                    heap_shared_bytes(workgroup)?,
+                    Some(workgroup as usize * PER_THREAD_KEEP),
+                )?;
+            }
+        }
+        Selection::Mid => {
+            validate_mid_cols(plan.cols)?;
+            validate_launch_requirements(plan, MIDK_KERNEL, mid_shared_bytes(plan.cols)?, None)?;
+        }
+    }
+    Ok(workgroup)
 }
 
 fn needs_exact_rescan(cols: u32, k: u32, workgroup: u32) -> bool {
@@ -179,15 +222,7 @@ fn launch_cuda_kernel(
     shared_mem_bytes: u32,
     k_limit: Option<usize>,
 ) -> Result<(), String> {
-    validate_dynamic_shared_memory(plan, kernel_name, shared_mem_bytes)?;
-    if let Some(limit) = k_limit {
-        if plan.k as usize > limit {
-            return Err(format!(
-                "cuda kernel `{kernel_name}` only supports k ≤ {limit}, received {}",
-                plan.k
-            ));
-        }
-    }
+    validate_launch_requirements(plan, kernel_name, shared_mem_bytes, k_limit)?;
 
     let rows = plan.rows as usize;
     let k = plan.k as usize;
@@ -240,6 +275,24 @@ fn launch_cuda_kernel(
     buffers.out_vals.copy_from_slice(&host_vals);
     buffers.out_idx.copy_from_slice(&host_idx);
 
+    Ok(())
+}
+
+fn validate_launch_requirements(
+    plan: &RankPlan,
+    kernel_name: &str,
+    shared_mem_bytes: u32,
+    k_limit: Option<usize>,
+) -> Result<(), String> {
+    validate_dynamic_shared_memory(plan, kernel_name, shared_mem_bytes)?;
+    if let Some(limit) = k_limit {
+        if plan.k as usize > limit {
+            return Err(format!(
+                "cuda kernel `{kernel_name}` only supports k ≤ {limit}, received {}",
+                plan.k
+            ));
+        }
+    }
     Ok(())
 }
 

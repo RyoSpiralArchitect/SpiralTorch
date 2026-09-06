@@ -11,7 +11,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::backend::{device_caps::BackendKind, unison_heuristics::RankKind};
+use crate::backend::device_caps::BackendKind;
+#[cfg(feature = "cuda")]
+use crate::backend::unison_heuristics::RankKind;
 use crate::ops::rank_entry::{RankPlan, RankPlanError, RankPlanSnapshot};
 use crate::runtime::blackcat::{
     bandit::{BanditDecisionWitness, SoftBanditMode},
@@ -38,6 +40,8 @@ pub enum RankAdaptationError {
     NoCandidates,
     #[error("rank adaptation has no candidate left after correctness quarantine")]
     NoEligibleCandidates,
+    #[error("comparing native rank candidates requires accelerator fallback to be forbidden")]
+    NativeComparisonRequiresStrictFallback,
     #[error("rank adaptation accepts at most {maximum} candidates, got {actual}")]
     TooManyCandidates { maximum: usize, actual: usize },
     #[error("SpiralK candidate {index} must not be empty")]
@@ -211,13 +215,23 @@ impl RankAdaptationSession {
         policy: SoftBanditMode,
         seed: u64,
     ) -> Result<Self, RankAdaptationError> {
-        Self::try_from_spiralk_with_execution_signature(
+        let session = Self::try_from_spiralk_with_execution_signature(
             base,
             scripts,
             policy,
             seed,
             effective_rank_execution_signature,
-        )
+        )?;
+        if session.candidates.len() > 1
+            && matches!(
+                base.device_caps.backend,
+                BackendKind::Cuda | BackendKind::Wgpu
+            )
+            && base.accelerator_fallback().allows_fallback()
+        {
+            return Err(RankAdaptationError::NativeComparisonRequiresStrictFallback);
+        }
+        Ok(session)
     }
 
     /// Evaluates candidates with a caller-owned Rust execution identity.
@@ -519,43 +533,10 @@ impl RankAdaptationSession {
 /// claiming that its knobs are ignored.
 pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, RankPlanError> {
     plan.validate()?;
-    let common = format!(
-        "spiraltorch.rank_execution.v1/backend={}/kind={}/rows={}/cols={}/k={}/fallback={}",
-        plan.device_caps.backend.as_str(),
-        plan.kind.as_str(),
-        plan.rows,
-        plan.cols,
-        plan.k,
-        plan.accelerator_fallback().as_str(),
-    );
+    let common = rank_execution_signature_prefix(plan);
     let signature = match plan.device_caps.backend {
-        BackendKind::Cuda if !cfg!(feature = "cuda") => format!(
-            "{common}/path={}",
-            if plan.accelerator_fallback().allows_fallback() {
-                "software_fallback"
-            } else {
-                "unavailable"
-            }
-        ),
-        BackendKind::Cuda
-            if plan.k == 1 && matches!(plan.kind, RankKind::TopK | RankKind::BottomK) =>
-        {
-            format!("{common}/path=warp_bitonic/block=32")
-        }
-        BackendKind::Cuda => format!("{common}/path=workgroup_dispatch/wg={}", plan.choice.wg),
-        BackendKind::Wgpu if plan.choice.use_2ce => {
-            let requested_tile = match plan.kind {
-                RankKind::TopK => plan.choice.tile,
-                RankKind::MidK | RankKind::BottomK => plan.choice.ctile,
-            };
-            let tile = requested_tile.min(plan.cols.max(1));
-            format!("{common}/path=exact_2ce/tile={tile}")
-        }
-        BackendKind::Wgpu if matches!(plan.kind, RankKind::TopK | RankKind::BottomK) => {
-            let k_lane = plan.choice.kl.max(plan.k).max(1);
-            format!("{common}/path=direct/k_lane={k_lane}")
-        }
-        BackendKind::Wgpu => format!("{common}/path=direct"),
+        BackendKind::Cuda => cuda_rank_execution_signature(plan, &common),
+        BackendKind::Wgpu => wgpu_rank_execution_signature(plan, &common),
         BackendKind::Cpu | BackendKind::Hip => format!("{common}/path=shape_only"),
         BackendKind::Mps => format!(
             "{common}/path=unbound/u2={}/wg={}/kl={}/ch={}/mk={}/mkd={}/tile={}/ctile={}/fft_tile={}/fft_radix={}/fft_segments={}",
@@ -573,6 +554,115 @@ pub fn effective_rank_execution_signature(plan: &RankPlan) -> Result<String, Ran
         ),
     };
     Ok(signature)
+}
+
+/// Identity for a caller-owned strict native rank executor.
+///
+/// This does not attest runtime readiness. Cross-language clients may use it
+/// only when their execution contract forbids software fallback and they
+/// independently gate every observation on output correctness.
+pub fn declared_native_rank_execution_signature(plan: &RankPlan) -> Result<String, RankPlanError> {
+    plan.validate()?;
+    if !plan.accelerator_fallback().is_strict() {
+        return Err(RankPlanError::DeclaredNativeRequiresStrictFallback);
+    }
+    if plan.device_caps.backend != BackendKind::Wgpu {
+        return effective_rank_execution_signature(plan);
+    }
+    crate::backend::rank_support::wgpu_rank_exact_support(plan)
+        .map_err(|detail| RankPlanError::UnsupportedNativeExecution { detail })?;
+    let common = format!(
+        "{}/scope=declared_native",
+        rank_execution_signature_prefix(plan)
+    );
+    Ok(wgpu_rank_execution_signature_with_state(
+        plan, &common, true, true,
+    ))
+}
+
+fn rank_execution_signature_prefix(plan: &RankPlan) -> String {
+    format!(
+        "spiraltorch.rank_execution.v1/backend={}/kind={}/rows={}/cols={}/k={}/fallback={}",
+        plan.device_caps.backend.as_str(),
+        plan.kind.as_str(),
+        plan.rows,
+        plan.cols,
+        plan.k,
+        plan.accelerator_fallback().as_str(),
+    )
+}
+
+fn non_native_rank_execution_signature(plan: &RankPlan, common: &str) -> String {
+    format!(
+        "{common}/path={}",
+        if plan.accelerator_fallback().allows_fallback() {
+            "software_fallback"
+        } else {
+            "unavailable"
+        }
+    )
+}
+
+fn cuda_rank_execution_signature(plan: &RankPlan, common: &str) -> String {
+    #[cfg(feature = "cuda")]
+    {
+        use crate::backend::rankk_software::Selection;
+
+        let selection = match plan.kind {
+            RankKind::TopK => Selection::Top,
+            RankKind::MidK => Selection::Mid,
+            RankKind::BottomK => Selection::Bottom,
+        };
+        if crate::backend::cuda_runtime::validate_native_selection(plan, selection).is_err() {
+            return non_native_rank_execution_signature(plan, common);
+        }
+        if plan.rows == 0 || plan.k == 0 {
+            return format!("{common}/path=noop");
+        }
+        if plan.cols == 0 {
+            return format!("{common}/path=empty_columns");
+        }
+        if plan.k == 1 && matches!(plan.kind, RankKind::TopK | RankKind::BottomK) {
+            return format!("{common}/path=warp_bitonic/block=32");
+        }
+        format!("{common}/path=workgroup_dispatch/wg={}", plan.choice.wg)
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    non_native_rank_execution_signature(plan, common)
+}
+
+fn wgpu_rank_execution_signature(plan: &RankPlan, common: &str) -> String {
+    #[cfg(feature = "wgpu-rt")]
+    let (context_ready, native_plan_supported) = (
+        crate::backend::wgpu_rt::installed_ctx().is_some(),
+        crate::backend::rank_support::wgpu_rank_exact_support(plan).is_ok(),
+    );
+    #[cfg(not(feature = "wgpu-rt"))]
+    let (context_ready, native_plan_supported) = (false, false);
+
+    wgpu_rank_execution_signature_with_state(plan, common, context_ready, native_plan_supported)
+}
+
+fn wgpu_rank_execution_signature_with_state(
+    plan: &RankPlan,
+    common: &str,
+    context_ready: bool,
+    native_plan_supported: bool,
+) -> String {
+    if !context_ready || !native_plan_supported {
+        return non_native_rank_execution_signature(plan, common);
+    }
+    match plan.choice.use_2ce {
+        true => {
+            let requested_tile = crate::backend::rank_support::exact_tile_cols(plan);
+            let tile = requested_tile.min(plan.cols.max(1));
+            format!("{common}/path=exact_2ce/tile={tile}")
+        }
+        // Direct kernels can ignore k_lane depending on subgroup availability
+        // and heuristic routing. Do not split arms on this non-portable knob.
+        false => format!("{common}/path=direct"),
+    }
 }
 
 fn validate_scripts(scripts: &[String]) -> Result<(), RankAdaptationError> {
@@ -657,15 +747,20 @@ mod tests {
         vec!["u2: false;".to_owned(), "u2: true;".to_owned()]
     }
 
-    #[test]
-    fn selection_and_correct_observation_share_one_rust_contract() {
-        let mut session = RankAdaptationSession::try_from_spiralk(
+    fn contract_test_session(seed: u64) -> RankAdaptationSession {
+        RankAdaptationSession::try_from_spiralk_with_execution_signature(
             &base_plan(),
             &scripts(),
             SoftBanditMode::UCB,
-            17,
+            seed,
+            declared_native_rank_execution_signature,
         )
-        .expect("session");
+        .expect("strict external contract")
+    }
+
+    #[test]
+    fn selection_and_correct_observation_share_one_rust_contract() {
+        let mut session = contract_test_session(17);
         let selection = session.try_choose().expect("selection");
         assert_eq!(selection.receipt().selection_id, 1);
         assert_eq!(session.pending_selection_id(), Some(1));
@@ -693,13 +788,7 @@ mod tests {
 
     #[test]
     fn failed_correctness_and_abandonment_never_credit_a_candidate() {
-        let mut session = RankAdaptationSession::try_from_spiralk(
-            &base_plan(),
-            &scripts(),
-            SoftBanditMode::UCB,
-            29,
-        )
-        .expect("session");
+        let mut session = contract_test_session(29);
         let first = session.try_choose().expect("first selection");
         let rejected = session
             .try_observe(first.receipt().selection_id, 2.0, false)
@@ -750,13 +839,7 @@ mod tests {
 
     #[test]
     fn all_failed_candidates_stop_selection_explicitly() {
-        let mut session = RankAdaptationSession::try_from_spiralk(
-            &base_plan(),
-            &scripts(),
-            SoftBanditMode::UCB,
-            31,
-        )
-        .expect("session");
+        let mut session = contract_test_session(31);
         for _ in 0..2 {
             let selection = session.try_choose().expect("untried candidate");
             session
@@ -775,13 +858,7 @@ mod tests {
 
     #[test]
     fn invalid_measurement_and_stale_id_preserve_the_pending_slot() {
-        let mut session = RankAdaptationSession::try_from_spiralk(
-            &base_plan(),
-            &scripts(),
-            SoftBanditMode::UCB,
-            43,
-        )
-        .expect("session");
+        let mut session = contract_test_session(43);
         let selection = session.try_choose().expect("selection");
         assert!(matches!(
             session.try_observe(selection.receipt().selection_id + 1, 1.0, true),
@@ -849,6 +926,29 @@ mod tests {
 
     #[cfg(feature = "cuda")]
     #[test]
+    fn cuda_native_comparison_requires_strict_execution() {
+        let base = try_plan_rank_with_config(
+            RankKind::TopK,
+            2,
+            256,
+            8,
+            BackendKind::Cuda.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        )
+        .unwrap();
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk(
+                &base,
+                &["wg: 32;".to_owned(), "wg: 256;".to_owned()],
+                SoftBanditMode::UCB,
+                1,
+            ),
+            Err(RankAdaptationError::NativeComparisonRequiresStrictFallback)
+        ));
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
     fn cuda_candidates_are_deduplicated_by_consumed_workgroup() {
         let base = try_plan_rank_with_config(
             RankKind::TopK,
@@ -883,6 +983,27 @@ mod tests {
             ),
             Err(RankAdaptationError::DuplicatePlan { .. })
         ));
+
+        for fallback in [AcceleratorFallback::Allow, AcceleratorFallback::Forbid] {
+            let unsupported = try_plan_rank_with_config(
+                RankKind::TopK,
+                2,
+                256,
+                8,
+                BackendKind::Cuda.default_caps(),
+                ExecutionConfig::new(fallback, 1024),
+            )
+            .expect("CUDA plan");
+            assert!(matches!(
+                RankAdaptationSession::try_from_spiralk(
+                    &unsupported,
+                    &["wg: 512;".to_owned(), "wg: 1024;".to_owned()],
+                    SoftBanditMode::UCB,
+                    1,
+                ),
+                Err(RankAdaptationError::DuplicatePlan { .. })
+            ));
+        }
     }
 
     #[cfg(not(feature = "cuda"))]
@@ -943,19 +1064,121 @@ mod tests {
     }
 
     #[test]
+    fn wgpu_direct_lane_hints_do_not_create_portably_distinct_arms() {
+        assert!(matches!(
+            RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                &base_plan(),
+                &[
+                    "u2: false; kl: 8;".to_owned(),
+                    "u2: false; kl: 16;".to_owned()
+                ],
+                SoftBanditMode::UCB,
+                1,
+                declared_native_rank_execution_signature,
+            ),
+            Err(RankAdaptationError::DuplicatePlan { .. })
+        ));
+    }
+
+    #[test]
     fn wgpu_two_stage_signature_uses_the_effective_tile() {
-        let mut first = base_plan();
+        let mut first = try_plan_rank_with_config(
+            RankKind::TopK,
+            2,
+            256,
+            8,
+            BackendKind::Wgpu.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+        )
+        .expect("WGPU plan");
         first.choice.use_2ce = true;
         first.choice.tile = first.cols * 2;
         let mut second = first.clone();
         second.choice.tile = first.cols * 4;
-
-        assert_eq!(
-            effective_rank_execution_signature(&first).unwrap(),
-            effective_rank_execution_signature(&second).unwrap()
+        let first_signature = wgpu_rank_execution_signature_with_state(
+            &first,
+            &rank_execution_signature_prefix(&first),
+            true,
+            true,
         );
-        assert!(effective_rank_execution_signature(&first)
-            .unwrap()
-            .ends_with("/path=exact_2ce/tile=256"));
+        let second_signature = wgpu_rank_execution_signature_with_state(
+            &second,
+            &rank_execution_signature_prefix(&second),
+            true,
+            true,
+        );
+
+        assert_eq!(first_signature, second_signature);
+        assert!(first_signature.ends_with("/path=exact_2ce/tile=256"));
+        let declared = declared_native_rank_execution_signature(&first).unwrap();
+        assert!(declared.contains("/scope=declared_native/"));
+        assert!(declared.ends_with("/path=exact_2ce/tile=256"));
+
+        let fallback_allowed = try_plan_rank_with_config(
+            RankKind::TopK,
+            2,
+            256,
+            8,
+            BackendKind::Wgpu.default_caps(),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        )
+        .expect("WGPU fallback plan");
+        assert_eq!(
+            declared_native_rank_execution_signature(&fallback_allowed),
+            Err(RankPlanError::DeclaredNativeRequiresStrictFallback)
+        );
+    }
+
+    #[test]
+    fn wgpu_candidates_collapse_when_native_execution_is_not_ready() {
+        for fallback in [AcceleratorFallback::Allow, AcceleratorFallback::Forbid] {
+            let mut direct = try_plan_rank_with_config(
+                RankKind::TopK,
+                2,
+                256,
+                8,
+                BackendKind::Wgpu.default_caps(),
+                ExecutionConfig::new(fallback, 1024),
+            )
+            .expect("WGPU plan");
+            direct.choice.use_2ce = false;
+            let mut two_stage = direct.clone();
+            two_stage.choice.use_2ce = true;
+
+            let direct_signature = wgpu_rank_execution_signature_with_state(
+                &direct,
+                &rank_execution_signature_prefix(&direct),
+                false,
+                true,
+            );
+            let two_stage_signature = wgpu_rank_execution_signature_with_state(
+                &two_stage,
+                &rank_execution_signature_prefix(&two_stage),
+                false,
+                true,
+            );
+            assert_eq!(direct_signature, two_stage_signature);
+            let expected_path = if fallback.allows_fallback() {
+                "/path=software_fallback"
+            } else {
+                "/path=unavailable"
+            };
+            assert!(direct_signature.ends_with(expected_path));
+
+            let unsupported_direct = wgpu_rank_execution_signature_with_state(
+                &direct,
+                &rank_execution_signature_prefix(&direct),
+                true,
+                false,
+            );
+            let unsupported_two_stage = wgpu_rank_execution_signature_with_state(
+                &two_stage,
+                &rank_execution_signature_prefix(&two_stage),
+                true,
+                false,
+            );
+            assert_eq!(unsupported_direct, unsupported_two_stage);
+            assert!(unsupported_direct.ends_with(expected_path));
+        }
     }
 }

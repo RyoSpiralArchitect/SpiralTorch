@@ -9,3 +9,4 @@
 //! allocation, or foreign-function interfaces.
 
 pub mod compaction;
+pub mod rank;

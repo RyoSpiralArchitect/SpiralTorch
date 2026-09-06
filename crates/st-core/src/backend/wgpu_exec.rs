@@ -3,8 +3,13 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::backend::rank_support::{
+    exact_kind as exact_2ce_kind, exact_tile_cols as exact_2ce_tile_cols,
+};
+pub use crate::backend::rank_support::{wgpu_rank_exact_support, wgpu_rank_exact_support_for};
 use crate::backend::rankk_launch::{with_registered_buffers_wgpu, LaunchSlices};
 use crate::backend::rankk_software::{run_selection, Selection};
+#[cfg(test)]
 use crate::backend::unison_heuristics::RankKind;
 use crate::ops::rank_entry::{RankKExecutor, RankPlan};
 
@@ -13,62 +18,6 @@ use crate::backend::rankk_launch::{with_launch_buffers_wgpu, LaunchBuffers};
 
 #[derive(Default)]
 pub struct WgpuExecutor;
-
-const WGPU_RANK_EXACT_SMALL_COLS_LIMIT: u32 = 256;
-
-pub fn wgpu_rank_exact_support(plan: &RankPlan) -> Result<(), String> {
-    if plan.choice.use_2ce {
-        return st_backend_wgpu::ExactRank2CePlan::try_new(
-            exact_2ce_kind(plan.kind),
-            plan.rows,
-            plan.cols,
-            plan.k,
-            exact_2ce_tile_cols(plan),
-        )
-        .map(|_| ())
-        .map_err(|error| error.to_string());
-    }
-    wgpu_rank_exact_support_for(plan.kind, plan.rows, plan.cols, plan.k)
-}
-
-pub fn wgpu_rank_exact_support_for(
-    kind: RankKind,
-    rows: u32,
-    cols: u32,
-    k: u32,
-) -> Result<(), String> {
-    if rows == 0 || cols == 0 || k == 0 {
-        return Ok(());
-    }
-    if k > cols {
-        return Err(format!(
-            "wgpu {} exact path requires k <= cols, got k={k} cols={cols}",
-            kind.as_str()
-        ));
-    }
-
-    match kind {
-        RankKind::TopK | RankKind::BottomK => {
-            if k > 1 && cols > WGPU_RANK_EXACT_SMALL_COLS_LIMIT {
-                return Err(format!(
-                    "wgpu {} exact path supports k == 1 for wide rows or cols <= {}, got cols={cols} k={k}",
-                    kind.as_str(),
-                    WGPU_RANK_EXACT_SMALL_COLS_LIMIT
-                ));
-            }
-        }
-        RankKind::MidK => {
-            if cols > WGPU_RANK_EXACT_SMALL_COLS_LIMIT {
-                return Err(format!(
-                    "wgpu midk exact path supports cols <= {}, got cols={cols} k={k}",
-                    WGPU_RANK_EXACT_SMALL_COLS_LIMIT
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
 
 impl RankKExecutor for WgpuExecutor {
     type Error = String;
@@ -241,21 +190,6 @@ fn dispatch_exact_2ce(plan: &RankPlan, input: &[f32]) -> Result<(Vec<f32>, Vec<i
         exact_2ce_tile_cols(plan),
         input,
     )
-}
-
-fn exact_2ce_kind(kind: RankKind) -> st_backend_wgpu::ExactRank2CeKind {
-    match kind {
-        RankKind::TopK => st_backend_wgpu::ExactRank2CeKind::TopK,
-        RankKind::MidK => st_backend_wgpu::ExactRank2CeKind::MidK,
-        RankKind::BottomK => st_backend_wgpu::ExactRank2CeKind::BottomK,
-    }
-}
-
-fn exact_2ce_tile_cols(plan: &RankPlan) -> u32 {
-    match plan.kind {
-        RankKind::TopK => plan.choice.tile,
-        RankKind::MidK | RankKind::BottomK => plan.choice.ctile,
-    }
 }
 
 fn copy_rankk_outputs(

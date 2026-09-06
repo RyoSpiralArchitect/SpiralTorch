@@ -983,7 +983,14 @@ Black Cat selection, correctness-gated reward, and the pending-selection slot:
 import { RankAdaptationSession } from "spiraltorch-wasm";
 
 const session = new RankAdaptationSession({
-  rank_plan: { kind: "topk", rows: 2, cols: 256, k: 8, backend: "wgpu" },
+  rank_plan: {
+    kind: "topk",
+    rows: 2,
+    cols: 256,
+    k: 8,
+    backend: "wgpu",
+    strict_accelerator: true,
+  },
   scripts: ["u2: false;", "u2: true;"],
   policy: "ucb",
   seed: 17,
@@ -1008,7 +1015,11 @@ RNG seeds are decimal strings so values above JavaScript's safe-integer range
 remain exact. Mutating calls commit the cloned Rust session only after their
 receipt is serializable, so a transport error does not leave hidden state behind.
 Neither JavaScript nor the WASM wrapper derives the reward or silently retries a
-candidate.
+candidate. Multi-candidate external execution uses the declared native signature
+only for a strict-accelerator plan: runtime setup and correctness remain explicit,
+and a launch that cannot honor the native contract must be abandoned rather than
+credited. Fallback-allowed plans use the currently executable Rust route and
+therefore collapse candidate scripts that would all run as the same software path.
 
 ## High-level Canvas utilities
 

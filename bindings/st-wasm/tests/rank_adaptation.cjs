@@ -13,6 +13,7 @@ const session = new wasm.RankAdaptationSession({
     cols: 256,
     k: 8,
     backend: "wgpu",
+    strict_accelerator: true,
   },
   scripts: ["u2: false;", "u2: true;"],
   policy: "ucb",
@@ -33,6 +34,7 @@ assert.equal(
 assert.equal(first.plan.execution_client, "wasm");
 assert.equal(first.plan.requested_backend, "wgpu");
 assert.match(first.execution_signature, /backend=wgpu/);
+assert.match(first.execution_signature, /scope=declared_native/);
 assert.equal(first.selection_id, 1);
 assert.equal(session.pendingSelectionId(), 1);
 assert.throws(() => session.choose(), /still awaiting observation/);
@@ -77,7 +79,14 @@ assert.equal(followUp.decision.arms[first.candidate_index].quarantined, true);
 session.abandon(followUp.selection_id);
 assert.throws(
   () => new wasm.RankAdaptationSession({
-    rank_plan: { kind: "topk", rows: 2, cols: 256, k: 8, backend: "wgpu" },
+    rank_plan: {
+      kind: "topk",
+      rows: 2,
+      cols: 256,
+      k: 8,
+      backend: "wgpu",
+      strict_accelerator: true,
+    },
     scripts: ["u2: false;", " u2: false; "],
     seed: 1,
   }),
@@ -86,6 +95,21 @@ assert.throws(
 
 session.free();
 
+assert.throws(
+  () => new wasm.RankAdaptationSession({
+    rank_plan: { kind: "topk", rows: 2, cols: 256, k: 8, backend: "wgpu" },
+    scripts: ["u2: false;", "u2: true;"],
+  }),
+  /same effective execution/,
+);
+assert.throws(
+  () => new wasm.RankAdaptationSession({
+    rank_plan: { kind: "topk", rows: 2, cols: 257, k: 8, backend: "wgpu", strict_accelerator: true },
+    scripts: ["u2: false;"],
+  }),
+  /cols <= 256/,
+);
+
 const thompson = new wasm.RankAdaptationSession({
   rank_plan: {
     kind: "topk",
@@ -93,6 +117,7 @@ const thompson = new wasm.RankAdaptationSession({
     cols: 256,
     k: 8,
     backend: "wgpu",
+    strict_accelerator: true,
   },
   scripts: ["u2: false;", "u2: true;"],
   policy: "thompson_sampling",
