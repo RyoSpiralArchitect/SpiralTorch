@@ -1,0 +1,13 @@
+{
+  "schema": "spiraltorch.benchmark_admission.v1",
+  "status": "rejected_for_matched_cuda_comparison",
+  "reason": "torch.topk did not guarantee the canonical cutoff tie indices",
+  "cuda_comparison_eligible": false,
+  "native_bridge_observation_eligible": true,
+  "raw_status_does_not_override_this_audit": true,
+  "review_comment": "https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2072#discussion_r3942906426",
+  "artifacts": {
+    "matmul-rank-3546ecd2.json": "76ef5887bef76ad55e530b093307bc82782615943e3ae467433b2fc9fd8e0b62",
+    "matmul-rank-repeat-3546ecd2.json": "a94407af94f9fa2ae192ab6d372feffc2cc34ebe4bc262c66285c7e3a6cc9688"
+  }
+}
