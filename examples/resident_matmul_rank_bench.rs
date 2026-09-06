@@ -196,7 +196,48 @@ mod native {
                 .flat_map(|v| v.to_le_bytes())
                 .chain(expected.indices.iter().flat_map(|v| v.to_le_bytes()))
                 .collect::<Vec<_>>();
-            Some(readback_probe(runtime, &payload)?)
+            let control = readback_probe(runtime, &payload)?;
+            let mut stages = Vec::new();
+            for block in 0..14 {
+                rank.synchronize()?;
+                let begin = Instant::now();
+                matmul.dispatch(1)?;
+                let matmul_submitted = Instant::now();
+                matmul.synchronize()?;
+                let matmul_completed = Instant::now();
+                rank.set_input_from_matmul(&matmul)?;
+                let copy_submitted = Instant::now();
+                rank.synchronize()?;
+                let copy_completed = Instant::now();
+                rank.dispatch(1)?;
+                let rank_submitted = Instant::now();
+                rank.synchronize()?;
+                let rank_completed = Instant::now();
+                let snapshot = rank.snapshot()?;
+                let snapshot_submitted = Instant::now();
+                let actual = snapshot.read()?;
+                let read = Instant::now();
+                if actual != expected {
+                    return Err("fenced stage output changed".into());
+                }
+                if block >= 2 {
+                    let ms = |end: Instant, start: Instant| (end - start).as_secs_f64() * 1000.;
+                    stages.push(json!({
+                        "matmul_submit":ms(matmul_submitted,begin),
+                        "matmul_completion":ms(matmul_completed,matmul_submitted),
+                        "copy_submit":ms(copy_submitted,matmul_completed),
+                        "copy_completion":ms(copy_completed,copy_submitted),
+                        "rank_submit":ms(rank_submitted,copy_completed),
+                        "rank_completion":ms(rank_completed,rank_submitted),
+                        "snapshot_submit":ms(snapshot_submitted,rank_completed),
+                        "snapshot_read":ms(read,snapshot_submitted),
+                        "total":ms(read,begin),
+                    }));
+                }
+            }
+            Some(json!({"status":"passed", "control":control,
+                "fenced_stage_boundary":"host submit/completion diagnostics with extra fences; not GPU-event times or the uninstrumented critical path",
+                "fenced_stages_ms":stages}))
         } else {
             None
         };
