@@ -12,7 +12,6 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::backend::device_caps::BackendKind;
-#[cfg(feature = "cuda")]
 use crate::backend::unison_heuristics::RankKind;
 use crate::ops::rank_entry::{RankPlan, RankPlanError, RankPlanSnapshot};
 use crate::runtime::blackcat::{
@@ -620,6 +619,26 @@ fn cuda_rank_execution_signature(plan: &RankPlan, common: &str) -> String {
 
 fn wgpu_rank_execution_signature(plan: &RankPlan, common: &str) -> String {
     #[cfg(feature = "wgpu-rt")]
+    if let Some(ctx) = crate::backend::wgpu_rt::installed_ctx() {
+        if !plan.choice.use_2ce
+            && matches!(plan.kind, RankKind::TopK | RankKind::BottomK)
+            && crate::backend::rank_support::wgpu_rank_exact_support(plan).is_ok()
+        {
+            let limits = ctx.device.limits();
+            let fixed_width = if limits.min_subgroup_size == limits.max_subgroup_size {
+                limits.min_subgroup_size
+            } else {
+                0
+            };
+            return wgpu_direct_execution_signature(
+                plan,
+                common,
+                ctx.device.features().contains(wgpu::Features::SUBGROUP),
+                fixed_width,
+            );
+        }
+    }
+    #[cfg(feature = "wgpu-rt")]
     let (context_ready, native_plan_supported) = (
         crate::backend::wgpu_rt::installed_ctx().is_some(),
         crate::backend::rank_support::wgpu_rank_exact_support(plan).is_ok(),
@@ -645,10 +664,39 @@ fn wgpu_rank_execution_signature_with_state(
             let tile = requested_tile.min(plan.cols.max(1));
             format!("{common}/path=exact_2ce/tile={tile}")
         }
-        // Direct kernels can ignore k_lane depending on subgroup availability
-        // and heuristic routing. Do not split arms on this non-portable knob.
+        false if matches!(plan.kind, RankKind::TopK | RankKind::BottomK) => {
+            wgpu_direct_execution_signature(
+                plan,
+                common,
+                plan.device_caps.subgroup,
+                plan.device_caps.lane_width,
+            )
+        }
         false => format!("{common}/path=direct"),
     }
+}
+
+fn wgpu_direct_execution_signature(
+    plan: &RankPlan,
+    common: &str,
+    has_subgroup: bool,
+    fixed_width: u32,
+) -> String {
+    let algo_hint =
+        crate::backend::wgpu_heuristics::choose_topk(plan.rows, plan.cols, plan.k, has_subgroup)
+            .map_or(0, |choice| choice.algo_topk);
+    let prefer_intrinsics = std::env::var("ST_USE_SG_INTRIN").ok().as_deref() == Some("1");
+    let pipeline = crate::backend::rank_support::DirectTopKPipeline::choose(
+        has_subgroup,
+        algo_hint,
+        prefer_intrinsics,
+        plan.cols,
+        plan.k,
+    );
+    format!(
+        "{common}/path=direct/{}",
+        pipeline.execution_suffix(plan.choice.kl.max(plan.k).max(1), fixed_width)
+    )
 }
 
 fn validate_scripts(scripts: &[String]) -> Result<(), RankAdaptationError> {
@@ -1094,6 +1142,35 @@ mod tests {
             ),
             Err(RankAdaptationError::DuplicatePlan { .. })
         ));
+    }
+
+    #[test]
+    fn direct_wgpu_identities_keep_only_consumed_lanes() {
+        use crate::backend::rank_support::DirectTopKPipeline as Pipeline;
+        let bitonic = Pipeline::choose(true, 0, false, 256, 24);
+        assert_eq!(bitonic, Pipeline::SubgroupBitonic);
+        assert_ne!(
+            bitonic.execution_suffix(24, 32),
+            bitonic.execution_suffix(32, 32)
+        );
+        assert_eq!(
+            bitonic.execution_suffix(32, 32),
+            bitonic.execution_suffix(64, 32)
+        );
+        assert_eq!(
+            bitonic.execution_suffix(24, 0),
+            bitonic.execution_suffix(32, 0)
+        );
+        for pipeline in [
+            Pipeline::choose(false, 2, false, 256, 24),
+            Pipeline::choose(true, 1, false, 256, 24),
+            Pipeline::choose(true, 1, true, 256, 24),
+        ] {
+            assert_eq!(
+                pipeline.execution_suffix(24, 32),
+                pipeline.execution_suffix(32, 32)
+            );
+        }
     }
 
     #[test]
