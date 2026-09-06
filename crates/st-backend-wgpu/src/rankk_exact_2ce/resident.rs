@@ -344,6 +344,29 @@ impl ResidentRank {
         &mut self,
         repetitions: u32,
     ) -> Result<RankProfileReadback, ResidentRankError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let backend = self.adapter_info().backend;
+        self.dispatch_profiled_with(repetitions, |context, commands| {
+            #[cfg(not(target_arch = "wasm32"))]
+            if backend == wgpu::Backend::Metal {
+                return runtime::submit_with_timeout(
+                    context.device(),
+                    context.queue(),
+                    [commands],
+                    std::time::Duration::from_secs(30),
+                    "resident.rank.profile.chunk",
+                );
+            }
+            context.queue().submit([commands]);
+            Ok(())
+        })
+    }
+
+    fn dispatch_profiled_with(
+        &mut self,
+        repetitions: u32,
+        mut submit_chunk: impl FnMut(&WgpuContext, wgpu::CommandBuffer) -> Result<(), WgpuRuntimeError>,
+    ) -> Result<RankProfileReadback, ResidentRankError> {
         if repetitions == 0 || repetitions > MAX_REPETITIONS {
             return Err(ResidentRankError::InvalidRepetitions);
         }
@@ -359,35 +382,23 @@ impl ResidentRank {
         let context = self.runtime.context();
         let errors = TimestampErrorScopes::try_new(context.clone())?;
         let timestamps = PassTimestampRecorder::new(context.clone(), repetitions * 2)?;
+        let validated = runtime::Shared::new(AtomicBool::new(false));
+        // An intermediate submission may fail after it has touched the output.
+        // Detach older publication tokens before the first fallible GPU work.
+        self.output_generation = Some(self.generation);
+        self.pending_profile = Some(validated.clone());
         let mut encoder = context.device().create_command_encoder(&Default::default());
         for start in (0..repetitions).step_by(PROFILE_REPETITIONS_PER_SUBMISSION as usize) {
             let end = (start + PROFILE_REPETITIONS_PER_SUBMISSION).min(repetitions);
             self.encode_profiled_dispatch(&mut encoder, start..end, &timestamps);
             if end < repetitions {
-                let commands = [encoder.finish()];
-                #[cfg(not(target_arch = "wasm32"))]
-                if self.adapter_info().backend == wgpu::Backend::Metal {
-                    runtime::submit_with_timeout(
-                        context.device(),
-                        context.queue(),
-                        commands,
-                        std::time::Duration::from_secs(30),
-                        "resident.rank.profile.chunk",
-                    )?;
-                } else {
-                    context.queue().submit(commands);
-                }
-                #[cfg(target_arch = "wasm32")]
-                context.queue().submit(commands);
+                submit_chunk(context, encoder.finish())?;
                 encoder = context.device().create_command_encoder(&Default::default());
             }
         }
         let mut readback = timestamps.resolve(&mut encoder);
         context.queue().submit(Some(encoder.finish()));
         readback.validate(errors.finish());
-        let validated = runtime::Shared::new(AtomicBool::new(false));
-        self.output_generation = Some(self.generation);
-        self.pending_profile = Some(validated.clone());
         Ok(RankProfileReadback {
             readback,
             validated,
@@ -649,6 +660,45 @@ fn decode(bytes: &[u8]) -> Output {
 mod profiling_tests {
     use super::*;
     use crate::rankk_exact_2ce::Kind;
+
+    #[test]
+    fn failed_submitted_profile_chunk_cannot_leave_output_published() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let plan = Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap();
+        let mut rank = ResidentRank::request_profiled_blocking(plan).unwrap();
+        rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+        let earlier = rank.dispatch_profiled(1).unwrap();
+        rank.dispatch(1).unwrap();
+        assert!(rank.output_is_current());
+        let mut submitted = 0;
+        let failed = rank.dispatch_profiled_with(257, |context, commands| {
+            context.queue().submit([commands]);
+            submitted += 1;
+            // A scoped failure after real submission, not an induced driver hang.
+            Err(WgpuRuntimeError::SubmitTimeout {
+                operation: "injected.profile.chunk",
+                timeout: std::time::Duration::ZERO,
+            })
+        });
+        assert!(matches!(
+            failed,
+            Err(ResidentRankError::Runtime(
+                WgpuRuntimeError::SubmitTimeout { .. }
+            ))
+        ));
+        assert_eq!(submitted, 1);
+        assert!(!rank.output_is_current());
+        assert!(matches!(
+            rank.snapshot(),
+            Err(ResidentRankError::StaleOutput)
+        ));
+        earlier.read().unwrap();
+        assert!(!rank.output_is_current());
+        rank.dispatch(1).unwrap();
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [7., 6.]);
+    }
 
     #[test]
     fn private_profile_devices_retire_after_workspace_and_pending_reads() {
