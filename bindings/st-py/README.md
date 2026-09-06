@@ -415,7 +415,8 @@ These APIs are not in the published 0.4.27 wheel yet.
   are deduplicated by the route currently executable in the Rust build.
   Strict WGPU signatures are marked `scope=declared_native`: they validate the
   shared Rust kernel geometry but do not attest device initialization. Direct
-  lane hints are conservatively deduplicated because not all kernels consume them.
+  lane hints are deduplicated on heap/workgroup routes; subgroup bitonic keeps
+  the effective keep-count when a fixed subgroup width is known or declared.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
 - Z-space barycentre solver (`z_space_barycenter`) to mix colour-field
