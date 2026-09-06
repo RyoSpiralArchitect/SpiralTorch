@@ -45,3 +45,22 @@ def test_rank_lifecycle_and_exact_ties(kind, tile):
     assert result["generation"] == 2
     assert result["indices"] == [-1] * 3
     assert all(math.isnan(v) for v in result["values"])
+
+
+@pytest.mark.skipif(not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test")
+@pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
+@pytest.mark.parametrize("cols,tile", [(1024, 1024), (1025, 1024), (1025, 1025), (2049, 2048)])
+def test_shared_and_storage_sort_boundaries(kind, cols, tile):
+    values = [float(i * 37 % 101 - 50) for i in range(cols)]
+    values[-1] = math.nan
+    ids = sorted(range(cols - 1), key=lambda i: (-values[i] if kind == "topk" else values[i], i))
+    start = (len(ids) - 7) // 2 if kind == "midk" else 0
+    expected_ids = ids[start:start + 7]
+    ws = st.WgpuRank(kind, 1, cols, 7, tile_cols=tile)
+    ws.upload(st.Tensor(1, cols, values))
+    ws.dispatch(2)
+    assert ws.readback() == {
+        "values": [values[i] for i in expected_ids],
+        "indices": expected_ids,
+        "generation": 1,
+    }
