@@ -862,8 +862,14 @@ mod tests {
         assert_eq!(bytes, bytemuck::cast_slice(&[99u32; 4]));
         // Whether already completed or aborted, the old callback must settle.
         let _ = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
-        drop(second);
         drop(reused);
+        let cached = pool
+            .idle
+            .take()
+            .expect("successful read must return its buffer");
+        assert!(pool.idle.take().is_none());
+        pool.idle.recycle(cached);
+        drop(second);
         assert!(pool.idle.take().is_some());
         assert!(pool.idle.take().is_none());
         let mut survivor = pool.checkout("pool.survivor");
