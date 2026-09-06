@@ -27,23 +27,44 @@ const WORKGROUP_SIZE: u32 = 256;
 const PARALLEL_MIDK_MAX_TILES: u32 = 32;
 const STORAGE_BINDINGS: u32 = 7;
 const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
-const WGSL: &str = concat!(
-    include_str!("shaders/rankk_exact_2ce_common.wgsl"),
-    "\n",
-    include_str!("shaders/rankk_exact_2ce.wgsl"),
-);
-const TOURNAMENT_WGSL: &str = concat!(
-    include_str!("shaders/rankk_exact_2ce_common.wgsl"),
-    "\n",
-    include_str!("shaders/rankk_exact_2ce_midk_tournament.wgsl"),
-);
+const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
+const TOURNAMENT_WGSL: &str = include_str!("shaders/rankk_exact_2ce_midk_tournament.wgsl");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
-enum MergeMode {
+pub(crate) enum MergeMode {
     Streaming = 0,
     ParallelMidk = 1,
     TournamentMidk = 2,
+}
+
+impl MergeMode {
+    pub(crate) const fn for_rank(kind: Kind, k: u32, tiles_x: u32) -> Self {
+        if matches!(kind, Kind::MidK) {
+            if tiles_x <= PARALLEL_MIDK_MAX_TILES {
+                return Self::ParallelMidk;
+            }
+            // One retained winner has no incremental tree updates to amortize.
+            if tiles_x <= WORKGROUP_SIZE && k > 1 {
+                return Self::TournamentMidk;
+            }
+        }
+        Self::Streaming
+    }
+
+    pub(crate) const fn entry_point(self) -> &'static str {
+        match self {
+            Self::TournamentMidk => "rankk_exact_2ce_midk_tournament",
+            Self::Streaming | Self::ParallelMidk => "rankk_exact_2ce_row_merge",
+        }
+    }
+
+    pub(crate) const fn pipeline_label(self) -> &'static str {
+        match self {
+            Self::TournamentMidk => "st.rankk.exact_2ce.row_merge_tournament",
+            Self::Streaming | Self::ParallelMidk => "st.rankk.exact_2ce.row_merge",
+        }
+    }
 }
 
 /// Validated shape and tile geometry for exact two-command rank-k execution.
@@ -122,16 +143,7 @@ impl Plan {
     }
 
     const fn merge_mode(self) -> MergeMode {
-        if matches!(self.kind, Kind::MidK) {
-            if self.tiles_x <= PARALLEL_MIDK_MAX_TILES {
-                return MergeMode::ParallelMidk;
-            }
-            // One retained winner has no incremental tree updates to amortize.
-            if self.tiles_x <= WORKGROUP_SIZE && self.k > 1 {
-                return MergeMode::TournamentMidk;
-            }
-        }
-        MergeMode::Streaming
+        MergeMode::for_rank(self.kind, self.k, self.tiles_x)
     }
 
     // One Rust-owned mode selects the pipeline and its matching dispatch grid.
@@ -302,10 +314,10 @@ impl Pipelines {
                 compilation_options: Default::default(),
             });
             let row_merge = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("st.rankk.exact_2ce.row_merge"),
+                label: Some(MergeMode::Streaming.pipeline_label()),
                 layout: Some(&pipeline_layout),
                 module: &module,
-                entry_point: "rankk_exact_2ce_row_merge",
+                entry_point: MergeMode::Streaming.entry_point(),
                 compilation_options: Default::default(),
             });
             // Module isolation also protects browser compilers, which need not
@@ -316,10 +328,10 @@ impl Pipelines {
             });
             let row_merge_tournament =
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.rankk.exact_2ce.row_merge_tournament"),
+                    label: Some(MergeMode::TournamentMidk.pipeline_label()),
                     layout: Some(&pipeline_layout),
                     module: &tournament_module,
-                    entry_point: "rankk_exact_2ce_midk_tournament",
+                    entry_point: MergeMode::TournamentMidk.entry_point(),
                     compilation_options: Default::default(),
                 });
             Self {
@@ -636,6 +648,15 @@ mod tests {
             PARALLEL_MIDK_MAX_TILES
         )));
         for (source, tournament) in [(WGSL, false), (TOURNAMENT_WGSL, true)] {
+            // Catalog consumers load complete files, while one canonical
+            // prelude owns their shared ordering and search primitives.
+            assert!(
+                source.starts_with(concat!(
+                    include_str!("shaders/rankk_exact_2ce_common.wgsl"),
+                    "\n"
+                )),
+                "run tools/sync_rankk_wgsl.py after editing the shared prelude"
+            );
             let module =
                 naga::front::wgsl::parse_str(source).expect("rank-k 2CE WGSL should parse");
             let info = Validator::new(ValidationFlags::all(), Capabilities::all())

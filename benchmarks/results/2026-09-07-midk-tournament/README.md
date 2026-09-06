@@ -8,8 +8,9 @@ two dispatches, with no intermediate host readback or CPU fallback.
 
 MidK with at most 32 tiles keeps the parallel path. More than 256 tiles,
 TopK/BottomK, and single-winner large MidK keep their existing paths.
-The old shader is split into a shared prelude and legacy body; their assembled
-bytes are **identical** to main before this change:
+The cataloged shaders are complete, standalone WGSL files. Their shared prelude
+is kept in sync by `tools/sync_rankk_wgsl.py` and a Rust assertion. The legacy
+module's bytes are **identical** to main before this change:
 `d2c2430ef6e86077770c574b347d64f1508d0a2b08df2e901e166e5a6c803804`.
 The tournament compiles in a separate module, shares ordering/seek primitives,
 and fits the existing 8 KiB workgroup budget. Python/WASM use this same Rust
@@ -22,7 +23,10 @@ The measured source is `1ed7d2f394cf19ad13b33c47b14c3bd4fc4ab2af`; baseline is
 `5caf31829ecc668493e2a08d832b7e611745fd10`, whose executable code equals main
 `9cdc222489a9dd397eb26ea02c5d1f24b56caeec` (only evidence/docs differ).
 Later changes add the matched browser fixture, `k=2` regression coverage,
-and this evidence; the measured runtime is unchanged.
+and this evidence. Review also restored standalone shader-file consumers and
+made kernel reports use the runtime's Rust merge selector. Both GPU module
+strings remain byte-identical to the measured source; original raw reports
+retain their pre-fix catalog labels rather than silently rewriting metadata.
 
 Furnace's RTX 5090 passed 204 final cases: two 72-case many-row runs, a 24-case
 boundary run, and the normal 36-case UCB/Thompson comparison. There are 6,144

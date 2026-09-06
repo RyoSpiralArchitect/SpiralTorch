@@ -458,7 +458,7 @@ jobs:
       - name: Complex dynamics and runtime protocol regression
         run: |
           python -m pip install pytest
-          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_spiralk_rank_tile.py bindings/st-py/tests/test_resident_rank_adaptation.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_spiralk_rank_tile.py bindings/st-py/tests/test_resident_rank_adaptation.py bindings/st-py/tests/test_wgpu_rank_reports.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_zspace_complex_dynamics.py bindings/st-py/tests/test_zspace_dynamics.py bindings/st-py/tests/test_runtime_protocol_catalog.py
           python -I tools/smoke_zspace_runtime_protocols.py
       - name: NumPy 2.2 DLPack copy policy regression
