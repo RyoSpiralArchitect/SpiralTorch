@@ -20,6 +20,8 @@ declare module "spiraltorch-wasm" {
         shape(): Uint32Array;
         adapterInfo(): unknown;
         upload(input: Float32Array): void;
+        /** Enqueue a device-local snapshot copy; no host staging or persistent alias. */
+        setInputFromMatmul(source: WgpuMatmul): void;
         dispatch(repetitions?: number): bigint;
         synchronize(): Promise<void>;
         readback(): Promise<{values: Float32Array; indices: Int32Array; generation: bigint}>;

@@ -107,6 +107,14 @@ mod enabled {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
             py.detach(|| self.inner.upload(input.data())).map_err(error)
         }
+        fn set_input_from_matmul(
+            &mut self,
+            py: Python<'_>,
+            source: &crate::wgpu_resident::PyWgpuMatmul,
+        ) -> PyResult<()> {
+            py.detach(|| self.inner.set_input_from_matmul(&source.inner))
+                .map_err(error)
+        }
         #[pyo3(signature = (repetitions=1))]
         fn dispatch(&mut self, py: Python<'_>, repetitions: u32) -> PyResult<u64> {
             py.detach(|| self.inner.dispatch(repetitions))

@@ -376,6 +376,13 @@ impl WasmWgpuRank {
         self.inner.upload(&input.to_vec()).map_err(error)
     }
 
+    #[wasm_bindgen(js_name = setInputFromMatmul)]
+    pub fn set_input_from_matmul(&mut self, source: &WasmWgpuMatmul) -> Result<(), JsValue> {
+        self.inner
+            .set_input_from_matmul(&source.inner)
+            .map_err(error)
+    }
+
     pub fn dispatch(&mut self, repetitions: Option<Number>) -> Result<u64, JsValue> {
         let reps = repetitions
             .as_ref()

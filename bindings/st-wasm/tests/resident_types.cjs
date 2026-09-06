@@ -25,5 +25,6 @@ const rank = types.match(/export class WgpuRank \{[\s\S]*?\n\}/)?.[0];
 assert.ok(rank, "WebGPU feature must export resident rank");
 assert.match(rank, /create\(kind: string, rows: number, cols: number, k: number, tile_cols\?: number(?: \| null)?\): Promise<WgpuRank>/);
 assert.match(rank, /upload\(input: Float32Array\): void/);
+assert.match(rank, /setInputFromMatmul\(source: WgpuMatmul\): void/);
 assert.match(rank, /dispatch\(repetitions\?: number(?: \| null)?\): bigint/);
 assert.match(rank, /readback\(\): Promise<\{values: Float32Array; indices: Int32Array; generation: bigint\}>/);

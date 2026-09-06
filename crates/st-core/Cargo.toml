@@ -119,3 +119,8 @@ required-features = ["cuda", "wgpu-rt", "kdsl"]
 name = "resident_rank_bench"
 path = "../../examples/resident_rank_bench.rs"
 required-features = ["wgpu-rt"]
+
+[[example]]
+name = "resident_matmul_rank_bench"
+path = "../../examples/resident_matmul_rank_bench.rs"
+required-features = ["wgpu-rt"]
