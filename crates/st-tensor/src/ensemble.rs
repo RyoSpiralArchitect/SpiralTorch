@@ -33,11 +33,6 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
                 Layout::RowMajor | Layout::ColMajor => tensor.clone(),
                 _ => tensor.to_layout(Layout::RowMajor)?,
             };
-            if !tensor.data().iter().all(|value| value.is_finite()) {
-                return Err(TensorError::InvalidValue {
-                    label: "mean_tensors_partials_must_be_finite",
-                });
-            }
             Ok(tensor)
         })
         .collect::<PureResult<Vec<_>>>()?;
@@ -60,13 +55,13 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
                     let col = index % cols;
                     let width = (cols - col).min(count - offset);
                     for (c, dst) in accum[offset..offset + width].iter_mut().enumerate() {
-                        *dst += f64::from(data[(col + c) * rows + row]);
+                        accumulate(dst, data[(col + c) * rows + row])?;
                     }
                     offset += width;
                 }
             } else {
                 for (dst, &src) in accum.iter_mut().zip(&data[start..start + count]) {
-                    *dst += f64::from(src);
+                    accumulate(dst, src)?;
                 }
             }
         }
@@ -85,6 +80,17 @@ fn finite(label: &'static str, value: f32) -> PureResult<()> {
     } else {
         Err(TensorError::NonFiniteValue { label, value })
     }
+}
+
+#[inline]
+fn accumulate(dst: &mut f64, src: f32) -> PureResult<()> {
+    if !src.is_finite() {
+        return Err(TensorError::InvalidValue {
+            label: "mean_tensors_partials_must_be_finite",
+        });
+    }
+    *dst += f64::from(src);
+    Ok(())
 }
 
 #[cfg(test)]
