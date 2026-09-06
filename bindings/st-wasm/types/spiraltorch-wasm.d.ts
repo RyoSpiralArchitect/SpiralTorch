@@ -9,6 +9,14 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Ordered-f64 arithmetic means in WASM linear memory, not GPU storage. */
+    export class TensorMeanBatch {
+        constructor(rows: number, cols: number, partial_count: number, data: Float32Array);
+        /** Finite scale; returns a new row-major Float32Array. */
+        meanScaled(scale: number): Float32Array;
+        free(): void;
+    }
+
     /** Explicit WebGPU feature; persistent device-local matrix storage. */
     export class WgpuMatmul {
         private constructor();

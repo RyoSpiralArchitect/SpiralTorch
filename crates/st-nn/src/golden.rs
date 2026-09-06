@@ -822,26 +822,16 @@ impl GoldenRetriever {
 
         let (effective_rank, guard) = golden_barycenter_plan_parameters(rows, cols, rank, plan)?;
 
-        let mut accum = vec![0.0f64; rows * cols];
-        for tensor in partials {
-            let logical = tensor.to_layout(st_tensor::Layout::RowMajor)?;
-            for (dst, src) in accum.iter_mut().zip(logical.data()) {
-                if !src.is_finite() {
-                    return Err(invalid("partials must be finite"));
+        let tensor =
+            st_tensor::mean_tensors_scaled(partials, 1.0 + guard).map_err(|error| match error {
+                TensorError::InvalidValue {
+                    label: "mean_tensors_partials_must_be_finite",
+                } => invalid("partials must be finite"),
+                TensorError::NonFiniteValue { .. } => {
+                    invalid("result exceeds finite float32 range")
                 }
-                *dst += f64::from(*src);
-            }
-        }
-
-        let mut output = Vec::with_capacity(accum.len());
-        for value in accum {
-            let value = (value / partials.len() as f64 * f64::from(1.0 + guard)) as f32;
-            if !value.is_finite() {
-                return Err(invalid("result exceeds finite float32 range"));
-            }
-            output.push(value);
-        }
-        let tensor = Tensor::from_vec(rows, cols, output)?;
+                other => other,
+            })?;
         let receipt = golden_barycenter_receipt(
             partials.len(),
             rows,
@@ -2539,6 +2529,53 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         assert_eq!(retriever.last_dropouts().len(), 1);
+    }
+
+    #[test]
+    fn sync_z_barycenter_shared_reducer_preserves_guard_order_and_receipt() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![ModuleTrainer::new(caps, -1.0, 0.05, 0.01)];
+        let mut retriever =
+            GoldenRetriever::new(GoldenRetrieverConfig::default(), trainers).unwrap();
+        let partials: Vec<_> = [2.0f32.powi(60), 1.0, -2.0f32.powi(60)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let tensor =
+                    Tensor::from_fn(
+                        3,
+                        345,
+                        |_, col| if col % 2 == 0 { value } else { index as f32 },
+                    )
+                    .unwrap();
+                if index == 1 {
+                    tensor.to_layout(st_tensor::Layout::ColMajor).unwrap()
+                } else {
+                    tensor
+                }
+            })
+            .collect();
+        let plan = try_plan_rank(RankKind::TopK, 3, 345, 7, caps).unwrap();
+        let (actual, receipt) = retriever
+            .sync_z_barycenter_with_plan(&partials, 7, &plan)
+            .unwrap();
+        assert!(validate_golden_barycenter_output(&partials, 7, &plan, &actual, 0.0, 0.0).unwrap());
+        assert_eq!(actual.data()[0], 0.0);
+        assert_eq!(actual.data()[1], 1.0 + receipt.guard);
+        assert!(!receipt.plan_executed);
+        assert_eq!(receipt.plan_source, "caller_supplied");
+        let bad = Tensor::from_vec(1, 1, vec![f32::INFINITY]).unwrap();
+        assert!(retriever
+            .sync_z_barycenter(&[bad], 1)
+            .unwrap_err()
+            .to_string()
+            .contains("partials must be finite"));
+        let large = Tensor::from_vec(1, 1025, vec![f32::MAX; 1025]).unwrap();
+        assert!(retriever
+            .sync_z_barycenter(&[large], 1)
+            .unwrap_err()
+            .to_string()
+            .contains("result exceeds finite float32 range"));
     }
 
     #[test]

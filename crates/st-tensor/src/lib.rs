@@ -12,6 +12,7 @@ pub mod backend;
 pub mod classification;
 pub mod compaction;
 pub mod dlpack;
+mod ensemble;
 pub mod execution;
 pub mod execution_capability;
 mod hardmax;
@@ -29,6 +30,7 @@ pub use autograd::{
 };
 pub use backend::faer_dense;
 pub use classification::{class_indices_from_tensor, CrossEntropyConfig, LossReduction};
+pub use ensemble::mean_tensors_scaled;
 pub use execution::{
     emit_tensor_execution_receipt, prepare_tensor_execution, TensorExecutionCompletion,
     TensorExecutionContractError, TensorExecutionFallback, TensorExecutionFallbackReason,

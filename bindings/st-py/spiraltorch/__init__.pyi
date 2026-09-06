@@ -5891,6 +5891,10 @@ def from_dlpack(capsule: object) -> Tensor: ...
 
 def to_dlpack(tensor: Tensor) -> object: ...
 
+def mean_tensors_scaled(partials: Sequence[Tensor], scale: float = 1.0) -> Tensor:
+    """Finite signed-vector mean, summed in input order in Rust f64 on CPU."""
+    ...
+
 def z_space_barycenter(
     weights: Sequence[float],
     densities: Sequence[Tensor],
@@ -12292,6 +12296,7 @@ __all__ = [
     "ZSpaceBarycenter",
     "BarycenterIntermediate",
     "z_space_barycenter",
+    "mean_tensors_scaled",
     "ZMetrics",
     "ZSpaceControlGradient",
     "ZSpaceDecoded",

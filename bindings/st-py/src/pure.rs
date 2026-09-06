@@ -1915,6 +1915,23 @@ impl From<ZSpaceBarycenter> for PyZSpaceBarycenter {
     }
 }
 
+/// Ordered f64 arithmetic mean of finite tensors, then f32 scaling.
+/// Runs the shared Rust CPU reducer, not a rank kernel or probability barycenter.
+#[pyfunction(name = "mean_tensors_scaled", signature = (partials, scale=1.0))]
+fn py_mean_tensors_scaled(
+    py: Python<'_>,
+    partials: Vec<Py<PyTensor>>,
+    scale: f32,
+) -> PyResult<PyTensor> {
+    let partials: Vec<Tensor> = partials
+        .into_iter()
+        .map(|tensor| tensor.bind(py).borrow().inner.clone())
+        .collect();
+    py.detach(|| st_tensor::mean_tensors_scaled(&partials, scale))
+        .map(PyTensor::from_tensor)
+        .map_err(tensor_err_to_py)
+}
+
 #[pyfunction]
 #[pyo3(
     name = "z_space_barycenter",
@@ -2096,6 +2113,7 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_apply_amegagrad_step, m)?)?;
     m.add_function(wrap_pyfunction!(py_configure_amegagrad_optimizer, m)?)?;
     m.add_function(wrap_pyfunction!(py_z_space_barycenter, m)?)?;
+    m.add_function(wrap_pyfunction!(py_mean_tensors_scaled, m)?)?;
     m.add_function(wrap_pyfunction!(
         py_topos_control_signal_from_observation,
         m
