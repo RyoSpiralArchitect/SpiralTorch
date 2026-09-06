@@ -11,6 +11,7 @@ mod generation_control;
 mod generation_evidence;
 mod imaginary_time_schrodinger;
 mod periodicity;
+mod rank_adaptation;
 mod rank_plan;
 mod repetition_unlikelihood;
 mod reports;
@@ -71,6 +72,8 @@ pub use imaginary_time_schrodinger::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use periodicity::*;
+#[cfg(target_arch = "wasm32")]
+pub use rank_adaptation::*;
 #[cfg(target_arch = "wasm32")]
 pub use rank_plan::*;
 pub use repetition_unlikelihood::*;

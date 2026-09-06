@@ -1149,11 +1149,21 @@ def test_rank_plan_exposes_the_captured_execution_contract(
     monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "0")
     monkeypatch.setenv("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "91")
     fallback_plan = st.plan("topk", 2, 8, 2, backend="cpu")
+    explicit_strict_plan = st.plan(
+        "topk", 2, 8, 2, backend="cpu", strict_accelerator=True
+    )
+
+    monkeypatch.setenv("SPIRALTORCH_STRICT_GPU", "1")
+    explicit_fallback_plan = st.plan(
+        "topk", 2, 8, 2, backend="cpu", strict_accelerator=False
+    )
 
     assert strict_plan.accelerator_fallback == "forbid"
     assert int(strict_plan.tensor_util_wgpu_min_values) == 37
     assert fallback_plan.accelerator_fallback == "allow"
     assert int(fallback_plan.tensor_util_wgpu_min_values) == 91
+    assert explicit_strict_plan.accelerator_fallback == "forbid"
+    assert explicit_fallback_plan.accelerator_fallback == "allow"
 
 
 def test_init_backend_and_session_explicit_wgpu_backend_when_runtime_is_enabled() -> None:

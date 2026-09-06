@@ -26,6 +26,8 @@ mod plugin;
 mod psi_synchro;
 mod pure;
 mod qr;
+#[cfg(feature = "kdsl")]
+mod rank_adaptation;
 mod rec;
 #[cfg(feature = "robotics")]
 mod robotics;
@@ -273,6 +275,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     pure::register(py, m)?;
     planner::register(py, m)?;
     spiralk::register(py, m)?;
+    #[cfg(feature = "kdsl")]
+    rank_adaptation::register(py, m)?;
     psi_synchro::register(py, m)?;
     text::register(py, m)?;
     hpo::register(py, m)?;
@@ -506,6 +510,10 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     #[cfg(feature = "kdsl")]
     exports.extend_from_slice(&[
+        "RankAdaptationSession",
+        "RankAdaptationSelection",
+        "RANK_ADAPTATION_CONTRACT_VERSION",
+        "RANK_ADAPTATION_SEMANTIC_OWNER",
         "SpiralKContext",
         "SpiralKWilsonMetrics",
         "SpiralKHeuristicHint",

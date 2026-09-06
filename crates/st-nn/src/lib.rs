@@ -76,11 +76,16 @@ pub use gnn::{
     ZSpaceGraphBatchRegressor, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
     ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
 };
+#[cfg(all(feature = "golden", feature = "kdsl"))]
+pub use golden::golden_barycenter_adaptation_session;
 #[cfg(feature = "golden")]
 pub use golden::{
-    CouncilDigest, CouncilEvidence, GoldenBlackcatPulse, GoldenCooperativeDirective,
+    golden_barycenter_execution_signature, validate_golden_barycenter_output, CouncilDigest,
+    CouncilEvidence, GoldenBarycenterReceipt, GoldenBlackcatPulse, GoldenCooperativeDirective,
     GoldenCouncilSnapshot, GoldenEpochReport, GoldenRetriever, GoldenRetrieverConfig,
     GoldenSelfRewriteConfig, GoldenTrainedWorker, GoldenTrainingOutput, GoldenWorkerEpoch,
+    GOLDEN_BARYCENTER_CANDIDATE_CONTRACT_VERSION, GOLDEN_BARYCENTER_DEFAULT_ATOL,
+    GOLDEN_BARYCENTER_DEFAULT_RTOL,
 };
 pub use highlevel::{BarycenterConfig, DifferentialTrace, SpiralSession, SpiralSessionBuilder};
 pub use injector::Injector;

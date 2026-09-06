@@ -236,6 +236,7 @@ jobs:
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
           node bindings/st-wasm/tests/row_indexing.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
+          node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
       - name: Browser WebGPU binding build
         run: |
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib

@@ -577,26 +577,13 @@ pub fn dispatch_topk_1ce(
         ],
     });
 
-    let sgc_hint = if has_sub { 8 } else { 1 };
     let prefer_intrin = std::env::var("ST_USE_SG_INTRIN").ok().as_deref() == Some("1");
-    let prefer_heap_default = (k <= 32 && cols >= 2048) || (k <= 16 && sgc_hint >= 8);
-    let prefer_heap = match algo_hint {
-        1 => true,
-        2 => false,
-        _ => prefer_heap_default,
-    };
-    let pipeline = if has_sub {
-        if prefer_heap {
-            if prefer_intrin {
-                ensure_topk_heap_sgintrin_pl(&ctx)?
-            } else {
-                ensure_topk_heap_pl(&ctx)?
-            }
-        } else {
-            ensure_topk_bit_pl(&ctx)?
-        }
-    } else {
-        ensure_topk_wg_pl(&ctx)?
+    use crate::backend::rank_support::DirectTopKPipeline;
+    let pipeline = match DirectTopKPipeline::choose(has_sub, algo_hint, prefer_intrin, cols, k) {
+        DirectTopKPipeline::Workgroup => ensure_topk_wg_pl(&ctx)?,
+        DirectTopKPipeline::SubgroupHeap => ensure_topk_heap_pl(&ctx)?,
+        DirectTopKPipeline::SubgroupHeapIntrinsics => ensure_topk_heap_sgintrin_pl(&ctx)?,
+        DirectTopKPipeline::SubgroupBitonic => ensure_topk_bit_pl(&ctx)?,
     };
 
     let mut enc = ctx

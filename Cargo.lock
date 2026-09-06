@@ -3214,6 +3214,7 @@ dependencies = [
  "st-backend-wgpu",
  "st-frac",
  "st-kdsl",
+ "st-kernel-contracts",
  "st-kv",
  "st-softlogic",
  "st-tensor",

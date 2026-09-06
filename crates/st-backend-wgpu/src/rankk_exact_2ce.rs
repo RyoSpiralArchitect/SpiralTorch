@@ -18,36 +18,12 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::runtime::{ensure_blocking_readback_supported, read_buffer, WgpuRuntimeError};
+use st_kernel_contracts::rank::Exact2CeGeometry;
+pub use st_kernel_contracts::rank::{Kind, PlanError};
 
 const WORKGROUP_SIZE: u32 = 256;
 const STORAGE_BINDINGS: u32 = 7;
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
-
-/// Exact rank family selected by the two-command dispatcher.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Kind {
-    TopK,
-    MidK,
-    BottomK,
-}
-
-impl Kind {
-    const fn as_uniform(self) -> u32 {
-        match self {
-            Self::TopK => 0,
-            Self::MidK => 1,
-            Self::BottomK => 2,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::TopK => "topk",
-            Self::MidK => "midk",
-            Self::BottomK => "bottomk",
-        }
-    }
-}
 
 /// Validated shape and tile geometry for exact two-command rank-k execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,33 +50,7 @@ impl Plan {
         k: u32,
         tile_cols: u32,
     ) -> Result<Self, PlanError> {
-        if tile_cols == 0 {
-            return Err(PlanError::ZeroTile);
-        }
-        if k > cols {
-            return Err(PlanError::KExceedsColumns { k, cols });
-        }
-
-        // A tile larger than the row is a valid one-tile request. Keep both
-        // values so reports retain the planner directive and execution truth.
-        let effective_tile_cols = tile_cols.min(cols.max(1));
-        let tile_stride = effective_tile_cols
-            .checked_next_power_of_two()
-            .ok_or(PlanError::ArithmeticOverflow("tile stride"))?;
-        let tiles_x = if cols == 0 {
-            0
-        } else {
-            cols.div_ceil(effective_tile_cols)
-        };
-
-        let input_elements = checked_shader_elements("input", rows as u64 * cols as u64)?;
-        let output_elements = checked_shader_elements("output", rows as u64 * k as u64)?;
-        let tile_state_elements =
-            checked_shader_elements("tile state", rows as u64 * tiles_x as u64)?;
-        let scratch_elements = checked_shader_elements(
-            "tile scratch",
-            tile_state_elements as u64 * tile_stride as u64,
-        )?;
+        let geometry = Exact2CeGeometry::try_new(rows, cols, k, tile_cols)?;
 
         Ok(Self {
             kind,
@@ -108,13 +58,13 @@ impl Plan {
             cols,
             k,
             requested_tile_cols: tile_cols,
-            tile_cols: effective_tile_cols,
-            tile_stride,
-            tiles_x,
-            input_elements,
-            output_elements,
-            scratch_elements,
-            tile_state_elements,
+            tile_cols: geometry.tile_cols,
+            tile_stride: geometry.tile_stride,
+            tiles_x: geometry.tiles_x,
+            input_elements: geometry.input_elements,
+            output_elements: geometry.output_elements,
+            scratch_elements: geometry.scratch_elements,
+            tile_state_elements: geometry.tile_state_elements,
         })
     }
 
@@ -240,22 +190,6 @@ impl Plan {
         }
         Ok(())
     }
-}
-
-fn checked_shader_elements(name: &'static str, elements: u64) -> Result<u32, PlanError> {
-    u32::try_from(elements).map_err(|_| PlanError::IndexSpaceTooLarge { name, elements })
-}
-
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum PlanError {
-    #[error("rank-k two-command execution requires tile_cols > 0")]
-    ZeroTile,
-    #[error("rank-k requires k <= cols, got k={k} cols={cols}")]
-    KExceedsColumns { k: u32, cols: u32 },
-    #[error("rank-k two-command geometry overflowed while computing {0}")]
-    ArithmeticOverflow(&'static str),
-    #[error("{name} requires {elements} elements, exceeding the WGSL u32 index space")]
-    IndexSpaceTooLarge { name: &'static str, elements: u64 },
 }
 
 #[repr(C)]

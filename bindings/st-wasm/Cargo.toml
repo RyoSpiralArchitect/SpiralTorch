@@ -17,7 +17,7 @@ webgpu = ["dep:st-backend-wgpu", "dep:wasm-bindgen-futures"]
 
 [dependencies]
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
-st-core   = { path = "../../crates/st-core" }
+st-core   = { path = "../../crates/st-core", features = ["kdsl"] }
 st-frac   = { path = "../../crates/st-frac" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

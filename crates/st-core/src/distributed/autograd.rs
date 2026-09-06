@@ -1263,9 +1263,23 @@ mod tests {
             assert!(routed
                 .iter()
                 .all(|(_, data)| data["requested_backend"] == "wgpu"));
-            assert!(routed
-                .iter()
-                .all(|(_, data)| matches!(data["backend"].as_str(), Some("cpu" | "wgpu_dense"))));
+            for (_, data) in routed {
+                match data["backend"].as_str() {
+                    Some("wgpu") => {
+                        assert_eq!(data["executed_backend"], "wgpu");
+                        assert_eq!(data["kernel_backend"], "wgpu_dense");
+                        assert!(data.get("fallback").is_none(), "{data}");
+                    }
+                    Some("wgpu_dense") => {
+                        assert_eq!(data["kernel"], format!("tensor_util.{op_name}"));
+                        assert!(data.get("fallback").is_none(), "{data}");
+                    }
+                    Some("cpu") => {
+                        assert!(data["fallback"].is_object(), "{data}");
+                    }
+                    backend => panic!("unexpected {op_name} tensor backend {backend:?}: {data}"),
+                }
+            }
         }
         let forwarding_round = events
             .iter()

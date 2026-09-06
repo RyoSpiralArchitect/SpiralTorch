@@ -6,7 +6,9 @@ use st_core::backend::execution_plan::{
 };
 use st_core::backend::runtime_probe::resolve_backend;
 use st_core::backend::unison::RankKind;
-use st_core::ops::rank_entry::{try_plan_rank_with_config, try_plan_rank_with_planning_context};
+use st_core::ops::rank_entry::{
+    try_plan_rank_with_config, try_plan_rank_with_planning_context, RankPlan,
+};
 
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -60,7 +62,7 @@ fn requested_backend(value: &str) -> Result<BackendKind, String> {
     }
 }
 
-fn add_client_fields(
+pub(crate) fn add_client_fields(
     payload: &mut Value,
     requested_backend: BackendKind,
     effective_backend: BackendKind,
@@ -86,7 +88,17 @@ fn to_json_compatible_js(value: &Value) -> Result<JsValue, JsValue> {
         .map_err(js_error)
 }
 
-fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
+pub(crate) struct ResolvedRankPlan {
+    pub plan: RankPlan,
+    pub requested_backend: BackendKind,
+    pub effective_backend: BackendKind,
+}
+
+pub(crate) fn resolve_rank_plan_value(value: Value) -> Result<ResolvedRankPlan, String> {
+    resolve_rank_plan(request_from_value(value)?)
+}
+
+fn resolve_rank_plan(request: RankPlanRequest) -> Result<ResolvedRankPlan, String> {
     let kind = request
         .kind
         .parse::<RankKind>()
@@ -116,14 +128,11 @@ fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
             &planning_context,
         )
         .map_err(|error| error.to_string())?;
-        let mut payload =
-            serde_json::to_value(plan.snapshot()).expect("rank-plan snapshot is serializable");
-        add_client_fields(
-            &mut payload,
-            runtime_execution_plan.requested_backend,
-            runtime_execution_plan.effective_backend,
-        );
-        return Ok(payload);
+        return Ok(ResolvedRankPlan {
+            plan,
+            requested_backend: runtime_execution_plan.requested_backend,
+            effective_backend: runtime_execution_plan.effective_backend,
+        });
     }
 
     let requested_backend = requested_backend(request.backend.as_deref().unwrap_or("wgpu"))?;
@@ -158,9 +167,22 @@ fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
         execution_config,
     )
     .map_err(|error| error.to_string())?;
+    Ok(ResolvedRankPlan {
+        plan,
+        requested_backend,
+        effective_backend,
+    })
+}
+
+fn rank_plan_value(request: RankPlanRequest) -> Result<Value, String> {
+    let resolved = resolve_rank_plan(request)?;
     let mut payload =
-        serde_json::to_value(plan.snapshot()).expect("rank-plan snapshot is serializable");
-    add_client_fields(&mut payload, requested_backend, effective_backend);
+        serde_json::to_value(resolved.plan.snapshot()).expect("rank-plan snapshot is serializable");
+    add_client_fields(
+        &mut payload,
+        resolved.requested_backend,
+        resolved.effective_backend,
+    );
     Ok(payload)
 }
 

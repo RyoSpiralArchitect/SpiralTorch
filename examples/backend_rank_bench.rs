@@ -10,10 +10,23 @@ use st_core::backend::rankk_launch::{
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::backend::wgpu_exec::WgpuExecutor;
 use st_core::ops::rank_entry::{execute_rank, try_plan_rank_with_config, RankPlan};
-use st_core::runtime::blackcat::{bandit::SoftBanditMode, ChoiceGroups, MultiBandit};
-use std::collections::HashMap;
+use st_core::runtime::blackcat::bandit::SoftBanditMode;
+use st_core::runtime::rank_adaptation::RankAdaptationSession;
+use std::ffi::OsStr;
 use std::io::{self, BufRead};
 use std::time::Instant;
+
+const BUILD_IDENTITY_SCHEMA: &str = "spiraltorch.native_build_identity.v1";
+
+fn build_identity() -> Result<serde_json::Value, String> {
+    let manifest = serde_json::from_str::<serde_json::Value>(st_core::build_manifest_json())
+        .map_err(|error| format!("invalid embedded build manifest: {error}"))?;
+    Ok(json!({
+        "schema": BUILD_IDENTITY_SCHEMA,
+        "build_fingerprint": st_core::build_fingerprint(),
+        "manifest": manifest,
+    }))
+}
 
 #[derive(Deserialize)]
 struct Request {
@@ -100,16 +113,13 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
         ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
     )
     .map_err(|e| e.to_string())?;
-    let context = base.spiralk_context().map_err(|e| e.to_string())?;
-    let plans = request
-        .scripts
-        .iter()
-        .map(|script| {
-            let out = st_kdsl::eval_program(script, &context).map_err(|e| e.to_string())?;
-            base.try_with_spiralk_hard(&out.hard)
-                .map_err(|e| e.to_string())
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let mut adaptation = RankAdaptationSession::try_from_spiralk(
+        &base,
+        &request.scripts,
+        SoftBanditMode::UCB,
+        request.seed,
+    )
+    .map_err(|e| e.to_string())?;
     let mut expected_values = Vec::new();
     let mut expected_indices = Vec::new();
     for row in request.input.chunks_exact(request.cols as usize) {
@@ -139,61 +149,215 @@ fn benchmark(request: Request) -> Result<serde_json::Value, String> {
             Err(format!("rank correctness failed: values={values:?}, indices={indices:?}; expected indices={expected_indices:?}"))
         }
     };
-    // Every candidate must execute correctly before it enters the bandit's domain.
+    // No Black Cat decision is admitted until every candidate passes once.
+    let candidate_plans = adaptation.candidate_plans().cloned().collect::<Vec<_>>();
+    let candidate_snapshots = adaptation.snapshot().candidates;
     let mut first_call_ms = Vec::new();
-    for plan in &plans {
+    for (candidate_index, plan) in candidate_plans.iter().enumerate() {
         let start = Instant::now();
-        let (values, indices) = launch(plan, backend, &request.input)?;
-        first_call_ms.push(start.elapsed().as_secs_f64() * 1000.0);
-        check(&values, &indices)?;
-        for _ in 0..request.warmup {
-            launch(plan, backend, &request.input)?;
+        let result = launch(plan, backend, &request.input);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        first_call_ms.push(json!({
+            "candidate_index": candidate_index,
+            "elapsed_ms": elapsed_ms,
+        }));
+        let (values, indices) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "candidate_preflight_launch",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "elapsed_ms": elapsed_ms,
+                    "first_call_ms": first_call_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
+        };
+        if let Err(error) = check(&values, &indices) {
+            return Ok(json!({
+                "status": "error",
+                "stage": "candidate_preflight_correctness",
+                "error": error,
+                "candidate": candidate_snapshots[candidate_index],
+                "elapsed_ms": elapsed_ms,
+                "actual_values": values,
+                "actual_indices": indices,
+                "expected_values": expected_values,
+                "expected_indices": expected_indices,
+                "first_call_ms": first_call_ms,
+                "rank_adaptation": adaptation.snapshot(),
+            }));
+        }
+        for warmup_index in 0..request.warmup {
+            let result = launch(plan, backend, &request.input);
+            let (values, indices) = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    return Ok(json!({
+                        "status": "error",
+                        "stage": "candidate_warmup_launch",
+                        "error": error,
+                        "candidate": candidate_snapshots[candidate_index],
+                        "warmup_index": warmup_index,
+                        "first_call_ms": first_call_ms,
+                        "rank_adaptation": adaptation.snapshot(),
+                    }));
+                }
+            };
+            if let Err(error) = check(&values, &indices) {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "candidate_warmup_correctness",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "warmup_index": warmup_index,
+                    "actual_values": values,
+                    "actual_indices": indices,
+                    "expected_values": expected_values,
+                    "expected_indices": expected_indices,
+                    "first_call_ms": first_call_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
         }
     }
-    let groups = ChoiceGroups {
-        groups: HashMap::from([(
-            "variant".to_owned(),
-            (0..plans.len()).map(|i| i.to_string()).collect(),
-        )]),
-    };
-    let mut bandit = MultiBandit::try_new_seeded(&groups, 1, SoftBanditMode::UCB, request.seed)
-        .map_err(|e| e.to_string())?;
+
+    // Measure every arm equally in a rotating order. These control samples are
+    // separate from the adaptive observations and never train the posterior.
+    let mut control_samples = Vec::new();
+    let candidate_count = candidate_plans.len();
+    let rotation = request.seed as usize % candidate_count;
+    for round in 0..request.iterations {
+        for offset in 0..candidate_count {
+            let candidate_index = (rotation + round + offset) % candidate_count;
+            let plan = &candidate_plans[candidate_index];
+            let started = Instant::now();
+            let result = launch(plan, backend, &request.input);
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let (values, indices) = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    return Ok(json!({
+                        "status": "error",
+                        "stage": "balanced_control_launch",
+                        "error": error,
+                        "candidate": candidate_snapshots[candidate_index],
+                        "round": round,
+                        "elapsed_ms": elapsed_ms,
+                        "rank_adaptation": adaptation.snapshot(),
+                    }));
+                }
+            };
+            if let Err(error) = check(&values, &indices) {
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "balanced_control_correctness",
+                    "error": error,
+                    "candidate": candidate_snapshots[candidate_index],
+                    "round": round,
+                    "elapsed_ms": elapsed_ms,
+                    "actual_values": values,
+                    "actual_indices": indices,
+                    "expected_values": expected_values,
+                    "expected_indices": expected_indices,
+                    "rank_adaptation": adaptation.snapshot(),
+                }));
+            }
+            control_samples.push(json!({
+                "round": round,
+                "order_offset": offset,
+                "candidate_index": candidate_index,
+                "execution_signature": candidate_snapshots[candidate_index].execution_signature,
+                "elapsed_ms": elapsed_ms,
+            }));
+        }
+    }
     let mut samples = Vec::new();
     for _ in 0..request.iterations {
-        let (picks, _) = bandit.try_select_all(&[1.0]).map_err(|e| e.to_string())?;
-        let index: usize = picks["variant"].parse().map_err(|e| format!("{e}"))?;
+        let selection = adaptation.try_choose().map_err(|e| e.to_string())?;
+        let selection_id = selection.receipt().selection_id;
         let start = Instant::now();
-        let result = launch(&plans[index], backend, &request.input);
+        let result = launch(selection.plan(), backend, &request.input);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         let (values, indices) = match result {
             Ok(result) => result,
             Err(error) => {
-                bandit.try_abandon_all().map_err(str::to_owned)?;
-                return Err(error);
+                let abandonment = adaptation
+                    .try_abandon(selection_id)
+                    .map(|receipt| json!(receipt))
+                    .unwrap_or_else(|receipt_error| {
+                        json!({"status": "error", "error": receipt_error.to_string()})
+                    });
+                return Ok(json!({
+                    "status": "error",
+                    "stage": "adaptive_launch",
+                    "error": error,
+                    "selection": selection.receipt(),
+                    "abandonment": abandonment,
+                    "elapsed_ms": elapsed_ms,
+                    "rank_adaptation": adaptation.snapshot(),
+                    "control_samples": control_samples,
+                }));
             }
         };
-        if let Err(error) = check(&values, &indices) {
-            bandit.try_abandon_all().map_err(str::to_owned)?;
-            return Err(error);
+        let correctness = check(&values, &indices);
+        let observation = adaptation
+            .try_observe(selection_id, elapsed_ms, correctness.is_ok())
+            .map_err(|e| e.to_string())?;
+        if let Err(error) = correctness {
+            return Ok(json!({
+                "status": "error",
+                "stage": "adaptive_correctness",
+                "error": error,
+                "selection": selection.receipt(),
+                "observation": observation,
+                "actual_values": values,
+                "actual_indices": indices,
+                "expected_values": expected_values,
+                "expected_indices": expected_indices,
+                "rank_adaptation": adaptation.snapshot(),
+                "control_samples": control_samples,
+            }));
         }
-        let reward = 1.0 / (1.0 + elapsed_ms);
-        bandit
-            .try_update_all(&[1.0], reward)
-            .map_err(str::to_owned)?;
-        samples.push(json!({"variant": index, "elapsed_ms": elapsed_ms, "reward": reward}));
+        samples.push(json!({"selection": selection.receipt(), "observation": observation}));
     }
+    let adaptation_snapshot = adaptation.snapshot();
+    let observation_counts = adaptation_snapshot.observation_counts.clone();
     Ok(
         json!({"status": "passed", "backend": request.backend, "adapter": adapter,
         "kind": request.kind, "rows": request.rows, "cols": request.cols, "k": request.k,
-        "scripts": request.scripts, "plans": plans.iter().map(RankPlan::snapshot).collect::<Vec<_>>(),
-        "first_call_ms": first_call_ms, "samples": samples,
-        "blackcat_observation_counts": bandit.observation_counts(),
+        "scripts": request.scripts, "rank_adaptation": adaptation_snapshot,
+        "first_call_ms": first_call_ms,
+        "control_design": "equal-count rotating round-robin; does not update Black Cat",
+        "control_samples": control_samples, "samples": samples,
+        "blackcat_observation_counts": observation_counts,
         "values": expected_values, "indices": expected_indices,
         "boundary": "Rust host buffers -> strict GPU execution -> host buffers; planning excluded"}),
     )
 }
 
 fn main() {
+    let mut args = std::env::args_os().skip(1);
+    match (args.next(), args.next()) {
+        (Some(flag), None) if flag == OsStr::new("--build-info") => {
+            match build_identity() {
+                Ok(identity) => println!("{identity}"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        (None, None) => {}
+        _ => {
+            eprintln!("usage: backend_rank_bench [--build-info]");
+            std::process::exit(2);
+        }
+    }
+
     let mut failed = false;
     for line in io::stdin().lock().lines() {
         let result = line
@@ -204,6 +368,9 @@ fn main() {
             failed = true;
             json!({"status": "error", "error": error})
         });
+        if report.get("status").and_then(|value| value.as_str()) == Some("error") {
+            failed = true;
+        }
         println!("{report}");
     }
     if failed {

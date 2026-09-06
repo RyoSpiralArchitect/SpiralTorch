@@ -65,6 +65,10 @@ pub enum RankPlanError {
         mode_field: &'static str,
         mode: u8,
     },
+    #[error("declared native rank execution requires accelerator fallback to be forbidden")]
+    DeclaredNativeRequiresStrictFallback,
+    #[error("unsupported native rank execution: {detail}")]
+    UnsupportedNativeExecution { detail: String },
     #[error(transparent)]
     InvalidDeviceCaps(#[from] DeviceCapsError),
 }

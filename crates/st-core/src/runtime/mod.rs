@@ -10,6 +10,8 @@ mod canonical_json;
 #[cfg(feature = "golden")]
 pub mod golden;
 pub(crate) mod persistence;
+#[cfg(feature = "kdsl")]
+pub mod rank_adaptation;
 pub mod route_selection;
 pub mod topos_route_policy;
 pub mod trainer_checkpoint;

@@ -33,7 +33,7 @@ use crate::json::json_to_py;
 #[cfg(feature = "kdsl")]
 use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
 use st_core::ops::rank_entry::{
-    try_plan_rank, try_plan_rank_with_config, try_plan_rank_with_planning_context, RankPlan,
+    try_plan_rank_with_config, try_plan_rank_with_planning_context, RankPlan,
 };
 
 #[pyclass(module = "spiraltorch", name = "RankPlan")]
@@ -68,6 +68,20 @@ impl PyRankPlan {
         &self.inner
     }
 
+    pub(crate) fn metadata(
+        &self,
+    ) -> (
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+    ) {
+        (
+            self.kind_override,
+            self.requested_backend,
+            self.effective_backend,
+        )
+    }
+
     fn merge_kind(&self) -> &'static str {
         match self.inner.choice.mk {
             1 => "shared",
@@ -86,6 +100,31 @@ impl PyRankPlan {
             _ => "auto",
         }
     }
+}
+
+pub(crate) fn rank_plan_contract_value(
+    plan: &RankPlan,
+    requested_backend: Option<&'static str>,
+    effective_backend: Option<&'static str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(plan.snapshot())?;
+    let object = value
+        .as_object_mut()
+        .expect("rank-plan snapshot serializes as an object");
+    object.insert("execution_client".into(), "python".into());
+    object.insert(
+        "requested_backend".into(),
+        requested_backend
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "effective_backend".into(),
+        effective_backend
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    Ok(value)
 }
 
 #[pymethods]
@@ -238,24 +277,9 @@ impl PyRankPlan {
 
     /// Returns the shared Rust-owned planning contract with client provenance.
     fn contract(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let mut value = serde_json::to_value(self.inner.snapshot())
-            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
-        let object = value
-            .as_object_mut()
-            .expect("rank-plan snapshot serializes as an object");
-        object.insert("execution_client".into(), "python".into());
-        object.insert(
-            "requested_backend".into(),
-            self.requested_backend
-                .map(serde_json::Value::from)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        object.insert(
-            "effective_backend".into(),
-            self.effective_backend
-                .map(serde_json::Value::from)
-                .unwrap_or(serde_json::Value::Null),
-        );
+        let value =
+            rank_plan_contract_value(&self.inner, self.requested_backend, self.effective_backend)
+                .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
         json_to_py(py, &value)
     }
 
@@ -556,6 +580,7 @@ fn plan_impl(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    strict_accelerator: Option<bool>,
     runtime_execution_plan: Option<&Bound<'_, PyAny>>,
     kind_override: Option<&'static str>,
 ) -> PyResult<PyRankPlan> {
@@ -565,9 +590,10 @@ fn plan_impl(
             || subgroup.is_some()
             || max_workgroup.is_some()
             || shared_mem_per_workgroup.is_some()
+            || strict_accelerator.is_some()
         {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "runtime_execution_plan cannot be combined with backend or device-capability overrides",
+                "runtime_execution_plan cannot be combined with backend, device-capability, or execution-config overrides",
             ));
         }
         let value = crate::json::py_to_json(runtime_execution_plan)?;
@@ -604,7 +630,15 @@ fn plan_impl(
         shared_mem_per_workgroup,
     )
     .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-    let plan = try_plan_rank(kind, rows, cols, k, caps)
+    let mut execution_config = ExecutionConfig::from_env();
+    if let Some(strict_accelerator) = strict_accelerator {
+        execution_config.accelerator_fallback = if strict_accelerator {
+            AcceleratorFallback::Forbid
+        } else {
+            AcceleratorFallback::Allow
+        };
+    }
+    let plan = try_plan_rank_with_config(kind, rows, cols, k, caps, execution_config)
         .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
     Ok(PyRankPlan::from_plan_with_metadata(
         plan,
@@ -615,7 +649,7 @@ fn plan_impl(
 }
 
 #[pyfunction]
-#[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, runtime_execution_plan=None))]
+#[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, strict_accelerator=None, runtime_execution_plan=None))]
 #[allow(clippy::too_many_arguments)]
 fn plan(
     kind: &str,
@@ -627,6 +661,7 @@ fn plan(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    strict_accelerator: Option<bool>,
     runtime_execution_plan: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyRankPlan> {
     let (rank_kind, kind_override) = if kind.eq_ignore_ascii_case("fft") {
@@ -644,13 +679,14 @@ fn plan(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        strict_accelerator,
         runtime_execution_plan,
         kind_override,
     )
 }
 
 #[pyfunction]
-#[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, runtime_execution_plan=None))]
+#[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, strict_accelerator=None, runtime_execution_plan=None))]
 #[allow(clippy::too_many_arguments)]
 fn plan_topk(
     rows: u32,
@@ -661,6 +697,7 @@ fn plan_topk(
     subgroup: Option<bool>,
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
+    strict_accelerator: Option<bool>,
     runtime_execution_plan: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyRankPlan> {
     plan_impl(
@@ -673,6 +710,7 @@ fn plan_topk(
         subgroup,
         max_workgroup,
         shared_mem_per_workgroup,
+        strict_accelerator,
         runtime_execution_plan,
         None,
     )

@@ -37,6 +37,7 @@ pub mod hip_exec;
 pub mod hip_runtime;
 pub mod kdsl_bridge;
 pub mod rank_directives;
+pub mod rank_support;
 pub mod rankk_launch;
 pub mod rankk_software;
 pub mod runtime_probe;

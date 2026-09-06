@@ -2553,6 +2553,17 @@ participants)` to seed cooperative moderators on every trainer without touching
 individual mutexes—perfect for multi-node runs where you want Redis-backed
 guards and SpiralK hints to stay aligned.
 
+For an auditable path, use `sync_z_barycenter_with_receipt(...)`, or build a
+Golden-specific Black Cat controller with
+`golden_barycenter_adaptation_session(...)` before passing its validated plan to
+`sync_z_barycenter_with_plan(...)`. Golden candidate identity follows the FFT
+tile actually consumed by the guard, not unrelated rank-k knobs. Before reward
+credit, call `validate_golden_barycenter_output(...)` to compare the result with
+an independently recomputed partial/guard reference. The returned
+`GoldenBarycenterReceipt` captures the effective rank, guard, and complete plan
+snapshot. It also states `plan_executed: false` because the plan parameterizes
+the Golden guard rather than claiming a rank-k launch.
+
 GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
@@ -3219,6 +3230,11 @@ radius rather than a disconnected diagnostic. Observation-only reports and
 explicitly abandoned selections do not reward-train the ES. The
 selection and update traces retain the base/effective contexts, evaluated Z,
 reward comparison, acceptance decision, and fractional penalty.
+
+Black Cat contextual-bandit witness contract v3 separates selection attempts
+from credited observations, records forced exploration and quarantine state,
+and transports Thompson's `u64` RNG seed as decimal text so WASM clients retain
+its exact value.
 
 Attach the runtime once and it will ingest per-step metrics, evaluate the
 canonical Rust variational free-energy report, log Above/Here/Beneath energy,
