@@ -1723,7 +1723,11 @@ fn convert_wgpu_choice(
         ch: choice.ch,
         mk: 0,
         mkd: 0,
-        tile: choice.rank_tile.unwrap_or(choice.tile_cols),
+        tile: if kind == RankKind::TopK {
+            choice.rank_tile.unwrap_or(choice.tile_cols)
+        } else {
+            choice.tile_cols
+        },
         ctile: choice.ctile,
         subgroup,
         fft_tile: choice.tile_cols,
@@ -2214,6 +2218,43 @@ mod tests {
             radix: 4,
             segments: 1,
         }
+    }
+
+    #[test]
+    fn rank_tile_does_not_leak_into_non_topk_refinement() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        for kind in [RankKind::BottomK, RankKind::MidK] {
+            let scenario = RankScenario::new(1_024, 65_536, 256, &caps, kind);
+            let baseline = fallback_with_scenario(scenario);
+            let mut original = directive_choice();
+            original.ctile = 512;
+            let mut hinted = original;
+            hinted.rank_tile = Some(32);
+            let before = refine_wgpu_choice(original, baseline, scenario, Some(true)).unwrap();
+            let after = refine_wgpu_choice(hinted, baseline, scenario, Some(true)).unwrap();
+            assert_eq!(after.ctile, before.ctile, "{kind:?} compaction changed");
+            assert_eq!(
+                (
+                    after.tile,
+                    after.fft_tile,
+                    after.fft_radix,
+                    after.fft_segments
+                ),
+                (
+                    before.tile,
+                    before.fft_tile,
+                    before.fft_radix,
+                    before.fft_segments
+                ),
+                "TopK-only hint changed {kind:?}",
+            );
+        }
+        let mut topk = directive_choice();
+        topk.rank_tile = Some(32);
+        let converted = convert_wgpu_choice(topk, true, RankKind::TopK, Some(true)).unwrap();
+        assert_eq!(converted.choice.tile, 32);
+        assert_eq!(converted.choice.fft_tile, 2048);
+        assert_eq!(converted.choice.ctile, 256);
     }
 
     #[test]

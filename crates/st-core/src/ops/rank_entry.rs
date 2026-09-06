@@ -143,6 +143,7 @@ pub struct RankPlanChoiceOverrides {
     pub merge_kind: Option<u32>,
     pub merge_detail: Option<u32>,
     pub compaction_tile: Option<u32>,
+    /// TopK sweep tile; ignored by other rank kinds.
     pub rank_tile: Option<u32>,
     pub fft_tile: Option<u32>,
     pub fft_radix: Option<u32>,
@@ -271,7 +272,7 @@ impl RankPlan {
         if let Some(value) = overrides.compaction_tile {
             updated.choice.ctile = value;
         }
-        if let Some(value) = overrides.rank_tile {
+        if let (RankKind::TopK, Some(value)) = (self.kind, overrides.rank_tile) {
             updated.choice.tile = value;
         }
         if let Some(value) = overrides.fft_tile {

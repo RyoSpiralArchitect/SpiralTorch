@@ -938,6 +938,33 @@ mod tests {
     }
 
     #[test]
+    fn hard_rank_tile_is_ignored_outside_topk() {
+        for kind in [RankKind::TopK, RankKind::MidK, RankKind::BottomK] {
+            let base = try_plan_rank_with_config(
+                kind,
+                2,
+                8193,
+                65,
+                BackendKind::Wgpu.default_caps(),
+                ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+            )
+            .unwrap();
+            let hard = st_kdsl::Hard {
+                rank_tile: Some(32),
+                ..Default::default()
+            };
+            let updated = base.try_with_spiralk_hard(&hard).unwrap();
+            if kind == RankKind::TopK {
+                assert_eq!(updated.choice.tile, 32);
+                assert_eq!(updated.choice.ctile, base.choice.ctile);
+                assert_eq!(updated.choice.fft_tile, base.choice.fft_tile);
+            } else {
+                assert_eq!(updated.snapshot(), base.snapshot());
+            }
+        }
+    }
+
+    #[test]
     fn rank_tile_does_not_change_fft_and_unused_tiles_do_not_create_arms() {
         let base = base_plan();
         let session = RankAdaptationSession::try_from_spiralk_with_execution_signature(
