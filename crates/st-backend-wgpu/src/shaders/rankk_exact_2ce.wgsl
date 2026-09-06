@@ -88,6 +88,16 @@ fn tile_lower_bound(state: u32, key: u32, index: u32) -> u32 {
     return low;
 }
 
+// Each lane owns tiles lane + n * 256. Higher lanes contain only the reduction
+// identity, so skip empty upper levels without changing the surviving tree.
+fn merge_reduction_start() -> u32 {
+    var stride = 128u;
+    loop {
+        if (stride < params.tiles_x || stride == 0u) { return stride; }
+        stride = stride >> 1u;
+    }
+}
+
 fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
     var count = 0u;
     for (var tile = lane; tile < params.tiles_x; tile = tile + 256u) {
@@ -95,7 +105,7 @@ fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
     }
     merge_indices[lane] = count;
     workgroupBarrier();
-    for (var stride = 128u; stride > 0u; stride = stride >> 1u) {
+    for (var stride = merge_reduction_start(); stride > 0u; stride = stride >> 1u) {
         if (lane < stride) {
             merge_indices[lane] = merge_indices[lane] + merge_indices[lane + stride];
         }
@@ -437,7 +447,7 @@ fn rankk_exact_2ce_row_merge(
         merge_tiles[local_id.x] = best_tile;
         workgroupBarrier();
 
-        var stride = 128u;
+        var stride = merge_reduction_start();
         loop {
             if (stride == 0u) {
                 break;
