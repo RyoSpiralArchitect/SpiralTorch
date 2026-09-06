@@ -1,0 +1,807 @@
+{
+  "schema": "spiraltorch.retirement_order_evidence.v1",
+  "status": "diagnostic_only_no_production_workaround_admitted",
+  "date": "2026-09-06",
+  "production_main": "1ef53ed0da3304de2839d01890a68fa09ff07994",
+  "harness_revision": "386d7cf2208f85e49a229002b119e6d44d83b8f8",
+  "harness_git_blob": "99265e657e6899577fb50e09b00dac696cde271b",
+  "runtime_changes_in_harness_revision": false,
+  "external_hal_base": {
+    "name": "wgpu-hal",
+    "version": "0.21.1",
+    "crate_sha256": "172e490a87295564f3fcc0f165798d87386f6231b04d4548bca458cbbfd63222"
+  },
+  "patches": {
+    "vulkan_unpinned": "hal-destroy-unpinned.patch",
+    "vulkan_pinned": "hal-destroy-pinned.patch",
+    "cross_backend_pinned": "hal-cross-backend.patch",
+    "pinned_lockfile_change": "external-hal-lockfile.patch"
+  },
+  "external_override_boundary": "Experimental git revision plus external HAL patch and graph change, not a clean production build/source admission. No Cargo registry sources or repository dependency policy were modified.",
+  "combined_candidate_revision": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+  "combined_harness_git_blob": "e0bc682db7f2ea85917d340c380f8d67a0b75b4a",
+  "chronology": "First 3 serial controls, park/serial-park/drop controls; unpinned Vulkan guard excluded; pinned Vulkan guard; cross-backend 6 runs and 8x8 debugger; more serial controls; cross-backend 8x16 debugger; combined primary/guard; Metal modes; corrected framed 8x8 serial pair.",
+  "timeouts": {
+    "ordinary_seconds": 30,
+    "larger_serial_seconds": 60,
+    "term_kill_after_seconds": 10
+  },
+  "binary_sha256_pre_post_verified": true,
+  "exclusive_gpu_reservation": false,
+  "runtime_admission": false,
+  "throughput_admission": false,
+  "universal_lifetime_guarantee": false,
+  "driver_root_cause_proven": false,
+  "runs": [
+    {
+      "mode": "worker_serial_drop",
+      "run": 1,
+      "log": "exit-order-worker_serial_drop-1.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "5b143d9664e74350f09fde8489ae68454f2831a091755c1365f919386479407e",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "run": 2,
+      "log": "exit-order-worker_serial_drop-2.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "6a28ac76de4721dc053fbedc025466668e39488d91c3d93ff42bc85b3513c31d",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "run": 3,
+      "log": "exit-order-worker_serial_drop-3.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "136ac93860ebc25fd0dd4112f154f19b5e78d2101937b203ae0a935d94214d09",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_drop_park",
+      "run": 1,
+      "log": "exit-order-worker_drop_park-1.log",
+      "exit_code": 124,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "caa4d67d2776a96e0792a902b1a865aa54c152c774ebb16e23949f7a8e14eda7",
+      "receipts": 0,
+      "runtimes_dropped": 0,
+      "rounds_joined": 0
+    },
+    {
+      "mode": "worker_serial_drop_park",
+      "run": 1,
+      "log": "exit-order-worker_serial_drop_park-1.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "bf9e03a6c445e2a63bc331dacc16fe7a191c4f916bf9bcc83592fd7581a85ab5",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop_park",
+      "run": 2,
+      "log": "exit-order-worker_serial_drop_park-2.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "5102ce3851c8a1c90a25699896239f5dafc7801b5a0fd9e39efb2124c540c0c7",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop_park",
+      "run": 3,
+      "log": "exit-order-worker_serial_drop_park-3.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "289d51888a76f03fa828fb292bd7c8f0c8e1e9a779417e30fe18e65e072124d9",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "run": 1,
+      "log": "exit-order-drop-1.log",
+      "exit_code": 124,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "b9263282380d08698e6edf2a6e7050db1fc42c570806748e3b75cbc55b3f1d6a",
+      "receipts": 0,
+      "runtimes_dropped": 0,
+      "rounds_joined": 0
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 4,
+      "log": "base-serial-repeat-4x4-4.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "9a2debf15bc59fb11934927734aa7164e820e4e83cd1d4c2d4740ca7f11da36e",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 5,
+      "log": "base-serial-repeat-4x4-5.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "19ec0fa1a21bba100060a6f7d9d4f9f817808d4115686fd8319e3e3934d33da5",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 6,
+      "log": "base-serial-repeat-4x4-6.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "fc521a0a65ac6a38ab3536f6c1f7d7ee9d0aadcf725aad7a3d0d14b17137dc55",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 8,
+      "rounds": 8,
+      "run": 1,
+      "log": "base-serial-framed-8x8-1.json",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "transport": "separated_remote_streams",
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "35df83331b9fe352f545d80e5bf495efbe13199868b739f5e4d658dbbe0cb869",
+      "receipts": 64,
+      "runtimes_dropped": 64,
+      "rounds_joined": 8
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 8,
+      "rounds": 8,
+      "run": 2,
+      "log": "base-serial-framed-8x8-2.json",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "transport": "separated_remote_streams",
+      "variant": "unchanged_runtime",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "c273a62df574c6327c8408325cf5282e2e1d79732af28e6199e5f09da5756114",
+      "receipts": 64,
+      "runtimes_dropped": 64,
+      "rounds_joined": 8
+    },
+    {
+      "mode": "drop",
+      "run": 1,
+      "log": "hal-destroy-drop-1.log",
+      "exit_code": 124,
+      "binary_sha256": "c5cc4d4250c394084bd241bc11d6c0ce5b22467a36eee7f73dce0ab14899474d",
+      "source": "386d7cf2+external_hal_destroy_patch",
+      "threads": 4,
+      "rounds": 4,
+      "variant": "confounded_unpinned_vulkan_guard",
+      "admission": "excluded_dependency_graph_drift",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "17f0568fe54fe63a4c234caec7a5566a75ac7c8e27bc3272658955f98a2e052a",
+      "receipts": 0,
+      "runtimes_dropped": 0,
+      "rounds_joined": 0
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 1,
+      "log": "hal-destroy-pinned-drop-1.log",
+      "exit_code": 124,
+      "binary_sha256": "d6cbb76b95ae6656274c100badda7dd1768c59656aeba87c656ad2de17d486ab",
+      "source": "386d7cf2+external_hal_destroy_patch_pinned",
+      "variant": "vulkan_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "43f2c8a19f9516aecc6956b539797cfe36bc74049191715b58df0db84d3f75ff",
+      "receipts": 0,
+      "runtimes_dropped": 0,
+      "rounds_joined": 0
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 1,
+      "log": "hal-cross-backend-drop-1.log",
+      "exit_code": 0,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "ee23b73c91561547202cd4d68d2606493d6e764c078b3bf0190e093fa662a3c5",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 2,
+      "log": "hal-cross-backend-drop-2.log",
+      "exit_code": 0,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "9686eb29fa0de4237268c1a39cabfb9f7200d23ba7363b09e7eab07a05c98ec2",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 3,
+      "log": "hal-cross-backend-drop-3.log",
+      "exit_code": 0,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "0207f332e37414305d826bb02099e3a602ae51e57e439d90ad9c79819392d766",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 4,
+      "log": "hal-cross-backend-drop-4.log",
+      "exit_code": 0,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "3eec607985e4267533f3afe254e35fc7fb30a03aaaaceb33a072562e74fa8e50",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 5,
+      "log": "hal-cross-backend-drop-5.log",
+      "exit_code": 0,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "c258f7b0b189b9630031ccfcf04a7d67210dc9ba9fdd4f2846454e444aa765b8",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 6,
+      "log": "hal-cross-backend-drop-6.log",
+      "exit_code": 124,
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "source": "386d7cf2+external_hal_cross_backend_patch",
+      "variant": "cross_backend_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "2e324600b1f0f43acd0cad0b36556df5fd68d54f04959192f12b58cc31843d02",
+      "receipts": 0,
+      "runtimes_dropped": 9,
+      "rounds_joined": 2
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 1,
+      "log": "combined-primary-hal-drop-1.log",
+      "exit_code": 0,
+      "binary_sha256": "8f81367086b61f5cd4737b6d4240a4f05ab595e14afb1d54cddab28f717fae89",
+      "source": "952e9b8c+external_hal_destroy_patch_pinned",
+      "variant": "lazy_primary_plus_vulkan_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "9c99c1026bf3135e80f4bdf1f514827e690bb337745ee542a53ff18d4e9abe56",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "run": 2,
+      "log": "combined-primary-hal-drop-2.log",
+      "exit_code": 124,
+      "binary_sha256": "8f81367086b61f5cd4737b6d4240a4f05ab595e14afb1d54cddab28f717fae89",
+      "source": "952e9b8c+external_hal_destroy_patch_pinned",
+      "variant": "lazy_primary_plus_vulkan_guard_pinned",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "e8575e215174426dad92a25d6b6cfd6da8eb6dc802a993ba04a1d0629021c6bc",
+      "receipts": 0,
+      "runtimes_dropped": 1,
+      "rounds_joined": 0
+    },
+    {
+      "mode": "drop",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-drop.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "9c21c37f5cd7e99916f16830e20527d97868cb26f98d627135abcebe2138f2b9",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "destroy",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-destroy.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "2d70a49c31c0d380b2cfba57e520dd5602d41c95245da67e14aa37d260ae0bfb",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "join_then_drop",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-join_then_drop.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "bc965a363dbc02b0eddda0e988db352ab91e048dca7ac3f0dd954f03b53d261e",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-worker_serial_drop.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "3e724a727c6171ccb4753ea5bf7bca195146d0245a81b507399a42f39213b896",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_drop_park",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-worker_drop_park.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "9376944999bc5ffc611b74885fd99f860da7f7f2913512803604037e480be4a7",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    },
+    {
+      "mode": "worker_serial_drop_park",
+      "threads": 4,
+      "rounds": 4,
+      "exit_code": 0,
+      "log": "order-metal-worker_serial_drop_park.log",
+      "binary_sha256": "3f16543fd4105564c788dab4278d3fac95da2de2d1f634b23b76af4c35f34e01",
+      "source": "386d7cf2",
+      "variant": "unchanged_runtime",
+      "platform": "macOS/Metal",
+      "log_sha256": "5f6ecd0b711c9c1a693c84d9efe5707c769d7a79f9f3fb65a1b28d417fd6ca4f",
+      "receipts": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4
+    }
+  ],
+  "completion_only_diagnostics": [
+    {
+      "mode": "worker_serial_drop",
+      "threads": 8,
+      "rounds": 8,
+      "run": 1,
+      "log": "base-serial-repeat-8x8-1.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "receipt_admission": false,
+      "reason": "Combined SSH streams can splice stderr into long JSON. Original pair retained; corrected framed pair used for structured receipts."
+    },
+    {
+      "mode": "worker_serial_drop",
+      "threads": 8,
+      "rounds": 8,
+      "run": 2,
+      "log": "base-serial-repeat-8x8-2.log",
+      "exit_code": 0,
+      "binary_sha256": "f6c2158b433cd7f172af59b6c2b00504164903f322ff81e577fa0a9b60eca846",
+      "source": "386d7cf2",
+      "receipt_admission": false,
+      "reason": "Combined SSH streams can splice stderr into long JSON. Original pair retained; corrected framed pair used for structured receipts."
+    }
+  ],
+  "debugger_runs": [
+    {
+      "log": "hal-destroy-pinned-gdb.log",
+      "binary_sha256": "d6cbb76b95ae6656274c100badda7dd1768c59656aeba87c656ad2de17d486ab",
+      "threads": 4,
+      "rounds": 4,
+      "interrupt_after_seconds": 15,
+      "wrapper_exit_code": 124,
+      "inferior_outcome": "interrupted_incomplete",
+      "frames": "Vulkan destruction overlaps EGL context destruction; one worker waits for the diagnostic mutex."
+    },
+    {
+      "log": "hal-cross-backend-gdb.log",
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "threads": 8,
+      "rounds": 8,
+      "interrupt_after_seconds": 20,
+      "wrapper_exit_code": 0,
+      "inferior_outcome": "exited_normally",
+      "receipt_admission": false,
+      "frames": "Inferior exited normally. Debugger diagnostic only, not pooled with structured receipt or throughput admission."
+    },
+    {
+      "log": "hal-cross-backend-gdb-repeat.log",
+      "binary_sha256": "55449cb65c6160c12f4b1c468a8030555269e22bdab08b4bcf7137630e81f529",
+      "threads": 8,
+      "rounds": 16,
+      "interrupt_after_seconds": 40,
+      "wrapper_exit_code": 124,
+      "inferior_outcome": "interrupted_incomplete",
+      "frames": "Application and driver-owned NVIDIA cleanup in __nptl_deallocate_tsd; another worker in vkDestroyDevice."
+    }
+  ],
+  "validation": {
+    "native_example_strict_clippy": "passed",
+    "wasm_all_targets_strict_clippy": "passed",
+    "pinned_rustfmt": "passed",
+    "metal_modes": 6,
+    "python_rebuilt": false,
+    "new_browser_measurements": false
+  },
+  "archive": {
+    "name": "raw-logs.tar.gz",
+    "bytes": 82324,
+    "sha256": "4c5301a6215945cc3c8cc540197b394b59c2d8b860d129b8ad71fd59544bec15"
+  },
+  "archived_files": [
+    {
+      "name": "base-serial-framed-8x8-1.json",
+      "bytes": 20140,
+      "sha256": "35df83331b9fe352f545d80e5bf495efbe13199868b739f5e4d658dbbe0cb869"
+    },
+    {
+      "name": "base-serial-framed-8x8-2.json",
+      "bytes": 20140,
+      "sha256": "c273a62df574c6327c8408325cf5282e2e1d79732af28e6199e5f09da5756114"
+    },
+    {
+      "name": "base-serial-repeat-4x4-4.log",
+      "bytes": 4793,
+      "sha256": "9a2debf15bc59fb11934927734aa7164e820e4e83cd1d4c2d4740ca7f11da36e"
+    },
+    {
+      "name": "base-serial-repeat-4x4-5.log",
+      "bytes": 4793,
+      "sha256": "19ec0fa1a21bba100060a6f7d9d4f9f817808d4115686fd8319e3e3934d33da5"
+    },
+    {
+      "name": "base-serial-repeat-4x4-6.log",
+      "bytes": 4793,
+      "sha256": "fc521a0a65ac6a38ab3536f6c1f7d7ee9d0aadcf725aad7a3d0d14b17137dc55"
+    },
+    {
+      "name": "base-serial-repeat-8x8-1.log",
+      "bytes": 18301,
+      "sha256": "c42434617b5babbe02e3b7b5f791bfe7c12071f042aef5f5e45deb97aab8f3d3"
+    },
+    {
+      "name": "base-serial-repeat-8x8-2.log",
+      "bytes": 18301,
+      "sha256": "f8c58993d855ce321e2d0fa053f42c256512c1d3014bb85abc4ea340b6310595"
+    },
+    {
+      "name": "combined-primary-hal-build.log",
+      "bytes": 223398,
+      "sha256": "7bc52f622721a8945a389d77e2646e9c6c0a7fb7763306d408efac1e74cc1021"
+    },
+    {
+      "name": "combined-primary-hal-drop-1.log",
+      "bytes": 4779,
+      "sha256": "9c99c1026bf3135e80f4bdf1f514827e690bb337745ee542a53ff18d4e9abe56"
+    },
+    {
+      "name": "combined-primary-hal-drop-2.log",
+      "bytes": 503,
+      "sha256": "e8575e215174426dad92a25d6b6cfd6da8eb6dc802a993ba04a1d0629021c6bc"
+    },
+    {
+      "name": "exit-order-build.log",
+      "bytes": 113156,
+      "sha256": "2364d65bf3c62994d1aaf03331b97f814800ac40586378ac1187d7cc7f4eed54"
+    },
+    {
+      "name": "exit-order-clippy.log",
+      "bytes": 113729,
+      "sha256": "4f2d5a45f01e2b1726e77cebac5e9619bd44904df79263efab11aed8ac8a6402"
+    },
+    {
+      "name": "exit-order-drop-1.log",
+      "bytes": 464,
+      "sha256": "b9263282380d08698e6edf2a6e7050db1fc42c570806748e3b75cbc55b3f1d6a"
+    },
+    {
+      "name": "exit-order-worker_drop_park-1.log",
+      "bytes": 464,
+      "sha256": "caa4d67d2776a96e0792a902b1a865aa54c152c774ebb16e23949f7a8e14eda7"
+    },
+    {
+      "name": "exit-order-worker_serial_drop-1.log",
+      "bytes": 4793,
+      "sha256": "5b143d9664e74350f09fde8489ae68454f2831a091755c1365f919386479407e"
+    },
+    {
+      "name": "exit-order-worker_serial_drop-2.log",
+      "bytes": 4793,
+      "sha256": "6a28ac76de4721dc053fbedc025466668e39488d91c3d93ff42bc85b3513c31d"
+    },
+    {
+      "name": "exit-order-worker_serial_drop-3.log",
+      "bytes": 4793,
+      "sha256": "136ac93860ebc25fd0dd4112f154f19b5e78d2101937b203ae0a935d94214d09"
+    },
+    {
+      "name": "exit-order-worker_serial_drop_park-1.log",
+      "bytes": 4798,
+      "sha256": "bf9e03a6c445e2a63bc331dacc16fe7a191c4f916bf9bcc83592fd7581a85ab5"
+    },
+    {
+      "name": "exit-order-worker_serial_drop_park-2.log",
+      "bytes": 4798,
+      "sha256": "5102ce3851c8a1c90a25699896239f5dafc7801b5a0fd9e39efb2124c540c0c7"
+    },
+    {
+      "name": "exit-order-worker_serial_drop_park-3.log",
+      "bytes": 4798,
+      "sha256": "289d51888a76f03fa828fb292bd7c8f0c8e1e9a779417e30fe18e65e072124d9"
+    },
+    {
+      "name": "external-hal-lockfile.patch",
+      "bytes": 402,
+      "sha256": "4da9dddc101383a4554a5124daeb34d16614b405d87f43466e863329b02cbee5"
+    },
+    {
+      "name": "hal-cross-backend-build.log",
+      "bytes": 222937,
+      "sha256": "9b2a70ff543bf88c5af054cb83997908557702bb541def8b1fabb8a2dc01a868"
+    },
+    {
+      "name": "hal-cross-backend-drop-1.log",
+      "bytes": 4779,
+      "sha256": "ee23b73c91561547202cd4d68d2606493d6e764c078b3bf0190e093fa662a3c5"
+    },
+    {
+      "name": "hal-cross-backend-drop-2.log",
+      "bytes": 4779,
+      "sha256": "9686eb29fa0de4237268c1a39cabfb9f7200d23ba7363b09e7eab07a05c98ec2"
+    },
+    {
+      "name": "hal-cross-backend-drop-3.log",
+      "bytes": 4779,
+      "sha256": "0207f332e37414305d826bb02099e3a602ae51e57e439d90ad9c79819392d766"
+    },
+    {
+      "name": "hal-cross-backend-drop-4.log",
+      "bytes": 4779,
+      "sha256": "3eec607985e4267533f3afe254e35fc7fb30a03aaaaceb33a072562e74fa8e50"
+    },
+    {
+      "name": "hal-cross-backend-drop-5.log",
+      "bytes": 4779,
+      "sha256": "c258f7b0b189b9630031ccfcf04a7d67210dc9ba9fdd4f2846454e444aa765b8"
+    },
+    {
+      "name": "hal-cross-backend-drop-6.log",
+      "bytes": 1801,
+      "sha256": "2e324600b1f0f43acd0cad0b36556df5fd68d54f04959192f12b58cc31843d02"
+    },
+    {
+      "name": "hal-cross-backend-gdb-repeat.log",
+      "bytes": 86699,
+      "sha256": "7d35cda195f5bf73d257f0315cf8bd7d6d756bb82ea30c84d29c06bb0dcc0227"
+    },
+    {
+      "name": "hal-cross-backend-gdb.log",
+      "bytes": 18700,
+      "sha256": "dd81640b73c9311b8b14f39c7370fd1afe87baa84da40cf683c0099321bf26f3"
+    },
+    {
+      "name": "hal-cross-backend.patch",
+      "bytes": 1783,
+      "sha256": "3a8dc9c293fcae881c69936c7fd835ab8d4860f7ddc18d150bbcbab941e8dc77"
+    },
+    {
+      "name": "hal-destroy-build.log",
+      "bytes": 221431,
+      "sha256": "11168af1794c109d809477a5de833b2bda314341d2212cef70913c04af606a80"
+    },
+    {
+      "name": "hal-destroy-drop-1.log",
+      "bytes": 464,
+      "sha256": "17f0568fe54fe63a4c234caec7a5566a75ac7c8e27bc3272658955f98a2e052a"
+    },
+    {
+      "name": "hal-destroy-pinned-build.log",
+      "bytes": 221241,
+      "sha256": "6cb92d06418d105eb04b5c26438633a4c8df623a168a7bd31a2ba3371cd12594"
+    },
+    {
+      "name": "hal-destroy-pinned-drop-1.log",
+      "bytes": 464,
+      "sha256": "43f2c8a19f9516aecc6956b539797cfe36bc74049191715b58df0db84d3f75ff"
+    },
+    {
+      "name": "hal-destroy-pinned-gdb.log",
+      "bytes": 65161,
+      "sha256": "915d4f89726a3dc43d7bd94a6ebfc4e68747f47937f63e82ad76a0fcdbb1a69f"
+    },
+    {
+      "name": "hal-destroy-pinned.patch",
+      "bytes": 1225,
+      "sha256": "9185984932e4fad674d9f90d52ed0e8e8f2e9736f4b77c525a7ad50e0abf244f"
+    },
+    {
+      "name": "hal-destroy-unpinned.patch",
+      "bytes": 746,
+      "sha256": "766404844e197b125c4f2ebc0b8cece44b267737ca4f66f882edaa6538e4a87c"
+    },
+    {
+      "name": "order-metal-build.log",
+      "bytes": 113729,
+      "sha256": "f7321221601b3673ccc13ad253139c24a1b907412d23360e6b87e50a77ea22fc"
+    },
+    {
+      "name": "order-metal-destroy.log",
+      "bytes": 5182,
+      "sha256": "2d70a49c31c0d380b2cfba57e520dd5602d41c95245da67e14aa37d260ae0bfb"
+    },
+    {
+      "name": "order-metal-drop.log",
+      "bytes": 4539,
+      "sha256": "9c21c37f5cd7e99916f16830e20527d97868cb26f98d627135abcebe2138f2b9"
+    },
+    {
+      "name": "order-metal-join_then_drop.log",
+      "bytes": 5861,
+      "sha256": "bc965a363dbc02b0eddda0e988db352ab91e048dca7ac3f0dd954f03b53d261e"
+    },
+    {
+      "name": "order-metal-worker_drop_park.log",
+      "bytes": 4551,
+      "sha256": "9376944999bc5ffc611b74885fd99f860da7f7f2913512803604037e480be4a7"
+    },
+    {
+      "name": "order-metal-worker_serial_drop.log",
+      "bytes": 4553,
+      "sha256": "3e724a727c6171ccb4753ea5bf7bca195146d0245a81b507399a42f39213b896"
+    },
+    {
+      "name": "order-metal-worker_serial_drop_park.log",
+      "bytes": 4558,
+      "sha256": "5f6ecd0b711c9c1a693c84d9efe5707c769d7a79f9f3fb65a1b28d417fd6ca4f"
+    },
+    {
+      "name": "order-wasm-clippy.log",
+      "bytes": 110543,
+      "sha256": "9833dee8329d4e549d8b5c385b4e27fe27e50ae548a49d73aa40df65656a4e6a"
+    },
+    {
+      "name": "wgpu-wrapper-vs-registry.patch",
+      "bytes": 1816,
+      "sha256": "09e4ced934a1fa214ff3161f7a61bfc79bf6966e5f4915d3dd0ed024e152cf20"
+    }
+  ]
+}
