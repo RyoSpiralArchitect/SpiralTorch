@@ -213,3 +213,53 @@ archives remain unchanged.
 
 Internal-error archive SHA-256: `f66a5712dd6b10862307ef406f8a8a262e2bda05aa721aa61ebcc291895269ec`.
 Internal-error summary SHA-256: `fd174c52c69643785733be9f96e1973eb3ddd2f6e709228ce256986bc059b6bc`.
+
+## Closing Review And Device Lifetime
+
+`1bfdceb0` fails closed when a browser `popErrorScope()` Promise rejects. The
+retained synthetic red replay accepted missing validation and published output;
+the green replay rejects, leaves output stale, and recovers through ordinary
+dispatch. This is not a real driver fault.
+
+`baa0b962` makes the profiling factory own a private device whose handles cannot
+escape to ordinary shared-runtime operations. It preserves the ordinary fast
+path without an execution lock. A native ABBA against `b7999e8f` passes 144 cases
+and 9,216 Rust policy observations. Fixed-control candidate/baseline mean-ratio
+medians are **1.019 / 0.999**, with ranges **0.967-1.050 / 0.966-1.017**. The
+first pair's approximately 2% increase is retained, not erased as noise. The
+44-case matched browser median is **0.999**, range **0.946-1.115**. These are
+regression controls, not another speedup claim, and do not measure later fixes.
+
+A further 72-case stage probe at `baa0b962` exposed a lifetime defect after 62
+successful cases: repeated device initialization errors followed by SIGSEGV.
+The entire failed run is invalid and retained, including its partial output.
+`8dde25c317b1ff26053d470ef0c3f3d90bbfd2fe` fixes Rust field destruction order so
+workspace/readback buffers and queries retire before their last owning device.
+The identical 72-case fixture then passes. A new 96-cycle native regression
+also covers reading after workspace destruction and dropping pending reads.
+There is no added dispatch synchronization, shader or policy change.
+
+The final executable source passes 90 live backend tests plus WGSL parsing on
+each native host, 103 freshly packaged Python tests, 12 browser profile cases
+and the rank-only 1024-repetition test. A final 36-case native/PyTorch CUDA run
+passes another 2,304 policy observations; it is not a matched speedup study.
+Native/WASM strict Clippy and fresh wheel/WASM builds pass. The shipped ambient
+TypeScript declarations now include the profile API and referenced `WgpuMatmul`;
+both generated and shipped declarations are checked, including strict `tsc`
+compilation of positive and negative profile calls without `skipLibCheck`.
+
+[closing-summary.json](closing-summary.json) and
+[closing-logs.tar.xz](closing-logs.tar.xz) keep these separate source identities,
+the failed stage run, scope red/green results, build/test logs, product hashes,
+source bundles and replay scripts. The archive validates 1,154 timestamp reports
+across the private-device and final products. After extraction:
+
+```sh
+python -I analyze_closing.py --repo /path/to/SpiralTorch --output recomputed.json
+```
+
+Extraction and replay reproduced the summary byte-for-byte; the three earlier
+archives remain unchanged. Their original performance limitations still apply.
+
+Closing archive SHA-256: `32214eece074752ec5b3d095db2170c77e99765d82a79da1c24fbb12ebfb7550`.
+Closing summary SHA-256: `1e993824dc5df0737af648643e9976a9d8df514bf8ad7fa84d52af75d45631e8`.

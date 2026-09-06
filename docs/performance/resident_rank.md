@@ -185,6 +185,12 @@ factory internally. Profile construction validates all three error classes too.
 An internal device-scope lease remains as a defensive encoding check, not an
 execution/readback lock. WASM pops scopes synchronously before returning a promise.
 
+Workspace buffers, idle staging buffers and pending query storage retire before
+their final owning native device. Keeping the device alive until those resources
+drop prevents repeated private-workspace creation from leaking retired device
+resources. Pending reads still outlive the workspace; the lifetime regression
+exercises both successful reads and cancellation over 96 creation/drop cycles.
+
 Profiled output remains stale until the corresponding query read and captured
 validation succeed. `synchronize()` alone does not publish it. Failed or dropped
 Rust readbacks cannot expose output, and an older profile cannot publish after
