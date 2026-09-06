@@ -1,0 +1,744 @@
+{
+  "schema": "spiraltorch.wgpu_lifecycle_evidence.v1",
+  "status": "diagnostic_only_production_failure_unresolved",
+  "date": "2026-09-06",
+  "production_runtime_revision": "f51f4b0fd33fff0e891e94be0337f1ac40e50f5e",
+  "harness_only_revision": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+  "unmerged_runtime_candidate_revision": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+  "identical_harness_git_blob": "e0bc682db7f2ea85917d340c380f8d67a0b75b4a",
+  "boundary": "Sequential bounded correctness diagnostics. No throughput, universal safety, production fix or root-cause admission.",
+  "execution": {
+    "threads": 4,
+    "rounds": 4,
+    "linux_timeout_seconds": 30,
+    "linux_term_kill_after_seconds": 10,
+    "order": "Six candidate join_then_drop, two candidate drop, six main join_then_drop, two main drop; then one Metal process per mode.",
+    "binary_pre_post_sha256_verified": true,
+    "parallel_driver_calls_inside_each_process": true,
+    "exclusive_gpu_reservation": false,
+    "randomized_order": false,
+    "exit_codes_from": "terminal command results, not inferred from log content"
+  },
+  "runs": [
+    {
+      "mode": "join_then_drop",
+      "run": 1,
+      "exit_code": 0,
+      "log": "join-retirement-01.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "507e90564ea08a68c4c30361d55d32cbf711ff9de4b3de218676c59c180fbc53",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 2,
+      "exit_code": 0,
+      "log": "join-retirement-02.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "da40ff081b28b6cddf07582305d6840fbd5383d55da7ae1bc954836861cbe2ee",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 3,
+      "exit_code": 0,
+      "log": "join-retirement-03.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "a2766da2e701dbac48d1f18dec1954d79c45aa57bcbbe9e5bd4edccff31d8495",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 4,
+      "exit_code": 0,
+      "log": "join-retirement-04.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "93a36a25702a18040f2e045365ffe1568537ce9cb10253638e87095c1e3de118",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 5,
+      "exit_code": 0,
+      "log": "join-retirement-05.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "110d4e66dce569710d1a1d97f26f31966b56543bff70f5362cc2b6be2eb73b4a",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 6,
+      "exit_code": 0,
+      "log": "join-retirement-06.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "785dbe47e4543029041df16db2bfae19d23522fdee12df1b02f463306bb69074",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "drop",
+      "run": 1,
+      "exit_code": 124,
+      "log": "join-retirement-drop-control-01.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "cbd0fbe99d892d5de5a445b2f6fb1d5d17e46ae5f90f474f45b8aecb7b7f2a0e",
+      "bytes": 503,
+      "receipts": 0,
+      "readbacks_verified": 4,
+      "runtimes_dropped": 1,
+      "rounds_joined": 0,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "drop",
+      "run": 2,
+      "exit_code": 124,
+      "log": "join-retirement-drop-control-02.log",
+      "source": "952e9b8c56f41d121e7cf7f8ea760f574f878ef7",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "fa6f2384d8db23bbc236dbb6451d8831c6bbfd35f01709635602fc96577b41f1",
+      "bytes": 503,
+      "receipts": 0,
+      "readbacks_verified": 4,
+      "runtimes_dropped": 1,
+      "rounds_joined": 0,
+      "binary_sha256": "aa84cf7235720de20647a03109f035faef6f47feeb5fede164774a0abb0f6b09"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 1,
+      "exit_code": 0,
+      "log": "main-join-retirement-01.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "1e88c269eacdf536aa716336566a48a7c1d96433be53d62dff0f11a3346d67e9",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 2,
+      "exit_code": 0,
+      "log": "main-join-retirement-02.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "a9d6b6308046da4c5107d4d9aaa74024f9a35ebc9f10541f34603e1b0f026f26",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 3,
+      "exit_code": 0,
+      "log": "main-join-retirement-03.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "90a294e0650b6b4015b93051311ebefa1db7fa958f24f99b1eef9396c2e52255",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 4,
+      "exit_code": 0,
+      "log": "main-join-retirement-04.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "2f5b390a03a9352bd36762d28ab59a77626dfd73c196ae2750644b88567fd0d7",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 5,
+      "exit_code": 0,
+      "log": "main-join-retirement-05.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "ddc008db01a2f4e24f2be07a52e4bd11e794d20aecabf1208026aff50c7c9f43",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "join_then_drop",
+      "run": 6,
+      "exit_code": 0,
+      "log": "main-join-retirement-06.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "a5e0740b0a70ae37998a2e2dd19f1c7bd7ea8f21632b0293bfb9f722910c88f2",
+      "bytes": 6101,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "drop",
+      "run": 1,
+      "exit_code": 124,
+      "log": "main-drop-control-01.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "25f1e2547fac085d2035629aa7527895941039446de9fa145e909ef4022e0883",
+      "bytes": 464,
+      "receipts": 0,
+      "readbacks_verified": 4,
+      "runtimes_dropped": 0,
+      "rounds_joined": 0,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "drop",
+      "run": 2,
+      "exit_code": 124,
+      "log": "main-drop-control-02.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "Linux/Vulkan",
+      "log_sha256": "745341e165b35c9f645b3c2c8fe73e66533398beb68fdb19f7cff0853670512a",
+      "bytes": 1113,
+      "receipts": 0,
+      "readbacks_verified": 8,
+      "runtimes_dropped": 4,
+      "rounds_joined": 1,
+      "binary_sha256": "566df4b7a52ddd4719c390d792626d2b016df7d6f25a8421657b2890d7dcedb0"
+    },
+    {
+      "mode": "drop",
+      "exit_code": 0,
+      "log": "main-metal-drop.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "macOS/Metal",
+      "log_sha256": "97777f3ee96649cadeecea687774200d50f743dc86aff21d9bc8e669406939dd",
+      "bytes": 4539,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "da49b1605b8c38f58d6a5ffad853334653db7dd32f9cf0f9ec1c8af20f681fa3"
+    },
+    {
+      "mode": "destroy",
+      "exit_code": 0,
+      "log": "main-metal-destroy.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "macOS/Metal",
+      "log_sha256": "62c9c249affa71bb6c898d6934fa3d3fa42eefdc470b15b033f22ff8cd67a456",
+      "bytes": 5182,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "da49b1605b8c38f58d6a5ffad853334653db7dd32f9cf0f9ec1c8af20f681fa3"
+    },
+    {
+      "mode": "join_then_drop",
+      "exit_code": 0,
+      "log": "main-metal-join_then_drop.log",
+      "source": "d05983059b11273cf1ea97737fb1d4b6ecd369f5",
+      "platform": "macOS/Metal",
+      "log_sha256": "678fdc5b004a0dff276cff149dc5c7b98ceb22d68efc0f74ae168f808ce1684d",
+      "bytes": 5861,
+      "receipts": 16,
+      "readbacks_verified": 16,
+      "runtimes_dropped": 16,
+      "rounds_joined": 4,
+      "binary_sha256": "da49b1605b8c38f58d6a5ffad853334653db7dd32f9cf0f9ec1c8af20f681fa3"
+    }
+  ],
+  "earlier_probes": [
+    {
+      "logs": [
+        "base-gdb-01.log",
+        "base-gdb-02.log"
+      ],
+      "revision": "f51f4b0f",
+      "wrapper_exit_codes": [
+        0,
+        124
+      ],
+      "outcomes": [
+        "70 unit tests, inferior exited normally",
+        "interrupted diagnostic, incomplete"
+      ]
+    },
+    {
+      "logs": [
+        "lifecycle-base-01.log",
+        "lifecycle-base-gdb.log"
+      ],
+      "revision": "fd0960e0",
+      "wrapper_exit_codes": [
+        124,
+        124
+      ],
+      "outcomes": [
+        "30-second timeout",
+        "15-second debugger interrupt, EGL/Vulkan lifetime stacks"
+      ]
+    },
+    {
+      "logs": [
+        "lifecycle-candidate-verified-01.log",
+        "lifecycle-candidate-verified-02.log",
+        "lifecycle-candidate-verified-03.log"
+      ],
+      "revision": "5be0031a",
+      "wrapper_exit_codes": [
+        0,
+        0,
+        124
+      ],
+      "outcomes": [
+        "passed",
+        "passed",
+        "timeout"
+      ]
+    },
+    {
+      "logs": [
+        "lifecycle-candidate-gdb-01.log"
+      ],
+      "revision": "5be0031a",
+      "wrapper_exit_codes": [
+        0
+      ],
+      "inferior_signal": "SIGSEGV",
+      "outcomes": [
+        "failed; debugger wrapper zero is not inferior success"
+      ]
+    },
+    {
+      "logs": [
+        "shared-primary-lifecycle-01.log",
+        "shared-primary-lifecycle-02.log"
+      ],
+      "revision": "c03880b4",
+      "wrapper_exit_codes": [
+        0,
+        124
+      ],
+      "outcomes": [
+        "passed",
+        "timeout"
+      ]
+    },
+    {
+      "logs": [
+        "shutdown-explicit-01.log",
+        "implicit-disabled-01.log",
+        "nvidia-driver-only-01.log"
+      ],
+      "revision": "13d69566",
+      "wrapper_exit_codes": [
+        124,
+        124,
+        124
+      ],
+      "outcomes": [
+        "explicit destroy timeout",
+        "process-scoped implicit-layer exclusion timeout",
+        "process-scoped NVIDIA-only ICD timeout"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "log": "lifecycle-candidate-01.log",
+      "status": "invalid_setup_not_candidate_behavior",
+      "reason": "Disk-full build and failed copy preceded accidental execution of incomplete/stale image. Excluded from all candidate comparisons.",
+      "supporting_logs": [
+        "lifecycle-candidate-build.log",
+        "lifecycle-candidate-build-after-clean.log"
+      ]
+    }
+  ],
+  "validation": {
+    "main_native_strict_clippy": "passed",
+    "main_wasm_all_targets_strict_clippy": "passed",
+    "main_metal_unit_tests": 70,
+    "main_shader_validation": "passed",
+    "main_invalid_cli_cases": 7,
+    "python_rebuild_for_candidates": false,
+    "browser_new_runtime_policy": false
+  },
+  "archive": {
+    "name": "raw-logs.tar.gz",
+    "bytes": 166292,
+    "sha256": "d7e5baade97cb742513c9490edf4167bf525bdc06827cff63f8773a634a743a9"
+  },
+  "archived_files": [
+    {
+      "name": "base-build.log",
+      "bytes": 113716,
+      "sha256": "0684fc7dee1d91cb7c45f26502f3785110cae9fd3f7bac7bd1388ec8fdfe8752"
+    },
+    {
+      "name": "base-gdb-01.log",
+      "bytes": 10956,
+      "sha256": "d9c86233d15e5460183fad8193da0ea03987a01c73c721959bf991f4f9d78f2e"
+    },
+    {
+      "name": "base-gdb-02.log",
+      "bytes": 105529,
+      "sha256": "c69ca80c6093a62e80c9faab3da50f0de1e696fa9ff84a5972b9669889b803e4"
+    },
+    {
+      "name": "implicit-disabled-01.log",
+      "bytes": 339,
+      "sha256": "4101a1283999f0be2199ce95e281d26edacd96ed74276bfb4eff42781647eac7"
+    },
+    {
+      "name": "join-retirement-01.log",
+      "bytes": 6101,
+      "sha256": "507e90564ea08a68c4c30361d55d32cbf711ff9de4b3de218676c59c180fbc53"
+    },
+    {
+      "name": "join-retirement-02.log",
+      "bytes": 6101,
+      "sha256": "da40ff081b28b6cddf07582305d6840fbd5383d55da7ae1bc954836861cbe2ee"
+    },
+    {
+      "name": "join-retirement-03.log",
+      "bytes": 6101,
+      "sha256": "a2766da2e701dbac48d1f18dec1954d79c45aa57bcbbe9e5bd4edccff31d8495"
+    },
+    {
+      "name": "join-retirement-04.log",
+      "bytes": 6101,
+      "sha256": "93a36a25702a18040f2e045365ffe1568537ce9cb10253638e87095c1e3de118"
+    },
+    {
+      "name": "join-retirement-05.log",
+      "bytes": 6101,
+      "sha256": "110d4e66dce569710d1a1d97f26f31966b56543bff70f5362cc2b6be2eb73b4a"
+    },
+    {
+      "name": "join-retirement-06.log",
+      "bytes": 6101,
+      "sha256": "785dbe47e4543029041df16db2bfae19d23522fdee12df1b02f463306bb69074"
+    },
+    {
+      "name": "join-retirement-build.log",
+      "bytes": 113156,
+      "sha256": "0e3c2c789f8e36ec3f1f1fdb9c95dc0f51a829072f1fd3348485318d2ea8d7d4"
+    },
+    {
+      "name": "join-retirement-clippy.log",
+      "bytes": 113422,
+      "sha256": "33520df3c3db6ddef75fe3968835981204555fa46ac1cdd8b0bb533c6c1aea50"
+    },
+    {
+      "name": "join-retirement-drop-control-01.log",
+      "bytes": 503,
+      "sha256": "cbd0fbe99d892d5de5a445b2f6fb1d5d17e46ae5f90f474f45b8aecb7b7f2a0e"
+    },
+    {
+      "name": "join-retirement-drop-control-02.log",
+      "bytes": 503,
+      "sha256": "fa6f2384d8db23bbc236dbb6451d8831c6bbfd35f01709635602fc96577b41f1"
+    },
+    {
+      "name": "lazy-gl-browser-chain.json",
+      "bytes": 181931,
+      "sha256": "704da5fa0ed0e305af44d175ec5332058692210ef1b69a4eb62dd0eb41113728"
+    },
+    {
+      "name": "lazy-gl-browser-chain.log",
+      "bytes": 139,
+      "sha256": "fbe9d71d9de9637411e0f16d9e07df889c11851e71c8fc431b38adef5be6fefb"
+    },
+    {
+      "name": "lazy-gl-browser-rank.json",
+      "bytes": 563548,
+      "sha256": "b871257f93722082d5357a9fff105dbde5b3ed17e84bc69cedd8ae609cf6d635"
+    },
+    {
+      "name": "lazy-gl-browser-rank.log",
+      "bytes": 138,
+      "sha256": "f24f23bdca499d91c63e0f3840852358490f8c4d7d06737bc959f6f0cd8801ee"
+    },
+    {
+      "name": "lazy-gl-caller-clippy.log",
+      "bytes": 115841,
+      "sha256": "bb7c8e6dbb094b1cd59df7b366c7b78fc5efea10ed0227e1afb109d0f9461537"
+    },
+    {
+      "name": "lazy-gl-furnace-build.log",
+      "bytes": 113873,
+      "sha256": "295d39701ae72d0a5467be859936eb12a61f0c624ab4bfa56611f776e1982e8d"
+    },
+    {
+      "name": "lazy-gl-metal-tests.log",
+      "bytes": 120310,
+      "sha256": "32648b5ea685c912c61602414720d06832dfc6295aaf9208855ab0bab1282dde"
+    },
+    {
+      "name": "lazy-gl-native-clippy.log",
+      "bytes": 113576,
+      "sha256": "082df572309bdff68ff8b5674ed5f1dac2319dd93f33b50204554c05c6411467"
+    },
+    {
+      "name": "lazy-gl-wasm-clippy.log",
+      "bytes": 110588,
+      "sha256": "ecd479aeaa1686a419fab856ec73b0560b7040b298a1744dcf67344440aac9df"
+    },
+    {
+      "name": "lazy-gl-webgpu-build.log",
+      "bytes": 111461,
+      "sha256": "9a96a471603bae1f971d70df57579fd8e091377b63db0fdd860eea565d2064f3"
+    },
+    {
+      "name": "lifecycle-base-01.log",
+      "bytes": 300,
+      "sha256": "f2c48bdddc7666659f642b81da4ae42541fd986f1fd5629d6c9abb7ab781ebe2"
+    },
+    {
+      "name": "lifecycle-base-build.log",
+      "bytes": 113562,
+      "sha256": "ff96a2ac75ed20710e9a1fe1e54ceacf860bf71bb133f3062eb5a71487f0e1db"
+    },
+    {
+      "name": "lifecycle-base-gdb.log",
+      "bytes": 53225,
+      "sha256": "c3dca749b62dac1c3891a23035ed0ed9dd6f59178b94176d238f3d647f66c257"
+    },
+    {
+      "name": "lifecycle-candidate-01.log",
+      "bytes": 1309,
+      "sha256": "7d962b55be36305c538692c24432bbba798849a1e3aaf5ac352a8da04c7fa6ea"
+    },
+    {
+      "name": "lifecycle-candidate-build-after-clean.log",
+      "bytes": 113156,
+      "sha256": "f20631f6481a9d6cc027024bdb8033c819ffd838016d7c41c77cb350ffba9969"
+    },
+    {
+      "name": "lifecycle-candidate-build.log",
+      "bytes": 116313,
+      "sha256": "89d61d6b947c8a5b3240ff3c1b8b773577d4b7500b60725e8ff90063f34d2795"
+    },
+    {
+      "name": "lifecycle-candidate-gdb-01.log",
+      "bytes": 69297,
+      "sha256": "fe7d18e13d118b2a71a8b7dd4026aa8fb852e2993d84de3c2d87f5af1b0a60e7"
+    },
+    {
+      "name": "lifecycle-candidate-verified-01.log",
+      "bytes": 4105,
+      "sha256": "ce49fbeb046c5589db71871fbf9a7cef861fd3511dd97aa42bb6d47d0b113886"
+    },
+    {
+      "name": "lifecycle-candidate-verified-02.log",
+      "bytes": 4105,
+      "sha256": "9c7932f6ec7a30324eda3e41ac28f2472f7a188e969de71a3a9c8a051434019f"
+    },
+    {
+      "name": "lifecycle-candidate-verified-03.log",
+      "bytes": 1833,
+      "sha256": "cff4fe87821654bac95212ce1bb4637390883ba28495222ab84832775e1a080c"
+    },
+    {
+      "name": "lifecycle-check.log",
+      "bytes": 113774,
+      "sha256": "70a6515ad2731d0b0b4a0574d4440dbecaee70ac4ed03419794edece182cb87f"
+    },
+    {
+      "name": "lifecycle-main-control-build.log",
+      "bytes": 113156,
+      "sha256": "f81ee9584169a0dba30d82dd198f7de2858db5cff240a0dd6cc7b3d9fb5779a3"
+    },
+    {
+      "name": "main-cli-validation.log",
+      "bytes": 74,
+      "sha256": "35d8d667617158e937b65d5af72170ec21a95ef514cd155a719e904d9f13cbc3"
+    },
+    {
+      "name": "main-drop-control-01.log",
+      "bytes": 464,
+      "sha256": "25f1e2547fac085d2035629aa7527895941039446de9fa145e909ef4022e0883"
+    },
+    {
+      "name": "main-drop-control-02.log",
+      "bytes": 1113,
+      "sha256": "745341e165b35c9f645b3c2c8fe73e66533398beb68fdb19f7cff0853670512a"
+    },
+    {
+      "name": "main-join-retirement-01.log",
+      "bytes": 6101,
+      "sha256": "1e88c269eacdf536aa716336566a48a7c1d96433be53d62dff0f11a3346d67e9"
+    },
+    {
+      "name": "main-join-retirement-02.log",
+      "bytes": 6101,
+      "sha256": "a9d6b6308046da4c5107d4d9aaa74024f9a35ebc9f10541f34603e1b0f026f26"
+    },
+    {
+      "name": "main-join-retirement-03.log",
+      "bytes": 6101,
+      "sha256": "90a294e0650b6b4015b93051311ebefa1db7fa958f24f99b1eef9396c2e52255"
+    },
+    {
+      "name": "main-join-retirement-04.log",
+      "bytes": 6101,
+      "sha256": "2f5b390a03a9352bd36762d28ab59a77626dfd73c196ae2750644b88567fd0d7"
+    },
+    {
+      "name": "main-join-retirement-05.log",
+      "bytes": 6101,
+      "sha256": "ddc008db01a2f4e24f2be07a52e4bd11e794d20aecabf1208026aff50c7c9f43"
+    },
+    {
+      "name": "main-join-retirement-06.log",
+      "bytes": 6101,
+      "sha256": "a5e0740b0a70ae37998a2e2dd19f1c7bd7ea8f21632b0293bfb9f722910c88f2"
+    },
+    {
+      "name": "main-metal-destroy.log",
+      "bytes": 5182,
+      "sha256": "62c9c249affa71bb6c898d6934fa3d3fa42eefdc470b15b033f22ff8cd67a456"
+    },
+    {
+      "name": "main-metal-drop.log",
+      "bytes": 4539,
+      "sha256": "97777f3ee96649cadeecea687774200d50f743dc86aff21d9bc8e669406939dd"
+    },
+    {
+      "name": "main-metal-example-build.log",
+      "bytes": 113723,
+      "sha256": "a62b22a20bc78750e0f00597db5219e48bc0aaa55da84f78b713c7012668eab8"
+    },
+    {
+      "name": "main-metal-join_then_drop.log",
+      "bytes": 5861,
+      "sha256": "678fdc5b004a0dff276cff149dc5c7b98ceb22d68efc0f74ae168f808ce1684d"
+    },
+    {
+      "name": "main-metal-tests-build.log",
+      "bytes": 113798,
+      "sha256": "a9e7ee7159f8b1c12cae6c6526837945e44b5ef02511dbff98c165d9bcd7d58e"
+    },
+    {
+      "name": "main-metal-tests.log",
+      "bytes": 10470,
+      "sha256": "97e59b5759f249fb619b8e5c09b8848c50d543d84645b8c4d44bb80cd8924af0"
+    },
+    {
+      "name": "main-native-clippy.log",
+      "bytes": 113723,
+      "sha256": "068ac98da7aab6ab22300b99e91bd2e628e801e0a86fdc527f30c555a21df5a1"
+    },
+    {
+      "name": "main-shader-tests.log",
+      "bytes": 150,
+      "sha256": "8c2c36c6952d8d8b83ee046806c100706afd71a4b7919d688fc2ab6080c351a7"
+    },
+    {
+      "name": "main-wasm-clippy.log",
+      "bytes": 110591,
+      "sha256": "cdaf5011924ee6e4d2b2b52908409e14d875fd58e57115b9afb637e7a0170906"
+    },
+    {
+      "name": "nvidia-driver-only-01.log",
+      "bytes": 339,
+      "sha256": "563669882feba098487f8549de896904316d4c2580ef80404fe26529522b2eed"
+    },
+    {
+      "name": "shared-primary-build.log",
+      "bytes": 113156,
+      "sha256": "30938b6e9f2deba8af5f87dd7f0a888a86fbe7f7c6d7d2d572a27b9a58029ed2"
+    },
+    {
+      "name": "shared-primary-lifecycle-01.log",
+      "bytes": 4105,
+      "sha256": "3b268698444813b4345a2c7c6e9f30ba5003452193be61ea27ae6fa7260318a6"
+    },
+    {
+      "name": "shared-primary-lifecycle-02.log",
+      "bytes": 339,
+      "sha256": "6693af6e7cad5be643c76ba2c54917d6a29aacb85f95d8e0fdfb3ba39c9d4f34"
+    },
+    {
+      "name": "shared-primary-metal-tests.log",
+      "bytes": 119958,
+      "sha256": "310fe0d79c57b494203b9dac44d971f6bc5231eceb71e3880a8ea77dc52ae4e0"
+    },
+    {
+      "name": "shutdown-explicit-01.log",
+      "bytes": 499,
+      "sha256": "f750d6481b96af90fbb8006acf661f76577584a187bb0c64a5f3527a01712ca9"
+    },
+    {
+      "name": "shutdown-native-clippy.log",
+      "bytes": 113422,
+      "sha256": "99fbf001f30f92dbafb08bc390e6c37521099e757a337109f93c23a53b281545"
+    },
+    {
+      "name": "shutdown-probe-build.log",
+      "bytes": 113156,
+      "sha256": "a107cf21163a15aa72ae5e26faa15467cc3204797567de8eb1c9d726fd3610db"
+    },
+    {
+      "name": "unmerged-lazy-gles-shared-primary.patch",
+      "bytes": 12335,
+      "sha256": "fe23b7f5de8905afe3b9978654c50dccb036b5bbf1796ff85db0e7e1e58360f8"
+    }
+  ]
+}
