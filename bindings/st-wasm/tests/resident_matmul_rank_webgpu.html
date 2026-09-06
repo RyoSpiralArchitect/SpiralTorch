@@ -78,12 +78,18 @@ try {
       check(result,expected);
       if(block>=2) times[["host_bridge","device_copy_bridge","single_submit_bridge"][mode]].push(elapsed);
     }
-    rank.dispatchFromMatmul(source,16);
-    const generation=rank.generation;
-    source.uploadRhs(new Float32Array(k*n).fill(99)); source.dispatch(); source.free();
-    rank.dispatch(2); const pending=rank.readback(); rank.free();
-    const result=await pending; check(result,expected);
-    assert(result.generation===generation,"copy and snapshot survive both workspace frees");
+    const pending=[];
+    for(let scale=1;scale<=4;scale++) {
+      const changed=rhs.map(v=>v*scale);
+      source.uploadRhs(changed);
+      rank.dispatchFromMatmul(source,scale);
+      pending.push({promise:rank.readback(),generation:rank.generation,expected:reference(lhs,changed,m,k,n,kind,take)});
+    }
+    source.free(); rank.free();
+    for(const snapshot of pending) {
+      const result=await snapshot.promise; check(result,snapshot.expected);
+      assert(result.generation===snapshot.generation,"overlapping snapshots survive workspace frees without aliasing");
+    }
     report.cases.push({m,k,n,kind,kernel,accumulation,status:"passed",samples_ms:times});
   }
   report.status="passed";

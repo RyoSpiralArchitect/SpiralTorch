@@ -175,6 +175,7 @@ pub struct ResidentMatmul {
     inputs_ready: [bool; 2],
     generation: u64,
     output_generation: Option<u64>,
+    readback_pool: runtime::ReadbackPool,
 }
 
 impl ResidentMatmul {
@@ -305,6 +306,7 @@ impl ResidentMatmul {
             layout: &layout,
             entries: &entries,
         });
+        let readback_pool = runtime::ReadbackPool::new::<f32>(context.clone(), out_len)?;
         Ok(Self {
             runtime,
             shape,
@@ -319,6 +321,7 @@ impl ResidentMatmul {
             inputs_ready: [false; 2],
             generation: 0,
             output_generation: None,
+            readback_pool,
         })
     }
 
@@ -485,14 +488,15 @@ impl ResidentMatmul {
     pub fn snapshot(&self) -> Result<MatmulReadback, MatmulError> {
         self.require_current()?;
         let context = self.runtime.context();
-        let staging = runtime::empty_buffer::<f32>(
-            context.device(),
-            "resident.snapshot",
-            self.shape.lengths()[2],
-            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        )?;
+        let staging = self.readback_pool.checkout("resident.snapshot");
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(&self.output, 0, &staging, 0, staging.size());
+        encoder.copy_buffer_to_buffer(
+            &self.output,
+            0,
+            staging.buffer(),
+            0,
+            staging.buffer().size(),
+        );
         context.queue().submit(Some(encoder.finish()));
         Ok(MatmulReadback {
             context: context.clone(),
@@ -532,13 +536,17 @@ impl ResidentMatmul {
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(&self.output, 0, &staging, 0, 4);
         context.queue().submit(Some(encoder.finish()));
-        Ok(async move { map_staging(context, staging).await.map(|_| ()) })
+        Ok(async move {
+            map_staging(context, runtime::ReadbackLease::unpooled(staging))
+                .await
+                .map(|_| ())
+        })
     }
 }
 
 pub struct MatmulReadback {
     context: WgpuContext,
-    staging: wgpu::Buffer,
+    staging: runtime::ReadbackLease,
     shape: MatmulShape,
     generation: u64,
 }
@@ -552,11 +560,9 @@ impl MatmulReadback {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn read(self) -> Result<Vec<f32>, MatmulError> {
-        let bytes = runtime::map_read_bytes_with_timeout(
-            self.context.device(),
-            &self.staging,
-            0..self.staging.size(),
+    pub fn read(mut self) -> Result<Vec<f32>, MatmulError> {
+        let bytes = self.staging.read(
+            &self.context,
             std::time::Duration::from_secs(30),
             "resident.snapshot",
         )?;
@@ -570,28 +576,13 @@ impl MatmulReadback {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn map_staging(context: WgpuContext, staging: wgpu::Buffer) -> Result<Vec<f32>, MatmulError> {
-    let slice = staging.slice(..);
-    let (sender, receiver) = futures_channel::oneshot::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
-    receiver
-        .await
-        .map_err(|_| WgpuRuntimeError::MapCallbackDisconnected {
-            resource: "resident.snapshot".into(),
-        })?
-        .map_err(|error| WgpuRuntimeError::Map {
-            resource: "resident.snapshot".into(),
-            message: error.to_string(),
-        })?;
-    let mapped = slice.get_mapped_range();
-    let output = decode_f32(&mapped);
-    drop(mapped);
-    staging.unmap();
-    // Keep the device/queue alive throughout the asynchronous readback.
-    drop(context);
-    Ok(output)
+async fn map_staging(
+    context: WgpuContext,
+    staging: runtime::ReadbackLease,
+) -> Result<Vec<f32>, MatmulError> {
+    Ok(decode_f32(
+        &staging.read_async(context, "resident.snapshot").await?,
+    ))
 }
 
 fn decode_f32(bytes: &[u8]) -> Vec<f32> {

@@ -43,6 +43,7 @@ pub struct ResidentRank {
     bind_group: wgpu::BindGroup,
     generation: u64,
     output_generation: Option<u64>,
+    readback_pool: runtime::ReadbackPool,
 }
 
 impl ResidentRank {
@@ -134,6 +135,10 @@ impl ResidentRank {
                 binding(7, &params),
             ],
         });
+        let readback_pool = runtime::ReadbackPool::new::<u64>(
+            runtime.context().clone(),
+            plan.output_elements() as usize,
+        )?;
         Ok(Self {
             runtime,
             plan,
@@ -144,6 +149,7 @@ impl ResidentRank {
             bind_group,
             generation: 0,
             output_generation: None,
+            readback_pool,
         })
     }
 
@@ -294,16 +300,11 @@ impl ResidentRank {
             return Err(ResidentRankError::StaleOutput);
         }
         let context = self.runtime.context();
-        let staging = runtime::empty_buffer::<u64>(
-            context.device(),
-            "resident.rank.snapshot",
-            self.plan.output_elements() as usize,
-            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        )?;
+        let staging = self.readback_pool.checkout("resident.rank.snapshot");
         let mut encoder = context.device().create_command_encoder(&Default::default());
         let bytes = u64::from(self.plan.output_elements()) * 4;
-        encoder.copy_buffer_to_buffer(&self.values, 0, &staging, 0, bytes);
-        encoder.copy_buffer_to_buffer(&self.indices, 0, &staging, bytes, bytes);
+        encoder.copy_buffer_to_buffer(&self.values, 0, staging.buffer(), 0, bytes);
+        encoder.copy_buffer_to_buffer(&self.indices, 0, staging.buffer(), bytes, bytes);
         context.queue().submit(Some(encoder.finish()));
         Ok(RankReadback {
             context: context.clone(),
@@ -343,14 +344,18 @@ impl ResidentRank {
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(&self.values, 0, &staging, 0, 4);
         context.queue().submit(Some(encoder.finish()));
-        Ok(async move { map_bytes(context, staging).await.map(|_| ()) })
+        Ok(async move {
+            map_bytes(context, runtime::ReadbackLease::unpooled(staging))
+                .await
+                .map(|_| ())
+        })
     }
 }
 
 /// A snapshot remains valid after later uploads, dispatches, or workspace drop.
 pub struct RankReadback {
     context: WgpuContext,
-    staging: wgpu::Buffer,
+    staging: runtime::ReadbackLease,
     plan: Plan,
     generation: u64,
 }
@@ -364,11 +369,9 @@ impl RankReadback {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn read(self) -> Result<Output, ResidentRankError> {
-        let bytes = runtime::map_read_bytes_with_timeout(
-            self.context.device(),
-            &self.staging,
-            0..self.staging.size(),
+    pub fn read(mut self) -> Result<Output, ResidentRankError> {
+        let bytes = self.staging.read(
+            &self.context,
             std::time::Duration::from_secs(30),
             "resident.rank.snapshot",
         )?;
@@ -403,28 +406,11 @@ fn decode(bytes: &[u8]) -> Output {
 #[cfg(target_arch = "wasm32")]
 async fn map_bytes(
     context: WgpuContext,
-    staging: wgpu::Buffer,
+    staging: runtime::ReadbackLease,
 ) -> Result<Vec<u8>, ResidentRankError> {
-    let slice = staging.slice(..);
-    let (sender, receiver) = futures_channel::oneshot::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
-    receiver
-        .await
-        .map_err(|_| WgpuRuntimeError::MapCallbackDisconnected {
-            resource: "resident.rank.snapshot".into(),
-        })?
-        .map_err(|error| WgpuRuntimeError::Map {
-            resource: "resident.rank.snapshot".into(),
-            message: error.to_string(),
-        })?;
-    let mapped = slice.get_mapped_range();
-    let bytes = mapped.to_vec();
-    drop(mapped);
-    staging.unmap();
-    drop(context);
-    Ok(bytes)
+    Ok(staging
+        .read_async(context, "resident.rank.snapshot")
+        .await?)
 }
 
 #[cfg(test)]
@@ -574,6 +560,75 @@ mod tests {
             assert_eq!(rank.generation(), u64::MAX);
             assert!(rank.output_is_current());
             assert_eq!(rank.snapshot().unwrap().read().unwrap(), actual);
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn snapshot_copy_stages_match_output_when_enabled() {
+        use std::time::{Duration, Instant};
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("rank.snapshot.stages")).unwrap();
+        let context = runtime.context();
+        let mut rank = ResidentRank::new(
+            runtime.clone(),
+            Plan::try_new(Kind::TopK, 2, 257, 7, 256).unwrap(),
+        )
+        .unwrap();
+        let values = (0..514).map(|i| (i % 31) as f32).collect::<Vec<_>>();
+        rank.upload(&values).unwrap();
+        rank.dispatch(1).unwrap();
+        let expected = cpu_reference(Kind::TopK, 2, 257, 7, &values);
+        for anchored in [false, true] {
+            let _anchor = anchored.then(|| {
+                runtime::empty_buffer::<u8>(
+                    context.device(),
+                    "snapshot.anchor",
+                    112,
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                )
+                .unwrap()
+            });
+            for _ in 0..14 {
+                rank.synchronize().unwrap();
+                let t0 = Instant::now();
+                let staging = runtime::empty_buffer::<u64>(
+                    context.device(),
+                    "resident.rank.snapshot",
+                    rank.plan.output_elements() as usize,
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                )
+                .unwrap();
+                let t1 = Instant::now();
+                let mut encoder = context.device().create_command_encoder(&Default::default());
+                let t2 = Instant::now();
+                let bytes = u64::from(rank.plan.output_elements()) * 4;
+                encoder.copy_buffer_to_buffer(&rank.values, 0, &staging, 0, bytes);
+                let t3 = Instant::now();
+                encoder.copy_buffer_to_buffer(&rank.indices, 0, &staging, bytes, bytes);
+                let t4 = Instant::now();
+                let commands = encoder.finish();
+                let t5 = Instant::now();
+                context.queue().submit(Some(commands));
+                let t6 = Instant::now();
+                let mapped = runtime::map_read_bytes_with_timeout(
+                    context.device(),
+                    &staging,
+                    0..staging.size(),
+                    Duration::from_secs(30),
+                    "snapshot.stage.test",
+                )
+                .unwrap();
+                let t7 = Instant::now();
+                assert_eq!(decode(&mapped), expected);
+                eprintln!("snapshot stages anchored={anchored} us allocate={:.3} encoder={:.3} values_copy={:.3} indices_copy={:.3} finish={:.3} submit={:.3} map={:.3}",
+                (t1-t0).as_secs_f64()*1e6, (t2-t1).as_secs_f64()*1e6,
+                (t3-t2).as_secs_f64()*1e6, (t4-t3).as_secs_f64()*1e6,
+                (t5-t4).as_secs_f64()*1e6, (t6-t5).as_secs_f64()*1e6, (t7-t6).as_secs_f64()*1e6);
+            }
         }
     }
 

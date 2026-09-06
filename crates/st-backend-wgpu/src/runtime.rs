@@ -7,6 +7,7 @@
 use std::cell::RefCell;
 use std::mem::size_of;
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -574,6 +575,174 @@ pub fn empty_buffer<T>(
     }))
 }
 
+#[derive(Default)]
+struct ReadbackSlot {
+    #[cfg(not(target_arch = "wasm32"))]
+    buffer: Mutex<Option<wgpu::Buffer>>,
+    #[cfg(target_arch = "wasm32")]
+    buffer: RefCell<Option<wgpu::Buffer>>,
+}
+
+impl ReadbackSlot {
+    fn take(&self) -> Option<wgpu::Buffer> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.buffer.lock().unwrap_or_else(|e| e.into_inner()).take()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.buffer.borrow_mut().take()
+        }
+    }
+
+    fn recycle(&self, buffer: wgpu::Buffer) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut idle = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(target_arch = "wasm32")]
+        let mut idle = self.buffer.borrow_mut();
+        if idle.is_none() {
+            *idle = Some(buffer);
+        }
+    }
+}
+
+/// One idle staging buffer per workspace; outstanding snapshots are never shared.
+pub(crate) struct ReadbackPool {
+    context: WgpuContext,
+    bytes: u64,
+    idle: Shared<ReadbackSlot>,
+}
+
+impl ReadbackPool {
+    pub(crate) fn new<T>(context: WgpuContext, elements: usize) -> Result<Self, WgpuRuntimeError> {
+        let bytes = validate_buffer_size::<T>(
+            context.device(),
+            "resident.readback.pool",
+            elements,
+            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        )?;
+        Ok(Self {
+            context,
+            bytes,
+            idle: Shared::new(ReadbackSlot::default()),
+        })
+    }
+
+    pub(crate) fn checkout(&self, label: &str) -> ReadbackLease {
+        let buffer = self.idle.take().unwrap_or_else(|| {
+            self.context
+                .device()
+                .create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: self.bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+        });
+        ReadbackLease {
+            buffer: Some(buffer),
+            idle: Shared::downgrade(&self.idle),
+            map_active: Shared::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+/// Owns its buffer until read/cancellation/drop. Weak return ownership does not
+/// keep a destroyed workspace or its idle cache alive.
+pub(crate) struct ReadbackLease {
+    buffer: Option<wgpu::Buffer>,
+    idle: WeakShared<ReadbackSlot>,
+    map_active: Shared<AtomicBool>,
+}
+
+impl ReadbackLease {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn unpooled(buffer: wgpu::Buffer) -> Self {
+        Self {
+            buffer: Some(buffer),
+            idle: WeakShared::new(),
+            map_active: Shared::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn buffer(&self) -> &wgpu::Buffer {
+        self.buffer.as_ref().expect("live readback lease")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn read(
+        &mut self,
+        context: &WgpuContext,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Vec<u8>, WgpuRuntimeError> {
+        // The blocking helper owns unmap. Failed/panicking reads never recycle.
+        let idle = std::mem::replace(&mut self.idle, WeakShared::new());
+        let result = map_read_bytes_with_timeout(
+            context.device(),
+            self.buffer(),
+            0..self.buffer().size(),
+            timeout,
+            label,
+        );
+        if result.is_ok() {
+            self.idle = idle;
+        }
+        result
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) async fn read_async(
+        mut self,
+        context: WgpuContext,
+        label: &str,
+    ) -> Result<Vec<u8>, WgpuRuntimeError> {
+        let idle = std::mem::replace(&mut self.idle, WeakShared::new());
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        self.map_active.store(true, Ordering::Relaxed);
+        let active = self.map_active.clone();
+        let slice = self.buffer().slice(..);
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            if result.is_err() {
+                active.store(false, Ordering::Relaxed);
+            }
+            let _ = sender.send(result);
+        });
+        let result = receiver.await.map_err(|_| {
+            self.map_active.store(false, Ordering::Relaxed);
+            WgpuRuntimeError::MapCallbackDisconnected {
+                resource: label.into(),
+            }
+        })?;
+        result.map_err(|error| WgpuRuntimeError::Map {
+            resource: label.into(),
+            message: error.to_string(),
+        })?;
+        let mapped = slice.get_mapped_range();
+        let bytes = mapped.to_vec();
+        drop(mapped);
+        self.idle = idle;
+        drop(self);
+        drop(context);
+        Ok(bytes)
+    }
+}
+
+impl Drop for ReadbackLease {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.buffer.take() {
+            // Failed/cancelled readers have detached their cache. Successful
+            // async reads unmap here; the blocking helper already unmapped.
+            if self.map_active.swap(false, Ordering::Relaxed) {
+                buffer.unmap();
+            }
+            if let Some(idle) = self.idle.upgrade() {
+                idle.recycle(buffer);
+            }
+        }
+    }
+}
+
 /// Copy a POD buffer to host memory with bounded map polling.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_buffer<T: Pod>(
@@ -649,6 +818,75 @@ pub fn read_buffer<T: Pod>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn readback_pool_cancels_maps_and_keeps_one_idle_buffer_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("readback.pool.test")).unwrap();
+        let context = runtime.context();
+        let pool = ReadbackPool::new::<u32>(context.clone(), 4).unwrap();
+        let mut first = pool.checkout("pool.first");
+        let second = pool.checkout("pool.second");
+        assert!(pool.idle.take().is_none());
+        context
+            .queue()
+            .write_buffer(first.buffer(), 0, bytemuck::cast_slice(&[1u32; 4]));
+        context.queue().submit([]);
+        let (sender, receiver) = mpsc::channel();
+        first.idle = WeakShared::new();
+        first.map_active.store(true, Ordering::Relaxed);
+        let active = first.map_active.clone();
+        first
+            .buffer()
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                if result.is_err() {
+                    active.store(false, Ordering::Relaxed);
+                }
+                let _ = sender.send(result);
+            });
+        drop(first);
+        let mut reused = pool.checkout("pool.reused");
+        assert!(pool.idle.take().is_none());
+        context
+            .queue()
+            .write_buffer(reused.buffer(), 0, bytemuck::cast_slice(&[99u32; 4]));
+        context.queue().submit([]);
+        let bytes = reused
+            .read(context, Duration::from_secs(30), "pool.reused")
+            .unwrap();
+        assert_eq!(bytes, bytemuck::cast_slice(&[99u32; 4]));
+        // Whether already completed or aborted, the old callback must settle.
+        let _ = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        drop(reused);
+        let cached = pool
+            .idle
+            .take()
+            .expect("successful read must return its buffer");
+        assert!(pool.idle.take().is_none());
+        pool.idle.recycle(cached);
+        drop(second);
+        assert!(pool.idle.take().is_some());
+        assert!(pool.idle.take().is_none());
+        let mut survivor = pool.checkout("pool.survivor");
+        let weak = Shared::downgrade(&pool.idle);
+        drop(pool);
+        assert!(weak.upgrade().is_none());
+        context
+            .queue()
+            .write_buffer(survivor.buffer(), 0, bytemuck::cast_slice(&[7u32; 4]));
+        context.queue().submit([]);
+        assert_eq!(
+            survivor
+                .read(context, Duration::from_secs(30), "pool.survivor")
+                .unwrap(),
+            bytemuck::cast_slice(&[7u32; 4])
+        );
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]

@@ -18,7 +18,31 @@ def require_canonical_indices(actual, expected):
         raise RuntimeError("CUDA rank indices differ from the canonical stable selection")
 
 
-def run(executable):
+def run_native_pass(image, payload, probe_only=False):
+    native = subprocess.run([str(image)] + (["--readback-probe"] if probe_only else []),
+        input=payload, text=True, capture_output=True, timeout=180)
+    if native.returncode or native.stderr:
+        raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
+    return [json.loads(line) for line in native.stdout.splitlines()]
+
+
+def collect_readback_diagnostics(image, payload, requests, comparisons):
+    results = run_native_pass(image, payload, probe_only=True)
+    if len(results) != len(requests) or len(comparisons) != len(requests):
+        raise RuntimeError("native diagnostic cardinality mismatch")
+    for request, result, comparison in zip(requests, results, comparisons):
+        if (result.get("status") != "passed" or result.get("mode") != "probe_only"
+                or result.get("samples_ms") is not None
+                or any(result.get(key) != request[key] for key in ("rows", "inner", "cols", "k", "kind", "seed"))
+                or any(result.get(key) != comparison[key] for key in ("values", "indices", "adapter"))
+                or not isinstance(result.get("readback_probe"), dict)
+                or result["readback_probe"].get("status") != "passed"):
+            raise RuntimeError("native diagnostic contract mismatch")
+    return dict(boundary="separate native process after ALL native and CUDA comparison samples; not comparison timing",
+                results=results)
+
+
+def run(executable, readback_probe=False):
     require_uncontended_gpu()
     import torch
     torch.set_num_threads(1)
@@ -45,10 +69,7 @@ def run(executable):
         binding = audit.validate_source_binding(identity, before)
         if not binding["valid"]:
             raise RuntimeError(f"source/build mismatch: {binding}")
-        native = subprocess.run([str(image)], input=payload, text=True, capture_output=True, timeout=180)
-        if native.returncode or native.stderr:
-            raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
-        results = [json.loads(line) for line in native.stdout.splitlines()]
+        results = run_native_pass(image, payload)
         if len(results) != len(requests):
             raise RuntimeError("native result cardinality mismatch")
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="passed",
@@ -57,6 +78,7 @@ def run(executable):
             torch=str(torch.__version__), torch_device=torch.cuda.get_device_name(),
             dtype="float32", tf32=bool(torch.backends.cuda.matmul.allow_tf32), torch_cpu_threads=torch.get_num_threads(),
             comparison="bounded integer projection heads; frameworks measured in separate blocks",
+            readback_probe_requested=readback_probe,
             boundaries={
                 "host_bridge":"resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
                 "device_copy_bridge":"resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
@@ -107,6 +129,9 @@ def run(executable):
                 samples["torch_resident_per_op"] = bench.summarize([v/16 for v in timing["samples_ms"]])
                 report["cases"].append(dict(request={k:v for k,v in r.items() if k not in ("lhs","rhs")}, native=result, timings=samples,
                     cuda_rank_contract="stable sort; selected values and indices match the canonical reference"))
+        if readback_probe:
+            require_uncontended_gpu()
+            report["readback_diagnostics"] = collect_readback_diagnostics(image, payload, requests, results)
         after = audit.source_identity()
         require_uncontended_gpu()
         report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"
@@ -121,9 +146,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--readback-probe", action="store_true",
+                        help="run separate diagnostic process AFTER all native/CUDA samples; not comparison timing")
     args = parser.parse_args()
     try:
-        report = run(args.executable.resolve(strict=True))
+        report = run(args.executable.resolve(strict=True), args.readback_probe)
     except Exception as error:
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="error", error=str(error))
     audit.write_report_exclusive(args.output, report)

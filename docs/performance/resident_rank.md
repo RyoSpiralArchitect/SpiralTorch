@@ -29,6 +29,14 @@ an asynchronous mapping promise. Later uploads, dispatches or `free()` do not
 change that snapshot. Upload invalidates the current output; readback before a
 new dispatch is rejected. Failed input-length validation preserves prior state.
 
+Rank and matmul use the same Rust readback lease implementation. Each workspace
+retains at most one idle staging buffer after a successful read (or a snapshot
+dropped before mapping). Outstanding snapshots still own distinct buffers;
+later reuse cannot mutate an already returned Python list/Tensor or JavaScript
+typed array. Failed or cancelled mapping is discarded, not cached. A snapshot
+does not keep a destroyed workspace's cache alive. This is staging allocation
+reuse, not removal of the final copy, map, or host-owned result allocation.
+
 The shared shader writes value bits as `u32`, avoiding browser rejection of a
 constant NaN expression, and uses `workgroupUniformLoad` for the merge-loop bound.
 Neither change disables shader validation or changes the CPU ordering contract.
@@ -156,6 +164,19 @@ bridge, 16 one-submission calls, and a batch of 16 complete chains in one
 submission. All resident intervals end at a completion fence and exclude maps;
 every mode is checked against the reference after timing. Separate calls and
 batched replay remain distinct metrics rather than being pooled into one speedup.
+
+With `--readback-probe`, the Python wrapper first completes **all** normal native
+and CUDA comparisons, then starts a separate native process for diagnostics.
+The native executable's flag is probe-only: it emits no comparison timings.
+Diagnostics are stored separately under `readback_diagnostics`, never mixed
+into comparison samples. Extra completion fences separate projection,
+copy, rank and snapshot submission/read; these are not GPU-event times and do
+not reproduce the unfenced critical path. The synthetic byte-copy control holds
+another MAP_READ buffer alive in **all** modes, so its fresh-allocation cost is
+not an isolated allocation baseline. The opt-in Rust test
+`snapshot_copy_stages_match_output_when_enabled` separately compares snapshot
+allocation with and without such an anchor. Keep these diagnostics separate
+from the harness's normal end-to-end/resident comparisons.
 
 ## Measurement Boundaries
 
