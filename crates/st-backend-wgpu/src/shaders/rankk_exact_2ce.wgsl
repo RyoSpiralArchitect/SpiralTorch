@@ -346,7 +346,9 @@ fn rankk_exact_2ce_row_merge(
             let value = scratch_values[address];
             let index = scratch_indices[address];
             var global_rank = own_offset;
-            for (var other = 0u; other < params.tiles_x; other = other + 1u) {
+            // Remaining lower-bound counts cannot bring an excluded rank back.
+            for (var other = 0u; other < params.tiles_x && global_rank < rank_end;
+                 other = other + 1u) {
                 if (other != own_tile) {
                     let state = row * params.tiles_x + other;
                     let base = state * params.tile_stride;

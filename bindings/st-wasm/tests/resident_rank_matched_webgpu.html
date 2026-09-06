@@ -11,21 +11,45 @@ const report={schema:"spiraltorch.browser_rank_matched.v1",status:"running",case
   boundary:"64 resident pairs plus completion fence; alternating arms; validation outside timing",
   interpretation:"one deterministic fixture; separate devices in one browser; adapter identity may be anonymous",
   repetitions:64,warmup_batches:4,retained_batches:16};
+const pruning=new URLSearchParams(location.search).get("suite")==="pruning";
+report.fixture_suite=pruning ? "pruning" : "boundary";
+if(pruning) report.interpretation="three deterministic seeds including quantized ties; separate devices in one browser; adapter identity may be anonymous";
 function assert(ok, message) { if(!ok) throw Error(message); }
-function reference(input,rows,cols,k) {
+function reference(input,rows,cols,k,kind) {
   const values=[],indices=[];
   for(let row=0;row<rows;row++) {
     const order=Array.from({length:cols},(_,i)=>i).filter(i=>Number.isFinite(input[row*cols+i]));
     order.sort((i,j)=>{
       const a=input[row*cols+i],b=input[row*cols+j];
-      if(a===0 && b===0 && !Object.is(a,b)) return Object.is(a,-0) ? -1 : 1;
-      return a-b || i-j;
+      const cmp=a===0 && b===0 && !Object.is(a,b) ? (Object.is(a,-0) ? -1 : 1) : a-b;
+      return (kind==="topk" ? -cmp : cmp) || i-j;
     });
-    const take=Math.min(k,order.length),start=Math.floor((order.length-take)/2);
+    const take=Math.min(k,order.length),start=kind==="midk" ? Math.floor((order.length-take)/2) : 0;
     for(const i of order.slice(start,start+take)) { values.push(input[row*cols+i]); indices.push(i); }
     while(values.length<(row+1)*k) { values.push(NaN); indices.push(-1); }
   }
   return {values,indices};
+}
+function requests() {
+  if(!pruning) return [32,33,63,64,65,127,128,129,255,256,257].flatMap(tiles=>
+    [1,7,65,256].map(k=>({kind:"midk",rows:2,cols:tiles*32-1,k,tile_cols:32})));
+  return [17,29,43].flatMap(seed=>[
+    ...[[2,1023,32],[2,4095,128],[2,8191,256],[2,8193,512],
+        [2,16383,512],[64,8191,256],[2,8193,256]].flatMap(([rows,cols,tile_cols])=>
+      [7,65].map(k=>({kind:"midk",rows,cols,k,tile_cols,seed}))),
+    ...[7,1024].map(k=>({kind:"midk",rows:2,cols:1024,k,tile_cols:1024,seed})),
+    ...["topk","bottomk"].map(kind=>({kind,rows:2,cols:8191,k:65,tile_cols:256,seed})),
+  ]);
+}
+function fixture(rows,cols,seed) {
+  let state=seed;
+  return Float32Array.from({length:rows*cols},(_,i)=>{
+    state=(Math.imul(state,1664525)+1013904223)>>>0;
+    if(i%251===0) return NaN;
+    if(i%127===0) return -0;
+    return seed===undefined ? (i*73%127-63)/8 :
+      seed===43 ? (state%127-63)/8 : state/4294967296*2-1;
+  });
 }
 function check(actual,expected) {
   assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed readback");
@@ -39,16 +63,12 @@ try {
   await initBaseline();
   await initCandidate();
   let caseIndex=0;
-  for(const tiles of [32,33,63,64,65,127,128,129,255,256,257]) for(const k of [1,7,65,256]) {
-    const rows=2,cols=tiles*32-1,tile=32;
-    const input=Float32Array.from({length:rows*cols},(_,i)=>{
-      if(i%251===0) return NaN;
-      if(i%127===0) return -0;
-      return (i*73%127-63)/8;
-    });
-    const expected=reference(input,rows,cols,k);
-    const baseline=await Baseline.create("midk",rows,cols,k,tile);
-    const candidate=await Candidate.create("midk",rows,cols,k,tile);
+  for(const request of requests()) {
+    const {kind,rows,cols,k,tile_cols:tile,seed}=request;
+    const input=fixture(rows,cols,seed);
+    const expected=reference(input,rows,cols,k,kind);
+    const baseline=await Baseline.create(kind,rows,cols,k,tile);
+    const candidate=await Candidate.create(kind,rows,cols,k,tile);
     try {
       if(!report.adapters) report.adapters={baseline:baseline.adapterInfo(),candidate:candidate.adapterInfo()};
       baseline.upload(input); candidate.upload(input);
@@ -67,7 +87,7 @@ try {
         }
         if(batch>=report.warmup_batches) samples.push(sample);
       }
-      report.cases.push({kind:"midk",rows,cols,k,tile_cols:tile,samples,status:"passed"});
+      report.cases.push({...request,samples,status:"passed"});
     } finally { baseline.free(); candidate.free(); }
     caseIndex++;
   }

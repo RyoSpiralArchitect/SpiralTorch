@@ -50,6 +50,14 @@ half of each row. One merge workgroup owns each candidate tile, rather than one
 workgroup scanning every tile in a row. The total (value, index) order gives each
 valid candidate a unique output destination. Only the disjoint missing-value
 tail is initialized, so one workgroup cannot overwrite another's valid output.
+Each candidate stops its other-tile searches once its partial global rank reaches
+the retained band's upper bound: remaining predecessor counts are nonnegative,
+so they cannot make that candidate eligible again. Retained candidates still
+compute their exact rank. This does not change the 32-tile route threshold,
+geometry, buffers, dispatch count, output ordering or policy rewards. The
+[matched pruning study](../../benchmarks/results/2026-09-07-midk-rank-pruning/README.md)
+keeps browser A/A controls, native/PyTorch CUDA comparisons and slower small
+cases alongside the improvements; it is not an all-shape speedup claim.
 Host and resident execution share the same checked dispatch grid. More fragmented
 geometries use one row workgroup. When at least 64 finite candidates precede the
 retained band, it first seeks the band's exact starting position: 32 total-float
