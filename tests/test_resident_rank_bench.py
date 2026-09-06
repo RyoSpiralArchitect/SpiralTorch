@@ -44,6 +44,22 @@ class RankSuiteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             list(bench.requests_for(None, "unknown"))
 
+    def test_active_lane_suite_covers_reduction_widths_and_k(self):
+        requests = list(bench.requests_for(bench.audit.load_bench_module(), "active-lanes"))
+        self.assertEqual(len(requests), 243)
+        self.assertEqual({(r["cols"] + 31) // 32 for r in requests},
+                         {1, 2, 3, 5, 17, 33, 65, 129, 257})
+        self.assertEqual({r["k"] for r in requests}, {1, 7, 31, 63, 65})
+        self.assertEqual(len({(r["seed"], r["kind"], r["cols"], r["k"]) for r in requests}),
+                         len(requests))
+        for r in requests:
+            self.assertLessEqual(r["k"], r["cols"])
+            self.assertEqual(len(r["input"]), r["rows"] * r["cols"])
+            self.assertTrue(all(math.isfinite(v) for v in r["input"]))
+            if r["seed"] == 43:
+                self.assertEqual(bench.cuda_rank_operation(r), "stable_sort")
+                self.assertTrue(all(v != 0 or math.copysign(1, v) == 1 for v in r["input"]))
+
     def test_cuda_controls_preserve_source_index_order(self):
         for kind in ["topk", "bottomk", "midk"]:
             for values, tied in [([1., 2., 3., 4.], False),
