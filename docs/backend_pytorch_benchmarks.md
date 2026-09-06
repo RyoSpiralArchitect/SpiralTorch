@@ -144,6 +144,8 @@ validate `rank_tile > 0`; runtime heuristic suggestions retain their existing
 selection/refinement policy. Effective tile clamping still deduplicates arms.
 
 ```python
+import spiraltorch as st
+
 base = st.plan("topk", 2, 257, 7, backend="wgpu", strict_accelerator=True)
 session = st.RankAdaptationSession(
     base, [f"u2: true; rank_tile: {tile};" for tile in (32, 128, 256, 512)],
@@ -169,6 +171,12 @@ cross-framework interleaving, proof of convergence, or training-quality gains.
 The browser fixture is selected with `rank-adaptation` in
 `tools/test_resident_browser.cjs`; it exercises real WebGPU dispatch and both
 UCB and Thompson sampling through the same Rust session.
+
+The [resident adaptation receipt](../benchmarks/results/2026-09-06-resident-rank-adaptation/README.md)
+retains 72 Furnace cases, 4,608 adaptive observations, and 18 browser cases.
+Large MidK improves relative to fixed tile 256, while large TopK/BottomK retain
+exploration regressions. All fixed WGPU controls remain slower than their CUDA
+references; see the mean-time and timing-boundary qualifications in the receipt.
 
 ## Golden Training Continuation
 
