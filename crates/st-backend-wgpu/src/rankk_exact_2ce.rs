@@ -116,7 +116,8 @@ impl Plan {
             if self.tiles_x <= 32 {
                 return MergeMode::ParallelMidk;
             }
-            if self.tiles_x <= WORKGROUP_SIZE {
+            // One retained winner has no incremental tree updates to amortize.
+            if self.tiles_x <= WORKGROUP_SIZE && self.k > 1 {
                 return MergeMode::TournamentMidk;
             }
         }
@@ -253,6 +254,7 @@ pub struct Pipelines {
     layout: wgpu::BindGroupLayout,
     tile_sort: wgpu::ComputePipeline,
     row_merge: wgpu::ComputePipeline,
+    row_merge_tournament: wgpu::ComputePipeline,
 }
 
 impl Pipelines {
@@ -296,10 +298,19 @@ impl Pipelines {
                 entry_point: "rankk_exact_2ce_row_merge",
                 compilation_options: Default::default(),
             });
+            let row_merge_tournament =
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("st.rankk.exact_2ce.row_merge_tournament"),
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: "rankk_exact_2ce_midk_tournament",
+                    compilation_options: Default::default(),
+                });
             Self {
                 layout,
                 tile_sort,
                 row_merge,
+                row_merge_tournament,
             }
         }));
         #[cfg(not(target_arch = "wasm32"))]
@@ -319,6 +330,14 @@ impl Pipelines {
                 payload,
             ))),
             Ok(pipelines) => Ok(pipelines),
+        }
+    }
+
+    fn merge_pipeline(&self, plan: Plan) -> &wgpu::ComputePipeline {
+        if matches!(plan.merge_mode(), MergeMode::TournamentMidk) {
+            &self.row_merge_tournament
+        } else {
+            &self.row_merge
         }
     }
 }
@@ -463,7 +482,7 @@ pub fn dispatch_host(
             label: Some("st.rankk.exact_2ce.pass.row_merge"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&pipelines.row_merge);
+        pass.set_pipeline(pipelines.merge_pipeline(plan));
         pass.set_bind_group(0, &bind_group, &[]);
         let (x, y) = plan.merge_workgroups();
         pass.dispatch_workgroups(x, y, 1);
@@ -597,9 +616,26 @@ mod tests {
     #[test]
     fn exact_rank_2ce_wgsl_parses_and_validates() {
         let module = naga::front::wgsl::parse_str(WGSL).expect("rank-k 2CE WGSL should parse");
-        Validator::new(ValidationFlags::all(), Capabilities::all())
+        let info = Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&module)
             .expect("rank-k 2CE WGSL should validate");
+        let (cache, _) = module
+            .global_variables
+            .iter()
+            .find(|(_, variable)| variable.name.as_deref() == Some("tournament_nodes"))
+            .unwrap();
+        assert!(module
+            .entry_points
+            .iter()
+            .any(|entry| entry.name == "rankk_exact_2ce_midk_tournament"));
+        for (index, entry) in module.entry_points.iter().enumerate() {
+            assert_eq!(
+                !info.get_entry_point(index)[cache].is_empty(),
+                entry.name == "rankk_exact_2ce_midk_tournament",
+                "tournament storage leaked into {}",
+                entry.name,
+            );
+        }
     }
 
     #[test]
@@ -632,22 +668,24 @@ mod tests {
         assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
         for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
             for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-                let plan = Plan::try_new(kind, 3, tiles * 8 - 1, 1, 8).unwrap();
-                let mode = match (kind, tiles) {
-                    (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
-                    (Kind::MidK, 33..=256) => MergeMode::TournamentMidk,
-                    _ => MergeMode::Streaming,
-                };
-                assert_eq!(plan.merge_mode(), mode);
-                assert_eq!(plan.params().merge_mode, mode as u32);
-                assert_eq!(
-                    plan.merge_workgroups(),
-                    if mode == MergeMode::ParallelMidk {
-                        (tiles, 3)
-                    } else {
-                        (3, 1)
-                    }
-                );
+                for k in [1, 7] {
+                    let plan = Plan::try_new(kind, 3, tiles * 8 - 1, k, 8).unwrap();
+                    let mode = match (kind, tiles) {
+                        (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
+                        (Kind::MidK, 33..=256) if k > 1 => MergeMode::TournamentMidk,
+                        _ => MergeMode::Streaming,
+                    };
+                    assert_eq!(plan.merge_mode(), mode);
+                    assert_eq!(plan.params().merge_mode, mode as u32);
+                    assert_eq!(
+                        plan.merge_workgroups(),
+                        if mode == MergeMode::ParallelMidk {
+                            (tiles, 3)
+                        } else {
+                            (3, 1)
+                        }
+                    );
+                }
             }
         }
     }

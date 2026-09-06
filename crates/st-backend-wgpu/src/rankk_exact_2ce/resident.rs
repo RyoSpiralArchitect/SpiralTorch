@@ -282,7 +282,7 @@ impl ResidentRank {
                     self.plan.tiles_x(),
                     self.plan.rows(),
                 ),
-                (&self.pipelines.row_merge, merge_x, merge_y),
+                (self.pipelines.merge_pipeline(self.plan), merge_x, merge_y),
             ] {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("resident.rank.pass"),

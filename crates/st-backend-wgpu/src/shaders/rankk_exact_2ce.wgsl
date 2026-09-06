@@ -5,7 +5,6 @@ const KIND_MIDK: u32 = 1u;
 const INVALID_INDEX: u32 = 0xffffffffu;
 const LOCAL_SORT_CAPACITY: u32 = 1024u;
 const MERGE_PARALLEL_MIDK: u32 = 1u;
-const MERGE_TOURNAMENT_MIDK: u32 = 2u;
 
 struct Params {
     rows: u32,
@@ -119,6 +118,35 @@ fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
     // All lanes must finish reading before a later search reuses this scratch.
     workgroupBarrier();
     return total;
+}
+
+fn initialize_merge_bounds(row: u32, lane: u32) {
+    if (lane == 0u) {
+        var finite_count = 0u;
+        for (var tile = 0u; tile < params.tiles_x; tile = tile + 1u) {
+            finite_count = finite_count + tile_counts[row * params.tiles_x + tile];
+        }
+        let take = min(params.k, finite_count);
+        merge_start = select(0u, (finite_count - take) / 2u, params.kind == KIND_MIDK);
+        merge_end = merge_start + take;
+    }
+    workgroupBarrier();
+}
+
+fn find_midk_cutoff(row: u32, lane: u32, rank_start: u32) -> vec2<u32> {
+    var key = 0u;
+    var index = 0u;
+    for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
+        let probe = key | bit;
+        if (row_count_before(row, probe, 0u, lane) <= rank_start) { key = probe; }
+    }
+    for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
+        if (bit < params.cols) {
+            let probe = index | bit;
+            if (row_count_before(row, key, probe, lane) <= rank_start) { index = probe; }
+        }
+    }
+    return vec2<u32>(key, index);
 }
 
 fn tournament_winner(left: u32, right: u32) -> u32 {
@@ -390,20 +418,7 @@ fn rankk_exact_2ce_row_merge(
         return;
     }
 
-    if (local_id.x == 0u) {
-        var finite_count = 0u;
-        for (var current_tile = 0u; current_tile < params.tiles_x; current_tile = current_tile + 1u) {
-            finite_count = finite_count + tile_counts[row * params.tiles_x + current_tile];
-        }
-        let take = min(params.k, finite_count);
-        if (params.kind == KIND_MIDK) {
-            merge_start = (finite_count - take) / 2u;
-        } else {
-            merge_start = 0u;
-        }
-        merge_end = merge_start + take;
-    }
-    workgroupBarrier();
+    initialize_merge_bounds(row, local_id.x);
     // Make the data-dependent loop bound provably uniform to browser validators.
     let rank_end = workgroupUniformLoad(&merge_end);
     let rank_start = workgroupUniformLoad(&merge_start);
@@ -465,30 +480,12 @@ fn rankk_exact_2ce_row_merge(
     // prefix without changing the k-way merge or adding another dispatch.
     // Short prefixes retain the cheaper direct merge.
     let seek_prefix = params.kind == KIND_MIDK && rank_start >= 64u;
-    var cutoff_key = 0u;
-    var cutoff_index = 0u;
+    var cutoff = vec2<u32>(0u);
     if (seek_prefix) {
-        for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
-            let probe = cutoff_key | bit;
-            if (row_count_before(row, probe, 0u, local_id.x) <= rank_start) {
-                cutoff_key = probe;
-            }
-        }
-        for (var bit = 0x80000000u; bit > 0u; bit = bit >> 1u) {
-            if (bit < params.cols) {
-                let probe = cutoff_index | bit;
-                if (row_count_before(row, cutoff_key, probe, local_id.x) <= rank_start) {
-                    cutoff_index = probe;
-                }
-            }
-        }
+        cutoff = find_midk_cutoff(row, local_id.x, rank_start);
     }
-
-    if (params.merge_mode == MERGE_TOURNAMENT_MIDK) {
-        merge_midk_tournament(row, local_id.x, rank_start, rank_end,
-            seek_prefix, cutoff_key, cutoff_index);
-        return;
-    }
+    let cutoff_key = cutoff.x;
+    let cutoff_index = cutoff.y;
 
     var tile = local_id.x;
     for (; tile < params.tiles_x; tile = tile + 256u) {
@@ -577,4 +574,23 @@ fn rankk_exact_2ce_row_merge(
         workgroupBarrier();
         rank = rank + 1u;
     }
+}
+
+// A separate entry point keeps the cached tree's storage and register pressure
+// out of the existing parallel MidK and streaming rank pipelines.
+@compute @workgroup_size(256)
+fn rankk_exact_2ce_midk_tournament(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    let row = workgroup_id.x;
+    if (row >= params.rows) { return; }
+    initialize_merge_bounds(row, local_id.x);
+    let rank_end = workgroupUniformLoad(&merge_end);
+    let rank_start = workgroupUniformLoad(&merge_start);
+    let seek_prefix = rank_start >= 64u;
+    var cutoff = vec2<u32>(0u);
+    if (seek_prefix) { cutoff = find_midk_cutoff(row, local_id.x, rank_start); }
+    merge_midk_tournament(row, local_id.x, rank_start, rank_end,
+        seek_prefix, cutoff.x, cutoff.y);
 }
