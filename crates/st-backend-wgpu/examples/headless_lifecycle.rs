@@ -7,8 +7,12 @@ fn main() -> Result<(), String> {
     use std::sync::Barrier;
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() > 2 {
-        return Err("usage: headless_lifecycle [threads=4] [rounds=4]".into());
+    if args.len() > 3 {
+        return Err("usage: headless_lifecycle [threads=4] [rounds=4] [drop|destroy]".into());
+    }
+    let shutdown = args.get(2).map(String::as_str).unwrap_or("drop");
+    if !matches!(shutdown, "drop" | "destroy") {
+        return Err("shutdown must be drop or destroy".into());
     }
     let parse = |index: usize, default: usize, max: usize| -> Result<usize, String> {
         let value = args
@@ -67,6 +71,11 @@ fn main() -> Result<(), String> {
                             return Err("lifecycle readback mismatch".into());
                         }
                         drop(buffer);
+                        if shutdown == "destroy" {
+                            context.device().destroy();
+                            context.device().poll(wgpu::Maintain::Wait);
+                            eprintln!("round={round} worker={worker} phase=device_destroyed");
+                        }
                         drop(runtime);
                         eprintln!("round={round} worker={worker} phase=runtime_dropped");
                         Ok(serde_json::json!({
@@ -90,7 +99,7 @@ fn main() -> Result<(), String> {
         "{}",
         serde_json::json!({
             "schema": "spiraltorch.headless_lifecycle.v1", "status": "passed",
-            "threads": threads, "rounds": rounds, "receipts": receipts,
+        "threads": threads, "rounds": rounds, "shutdown": shutdown, "receipts": receipts,
             "boundary": "startup/copy/readback/drop/thread-join correctness, not throughput"
         })
     );
