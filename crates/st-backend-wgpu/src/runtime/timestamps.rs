@@ -186,11 +186,11 @@ fn decode(bytes: &[u8], count: u32, period: f64) -> Result<PassTimestamps, WgpuR
 
 /// Owned query/resolve buffers for an instrumented dispatch, including its chunks.
 pub(crate) struct PassTimestampRecorder {
-    context: WgpuContext,
     allocation: QueryAllocation,
     staging: ReadbackLease,
     count: u32,
     period: f64,
+    context: WgpuContext,
 }
 
 impl PassTimestampRecorder {
@@ -271,12 +271,13 @@ impl PassTimestampRecorder {
 
 /// A pending timestamp copy owns its storage independently of later submissions.
 pub struct TimestampReadback {
-    context: WgpuContext,
     staging: ReadbackLease,
     count: u32,
     period: f64,
     _allocation: QueryAllocation,
     validation: Option<TimestampValidation>,
+    // Pending queries may be the final owners of a dedicated profile device.
+    context: WgpuContext,
 }
 
 impl TimestampReadback {

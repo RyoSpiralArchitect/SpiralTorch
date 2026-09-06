@@ -26,7 +26,7 @@ function checkMatmulContract(types, label) {
   assert.match(declaration, /uploadRhs\(rhs: Float32Array\): void/);
   assert.match(declaration, /setLhsFrom\(source: WgpuMatmul\): void/);
   console.log(label + " resident WebGPU TypeScript contract passed");
-  }
+}
 
 function checkRankContract(types, label) {
   const rank = types.match(/^( *)export class WgpuRank \{[\s\S]*?^\1\}/m)?.[0];

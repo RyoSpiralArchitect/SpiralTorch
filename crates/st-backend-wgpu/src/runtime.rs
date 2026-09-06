@@ -642,9 +642,10 @@ impl ReadbackSlot {
 
 /// One idle staging buffer per workspace; outstanding snapshots are never shared.
 pub(crate) struct ReadbackPool {
-    context: WgpuContext,
     bytes: u64,
     idle: Shared<ReadbackSlot>,
+    // Drop cached GPU resources before the last device handle polls and retires.
+    context: WgpuContext,
 }
 
 impl ReadbackPool {

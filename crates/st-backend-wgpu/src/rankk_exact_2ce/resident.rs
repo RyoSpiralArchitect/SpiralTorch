@@ -43,7 +43,6 @@ pub enum ResidentRankError {
 
 /// One fixed rank shape/tile. Upload invalidates output; dispatch never reads it.
 pub struct ResidentRank {
-    runtime: WgpuRuntime,
     plan: Plan,
     pipelines: Pipelines,
     input: wgpu::Buffer,
@@ -55,6 +54,8 @@ pub struct ResidentRank {
     pending_profile: Option<runtime::Shared<AtomicBool>>,
     private_profile_device: bool,
     readback_pool: runtime::ReadbackPool,
+    // The owning device must outlive every workspace buffer and pipeline.
+    runtime: WgpuRuntime,
 }
 
 impl ResidentRank {
@@ -595,10 +596,10 @@ impl RankGpuProfile {
 
 /// A snapshot remains valid after later uploads, dispatches, or workspace drop.
 pub struct RankReadback {
-    context: WgpuContext,
     staging: runtime::ReadbackLease,
     plan: Plan,
     generation: u64,
+    context: WgpuContext,
 }
 
 impl RankReadback {
@@ -648,6 +649,35 @@ fn decode(bytes: &[u8]) -> Output {
 mod profiling_tests {
     use super::*;
     use crate::rankk_exact_2ce::Kind;
+
+    #[test]
+    fn private_profile_devices_retire_after_workspace_and_pending_reads() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        for cycle in 0..96 {
+            let plan = Plan::try_new(Kind::TopK, 1, 8, 2, 4).unwrap();
+            let mut rank = ResidentRank::request_profiled_blocking(plan).unwrap();
+            rank.upload(&[0., 1., 2., 3., 4., 5., 6., 7.]).unwrap();
+            rank.dispatch(1).unwrap();
+            let snapshot = rank.snapshot().unwrap();
+            let pending = rank.dispatch_profiled(1).unwrap();
+            if cycle % 3 == 0 {
+                pending.read().unwrap();
+                assert_eq!(snapshot.read().unwrap().values, [7., 6.]);
+                drop(rank);
+            } else {
+                drop(rank);
+                if cycle % 3 == 1 {
+                    pending.read().unwrap();
+                    assert_eq!(snapshot.read().unwrap().values, [7., 6.]);
+                } else {
+                    drop(snapshot);
+                    drop(pending);
+                }
+            }
+        }
+    }
 
     #[test]
     fn shared_timestamp_device_cannot_open_rank_profiling_scopes() {
