@@ -69,13 +69,18 @@ try {
     ws.dispatch();
     check(await first,expected);
     ws.upload(input); ws.dispatch(); await ws.synchronize();
-    const times=[], repetitions=tournament ? 2 : 8;
-    for(let i=0;i<(tournament ? 3 : 10);i++) { const t=performance.now(); ws.dispatch(repetitions); await ws.synchronize(); times.push((performance.now()-t)/repetitions); }
+    const times=[], repetitions=tournament ? 16 : 8, warmup=tournament ? 2 : 0;
+    for(let i=0;i<(tournament ? 14 : 10);i++) {
+      const t=performance.now(); ws.dispatch(repetitions); await ws.synchronize();
+      const elapsed=(performance.now()-t)/repetitions;
+      if(tournament) check(await ws.readback(),expected);
+      if(i>=warmup) times.push(elapsed);
+    }
     const pending=ws.readback(); ws.free();
     const result=await pending;
     assert(result.generation===3n,"snapshot generation survives workspace free");
     check(result,expected);
-    report.cases.push({kind,rows,cols,k,tile_cols:tile,repetitions,samples_ms:times,status:"passed"});
+    report.cases.push({kind,rows,cols,k,tile_cols:tile,repetitions,warmup_batches:warmup,samples_ms:times,status:"passed"});
   }
   const fullKGeometries = [[1024,32],[1025,32],[1025,256],...(tournament ? [[2047,8],[2055,8]] : [])];
   for(const [cols,tile] of fullKGeometries) {

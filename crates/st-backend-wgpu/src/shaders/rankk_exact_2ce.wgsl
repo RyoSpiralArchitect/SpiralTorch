@@ -178,10 +178,12 @@ fn merge_midk_tournament(
             let tile = tournament_nodes[1];
             if (merge_indices[tile] == INVALID_INDEX) { break; }
             if (rank >= rank_start) {
-                let destination = row * params.k + rank - rank_start;
+                let destination = row * params.k + (rank - rank_start);
                 output_values[destination] = bitcast<u32>(merge_values[tile]);
                 output_indices[destination] = merge_indices[tile];
             }
+            // The final retained rank needs no successor load or tree repair.
+            if (rank + 1u == rank_end) { break; }
             let state = row * params.tiles_x + tile;
             let next = merge_tiles[tile] + 1u;
             merge_tiles[tile] = next;
