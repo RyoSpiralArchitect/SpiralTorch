@@ -383,6 +383,22 @@ impl WasmWgpuRank {
             .map_err(error)
     }
 
+    #[wasm_bindgen(js_name = dispatchFromMatmul)]
+    pub fn dispatch_from_matmul(
+        &mut self,
+        source: &mut WasmWgpuMatmul,
+        repetitions: Option<Number>,
+    ) -> Result<u64, JsValue> {
+        let reps = repetitions
+            .as_ref()
+            .map(|v| dimension(v.as_ref()))
+            .transpose()?
+            .unwrap_or(1);
+        self.inner
+            .dispatch_from_matmul(&mut source.inner, reps as u32)
+            .map_err(error)
+    }
+
     pub fn dispatch(&mut self, repetitions: Option<Number>) -> Result<u64, JsValue> {
         let reps = repetitions
             .as_ref()

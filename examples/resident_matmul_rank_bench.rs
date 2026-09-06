@@ -63,31 +63,45 @@ mod native {
         rank.set_input_from_matmul(&matmul)?;
         rank.dispatch(1)?;
         let expected = rank.snapshot()?.read()?;
-        let mut samples = [Vec::new(), Vec::new(), Vec::new()];
+        let mut samples: [Vec<f64>; 6] = std::array::from_fn(|_| Vec::new());
         for block in 0..14 {
-            for slot in 0..3 {
-                let mode = (slot + block + r.seed as usize % 3) % 3;
+            for slot in 0..6 {
+                let mode = (slot + block + r.seed as usize % 6) % 6;
                 rank.synchronize()?;
                 let start = Instant::now();
-                let repetitions = if mode == 2 { 16 } else { 1 };
+                let resident = matches!(mode, 2 | 4 | 5);
+                let repetitions = if resident { 16 } else { 1 };
                 let mut actual = None;
-                for _ in 0..repetitions {
-                    matmul.dispatch(1)?;
-                    if mode == 0 {
-                        rank.upload(&matmul.snapshot()?.read()?)?;
-                    } else {
-                        rank.set_input_from_matmul(&matmul)?;
-                    }
-                    rank.dispatch(1)?;
-                    if mode != 2 {
-                        actual = Some(rank.snapshot()?.read()?);
+                if mode == 5 {
+                    rank.dispatch_from_matmul(&mut matmul, repetitions)?;
+                } else {
+                    for _ in 0..repetitions {
+                        if mode >= 3 {
+                            rank.dispatch_from_matmul(&mut matmul, 1)?;
+                        } else {
+                            matmul.dispatch(1)?;
+                            if mode == 0 {
+                                rank.upload(&matmul.snapshot()?.read()?)?;
+                            } else {
+                                rank.set_input_from_matmul(&matmul)?;
+                            }
+                            rank.dispatch(1)?;
+                        }
+                        if !resident {
+                            actual = Some(rank.snapshot()?.read()?);
+                        }
                     }
                 }
-                if mode == 2 {
+                if resident {
                     rank.synchronize()?;
                 }
                 let ms = start.elapsed().as_secs_f64() * 1000. / f64::from(repetitions);
-                if actual.is_some_and(|output| output != expected) {
+                // Validate every timed mode; resident snapshots are outside timing.
+                let actual = match actual {
+                    Some(output) => output,
+                    None => rank.snapshot()?.read()?,
+                };
+                if actual != expected {
                     return Err("bridge parity failed".into());
                 }
                 if block >= 2 {
@@ -103,7 +117,8 @@ mod native {
             "matmul_kernel":matmul.kernel().as_str(),"matmul_accumulation":matmul.accumulation().as_str(),
             "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
             "values":expected.values,"indices":expected.indices,"resident_repetitions":16,
-            "samples_ms":{"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2]}}),
+            "samples_ms":{"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2],
+                "single_submit_bridge":samples[3],"resident_single_submit_per_op":samples[4],"resident_batched_submit_per_op":samples[5]}}),
         )
     }
 

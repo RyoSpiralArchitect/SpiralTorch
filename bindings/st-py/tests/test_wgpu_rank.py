@@ -102,3 +102,42 @@ def test_device_local_matmul_copy_is_owned_and_transactional(kind):
     gc.collect()
     rank.dispatch(2)
     assert rank.readback() == {"values":expected_values,"indices":expected_ids,"generation":generation}
+
+
+@pytest.mark.skipif(not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test")
+@pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
+@pytest.mark.parametrize("kernel,accumulation", [
+    ("scalar", "sequential"), ("register_2x2", "tiled"), ("register_2x2", "compensated"),
+])
+def test_single_submit_matmul_rank_chain(kind, kernel, accumulation):
+    source = st.WgpuMatmul(1, 2, 8, kernel=kernel, accumulation=accumulation)
+    rank = st.WgpuRank(kind, 1, 8, 3)
+    with pytest.raises(ValueError):
+        rank.dispatch_from_matmul(source)
+    assert not source.output_is_current and rank.generation == 0
+    values = [3., 1., 3., -2., 7., 4., 0., 1.]
+    source.upload(st.Tensor(1, 2, [1., 0.]), st.Tensor(2, 8, values + [0.] * 8))
+    for repetitions in [0, 1025]:
+        with pytest.raises(ValueError):
+            rank.dispatch_from_matmul(source, repetitions)
+    with pytest.raises(TypeError):
+        rank.dispatch_from_matmul(object())
+    assert not source.output_is_current and rank.generation == 0
+    assert rank.dispatch_from_matmul(source, 3) == 1
+    assert source.output_is_current and rank.output_is_current
+    ids = sorted(range(8), key=lambda i: (-values[i] if kind == "topk" else values[i], i))
+    start = 2 if kind == "midk" else 0
+    ids = ids[start:start+3]
+    assert rank.readback() == {"values": [values[i] for i in ids], "indices": ids, "generation": 1}
+    wrong = st.WgpuMatmul(2, 1, 4)
+    wrong.upload(st.Tensor(2, 1, [1., 1.]), st.Tensor(1, 4, [99.] * 4))
+    with pytest.raises(ValueError):
+        rank.dispatch_from_matmul(wrong)
+    assert not wrong.output_is_current and rank.generation == 1
+    source.upload_rhs(st.Tensor(2, 8, [99.] * 16))
+    assert rank.dispatch_from_matmul(source) == 2
+    source.upload_rhs(st.Tensor(2, 8, [-9.] * 16))
+    source.dispatch()
+    del source
+    rank.dispatch()
+    assert rank.readback() == {"values": [99.] * 3, "indices": list(range(start, start+3)), "generation": 2}

@@ -428,15 +428,31 @@ impl ResidentMatmul {
     }
 
     pub fn dispatch(&mut self, repetitions: u32) -> Result<u64, MatmulError> {
+        let (context, _) = self.prepare_dispatch(repetitions)?;
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        self.encode_dispatch(&mut encoder, repetitions);
+        context.queue().submit(Some(encoder.finish()));
+        self.mark_dispatched();
+        Ok(self.generation)
+    }
+
+    pub(crate) fn prepare_dispatch(
+        &self,
+        repetitions: u32,
+    ) -> Result<(&WgpuContext, &wgpu::Buffer), MatmulError> {
         if repetitions == 0 || repetitions > MAX_REPETITIONS {
             return Err(MatmulError::InvalidRepetitions);
         }
         if self.inputs_ready != [true; 2] {
             return Err(MatmulError::MissingInputs);
         }
-        let context = self.runtime.context();
+        Ok((self.runtime.context(), &self.output))
+    }
+
+    // Crate-owned composition validates first and marks freshness only after submit.
+    pub(crate) fn encode_dispatch(&self, encoder: &mut wgpu::CommandEncoder, repetitions: u32) {
+        debug_assert!(self.prepare_dispatch(repetitions).is_ok());
         let [tile_m, tile_n, _] = self.tile.dimensions();
-        let mut encoder = context.device().create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("resident.matmul.pass"),
@@ -452,9 +468,10 @@ impl ResidentMatmul {
                 );
             }
         }
-        context.queue().submit(Some(encoder.finish()));
+    }
+
+    pub(crate) fn mark_dispatched(&mut self) {
         self.output_generation = Some(self.generation);
-        Ok(self.generation)
     }
 
     fn require_current(&self) -> Result<(), MatmulError> {
