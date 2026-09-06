@@ -9,9 +9,11 @@ but exclude host transfers. This is not a float32 stack.mean or training benchma
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import statistics
+import subprocess
 import time
 
 import numpy as np
@@ -32,6 +34,18 @@ def ordered_mean(partials, scale):
     return result.div_(len(partials)).mul_(float(np.float32(scale))).float()
 
 
+def cuda_availability():
+    result = subprocess.run(
+        ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, check=True,
+    )
+    pids = [int(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+    foreign = [pid for pid in pids if pid != os.getpid()]
+    if foreign:
+        raise RuntimeError(f"foreign CUDA processes observed: {foreign}")
+    return {"time_ns": time.time_ns(), "compute_pids": pids, "own_pid": os.getpid()}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -43,8 +57,11 @@ def main():
     with args.output.open("x") as output:
         torch.set_num_threads(1)
         torch.set_num_interop_threads(1)
-        if args.device == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA requested but unavailable; no CPU fallback")
+        availability = []
+        if args.device == "cuda":
+            availability.append(cuda_availability())
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA requested but unavailable; no CPU fallback")
         st = None
         if not args.torch_only:
             import spiraltorch as st
@@ -64,6 +81,7 @@ def main():
             "device_name": torch.cuda.get_device_name() if args.device == "cuda" else platform.machine(),
             "torch_threads": torch.get_num_threads(), "boundary": __doc__,
             "warmup": 3, "samples": 16, "cases": [],
+            "gpu_availability": availability,
         }
         if st is not None:
             report["spiraltorch_file"] = st.__file__
@@ -74,6 +92,8 @@ def main():
                 for seed in [17, 29, 43]:
                     for count in [4, 16, 64]:
                         for rows, cols in [(1, 1025), (32, 2048), (128, 2048)]:
+                            if args.device == "cuda":
+                                availability.append(cuda_availability())
                             index = np.arange(rows * cols, dtype=np.int64)
                             data = [(((index * 17 + p * 131 + seed * 73) % 4093 - 2046) / 64).astype(np.float32).reshape(rows, cols) for p in range(count)]
                             partials = [torch.from_numpy(values).to(args.device) for values in data]
@@ -103,6 +123,8 @@ def main():
                                         samples[arm + "_ms"].append(elapsed_ms)
                             case = dict(rows=rows, cols=cols, count=count, seed=seed, scale=scale, checksum=expected_checksum, **samples)
                             report["cases"].append(case)
+                            if args.device == "cuda":
+                                availability.append(cuda_availability())
                             print(seed, count, rows, cols, {arm: statistics.median(samples[arm + "_ms"]) for arm in arms}, flush=True)
                 report["status"] = "passed"
         except BaseException as exc:

@@ -47,6 +47,7 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
         // reassociating the partials would change cancellation-sensitive results.
         for tensor in &logical {
             let data = tensor.data();
+            let mut valid = true;
             if tensor.layout() == Layout::ColMajor {
                 let mut offset = 0;
                 while offset < count {
@@ -55,14 +56,24 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
                     let col = index % cols;
                     let width = (cols - col).min(count - offset);
                     for (c, dst) in accum[offset..offset + width].iter_mut().enumerate() {
-                        accumulate(dst, data[(col + c) * rows + row])?;
+                        let src = data[(col + c) * rows + row];
+                        *dst += f64::from(src);
+                        valid &= src.is_finite();
                     }
                     offset += width;
                 }
             } else {
                 for (dst, &src) in accum.iter_mut().zip(&data[start..start + count]) {
-                    accumulate(dst, src)?;
+                    *dst += f64::from(src);
+                    valid &= src.is_finite();
                 }
+            }
+            // No result is published until validation succeeds. Reducing the
+            // validity mask lets finite inputs use SIMD without a second scan.
+            if !valid {
+                return Err(TensorError::InvalidValue {
+                    label: "mean_tensors_partials_must_be_finite",
+                });
             }
         }
         for &sum in accum.iter() {
@@ -80,17 +91,6 @@ fn finite(label: &'static str, value: f32) -> PureResult<()> {
     } else {
         Err(TensorError::NonFiniteValue { label, value })
     }
-}
-
-#[inline]
-fn accumulate(dst: &mut f64, src: f32) -> PureResult<()> {
-    if !src.is_finite() {
-        return Err(TensorError::InvalidValue {
-            label: "mean_tensors_partials_must_be_finite",
-        });
-    }
-    *dst += f64::from(src);
-    Ok(())
 }
 
 #[cfg(test)]
