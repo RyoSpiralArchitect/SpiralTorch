@@ -93,9 +93,10 @@ fn tile_lower_bound(state: u32, key: u32, index: u32) -> u32 {
 fn merge_reduction_start() -> u32 {
     var stride = 128u;
     loop {
-        if (stride < params.tiles_x || stride == 0u) { return stride; }
+        if (stride < params.tiles_x || stride == 0u) { break; }
         stride = stride >> 1u;
     }
+    return stride;
 }
 
 fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
