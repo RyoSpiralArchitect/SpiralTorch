@@ -470,6 +470,63 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
+    fn fragmented_midk_seek_matches_total_order_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime = pollster::block_on(WgpuRuntime::request_headless("midk.prefix.seek"))
+            .expect("requested runtime test requires WGPU");
+        let extremes = [
+            -f32::MAX,
+            -f32::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+        ];
+        for (cols, tile) in [(257, 1), (1025, 8), (1025, 32), (4097, 128), (8193, 256)] {
+            for k in [1, 7, cols - 126, cols - 128, cols] {
+                let plan = Plan::try_new(Kind::MidK, 3, cols, k, tile).unwrap();
+                let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();
+                for pattern in 0..4 {
+                    let input = (0..3 * cols)
+                        .map(|i| {
+                            let column = i % cols;
+                            match pattern {
+                                0 => ((column * 73 % 127) as f32 - 63.) / 8.,
+                                1 => {
+                                    if column % 3 == 0 {
+                                        -0.0
+                                    } else {
+                                        0.0
+                                    }
+                                }
+                                2 => extremes[(i as usize * 37) % extremes.len()],
+                                _ => f32::NAN,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let expected = cpu_reference(Kind::MidK, 3, cols, k, &input);
+                    rank.upload(&input).unwrap();
+                    rank.dispatch(2).unwrap();
+                    let result = rank.snapshot().unwrap().read().unwrap();
+                    assert_eq!(
+                        result.indices, expected.indices,
+                        "cols={cols} tile={tile} k={k} pattern={pattern}"
+                    );
+                    for (a, b) in result.values.iter().zip(expected.values) {
+                        assert!((a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn resident_rank_lifecycle_matches_reference_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
