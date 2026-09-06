@@ -7,16 +7,17 @@ const crypto = require("node:crypto");
 const {chromium} = require("playwright");
 
 async function main() {
-  const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes] = process.argv.slice(2);
+  const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes, fixture] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|matmul]");
   }
+  if(fixture && !["rank", "matmul"].includes(fixture)) throw Error("unknown fixture");
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
-  let metadata = {}, pageErrors = [];
+  let metadata = {}, pageErrors = [], consoleMessages = [];
   try {
     const files = new Map([
-      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/resident_webgpu.html"), "text/html"]],
+      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/", fixture === "rank" ? "resident_rank_webgpu.html" : "resident_webgpu.html"), "text/html"]],
       ["/module/spiraltorch_wasm.js", [path.join(moduleDir,"spiraltorch_wasm.js"), "text/javascript"]],
       ["/module/spiraltorch_wasm_bg.wasm", [path.join(moduleDir,"spiraltorch_wasm_bg.wasm"), "application/wasm"]],
     ]);
@@ -54,6 +55,7 @@ async function main() {
     browser = await chromium.launch({executablePath,headless:true,args:["--enable-unsafe-webgpu"]});
     metadata.browser_version = browser.version();
     page = await browser.newPage();
+    page.on("console", message=>{ if(consoleMessages.length<100) consoleMessages.push({type:message.type(),text:message.text()}); });
     let rejectPageError;
     const fatal = new Promise((_,reject)=>{ rejectPageError=reject; });
     fatal.catch(()=>{});
@@ -80,7 +82,7 @@ async function main() {
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
-    Object.assign(report,metadata,{page_errors:pageErrors});
+    Object.assign(report,metadata,{page_errors:pageErrors,console_messages:consoleMessages});
     fs.writeFileSync(fd,JSON.stringify(report,null,2)+"\n");
     fs.closeSync(fd);
   }

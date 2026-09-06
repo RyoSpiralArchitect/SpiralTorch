@@ -9,6 +9,22 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Explicit WebGPU feature; exact two-stage rank, no CPU fallback. */
+    export class WgpuRank {
+        static create(kind: "topk" | "midk" | "bottomk", rows: number, cols: number, k: number, tile_cols?: number): Promise<WgpuRank>;
+        free(): void;
+        readonly kind: string;
+        readonly tileCols: number;
+        readonly generation: bigint;
+        readonly outputIsCurrent: boolean;
+        shape(): Uint32Array;
+        adapterInfo(): unknown;
+        upload(input: Float32Array): void;
+        dispatch(repetitions?: number): bigint;
+        synchronize(): Promise<void>;
+        readback(): Promise<{values: Float32Array; indices: Int32Array; generation: bigint}>;
+    }
+
     /** Structural receipt from the Rust-owned immutable reverse-mode graph. */
     export type AutogradGraphSummary = {
         contract_version: "spiraltorch.autograd.v1";

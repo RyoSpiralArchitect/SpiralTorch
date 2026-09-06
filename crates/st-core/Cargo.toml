@@ -114,3 +114,8 @@ path = "../../examples/plugin_system_demo.rs"
 name = "backend_rank_bench"
 path = "../../examples/backend_rank_bench.rs"
 required-features = ["cuda", "wgpu-rt", "kdsl"]
+
+[[example]]
+name = "resident_rank_bench"
+path = "../../examples/resident_rank_bench.rs"
+required-features = ["wgpu-rt"]

@@ -9,6 +9,8 @@
 //! Rust CPU reference contract: non-finite values are ignored, equal values
 //! prefer the lower source index, and missing outputs are `(NaN, -1)`.
 
+pub mod resident;
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -620,7 +622,7 @@ mod tests {
         .ok()
     }
 
-    fn cpu_reference(kind: Kind, rows: u32, cols: u32, k: u32, input: &[f32]) -> Output {
+    pub(super) fn cpu_reference(kind: Kind, rows: u32, cols: u32, k: u32, input: &[f32]) -> Output {
         let mut values = Vec::with_capacity((rows * k) as usize);
         let mut indices = Vec::with_capacity((rows * k) as usize);
         for row in 0..rows as usize {

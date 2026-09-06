@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SpiralTorch resident rank validation</title>
+<pre id="result" data-status="running">Running</pre>
+<script type="module">
+const out = document.querySelector("#result");
+const report = {schema:"spiraltorch.browser_resident_rank.v1", cases:[], assertions:[],
+  boundary:"resident dispatch + four-byte completion fence; upload and full readback excluded"};
+function assert(ok, message) { if(!ok) throw Error(message); report.assertions.push(message); }
+async function rejects(fn, label) { let failed=false; try { await fn(); } catch { failed=true; } assert(failed,label); }
+function reference(input, rows, cols, k, kind) {
+  const values=[], indices=[];
+  for(let r=0;r<rows;r++) {
+    const candidates=Array.from({length:cols},(_,i)=>i).filter(i=>Number.isFinite(input[r*cols+i]));
+    candidates.sort((a,b)=>{
+      const x=input[r*cols+a], y=input[r*cols+b];
+      let cmp=x-y;
+      if(x===0 && y===0 && !Object.is(x,y)) cmp=Object.is(x,-0) ? -1 : 1;
+      return (kind==="topk" ? -cmp : cmp) || a-b;
+    });
+    const take=Math.min(k,candidates.length), start=kind==="midk" ? Math.floor((candidates.length-take)/2) : 0;
+    for(const i of candidates.slice(start,start+take)) { values.push(input[r*cols+i]); indices.push(i); }
+    for(let j=take;j<k;j++) { values.push(NaN); indices.push(-1); }
+  }
+  return {values,indices};
+}
+function check(actual, expected) {
+  assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array, "typed rank outputs");
+  assert(actual.values.length===expected.values.length && actual.indices.length===expected.indices.length,"output lengths");
+  assert(expected.indices.every((v,i)=>v===actual.indices[i]),"exact rank indices including ties and sentinels: actual="+Array.from(actual.indices)+" expected="+expected.indices+" values="+Array.from(actual.values));
+  assert(expected.values.every((v,i)=>Object.is(v,actual.values[i])),"exact float32 values including signed zero and NaN");
+}
+try {
+  const {default:init, WgpuRank}=await import("/module/spiraltorch_wasm.js"); await init();
+  for(const n of [-1,0,1.5,NaN,Infinity,4294967296,"2",true]) {
+    await rejects(()=>WgpuRank.create("topk",n,8,2),"invalid dimension "+String(n));
+  }
+  await rejects(()=>WgpuRank.create("unknown",1,8,2),"invalid kind");
+  await rejects(()=>WgpuRank.create("topk",1,8,9),"k exceeds columns");
+  for(const kind of ["topk","midk","bottomk"]) for(const tile of [70,128,257,1024]) {
+    const rows=2, cols=513, k=7;
+    const input=Float32Array.from({length:rows*cols},(_,i)=>(i*37%101-50)/7);
+    input[0]=-0; input[1]=0; input[2]=Infinity; input.fill(NaN,cols); input[cols+1]=1;
+    const expected=reference(input,rows,cols,k,kind);
+    const ws=await WgpuRank.create(kind,rows,cols,k,tile);
+    report.adapter ??= ws.adapterInfo();
+    await rejects(()=>ws.dispatch(),"dispatch before upload");
+    await rejects(()=>ws.readback(),"readback before dispatch");
+    await rejects(()=>ws.upload(new Float64Array(input)),"wrong typed array");
+    ws.upload(input);
+    for(const n of [0,-1,1.5,NaN,Infinity,1025,4294967297]) await rejects(()=>ws.dispatch(n),"invalid repetitions "+n);
+    ws.dispatch(3);
+    const first=ws.readback();
+    await rejects(()=>ws.upload(new Float32Array(1)),"invalid upload length");
+    assert(ws.outputIsCurrent,"failed upload preserves current output");
+    ws.upload(new Float32Array(rows*cols).fill(99));
+    await rejects(()=>ws.readback(),"upload invalidates output");
+    ws.dispatch();
+    check(await first,expected);
+    ws.upload(input); ws.dispatch(); await ws.synchronize();
+    const times=[];
+    for(let i=0;i<10;i++) { const t=performance.now(); ws.dispatch(8); await ws.synchronize(); times.push((performance.now()-t)/8); }
+    const pending=ws.readback(); ws.free();
+    const result=await pending;
+    assert(result.generation===3n,"snapshot generation survives workspace free");
+    check(result,expected);
+    report.cases.push({kind,rows,cols,k,tile_cols:tile,samples_ms:times,status:"passed"});
+  }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

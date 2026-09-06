@@ -20,7 +20,8 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> scratch_indices: array<u32>;
 @group(0) @binding(3) var<storage, read_write> tile_counts: array<u32>;
 @group(0) @binding(4) var<storage, read_write> tile_cursors: array<u32>;
-@group(0) @binding(5) var<storage, read_write> output_values: array<f32>;
+// Preserve sentinel bits without constructing a non-finite WGSL constant.
+@group(0) @binding(5) var<storage, read_write> output_values: array<u32>;
 @group(0) @binding(6) var<storage, read_write> output_indices: array<u32>;
 @group(0) @binding(7) var<uniform> params: Params;
 
@@ -200,7 +201,7 @@ fn rankk_exact_2ce_row_merge(
         if (output_slot >= params.k) {
             break;
         }
-        output_values[row * params.k + output_slot] = bitcast<f32>(0x7fc00000u);
+        output_values[row * params.k + output_slot] = 0x7fc00000u;
         output_indices[row * params.k + output_slot] = INVALID_INDEX;
         output_slot = output_slot + 256u;
     }
@@ -221,10 +222,12 @@ fn rankk_exact_2ce_row_merge(
         merge_end = merge_start + take;
     }
     workgroupBarrier();
+    // Make the data-dependent loop bound provably uniform to browser validators.
+    let rank_end = workgroupUniformLoad(&merge_end);
 
     var rank = 0u;
     loop {
-        if (rank >= merge_end) {
+        if (rank >= rank_end) {
             break;
         }
 
@@ -282,7 +285,7 @@ fn rankk_exact_2ce_row_merge(
             if (selected_tile != INVALID_INDEX) {
                 if (rank >= merge_start) {
                     let destination = row * params.k + (rank - merge_start);
-                    output_values[destination] = merge_values[0];
+                    output_values[destination] = bitcast<u32>(merge_values[0]);
                     output_indices[destination] = merge_indices[0];
                 }
                 let tile_state = row * params.tiles_x + selected_tile;
