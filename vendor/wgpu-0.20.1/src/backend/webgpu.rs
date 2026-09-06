@@ -941,6 +941,10 @@ impl ContextWebGpu {
         Ok(create_identified((canvas, context)))
     }
 
+    pub fn query_set_destroy(&self, query_set_data: &Sendable<webgpu_sys::GpuQuerySet>) {
+        query_set_data.0.destroy();
+    }
+
     /// Get mapped buffer range directly as a `js_sys::ArrayBuffer`.
     pub fn buffer_get_mapped_range_as_array_buffer(
         &self,

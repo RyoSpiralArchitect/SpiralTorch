@@ -25,7 +25,7 @@ async function check(ws, expected) {
   const actual=await ws.readback();
   assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed result");
   assert(actual.values.length===expected.values.length && actual.indices.length===expected.indices.length,"result length");
-  expected.values.forEach((v,i)=>assert(Object.is(v,actual.values[i]) && expected.indices[i]===actual.indices[i],"canonical rank "+i));
+  expected.values.forEach((v,i)=>assert(Object.is(v,actual.values[i]) && expected.indices[i]===actual.indices[i],"canonical rank "+i+": "+actual.values[i]+"/"+actual.indices[i]+" expected "+v+"/"+expected.indices[i]));
 }
 function validate(profile,repetitions) {
   assert(profile.schema==="spiraltorch.rank_gpu_profile.v1" && profile.instrumented,"Rust profile schema");

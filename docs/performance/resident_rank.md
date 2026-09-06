@@ -161,6 +161,14 @@ ownership and 1024-repetition boundaries. Native/Python live timestamp tests
 require `SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS=1`; lack of capability is an error,
 not a CPU fallback or a successful zero-timing measurement.
 
+Query creation/encoding/submission errors are captured in owned error-scope
+futures before another profile can begin. Reads reject validation/allocation
+failures instead of accepting cleared query buffers as zero-duration evidence.
+Browser query resources are explicitly destroyed after submission/readback or
+cancellation, rather than waiting for JavaScript garbage collection. This uses
+a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal
+query-handle Drop and all non-profiled execution retain their existing behavior.
+
 ## Projection To Rank Without Host Staging
 
 `set_input_from_matmul` (`setInputFromMatmul` in JavaScript) copies current

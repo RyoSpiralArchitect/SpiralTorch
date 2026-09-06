@@ -2,7 +2,9 @@
 
 use super::{binding, storage_buffer, DispatchError, Output, Pipelines, Plan};
 use crate::resident_matmul::{MatmulError, ResidentMatmul};
-use crate::runtime::timestamps::{PassTimestampRecorder, PassTimestamps, TimestampReadback};
+use crate::runtime::timestamps::{
+    PassTimestampRecorder, PassTimestamps, TimestampErrorScopes, TimestampReadback,
+};
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -308,6 +310,7 @@ impl ResidentRank {
             return Err(ResidentRankError::MissingInput);
         }
         let context = self.runtime.context();
+        let errors = TimestampErrorScopes::new(context.clone());
         let timestamps = PassTimestampRecorder::new(context.clone(), repetitions * 2)?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         for start in (0..repetitions).step_by(PROFILE_REPETITIONS_PER_SUBMISSION as usize) {
@@ -332,8 +335,9 @@ impl ResidentRank {
                 encoder = context.device().create_command_encoder(&Default::default());
             }
         }
-        let readback = timestamps.resolve(&mut encoder);
+        let mut readback = timestamps.resolve(&mut encoder);
         context.queue().submit(Some(encoder.finish()));
+        readback.validate(errors.finish());
         self.output_generation = Some(self.generation);
         Ok(RankProfileReadback {
             readback,

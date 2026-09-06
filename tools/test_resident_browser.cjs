@@ -88,6 +88,10 @@ async function main() {
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);
     report = JSON.parse(await page.locator("#result").textContent());
     if(pageErrors.length) report.status="error";
+    if(fixture === "rank-profile" && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
+      report.status="error";
+      report.error="uncaptured WebGPU timestamp validation/allocation failure";
+    }
   } catch(error) {
     report = {status:"error",error:String(error.stack||error)};
     if(page) report.last_page_result = await page.locator("#result").textContent({timeout:2000}).catch(()=>null);

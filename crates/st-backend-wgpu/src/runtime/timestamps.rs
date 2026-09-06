@@ -2,6 +2,74 @@
 
 use super::{empty_buffer, ReadbackLease, WgpuContext, WgpuRuntimeError};
 
+#[cfg(not(target_arch = "wasm32"))]
+type ErrorFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Option<wgpu::Error>> + Send>>;
+#[cfg(target_arch = "wasm32")]
+type ErrorFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Option<wgpu::Error>>>>;
+
+/// Pop synchronously: concurrent WASM promises must not steal each other's scopes.
+pub(crate) struct TimestampErrorScopes(Option<WgpuContext>);
+
+impl TimestampErrorScopes {
+    pub(crate) fn new(context: WgpuContext) -> Self {
+        context
+            .device()
+            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        context
+            .device()
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        Self(Some(context))
+    }
+
+    pub(crate) fn finish(mut self) -> TimestampValidation {
+        let context = self.0.take().unwrap();
+        TimestampValidation {
+            validation: Box::pin(context.device().pop_error_scope()),
+            allocation: Box::pin(context.device().pop_error_scope()),
+        }
+    }
+}
+
+impl Drop for TimestampErrorScopes {
+    fn drop(&mut self) {
+        if let Some(context) = self.0.take() {
+            drop(context.device().pop_error_scope());
+            drop(context.device().pop_error_scope());
+        }
+    }
+}
+
+pub(crate) struct TimestampValidation {
+    validation: ErrorFuture,
+    allocation: ErrorFuture,
+}
+
+impl TimestampValidation {
+    async fn check(self) -> Result<(), WgpuRuntimeError> {
+        let validation = self.validation.await;
+        let allocation = self.allocation.await;
+        if let Some(error) = validation.or(allocation) {
+            return Err(invalid(format!("GPU timestamp execution failed: {error}")));
+        }
+        Ok(())
+    }
+}
+
+struct QueryAllocation {
+    queries: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for QueryAllocation {
+    fn drop(&mut self) {
+        // Rust handle drop alone defers GPUQuerySet destruction until JS GC.
+        // The readback owns this until after submission, including cancellation.
+        self.queries.destroy_webgpu();
+        self.resolve.destroy();
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PassTimestamp {
     pub start_tick: u64,
@@ -64,8 +132,7 @@ fn decode(bytes: &[u8], count: u32, period: f64) -> Result<PassTimestamps, WgpuR
 /// Owned query/resolve buffers for an instrumented dispatch, including its chunks.
 pub(crate) struct PassTimestampRecorder {
     context: WgpuContext,
-    queries: wgpu::QuerySet,
-    resolve: wgpu::Buffer,
+    allocation: QueryAllocation,
     staging: ReadbackLease,
     count: u32,
     period: f64,
@@ -106,8 +173,7 @@ impl PassTimestampRecorder {
             });
         Ok(Self {
             context,
-            queries,
-            resolve,
+            allocation: QueryAllocation { queries, resolve },
             staging,
             count,
             period,
@@ -117,16 +183,21 @@ impl PassTimestampRecorder {
     pub(crate) fn writes(&self, pass: u32) -> wgpu::ComputePassTimestampWrites<'_> {
         assert!(pass < self.count / 2);
         wgpu::ComputePassTimestampWrites {
-            query_set: &self.queries,
+            query_set: &self.allocation.queries,
             beginning_of_pass_write_index: Some(pass * 2),
             end_of_pass_write_index: Some(pass * 2 + 1),
         }
     }
 
     pub(crate) fn resolve(self, encoder: &mut wgpu::CommandEncoder) -> TimestampReadback {
-        encoder.resolve_query_set(&self.queries, 0..self.count, &self.resolve, 0);
+        encoder.resolve_query_set(
+            &self.allocation.queries,
+            0..self.count,
+            &self.allocation.resolve,
+            0,
+        );
         encoder.copy_buffer_to_buffer(
-            &self.resolve,
+            &self.allocation.resolve,
             0,
             self.staging.buffer(),
             0,
@@ -137,6 +208,8 @@ impl PassTimestampRecorder {
             staging: self.staging,
             count: self.count,
             period: self.period,
+            _allocation: self.allocation,
+            validation: None,
         }
     }
 }
@@ -147,11 +220,20 @@ pub struct TimestampReadback {
     staging: ReadbackLease,
     count: u32,
     period: f64,
+    _allocation: QueryAllocation,
+    validation: Option<TimestampValidation>,
 }
 
 impl TimestampReadback {
+    pub(crate) fn validate(&mut self, validation: TimestampValidation) {
+        self.validation = Some(validation);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read(mut self) -> Result<PassTimestamps, WgpuRuntimeError> {
+        if let Some(validation) = self.validation.take() {
+            pollster::block_on(validation.check())?;
+        }
         let bytes = self.staging.read(
             &self.context,
             std::time::Duration::from_secs(30),
@@ -161,7 +243,10 @@ impl TimestampReadback {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn read_async(self) -> Result<PassTimestamps, WgpuRuntimeError> {
+    pub async fn read_async(mut self) -> Result<PassTimestamps, WgpuRuntimeError> {
+        if let Some(validation) = self.validation.take() {
+            validation.check().await?;
+        }
         let bytes = self
             .staging
             .read_async(self.context, "profile.pass.timestamps")
@@ -173,6 +258,28 @@ impl TimestampReadback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn timestamp_validation_failure_is_not_a_successful_zero_measurement() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            super::super::WgpuRuntime::request_profiled_headless_blocking("profile.validation")
+                .unwrap();
+        let context = runtime.context().clone();
+        let scope = TimestampErrorScopes::new(context.clone());
+        let _invalid = context
+            .device()
+            .create_query_set(&wgpu::QuerySetDescriptor {
+                label: None,
+                ty: wgpu::QueryType::Timestamp,
+                count: wgpu::QUERY_SET_MAX_QUERIES + 1,
+            });
+        assert!(pollster::block_on(scope.finish().check()).is_err());
+        assert!(pollster::block_on(TimestampErrorScopes::new(context).finish().check()).is_ok());
+    }
 
     fn bytes(values: &[u64]) -> Vec<u8> {
         values.iter().flat_map(|x| x.to_le_bytes()).collect()
