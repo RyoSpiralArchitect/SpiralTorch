@@ -78,6 +78,8 @@ def main():
         report = {
             "schema": "spiraltorch.tensor_mean_torch.v1", "torch_version": torch.__version__,
             "torch_file": torch.__file__, "device": args.device, "host": platform.platform(),
+            "torch_execution": args.device + "_ordered_f64",
+            "spiraltorch_execution": "native_cpu_ordered_f64" if st is not None else None,
             "device_name": torch.cuda.get_device_name() if args.device == "cuda" else platform.machine(),
             "torch_threads": torch.get_num_threads(), "boundary": __doc__,
             "warmup": 3, "samples": 16, "cases": [],

@@ -4,6 +4,11 @@ import struct
 import pytest
 import spiraltorch as st
 
+pytestmark = pytest.mark.skipif(
+    getattr(st, "_rs", None) is None,
+    reason="mean_tensors_scaled requires the native extension, not the Python stub",
+)
+
 
 def bits(values):
     return struct.pack(f"{len(values)}f", *values)

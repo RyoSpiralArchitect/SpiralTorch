@@ -1,0 +1,2328 @@
+{
+  "boundaries": [
+    "All reductions retain per-coordinate input-order f64 sums; no f32 reassociation or GPU fallback.",
+    "Native legacy is the previous reduction body, not the entire Golden runtime or planner.",
+    "CPU Torch uses one thread. Torch inputs are prevalidated outside timing; SpiralTorch validates every call.",
+    "CUDA is PyTorch 2.13.0+cu132 on RTX 5090, not a new SpiralTorch CUDA implementation; host-clock plus synchronization, transfers excluded.",
+    "Browser timings include fresh Float32Array output and run portable WASM CPU, not WebGPU or SIMD128.",
+    "Furnace native and Torch runs are separate, same-host observations, not interleaved arms. GPU contention checks are point observations, not continuous monitoring.",
+    "First native-initial run overlapped an unrelated Torch import; retain as exploratory only. Initial repeat and later confirmed timings are retained separately.",
+    "Failed Chimera test used invalid 7x11 geometry, browser fixture had exponent syntax error, Python test used shape property instead of native method; all fixed, failure logs retained.",
+    "Regenerating web glue from the same retained raw WASM changed adapter helper numbering and output hashes; no byte-reproducible build claim. Browser measurements bind the original frozen generated assets. Node is a separate generated product.",
+    "No model-quality, training-speed, GPU-kernel, or general framework superiority claim."
+  ],
+  "browser_wasm_over_js": [
+    {
+      "count": 4,
+      "max_ratio": 0.7857142822931007,
+      "median_ratio": 0.6999999903142453,
+      "min_ratio": 0.6875000002910383,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.6190476189631453,
+      "median_ratio": 0.5454545417600427,
+      "min_ratio": 0.5111111104488373,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.5354838715135493,
+      "median_ratio": 0.5290322585110858,
+      "min_ratio": 0.5256410257818568,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 0.7045454568160344,
+      "median_ratio": 0.70000000461936,
+      "min_ratio": 0.7000000024214387,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.5974842763169648,
+      "median_ratio": 0.5776397515815385,
+      "min_ratio": 0.5740740744403006,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.5388429754207502,
+      "median_ratio": 0.534090908876496,
+      "min_ratio": 0.5335628225091049,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 0.6733668353994164,
+      "median_ratio": 0.6616161621672962,
+      "min_ratio": 0.6439024383134604,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.5773524718717452,
+      "median_ratio": 0.5745007679473648,
+      "min_ratio": 0.5673981192617344,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.5469522240332552,
+      "median_ratio": 0.5408960131180499,
+      "min_ratio": 0.5349693251879598,
+      "rows": 128,
+      "seeds": 3
+    }
+  ],
+  "compiled_source": "2928e357463ca3909dc87c08d52c4f5d464cf487",
+  "fixture": {
+    "counts": [
+      4,
+      16,
+      64
+    ],
+    "retained_samples": 16,
+    "scale": 1.25,
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "shapes": [
+      [
+        1,
+        1025
+      ],
+      [
+        32,
+        2048
+      ],
+      [
+        128,
+        2048
+      ]
+    ],
+    "warmup": 3
+  },
+  "furnace_native_over_torch_cpu": [
+    {
+      "count": 4,
+      "max_ratio": 0.3241774003103704,
+      "median_ratio": 0.21838428881060512,
+      "min_ratio": 0.2154114799748841,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.22999719886374845,
+      "median_ratio": 0.228500988129149,
+      "min_ratio": 0.22689951876774286,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.23235393990051653,
+      "median_ratio": 0.23150060541741577,
+      "min_ratio": 0.23117796218722086,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 1.4156437742384698,
+      "median_ratio": 1.0478633899590466,
+      "min_ratio": 0.9537827152813976,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.8886949565248686,
+      "median_ratio": 0.8786801341645765,
+      "min_ratio": 0.8508130319062578,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.8256862255930385,
+      "median_ratio": 0.8234281528467335,
+      "min_ratio": 0.817172831305708,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 0.68355927634634,
+      "median_ratio": 0.6814605821476842,
+      "min_ratio": 0.4476000083354924,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.5187403684133964,
+      "median_ratio": 0.5174737307267651,
+      "min_ratio": 0.5055789418718596,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.7557152493620912,
+      "median_ratio": 0.7173376761422073,
+      "min_ratio": 0.7161774844652735,
+      "rows": 128,
+      "seeds": 3
+    }
+  ],
+  "furnace_native_over_torch_cuda": [
+    {
+      "count": 4,
+      "max_ratio": 0.09092779522570867,
+      "median_ratio": 0.05733473782819876,
+      "min_ratio": 0.05460462798165903,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.04888269119271506,
+      "median_ratio": 0.04882855011218849,
+      "min_ratio": 0.04825526732291533,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.05485942463064128,
+      "median_ratio": 0.05438410408059308,
+      "min_ratio": 0.05396205280422606,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 4.43233532480792,
+      "median_ratio": 2.253462455121048,
+      "min_ratio": 2.248178172550311,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 2.899214666822468,
+      "median_ratio": 2.8955823275720705,
+      "min_ratio": 2.850226177093966,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 3.339223280728054,
+      "median_ratio": 3.322724825231995,
+      "min_ratio": 3.3051824057967116,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 8.810521624891765,
+      "median_ratio": 8.740191024519062,
+      "min_ratio": 8.67386626832875,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 11.463258329688427,
+      "median_ratio": 5.638627052443654,
+      "min_ratio": 5.576997052328262,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 37.34203864090817,
+      "median_ratio": 35.261044990092884,
+      "min_ratio": 35.08256136073292,
+      "rows": 128,
+      "seeds": 3
+    }
+  ],
+  "mac_python_spiraltorch_over_torch_cpu": [
+    {
+      "count": 4,
+      "max_ratio": 0.24460091114095733,
+      "median_ratio": 0.24205946155141433,
+      "min_ratio": 0.24117792523833984,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.21435318499501002,
+      "median_ratio": 0.2070401965854804,
+      "min_ratio": 0.2020903861908185,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.18725263934935188,
+      "median_ratio": 0.1866770482592599,
+      "min_ratio": 0.18025839308972644,
+      "rows": 1,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 0.605614605125314,
+      "median_ratio": 0.4601079950762858,
+      "min_ratio": 0.4157619753300327,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.5822469917899554,
+      "median_ratio": 0.417404628743549,
+      "min_ratio": 0.35330160452315185,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.6218338042526218,
+      "median_ratio": 0.6017624666252167,
+      "min_ratio": 0.5853275894025223,
+      "rows": 32,
+      "seeds": 3
+    },
+    {
+      "count": 4,
+      "max_ratio": 0.4062985947218582,
+      "median_ratio": 0.4014149230154875,
+      "min_ratio": 0.3500206582166631,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 16,
+      "max_ratio": 0.4293597611994851,
+      "median_ratio": 0.35785216279421966,
+      "min_ratio": 0.3339490630563694,
+      "rows": 128,
+      "seeds": 3
+    },
+    {
+      "count": 64,
+      "max_ratio": 0.6537211010565996,
+      "median_ratio": 0.6482029562172283,
+      "min_ratio": 0.6449575252300239,
+      "rows": 128,
+      "seeds": 3
+    }
+  ],
+  "native_candidate_over_legacy": {
+    "furnace/native-tiled-repeat.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.9179572210247057,
+          "median_ratio": 0.915981159612578,
+          "min_ratio": 0.8790945456975644,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8717512041991281,
+          "median_ratio": 0.8518660594961145,
+          "min_ratio": 0.8485666650077142,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8079981126228908,
+          "median_ratio": 0.8039588910722966,
+          "min_ratio": 0.7831357585008056,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.8463205782024303,
+          "median_ratio": 0.8427831385412354,
+          "min_ratio": 0.8109470094010375,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8441477605937203,
+          "median_ratio": 0.828709327416085,
+          "min_ratio": 0.8204098279112615,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8285537823046893,
+          "median_ratio": 0.8036031929323615,
+          "min_ratio": 0.7969588174776169,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.9068602034280302,
+          "median_ratio": 0.8570140877741144,
+          "min_ratio": 0.8477834561408129,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8241773805344749,
+          "median_ratio": 0.8140554330999705,
+          "min_ratio": 0.8101995368263838,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.9319444527001197,
+          "median_ratio": 0.8800822936399921,
+          "min_ratio": 0.8466435217158772,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.6493488175278574,
+          "median_ratio": 0.6364354595097014,
+          "min_ratio": 0.6069344770199246,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5417342580619882,
+          "median_ratio": 0.5368015954629023,
+          "min_ratio": 0.5329749019791984,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4804192423603469,
+          "median_ratio": 0.4767207210936449,
+          "min_ratio": 0.4557972734224613,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.4602700134363621,
+          "median_ratio": 0.41680528790194793,
+          "min_ratio": 0.41281882237518414,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.3655264281215128,
+          "median_ratio": 0.3537454132523598,
+          "min_ratio": 0.3094935870682599,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.37948249106791665,
+          "median_ratio": 0.3750269750856333,
+          "min_ratio": 0.3501136918230324,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.3918974135077467,
+          "median_ratio": 0.3899020181515934,
+          "min_ratio": 0.3840297989240012,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.3922613831671868,
+          "median_ratio": 0.39190324662211284,
+          "min_ratio": 0.3908419508574295,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8087906105721708,
+          "median_ratio": 0.8025765680889048,
+          "min_ratio": 0.7994933783637564,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "furnace/native-tiled.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.9524414468517578,
+          "median_ratio": 0.9126104735523018,
+          "min_ratio": 0.8919415120319979,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.870808615321537,
+          "median_ratio": 0.847345214717107,
+          "min_ratio": 0.8236546464913757,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.80995787511127,
+          "median_ratio": 0.7998096567917443,
+          "min_ratio": 0.7956508167724483,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.8544155651811817,
+          "median_ratio": 0.8503387087583946,
+          "min_ratio": 0.8406611820031837,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.836557258091942,
+          "median_ratio": 0.8338739382331272,
+          "min_ratio": 0.7783861043052421,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8255821525196191,
+          "median_ratio": 0.8083692742951477,
+          "min_ratio": 0.8017600661198407,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.8622927707051633,
+          "median_ratio": 0.8593583991326725,
+          "min_ratio": 0.8557815457130129,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8221641299642609,
+          "median_ratio": 0.8199344814970001,
+          "min_ratio": 0.8017345490844888,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.9266567139982909,
+          "median_ratio": 0.881435483213401,
+          "min_ratio": 0.8793910154821879,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.6549711665392899,
+          "median_ratio": 0.6378596087456847,
+          "min_ratio": 0.5950847165404931,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5325515286244317,
+          "median_ratio": 0.5266693157677553,
+          "min_ratio": 0.5240439634713016,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4833313515779988,
+          "median_ratio": 0.4777087514866713,
+          "min_ratio": 0.47473102970125414,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.46224457476166586,
+          "median_ratio": 0.4110992723264912,
+          "min_ratio": 0.40491580076274414,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.3772773821997747,
+          "median_ratio": 0.3732328194068441,
+          "min_ratio": 0.33896847561940824,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.39009281365090837,
+          "median_ratio": 0.3818630721044357,
+          "min_ratio": 0.34868266886490734,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.3893253223494097,
+          "median_ratio": 0.3832613388037873,
+          "min_ratio": 0.3812335796966588,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.39126027155424725,
+          "median_ratio": 0.3838045422910188,
+          "min_ratio": 0.3793861492928806,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8069836778064867,
+          "median_ratio": 0.7952240440661755,
+          "min_ratio": 0.7908508224987799,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "furnace/native-vector.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.9302212418088627,
+          "median_ratio": 0.9287341569067865,
+          "min_ratio": 0.8725792955052598,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8322201912260968,
+          "median_ratio": 0.8319222906247472,
+          "min_ratio": 0.8265361110792621,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.7875565952804957,
+          "median_ratio": 0.7839382596901248,
+          "min_ratio": 0.7825390075561808,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.8790862335825462,
+          "median_ratio": 0.8694329671991443,
+          "min_ratio": 0.828809581801093,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8497982370145587,
+          "median_ratio": 0.8254068054278261,
+          "min_ratio": 0.7986557084487861,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8075958291815806,
+          "median_ratio": 0.7989739067298179,
+          "min_ratio": 0.787277848139079,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.9074529880870336,
+          "median_ratio": 0.8561686300341012,
+          "min_ratio": 0.8534814367232569,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8162183531376423,
+          "median_ratio": 0.8125513519093174,
+          "min_ratio": 0.7858926174606882,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.9417694224320154,
+          "median_ratio": 0.8980773670789708,
+          "min_ratio": 0.8802822842667407,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.9307524295941667,
+          "median_ratio": 0.8619404680754374,
+          "min_ratio": 0.8577025002880517,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.7983389358397561,
+          "median_ratio": 0.7931678617392904,
+          "min_ratio": 0.7838422522035285,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.7584706382710604,
+          "median_ratio": 0.757870467159216,
+          "min_ratio": 0.7529749457486683,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.5614862947153849,
+          "median_ratio": 0.4963998523189245,
+          "min_ratio": 0.4832200838867606,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.519463839737808,
+          "median_ratio": 0.5041002801592812,
+          "min_ratio": 0.49395578666300044,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.2358006918089262,
+          "median_ratio": 1.2222661366281675,
+          "min_ratio": 1.2176093269501451,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.4934875501923547,
+          "median_ratio": 0.4869742076394403,
+          "min_ratio": 0.4799424249083261,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5719338285377905,
+          "median_ratio": 0.5559789634323385,
+          "min_ratio": 0.551017058112333,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.2069024389942238,
+          "median_ratio": 1.1905037656676698,
+          "min_ratio": 1.1783138023364048,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-fused.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 1.2342734379287903,
+          "median_ratio": 1.035191967830341,
+          "min_ratio": 1.0163508445076361,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.1061182909878875,
+          "median_ratio": 1.0987346138484442,
+          "min_ratio": 1.0459936913999703,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.0775675310144714,
+          "median_ratio": 1.0301924274179368,
+          "min_ratio": 1.0296776467450321,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.1940492067370334,
+          "median_ratio": 1.0372231441014015,
+          "min_ratio": 1.0342197278119771,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.0581223330072531,
+          "median_ratio": 1.0472559025242287,
+          "min_ratio": 1.034885953685289,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.0527935990817092,
+          "median_ratio": 1.0366479528118815,
+          "min_ratio": 1.0357800401892243,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.0363031109610035,
+          "median_ratio": 1.028462145419996,
+          "min_ratio": 1.0186305521233419,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.0470717886688503,
+          "median_ratio": 1.0398966604508288,
+          "min_ratio": 1.0181812881320427,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.0964473278711213,
+          "median_ratio": 1.0886860113194263,
+          "min_ratio": 1.0838200141290384,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.8829739268334397,
+          "median_ratio": 0.7331617196942347,
+          "min_ratio": 0.728101725125724,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.6737926071185344,
+          "median_ratio": 0.668117686714499,
+          "min_ratio": 0.6655991434321031,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6461036155113163,
+          "median_ratio": 0.6429136700367896,
+          "min_ratio": 0.6354061180843339,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.34163411633109625,
+          "median_ratio": 0.33336575504167765,
+          "min_ratio": 0.33035019031550955,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.29015067974384257,
+          "median_ratio": 0.2894984546011079,
+          "min_ratio": 0.2870072375795686,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.306345424114123,
+          "median_ratio": 0.30393329851988155,
+          "min_ratio": 0.29754351689122527,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.2995834526903588,
+          "median_ratio": 0.29842173734562183,
+          "min_ratio": 0.29510262298018436,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2749335702064961,
+          "median_ratio": 0.2729697929633141,
+          "min_ratio": 0.26870007542091773,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.61445386774085,
+          "median_ratio": 0.604437788281401,
+          "min_ratio": 0.5865275974984888,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-initial-repeat.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 1.1655033557046979,
+          "median_ratio": 1.1388075707950494,
+          "min_ratio": 1.1351199952827409,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.23491146791902,
+          "median_ratio": 1.2163575252085148,
+          "min_ratio": 1.1876318959698573,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.2808894637057069,
+          "median_ratio": 1.2626000098169146,
+          "min_ratio": 1.2605626899323594,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.1628784969371444,
+          "median_ratio": 1.143563500182402,
+          "min_ratio": 1.1398363854600548,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.2083754085803602,
+          "median_ratio": 1.1881287675465937,
+          "min_ratio": 1.1874890764329555,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.2929623848394256,
+          "median_ratio": 1.2795952901986278,
+          "min_ratio": 1.276379520889006,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.1280984976802106,
+          "median_ratio": 1.1252153218722802,
+          "min_ratio": 1.109813986112848,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.1809499938009544,
+          "median_ratio": 1.1710389844819542,
+          "min_ratio": 1.1645119025101132,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.4056643208626034,
+          "median_ratio": 1.391635689835658,
+          "min_ratio": 1.3893956570557886,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.8834074155371417,
+          "median_ratio": 0.8552697932425618,
+          "min_ratio": 0.8330216403954047,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.8885733385802133,
+          "median_ratio": 0.8319873695210186,
+          "min_ratio": 0.7991432369436958,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8210405070950292,
+          "median_ratio": 0.8181596625438717,
+          "min_ratio": 0.8090163349567107,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.4102654891731944,
+          "median_ratio": 0.40911541849909633,
+          "min_ratio": 0.4073501795512929,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.3849539453551865,
+          "median_ratio": 0.3754388197961164,
+          "min_ratio": 0.3751232634180519,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4076322619614655,
+          "median_ratio": 0.3972038592630651,
+          "min_ratio": 0.3920847586650978,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.39859187677211066,
+          "median_ratio": 0.38568336193438985,
+          "min_ratio": 0.38143786350764913,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.3609105823801826,
+          "median_ratio": 0.35987434537676016,
+          "min_ratio": 0.3595666476581935,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6621033157269502,
+          "median_ratio": 0.6599312817855228,
+          "min_ratio": 0.6452436349454099,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-initial.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 1.145618135665636,
+          "median_ratio": 1.1396454449122206,
+          "min_ratio": 1.121856190214541,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.2189414111588586,
+          "median_ratio": 1.1927328474220704,
+          "min_ratio": 0.9089352112676057,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.2569826357362286,
+          "median_ratio": 1.2540027767116342,
+          "min_ratio": 1.2351261133725893,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.1566113793074806,
+          "median_ratio": 1.150561366471548,
+          "min_ratio": 1.1230803256983057,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.2094242448141448,
+          "median_ratio": 1.2060078631957916,
+          "min_ratio": 1.1894767315625678,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.3459752280795352,
+          "median_ratio": 1.2852165409786795,
+          "min_ratio": 1.2709124785504238,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 1.1405462643485553,
+          "median_ratio": 1.1329017917199857,
+          "min_ratio": 1.1300445256295737,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 1.1871840127348061,
+          "median_ratio": 1.1823119777650328,
+          "min_ratio": 1.173374392079238,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 1.4017689739025092,
+          "median_ratio": 1.3969225527120905,
+          "min_ratio": 1.3926578501588198,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.8666071328905508,
+          "median_ratio": 0.8537211974213315,
+          "min_ratio": 0.8515856029539106,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.852304797742239,
+          "median_ratio": 0.8097156959166575,
+          "min_ratio": 0.8072656619616092,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.8665208317113171,
+          "median_ratio": 0.8519694100509833,
+          "min_ratio": 0.8353227071006833,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.41975234327178346,
+          "median_ratio": 0.41487917637743854,
+          "min_ratio": 0.40093668170386265,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.375891514944928,
+          "median_ratio": 0.37007218246728113,
+          "min_ratio": 0.36094069270612045,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4460195010570108,
+          "median_ratio": 0.40073047304628606,
+          "min_ratio": 0.3938220240580139,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.3834772414918539,
+          "median_ratio": 0.3763266189128558,
+          "min_ratio": 0.3745771083113623,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.39868050985423586,
+          "median_ratio": 0.3712974599766956,
+          "min_ratio": 0.36606208573944704,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6634095734408503,
+          "median_ratio": 0.656785703333013,
+          "min_ratio": 0.6433558471730255,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-tiled-confirm.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.6720434013902008,
+          "median_ratio": 0.6558636568396817,
+          "min_ratio": 0.6542585784313725,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5146888115010269,
+          "median_ratio": 0.49645027400646025,
+          "min_ratio": 0.4916616052060737,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4474899153304122,
+          "median_ratio": 0.4279260316691321,
+          "min_ratio": 0.3894965725168719,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.6080682943373868,
+          "median_ratio": 0.5966955721294155,
+          "min_ratio": 0.5751696474387584,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4601874561575973,
+          "median_ratio": 0.4515466820473145,
+          "min_ratio": 0.44951268886390683,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5385109489467961,
+          "median_ratio": 0.4820637471712377,
+          "min_ratio": 0.478921788870425,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.6201751980281511,
+          "median_ratio": 0.6160806554652916,
+          "min_ratio": 0.6059198907575389,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4694538853763776,
+          "median_ratio": 0.4652222188741061,
+          "min_ratio": 0.4621245115264558,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6246709676172016,
+          "median_ratio": 0.6109081708280001,
+          "min_ratio": 0.6100476566172037,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.4185029702970297,
+          "median_ratio": 0.4122265062479677,
+          "min_ratio": 0.401296,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2717185450208706,
+          "median_ratio": 0.2711602431033189,
+          "min_ratio": 0.19629559576599484,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.23103281872853282,
+          "median_ratio": 0.22868362218139857,
+          "min_ratio": 0.22433618775769107,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.2569846537219812,
+          "median_ratio": 0.2502170395900566,
+          "min_ratio": 0.2498290438942795,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.38838018870612145,
+          "median_ratio": 0.1876764266712098,
+          "min_ratio": 0.18703742413897917,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.22587696592846154,
+          "median_ratio": 0.21244168258084933,
+          "min_ratio": 0.20669505523461743,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.2356730878715278,
+          "median_ratio": 0.22193367434375824,
+          "min_ratio": 0.21610814345133814,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2526837275000327,
+          "median_ratio": 0.2405798658013585,
+          "min_ratio": 0.23508087210700063,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.35966431290760487,
+          "median_ratio": 0.3587768105882722,
+          "min_ratio": 0.3578399230019116,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-tiled-repeat.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.7239370995923121,
+          "median_ratio": 0.6572868858626139,
+          "min_ratio": 0.647982399119956,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5005338217295824,
+          "median_ratio": 0.4990861178641776,
+          "min_ratio": 0.4875016543874355,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4433207626283173,
+          "median_ratio": 0.43000164907257593,
+          "min_ratio": 0.3865673211130605,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.6036544859175961,
+          "median_ratio": 0.5959204565902131,
+          "min_ratio": 0.5505473095600137,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.45596240629138424,
+          "median_ratio": 0.4538661818297439,
+          "min_ratio": 0.41808618438234524,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5901735030998064,
+          "median_ratio": 0.4974377894623466,
+          "min_ratio": 0.4852003075170753,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.6121547166444155,
+          "median_ratio": 0.6117388322320371,
+          "min_ratio": 0.5668225056179511,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4634673208671796,
+          "median_ratio": 0.4633271577558022,
+          "min_ratio": 0.4613652835583939,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6697049480778594,
+          "median_ratio": 0.6246273801276216,
+          "min_ratio": 0.6179414393116271,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.40377323159028133,
+          "median_ratio": 0.40341404469461745,
+          "min_ratio": 0.34988778797270265,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2965593643230737,
+          "median_ratio": 0.2757964686181826,
+          "min_ratio": 0.2602689984445,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.310416590404063,
+          "median_ratio": 0.24448993881092274,
+          "min_ratio": 0.2278836207562026,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.2889898213275713,
+          "median_ratio": 0.25118073679613073,
+          "min_ratio": 0.24657746849931508,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.19556382622784227,
+          "median_ratio": 0.18969993376377267,
+          "min_ratio": 0.18706459876808693,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.2648415833408636,
+          "median_ratio": 0.21056163413242776,
+          "min_ratio": 0.2020617321223561,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.24809787311116394,
+          "median_ratio": 0.22003024213046665,
+          "min_ratio": 0.2192255335452452,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.29755657306159045,
+          "median_ratio": 0.23369631206233457,
+          "min_ratio": 0.22839487051052318,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4200652878544053,
+          "median_ratio": 0.3817793149105128,
+          "min_ratio": 0.3621800859858312,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-tiled.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.8392078431372548,
+          "median_ratio": 0.6537358114007733,
+          "min_ratio": 0.6399438796859233,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.6046118217510087,
+          "median_ratio": 0.509437908496732,
+          "min_ratio": 0.4922380508587405,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.44327092374457533,
+          "median_ratio": 0.4406265538151282,
+          "min_ratio": 0.42575825468063566,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.75380773588381,
+          "median_ratio": 0.6148584918111254,
+          "min_ratio": 0.6042451218329166,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4555565903665991,
+          "median_ratio": 0.4543838631247186,
+          "min_ratio": 0.4408707884041039,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5697733531660447,
+          "median_ratio": 0.5035525482402753,
+          "min_ratio": 0.4781403888647879,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.6138520764645921,
+          "median_ratio": 0.6083335141683819,
+          "min_ratio": 0.5997819803921324,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4664394945843128,
+          "median_ratio": 0.4642563051627665,
+          "min_ratio": 0.4587156942664586,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6220848521972849,
+          "median_ratio": 0.6182741287519553,
+          "min_ratio": 0.6137400654807564,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.5148329721782517,
+          "median_ratio": 0.40802603036876356,
+          "min_ratio": 0.40327352848599307,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2784477686195531,
+          "median_ratio": 0.2745018971874985,
+          "min_ratio": 0.2726003609247846,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.23046540765187631,
+          "median_ratio": 0.22899413112021588,
+          "min_ratio": 0.22728420936793456,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.25205389187579713,
+          "median_ratio": 0.25128386807413255,
+          "min_ratio": 0.24763589035224254,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.19006324714276918,
+          "median_ratio": 0.18760452154563664,
+          "min_ratio": 0.1873192712322351,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.2431886486766296,
+          "median_ratio": 0.20968622563358857,
+          "min_ratio": 0.2046663610088414,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.21768537252430242,
+          "median_ratio": 0.21768052861395562,
+          "min_ratio": 0.21716442680564063,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2547315342617424,
+          "median_ratio": 0.23656231617267515,
+          "min_ratio": 0.22378376019882631,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.36739500611123244,
+          "median_ratio": 0.3566513238914998,
+          "min_ratio": 0.35555839648412985,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-vector-repeat.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.6676859847836191,
+          "median_ratio": 0.6508648467507024,
+          "min_ratio": 0.648621678932269,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5140877005347593,
+          "median_ratio": 0.5025089977851606,
+          "min_ratio": 0.500704879139016,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4311337772425906,
+          "median_ratio": 0.42949057820448516,
+          "min_ratio": 0.42887593433711246,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.5946468472948974,
+          "median_ratio": 0.5833532332785601,
+          "min_ratio": 0.5829611688695449,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.45573091638654323,
+          "median_ratio": 0.44896974669027695,
+          "min_ratio": 0.4408562727324965,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.4969688784428186,
+          "median_ratio": 0.48012545690066566,
+          "min_ratio": 0.474516430623569,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.584566717245605,
+          "median_ratio": 0.5815802706325639,
+          "min_ratio": 0.5809221883371576,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4538249959475069,
+          "median_ratio": 0.4512613012614823,
+          "min_ratio": 0.4464581187949216,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.6178280281296747,
+          "median_ratio": 0.6158901803328939,
+          "min_ratio": 0.6111140466943423,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.6736669245709053,
+          "median_ratio": 0.6550131005720842,
+          "min_ratio": 0.6429997236126893,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5913430401863715,
+          "median_ratio": 0.5709045507776012,
+          "min_ratio": 0.5706056616194866,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5433810730269714,
+          "median_ratio": 0.5402210277707971,
+          "min_ratio": 0.5362326620002577,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.32326580425081364,
+          "median_ratio": 0.322286207915329,
+          "min_ratio": 0.3187511727138456,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.29971581693872384,
+          "median_ratio": 0.28598609424923005,
+          "min_ratio": 0.27650633817426584,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.31318462105716344,
+          "median_ratio": 0.30999739755715955,
+          "min_ratio": 0.28811095334276365,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.27240847407179863,
+          "median_ratio": 0.27072051405362013,
+          "min_ratio": 0.2703988732958763,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.2522909205853368,
+          "median_ratio": 0.24915845086397345,
+          "min_ratio": 0.24893983774122225,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5867603787636647,
+          "median_ratio": 0.5863240992509327,
+          "min_ratio": 0.5680022439464663,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    },
+    "native-vector.json": {
+      "False": [
+        {
+          "count": 4,
+          "max_ratio": 0.8247953108271522,
+          "median_ratio": 0.655956576544131,
+          "min_ratio": 0.6480892511057,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5162558025793055,
+          "median_ratio": 0.5119908641035402,
+          "min_ratio": 0.4953519379270754,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.43403765293047125,
+          "median_ratio": 0.4299049334628552,
+          "min_ratio": 0.4291576704748559,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.794880101420258,
+          "median_ratio": 0.5943536149870506,
+          "min_ratio": 0.5831506620865612,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4548277105283065,
+          "median_ratio": 0.4542406559081247,
+          "min_ratio": 0.44662237682260814,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5101754309530561,
+          "median_ratio": 0.4930791546735225,
+          "min_ratio": 0.49057538515489907,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.586215942528431,
+          "median_ratio": 0.5839174934337883,
+          "min_ratio": 0.5815780105878398,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.4947960979133962,
+          "median_ratio": 0.45418994351885295,
+          "min_ratio": 0.44880500301721227,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.622720036545509,
+          "median_ratio": 0.6155684362873843,
+          "min_ratio": 0.6108114274319193,
+          "rows": 128,
+          "seeds": 3
+        }
+      ],
+      "True": [
+        {
+          "count": 4,
+          "max_ratio": 0.7275858704137393,
+          "median_ratio": 0.6600814214030991,
+          "min_ratio": 0.6542636631737466,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.5853967106452196,
+          "median_ratio": 0.5835509747225072,
+          "min_ratio": 0.5820844479215954,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5611540282163021,
+          "median_ratio": 0.5201406339059265,
+          "min_ratio": 0.5176573184444095,
+          "rows": 1,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.32922710369715336,
+          "median_ratio": 0.3233152070108421,
+          "min_ratio": 0.31869829924638815,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.27604873208961794,
+          "median_ratio": 0.27444498666253897,
+          "min_ratio": 0.2730395841988855,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.3143580004472004,
+          "median_ratio": 0.29891139356702756,
+          "min_ratio": 0.29692741705350695,
+          "rows": 32,
+          "seeds": 3
+        },
+        {
+          "count": 4,
+          "max_ratio": 0.2750954384900019,
+          "median_ratio": 0.2711606420430257,
+          "min_ratio": 0.2691073065999517,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 16,
+          "max_ratio": 0.26754562533422627,
+          "median_ratio": 0.2537476700230064,
+          "min_ratio": 0.251091047439389,
+          "rows": 128,
+          "seeds": 3
+        },
+        {
+          "count": 64,
+          "max_ratio": 0.5856924895193446,
+          "median_ratio": 0.5821052655561292,
+          "min_ratio": 0.5758594106386619,
+          "rows": 128,
+          "seeds": 3
+        }
+      ]
+    }
+  },
+  "products": {
+    "attribution": "clean source, unchanged library files, preserved build logs and byte-matched installed extension; not embedded Git attestation",
+    "build_info": {
+      "features": {
+        "cpu": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "kdsl": true,
+        "logic": false,
+        "logic-learn": false,
+        "mps": false,
+        "nn": true,
+        "rec": true,
+        "robotics": true,
+        "selfsup": true,
+        "text": true,
+        "wgpu": true,
+        "wgpu-rt": true
+      },
+      "package": "spiraltorch-py",
+      "profile": "release",
+      "target": {
+        "arch": "aarch64",
+        "family": "unix",
+        "os": "macos",
+        "pointer_width": 64
+      },
+      "version": "0.4.27"
+    },
+    "compiled_source": "2928e357463ca3909dc87c08d52c4f5d464cf487",
+    "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/golden-portable-reduction-20260907/venv/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+    "extension_sha256": "f980125accaa7f775c6d4a0d03e295adebdc0133a8eebb8875dbc9df1b2a4337",
+    "python": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/golden-portable-reduction-20260907/venv/bin/python",
+    "schema": "spiraltorch.tensor_mean_products.v1",
+    "snapshot_source": "00724458294cc9faea3de8ea389f137f945b9bfb",
+    "status": "passed",
+    "wasm_assets": {
+      "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "spiraltorch_wasm.d.ts": "849ee14e90a0906c3caa19f855f86ab99ed2c71779b957fb25d9f7c4ab9c1efb",
+      "spiraltorch_wasm.js": "96009aef647822d0cd13b340b60fc6f5837446bf486d6be2553c04d630339b28",
+      "spiraltorch_wasm_bg.wasm": "72f19760ffcd33cacec4a88d9d462e79a533acf9c3a4abfa4fa60977b8c64f58",
+      "spiraltorch_wasm_bg.wasm.d.ts": "cd14b36b699dd32a8ad1648b34e5c1e4a97bb8d3278cc394a2db7a7f1bc64960"
+    },
+    "wheel_sha256": "4b9d2ee23f4ca254c336eda57d828b431211c1d7cdd294607289c93aeaaa6857"
+  },
+  "raw_sha256": {
+    "analyze.py": "1ad353f83f7609c99ae3a84b7c97276fe3b2f0da1afb1b61f555f309f0a8baef",
+    "browser-fixture.html": "df7f4eaa9d8ac6f0c82d85e1aa95b43de62cb264b0be243711547a61e396d83b",
+    "browser-portable-fixed.json": "95f20d3cfa604fc240b01a6a4b5010f78dcb2e23758cfe34ac448b8456f3a70b",
+    "browser-portable-fixed.log": "d082313951efab4066668443770f2734b383096295f23164a3d9e362e3b6bf5d",
+    "browser-portable.json": "11125632d233fa7d5070e8ef61b23743a4fc96152e6b65b5a64feac9a4af97d2",
+    "browser-portable.log": "418c34e755e006d6546320e30f6a2cb7bfa90e5c0e337f06e2b42989262ea4b8",
+    "capture_products.py": "141183ed30cb2d29603df8082fe9487e6489350a3aca7dad0277564e715f3da7",
+    "furnace-build-tiled.log": "b6cc4145d67ddd642b34f2497973c354b9da7ccacdf980ed9ef8c79cedd92c60",
+    "furnace-build.log": "d76d49b2726ba0a853ad1aef976e72c229164ea3c9aca625c83ce80daa45fdfa",
+    "furnace-hardware.json": "ede7117b228cb9db709d184852f2be805998d9be8175566b3a78737aaf02635b",
+    "furnace-image-tiled-after.sha256": "71ec46426914dc6c863ec284172e24eceec7f07c1bc5b6114facb621c41d89e6",
+    "furnace-image-tiled.sha256": "71ec46426914dc6c863ec284172e24eceec7f07c1bc5b6114facb621c41d89e6",
+    "furnace-image.sha256": "a036b8022cdd1d05e0fa037e8ddc5df6e0161e89615fc3f3e59af472aa934f03",
+    "furnace-native-tiled-repeat.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "furnace-native-tiled.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "furnace-native.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "furnace-torch-cpu.log": "38cb9bed39420c556cc2d0b806ae225df04a6144cfa1ed3d9525f7ee3e917aec",
+    "furnace-torch-cuda.log": "90e2ca5432de0941fd6659f2218c30d79acf5b8d978c8548a95d195644396970",
+    "furnace/native-tiled-repeat.json": "6ac2cb5bc515e5c8d7e16a47d85b4e1af590f2942912dbd53aaf5fae511f3a2a",
+    "furnace/native-tiled.json": "4d14e03b421e56bb93c8631203055047615de4496870bafdbff27c49e31067c4",
+    "furnace/native-vector.json": "c5a043bc0bbad24f5d18f40b68a2cbd48ecdf87dfd7eb2013c4f631d9efca98c",
+    "furnace/torch-cpu.json": "a683c864df7a4e26a29d4aed5a0dbf73e74aa76ebc7ced28a41deba3ad1d4587",
+    "furnace/torch-cuda.json": "e93ab883f920697b55d8138e643f6930879c0766990d786be2bf8a9401878d12",
+    "golden-baseline-clippy.log": "f395f8bef8567481a393d3bf3e5d8029b7c268586baa281b163e0867b1857d69",
+    "golden-clippy.log": "d84ca691f8d8bb61126fbd1e02e7517ba0310f201b89353581ec66a42f0f824d",
+    "golden-final-tests.log": "ea6c1ba7645a9e17473692230717e042e456909393ead23db463a2c05dac943f",
+    "golden-tests.log": "1e48dd390ef64ab92c07fd315c68ca301ccf76419df733aff74f993594fec81c",
+    "mac-hardware.txt": "ee61e8b2c03ad9c9c248324edfa9ec17b5a9c0579282d45c3c3e7e8f5fc54dcb",
+    "native-build-11e07f5f.log": "e57676ba8fa32a16303ebc25129d8442ed89da4a32111d25594cbf4658881e39",
+    "native-build-fused.log": "0d03437c76f60c7408c68ab26130f6e7a6780585cd9e154bc058c0fb330bedc3",
+    "native-build-initial.log": "b1d2eebff23fdb155482a50c5ac1e1d0187c6917b3bbac5ef4bed56340940f2c",
+    "native-build-tiled.log": "0d03437c76f60c7408c68ab26130f6e7a6780585cd9e154bc058c0fb330bedc3",
+    "native-build-vector.log": "1783889fa3f45d5de3cd4afff1613fbf176dc784427568d677799da7150f3421",
+    "native-fused.json": "c8d378398953a7f18ec6e5d9b27a9150ed11424616d18e956da731b5e75d6898",
+    "native-fused.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-image-11e07f5f.sha256": "bf673788a4a4324ea283c9c7e1dc0976e5f788610b5981eedfec480cc948829a",
+    "native-image-1ac7dc81.sha256": "2c6f85c60fa6a7d04ce493de53694b612997b3499c41832de7701192d6168b00",
+    "native-image-2928e357-after.sha256": "505d290a8455c2a386cdac56b58ea2f1abbae44b1afe6ba42b5ebc1f0cd9dd6b",
+    "native-image-2928e357.sha256": "505d290a8455c2a386cdac56b58ea2f1abbae44b1afe6ba42b5ebc1f0cd9dd6b",
+    "native-image-bc1f63e7.sha256": "568a2fcca79a2a6a09962361734e2e53040ddeb3a8b329fd309cc085fc5a7367",
+    "native-initial-repeat.json": "5ead93ff32a7efa5a8540ae8c5c08b5066dfe497d7ef327ef891441c9f91fd0e",
+    "native-initial-repeat.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-initial.json": "0852dadc06dd156df486387120712433bd77b48e386054d54a508209512c3702",
+    "native-initial.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-tiled-confirm.json": "cc5e50d3e2894c178e1d8f586c3f4f179c014e3f8aaaf88cba93970b385f8e18",
+    "native-tiled-confirm.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-tiled-repeat.json": "44fdc55a543409176e75a3646c167d8764dc7f025a5f4dd1cee286d0709acd8b",
+    "native-tiled-repeat.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-tiled.json": "1192ccbb18cd45289f924a530c197d22c7f03e2728fb1778fed6934917e2d3df",
+    "native-tiled.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-vector-repeat.json": "609006e01f5bde92f7cd95dcb9c46df3842075b20a52e8f350a06b7877744751",
+    "native-vector-repeat.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-vector.json": "92149e78161337c499e018122a7c0256649c116532728883ecc68e27e23c77c3",
+    "native-vector.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "node-fixture.cjs": "dfe87d0c1c03996d7eecbeb0310510e6042691fd233c8f49591cce12d680dcda",
+    "node-products.sha256": "0adc11ccc21636c1a41755a0a667b3dc762a2f9fef21559f81d84088d1064a1c",
+    "node-tests.log": "f541c7bc421e49c5b1af58930bfb02a853814e55521f0336c00382aedec7637d",
+    "products.json": "a51a52955616ee32a9412664e49384f1b341c717f035639a1ff84461f7e50f87",
+    "python-final-tests.log": "f1f2d77435513ed34c2440070fe10ec27e4e767d2d9d43fc04d888942b04e4e2",
+    "python-tests-fixed.log": "3728c36f61c260a2aa4f17db0e9e0b2e2222df2b9b23c8e5b791ec315510cf6b",
+    "python-tests.log": "3f39e6d73f4bce37225e7ac68f9d02ac05467c1b77eb518dc8f08a3735fa858e",
+    "python-torch-cpu.json": "853bc14130e61052e715594f334231b64b4729ffbd2c49535b71a97bc060d650",
+    "python-torch-cpu.log": "225d6d40f11e9413ea00a15dbc3a8b3005b3bd2a42c873bf073d14b9fce2330b",
+    "raw-wasm-image.sha256": "a6b62d277ac55798a268f9f93733129c8d3127f3dfa89fdbf8fcec8626785f40",
+    "rustfmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rustfmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-fused.txt": "e1221e25f93672f0efc595eaef30c5112076584d8700306c5ec320ea42a3d8dd",
+    "source-initial.txt": "075c9cd020755b07930d80b4881bcf74f093d343c755a0b7a96e1c24f39761d8",
+    "source-tiled.bundle": "e3026db8e4e2c4a833f42084ae4b5dec07115a8d9e3884e9d5c106dbe05d7499",
+    "source-tiled.txt": "180c48a9e8febdcc72878567cdc5448136876be9cdaf091c61a66a22a9649190",
+    "source-vector.bundle": "72937443327d9437e2ec82e5179ec9a3c28dbf99c665872cab877b17329cec70",
+    "source-vector.txt": "5b056fd36ca5ae9fb5e64eb5d82fb8e60347d0ba78a512ae5b32d7f2ed52a616",
+    "tensor-clippy-final.log": "f45c9b098cafe36c58425bd674be37a5cb1eadfa12dc7a97d5befec9f53943aa",
+    "tensor-clippy.log": "d000199b8a663656e8bc9fc341ff605ab40744a900cc7d65c5252544b331863f",
+    "tensor-ensemble-integration.log": "6c6fcf922f7d17e9fe2759c59450db3100d02317ccced9cec22576a88de49888",
+    "tensor-full-tests.log": "16a7b9ef85fc446a7e331deb1f5dec83692dcaa53e3b09a551884ffe1030d22d",
+    "tensor-tests-2928e357.log": "6dce4202bea69d0a8fe43c40c1d6d7c1523b38d30924c735c8eda43da54ef2d3",
+    "tensor-tests.log": "ccf11ab5005c0cdc3c00e091141bddb07004b5455449f98016fd86b48ed959ae",
+    "types-initial.log": "f920a3b34d89de9fa4f7822d00bf3634ed3ea48c23aea222d0f6363256f728b8",
+    "types-tiled.log": "6cae9c50f1e07dc6bc6db9580f8c103981d5c18192cfc98ee3ee3b0a9b86d274",
+    "wasm-baseline-clippy.log": "ab731f98e90c44cba802155ec0fd049d9719471aa68efa6c9c324ed151cc0cc3",
+    "wasm-build-bc1f63e7.log": "b842b106960531c42792a04e0598cb12eb0a50f9140cff1fdcb0900750b43eae",
+    "wasm-build-tiled.log": "386cd58e2f80c5662f9bd866a373f6d4d959672ace14102c03c6de5e78acddd9",
+    "wasm-build-vector.log": "b0bfa27d5a12d2c3f042e367e2a6a49daf9b5febc031a8eb3e758f8ba38877b7",
+    "wasm-clippy.log": "fa5e45408002f9127d3a4a22fcb27d10c1fa7a281f8c4b94d086bf6e60c0ea7b",
+    "wasm-final-tests.log": "32ac55845fc557fca458cf2fd23c2dd9b76371443189a72a70d5b2139bddf0b5",
+    "wasm-native-tests.log": "384facbe5f3d054b3871c7459ff4771f96abe96b404769e44b93077d1f49881b",
+    "wasm-product-recheck.log": "cf8937b665ce257f1ce0f51b4f3b945b1778d2069b55f854ec2b0166ccb22308",
+    "wheel-build-tiled.log": "750e5a47a85a275e0584d15d9057b5d0bfbb452e7fde8458a82dec6148161728",
+    "wheel-build.log": "aa12886579caed8d9f881ce0d1dd482dba132b00e8e5d796194e45d90b61c3d6",
+    "wheel-install.log": "09d6cc8e95fc8c3bed244bfb38e34d5adcd73d43d9bde08beafa66a104d73352"
+  },
+  "schema": "spiraltorch.golden_portable_reduction_summary.v1",
+  "validation": {
+    "browser_cases": 27,
+    "furnace_torch_cpu_cases": 27,
+    "furnace_torch_cuda_cases": 27,
+    "golden_tests": 17,
+    "gpu_availability_points": 55,
+    "preexisting_strict_clippy": {
+      "golden": {
+        "signatures": [
+          [
+            "methods with the following characteristics: (`to_*` and `self` type is `Copy`) usually take `self` by value",
+            "crates/st-nn/src/golden.rs:598:23"
+          ],
+          [
+            "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+            "crates/st-nn/src/language/automation.rs:359:61"
+          ],
+          [
+            "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+            "crates/st-nn/src/language/automation.rs:388:54"
+          ],
+          [
+            "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+            "crates/st-nn/src/language/gw.rs:372:51"
+          ],
+          [
+            "this function has too many arguments (10/7)",
+            "crates/st-nn/src/layers/activation.rs:31:1"
+          ],
+          [
+            "this function has too many arguments (10/7)",
+            "crates/st-nn/src/layers/continuous_wavelet.rs:12:1"
+          ],
+          [
+            "the loop variable `c` is used to index `profile`",
+            "crates/st-nn/src/layers/continuous_wavelet.rs:173:18"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "crates/st-nn/src/layers/dropout.rs:33:1"
+          ],
+          [
+            "derefed type is same as origin",
+            "crates/st-nn/src/layers/embedding.rs:83:30"
+          ],
+          [
+            "this function has too many arguments (13/7)",
+            "crates/st-nn/src/layers/embedding.rs:145:1"
+          ],
+          [
+            "this function has too many arguments (28/7)",
+            "crates/st-nn/src/layers/lstm.rs:116:1"
+          ],
+          [
+            "this function has too many arguments (13/7)",
+            "crates/st-nn/src/layers/non_liner.rs:262:1"
+          ],
+          [
+            "the loop variable `col` is used to index `gain`",
+            "crates/st-nn/src/layers/non_liner.rs:1021:24"
+          ],
+          [
+            "the loop variable `col` is used to index `gain`",
+            "crates/st-nn/src/layers/non_liner.rs:1043:24"
+          ],
+          [
+            "this function has too many arguments (11/7)",
+            "crates/st-nn/src/layers/normalization.rs:23:1"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "crates/st-nn/src/layers/normalization.rs:176:1"
+          ],
+          [
+            "this function has too many arguments (13/7)",
+            "crates/st-nn/src/layers/wave_gate.rs:71:1"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "crates/st-nn/src/layers/zspace_projector.rs:20:1"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "crates/st-nn/src/z_rba/cov_head.rs:263:1"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "crates/st-nn/src/zspace_coherence/sequencer.rs:1812:5"
+          ],
+          [
+            "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+            "crates/st-nn/src/zspace_coherence/sequencer.rs:2481:64"
+          ],
+          [
+            "this `impl` can be derived",
+            "crates/st-nn/src/zspace_coherence/vae.rs:128:1"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "crates/st-nn/src/zspace_coherence/vae.rs:224:5"
+          ]
+        ],
+        "status": "preexisting_failure",
+        "unchanged_diagnostics": 23
+      },
+      "wasm": {
+        "signatures": [
+          [
+            "manual implementation of `Option::filter`",
+            "bindings/st-wasm/src/cobol.rs:1966:11"
+          ],
+          [
+            "manual implementation of `.is_multiple_of()`",
+            "bindings/st-wasm/src/cosmology.rs:234:8"
+          ],
+          [
+            "using `chunks_exact` with a constant chunk size",
+            "bindings/st-wasm/src/cosmology.rs:240:10"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "bindings/st-wasm/src/fractal_field.rs:150:1"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "bindings/st-wasm/src/fractal_field.rs:260:1"
+          ],
+          [
+            "this function has too many arguments (8/7)",
+            "bindings/st-wasm/src/fractal_field.rs:286:1"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "bindings/st-wasm/src/scale_stack.rs:118:1"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "bindings/st-wasm/src/scale_stack.rs:381:1"
+          ],
+          [
+            "this function has too many arguments (9/7)",
+            "bindings/st-wasm/src/scale_stack.rs:412:1"
+          ],
+          [
+            "redundant closure",
+            "bindings/st-wasm/src/cobol_bridge.rs:359:55"
+          ],
+          [
+            "redundant closure",
+            "bindings/st-wasm/src/cobol_bridge.rs:399:56"
+          ],
+          [
+            "redundant closure",
+            "bindings/st-wasm/src/cobol_bridge.rs:435:57"
+          ],
+          [
+            "redundant closure",
+            "bindings/st-wasm/src/cobol_bridge.rs:443:57"
+          ],
+          [
+            "manual implementation of `.is_multiple_of()`",
+            "bindings/st-wasm/src/fft.rs:200:8"
+          ],
+          [
+            "using `chunks_exact` with a constant chunk size",
+            "bindings/st-wasm/src/fft.rs:208:10"
+          ],
+          [
+            "manual implementation of `.is_multiple_of()`",
+            "bindings/st-wasm/src/mellin.rs:21:8"
+          ],
+          [
+            "using `chunks_exact` with a constant chunk size",
+            "bindings/st-wasm/src/mellin.rs:27:10"
+          ],
+          [
+            "the borrowed expression implements the required traits",
+            "bindings/st-wasm/src/mellin.rs:71:31"
+          ],
+          [
+            "struct `WasmMellinEvalPlan` has a public `len` method, but no `is_empty` method",
+            "bindings/st-wasm/src/mellin.rs:132:5"
+          ]
+        ],
+        "status": "preexisting_failure",
+        "unchanged_diagnostics": 19
+      }
+    },
+    "python_tests": 19,
+    "tensor_integration_tests": 2,
+    "tensor_strict_clippy": "passed",
+    "tensor_tests": 433,
+    "wasm_native_tests": 2,
+    "wasm_node_test": "passed",
+    "workspace_rustfmt": "passed"
+  }
+}
