@@ -39,7 +39,7 @@ try {
   await rejects(()=>WgpuRank.create("topk",1,8,9),"k exceeds columns");
   const geometries = [
     ...[8,70,128,257,1024].map(tile=>[513,tile]),
-    [1,1], [1024,256], [1024,1024], [1025,1024], [1025,1025],
+    [1,1], [1024,32], [1025,32], [1025,256], [1024,256], [1024,1024], [1025,1024], [1025,1025],
     [2049,1023], [2049,1024], [2049,1025], [2049,2048],
   ];
   for(const kind of ["topk","midk","bottomk"]) for(const [cols,tile] of geometries) {
@@ -70,6 +70,20 @@ try {
     assert(result.generation===3n,"snapshot generation survives workspace free");
     check(result,expected);
     report.cases.push({kind,rows,cols,k,tile_cols:tile,samples_ms:times,status:"passed"});
+  }
+  for(const [cols,tile] of [[1024,32],[1025,32],[1025,256]]) {
+    const rows=3, k=cols;
+    const ws=await WgpuRank.create("midk",rows,cols,k,tile);
+    const pending=[];
+    for(let i=0;i<4;i++) {
+      const input=new Float32Array(rows*cols).fill(NaN);
+      if(i%2===0) { input.fill(1,0,cols); input[cols]=-0; input[2*cols-2]=0; input[2*cols-1]=-3; }
+      ws.upload(input); ws.dispatch(3);
+      pending.push([ws.readback(),reference(input,rows,cols,k,"midk")]);
+    }
+    ws.free();
+    for(const [promise,expected] of pending) check(await promise,expected);
+    report.cases.push({kind:"midk",rows,cols,k,tile_cols:tile,validation_only:true,status:"passed"});
   }
   report.status="passed";
 } catch(error) { report.status="error"; report.error=String(error.stack||error); }

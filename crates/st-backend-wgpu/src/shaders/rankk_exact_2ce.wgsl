@@ -251,31 +251,11 @@ fn rankk_exact_2ce_row_merge(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let row = workgroup_id.x;
+    let parallel_midk = params.kind == KIND_MIDK && params.tiles_x <= 32u;
+    let row = select(workgroup_id.x, workgroup_id.y, parallel_midk);
     if (row >= params.rows) {
         return;
     }
-
-    var tile = local_id.x;
-    loop {
-        if (tile >= params.tiles_x) {
-            break;
-        }
-        tile_cursors[row * params.tiles_x + tile] = 0u;
-        tile = tile + 256u;
-    }
-
-    var output_slot = local_id.x;
-    loop {
-        if (output_slot >= params.k) {
-            break;
-        }
-        output_values[row * params.k + output_slot] = 0x7fc00000u;
-        output_indices[row * params.k + output_slot] = INVALID_INDEX;
-        output_slot = output_slot + 256u;
-    }
-    storageBarrier();
-    workgroupBarrier();
 
     if (local_id.x == 0u) {
         var finite_count = 0u;
@@ -295,51 +275,68 @@ fn rankk_exact_2ce_row_merge(
     let rank_end = workgroupUniformLoad(&merge_end);
     let rank_start = workgroupUniformLoad(&merge_start);
 
-    if (params.kind == KIND_MIDK && params.tiles_x <= 32u) {
+    if (parallel_midk) {
         // Every tile is sorted by the same total (value, source-index) order.
         // Binary-search other tiles to compute each candidate's global rank,
         // avoiding a serial merge through half the row just to discard it.
         // Keep the original merge for extremely fragmented tile geometries.
-        var candidate_slot = local_id.x;
-        let row_slots = params.tiles_x * params.tile_stride;
+        // Each workgroup owns one tile's candidates. Valid global ranks have
+        // unique destinations; initialize ONLY the disjoint missing-value tail.
+        let take = rank_end - rank_start;
+        for (var tail = workgroup_id.x * 256u + local_id.x;
+             tail < params.k - take; tail = tail + params.tiles_x * 256u) {
+            let destination = row * params.k + take + tail;
+            output_values[destination] = 0x7fc00000u;
+            output_indices[destination] = INVALID_INDEX;
+        }
+        let own_tile = workgroup_id.x;
+        let own_state = row * params.tiles_x + own_tile;
+        var own_offset = local_id.x;
         loop {
-            if (candidate_slot >= row_slots) { break; }
-            let own_tile = candidate_slot / params.tile_stride;
-            let own_offset = candidate_slot % params.tile_stride;
-            if (own_offset < tile_counts[row * params.tiles_x + own_tile]) {
-                let address = row * row_slots + candidate_slot;
-                let value = scratch_values[address];
-                let index = scratch_indices[address];
-                var global_rank = own_offset;
-                for (var other = 0u; other < params.tiles_x; other = other + 1u) {
-                    if (other != own_tile) {
-                        let state = row * params.tiles_x + other;
-                        let base = state * params.tile_stride;
-                        var low = 0u;
-                        var high = tile_counts[state];
-                        loop {
-                            if (low >= high) { break; }
-                            let middle = low + (high - low) / 2u;
-                            if (candidate_before(scratch_values[base + middle],
-                                scratch_indices[base + middle], value, index)) {
-                                low = middle + 1u;
-                            } else {
-                                high = middle;
-                            }
+            if (own_offset >= tile_counts[own_state]) { break; }
+            let address = own_state * params.tile_stride + own_offset;
+            let value = scratch_values[address];
+            let index = scratch_indices[address];
+            var global_rank = own_offset;
+            for (var other = 0u; other < params.tiles_x; other = other + 1u) {
+                if (other != own_tile) {
+                    let state = row * params.tiles_x + other;
+                    let base = state * params.tile_stride;
+                    var low = 0u;
+                    var high = tile_counts[state];
+                    loop {
+                        if (low >= high) { break; }
+                        let middle = low + (high - low) / 2u;
+                        if (candidate_before(scratch_values[base + middle],
+                            scratch_indices[base + middle], value, index)) {
+                            low = middle + 1u;
+                        } else {
+                            high = middle;
                         }
-                        global_rank = global_rank + low;
                     }
-                }
-                if (global_rank >= rank_start && global_rank < rank_end) {
-                    let destination = row * params.k + global_rank - rank_start;
-                    output_values[destination] = bitcast<u32>(value);
-                    output_indices[destination] = index;
+                    global_rank = global_rank + low;
                 }
             }
-            candidate_slot = candidate_slot + 256u;
+            if (global_rank >= rank_start && global_rank < rank_end) {
+                let destination = row * params.k + global_rank - rank_start;
+                output_values[destination] = bitcast<u32>(value);
+                output_indices[destination] = index;
+            }
+            own_offset = own_offset + 256u;
         }
         return;
     }
+
+    var tile = local_id.x;
+    for (; tile < params.tiles_x; tile = tile + 256u) {
+        tile_cursors[row * params.tiles_x + tile] = 0u;
+    }
+    for (var output_slot = local_id.x; output_slot < params.k; output_slot = output_slot + 256u) {
+        output_values[row * params.k + output_slot] = 0x7fc00000u;
+        output_indices[row * params.k + output_slot] = INVALID_INDEX;
+    }
+    storageBarrier();
+    workgroupBarrier();
 
     var rank = 0u;
     loop {

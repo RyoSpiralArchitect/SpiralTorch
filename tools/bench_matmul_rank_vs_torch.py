@@ -18,8 +18,11 @@ def require_canonical_indices(actual, expected):
         raise RuntimeError("CUDA rank indices differ from the canonical stable selection")
 
 
-def run_native_pass(image, payload, probe_only=False):
-    native = subprocess.run([str(image)] + (["--readback-probe"] if probe_only else []),
+def run_native_pass(image, payload, probe_only=False, resident_only=False):
+    if probe_only and resident_only:
+        raise ValueError("a native pass cannot be both comparison and probe")
+    flags = ["--readback-probe"] if probe_only else (["--resident-only"] if resident_only else [])
+    native = subprocess.run([str(image)] + flags,
         input=payload, text=True, capture_output=True, timeout=180)
     if native.returncode or native.stderr:
         raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
@@ -42,7 +45,7 @@ def collect_readback_diagnostics(image, payload, requests, comparisons):
                 results=results)
 
 
-def run(executable, readback_probe=False):
+def run(executable, readback_probe=False, resident_only=False):
     require_uncontended_gpu()
     import torch
     torch.set_num_threads(1)
@@ -69,7 +72,7 @@ def run(executable, readback_probe=False):
         binding = audit.validate_source_binding(identity, before)
         if not binding["valid"]:
             raise RuntimeError(f"source/build mismatch: {binding}")
-        results = run_native_pass(image, payload)
+        results = run_native_pass(image, payload, resident_only=resident_only)
         if len(results) != len(requests):
             raise RuntimeError("native result cardinality mismatch")
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="passed",
@@ -79,6 +82,7 @@ def run(executable, readback_probe=False):
             dtype="float32", tf32=bool(torch.backends.cuda.matmul.allow_tf32), torch_cpu_threads=torch.get_num_threads(),
             comparison="bounded integer projection heads; frameworks measured in separate blocks",
             readback_probe_requested=readback_probe,
+            resident_only_requested=resident_only,
             boundaries={
                 "host_bridge":"resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
                 "device_copy_bridge":"resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
@@ -92,6 +96,9 @@ def run(executable, readback_probe=False):
             for r, result in zip(requests, results):
                 if result.get("status") != "passed" or any(result.get(k) != r[k] for k in ("rows", "inner", "cols", "k", "kind", "seed")):
                     raise RuntimeError("native result/request mismatch")
+                if resident_only and (result.get("mode") != "resident_only"
+                        or set(result.get("samples_ms", {})) != {"resident_single_submit_per_op"}):
+                    raise RuntimeError("native resident-only boundary mismatch")
                 if result["adapter"]["name"] != torch.cuda.get_device_name():
                     raise RuntimeError("WGPU and CUDA must select the same named GPU")
                 left = torch.tensor(r["lhs"], dtype=torch.float32).reshape(r["rows"], r["inner"])
@@ -148,9 +155,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--readback-probe", action="store_true",
                         help="run separate diagnostic process AFTER all native/CUDA samples; not comparison timing")
+    parser.add_argument("--resident-only", action="store_true",
+                        help="measure only composed resident chains; no maps/uploads between timed intervals")
     args = parser.parse_args()
     try:
-        report = run(args.executable.resolve(strict=True), args.readback_probe)
+        report = run(args.executable.resolve(strict=True), args.readback_probe, args.resident_only)
     except Exception as error:
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="error", error=str(error))
     audit.write_report_exclusive(args.output, report)

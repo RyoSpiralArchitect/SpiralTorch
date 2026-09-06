@@ -1,0 +1,2391 @@
+{
+  "schema": "spiraltorch.matmul_rank_comparison.v1",
+  "status": "passed",
+  "source": {
+    "repository": "/home/ryospiralarchitect/scratch/spiraltorch-midk-tile-eaa0ffb8",
+    "commit": "eaa0ffb8d0d560d3778cc9d92934c10c2a947833",
+    "tree": "96c2149d34ee4134701a2764f40e004d90804bdb",
+    "tracked_dirty": false,
+    "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "native_build_identity": {
+    "build_fingerprint": "sha256:1163a1d296d28e8b0ba44d14bdbcff535271d66d14ae2ef03e46c465ece33527",
+    "manifest": {
+      "git": {
+        "commit": "eaa0ffb8d0d560d3778cc9d92934c10c2a947833",
+        "describe": "v0.4.27-74-geaa0ffb8",
+        "dirty": false,
+        "tree": "96c2149d34ee4134701a2764f40e004d90804bdb"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-06T06:59:40.850Z-85e83de44d754bbebad162e85fefda45",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "seed": "85e83de44d754bbebad162e85fefda45",
+      "target": {
+        "arch": "x86_64",
+        "os": "linux",
+        "triple": "x86_64-unknown-linux-gnu"
+      },
+      "timestamp": "2026-09-06T06:59:40.850Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  },
+  "build_source_binding": {
+    "valid": true,
+    "checks": {
+      "schema_matches": true,
+      "package_matches": true,
+      "commit_matches": true,
+      "tree_matches": true,
+      "build_was_clean": true,
+      "source_is_clean": true
+    },
+    "embedded_commit": "eaa0ffb8d0d560d3778cc9d92934c10c2a947833",
+    "embedded_tree": "96c2149d34ee4134701a2764f40e004d90804bdb",
+    "source_commit": "eaa0ffb8d0d560d3778cc9d92934c10c2a947833",
+    "source_tree": "96c2149d34ee4134701a2764f40e004d90804bdb"
+  },
+  "request_sha256": "f987634dda04fa6dc7ab232441c62cdb184d02771f18afaf184b015188b600e7",
+  "torch": "2.13.0+cu132",
+  "torch_device": "NVIDIA GeForce RTX 5090",
+  "dtype": "float32",
+  "tf32": false,
+  "torch_cpu_threads": 1,
+  "comparison": "bounded integer projection heads; frameworks measured in separate blocks",
+  "readback_probe_requested": false,
+  "resident_only_requested": true,
+  "boundaries": {
+    "host_bridge": "resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
+    "device_copy_bridge": "resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
+    "resident_copy_bridge_per_op": "16 matmul/copy/rank chains then completion fence; divided by 16, no maps",
+    "single_submit_bridge": "resident operands; one matmul/copy/rank submission, final rank map",
+    "resident_single_submit_per_op": "16 calls of one matmul/copy/rank submission then completion fence; divided by 16, no maps",
+    "resident_batched_submit_per_op": "16 complete matmul/copy/rank chains in one submission then completion fence; divided by 16, no maps",
+    "torch_resident_per_op": "16 matmul/stable-sort chains with preallocated CUDA outputs then synchronize; divided by 16, no maps"
+  },
+  "cases": [
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "topk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          11,
+          214,
+          144,
+          160,
+          81,
+          212,
+          121,
+          256,
+          212,
+          42,
+          139,
+          157,
+          82,
+          10
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.057115874999999997,
+            0.055209125000000005,
+            0.054977374999999995,
+            0.058858125,
+            0.0573560625,
+            0.0574340625,
+            0.0570105625,
+            0.0570445,
+            0.0551761875,
+            0.06339975,
+            0.060817437499999995,
+            0.0627371875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          34.0,
+          34.0,
+          31.0,
+          31.0,
+          28.0,
+          28.0,
+          27.0,
+          40.0,
+          38.0,
+          36.0,
+          33.0,
+          33.0,
+          31.0,
+          30.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.05723596875,
+          "p95_ms": 0.06339975,
+          "min_ms": 0.054977374999999995,
+          "samples_ms": [
+            0.057115874999999997,
+            0.055209125000000005,
+            0.054977374999999995,
+            0.058858125,
+            0.0573560625,
+            0.0574340625,
+            0.0570105625,
+            0.0570445,
+            0.0551761875,
+            0.06339975,
+            0.060817437499999995,
+            0.0627371875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01695040625,
+          "p95_ms": 0.017213,
+          "min_ms": 0.016794625,
+          "samples_ms": [
+            0.017192875,
+            0.0169749375,
+            0.017101625,
+            0.0169191875,
+            0.0170420625,
+            0.0170655,
+            0.017213,
+            0.016925875,
+            0.0168123125,
+            0.016852125,
+            0.016794625,
+            0.0168634375
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "midk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          129,
+          190,
+          48,
+          112,
+          122,
+          233,
+          237,
+          58,
+          69,
+          252,
+          21,
+          105,
+          125,
+          126
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.0475451875,
+            0.049196687499999996,
+            0.04925625,
+            0.04943525,
+            0.0704365,
+            0.049395125,
+            0.049442812499999995,
+            0.0476263125,
+            0.0489026875,
+            0.0494674375,
+            0.049382875,
+            0.1327799375
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -1.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.049389,
+          "p95_ms": 0.1327799375,
+          "min_ms": 0.0475451875,
+          "samples_ms": [
+            0.0475451875,
+            0.049196687499999996,
+            0.04925625,
+            0.04943525,
+            0.0704365,
+            0.049395125,
+            0.049442812499999995,
+            0.0476263125,
+            0.0489026875,
+            0.0494674375,
+            0.049382875,
+            0.1327799375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01637328125,
+          "p95_ms": 0.0171921875,
+          "min_ms": 0.0161753125,
+          "samples_ms": [
+            0.0171921875,
+            0.016974375,
+            0.0167664375,
+            0.0169161875,
+            0.01682525,
+            0.0161753125,
+            0.0162796875,
+            0.0162968125,
+            0.016349375,
+            0.0162583125,
+            0.016246375,
+            0.0163971875
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          184,
+          200,
+          8,
+          57,
+          78,
+          120,
+          195,
+          209,
+          47,
+          79,
+          81,
+          85,
+          115,
+          106
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.0572141875,
+            0.0570094375,
+            0.0570214375,
+            0.057268125,
+            0.0571290625,
+            0.056966812500000005,
+            0.06155175,
+            0.0621921875,
+            0.061979124999999996,
+            0.0606480625,
+            0.06298125,
+            0.0609016875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -37.0,
+          -36.0,
+          -34.0,
+          -34.0,
+          -34.0,
+          -34.0,
+          -34.0,
+          -38.0,
+          -37.0,
+          -35.0,
+          -35.0,
+          -34.0,
+          -34.0,
+          -33.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.05895809375,
+          "p95_ms": 0.06298125,
+          "min_ms": 0.056966812500000005,
+          "samples_ms": [
+            0.0572141875,
+            0.0570094375,
+            0.0570214375,
+            0.057268125,
+            0.0571290625,
+            0.056966812500000005,
+            0.06155175,
+            0.0621921875,
+            0.061979124999999996,
+            0.0606480625,
+            0.06298125,
+            0.0609016875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01619375,
+          "p95_ms": 0.016682125,
+          "min_ms": 0.0160445625,
+          "samples_ms": [
+            0.016682125,
+            0.016233875,
+            0.0161059375,
+            0.016304,
+            0.0163065,
+            0.0160968125,
+            0.0161771875,
+            0.0162010625,
+            0.0162019375,
+            0.0160445625,
+            0.0161864375,
+            0.016163125
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "topk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          577,
+          584,
+          950,
+          172,
+          158,
+          180,
+          749,
+          557,
+          698,
+          21,
+          394,
+          39,
+          434,
+          999,
+          624,
+          230,
+          162,
+          208,
+          25,
+          189,
+          489
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.0674174375,
+            0.0636239375,
+            0.0659241875,
+            0.0648218125,
+            0.0656115,
+            0.0639490625,
+            0.06620575000000001,
+            0.0625375625,
+            0.069782625,
+            0.0656040625,
+            0.06526975,
+            0.14785637499999998
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          97.0,
+          95.0,
+          89.0,
+          88.0,
+          86.0,
+          86.0,
+          86.0,
+          112.0,
+          98.0,
+          95.0,
+          93.0,
+          90.0,
+          86.0,
+          85.0,
+          102.0,
+          86.0,
+          82.0,
+          82.0,
+          79.0,
+          73.0,
+          73.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06560778125,
+          "p95_ms": 0.14785637499999998,
+          "min_ms": 0.0625375625,
+          "samples_ms": [
+            0.0674174375,
+            0.0636239375,
+            0.0659241875,
+            0.0648218125,
+            0.0656115,
+            0.0639490625,
+            0.06620575000000001,
+            0.0625375625,
+            0.069782625,
+            0.0656040625,
+            0.06526975,
+            0.14785637499999998
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016768625,
+          "p95_ms": 0.01683275,
+          "min_ms": 0.0167341875,
+          "samples_ms": [
+            0.01683275,
+            0.016781,
+            0.0168045,
+            0.016765875,
+            0.016768875,
+            0.016745,
+            0.016788125,
+            0.0167444375,
+            0.016801125,
+            0.0167341875,
+            0.016768375,
+            0.016735
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "midk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          892,
+          918,
+          1010,
+          59,
+          85,
+          134,
+          137,
+          821,
+          901,
+          955,
+          69,
+          90,
+          108,
+          183,
+          72,
+          108,
+          185,
+          210,
+          227,
+          273,
+          286
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.06302075,
+            0.057295875,
+            0.065477,
+            0.0608305,
+            0.0623070625,
+            0.0615198125,
+            0.062108375,
+            0.062116187499999996,
+            0.0602515625,
+            0.06345881249999999,
+            0.060442125,
+            0.063247875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          1.0,
+          1.0,
+          1.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          1.0,
+          1.0,
+          1.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06211228125,
+          "p95_ms": 0.065477,
+          "min_ms": 0.057295875,
+          "samples_ms": [
+            0.06302075,
+            0.057295875,
+            0.065477,
+            0.0608305,
+            0.0623070625,
+            0.0615198125,
+            0.062108375,
+            0.062116187499999996,
+            0.0602515625,
+            0.06345881249999999,
+            0.060442125,
+            0.063247875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016768843749999998,
+          "p95_ms": 0.01701825,
+          "min_ms": 0.016733125,
+          "samples_ms": [
+            0.016831875,
+            0.01701825,
+            0.0167700625,
+            0.016779,
+            0.01682525,
+            0.0167715,
+            0.0167593125,
+            0.016767625,
+            0.016743875,
+            0.016738125,
+            0.016733125,
+            0.01675925
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          658,
+          389,
+          827,
+          583,
+          290,
+          404,
+          908,
+          289,
+          770,
+          880,
+          950,
+          490,
+          103,
+          348,
+          658,
+          507,
+          118,
+          730,
+          90,
+          856,
+          849
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.065481375,
+            0.065508625,
+            0.0649961875,
+            0.06537218750000001,
+            0.06529675,
+            0.063434875,
+            0.06527962500000001,
+            0.0652664375,
+            0.06240081250000001,
+            0.061584375000000004,
+            0.062031625,
+            0.1535739375
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -103.0,
+          -90.0,
+          -88.0,
+          -85.0,
+          -80.0,
+          -79.0,
+          -79.0,
+          -93.0,
+          -90.0,
+          -87.0,
+          -84.0,
+          -82.0,
+          -80.0,
+          -79.0,
+          -90.0,
+          -88.0,
+          -83.0,
+          -83.0,
+          -80.0,
+          -74.0,
+          -69.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06527303125,
+          "p95_ms": 0.1535739375,
+          "min_ms": 0.061584375000000004,
+          "samples_ms": [
+            0.065481375,
+            0.065508625,
+            0.0649961875,
+            0.06537218750000001,
+            0.06529675,
+            0.063434875,
+            0.06527962500000001,
+            0.0652664375,
+            0.06240081250000001,
+            0.061584375000000004,
+            0.062031625,
+            0.1535739375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016744875,
+          "p95_ms": 0.01694025,
+          "min_ms": 0.0167140625,
+          "samples_ms": [
+            0.01694025,
+            0.01679075,
+            0.01675725,
+            0.016737,
+            0.01679825,
+            0.0167243125,
+            0.0167395,
+            0.01678125,
+            0.0167325,
+            0.0167140625,
+            0.01675025,
+            0.01673725
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "topk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          240,
+          169,
+          125,
+          251,
+          91,
+          63,
+          129,
+          195,
+          250,
+          213,
+          239,
+          4,
+          60,
+          211
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.057532875,
+            0.056638999999999995,
+            0.0564305,
+            0.05648725,
+            0.056433375,
+            0.0556455,
+            0.056042999999999996,
+            0.056240125,
+            0.0551821875,
+            0.058762875,
+            0.0568193125,
+            0.0576888125
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          42.0,
+          36.0,
+          35.0,
+          35.0,
+          34.0,
+          33.0,
+          32.0,
+          33.0,
+          33.0,
+          32.0,
+          30.0,
+          29.0,
+          29.0,
+          27.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.0564603125,
+          "p95_ms": 0.058762875,
+          "min_ms": 0.0551821875,
+          "samples_ms": [
+            0.057532875,
+            0.056638999999999995,
+            0.0564305,
+            0.05648725,
+            0.056433375,
+            0.0556455,
+            0.056042999999999996,
+            0.056240125,
+            0.0551821875,
+            0.058762875,
+            0.0568193125,
+            0.0576888125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016234718750000002,
+          "p95_ms": 0.0175551875,
+          "min_ms": 0.016074,
+          "samples_ms": [
+            0.0164030625,
+            0.016184375,
+            0.016295,
+            0.0162168125,
+            0.0162933125,
+            0.016252625,
+            0.016216375,
+            0.0163566875,
+            0.0161486875,
+            0.01619025,
+            0.016074,
+            0.0175551875
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "midk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          86,
+          143,
+          206,
+          209,
+          1,
+          22,
+          46,
+          96,
+          133,
+          159,
+          172,
+          209,
+          228,
+          242
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.0488491875,
+            0.04867425,
+            0.048787,
+            0.0486146875,
+            0.0487145,
+            0.0487281875,
+            0.049319249999999995,
+            0.0539180625,
+            0.048624625,
+            0.04855725,
+            0.049219812499999994,
+            0.153671
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.048757593749999995,
+          "p95_ms": 0.153671,
+          "min_ms": 0.04855725,
+          "samples_ms": [
+            0.0488491875,
+            0.04867425,
+            0.048787,
+            0.0486146875,
+            0.0487145,
+            0.0487281875,
+            0.049319249999999995,
+            0.0539180625,
+            0.048624625,
+            0.04855725,
+            0.049219812499999994,
+            0.153671
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01620675,
+          "p95_ms": 0.01633325,
+          "min_ms": 0.0160711875,
+          "samples_ms": [
+            0.01633325,
+            0.01626625,
+            0.0162735,
+            0.016317625,
+            0.016194875,
+            0.016218625,
+            0.0160711875,
+            0.0161871875,
+            0.0161925625,
+            0.01611575,
+            0.01610475,
+            0.0162590625
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          115,
+          179,
+          100,
+          112,
+          197,
+          75,
+          160,
+          215,
+          199,
+          72,
+          151,
+          107,
+          194,
+          243
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.055343500000000004,
+            0.0549644375,
+            0.062702125,
+            0.05642925,
+            0.05638275,
+            0.056517125,
+            0.0564139375,
+            0.056395,
+            0.056307625,
+            0.056453625,
+            0.06249725,
+            0.0611379375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -65.0,
+          -46.0,
+          -43.0,
+          -42.0,
+          -37.0,
+          -31.0,
+          -30.0,
+          -56.0,
+          -43.0,
+          -35.0,
+          -32.0,
+          -31.0,
+          -31.0,
+          -27.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.05642159375,
+          "p95_ms": 0.062702125,
+          "min_ms": 0.0549644375,
+          "samples_ms": [
+            0.055343500000000004,
+            0.0549644375,
+            0.062702125,
+            0.05642925,
+            0.05638275,
+            0.056517125,
+            0.0564139375,
+            0.056395,
+            0.056307625,
+            0.056453625,
+            0.06249725,
+            0.0611379375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0162386875,
+          "p95_ms": 0.016396875,
+          "min_ms": 0.0161246875,
+          "samples_ms": [
+            0.016396875,
+            0.0162696875,
+            0.0162336875,
+            0.0162890625,
+            0.016249875,
+            0.016161375,
+            0.0161813125,
+            0.0162138125,
+            0.0161246875,
+            0.0161534375,
+            0.016284375,
+            0.0162436875
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "topk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          433,
+          653,
+          315,
+          356,
+          23,
+          253,
+          437,
+          331,
+          613,
+          535,
+          471,
+          428,
+          19,
+          538,
+          783,
+          340,
+          874,
+          559,
+          555,
+          523,
+          606
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.065451125,
+            0.06425525,
+            0.0653223125,
+            0.065384875,
+            0.06315462499999999,
+            0.0652931875,
+            0.0652530625,
+            0.062340374999999996,
+            0.061669375,
+            0.0618915,
+            0.061709687500000006,
+            0.17683975
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          97.0,
+          87.0,
+          84.0,
+          78.0,
+          77.0,
+          72.0,
+          72.0,
+          94.0,
+          90.0,
+          88.0,
+          87.0,
+          77.0,
+          75.0,
+          75.0,
+          115.0,
+          112.0,
+          107.0,
+          96.0,
+          94.0,
+          90.0,
+          90.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06475415625,
+          "p95_ms": 0.17683975,
+          "min_ms": 0.061669375,
+          "samples_ms": [
+            0.065451125,
+            0.06425525,
+            0.0653223125,
+            0.065384875,
+            0.06315462499999999,
+            0.0652931875,
+            0.0652530625,
+            0.062340374999999996,
+            0.061669375,
+            0.0618915,
+            0.061709687500000006,
+            0.17683975
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016735875,
+          "p95_ms": 0.01678,
+          "min_ms": 0.0167090625,
+          "samples_ms": [
+            0.0167660625,
+            0.0167371875,
+            0.0167759375,
+            0.01678,
+            0.0167556875,
+            0.0167345625,
+            0.016732875,
+            0.0167090625,
+            0.016749125,
+            0.016727375,
+            0.016725375,
+            0.016732875
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "midk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          975,
+          987,
+          996,
+          999,
+          13,
+          206,
+          260,
+          161,
+          170,
+          188,
+          211,
+          320,
+          335,
+          337,
+          926,
+          124,
+          141,
+          168,
+          184,
+          239,
+          255
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.065349375,
+            0.0652671875,
+            0.0624419375,
+            0.0615503125,
+            0.06186206250000001,
+            0.06172443749999999,
+            0.061907625,
+            0.062103500000000006,
+            0.061278124999999996,
+            0.06197274999999999,
+            0.061699437499999996,
+            0.061820062499999995
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -2.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06188484375,
+          "p95_ms": 0.065349375,
+          "min_ms": 0.061278124999999996,
+          "samples_ms": [
+            0.065349375,
+            0.0652671875,
+            0.0624419375,
+            0.0615503125,
+            0.06186206250000001,
+            0.06172443749999999,
+            0.061907625,
+            0.062103500000000006,
+            0.061278124999999996,
+            0.06197274999999999,
+            0.061699437499999996,
+            0.061820062499999995
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01675171875,
+          "p95_ms": 0.0168000625,
+          "min_ms": 0.01672725,
+          "samples_ms": [
+            0.0168000625,
+            0.016754875,
+            0.01674325,
+            0.0167509375,
+            0.01675625,
+            0.0167525,
+            0.0167689375,
+            0.016743375,
+            0.016739875,
+            0.01677925,
+            0.0167404375,
+            0.01672725
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          353,
+          518,
+          857,
+          56,
+          689,
+          16,
+          696,
+          750,
+          945,
+          557,
+          923,
+          439,
+          716,
+          483,
+          662,
+          795,
+          106,
+          41,
+          152,
+          462,
+          978
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.06997518750000001,
+            0.06531050000000001,
+            0.06533499999999999,
+            0.0652884375,
+            0.065164625,
+            0.0659583125,
+            0.06529025,
+            0.0654594375,
+            0.0651969375,
+            0.0651479375,
+            0.1254700625,
+            0.066035875
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -93.0,
+          -90.0,
+          -87.0,
+          -86.0,
+          -85.0,
+          -84.0,
+          -84.0,
+          -103.0,
+          -80.0,
+          -79.0,
+          -79.0,
+          -78.0,
+          -77.0,
+          -75.0,
+          -102.0,
+          -93.0,
+          -90.0,
+          -88.0,
+          -88.0,
+          -88.0,
+          -82.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06532275,
+          "p95_ms": 0.1254700625,
+          "min_ms": 0.0651479375,
+          "samples_ms": [
+            0.06997518750000001,
+            0.06531050000000001,
+            0.06533499999999999,
+            0.0652884375,
+            0.065164625,
+            0.0659583125,
+            0.06529025,
+            0.0654594375,
+            0.0651969375,
+            0.0651479375,
+            0.1254700625,
+            0.066035875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016744812499999998,
+          "p95_ms": 0.0170895625,
+          "min_ms": 0.0167281875,
+          "samples_ms": [
+            0.0167924375,
+            0.0170895625,
+            0.0167384375,
+            0.016735875,
+            0.016748375,
+            0.0167295,
+            0.0167468125,
+            0.0167281875,
+            0.016731,
+            0.0167428125,
+            0.0167940625,
+            0.016764125
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "topk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          32,
+          186,
+          14,
+          102,
+          114,
+          127,
+          179,
+          223,
+          15,
+          155,
+          242,
+          187,
+          254,
+          73
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.05646275,
+            0.0552159375,
+            0.0626075,
+            0.0564856875,
+            0.056456062499999994,
+            0.0564770625,
+            0.0564229375,
+            0.056438499999999996,
+            0.056382875,
+            0.0563546875,
+            0.0622945625,
+            0.061414
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          39.0,
+          38.0,
+          35.0,
+          34.0,
+          34.0,
+          34.0,
+          34.0,
+          53.0,
+          46.0,
+          45.0,
+          44.0,
+          41.0,
+          38.0,
+          36.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.05645940625,
+          "p95_ms": 0.0626075,
+          "min_ms": 0.0552159375,
+          "samples_ms": [
+            0.05646275,
+            0.0552159375,
+            0.0626075,
+            0.0564856875,
+            0.056456062499999994,
+            0.0564770625,
+            0.0564229375,
+            0.056438499999999996,
+            0.056382875,
+            0.0563546875,
+            0.0622945625,
+            0.061414
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016185375000000002,
+          "p95_ms": 0.01634825,
+          "min_ms": 0.016012,
+          "samples_ms": [
+            0.01634825,
+            0.016232,
+            0.016012,
+            0.01621075,
+            0.016214875,
+            0.016170375,
+            0.0161659375,
+            0.016193875,
+            0.0162868125,
+            0.016176875,
+            0.016045375,
+            0.0160383125
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "midk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          8,
+          54,
+          56,
+          99,
+          122,
+          144,
+          169,
+          225,
+          256,
+          70,
+          82,
+          141,
+          158,
+          165
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.048952999999999997,
+            0.048631375000000004,
+            0.0486055,
+            0.048820812500000005,
+            0.04863425,
+            0.052435999999999997,
+            0.047882875,
+            0.0485430625,
+            0.048715375000000005,
+            0.048545375,
+            0.1329708125,
+            0.0487605625
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.0486748125,
+          "p95_ms": 0.1329708125,
+          "min_ms": 0.047882875,
+          "samples_ms": [
+            0.048952999999999997,
+            0.048631375000000004,
+            0.0486055,
+            0.048820812500000005,
+            0.04863425,
+            0.052435999999999997,
+            0.047882875,
+            0.0485430625,
+            0.048715375000000005,
+            0.048545375,
+            0.1329708125,
+            0.0487605625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0162223125,
+          "p95_ms": 0.0168015625,
+          "min_ms": 0.016079875,
+          "samples_ms": [
+            0.0168015625,
+            0.01624275,
+            0.01623225,
+            0.016079875,
+            0.0163620625,
+            0.0162235,
+            0.016158875,
+            0.0161809375,
+            0.01634225,
+            0.016221125,
+            0.016164875,
+            0.0161778125
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 2,
+        "inner": 32,
+        "cols": 257,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "indices": [
+          105,
+          198,
+          95,
+          204,
+          53,
+          64,
+          77,
+          156,
+          1,
+          44,
+          253,
+          79,
+          172,
+          106
+        ],
+        "inner": 32,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.060645625,
+            0.06296381250000001,
+            0.060692249999999996,
+            0.06255993750000001,
+            0.0612488125,
+            0.062217249999999995,
+            0.0614413125,
+            0.0626844375,
+            0.0569781875,
+            0.0564098125,
+            0.0564314375,
+            0.056333062499999996
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -37.0,
+          -37.0,
+          -31.0,
+          -31.0,
+          -29.0,
+          -28.0,
+          -28.0,
+          -55.0,
+          -49.0,
+          -46.0,
+          -42.0,
+          -41.0,
+          -41.0,
+          -39.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06097053125,
+          "p95_ms": 0.06296381250000001,
+          "min_ms": 0.056333062499999996,
+          "samples_ms": [
+            0.060645625,
+            0.06296381250000001,
+            0.060692249999999996,
+            0.06255993750000001,
+            0.0612488125,
+            0.062217249999999995,
+            0.0614413125,
+            0.0626844375,
+            0.0569781875,
+            0.0564098125,
+            0.0564314375,
+            0.056333062499999996
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01617121875,
+          "p95_ms": 0.01644175,
+          "min_ms": 0.01606825,
+          "samples_ms": [
+            0.01644175,
+            0.016423875,
+            0.016164125,
+            0.016257125,
+            0.0161560625,
+            0.01606825,
+            0.0160974375,
+            0.01624275,
+            0.0161783125,
+            0.0161600625,
+            0.01608375,
+            0.0161809375
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "topk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          258,
+          959,
+          663,
+          842,
+          901,
+          36,
+          594,
+          380,
+          24,
+          451,
+          528,
+          289,
+          706,
+          254,
+          626,
+          958,
+          70,
+          310,
+          332,
+          621,
+          855
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "topk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.06293375,
+            0.0704356875,
+            0.0652461875,
+            0.0652444375,
+            0.0654208125,
+            0.06538812499999999,
+            0.06533868749999999,
+            0.06386675,
+            0.065136875,
+            0.0652608125,
+            0.1474095625,
+            0.06509875000000001
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          108.0,
+          107.0,
+          104.0,
+          100.0,
+          87.0,
+          86.0,
+          85.0,
+          95.0,
+          83.0,
+          79.0,
+          78.0,
+          74.0,
+          73.0,
+          72.0,
+          116.0,
+          114.0,
+          89.0,
+          86.0,
+          86.0,
+          83.0,
+          80.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06525349999999999,
+          "p95_ms": 0.1474095625,
+          "min_ms": 0.06293375,
+          "samples_ms": [
+            0.06293375,
+            0.0704356875,
+            0.0652461875,
+            0.0652444375,
+            0.0654208125,
+            0.06538812499999999,
+            0.06533868749999999,
+            0.06386675,
+            0.065136875,
+            0.0652608125,
+            0.1474095625,
+            0.06509875000000001
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016752375,
+          "p95_ms": 0.016815875,
+          "min_ms": 0.016729,
+          "samples_ms": [
+            0.016815875,
+            0.0167500625,
+            0.0167546875,
+            0.0167670625,
+            0.0167599375,
+            0.016729,
+            0.0167695,
+            0.0167440625,
+            0.016741,
+            0.0167365625,
+            0.016749625,
+            0.01678275
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "midk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          75,
+          98,
+          170,
+          239,
+          303,
+          379,
+          389,
+          593,
+          644,
+          672,
+          815,
+          916,
+          41,
+          169,
+          606,
+          631,
+          853,
+          891,
+          926,
+          941,
+          953
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "midk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.065405625,
+            0.0645095625,
+            0.065463125,
+            0.06264249999999999,
+            0.0611024375,
+            0.062408125,
+            0.06122593750000001,
+            0.06302625,
+            0.060286187500000005,
+            0.0625845625,
+            0.061419562500000004,
+            0.06228568749999999
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          0.0,
+          0.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06249634375,
+          "p95_ms": 0.065463125,
+          "min_ms": 0.060286187500000005,
+          "samples_ms": [
+            0.065405625,
+            0.0645095625,
+            0.065463125,
+            0.06264249999999999,
+            0.0611024375,
+            0.062408125,
+            0.06122593750000001,
+            0.06302625,
+            0.060286187500000005,
+            0.0625845625,
+            0.061419562500000004,
+            0.06228568749999999
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.016708624999999998,
+          "p95_ms": 0.0167945625,
+          "min_ms": 0.016669875,
+          "samples_ms": [
+            0.0167945625,
+            0.01671075,
+            0.016669875,
+            0.0167245625,
+            0.0166993125,
+            0.0167235,
+            0.01669825,
+            0.0167368125,
+            0.016700125,
+            0.0167385,
+            0.0166815625,
+            0.0167065
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    },
+    {
+      "request": {
+        "rows": 3,
+        "inner": 128,
+        "cols": 1025,
+        "k": 7,
+        "kind": "bottomk",
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "indices": [
+          151,
+          465,
+          570,
+          729,
+          639,
+          262,
+          517,
+          328,
+          578,
+          139,
+          736,
+          941,
+          958,
+          126,
+          17,
+          589,
+          464,
+          872,
+          558,
+          504,
+          805
+        ],
+        "inner": 128,
+        "k": 7,
+        "kind": "bottomk",
+        "matmul_accumulation": "sequential",
+        "matmul_kernel": "scalar",
+        "mode": "resident_only",
+        "readback_probe": null,
+        "resident_repetitions": 16,
+        "rows": 3,
+        "samples_ms": {
+          "resident_single_submit_per_op": [
+            0.06364218749999999,
+            0.06535256249999999,
+            0.065222625,
+            0.063162125,
+            0.06516581249999999,
+            0.065183375,
+            0.0629905625,
+            0.06523324999999999,
+            0.06519375,
+            0.065175,
+            0.15415656249999998,
+            0.065289125
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "validation_boundary": "before/after all fixed-operand intervals; no intervening maps or uploads",
+        "values": [
+          -106.0,
+          -96.0,
+          -93.0,
+          -92.0,
+          -85.0,
+          -82.0,
+          -80.0,
+          -94.0,
+          -91.0,
+          -83.0,
+          -82.0,
+          -79.0,
+          -79.0,
+          -78.0,
+          -103.0,
+          -98.0,
+          -94.0,
+          -90.0,
+          -84.0,
+          -83.0,
+          -83.0
+        ]
+      },
+      "timings": {
+        "resident_single_submit_per_op": {
+          "n": 12,
+          "median_ms": 0.06518856249999999,
+          "p95_ms": 0.15415656249999998,
+          "min_ms": 0.0629905625,
+          "samples_ms": [
+            0.06364218749999999,
+            0.06535256249999999,
+            0.065222625,
+            0.063162125,
+            0.06516581249999999,
+            0.065183375,
+            0.0629905625,
+            0.06523324999999999,
+            0.06519375,
+            0.065175,
+            0.15415656249999998,
+            0.065289125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0167174375,
+          "p95_ms": 0.0167706875,
+          "min_ms": 0.01669625,
+          "samples_ms": [
+            0.0167706875,
+            0.0167634375,
+            0.0167145,
+            0.0167260625,
+            0.01670375,
+            0.0167014375,
+            0.0167188125,
+            0.016706,
+            0.0167238125,
+            0.0167160625,
+            0.0167323125,
+            0.01669625
+          ]
+        }
+      },
+      "cuda_rank_contract": "stable sort; selected values and indices match the canonical reference"
+    }
+  ],
+  "gpu_process_gate": "no foreign compute PIDs at preflight/postflight; not an exclusive reservation",
+  "provenance": {
+    "valid": true,
+    "source_after": {
+      "repository": "/home/ryospiralarchitect/scratch/spiraltorch-midk-tile-eaa0ffb8",
+      "commit": "eaa0ffb8d0d560d3778cc9d92934c10c2a947833",
+      "tree": "96c2149d34ee4134701a2764f40e004d90804bdb",
+      "tracked_dirty": false,
+      "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "executable": {
+      "path": "/home/ryospiralarchitect/scratch/target-rank-adaptation-clean-307733f8/release/examples/resident_matmul_rank_bench",
+      "sha256": "98f9bf83fb40bdd2f815a1e4cdafeebb269ced6b3219aae29625f7f6281cb718",
+      "device": 64512,
+      "inode": 43943446,
+      "size": 9453264,
+      "mtime_ns": 1788678014058080378,
+      "mode": 33277
+    },
+    "execution_image": {
+      "path": "/home/ryospiralarchitect/scratch/target-rank-adaptation-clean-307733f8/release/examples/matmul-rank-execution-enuaaxlh/resident_matmul_rank_bench",
+      "sha256": "98f9bf83fb40bdd2f815a1e4cdafeebb269ced6b3219aae29625f7f6281cb718",
+      "device": 64512,
+      "inode": 43943446,
+      "size": 9453264,
+      "mtime_ns": 1788678014058080378,
+      "mode": 33277
+    }
+  }
+}

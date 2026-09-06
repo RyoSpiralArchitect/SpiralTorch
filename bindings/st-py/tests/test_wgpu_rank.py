@@ -70,7 +70,7 @@ def test_rank_lifecycle_and_exact_ties(kind, tile):
 
 @pytest.mark.skipif(not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test")
 @pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
-@pytest.mark.parametrize("cols,tile", [(1024, 1024), (1025, 1024), (1025, 1025), (2049, 2048)])
+@pytest.mark.parametrize("cols,tile", [(1024, 32), (1025, 32), (1025, 256), (1024, 1024), (1025, 1024), (1025, 1025), (2049, 2048)])
 def test_shared_and_storage_sort_boundaries(kind, cols, tile):
     values = [float(i * 37 % 101 - 50) for i in range(cols)]
     values[-1] = math.nan

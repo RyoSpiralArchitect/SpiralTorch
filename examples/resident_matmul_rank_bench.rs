@@ -106,6 +106,7 @@ mod native {
         r: Request,
         runtime: &runtime::WgpuRuntime,
         probe: bool,
+        resident_only: bool,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         let left = u64::from(r.rows) * u64::from(r.inner);
         let right = u64::from(r.inner) * u64::from(r.cols);
@@ -143,8 +144,12 @@ mod native {
         let mut samples: [Vec<f64>; 6] = std::array::from_fn(|_| Vec::new());
         let timing_blocks = if probe { 0 } else { 14 };
         for block in 0..timing_blocks {
-            for slot in 0..6 {
-                let mode = (slot + block + r.seed as usize % 6) % 6;
+            for slot in 0..if resident_only { 1 } else { 6 } {
+                let mode = if resident_only {
+                    4
+                } else {
+                    (slot + block + r.seed as usize % 6) % 6
+                };
                 rank.synchronize()?;
                 let start = Instant::now();
                 let resident = matches!(mode, 2 | 4 | 5);
@@ -174,13 +179,16 @@ mod native {
                     rank.synchronize()?;
                 }
                 let ms = start.elapsed().as_secs_f64() * 1000. / f64::from(repetitions);
-                // Validate every timed mode; resident snapshots are outside timing.
-                let actual = match actual {
-                    Some(output) => output,
-                    None => rank.snapshot()?.read()?,
-                };
-                if actual != expected {
-                    return Err("bridge parity failed".into());
+                // Isolated fixed-operand replay validates before/after ALL samples,
+                // without inserting maps or uploads between timed intervals.
+                if !resident_only {
+                    let actual = match actual {
+                        Some(output) => output,
+                        None => rank.snapshot()?.read()?,
+                    };
+                    if actual != expected {
+                        return Err("bridge parity failed".into());
+                    }
                 }
                 if block >= 2 {
                     samples[mode].push(ms);
@@ -242,15 +250,28 @@ mod native {
         } else {
             None
         };
+        let names = [
+            "host_bridge",
+            "device_copy_bridge",
+            "resident_copy_bridge_per_op",
+            "single_submit_bridge",
+            "resident_single_submit_per_op",
+            "resident_batched_submit_per_op",
+        ];
+        let timed = names
+            .into_iter()
+            .zip(samples)
+            .filter(|(_, values)| !values.is_empty())
+            .collect::<std::collections::BTreeMap<_, _>>();
         Ok(
             json!({"status":"passed", "kind":r.kind,"rows":r.rows,"inner":r.inner,"cols":r.cols,"k":r.k,"seed":r.seed,
             "matmul_kernel":matmul.kernel().as_str(),"matmul_accumulation":matmul.accumulation().as_str(),
             "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
-            "mode":if probe { "probe_only" } else { "comparison" },
+            "mode":if probe { "probe_only" } else if resident_only { "resident_only" } else { "comparison" },
+            "validation_boundary":if resident_only { "before/after all fixed-operand intervals; no intervening maps or uploads" } else { "each timed mode plus post-timing" },
             "readback_probe":readback_probe,
             "values":expected.values,"indices":expected.indices,"resident_repetitions":16,
-            "samples_ms":if probe { None } else { Some(json!({"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2],
-                "single_submit_bridge":samples[3],"resident_single_submit_per_op":samples[4],"resident_batched_submit_per_op":samples[5]})) }}),
+            "samples_ms":if probe { None } else { Some(timed) }}),
         )
     }
 
@@ -266,12 +287,21 @@ mod native {
             return Ok(());
         }
         let probe = args == ["--readback-probe"];
-        if !args.is_empty() && !probe {
-            return Err("usage: resident_matmul_rank_bench [--build-info|--readback-probe]".into());
+        let resident_only = args == ["--resident-only"];
+        if !args.is_empty() && !probe && !resident_only {
+            return Err(
+                "usage: resident_matmul_rank_bench [--build-info|--readback-probe|--resident-only]"
+                    .into(),
+            );
         }
         let (runtime, _) = runtime::ensure_default_runtime_blocking("resident.matmul.rank.bench")?;
         for line in io::stdin().lock().lines() {
-            match run(serde_json::from_str(&line?)?, &runtime, probe) {
+            match run(
+                serde_json::from_str(&line?)?,
+                &runtime,
+                probe,
+                resident_only,
+            ) {
                 Ok(result) => println!("{result}"),
                 Err(error) => {
                     println!("{}", json!({"status":"error","error":error.to_string()}));
