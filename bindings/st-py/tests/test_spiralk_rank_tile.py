@@ -2,6 +2,8 @@
 import pytest
 import spiraltorch.spiralk as sk
 
+pytestmark = pytest.mark.skipif(not hasattr(sk, "SpiralKContext"), reason="requires the kdsl feature")
+
 
 def context():
     return sk.SpiralKContext(2, 257, 7, False, 32, 256, 512, 2, 1)

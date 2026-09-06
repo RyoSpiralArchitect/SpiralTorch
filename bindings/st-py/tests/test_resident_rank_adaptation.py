@@ -6,10 +6,12 @@ import pytest
 import spiraltorch as st
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test"
+    not st.wgpu_kernel_reports_available() or not hasattr(st, "RankAdaptationSession"),
+    reason="requires native WGPU and kdsl features",
 )
 
 
+@pytest.mark.skipif(os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") != "1", reason="explicit GPU test")
 @pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
 @pytest.mark.parametrize("policy", ["ucb", "thompson_sampling"])
 def test_candidates_dispatch_without_rebuilding_plan_in_python(kind, policy):
