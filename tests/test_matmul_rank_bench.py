@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import bench_matmul_rank_vs_torch as bench
@@ -26,6 +27,17 @@ class CanonicalRankTest(unittest.TestCase):
 
 
 class ReadbackProbeTest(unittest.TestCase):
+    def test_native_pass_modes_are_explicit_and_exclusive(self):
+        result = SimpleNamespace(returncode=0, stderr="", stdout='{"status":"passed"}\n')
+        for probe, resident, flags in ((False, False, []), (True, False, ["--readback-probe"]),
+                                       (False, True, ["--resident-only"])):
+            with patch.object(bench.subprocess, "run", return_value=result) as child:
+                bench.run_native_pass(Path("fixture"), "payload", probe, resident)
+                self.assertEqual(child.call_args.args[0], ["fixture"] + flags)
+        with patch.object(bench.subprocess, "run") as child, self.assertRaises(ValueError):
+            bench.run_native_pass(Path("fixture"), "", True, True)
+        child.assert_not_called()
+
     def test_probe_rejects_comparison_samples_or_changed_outputs(self):
         request = dict(rows=1, inner=1, cols=8, k=1, kind="topk", seed=17)
         comparison = dict(values=[7.], indices=[4], adapter={"name": "fixture"})
@@ -45,8 +57,8 @@ class ReadbackProbeTest(unittest.TestCase):
                 native.assert_called_once_with(Path("fixture"), "", probe_only=True)
 
     def test_probe_is_separate_and_after_every_cuda_case(self):
-        for enabled in (False, True):
-            with self.subTest(enabled=enabled):
+        for enabled, isolated in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(enabled=enabled, isolated=isolated):
                 events = []
                 torch = MagicMock()
                 torch.__version__ = "fixture"
@@ -67,10 +79,11 @@ class ReadbackProbeTest(unittest.TestCase):
                 timing.paired_timings.side_effect = timed
                 timing.summarize.return_value = {"median_ms": 1.}
 
-                def native(image, payload):
+                def native(image, payload, resident_only=False):
                     events.append("native")
                     return [dict(json.loads(line), status="passed", adapter={"name": "fixture"},
-                                 values=[], indices=[], samples_ms={"fixture": [1.]})
+                                 values=[], indices=[], mode="resident_only" if resident_only else "comparison",
+                                 samples_ms={"resident_single_submit_per_op" if resident_only else "fixture": [1.]})
                             for line in payload.splitlines()]
 
                 def probe(*args):
@@ -89,9 +102,10 @@ class ReadbackProbeTest(unittest.TestCase):
                         patch.object(bench.audit, "load_bench_module", return_value=timing), \
                         patch.object(bench, "run_native_pass", side_effect=native) as native_pass, \
                         patch.object(bench, "collect_readback_diagnostics", side_effect=probe) as diagnostics:
-                    report = bench.run(Path(directory) / "fixture", enabled)
+                    report = bench.run(Path(directory) / "fixture", enabled, isolated)
                     self.assertEqual(len(report["cases"]), 18)
                     native_pass.assert_called_once()
+                    self.assertEqual(native_pass.call_args.kwargs, {"resident_only": isolated})
                     self.assertEqual(diagnostics.call_count, int(enabled))
                     self.assertEqual("readback_diagnostics" in report, enabled)
                     self.assertEqual(events, ["native"] + ["cuda"] * 18 + (["probe"] if enabled else []))

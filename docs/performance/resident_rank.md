@@ -178,6 +178,13 @@ not an isolated allocation baseline. The opt-in Rust test
 allocation with and without such an anchor. Keep these diagnostics separate
 from the harness's normal end-to-end/resident comparisons.
 
+`--resident-only` runs only sixteen composed calls plus a completion fence per
+interval, rather than interleaving host-to-host modes. It performs no maps or
+uploads between intervals; fixed-operand output is validated before and after
+all samples, not after every sample. Reports label this boundary explicitly.
+The Python wrapper can combine this option with a later, separate diagnostic
+pass, but one native invocation cannot mix the two modes.
+
 ## Measurement Boundaries
 
 The comparison separates the existing host API, a persistent-buffer
