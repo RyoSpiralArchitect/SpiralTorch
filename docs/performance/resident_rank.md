@@ -133,8 +133,9 @@ rank.upload(st.Tensor(1, 8193, list(map(float, range(8193)))))
 profile = rank.profile(16)
 ```
 
-Rust uses `WgpuRuntime::request_profiled_headless(label).await`, then
-`ResidentRank::dispatch_profiled(n)?.read()?` (or `read_async().await?` on WASM).
+Rust uses `ResidentRank::request_profiled(plan).await` or
+`ResidentRank::request_profiled_blocking(plan)`, then
+`dispatch_profiled(n)?.read()?` (or `read_async().await?` on WASM).
 `createFromAdaptation(session, index, true)` / Python's
 `from_adaptation(session, index, timestamp_queries=True)` retain the same Rust
 candidate geometry, but do not feed diagnostic timings back to the policy.
@@ -173,14 +174,16 @@ cancellation, rather than waiting for JavaScript garbage collection. This uses
 a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal
 query-handle Drop and all non-profiled execution retain their existing behavior.
 
-Native Rust callers sharing one device cannot overlap profile **encoding**:
-another active timestamp scope returns `TimestampProfilingBusy` before query
-allocation, submission or freshness changes. The guard ends when scopes are
-popped, not when readback completes. Distinct devices and ordinary dispatch
-remain unrestricted. Caller-owned device error scopes must not interleave
-with diagnostics, since wgpu's error-scope stack is device-wide. Python factories
-already create separate profiled devices; WASM pops scopes synchronously before
-returning a promise and its device handles are single-threaded.
+Rank profiling requires the dedicated factory's private device. Its runtime
+handles never escape, so another workspace's ordinary construction/dispatch
+cannot enter its device-wide scopes. `ResidentRank::new` with a shareable
+timestamp-enabled runtime still supports ordinary work, but profiling rejects
+with `ProfileRequiresPrivateDevice` before allocating queries or changing output
+freshness. No lock or coordination cost was added to ordinary dispatch. Python
+and WASM keep the same public `timestamp_queries` arguments and use the private
+factory internally. Profile construction validates all three error classes too.
+An internal device-scope lease remains as a defensive encoding check, not an
+execution/readback lock. WASM pops scopes synchronously before returning a promise.
 
 Profiled output remains stale until the corresponding query read and captured
 validation succeed. `synchronize()` alone does not publish it. Failed or dropped

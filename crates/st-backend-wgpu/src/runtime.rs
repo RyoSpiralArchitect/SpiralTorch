@@ -100,6 +100,8 @@ impl WgpuRuntime {
 
     /// Request a separate timestamp-enabled runtime, without replacing the default.
     /// Unsupported devices fail explicitly instead of fabricating CPU-based GPU timings.
+    /// This low-level runtime is shareable. Scoped rank profiling instead uses
+    /// `ResidentRank::request_profiled`, which never exposes its device handles.
     pub async fn request_profiled_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
         Self::request_headless_inner(label, true).await
     }

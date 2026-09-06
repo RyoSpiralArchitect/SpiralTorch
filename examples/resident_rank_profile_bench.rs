@@ -4,10 +4,7 @@
 mod native {
     use serde::Deserialize;
     use serde_json::{json, Value};
-    use st_backend_wgpu::{
-        rankk_exact_2ce::{resident::ResidentRank, Kind, Plan},
-        runtime::WgpuRuntime,
-    };
+    use st_backend_wgpu::rankk_exact_2ce::{resident::ResidentRank, Kind, Plan};
     use std::{
         io::{self, BufRead},
         time::Instant,
@@ -24,7 +21,7 @@ mod native {
         input: Vec<f32>,
     }
 
-    fn run(r: Request, runtime: &WgpuRuntime) -> Result<Value, Box<dyn std::error::Error>> {
+    fn run(r: Request) -> Result<Value, Box<dyn std::error::Error>> {
         let kind = match r.kind.as_str() {
             "topk" => Kind::TopK,
             "midk" => Kind::MidK,
@@ -67,7 +64,7 @@ mod native {
             }
             Ok(())
         };
-        let mut ws = ResidentRank::new(runtime.clone(), plan)?;
+        let mut ws = ResidentRank::request_profiled_blocking(plan)?;
         ws.upload(&r.input)?;
         let mut batches = Vec::new();
         for batch in 0..14 {
@@ -102,7 +99,7 @@ mod native {
             json!({"schema":"spiraltorch.rank_stage_probe.v1","status":"passed",
             "kind":r.kind,"rows":r.rows,"cols":r.cols,"k":r.k,"tile":r.tile,"repetitions":16,
             "warmup_pairs":2,"retained_pairs":12,"values":values,"indices":indices,
-            "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
+            "adapter":{"name":ws.adapter_info().name,"backend":format!("{:?}",ws.adapter_info().backend)},
             "boundary":"plain: dispatch call plus completion; profiled: query allocation/encoding/submit plus query readback; GPU pass clocks are diagnostic, not subtractable from host clocks",
             "batches":batches}),
         )
@@ -122,12 +119,11 @@ mod native {
         if !args.is_empty() {
             return Err("usage: resident_rank_profile_bench [--build-info]".into());
         }
-        let runtime = WgpuRuntime::request_profiled_headless_blocking("resident.rank.profile")?;
         let mut failed = false;
         for line in io::stdin().lock().lines() {
             let result = serde_json::from_str(&line?)
                 .map_err(|e| e.into())
-                .and_then(|r| run(r, &runtime));
+                .and_then(run);
             match result {
                 Ok(report) => println!("{report}"),
                 Err(error) => {

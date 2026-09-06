@@ -77,13 +77,13 @@ fn timestamp_request(value: Option<js_sys::Boolean>) -> Result<bool, JsValue> {
         .map(|v| v.unwrap_or(false))
 }
 
-async fn rank_runtime(timestamps: bool) -> Result<runtime::WgpuRuntime, JsValue> {
+async fn rank_workspace(plan: Plan, timestamps: bool) -> Result<ResidentRank, JsValue> {
     if timestamps {
-        runtime::WgpuRuntime::request_profiled_headless("wasm.profiled.rank")
+        ResidentRank::request_profiled(plan).await.map_err(error)
+    } else {
+        ResidentRank::new_async(ensure_runtime().await?, plan)
             .await
             .map_err(error)
-    } else {
-        ensure_runtime().await
     }
 }
 
@@ -336,9 +336,7 @@ impl WasmWgpuRank {
         let plan = Plan::try_new(spec.kind, spec.rows, spec.cols, spec.k, spec.tile_cols)
             .map_err(error)?;
         Ok(Self {
-            inner: ResidentRank::new_async(rank_runtime(timestamps).await?, plan)
-                .await
-                .map_err(error)?,
+            inner: rank_workspace(plan, timestamps).await?,
         })
     }
 
@@ -372,9 +370,7 @@ impl WasmWgpuRank {
         )
         .map_err(error)?;
         Ok(Self {
-            inner: ResidentRank::new_async(rank_runtime(timestamps).await?, plan)
-                .await
-                .map_err(error)?,
+            inner: rank_workspace(plan, timestamps).await?,
         })
     }
 

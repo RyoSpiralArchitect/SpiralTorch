@@ -99,7 +99,7 @@ pub(crate) struct TimestampValidation {
 }
 
 impl TimestampValidation {
-    async fn check(self) -> Result<(), WgpuRuntimeError> {
+    pub(crate) async fn check(self) -> Result<(), WgpuRuntimeError> {
         let validation = self.validation.await;
         let allocation = self.allocation.await;
         let internal = self.internal.await;

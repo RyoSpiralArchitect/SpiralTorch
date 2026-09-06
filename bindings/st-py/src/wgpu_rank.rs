@@ -37,16 +37,15 @@ mod enabled {
     impl PyWgpuRank {
         fn from_kernel_plan(py: Python<'_>, plan: Plan, timestamp_queries: bool) -> PyResult<Self> {
             py.detach(move || {
-                let runtime = if timestamp_queries {
-                    runtime::WgpuRuntime::request_profiled_headless_blocking("python.profiled.rank")
+                let inner = if timestamp_queries {
+                    ResidentRank::request_profiled_blocking(plan).map_err(error)?
                 } else {
-                    runtime::ensure_default_runtime_blocking("python.resident.rank")
-                        .map(|(runtime, _)| runtime)
-                }
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                Ok(Self {
-                    inner: ResidentRank::new(runtime, plan).map_err(error)?,
-                })
+                    let (runtime, _) =
+                        runtime::ensure_default_runtime_blocking("python.resident.rank")
+                            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                    ResidentRank::new(runtime, plan).map_err(error)?
+                };
+                Ok(Self { inner })
             })
         }
     }
