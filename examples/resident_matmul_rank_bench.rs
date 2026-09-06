@@ -26,9 +26,86 @@ mod native {
         seed: u64,
     }
 
+    fn readback_probe(
+        runtime: &runtime::WgpuRuntime,
+        payload: &[u8],
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let context = runtime.context();
+        let device = context.device();
+        let queue = context.queue();
+        let size = payload.len() as u64;
+        let source = runtime::upload_slice(
+            device,
+            "probe.source",
+            payload,
+            wgpu::BufferUsages::COPY_SRC,
+        )?;
+        let allocate = || {
+            runtime::empty_buffer::<u8>(
+                device,
+                "probe.staging",
+                payload.len(),
+                wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            )
+        };
+        let reused = allocate()?;
+        let copy = |target: &wgpu::Buffer| {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&source, 0, target, 0, size);
+            queue.submit(Some(encoder.finish()));
+        };
+        copy(&reused);
+        let mut samples: [Vec<serde_json::Value>; 3] = std::array::from_fn(|_| Vec::new());
+        for block in 0..14 {
+            for slot in 0..3 {
+                let mode = (slot + block) % 3;
+                runtime::submit_with_timeout(
+                    device,
+                    queue,
+                    [],
+                    std::time::Duration::from_secs(30),
+                    "readback.probe",
+                )?;
+                let started = Instant::now();
+                let fresh = if mode == 0 { Some(allocate()?) } else { None };
+                let target = fresh.as_ref().unwrap_or(&reused);
+                let allocated = Instant::now();
+                if mode != 2 {
+                    copy(target);
+                }
+                let submitted = Instant::now();
+                let data = runtime::map_read_bytes_with_timeout(
+                    device,
+                    target,
+                    0..size,
+                    std::time::Duration::from_secs(30),
+                    "readback.probe",
+                )?;
+                let mapped = Instant::now();
+                drop(fresh);
+                let released = Instant::now();
+                if data != payload {
+                    return Err("readback control bytes changed".into());
+                }
+                if block >= 2 {
+                    let ms = |end: Instant, start: Instant| (end - start).as_secs_f64() * 1000.;
+                    samples[mode].push(json!({
+                        "allocate":ms(allocated,started), "copy_submit":ms(submitted,allocated),
+                        "map_and_owned_copy":ms(mapped,submitted), "release":ms(released,mapped),
+                        "total":ms(released,started),
+                    }));
+                }
+            }
+        }
+        Ok(json!({"status":"passed", "bytes":size,
+            "boundary":"precompleted synthetic byte-copy control, not rank shader time; map includes owned host copy and unmap",
+            "samples_ms":{"fresh":samples[0],"reused":samples[1],"map_only_no_submit":samples[2]}}))
+    }
+
     fn run(
         r: Request,
         runtime: &runtime::WgpuRuntime,
+        probe: bool,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         let left = u64::from(r.rows) * u64::from(r.inner);
         let right = u64::from(r.inner) * u64::from(r.cols);
@@ -112,10 +189,22 @@ mod native {
         if rank.snapshot()?.read()? != expected {
             return Err("post-timing parity failed".into());
         }
+        let readback_probe = if probe {
+            let payload = expected
+                .values
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .chain(expected.indices.iter().flat_map(|v| v.to_le_bytes()))
+                .collect::<Vec<_>>();
+            Some(readback_probe(runtime, &payload)?)
+        } else {
+            None
+        };
         Ok(
             json!({"status":"passed", "kind":r.kind,"rows":r.rows,"inner":r.inner,"cols":r.cols,"k":r.k,"seed":r.seed,
             "matmul_kernel":matmul.kernel().as_str(),"matmul_accumulation":matmul.accumulation().as_str(),
             "adapter":{"name":runtime.adapter_info().name,"backend":format!("{:?}",runtime.adapter_info().backend)},
+            "readback_probe":readback_probe,
             "values":expected.values,"indices":expected.indices,"resident_repetitions":16,
             "samples_ms":{"host_bridge":samples[0],"device_copy_bridge":samples[1],"resident_copy_bridge_per_op":samples[2],
                 "single_submit_bridge":samples[3],"resident_single_submit_per_op":samples[4],"resident_batched_submit_per_op":samples[5]}}),
@@ -133,12 +222,13 @@ mod native {
             );
             return Ok(());
         }
-        if !args.is_empty() {
-            return Err("usage: resident_matmul_rank_bench [--build-info]".into());
+        let probe = args == ["--readback-probe"];
+        if !args.is_empty() && !probe {
+            return Err("usage: resident_matmul_rank_bench [--build-info|--readback-probe]".into());
         }
         let (runtime, _) = runtime::ensure_default_runtime_blocking("resident.matmul.rank.bench")?;
         for line in io::stdin().lock().lines() {
-            match run(serde_json::from_str(&line?)?, &runtime) {
+            match run(serde_json::from_str(&line?)?, &runtime, probe) {
                 Ok(result) => println!("{result}"),
                 Err(error) => {
                     println!("{}", json!({"status":"error","error":error.to_string()}));

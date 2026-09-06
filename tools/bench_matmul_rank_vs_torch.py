@@ -18,7 +18,7 @@ def require_canonical_indices(actual, expected):
         raise RuntimeError("CUDA rank indices differ from the canonical stable selection")
 
 
-def run(executable):
+def run(executable, readback_probe=False):
     require_uncontended_gpu()
     import torch
     torch.set_num_threads(1)
@@ -45,7 +45,8 @@ def run(executable):
         binding = audit.validate_source_binding(identity, before)
         if not binding["valid"]:
             raise RuntimeError(f"source/build mismatch: {binding}")
-        native = subprocess.run([str(image)], input=payload, text=True, capture_output=True, timeout=180)
+        native = subprocess.run([str(image)] + (["--readback-probe"] if readback_probe else []),
+            input=payload, text=True, capture_output=True, timeout=180)
         if native.returncode or native.stderr:
             raise RuntimeError(f"native benchmark failed: {native.returncode} {native.stderr[-3000:]} {native.stdout[-3000:]}")
         results = [json.loads(line) for line in native.stdout.splitlines()]
@@ -57,6 +58,7 @@ def run(executable):
             torch=str(torch.__version__), torch_device=torch.cuda.get_device_name(),
             dtype="float32", tf32=bool(torch.backends.cuda.matmul.allow_tf32), torch_cpu_threads=torch.get_num_threads(),
             comparison="bounded integer projection heads; frameworks measured in separate blocks",
+            readback_probe_requested=readback_probe,
             boundaries={
                 "host_bridge":"resident operands; matmul, full intermediate map, rank upload/dispatch, final rank map",
                 "device_copy_bridge":"resident operands; matmul, GPU-local intermediate copy, rank dispatch, final rank map",
@@ -72,6 +74,8 @@ def run(executable):
                     raise RuntimeError("native result/request mismatch")
                 if result["adapter"]["name"] != torch.cuda.get_device_name():
                     raise RuntimeError("WGPU and CUDA must select the same named GPU")
+                if readback_probe and result.get("readback_probe", {}).get("status") != "passed":
+                    raise RuntimeError("readback control did not pass")
                 left = torch.tensor(r["lhs"], dtype=torch.float32).reshape(r["rows"], r["inner"])
                 right = torch.tensor(r["rhs"], dtype=torch.float32).reshape(r["inner"], r["cols"])
                 reference = left @ right
@@ -121,9 +125,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--readback-probe", action="store_true",
+                        help="add native allocation/copy/map controls; not GPU-event times")
     args = parser.parse_args()
     try:
-        report = run(args.executable.resolve(strict=True))
+        report = run(args.executable.resolve(strict=True), args.readback_probe)
     except Exception as error:
         report = dict(schema="spiraltorch.matmul_rank_comparison.v1", status="error", error=str(error))
     audit.write_report_exclusive(args.output, report)
