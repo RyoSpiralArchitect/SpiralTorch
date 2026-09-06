@@ -116,30 +116,25 @@ impl WgpuRuntime {
         timestamps: bool,
     ) -> Result<Self, WgpuRuntimeError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let mut selected = None;
-        for (power_preference, force_fallback_adapter) in [
-            (wgpu::PowerPreference::HighPerformance, false),
-            (wgpu::PowerPreference::LowPower, false),
-            (wgpu::PowerPreference::LowPower, true),
-        ] {
-            let options = wgpu::RequestAdapterOptions {
-                power_preference,
-                compatible_surface: None,
-                force_fallback_adapter,
-            };
-            if let Some(adapter) = instance.request_adapter(&options).await {
-                selected = Some(adapter);
-                break;
-            }
-        }
-        let adapter = selected.ok_or(WgpuRuntimeError::NoAdapter)?;
+        let instance = &instance;
+        let adapter = request_compatible_headless_adapter(
+            timestamps,
+            |power_preference, force_fallback_adapter| async move {
+                let options = wgpu::RequestAdapterOptions {
+                    power_preference,
+                    compatible_surface: None,
+                    force_fallback_adapter,
+                };
+                let adapter = instance.request_adapter(&options).await?;
+                let features = adapter.features();
+                Some((adapter, features))
+            },
+        )
+        .await?;
         let adapter_info = adapter.get_info();
         let optional_features = wgpu::Features::SUBGROUP | wgpu::Features::SHADER_F16;
         let mut required_features = adapter.features() & optional_features;
         if timestamps {
-            if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
-                return Err(WgpuRuntimeError::TimestampQueriesUnavailable);
-            }
             required_features |= wgpu::Features::TIMESTAMP_QUERY;
         }
         let (device, queue) = adapter
@@ -160,6 +155,31 @@ impl WgpuRuntime {
             adapter_info,
         ))
     }
+}
+
+async fn request_compatible_headless_adapter<A, F, Fut>(
+    timestamps: bool,
+    mut request: F,
+) -> Result<A, WgpuRuntimeError>
+where
+    F: FnMut(wgpu::PowerPreference, bool) -> Fut,
+    Fut: std::future::Future<Output = Option<(A, wgpu::Features)>>,
+{
+    let mut unavailable = WgpuRuntimeError::NoAdapter;
+    for (preference, fallback) in [
+        (wgpu::PowerPreference::HighPerformance, false),
+        (wgpu::PowerPreference::LowPower, false),
+        (wgpu::PowerPreference::LowPower, true),
+    ] {
+        if let Some((adapter, features)) = request(preference, fallback).await {
+            if timestamps && !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+                unavailable = WgpuRuntimeError::TimestampQueriesUnavailable;
+                continue;
+            }
+            return Ok(adapter);
+        }
+    }
+    Err(unavailable)
 }
 
 /// Failures while sizing, allocating, or reading WGPU buffers.
@@ -852,6 +872,44 @@ pub fn read_buffer<T: Pod>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn adapter_search_filters_features_before_accepting_a_preference() {
+        let empty = Some(wgpu::Features::empty());
+        let capable = Some(wgpu::Features::TIMESTAMP_QUERY);
+        let preferences = [
+            (wgpu::PowerPreference::HighPerformance, false),
+            (wgpu::PowerPreference::LowPower, false),
+            (wgpu::PowerPreference::LowPower, true),
+        ];
+        for (timestamps, candidates, expected) in [
+            (true, [empty, capable, None], Ok(1)),
+            (true, [empty, None, capable], Ok(2)),
+            (true, [None, None, None], Err(WgpuRuntimeError::NoAdapter)),
+            (
+                true,
+                [empty, None, None],
+                Err(WgpuRuntimeError::TimestampQueriesUnavailable),
+            ),
+            (false, [empty, capable, capable], Ok(0)),
+            (true, [capable, capable, capable], Ok(0)),
+        ] {
+            let mut candidates = candidates.into_iter();
+            let mut probes = Vec::new();
+            let selected = pollster::block_on(request_compatible_headless_adapter(
+                timestamps,
+                |preference, fallback| {
+                    let index = probes.len();
+                    probes.push((preference, fallback));
+                    std::future::ready(candidates.next().unwrap().map(|features| (index, features)))
+                },
+            ));
+            assert_eq!(selected, expected);
+            let expected_probes = expected.map_or(3, |index| index + 1);
+            assert_eq!(probes, preferences[..expected_probes]);
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
