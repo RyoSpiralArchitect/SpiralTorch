@@ -11,7 +11,7 @@ def test_hard_rank_tile_does_not_replace_fft_or_compaction():
     result = context().eval("rank_tile: 64; tile_cols: 512; ctile: 128;")
     assert result["hard"]["rank_tile"] == 64
     assert result["hard"]["tile_cols"] == 512
-    assert result["hard"]["ctile"] == 128
+    assert result["hard"]["compaction_tile"] == 128
 
 
 def test_public_hint_synthesizes_a_real_rank_soft_rule():
