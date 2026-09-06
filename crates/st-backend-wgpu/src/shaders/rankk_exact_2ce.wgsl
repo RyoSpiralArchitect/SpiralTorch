@@ -4,6 +4,8 @@ const KIND_TOPK: u32 = 0u;
 const KIND_MIDK: u32 = 1u;
 const INVALID_INDEX: u32 = 0xffffffffu;
 const LOCAL_SORT_CAPACITY: u32 = 1024u;
+const MERGE_PARALLEL_MIDK: u32 = 1u;
+const MERGE_TOURNAMENT_MIDK: u32 = 2u;
 
 struct Params {
     rows: u32,
@@ -13,7 +15,7 @@ struct Params {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    _pad: u32,
+    merge_mode: u32,
 };
 
 @group(0) @binding(0) var<storage, read> input_values: array<f32>;
@@ -33,6 +35,7 @@ var<workgroup> merge_start: u32;
 var<workgroup> merge_end: u32;
 var<workgroup> sort_values: array<f32, 1024>;
 var<workgroup> sort_indices: array<u32, 1024>;
+var<workgroup> tournament_nodes: array<u32, 512>;
 
 fn float_total_key(value: f32) -> u32 {
     let bits = bitcast<u32>(value);
@@ -116,6 +119,86 @@ fn row_count_before(row: u32, key: u32, index: u32, lane: u32) -> u32 {
     // All lanes must finish reading before a later search reuses this scratch.
     workgroupBarrier();
     return total;
+}
+
+fn tournament_winner(left: u32, right: u32) -> u32 {
+    return select(left, right, candidate_before(
+        merge_values[right], merge_indices[right],
+        merge_values[left], merge_indices[left],
+    ));
+}
+
+// One cached head per tile; after emitting a winner only its ancestors change.
+// Parallel construction is followed by a dependency-ordered O(k log tiles)
+// update loop, with no per-output workgroup or storage barrier.
+fn merge_midk_tournament(
+    row: u32, lane: u32, rank_start: u32, rank_end: u32,
+    seek_prefix: bool, cutoff_key: u32, cutoff_index: u32,
+) {
+    var leaf_count = 1u;
+    loop {
+        if (leaf_count >= params.tiles_x) { break; }
+        leaf_count = leaf_count << 1u;
+    }
+    var cursor = 0u;
+    var value = 0.0;
+    var index = INVALID_INDEX;
+    if (lane < params.tiles_x) {
+        let state = row * params.tiles_x + lane;
+        if (seek_prefix) {
+            cursor = tile_lower_bound(state, cutoff_key, cutoff_index);
+        }
+        if (cursor < tile_counts[state]) {
+            let address = state * params.tile_stride + cursor;
+            value = scratch_values[address];
+            index = scratch_indices[address];
+        }
+    }
+    merge_values[lane] = value;
+    merge_indices[lane] = index;
+    merge_tiles[lane] = cursor;
+    if (lane < leaf_count) { tournament_nodes[leaf_count + lane] = lane; }
+    for (var output_slot = lane; output_slot < params.k; output_slot = output_slot + 256u) {
+        output_values[row * params.k + output_slot] = 0x7fc00000u;
+        output_indices[row * params.k + output_slot] = INVALID_INDEX;
+    }
+    storageBarrier();
+    workgroupBarrier();
+    for (var stride = leaf_count >> 1u; stride > 0u; stride = stride >> 1u) {
+        if (lane < stride) {
+            let node = stride + lane;
+            tournament_nodes[node] = tournament_winner(
+                tournament_nodes[node * 2u], tournament_nodes[node * 2u + 1u],
+            );
+        }
+        workgroupBarrier();
+    }
+    if (lane == 0u) {
+        for (var rank = select(0u, rank_start, seek_prefix); rank < rank_end; rank = rank + 1u) {
+            let tile = tournament_nodes[1];
+            if (merge_indices[tile] == INVALID_INDEX) { break; }
+            if (rank >= rank_start) {
+                let destination = row * params.k + rank - rank_start;
+                output_values[destination] = bitcast<u32>(merge_values[tile]);
+                output_indices[destination] = merge_indices[tile];
+            }
+            let state = row * params.tiles_x + tile;
+            let next = merge_tiles[tile] + 1u;
+            merge_tiles[tile] = next;
+            merge_values[tile] = 0.0;
+            merge_indices[tile] = INVALID_INDEX;
+            if (next < tile_counts[state]) {
+                let address = state * params.tile_stride + next;
+                merge_values[tile] = scratch_values[address];
+                merge_indices[tile] = scratch_indices[address];
+            }
+            for (var node = (leaf_count + tile) >> 1u; node > 0u; node = node >> 1u) {
+                tournament_nodes[node] = tournament_winner(
+                    tournament_nodes[node * 2u], tournament_nodes[node * 2u + 1u],
+                );
+            }
+        }
+    }
 }
 
 fn swap_scratch(left: u32, right: u32) {
@@ -299,7 +382,7 @@ fn rankk_exact_2ce_row_merge(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let parallel_midk = params.kind == KIND_MIDK && params.tiles_x <= 32u;
+    let parallel_midk = params.merge_mode == MERGE_PARALLEL_MIDK;
     let row = select(workgroup_id.x, workgroup_id.y, parallel_midk);
     if (row >= params.rows) {
         return;
@@ -397,6 +480,12 @@ fn rankk_exact_2ce_row_merge(
                 }
             }
         }
+    }
+
+    if (params.merge_mode == MERGE_TOURNAMENT_MIDK) {
+        merge_midk_tournament(row, local_id.x, rank_start, rank_end,
+            seek_prefix, cutoff_key, cutoff_index);
+        return;
     }
 
     var tile = local_id.x;

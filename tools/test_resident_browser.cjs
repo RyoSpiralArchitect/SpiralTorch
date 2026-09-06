@@ -9,10 +9,10 @@ const {chromium} = require("playwright");
 async function main() {
   const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes, fixture] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-adaptation|matmul|matmul-rank]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-adaptation|matmul|matmul-rank]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-adaptation", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
-  const rankFixture = fixture === "rank" || fixture === "rank-active-lanes";
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-adaptation", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
+  const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
   let metadata = {}, pageErrors = [], consoleMessages = [];
@@ -74,6 +74,7 @@ async function main() {
     if(accumulations) params.set("accumulations",accumulations);
     if(shapes) params.set("shapes",shapes);
     if(fixture === "rank-active-lanes") params.set("suite","active-lanes");
+    if(fixture === "rank-tournament") params.set("suite","tournament");
     const query = "?"+params.toString();
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);

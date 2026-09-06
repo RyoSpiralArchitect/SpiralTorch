@@ -422,13 +422,20 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn midk_parallel_destinations_and_padding_remain_disjoint_when_enabled() {
+    fn midk_merge_destinations_and_padding_remain_disjoint_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
         }
         let runtime =
             pollster::block_on(WgpuRuntime::request_headless("midk.tile.ownership")).unwrap();
-        for (cols, tile) in [(1024, 32), (1025, 32), (1025, 256), (2049, 1025)] {
+        for (cols, tile) in [
+            (1024, 32),
+            (1025, 32),
+            (1025, 256),
+            (2049, 1025),
+            (2047, 8),
+            (2055, 8),
+        ] {
             for k in [1, 7, cols] {
                 let plan = Plan::try_new(Kind::MidK, 3, cols, k, tile).unwrap();
                 let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();

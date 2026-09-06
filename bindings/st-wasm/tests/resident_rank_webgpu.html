@@ -6,8 +6,9 @@
 const out = document.querySelector("#result");
 const report = {schema:"spiraltorch.browser_resident_rank.v1", cases:[], assertions:[],
   boundary:"resident dispatch + four-byte completion fence; upload and full readback excluded"};
-const activeLanes = new URLSearchParams(location.search).get("suite")==="active-lanes";
-report.fixture_suite = activeLanes ? "active-lanes" : "standard";
+const suite = new URLSearchParams(location.search).get("suite");
+const activeLanes = suite==="active-lanes", tournament = suite==="tournament";
+report.fixture_suite = tournament ? "tournament" : activeLanes ? "active-lanes" : "standard";
 function assert(ok, message) { if(!ok) throw Error(message); report.assertions.push(message); }
 async function rejects(fn, label) { let failed=false; try { await fn(); } catch { failed=true; } assert(failed,label); }
 function reference(input, rows, cols, k, kind) {
@@ -39,14 +40,15 @@ try {
   }
   await rejects(()=>WgpuRank.create("unknown",1,8,2),"invalid kind");
   await rejects(()=>WgpuRank.create("topk",1,8,9),"k exceeds columns");
-  const geometries = activeLanes ? [1,2,3,5,17,33,65,129,257].flatMap(tiles=>
+  const geometries = tournament ? [32,33,63,64,65,127,128,129,255,256,257].flatMap(tiles=>
+    [1,7,65,256].map(k=>[tiles*32-1,32,k])) : activeLanes ? [1,2,3,5,17,33,65,129,257].flatMap(tiles=>
     [1,7,Math.min(65,tiles*32-1)].map(k=>[tiles*32-1,32,k])) : [
     ...[8,70,128,257,1024].map(tile=>[513,tile]),
     [1,1], [1024,32], [1025,32], [1025,256], [1024,256], [1024,1024], [1025,1024], [1025,1025],
     [2049,1023], [2049,1024], [2049,1025], [2049,2048],
     [257,1], [1025,8], [4097,128], [8193,256],
   ];
-  for(const kind of ["topk","midk","bottomk"]) for(const [cols,tile,requestedK] of geometries) {
+  for(const kind of tournament ? ["midk"] : ["topk","midk","bottomk"]) for(const [cols,tile,requestedK] of geometries) {
     const rows=2, k=requestedK ?? Math.min(7,cols);
     const input=Float32Array.from({length:rows*cols},(_,i)=>(i*37%101-50)/7);
     input[0]=-0; input[1]=0; input[2]=Infinity; input.fill(NaN,cols); input[cols+1]=1;
@@ -67,15 +69,16 @@ try {
     ws.dispatch();
     check(await first,expected);
     ws.upload(input); ws.dispatch(); await ws.synchronize();
-    const times=[];
-    for(let i=0;i<10;i++) { const t=performance.now(); ws.dispatch(8); await ws.synchronize(); times.push((performance.now()-t)/8); }
+    const times=[], repetitions=tournament ? 2 : 8;
+    for(let i=0;i<(tournament ? 3 : 10);i++) { const t=performance.now(); ws.dispatch(repetitions); await ws.synchronize(); times.push((performance.now()-t)/repetitions); }
     const pending=ws.readback(); ws.free();
     const result=await pending;
     assert(result.generation===3n,"snapshot generation survives workspace free");
     check(result,expected);
-    report.cases.push({kind,rows,cols,k,tile_cols:tile,samples_ms:times,status:"passed"});
+    report.cases.push({kind,rows,cols,k,tile_cols:tile,repetitions,samples_ms:times,status:"passed"});
   }
-  for(const [cols,tile] of [[1024,32],[1025,32],[1025,256]]) {
+  const fullKGeometries = [[1024,32],[1025,32],[1025,256],...(tournament ? [[2047,8],[2055,8]] : [])];
+  for(const [cols,tile] of fullKGeometries) {
     const rows=3, k=cols;
     const ws=await WgpuRank.create("midk",rows,cols,k,tile);
     const pending=[];

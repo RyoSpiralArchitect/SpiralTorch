@@ -28,6 +28,14 @@ const STORAGE_BINDINGS: u32 = 7;
 const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum MergeMode {
+    Streaming = 0,
+    ParallelMidk = 1,
+    TournamentMidk = 2,
+}
+
 /// Validated shape and tile geometry for exact two-command rank-k execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Plan {
@@ -103,9 +111,21 @@ impl Plan {
         self.tiles_x
     }
 
-    // Keep this grid in sync with the shader's bounded parallel MidK branch.
+    const fn merge_mode(self) -> MergeMode {
+        if matches!(self.kind, Kind::MidK) {
+            if self.tiles_x <= 32 {
+                return MergeMode::ParallelMidk;
+            }
+            if self.tiles_x <= WORKGROUP_SIZE {
+                return MergeMode::TournamentMidk;
+            }
+        }
+        MergeMode::Streaming
+    }
+
+    // The same Rust-owned mode controls both the dispatch grid and WGSL branch.
     const fn merge_workgroups(self) -> (u32, u32) {
-        if matches!(self.kind, Kind::MidK) && self.tiles_x <= 32 {
+        if matches!(self.merge_mode(), MergeMode::ParallelMidk) {
             (self.tiles_x, self.rows)
         } else {
             (self.rows, 1)
@@ -141,7 +161,7 @@ impl Plan {
             tile_stride: self.tile_stride,
             tiles_x: self.tiles_x,
             kind: self.kind.as_uniform(),
-            _pad: 0,
+            merge_mode: self.merge_mode() as u32,
         }
     }
 
@@ -224,7 +244,7 @@ struct ParamsUniform {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    _pad: u32,
+    merge_mode: u32,
 }
 
 /// Device-owned pipelines shared by repeated exact rank-k dispatches.
@@ -608,6 +628,31 @@ mod tests {
     }
 
     #[test]
+    fn rust_merge_mode_drives_uniform_and_grid_at_each_boundary() {
+        assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
+        for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
+            for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+                let plan = Plan::try_new(kind, 3, tiles * 8 - 1, 1, 8).unwrap();
+                let mode = match (kind, tiles) {
+                    (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
+                    (Kind::MidK, 33..=256) => MergeMode::TournamentMidk,
+                    _ => MergeMode::Streaming,
+                };
+                assert_eq!(plan.merge_mode(), mode);
+                assert_eq!(plan.params().merge_mode, mode as u32);
+                assert_eq!(
+                    plan.merge_workgroups(),
+                    if mode == MergeMode::ParallelMidk {
+                        (tiles, 3)
+                    } else {
+                        (3, 1)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn exact_rank_2ce_runtime_matches_cpu_reference_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
@@ -747,7 +792,7 @@ mod tests {
             // A sole finite candidate in the last partial tile must survive
             // every padded reduction level, also when tiles exceed 256 lanes.
             input[2 * cols as usize - 1] = -3.0;
-            for k in [1, 7.min(cols), 65.min(cols)] {
+            for k in [1, 7.min(cols), 65.min(cols), 256.min(cols)] {
                 for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
                     let plan = Plan::try_new(kind, 5, cols, k, 8).unwrap();
                     assert_eq!(plan.tiles_x(), tiles);
