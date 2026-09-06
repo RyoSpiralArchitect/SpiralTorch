@@ -273,6 +273,7 @@ impl ResidentRank {
     }
 
     fn encode_dispatch(&self, encoder: &mut wgpu::CommandEncoder, repetitions: u32) {
+        let (merge_x, merge_y) = self.plan.merge_workgroups();
         for _ in 0..repetitions {
             // Separate passes provide the storage dependency between sort and merge.
             for (pipeline, x, y) in [
@@ -281,7 +282,7 @@ impl ResidentRank {
                     self.plan.tiles_x(),
                     self.plan.rows(),
                 ),
-                (&self.pipelines.row_merge, self.plan.rows(), 1),
+                (&self.pipelines.row_merge, merge_x, merge_y),
             ] {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("resident.rank.pass"),
@@ -418,6 +419,45 @@ mod tests {
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::rankk_exact_2ce::{tests::cpu_reference, Kind};
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn midk_parallel_destinations_and_padding_remain_disjoint_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("midk.tile.ownership")).unwrap();
+        for (cols, tile) in [(1024, 32), (1025, 32), (1025, 256), (2049, 1025)] {
+            for k in [1, 7, cols] {
+                let plan = Plan::try_new(Kind::MidK, 3, cols, k, tile).unwrap();
+                let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();
+                for iteration in 0..4 {
+                    let mut input = vec![f32::NAN; 3 * cols as usize];
+                    if iteration % 2 == 0 {
+                        input[..cols as usize].fill(1.0);
+                        input[cols as usize] = -0.0;
+                        input[cols as usize * 2 - 2] = 0.0;
+                        input[cols as usize * 2 - 1] = -3.0;
+                    }
+                    let expected = cpu_reference(Kind::MidK, 3, cols, k, &input);
+                    rank.upload(&input).unwrap();
+                    rank.dispatch(3).unwrap();
+                    let result = rank.snapshot().unwrap().read().unwrap();
+                    assert_eq!(
+                        result.indices, expected.indices,
+                        "cols={cols} tile={tile} k={k}"
+                    );
+                    for (actual, expected) in result.values.iter().zip(expected.values) {
+                        assert!(
+                            (actual.is_nan() && expected.is_nan())
+                                || actual.to_bits() == expected.to_bits()
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn combined_readback_preserves_float_bits_and_signed_indices() {

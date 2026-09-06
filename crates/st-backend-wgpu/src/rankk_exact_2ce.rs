@@ -103,6 +103,15 @@ impl Plan {
         self.tiles_x
     }
 
+    // Keep this grid in sync with the shader's bounded parallel MidK branch.
+    const fn merge_workgroups(self) -> (u32, u32) {
+        if matches!(self.kind, Kind::MidK) && self.tiles_x <= 32 {
+            (self.tiles_x, self.rows)
+        } else {
+            (self.rows, 1)
+        }
+    }
+
     pub const fn is_empty(self) -> bool {
         self.rows == 0 || self.cols == 0 || self.k == 0
     }
@@ -436,7 +445,8 @@ pub fn dispatch_host(
         });
         pass.set_pipeline(&pipelines.row_merge);
         pass.set_bind_group(0, &bind_group, &[]);
-        pass.dispatch_workgroups(plan.rows, 1, 1);
+        let (x, y) = plan.merge_workgroups();
+        pass.dispatch_workgroups(x, y, 1);
     }
     queue.submit(Some(second.finish()));
 
@@ -573,6 +583,31 @@ mod tests {
     }
 
     #[test]
+    fn merge_grid_matches_bounded_midk_selection() {
+        for (cols, tile, expected) in [
+            (1, 1, (1, 3)),
+            (1025, 256, (5, 3)),
+            (1024, 32, (32, 3)),
+            (1025, 32, (3, 1)),
+        ] {
+            assert_eq!(
+                Plan::try_new(Kind::MidK, 3, cols, 1, tile)
+                    .unwrap()
+                    .merge_workgroups(),
+                expected
+            );
+            for kind in [Kind::TopK, Kind::BottomK] {
+                assert_eq!(
+                    Plan::try_new(kind, 3, cols, 1, tile)
+                        .unwrap()
+                        .merge_workgroups(),
+                    (3, 1)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn exact_rank_2ce_runtime_matches_cpu_reference_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
@@ -643,6 +678,9 @@ mod tests {
         let pipelines = Pipelines::new(&device).unwrap();
         for (cols, tile) in [
             (1, 1),
+            (1024, 32),
+            (1025, 32),
+            (1025, 256),
             (1024, 256),
             (1024, 1024),
             (1025, 1024),

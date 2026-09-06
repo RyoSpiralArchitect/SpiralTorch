@@ -42,7 +42,12 @@ constant NaN expression, and uses `workgroupUniformLoad` for the merge-loop boun
 Neither change disables shader validation or changes the CPU ordering contract.
 For MidK with at most 32 tiles, candidates find their global rank through
 parallel binary searches over the sorted tiles. This avoids serially discarding
-half of each row. More fragmented geometries retain the existing GPU merge.
+half of each row. One merge workgroup owns each candidate tile, rather than one
+workgroup scanning every tile in a row. The total (value, index) order gives each
+valid candidate a unique output destination. Only the disjoint missing-value
+tail is initialized, so one workgroup cannot overwrite another's valid output.
+Host and resident execution share the same checked dispatch grid. More fragmented
+geometries retain the existing GPU merge; planner tile choices remain unchanged.
 
 Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
 publishing their sorted run to global scratch only once. Larger tiles keep the
