@@ -392,6 +392,9 @@ These APIs are not in the published 0.4.27 wheel yet.
   produced by `st-tensor` as either a static host contract or an accelerator
   dispatch/readback sentinel; Python never supplies or reconstructs a naked `Ready`
   capability list.
+- `WgpuRank` / `wgpu.WgpuRank` for persistent exact TopK/MidK/BottomK storage,
+  enqueue-only dispatch and combined value/index readback. See the
+  [shared WASM/Python/Rust guide](../../docs/performance/resident_rank.md).
 - `RankAdaptationSession` for bounded SpiralK candidate compilation and Black
   Cat selection over one rank workload. `choose()` returns a typed
   `RankAdaptationSelection`; its `.plan` is the selected `RankPlan` and its

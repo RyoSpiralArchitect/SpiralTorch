@@ -1,5 +1,6 @@
-use js_sys::{Float32Array, JsString, Number, Promise};
+use js_sys::{Float32Array, Int32Array, JsString, Number, Promise};
 use st_backend_wgpu::{
+    rankk_exact_2ce::{resident::ResidentRank, Kind, Plan},
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulShape, MatmulTile, ResidentMatmul},
     runtime,
 };
@@ -37,6 +38,20 @@ async fn create_workspace(
     kernel: Option<MatmulKernel>,
     accumulation: MatmulAccumulation,
 ) -> Result<WasmWgpuMatmul, JsValue> {
+    let runtime = ensure_runtime().await?;
+    Ok(WasmWgpuMatmul {
+        inner: ResidentMatmul::with_options(
+            runtime,
+            shape,
+            tile,
+            kernel.unwrap_or(MatmulKernel::Scalar),
+            accumulation,
+        )
+        .map_err(error)?,
+    })
+}
+
+async fn ensure_runtime() -> Result<runtime::WgpuRuntime, JsValue> {
     let runtime = match runtime::default_runtime() {
         Some(runtime) => runtime,
         None => {
@@ -48,16 +63,7 @@ async fn create_workspace(
             runtime::default_runtime().ok_or_else(|| error("WebGPU runtime installation failed"))?
         }
     };
-    Ok(WasmWgpuMatmul {
-        inner: ResidentMatmul::with_options(
-            runtime,
-            shape,
-            tile,
-            kernel.unwrap_or(MatmulKernel::Scalar),
-            accumulation,
-        )
-        .map_err(error)?,
-    })
+    Ok(runtime)
 }
 
 #[wasm_bindgen(js_class = WgpuMatmul)]
@@ -282,6 +288,135 @@ impl WasmWgpuMatmul {
         Ok(future_to_promise(async move {
             let values = snapshot.read_async().await.map_err(error)?;
             Ok(Float32Array::from(values.as_slice()).into())
+        }))
+    }
+}
+
+/// Exact rank workspace sharing Rust kernels, with no WASM CPU fallback.
+#[wasm_bindgen(js_name = WgpuRank)]
+pub struct WasmWgpuRank {
+    inner: ResidentRank,
+}
+
+#[wasm_bindgen(js_class = WgpuRank)]
+impl WasmWgpuRank {
+    #[wasm_bindgen(js_name = create)]
+    pub async fn create(
+        kind: JsString,
+        rows: Number,
+        cols: Number,
+        k: Number,
+        tile_cols: Option<Number>,
+    ) -> Result<WasmWgpuRank, JsValue> {
+        let kind = match kind.as_string().as_deref() {
+            Some("topk") => Kind::TopK,
+            Some("midk") => Kind::MidK,
+            Some("bottomk") => Kind::BottomK,
+            _ => return Err(error("kind must be topk, midk, or bottomk")),
+        };
+        let tile = tile_cols
+            .as_ref()
+            .map(|v| dimension(v.as_ref()))
+            .transpose()?
+            .unwrap_or(256);
+        let plan = Plan::try_new(
+            kind,
+            dimension(rows.as_ref())? as u32,
+            dimension(cols.as_ref())? as u32,
+            dimension(k.as_ref())? as u32,
+            tile as u32,
+        )
+        .map_err(error)?;
+        Ok(Self {
+            inner: ResidentRank::new_async(ensure_runtime().await?, plan)
+                .await
+                .map_err(error)?,
+        })
+    }
+
+    #[wasm_bindgen(js_name = shape)]
+    pub fn shape(&self) -> Vec<u32> {
+        let p = self.inner.plan();
+        vec![p.rows(), p.cols(), p.k()]
+    }
+    #[wasm_bindgen(getter)]
+    pub fn kind(&self) -> String {
+        self.inner.plan().kind().as_str().into()
+    }
+    #[wasm_bindgen(getter, js_name = tileCols)]
+    pub fn tile_cols(&self) -> u32 {
+        self.inner.plan().tile_cols()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn generation(&self) -> u64 {
+        self.inner.generation()
+    }
+    #[wasm_bindgen(getter, js_name = outputIsCurrent)]
+    pub fn output_is_current(&self) -> bool {
+        self.inner.output_is_current()
+    }
+
+    #[wasm_bindgen(js_name = adapterInfo)]
+    pub fn adapter_info(&self) -> Result<JsValue, JsValue> {
+        let info = self.inner.adapter_info();
+        crate::utils::json_to_js_value(
+            &serde_json::json!({
+                "name": info.name, "backend": format!("{:?}", info.backend),
+                "device_type": format!("{:?}", info.device_type),
+            })
+            .to_string(),
+        )
+    }
+
+    pub fn upload(&mut self, input: Float32Array) -> Result<(), JsValue> {
+        let input = float32_array(input.into())?;
+        if input.length() != self.inner.plan().input_elements() {
+            return Err(error("input length must match the rank workspace"));
+        }
+        self.inner.upload(&input.to_vec()).map_err(error)
+    }
+
+    pub fn dispatch(&mut self, repetitions: Option<Number>) -> Result<u64, JsValue> {
+        let reps = repetitions
+            .as_ref()
+            .map(|v| dimension(v.as_ref()))
+            .transpose()?
+            .unwrap_or(1);
+        self.inner.dispatch(reps as u32).map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = readback, unchecked_return_type = "Promise<{values: Float32Array; indices: Int32Array; generation: bigint}>")]
+    pub fn readback(&self) -> Result<Promise, JsValue> {
+        let snapshot = self.inner.snapshot().map_err(error)?;
+        let generation = snapshot.generation();
+        Ok(future_to_promise(async move {
+            let output = snapshot.read_async().await.map_err(error)?;
+            let result = js_sys::Object::new();
+            js_sys::Reflect::set(
+                &result,
+                &"values".into(),
+                &Float32Array::from(output.values.as_slice()),
+            )?;
+            js_sys::Reflect::set(
+                &result,
+                &"indices".into(),
+                &Int32Array::from(output.indices.as_slice()),
+            )?;
+            js_sys::Reflect::set(
+                &result,
+                &"generation".into(),
+                &js_sys::BigInt::from(generation),
+            )?;
+            Ok(result.into())
+        }))
+    }
+
+    #[wasm_bindgen(js_name = synchronize, unchecked_return_type = "Promise<void>")]
+    pub fn synchronize(&self) -> Result<Promise, JsValue> {
+        let completion = self.inner.synchronize_async().map_err(error)?;
+        Ok(future_to_promise(async move {
+            completion.await.map_err(error)?;
+            Ok(JsValue::UNDEFINED)
         }))
     }
 }

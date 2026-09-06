@@ -20,7 +20,8 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> scratch_indices: array<u32>;
 @group(0) @binding(3) var<storage, read_write> tile_counts: array<u32>;
 @group(0) @binding(4) var<storage, read_write> tile_cursors: array<u32>;
-@group(0) @binding(5) var<storage, read_write> output_values: array<f32>;
+// Preserve sentinel bits without constructing a non-finite WGSL constant.
+@group(0) @binding(5) var<storage, read_write> output_values: array<u32>;
 @group(0) @binding(6) var<storage, read_write> output_indices: array<u32>;
 @group(0) @binding(7) var<uniform> params: Params;
 
@@ -200,7 +201,7 @@ fn rankk_exact_2ce_row_merge(
         if (output_slot >= params.k) {
             break;
         }
-        output_values[row * params.k + output_slot] = bitcast<f32>(0x7fc00000u);
+        output_values[row * params.k + output_slot] = 0x7fc00000u;
         output_indices[row * params.k + output_slot] = INVALID_INDEX;
         output_slot = output_slot + 256u;
     }
@@ -221,10 +222,59 @@ fn rankk_exact_2ce_row_merge(
         merge_end = merge_start + take;
     }
     workgroupBarrier();
+    // Make the data-dependent loop bound provably uniform to browser validators.
+    let rank_end = workgroupUniformLoad(&merge_end);
+    let rank_start = workgroupUniformLoad(&merge_start);
+
+    if (params.kind == KIND_MIDK && params.tiles_x <= 32u) {
+        // Every tile is sorted by the same total (value, source-index) order.
+        // Binary-search other tiles to compute each candidate's global rank,
+        // avoiding a serial merge through half the row just to discard it.
+        // Keep the original merge for extremely fragmented tile geometries.
+        var candidate_slot = local_id.x;
+        let row_slots = params.tiles_x * params.tile_stride;
+        loop {
+            if (candidate_slot >= row_slots) { break; }
+            let own_tile = candidate_slot / params.tile_stride;
+            let own_offset = candidate_slot % params.tile_stride;
+            if (own_offset < tile_counts[row * params.tiles_x + own_tile]) {
+                let address = row * row_slots + candidate_slot;
+                let value = scratch_values[address];
+                let index = scratch_indices[address];
+                var global_rank = own_offset;
+                for (var other = 0u; other < params.tiles_x; other = other + 1u) {
+                    if (other != own_tile) {
+                        let state = row * params.tiles_x + other;
+                        let base = state * params.tile_stride;
+                        var low = 0u;
+                        var high = tile_counts[state];
+                        loop {
+                            if (low >= high) { break; }
+                            let middle = low + (high - low) / 2u;
+                            if (candidate_before(scratch_values[base + middle],
+                                scratch_indices[base + middle], value, index)) {
+                                low = middle + 1u;
+                            } else {
+                                high = middle;
+                            }
+                        }
+                        global_rank = global_rank + low;
+                    }
+                }
+                if (global_rank >= rank_start && global_rank < rank_end) {
+                    let destination = row * params.k + global_rank - rank_start;
+                    output_values[destination] = bitcast<u32>(value);
+                    output_indices[destination] = index;
+                }
+            }
+            candidate_slot = candidate_slot + 256u;
+        }
+        return;
+    }
 
     var rank = 0u;
     loop {
-        if (rank >= merge_end) {
+        if (rank >= rank_end) {
             break;
         }
 
@@ -282,7 +332,7 @@ fn rankk_exact_2ce_row_merge(
             if (selected_tile != INVALID_INDEX) {
                 if (rank >= merge_start) {
                     let destination = row * params.k + (rank - merge_start);
-                    output_values[destination] = merge_values[0];
+                    output_values[destination] = bitcast<u32>(merge_values[0]);
                     output_indices[destination] = merge_indices[0];
                 }
                 let tile_state = row * params.tiles_x + selected_tile;

@@ -9,6 +9,8 @@
 //! Rust CPU reference contract: non-finite values are ignored, equal values
 //! prefer the lower source index, and missing outputs are `(NaN, -1)`.
 
+pub mod resident;
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -554,7 +556,6 @@ mod tests {
 
         let rows = 2;
         let cols = 513;
-        let k = 7;
         let mut input = (0..rows * cols)
             .map(|index| ((index * 37 % 101) as f32 - 50.0) / 7.0)
             .collect::<Vec<_>>();
@@ -571,32 +572,34 @@ mod tests {
         input[cols as usize + 257] = 0.0;
         input[cols as usize + 512] = -4.0;
 
-        for tile_cols in [70, 128, 257, 300, 1_024] {
-            for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-                let plan = Plan::try_new(kind, rows, cols, k, tile_cols).unwrap();
-                let actual = dispatch_host(&device, &queue, &pipelines, plan, &input)
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "{} 2CE tile={tile_cols} dispatch failed: {error}",
-                            kind.as_str()
-                        )
-                    });
-                let expected = cpu_reference(kind, rows, cols, k, &input);
-                assert_eq!(
-                    actual.indices,
-                    expected.indices,
-                    "{} tile={tile_cols} indices",
-                    kind.as_str()
-                );
-                for (slot, (actual, expected)) in
-                    actual.values.iter().zip(expected.values.iter()).enumerate()
-                {
-                    assert!(
+        for k in [1, 7, cols] {
+            for tile_cols in [8, 70, 128, 257, 300, 1_024] {
+                for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+                    let plan = Plan::try_new(kind, rows, cols, k, tile_cols).unwrap();
+                    let actual = dispatch_host(&device, &queue, &pipelines, plan, &input)
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "{} 2CE tile={tile_cols} dispatch failed: {error}",
+                                kind.as_str()
+                            )
+                        });
+                    let expected = cpu_reference(kind, rows, cols, k, &input);
+                    assert_eq!(
+                        actual.indices,
+                        expected.indices,
+                        "{} tile={tile_cols} indices",
+                        kind.as_str()
+                    );
+                    for (slot, (actual, expected)) in
+                        actual.values.iter().zip(expected.values.iter()).enumerate()
+                    {
+                        assert!(
                         (actual.is_nan() && expected.is_nan())
                             || actual.to_bits() == expected.to_bits(),
                         "{} tile={tile_cols} value slot {slot}: actual={actual:?} expected={expected:?}",
                         kind.as_str()
                     );
+                    }
                 }
             }
         }
@@ -620,7 +623,7 @@ mod tests {
         .ok()
     }
 
-    fn cpu_reference(kind: Kind, rows: u32, cols: u32, k: u32, input: &[f32]) -> Output {
+    pub(super) fn cpu_reference(kind: Kind, rows: u32, cols: u32, k: u32, input: &[f32]) -> Output {
         let mut values = Vec::with_capacity((rows * k) as usize);
         let mut indices = Vec::with_capacity((rows * k) as usize);
         for row in 0..rows as usize {

@@ -1,0 +1,86 @@
+{
+  "schema": "spiraltorch.browser_resident_rank.v1",
+  "cases": [],
+  "assertions": [
+    "invalid dimension -1",
+    "invalid dimension 0",
+    "invalid dimension 1.5",
+    "invalid dimension NaN",
+    "invalid dimension Infinity",
+    "invalid dimension 4294967296",
+    "invalid dimension 2",
+    "invalid dimension true",
+    "invalid kind",
+    "k exceeds columns",
+    "dispatch before upload",
+    "readback before dispatch",
+    "wrong typed array",
+    "invalid repetitions 0",
+    "invalid repetitions -1",
+    "invalid repetitions 1.5",
+    "invalid repetitions NaN",
+    "invalid repetitions Infinity",
+    "invalid repetitions 1025",
+    "invalid repetitions 4294967297",
+    "invalid upload length",
+    "failed upload preserves current output",
+    "upload invalidates output",
+    "typed rank outputs",
+    "output lengths"
+  ],
+  "boundary": "resident dispatch + four-byte completion fence; upload and full readback excluded",
+  "adapter": {},
+  "status": "error",
+  "error": "Error: exact rank indices including ties and sentinels: actual=0,0,0,0,0,0,0,0,0,0,0,0,0,0 expected=30,131,232,333,434,60,161,1,-1,-1,-1,-1,-1,-1 values=0,0,0,0,0,0,0,0,0,0,0,0,0,0\n    at assert (http://127.0.0.1:51594/?:9:46)\n    at check (http://127.0.0.1:51594/?:30:3)\n    at http://127.0.0.1:51594/?:59:5",
+  "wasm_sha256": "36be54d0d462028b412e684d35294cb9e3d862551a177ac204bddbcd40f8aa3d",
+  "page_sha256": "517d3858e9126cb160aba190594b6428a2ba37140c951a48ddbb532f31124c60",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "asset_sha256": {
+    "/": "517d3858e9126cb160aba190594b6428a2ba37140c951a48ddbb532f31124c60",
+    "/module/spiraltorch_wasm.js": "a295556b3621cb32f134a31f5dba61ff95ab0c0551ade264fdae6aed9a3619c8",
+    "/module/spiraltorch_wasm_bg.wasm": "36be54d0d462028b412e684d35294cb9e3d862551a177ac204bddbcd40f8aa3d",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "152.0.7977.77",
+  "page_errors": [],
+  "console_messages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "warning",
+      "text": "Error while parsing WGSL: :203:55 error: value nan cannot be represented as 'f32'\n        output_values[row * params.k + output_slot] = bitcast<f32>(0x7fc00000u);\n                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n - While calling [Device \"wasm.resident.matmul\"].CreateShaderModule([ShaderModuleDescriptor \"\"st.rankk.exact_2ce.shader\"\"]).\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid ShaderModule \"st.rankk.exact_2ce.shader\"] is invalid due to a previous error.\n - While validating compute stage ([Invalid ShaderModule \"st.rankk.exact_2ce.shader\"], entryPoint: \"rankk_exact_2ce_tile_sort\").\n - While calling [Device \"wasm.resident.matmul\"].CreateComputePipeline([ComputePipelineDescriptor \"\"st.rankk.exact_2ce.tile_sort\"\"]).\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid ShaderModule \"st.rankk.exact_2ce.shader\"] is invalid due to a previous error.\n - While validating compute stage ([Invalid ShaderModule \"st.rankk.exact_2ce.shader\"], entryPoint: \"rankk_exact_2ce_row_merge\").\n - While calling [Device \"wasm.resident.matmul\"].CreateComputePipeline([ComputePipelineDescriptor \"\"st.rankk.exact_2ce.row_merge\"\"]).\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid ComputePipeline \"st.rankk.exact_2ce.tile_sort\"] is invalid due to a previous error.\n - While encoding [ComputePassEncoder \"resident.rank.pass\"].SetPipeline([Invalid ComputePipeline \"st.rankk.exact_2ce.tile_sort\"]).\n - While finishing [CommandEncoder (unlabeled)].\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid CommandBuffer] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer]])\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid ComputePipeline \"st.rankk.exact_2ce.tile_sort\"] is invalid due to a previous error.\n - While encoding [ComputePassEncoder \"resident.rank.pass\"].SetPipeline([Invalid ComputePipeline \"st.rankk.exact_2ce.tile_sort\"]).\n - While finishing [CommandEncoder (unlabeled)].\n"
+    },
+    {
+      "type": "warning",
+      "text": "[Invalid CommandBuffer] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer]])\n"
+    }
+  ]
+}

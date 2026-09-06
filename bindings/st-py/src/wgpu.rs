@@ -322,6 +322,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     )?;
     module.add_class::<crate::wgpu_resident::PyWgpuMatmul>()?;
     parent.add_class::<crate::wgpu_resident::PyWgpuMatmul>()?;
+    module.add_class::<crate::wgpu_rank::PyWgpuRank>()?;
+    parent.add_class::<crate::wgpu_rank::PyWgpuRank>()?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_reports_available, &module)?)?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_catalog, &module)?)?;
     module.add_function(wrap_pyfunction!(wgpu_kernel_descriptor, &module)?)?;
@@ -335,6 +337,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         "__all__",
         vec![
             "WgpuMatmul",
+            "WgpuRank",
             "wgpu_kernel_reports_available",
             "wgpu_kernel_catalog",
             "wgpu_kernel_descriptor",
