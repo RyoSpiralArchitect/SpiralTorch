@@ -12,6 +12,27 @@ def test_rank_surface_is_shared_with_wgpu_module():
 
 @pytest.mark.skipif(not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test")
 @pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
+def test_readback_reuse_keeps_previous_results_owned(kind):
+    source = st.WgpuMatmul(1, 1, 8)
+    rank = st.WgpuRank(kind, 1, 8, 3)
+    source.upload(st.Tensor(1, 1, [1.]), st.Tensor(1, 8, [0.] * 8))
+    retained = []
+    for scale in range(1, 5):
+        values = [scale * v for v in [3., 1., 3., -2., 7., 4., 0., 1.]]
+        source.upload_rhs(st.Tensor(1, 8, values))
+        generation = rank.dispatch_from_matmul(source)
+        ids = sorted(range(8), key=lambda i: (-values[i] if kind == "topk" else values[i], i))
+        start = 2 if kind == "midk" else 0
+        ids = ids[start:start + 3]
+        retained.append((source.readback(), rank.readback(), values, ids, generation))
+    del source, rank
+    for matrix, selected, values, ids, generation in retained:
+        assert matrix.tolist() == [values]
+        assert selected == {"values": [values[i] for i in ids], "indices": ids, "generation": generation}
+
+
+@pytest.mark.skipif(not os.getenv("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS"), reason="explicit GPU test")
+@pytest.mark.parametrize("kind", ["topk", "midk", "bottomk"])
 @pytest.mark.parametrize("tile", [3, 8, 256])
 def test_rank_lifecycle_and_exact_ties(kind, tile):
     values = [3.0, 1.0, 3.0, -2.0, 7.0, 4.0, 0.0, 1.0]

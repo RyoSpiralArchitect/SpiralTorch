@@ -98,7 +98,7 @@ mod native {
             }
         }
         Ok(json!({"status":"passed", "bytes":size,
-            "boundary":"precompleted synthetic byte-copy control, not rank shader time; map includes owned host copy and unmap",
+            "boundary":"precompleted synthetic byte-copy control with another MAP_READ buffer held alive in ALL modes; not isolated allocation cost or rank shader time; map includes owned host copy and unmap",
             "samples_ms":{"fresh":samples[0],"reused":samples[1],"map_only_no_submit":samples[2]}}))
     }
 
