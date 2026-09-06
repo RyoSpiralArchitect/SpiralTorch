@@ -24,9 +24,19 @@ use st_kernel_contracts::rank::Exact2CeGeometry;
 pub use st_kernel_contracts::rank::{Kind, PlanError};
 
 const WORKGROUP_SIZE: u32 = 256;
+const PARALLEL_MIDK_MAX_TILES: u32 = 32;
 const STORAGE_BINDINGS: u32 = 7;
 const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
-const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
+const WGSL: &str = concat!(
+    include_str!("shaders/rankk_exact_2ce_common.wgsl"),
+    "\n",
+    include_str!("shaders/rankk_exact_2ce.wgsl"),
+);
+const TOURNAMENT_WGSL: &str = concat!(
+    include_str!("shaders/rankk_exact_2ce_common.wgsl"),
+    "\n",
+    include_str!("shaders/rankk_exact_2ce_midk_tournament.wgsl"),
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -113,7 +123,7 @@ impl Plan {
 
     const fn merge_mode(self) -> MergeMode {
         if matches!(self.kind, Kind::MidK) {
-            if self.tiles_x <= 32 {
+            if self.tiles_x <= PARALLEL_MIDK_MAX_TILES {
                 return MergeMode::ParallelMidk;
             }
             // One retained winner has no incremental tree updates to amortize.
@@ -124,7 +134,7 @@ impl Plan {
         MergeMode::Streaming
     }
 
-    // The same Rust-owned mode controls both the dispatch grid and WGSL branch.
+    // One Rust-owned mode selects the pipeline and its matching dispatch grid.
     const fn merge_workgroups(self) -> (u32, u32) {
         if matches!(self.merge_mode(), MergeMode::ParallelMidk) {
             (self.tiles_x, self.rows)
@@ -162,7 +172,7 @@ impl Plan {
             tile_stride: self.tile_stride,
             tiles_x: self.tiles_x,
             kind: self.kind.as_uniform(),
-            merge_mode: self.merge_mode() as u32,
+            _pad: 0,
         }
     }
 
@@ -245,7 +255,7 @@ struct ParamsUniform {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    merge_mode: u32,
+    _pad: u32,
 }
 
 /// Device-owned pipelines shared by repeated exact rank-k dispatches.
@@ -298,11 +308,17 @@ impl Pipelines {
                 entry_point: "rankk_exact_2ce_row_merge",
                 compilation_options: Default::default(),
             });
+            // Module isolation also protects browser compilers, which need not
+            // lower unused workgroup globals like the native Naga backend does.
+            let tournament_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("st.rankk.exact_2ce.tournament_shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(TOURNAMENT_WGSL)),
+            });
             let row_merge_tournament =
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some("st.rankk.exact_2ce.row_merge_tournament"),
                     layout: Some(&pipeline_layout),
-                    module: &module,
+                    module: &tournament_module,
                     entry_point: "rankk_exact_2ce_midk_tournament",
                     compilation_options: Default::default(),
                 });
@@ -615,26 +631,42 @@ mod tests {
 
     #[test]
     fn exact_rank_2ce_wgsl_parses_and_validates() {
-        let module = naga::front::wgsl::parse_str(WGSL).expect("rank-k 2CE WGSL should parse");
-        let info = Validator::new(ValidationFlags::all(), Capabilities::all())
-            .validate(&module)
-            .expect("rank-k 2CE WGSL should validate");
-        let (cache, _) = module
-            .global_variables
-            .iter()
-            .find(|(_, variable)| variable.name.as_deref() == Some("tournament_nodes"))
-            .unwrap();
-        assert!(module
-            .entry_points
-            .iter()
-            .any(|entry| entry.name == "rankk_exact_2ce_midk_tournament"));
-        for (index, entry) in module.entry_points.iter().enumerate() {
+        assert!(WGSL.contains(&format!(
+            "params.kind == KIND_MIDK && params.tiles_x <= {}u;",
+            PARALLEL_MIDK_MAX_TILES
+        )));
+        for (source, tournament) in [(WGSL, false), (TOURNAMENT_WGSL, true)] {
+            let module =
+                naga::front::wgsl::parse_str(source).expect("rank-k 2CE WGSL should parse");
+            let info = Validator::new(ValidationFlags::all(), Capabilities::all())
+                .validate(&module)
+                .expect("rank-k 2CE WGSL should validate");
             assert_eq!(
-                !info.get_entry_point(index)[cache].is_empty(),
-                entry.name == "rankk_exact_2ce_midk_tournament",
-                "tournament storage leaked into {}",
-                entry.name,
+                module
+                    .global_variables
+                    .iter()
+                    .any(|(_, variable)| variable.name.as_deref() == Some("tournament_nodes")),
+                tournament,
             );
+            assert_eq!(module.entry_points.len(), if tournament { 1 } else { 2 });
+            let mut layout = naga::proc::Layouter::default();
+            layout.update(module.to_ctx()).unwrap();
+            for (index, entry) in module.entry_points.iter().enumerate() {
+                let bytes: u32 = module
+                    .global_variables
+                    .iter()
+                    .filter(|(handle, variable)| {
+                        variable.space == naga::AddressSpace::WorkGroup
+                            && !info.get_entry_point(index)[*handle].is_empty()
+                    })
+                    .map(|(_, variable)| (layout[variable.ty].size + 15) & !15)
+                    .sum();
+                assert!(
+                    bytes <= WORKGROUP_STORAGE_BYTES,
+                    "{} needs {bytes} workgroup bytes",
+                    entry.name
+                );
+            }
         }
     }
 
@@ -664,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn rust_merge_mode_drives_uniform_and_grid_at_each_boundary() {
+    fn rust_merge_mode_drives_pipeline_and_grid_at_each_boundary() {
         assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
         for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
             for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
@@ -676,7 +708,7 @@ mod tests {
                         _ => MergeMode::Streaming,
                     };
                     assert_eq!(plan.merge_mode(), mode);
-                    assert_eq!(plan.params().merge_mode, mode as u32);
+                    assert_eq!(plan.params()._pad, 0);
                     assert_eq!(
                         plan.merge_workgroups(),
                         if mode == MergeMode::ParallelMidk {
