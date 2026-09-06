@@ -1,6 +1,7 @@
 //! Persistent exact rank storage with enqueue-only dispatch and owned snapshots.
 
 use super::{binding, storage_buffer, DispatchError, Output, Pipelines, Plan};
+use crate::resident_matmul::ResidentMatmul;
 use crate::runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
@@ -15,6 +16,10 @@ pub enum ResidentRankError {
     MissingInput,
     #[error("dispatch current input before requesting a snapshot")]
     StaleOutput,
+    #[error("matmul source must have current dispatched output")]
+    StaleSource,
+    #[error("matmul output must match rank rows/columns and share the same device and queue")]
+    IncompatibleSource,
     #[error("rank repetitions must be in 1..={MAX_REPETITIONS}")]
     InvalidRepetitions,
     #[error("rank input generation counter exhausted")]
@@ -169,6 +174,35 @@ impl ResidentRank {
             .context()
             .queue()
             .write_buffer(&self.input, 0, bytemuck::cast_slice(input));
+        self.generation = generation;
+        self.output_generation = None;
+        Ok(())
+    }
+
+    /// Queue an owned device-to-device input copy, with no host readback or alias.
+    /// A later source update/drop cannot change this input. Validation failures
+    /// leave both the prior input generation and output freshness unchanged.
+    pub fn set_input_from_matmul(
+        &mut self,
+        source: &ResidentMatmul,
+    ) -> Result<(), ResidentRankError> {
+        let (source_context, output) = source
+            .current_output()
+            .ok_or(ResidentRankError::StaleSource)?;
+        let (rows, _, cols) = source.shape().dimensions();
+        let context = self.runtime.context();
+        if (rows, cols) != (self.plan.rows() as usize, self.plan.cols() as usize)
+            || !context.shares_handles_with(source_context)
+        {
+            return Err(ResidentRankError::IncompatibleSource);
+        }
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(ResidentRankError::GenerationOverflow)?;
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(output, 0, &self.input, 0, self.input.size());
+        context.queue().submit(Some(encoder.finish()));
         self.generation = generation;
         self.output_generation = None;
         Ok(())
@@ -420,5 +454,108 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn matmul_input_copy_is_owned_and_validation_is_transactional_when_enabled() {
+        use crate::resident_matmul::MatmulShape;
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime = pollster::block_on(WgpuRuntime::request_headless("rank.matmul.copy.test"))
+            .expect("requested runtime test requires WGPU");
+        eprintln!("matmul-rank adapter: {:?}", runtime.adapter_info());
+        let values = [
+            3., 1., 3., -2., 7., 4., 0., 1., -1., 8., 0., 2., 2., 3., 9., -2.,
+        ];
+        for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+            let mut rank =
+                ResidentRank::new(runtime.clone(), Plan::try_new(kind, 2, 8, 3, 8).unwrap())
+                    .unwrap();
+            rank.upload(&[0.; 16]).unwrap();
+            rank.dispatch(1).unwrap();
+            let initial_snapshot = rank.snapshot().unwrap();
+            let mut source =
+                ResidentMatmul::new(runtime.clone(), MatmulShape::new(2, 2, 8).unwrap()).unwrap();
+            assert!(matches!(
+                rank.set_input_from_matmul(&source),
+                Err(ResidentRankError::StaleSource)
+            ));
+            // Equal byte counts alone must not authorize a differently shaped source.
+            let mut wrong =
+                ResidentMatmul::new(runtime.clone(), MatmulShape::new(1, 1, 16).unwrap()).unwrap();
+            wrong.upload(&[1.], &[5.; 16]).unwrap();
+            wrong.dispatch(1).unwrap();
+            assert!(matches!(
+                rank.set_input_from_matmul(&wrong),
+                Err(ResidentRankError::IncompatibleSource)
+            ));
+            assert_eq!(rank.generation(), 1);
+            assert!(rank.output_is_current());
+
+            source.upload(&[1., 0., 0., 1.], &values).unwrap();
+            source.dispatch(1).unwrap();
+            rank.set_input_from_matmul(&source).unwrap();
+            assert_eq!(rank.generation(), 2);
+            assert!(!rank.output_is_current());
+            source.upload_rhs(&[99.; 16]).unwrap();
+            assert!(matches!(
+                rank.set_input_from_matmul(&source),
+                Err(ResidentRankError::StaleSource)
+            ));
+            assert_eq!(rank.generation(), 2);
+            source.dispatch(1).unwrap();
+            drop(source);
+            rank.dispatch(2).unwrap();
+            let actual = rank.snapshot().unwrap().read().unwrap();
+            assert_eq!(actual, cpu_reference(kind, 2, 8, 3, &values));
+            assert_eq!(
+                initial_snapshot.read().unwrap(),
+                cpu_reference(kind, 2, 8, 3, &[0.; 16])
+            );
+
+            let mut source =
+                ResidentMatmul::new(runtime.clone(), MatmulShape::new(2, 2, 8).unwrap()).unwrap();
+            source.upload(&[1., 0., 0., 1.], &values).unwrap();
+            source.dispatch(1).unwrap();
+            rank.generation = u64::MAX;
+            rank.output_generation = Some(u64::MAX);
+            assert!(matches!(
+                rank.set_input_from_matmul(&source),
+                Err(ResidentRankError::GenerationOverflow)
+            ));
+            assert_eq!(rank.generation(), u64::MAX);
+            assert!(rank.output_is_current());
+            assert_eq!(rank.snapshot().unwrap().read().unwrap(), actual);
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn matmul_copy_rejects_different_device_handles_when_enabled() {
+        use crate::resident_matmul::MatmulShape;
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("rank.copy.destination")).unwrap();
+        let foreign =
+            pollster::block_on(WgpuRuntime::request_headless("rank.copy.source")).unwrap();
+        assert!(!runtime.context().shares_handles_with(foreign.context()));
+        let mut source = ResidentMatmul::new(foreign, MatmulShape::new(1, 1, 4).unwrap()).unwrap();
+        source.upload(&[1.], &[99.; 4]).unwrap();
+        source.dispatch(1).unwrap();
+        let mut rank =
+            ResidentRank::new(runtime, Plan::try_new(Kind::TopK, 1, 4, 2, 4).unwrap()).unwrap();
+        rank.upload(&[1., 5., 3., 2.]).unwrap();
+        rank.dispatch(1).unwrap();
+        assert!(matches!(
+            rank.set_input_from_matmul(&source),
+            Err(ResidentRankError::IncompatibleSource)
+        ));
+        assert_eq!(rank.generation(), 1);
+        assert!(rank.output_is_current());
+        assert_eq!(rank.snapshot().unwrap().read().unwrap().values, [5., 3.]);
     }
 }

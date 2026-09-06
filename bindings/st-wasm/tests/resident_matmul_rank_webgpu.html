@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SpiralTorch device-local projection to rank</title>
+<pre id="result" data-status="running">Running</pre>
+<script type="module">
+const out = document.querySelector("#result");
+const report = {schema:"spiraltorch.browser_matmul_rank.v1",cases:[],assertions:[],
+  boundary:"resident operands; host bridge versus device-copy bridge; final rank readback included"};
+function assert(ok,label) { if(!ok) throw Error(label); report.assertions.push(label); }
+async function rejects(fn,label) { let failed=false; try { await fn(); } catch { failed=true; } assert(failed,label); }
+function reference(lhs,rhs,m,k,n,kind,take) {
+  const values=[],indices=[];
+  for(let row=0;row<m;row++) {
+    const logits=Array.from({length:n},(_,col)=>{
+      let value=0; for(let j=0;j<k;j++) value+=lhs[row*k+j]*rhs[j*n+col]; return value;
+    });
+    const ids=Array.from({length:n},(_,i)=>i).sort((a,b)=>(kind==="topk" ? logits[b]-logits[a] : logits[a]-logits[b]) || a-b);
+    const start=kind==="midk" ? Math.floor((n-take)/2) : 0;
+    for(const i of ids.slice(start,start+take)) { values.push(logits[i]); indices.push(i); }
+  }
+  return {values,indices};
+}
+function check(actual,expected) {
+  assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed rank result");
+  assert(actual.values.length===expected.values.length && actual.indices.length===expected.indices.length,"rank shape");
+  assert(expected.values.every((v,i)=>v===actual.values[i]),"exact integer projection values");
+  assert(expected.indices.every((v,i)=>v===actual.indices[i]),"exact stable rank indices");
+}
+try {
+  const {default:init,WgpuMatmul,WgpuRank}=await import("/module/spiraltorch_wasm.js"); await init();
+  for(const [m,k,n] of [[2,2,8],[2,32,257],[3,64,1025]]) for(const kind of ["topk","midk","bottomk"]) {
+    const lhs=Float32Array.from({length:m*k},(_,i)=>i*7%5-2);
+    const rhs=Float32Array.from({length:k*n},(_,i)=>i*11%7-3);
+    const take=3, expected=reference(lhs,rhs,m,k,n,kind,take);
+    const source=await WgpuMatmul.create(m,k,n), rank=await WgpuRank.create(kind,m,n,take);
+    report.adapter ??= rank.adapterInfo();
+    await rejects(()=>rank.setInputFromMatmul(source),"unexecuted source rejected");
+    source.upload(lhs,rhs); source.dispatch();
+    rank.setInputFromMatmul(source); rank.dispatch(); check(await rank.readback(),expected);
+    const initialGeneration=rank.generation;
+    await rejects(()=>rank.setInputFromMatmul({}),"wrong source type rejected");
+    const wrong=await WgpuMatmul.create(1,1,m*n);
+    wrong.upload(new Float32Array([1]),new Float32Array(m*n).fill(99)); wrong.dispatch();
+    await rejects(()=>rank.setInputFromMatmul(wrong),"equal bytes but wrong shape rejected"); wrong.free();
+    source.uploadRhs(rhs);
+    await rejects(()=>rank.setInputFromMatmul(source),"invalidated source rejected");
+    assert(rank.generation===initialGeneration && rank.outputIsCurrent,"failed copies preserve rank state");
+    check(await rank.readback(),expected);
+    const times={host_bridge:[],device_copy_bridge:[]};
+    for(let block=0;block<10;block++) for(const mode of (block%2 ? [1,0] : [0,1])) {
+      const start=performance.now();
+      source.dispatch();
+      if(mode===0) rank.upload(await source.readback()); else rank.setInputFromMatmul(source);
+      rank.dispatch(); const result=await rank.readback();
+      const elapsed=performance.now()-start;
+      check(result,expected);
+      if(block>=2) times[mode===0 ? "host_bridge" : "device_copy_bridge"].push(elapsed);
+    }
+    source.dispatch(); rank.setInputFromMatmul(source);
+    const generation=rank.generation;
+    source.uploadRhs(new Float32Array(k*n).fill(99)); source.dispatch(); source.free();
+    rank.dispatch(2); const pending=rank.readback(); rank.free();
+    const result=await pending; check(result,expected);
+    assert(result.generation===generation,"copy and snapshot survive both workspace frees");
+    report.cases.push({m,k,n,kind,status:"passed",samples_ms:times});
+  }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

@@ -59,6 +59,58 @@ that raises `NotImplementedError`, rather than silently executing on CPU.
 Rust callers construct `ResidentRank` from a `WgpuRuntime` and checked `Plan`,
 then use `upload`, `dispatch`, `snapshot().read()` and `synchronize` directly.
 
+## Projection To Rank Without Host Staging
+
+`set_input_from_matmul` (`setInputFromMatmul` in JavaScript) copies current
+matmul output into the rank input on the GPU. This is a device-to-device copy,
+not zero-copy aliasing: later source updates or destruction cannot change the
+copied input. The destination has a new input generation and requires dispatch.
+Source shape and exact device/queue handles must match. Missing/stale source
+output, mismatched shape/device, or generation overflow leave rank state intact.
+Freshness means submitted logical output, not a completed GPU execution receipt.
+
+```python
+head = st.WgpuMatmul(1, 2, 4)
+head.upload(st.Tensor(1, 2, [1, 0]), st.Tensor(2, 4, [2, 7, 3, 1, 0, 0, 0, 0]))
+rank = st.WgpuRank("topk", 1, 4, 2)
+head.dispatch()
+rank.set_input_from_matmul(head)  # no logits readback or host upload
+rank.dispatch()
+assert rank.readback()["indices"] == [1, 2]
+```
+
+```js
+const head = await WgpuMatmul.create(1, 2, 4);
+head.upload(new Float32Array([1, 0]), new Float32Array([2, 7, 3, 1, 0, 0, 0, 0]));
+const rank = await WgpuRank.create("topk", 1, 4, 2);
+head.dispatch();
+rank.setInputFromMatmul(head);
+head.free();
+rank.dispatch();
+const result = await rank.readback(); // indices: [1, 2]
+rank.free();
+```
+
+Rust exposes the same setter on `ResidentRank`. This composes a resident linear
+projection with exact rank selection; it is not a complete language model or a
+fused single-dispatch kernel. The copy and the following rank dispatch are
+separate queue submissions.
+
+```sh
+cargo build --release --locked -p st-core --features wgpu-rt --example resident_matmul_rank_bench
+python tools/bench_matmul_rank_vs_torch.py \
+  --executable target/release/examples/resident_matmul_rank_bench \
+  --output matmul-rank-comparison.json
+```
+
+This harness compares the intermediate host bridge against the GPU copy bridge,
+including the same final rank readback. It also measures resident chains against
+preallocated PyTorch CUDA matmul/rank with TF32 disabled. Inputs are bounded
+integers to make fp32 projection and stable tie-order checks exact; these
+fixtures do not establish arbitrary floating-point rank stability or model
+quality. Source/image binding and foreign-GPU-process gates match the rank-only
+harness; no exclusive GPU reservation or interleaved framework timing is claimed.
+
 ## Measurement Boundaries
 
 The comparison separates the existing host API, a persistent-buffer

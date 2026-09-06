@@ -353,6 +353,11 @@ impl ResidentMatmul {
         self.output_generation == Some(self.generation)
     }
 
+    pub(crate) fn current_output(&self) -> Option<(&WgpuContext, &wgpu::Buffer)> {
+        self.output_is_current()
+            .then_some((self.runtime.context(), &self.output))
+    }
+
     fn check_length(
         &self,
         operand: &'static str,

@@ -26,7 +26,7 @@ fn error(err: MatmulError) -> PyErr {
 #[cfg(feature = "wgpu")]
 #[pyclass(name = "WgpuMatmul", module = "spiraltorch.wgpu")]
 pub(crate) struct PyWgpuMatmul {
-    inner: ResidentMatmul,
+    pub(crate) inner: ResidentMatmul,
 }
 
 #[cfg(feature = "wgpu")]
