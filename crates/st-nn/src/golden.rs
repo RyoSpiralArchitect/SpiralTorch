@@ -871,6 +871,8 @@ impl GoldenRetriever {
         Ok(())
     }
 
+    /// Runs all workers and waits for every submitted epoch task before returning,
+    /// including on error. Completed trainer updates are not rolled back.
     pub fn run_epoch<M, L>(
         &mut self,
         modules: Vec<M>,
@@ -890,7 +892,8 @@ impl GoldenRetriever {
     /// Failed workers are recorded in the report, not returned as trained models.
     /// After a tolerated dropout, continue via worker-ID-keyed `run_epoch_workers`,
     /// not by packing the survivors into this dense, positional API.
-    /// Like `run_epoch`, an error does not roll back completed trainer updates.
+    /// Like `run_epoch`, waits for all submitted tasks even on error, without
+    /// rolling back completed trainer updates.
     pub fn run_epoch_owned<M, L>(
         &mut self,
         modules: Vec<M>,
@@ -943,6 +946,7 @@ impl GoldenRetriever {
     /// Failed model/loss state is not recoverable; do not substitute fresh state
     /// for that worker's partially advanced trainer. Continue with survivors.
     /// Input identities are checked before any task or epoch state is changed.
+    /// Every submitted task is joined before returning, including on error.
     pub fn run_epoch_workers<M, L>(
         &mut self,
         inputs: Vec<GoldenWorkerEpoch<M, L>>,
@@ -980,6 +984,7 @@ impl GoldenRetriever {
             .as_ref()
             .map(|_| GoldenScheduleSignal::from_iter(inputs.iter().map(|input| &input.schedule)));
         let mut handles = Vec::with_capacity(expected);
+        let mut first_error = None;
         for input in inputs {
             let GoldenWorkerEpoch {
                 trained,
@@ -993,15 +998,19 @@ impl GoldenRetriever {
             } = trained;
             let worker = &self.workers[id];
             let trainer = worker.trainer.clone();
-            let handle = self
+            match self
                 .runtime
                 .spawn_blocking(move || -> PureResult<(EpochStats, M, L)> {
                     let mut guard = trainer.lock();
                     let stats = guard.train_epoch(&mut module, &mut loss, loader, &schedule)?;
                     Ok((stats, module, loss))
-                })
-                .map_err(runtime_error)?;
-            handles.push((worker._id, handle));
+                }) {
+                Ok(handle) => handles.push((worker._id, handle)),
+                Err(err) => {
+                    first_error = Some(runtime_error(err));
+                    break;
+                }
+            }
         }
 
         let mut stats = Vec::with_capacity(expected);
@@ -1009,7 +1018,7 @@ impl GoldenRetriever {
         let mut successes = Vec::with_capacity(expected);
         let mut dropouts = Vec::new();
         for (worker_id, handle) in handles {
-            match handle.join() {
+            let error = match handle.join() {
                 Ok((epoch_stats, module, loss)) => {
                     successes.push(worker_id);
                     stats.push(epoch_stats);
@@ -1018,35 +1027,24 @@ impl GoldenRetriever {
                         module,
                         loss,
                     });
+                    continue;
                 }
-                Err(GoldenTaskError::Task(err)) => {
-                    if self.allow_dropout {
-                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &err));
-                    } else {
-                        return Err(err);
-                    }
-                }
-                Err(GoldenTaskError::Runtime(err)) => {
-                    let runtime_err = runtime_error(err);
-                    if self.allow_dropout {
-                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &runtime_err));
-                    } else {
-                        return Err(runtime_err);
-                    }
-                }
-                Err(GoldenTaskError::Panic) => {
-                    let panic_error = TensorError::IoError {
-                        message: format!(
-                            "golden retriever worker {worker_id} panicked during epoch"
-                        ),
-                    };
-                    if self.allow_dropout {
-                        dropouts.push(GoldenDropoutRecord::from_error(worker_id, &panic_error));
-                    } else {
-                        return Err(panic_error);
-                    }
-                }
+                Err(GoldenTaskError::Task(err)) => err,
+                Err(GoldenTaskError::Runtime(err)) => runtime_error(err),
+                Err(GoldenTaskError::Panic) => TensorError::IoError {
+                    message: format!("golden retriever worker {worker_id} panicked during epoch"),
+                },
+            };
+            if self.allow_dropout {
+                dropouts.push(GoldenDropoutRecord::from_error(worker_id, &error));
+            } else {
+                // Preserve the primary failure while draining the other workers.
+                first_error.get_or_insert(error);
             }
+        }
+
+        if let Some(error) = first_error {
+            return Err(error);
         }
 
         if stats.len() < self.min_successful_workers {
@@ -2300,6 +2298,150 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         assert!(retriever.last_dropouts().is_empty());
+    }
+
+    #[test]
+    fn failed_epoch_waits_for_other_submitted_workers() {
+        assert_failed_epoch_drains_workers(false);
+    }
+
+    #[test]
+    fn panicked_epoch_waits_for_other_submitted_workers() {
+        assert_failed_epoch_drains_workers(true);
+    }
+
+    fn assert_failed_epoch_drains_workers(panic: bool) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct ControlledLoss {
+            panic: bool,
+            failure: Option<&'static str>,
+            started: Option<mpsc::Sender<()>>,
+            release: Option<mpsc::Receiver<()>>,
+            retired: Arc<AtomicBool>,
+            inner: MeanSquaredError,
+        }
+
+        impl Loss for ControlledLoss {
+            fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
+                if let Some(started) = self.started.take() {
+                    started.send(()).unwrap();
+                    self.release
+                        .take()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("test releases the gated worker");
+                }
+                if self.panic {
+                    panic!("forced worker panic");
+                }
+                if let Some(message) = self.failure {
+                    return Err(TensorError::IoError {
+                        message: message.into(),
+                    });
+                }
+                self.inner.forward(prediction, target)
+            }
+
+            fn backward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
+                self.inner.backward(prediction, target)
+            }
+        }
+
+        impl Drop for ControlledLoss {
+            fn drop(&mut self) {
+                self.retired.store(true, Ordering::Release);
+            }
+        }
+
+        for late_failure in [false, true] {
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (returned_tx, returned_rx) = mpsc::channel();
+            let gated_retired = Arc::new(AtomicBool::new(false));
+            let mut trainers = Vec::new();
+            let mut inputs = Vec::new();
+            for (id, started, release) in [(0, None, None), (1, Some(started_tx), Some(release_rx))]
+            {
+                let (trainer, module, schedule) = owned_worker_fixture(id);
+                trainers.push(trainer);
+                inputs.push(
+                    GoldenTrainedWorker {
+                        worker: id,
+                        module,
+                        loss: ControlledLoss {
+                            panic: id == 0 && panic,
+                            failure: match id {
+                                0 => Some("forced first worker failure"),
+                                _ if late_failure => Some("forced second worker failure"),
+                                _ => None,
+                            },
+                            started,
+                            release,
+                            retired: if id == 1 {
+                                gated_retired.clone()
+                            } else {
+                                Arc::new(AtomicBool::new(false))
+                            },
+                            inner: MeanSquaredError,
+                        },
+                    }
+                    .with_epoch(owned_worker_loader(), schedule),
+                );
+            }
+            let mut retriever = GoldenRetriever::new(
+                GoldenRetrieverConfig {
+                    runtime: Some(GoldenRuntimeConfig {
+                        worker_threads: 2,
+                        ..GoldenRuntimeConfig::default()
+                    }),
+                    ..GoldenRetrieverConfig::default()
+                },
+                trainers,
+            )
+            .unwrap();
+            let observed_retired = gated_retired.clone();
+            let caller = std::thread::spawn(move || {
+                let error = retriever
+                    .run_epoch_workers(inputs)
+                    .err()
+                    .expect("worker fails");
+                returned_tx
+                    .send((error, observed_retired.load(Ordering::Acquire)))
+                    .unwrap();
+                retriever
+            });
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the other worker runs concurrently");
+            let early = returned_rx.recv_timeout(Duration::from_millis(100));
+            let returned_early = early.is_ok();
+            // Always release the gated worker before asserting or joining.
+            release_tx.send(()).unwrap();
+            let (error, retired_at_return) = early.unwrap_or_else(|_| {
+                returned_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("epoch finishes after worker release")
+            });
+            let retriever = caller.join().unwrap();
+            let no_dropouts = retriever.last_dropouts().is_empty();
+            let epoch = retriever.epoch;
+            drop(retriever);
+            assert!(gated_retired.load(Ordering::Acquire));
+            assert!(
+                !returned_early,
+                "epoch returned while another worker was still running"
+            );
+            assert!(retired_at_return, "submitted worker outlived failed epoch");
+            let message = error.to_string();
+            assert!(message.contains(if panic {
+                "worker 0 panicked"
+            } else {
+                "forced first worker failure"
+            }));
+            assert!(no_dropouts);
+            assert_eq!(epoch, 1);
+        }
     }
 
     #[test]
