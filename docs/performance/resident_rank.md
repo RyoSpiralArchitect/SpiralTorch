@@ -194,7 +194,11 @@ exercises both successful reads and cancellation over 96 creation/drop cycles.
 Profiled output remains stale until the corresponding query read and captured
 validation succeed. `synchronize()` alone does not publish it. Failed or dropped
 Rust readbacks cannot expose output, and an older profile cannot publish after
-a newer profile, upload, copy or ordinary dispatch supersedes it. Python's
+a newer profile, upload, copy or ordinary dispatch supersedes it.
+Profiling detaches earlier publication state before fallible encoding/submission,
+so a native intermediate-chunk timeout cannot leave prior output marked current.
+Initial admission failures (invalid repetitions, missing input, unsupported or
+shareable devices) remain transactional. Python's
 blocking `profile()` and an awaited successful WASM `profile()` publish the
 same state. Ordinary dispatch keeps its existing submission-freshness contract
 and does not allocate or read a diagnostic publication token.

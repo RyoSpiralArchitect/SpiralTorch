@@ -263,3 +263,32 @@ archives remain unchanged. Their original performance limitations still apply.
 
 Closing archive SHA-256: `32214eece074752ec5b3d095db2170c77e99765d82a79da1c24fbb12ebfb7550`.
 Closing summary SHA-256: `1e993824dc5df0737af648643e9976a9d8df514bf8ad7fa84d52af75d45631e8`.
+
+## Partial Submission Failure
+
+A further local review found that an intermediate profile chunk could be
+submitted and fail its completion wait before detaching earlier publication
+state. `5229a06d501c9370688b92989a9ebedff25783c1` invalidates that state after
+admission checks but before fallible GPU work. The regression submits one real
+chunk, then returns a synthetic scoped `SubmitTimeout`; it is not an induced
+driver hang. Keeping the old assignment order reproduces the failure. The fix
+also rejects snapshots and prevents an older pending read from republishing
+output, while ordinary dispatch recovers normally.
+
+Fresh local validation passes 91 backend tests plus WGSL parsing, 103 packaged
+Python tests, 12 browser profile cases including maximum repetitions, and
+native/WASM strict Clippy. The shader, ordinary dispatch and policy are unchanged.
+The latest Furnace 91-test correctness run briefly overlapped a newly started
+external training job because availability and launch were mistakenly batched;
+its wall times are excluded from performance evidence. No external process was
+modified, and no further Furnace GPU work was launched. Earlier uncontended
+comparisons remain frozen, not relabeled as measurements of this fix.
+
+[chunk-failure-summary.json](chunk-failure-summary.json) and
+[chunk-failure-logs.tar.xz](chunk-failure-logs.tar.xz) preserve the red harness,
+fresh build/test logs, product hashes and 145 browser timestamp reports. After
+extraction, `python -I analyze_chunk_failure.py --output recomputed.json`
+reproduces the summary byte-for-byte. Earlier archives remain unchanged.
+
+Chunk-failure archive SHA-256: `9a21254ad185a9c44122708301046184672f7ddada7670a95561784649cf23fb`.
+Chunk-failure summary SHA-256: `e9e6fcfbfb4ea815155fd5688d8168be17acbb87e3e8f97645d23848bb289b2c`.
