@@ -849,6 +849,10 @@ fn future_pop_error_scope(result: JsFutureResult) -> Option<crate::Error> {
             let js_error = wasm_bindgen::JsCast::dyn_into(js_value).unwrap();
             Some(crate::Error::from_js(js_error))
         }
+        Err(error) => Some(crate::Error::Internal {
+            source: Box::<dyn std::error::Error + Send + Sync>::from("<WebGPU Error>"),
+            description: format!("WebGPU popErrorScope rejected: {error:?}"),
+        }),
         _ => None,
     }
 }

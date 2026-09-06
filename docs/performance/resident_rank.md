@@ -166,6 +166,8 @@ futures before another profile can begin. Reads reject validation, allocation
 and internal failures instead of accepting cleared query buffers as zero-duration
 evidence. The pinned browser backend maps `GPUInternalError` through its
 `GPUError` base type, preserving a typed error instead of trapping during conversion.
+A rejected `popErrorScope()` Promise also becomes an internal error: unavailable
+validation is not a clean scope and cannot publish profiled output.
 Browser query resources are explicitly destroyed after submission/readback or
 cancellation, rather than waiting for JavaScript garbage collection. This uses
 a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal

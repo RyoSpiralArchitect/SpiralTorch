@@ -170,6 +170,29 @@ try {
   await check(internal,{values:[7,6],indices:[7,6]});
   internal.free();
   report.internal_validation.status="passed";
+  // A rejected scope Promise is unavailable validation, never a clean scope.
+  const scopeFaulted=await WgpuRank.create("topk",1,8,2,4,true);
+  scopeFaulted.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  const originalPopScope=GPUDevice.prototype.popErrorScope;
+  const rejectionMessage="injected popErrorScope rejection";
+  let popCalls=0,scopePending;
+  GPUDevice.prototype.popErrorScope=function() {
+    const result=Reflect.apply(originalPopScope,this,[]);
+    return ++popCalls===1 ? result.then(()=>{throw Error(rejectionMessage);}) : result;
+  };
+  try { scopePending=scopeFaulted.profile(1); }
+  finally { GPUDevice.prototype.popErrorScope=originalPopScope; }
+  let scopeFailure;
+  try { await scopePending; } catch(error) { scopeFailure=String(error); }
+  report.scope_rejection={status:"error",injection:"synthetic rejection after real popErrorScope; not a driver fault",pop_calls:popCalls,error:scopeFailure??null,output_current_after_read:scopeFaulted.outputIsCurrent};
+  assert(popCalls===3,"rejection still pops every diagnostic scope");
+  assert(scopeFailure?.includes(rejectionMessage),"unavailable validation must reject rather than publish");
+  assert(!scopeFaulted.outputIsCurrent,"scope rejection leaves output stale");
+  await rejects(()=>scopeFaulted.readback());
+  scopeFaulted.dispatch(1);
+  await check(scopeFaulted,{values:[7,6],indices:[7,6]});
+  scopeFaulted.free();
+  report.scope_rejection.status="passed";
   const unchanged=await WgpuRank.create("topk",1,8,2);
   assert(!unchanged.timestampQueriesEnabled,"profiled factories cannot replace global runtime");
   unchanged.free();
