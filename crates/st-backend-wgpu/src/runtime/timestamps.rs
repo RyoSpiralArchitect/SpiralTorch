@@ -58,6 +58,9 @@ impl TimestampErrorScopes {
         let lease = DeviceScopeLease::try_new(&context)?;
         context
             .device()
+            .push_error_scope(wgpu::ErrorFilter::Internal);
+        context
+            .device()
             .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         context
             .device()
@@ -74,6 +77,7 @@ impl TimestampErrorScopes {
         TimestampValidation {
             validation: Box::pin(context.device().pop_error_scope()),
             allocation: Box::pin(context.device().pop_error_scope()),
+            internal: Box::pin(context.device().pop_error_scope()),
         }
     }
 }
@@ -83,6 +87,7 @@ impl Drop for TimestampErrorScopes {
         if let Some(context) = self.context.take() {
             drop(context.device().pop_error_scope());
             drop(context.device().pop_error_scope());
+            drop(context.device().pop_error_scope());
         }
     }
 }
@@ -90,13 +95,15 @@ impl Drop for TimestampErrorScopes {
 pub(crate) struct TimestampValidation {
     validation: ErrorFuture,
     allocation: ErrorFuture,
+    internal: ErrorFuture,
 }
 
 impl TimestampValidation {
     async fn check(self) -> Result<(), WgpuRuntimeError> {
         let validation = self.validation.await;
         let allocation = self.allocation.await;
-        if let Some(error) = validation.or(allocation) {
+        let internal = self.internal.await;
+        if let Some(error) = validation.or(allocation).or(internal) {
             return Err(invalid(format!("GPU timestamp execution failed: {error}")));
         }
         Ok(())
@@ -306,6 +313,49 @@ impl TimestampReadback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn timestamp_validation_rejects_every_error_class_and_drains_all_scopes() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        for failing in 0..3 {
+            let polled = Arc::new(AtomicUsize::new(0));
+            let result = |index| -> ErrorFuture {
+                let polled = polled.clone();
+                Box::pin(async move {
+                    polled.fetch_add(1, Ordering::Relaxed);
+                    if index != failing {
+                        return None;
+                    }
+                    let source = Box::new(std::io::Error::other("injected scope error"));
+                    Some(match index {
+                        0 => wgpu::Error::Validation {
+                            source,
+                            description: "injected validation".into(),
+                        },
+                        1 => wgpu::Error::OutOfMemory { source },
+                        _ => wgpu::Error::Internal {
+                            source,
+                            description: "injected internal error".into(),
+                        },
+                    })
+                })
+            };
+            let validation = TimestampValidation {
+                validation: result(0),
+                allocation: result(1),
+                internal: result(2),
+            };
+            assert!(matches!(
+                pollster::block_on(validation.check()),
+                Err(WgpuRuntimeError::InvalidTimestamps { .. })
+            ));
+            assert_eq!(polled.load(Ordering::Relaxed), 3);
+        }
+    }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]

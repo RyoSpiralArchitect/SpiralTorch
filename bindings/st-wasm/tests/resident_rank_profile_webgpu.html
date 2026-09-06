@@ -140,6 +140,36 @@ try {
   await check(faulted,{values:[7,6],indices:[7,6]});
   faulted.free();
   report.publication_validation={status:"passed",injected_query_calls:calls,error:failure};
+  // Inject a scope result, not a real driver failure. Real push/pop still run,
+  // so the test requires an actual Internal scope and exercises wgpu conversion.
+  const internal=await WgpuRank.create("topk",1,8,2,4,true);
+  internal.upload(Float32Array.from([0,1,2,3,4,5,6,7]));
+  const pushScope=GPUDevice.prototype.pushErrorScope,popScope=GPUDevice.prototype.popErrorScope;
+  const filters=[],pushed=[],popped=[];
+  const internalMessage="injected timestamp internal error";
+  let internalPending;
+  GPUDevice.prototype.pushErrorScope=function(filter) {
+    filters.push(filter); pushed.push(filter);
+    return Reflect.apply(pushScope,this,[filter]);
+  };
+  GPUDevice.prototype.popErrorScope=function() {
+    const filter=filters.pop(); popped.push(filter);
+    const result=Reflect.apply(popScope,this,[]);
+    return filter==="internal" ? result.then(error=>error??new GPUInternalError(internalMessage)) : result;
+  };
+  try { internalPending=internal.profile(1); }
+  finally { GPUDevice.prototype.pushErrorScope=pushScope; GPUDevice.prototype.popErrorScope=popScope; }
+  let internalFailure;
+  try { await internalPending; } catch(error) { internalFailure=String(error); }
+  report.internal_validation={status:"error",injection:"synthetic GPUInternalError scope result; not a real driver failure",pushed,popped,error:internalFailure??null,output_current_after_read:internal.outputIsCurrent};
+  assert(pushed.includes("internal") && filters.length===0 && popped.join()===pushed.toReversed().join(),"all diagnostic scopes must be pushed and popped synchronously");
+  assert(internalFailure?.includes(internalMessage),"internal GPU error must reject rather than trap or publish");
+  assert(!internal.outputIsCurrent,"internal error must leave output stale");
+  await rejects(()=>internal.readback());
+  internal.dispatch(1);
+  await check(internal,{values:[7,6],indices:[7,6]});
+  internal.free();
+  report.internal_validation.status="passed";
   const unchanged=await WgpuRank.create("topk",1,8,2);
   assert(!unchanged.timestampQueriesEnabled,"profiled factories cannot replace global runtime");
   unchanged.free();

@@ -100,6 +100,13 @@ impl crate::Error {
             }
         } else if js_error.has_type::<webgpu_sys::GpuOutOfMemoryError>() {
             crate::Error::OutOfMemory { source }
+        } else if let Some(js_error) = js_error.dyn_ref::<webgpu_sys::GpuError>() {
+            // GPUInternalError inherits GPUError but is absent from this pinned
+            // web-sys snapshot. Keep the failure typed instead of trapping.
+            crate::Error::Internal {
+                source,
+                description: js_error.message(),
+            }
         } else {
             panic!("Unexpected error");
         }
