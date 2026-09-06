@@ -161,12 +161,8 @@ mod tests {
 
     #[cfg(feature = "wgpu_dense")]
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))?;
+        let adapter =
+            pollster::block_on(st_backend_wgpu::runtime::request_headless_adapter()).ok()?;
         pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("st.tensor.compaction.test_device"),

@@ -1,7 +1,7 @@
 //! Checked WGPU runtime primitives shared by backend kernels.
 //!
 //! This module owns device/queue lifetime and host/device buffer movement. It
-//! deliberately does not choose a backend or define tensor semantics.
+//! deliberately does not choose tensor runtime routes or define tensor semantics.
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -33,6 +33,65 @@ pub type Shared<T> = std::rc::Rc<T>;
 /// Weak ownership matching browser WGPU's single-threaded handle model.
 #[cfg(target_arch = "wasm32")]
 pub type WeakShared<T> = std::rc::Weak<T>;
+
+// wgpu-core 0.21 prefers discrete GPUs for HighPerformance, then the first
+// backend in Vulkan/Metal/DX12/GL order. GL cannot beat a primary discrete GPU.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+fn primary_adapter_is_final(device_type: wgpu::DeviceType) -> bool {
+    device_type == wgpu::DeviceType::DiscreteGpu
+}
+
+/// Request a headless adapter with the existing high-performance/fallback policy.
+///
+/// Native GL probing is lazy: a primary discrete GPU already wins wgpu's
+/// high-performance ordering. Otherwise all backends remain eligible, so an
+/// integrated/software primary cannot mask a higher-priority GL adapter.
+/// Browser requests stay on the event loop and retain the original descriptor.
+/// This does not share devices, serialize dispatch or retry device failures.
+pub async fn request_headless_adapter() -> Result<wgpu::Adapter, WgpuRuntimeError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let enabled = wgpu::Instance::enabled_backend_features();
+        let primary = enabled & wgpu::Backends::PRIMARY;
+        if enabled.contains(wgpu::Backends::GL) && !primary.is_empty() {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: primary,
+                ..Default::default()
+            });
+            if let Some(adapter) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+            {
+                if primary_adapter_is_final(adapter.get_info().device_type) {
+                    return Ok(adapter);
+                }
+            }
+        }
+    }
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    for (power_preference, force_fallback_adapter) in [
+        (wgpu::PowerPreference::HighPerformance, false),
+        (wgpu::PowerPreference::LowPower, false),
+        (wgpu::PowerPreference::LowPower, true),
+    ] {
+        if let Some(adapter) = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference,
+                compatible_surface: None,
+                force_fallback_adapter,
+            })
+            .await
+        {
+            return Ok(adapter);
+        }
+    }
+    Err(WgpuRuntimeError::NoAdapter)
+}
 
 /// Device/queue pair kept alive for repeated backend dispatches.
 #[derive(Clone, Debug)]
@@ -93,24 +152,7 @@ impl WgpuRuntime {
 
     /// Request a headless adapter and enable SpiralTorch's supported optional features.
     pub async fn request_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let mut selected = None;
-        for (power_preference, force_fallback_adapter) in [
-            (wgpu::PowerPreference::HighPerformance, false),
-            (wgpu::PowerPreference::LowPower, false),
-            (wgpu::PowerPreference::LowPower, true),
-        ] {
-            let options = wgpu::RequestAdapterOptions {
-                power_preference,
-                compatible_surface: None,
-                force_fallback_adapter,
-            };
-            if let Some(adapter) = instance.request_adapter(&options).await {
-                selected = Some(adapter);
-                break;
-            }
-        }
-        let adapter = selected.ok_or(WgpuRuntimeError::NoAdapter)?;
+        let adapter = request_headless_adapter().await?;
         let adapter_info = adapter.get_info();
         let optional_features = wgpu::Features::SUBGROUP | wgpu::Features::SHADER_F16;
         let required_features = adapter.features() & optional_features;
@@ -818,6 +860,39 @@ pub fn read_buffer<T: Pod>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lazy_gl_probe_preserves_wgpu_high_performance_priority() {
+        use wgpu::DeviceType::{Cpu, DiscreteGpu, IntegratedGpu, Other, VirtualGpu};
+        let types = [DiscreteGpu, IntegratedGpu, Other, VirtualGpu, Cpu];
+        // This order mirrors wgpu-core's HighPerformance preference. The GL
+        // backend follows every primary backend when device types are tied.
+        let rank = |kind| {
+            types
+                .iter()
+                .position(|&candidate| candidate == kind)
+                .unwrap()
+        };
+        for primary in types {
+            for secondary in types {
+                let legacy = if rank(secondary) < rank(primary) {
+                    secondary
+                } else {
+                    primary
+                };
+                let lazy = if primary_adapter_is_final(primary) {
+                    primary
+                } else {
+                    legacy
+                };
+                assert_eq!(lazy, legacy, "primary={primary:?}, GL={secondary:?}");
+            }
+        }
+        assert!(primary_adapter_is_final(DiscreteGpu));
+        for kind in [IntegratedGpu, Other, VirtualGpu, Cpu] {
+            assert!(!primary_adapter_is_final(kind));
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]

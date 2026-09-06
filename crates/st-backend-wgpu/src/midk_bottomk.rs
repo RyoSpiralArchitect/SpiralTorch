@@ -844,13 +844,8 @@ mod tests {
     }
 
     fn test_device() -> Result<(wgpu::Device, wgpu::Queue), String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .ok_or_else(|| "no WGPU adapter".to_owned())?;
+        let adapter = pollster::block_on(crate::runtime::request_headless_adapter())
+            .map_err(|error| error.to_string())?;
         if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
             return Err("software WGPU adapter is not admitted as real-GPU coverage".into());
         }

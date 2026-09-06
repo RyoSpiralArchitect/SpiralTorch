@@ -715,13 +715,8 @@ mod tests {
     #[test]
     #[ignore = "requires a live WGPU adapter"]
     fn semantic_wgpu_entry_matches_cpu_and_preserves_nd_shape() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }));
-        let Some(adapter) = adapter else {
+        let adapter = pollster::block_on(st_backend_wgpu::runtime::request_headless_adapter());
+        let Ok(adapter) = adapter else {
             return;
         };
         let (device, queue) = pollster::block_on(adapter.request_device(
