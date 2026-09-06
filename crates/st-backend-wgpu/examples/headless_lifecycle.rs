@@ -8,11 +8,13 @@ fn main() -> Result<(), String> {
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() > 3 {
-        return Err("usage: headless_lifecycle [threads=4] [rounds=4] [drop|destroy]".into());
+        return Err(
+            "usage: headless_lifecycle [threads=4] [rounds=4] [drop|destroy|join_then_drop]".into(),
+        );
     }
     let shutdown = args.get(2).map(String::as_str).unwrap_or("drop");
-    if !matches!(shutdown, "drop" | "destroy") {
-        return Err("shutdown must be drop or destroy".into());
+    if !matches!(shutdown, "drop" | "destroy" | "join_then_drop") {
+        return Err("shutdown must be drop, destroy or join_then_drop".into());
     }
     let parse = |index: usize, default: usize, max: usize| -> Result<usize, String> {
         let value = args
@@ -71,35 +73,52 @@ fn main() -> Result<(), String> {
                             return Err("lifecycle readback mismatch".into());
                         }
                         drop(buffer);
+                        eprintln!("round={round} worker={worker} phase=readback_verified");
                         if shutdown == "destroy" {
                             context.device().destroy();
                             context.device().poll(wgpu::Maintain::Wait);
                             eprintln!("round={round} worker={worker} phase=device_destroyed");
                         }
-                        drop(runtime);
-                        eprintln!("round={round} worker={worker} phase=runtime_dropped");
-                        Ok(serde_json::json!({
+                        let retained = if shutdown == "join_then_drop" {
+                            eprintln!("round={round} worker={worker} phase=runtime_retained");
+                            Some(runtime)
+                        } else {
+                            drop(runtime);
+                            eprintln!("round={round} worker={worker} phase=runtime_dropped");
+                            None
+                        };
+                        let receipt = serde_json::json!({
                             "round": round, "worker": worker, "adapter": info.name,
                             "backend": format!("{:?}", info.backend),
                             "device_type": format!("{:?}", info.device_type),
                             "status": "passed"
-                        }))
+                        });
+                        Ok((receipt, retained))
                     })
                 })
                 .collect::<Vec<_>>();
             handles
                 .into_iter()
-                .map(|handle| handle.join().map_err(|_| "worker panicked".to_owned())?)
-                .collect::<Result<Vec<_>, String>>()
-        })?;
-        receipts.extend(results);
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
         eprintln!("round={round} phase=threads_joined");
+        // Join every worker before retiring any returned device, even on errors.
+        for (worker, result) in results.into_iter().enumerate() {
+            let (receipt, retained) = result.map_err(|_| "worker panicked".to_owned())??;
+            if let Some(runtime) = retained {
+                eprintln!("round={round} worker={worker} phase=retirement_started");
+                drop(runtime);
+                eprintln!("round={round} worker={worker} phase=runtime_dropped");
+            }
+            receipts.push(receipt);
+        }
     }
     println!(
         "{}",
         serde_json::json!({
             "schema": "spiraltorch.headless_lifecycle.v1", "status": "passed",
-        "threads": threads, "rounds": rounds, "shutdown": shutdown, "receipts": receipts,
+            "threads": threads, "rounds": rounds, "shutdown": shutdown, "receipts": receipts,
             "boundary": "startup/copy/readback/drop/thread-join correctness, not throughput"
         })
     );
