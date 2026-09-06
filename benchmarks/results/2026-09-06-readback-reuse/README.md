@@ -1,6 +1,56 @@
 # Resident Readback Reuse
 
-## Measured Change
+## Confirmed Comparison Without Probes
+
+The primary evidence is now four runs **without `--readback-probe`**, in
+baseline/candidate/candidate/baseline order. All 72 cases pass exact values and
+canonical indices, clean source/build binding, stable image checks and the
+pre/post foreign-compute-PID gates. Every normal report has
+`readback_probe_requested=false`; no diagnostic process or per-case probe runs.
+This is still not an exclusive GPU reservation or an interleaved-framework test.
+
+Baseline: `7eca66104b2efe231bbedda5c9d895b70f81c9d5`.
+Candidate: `d5e45127b478a57cfcc591858f89ab7c9baa2adb`.
+The pool is unchanged from `0fb6955b`; the later commit separates diagnostics.
+All request hashes match `f987634dda04fa6dc7ab232441c62cdb184d02771f18afaf184b015188b600e7`.
+Hardware, integer fixtures, configuration and timing boundaries are described
+below and unchanged in these reruns.
+
+Units: microseconds. Median of three seed medians, each from twelve samples
+after two warmups. The composed call includes final owned rank readback.
+
+| Kind | Columns | Baseline 1 | Candidate 1 | Candidate 2 | Baseline 2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TopK | 257 | 763.20 | 78.77 | 79.28 | 770.50 |
+| TopK | 1025 | 760.77 | 85.98 | 85.35 | 766.50 |
+| MidK | 257 | 764.48 | 70.68 | 70.45 | 757.64 |
+| MidK | 1025 | 758.95 | 91.82 | 91.54 | 767.33 |
+| BottomK | 257 | 761.33 | 78.30 | 78.62 | 767.33 |
+| BottomK | 1025 | 763.78 | 85.89 | 85.41 | 766.13 |
+
+Warm latency remains **88-91% lower** after removing the diagnostic confound.
+The no-map resident interval is a different result: candidate 2 is approximately
+50.07-75.62 us/chain versus CUDA 16.23-16.76 us. CUDA remains about 3-4.5x faster.
+MidK/1025 resident time is 75.67 / 75.62 us in the candidates versus baseline
+70.38 / 70.43 us, a reproducible roughly **7.5% regression**. Other groups improve
+slightly. Do not present the end-to-end gain as a general kernel throughput gain.
+Cold starts, arbitrary floating inputs and full-model performance remain unmeasured.
+
+One additional corrected `--readback-probe` run validates the new orchestration:
+18 normal comparisons complete before a separate process emits 18 `probe_only`
+results with `samples_ms=null`. They live in `readback_diagnostics`, not in normal
+case timings. The normal native results contain no probes. This report is kept
+separately and is not one of the four primary no-probe runs. Five dependency-free
+harness tests include all-18-CUDA-cases-before-probe ordering and rejection of
+changed indices, request identities, modes and timing-bearing probe results.
+
+## Earlier Probe-Enabled Runs
+
+**Exploratory only, not the final comparison:** review found that these runs
+inserted diagnostics between requests and before CUDA timing. Allocator and
+GPU load history could therefore contaminate later comparison samples. Raw
+reports are retained unchanged. The runner now completes every comparison
+before a separate probe-only process; the corrected reruns are above.
 
 Retaining one idle staging buffer per resident rank/matmul workspace removes a
 large warm readback allocation cost on Furnace. It does not fuse shaders, remove
@@ -84,7 +134,8 @@ the exact driver/allocator mechanism has not been instrumented.
 With the pool, the fenced snapshot submission stage is roughly 5.4-5.5 us and
 the read stage roughly 12 us. Extra fences perturb this path; do not add these
 diagnostic stages to claim an uninstrumented critical-path decomposition.
-The normal four-run table above is the latency evidence.
+The four-run table above is historical probe-enabled evidence, not an isolated
+comparison. Its direction must be checked against runs without those probes.
 
 ## Ownership And Validation
 
@@ -120,6 +171,11 @@ diagnostics, or run the opt-in Rust test with `--nocapture` for allocation stage
 
 | Artifact | SHA-256 |
 | --- | --- |
+| readback-normal-baseline-7eca6610.json | 282298d4a17574b6fb68c3f98450481793c38bc1d49e68dd7e7d2ea1aac8f66f |
+| readback-normal-baseline-repeat-7eca6610.json | 7783aebdfb0638eacc4f04bb04a778457a860dd40b42c7a700f39505e0be6d99 |
+| readback-normal-candidate-d5e45127.json | f1dfe697fd1a569069ff7635d87e778aa043275b4a9147a7dcf57958a33485ce |
+| readback-normal-candidate-repeat-d5e45127.json | 1125b6be96e5b1ff66ffe986b088dd393022eeaabc006e470a3c205f5c1b47b1 |
+| readback-isolated-probe-d5e45127.json | 9b8ddd6bc5cf39a3656052a68d517d8a5b8d37bb28decd5746f7d18e9682bbd7 |
 | readback-probe-2a26ef45.json | acba9b701f5377c8136e69a67efc11ccf41173fc9917e4a3153222d2d9e7d40c |
 | readback-stages-7eca6610.json | bfcd65ff431f986f7c617569a39df3e7b8c36597ffccf46789f86740f1d90d10 |
 | readback-stages-repeat-7eca6610.json | 3d34e35661f7549eab4f4b1131e2fca826fbe0941fca93943190f3bfdf163f39 |
