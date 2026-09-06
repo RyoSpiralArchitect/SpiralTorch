@@ -52,3 +52,9 @@ not a root-cause proof. The uncompressed trace SHA-256 is
 Next work should consolidate Rust instance/bootstrap selection across runtime,
 core and tensor callers with explicit backend/fallback semantics, then repeat
 the parallel control. Do not merge the hardcoded Vulkan-only probe as that fix.
+
+Follow-up: the [frozen lifetime probe](../../2026-09-06-wgpu-lifecycle/README.md)
+shows that lazy GLES probing and a shared primary instance still fail. A
+harness-only mainline control completes when all workers join before runtime
+retirement, while worker-local Drop still times out. This narrows the next
+investigation; it does not admit the earlier bootstrap candidates as fixes.
