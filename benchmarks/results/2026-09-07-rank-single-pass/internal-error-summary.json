@@ -1,0 +1,110 @@
+{
+  "schema": "spiraltorch.rank_internal_error_review.v1",
+  "status": "passed",
+  "candidate_source": "d8749294c6266f8b43668fc2fbe566146460ac3d",
+  "native_profile_cases": 72,
+  "browser_profile_cases": 12,
+  "validated_profiles": 1009,
+  "native_backend_tests": 87,
+  "python_tests": 103,
+  "internal_validation": {
+    "status": "passed",
+    "injection": "synthetic GPUInternalError scope result; not a real driver failure",
+    "pushed": [
+      "internal",
+      "out-of-memory",
+      "validation"
+    ],
+    "popped": [
+      "validation",
+      "out-of-memory",
+      "internal"
+    ],
+    "error": "Error: invalid GPU timestamp data: GPU timestamp execution failed: injected timestamp internal error",
+    "output_current_after_read": false
+  },
+  "products": {
+    "schema": "spiraltorch.rank_review_products.v1",
+    "status": "passed",
+    "attribution": "clean source snapshot plus preserved build logs; not an embedded Git attestation",
+    "source": "d8749294c6266f8b43668fc2fbe566146460ac3d",
+    "python": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/venv/bin/python",
+    "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/venv/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+    "extension_sha256": "fe9297ad0ef2bf990478a4df1cf18e1dcdb919ba5a900fba5b9dfa8594d41d77",
+    "wheel_sha256": "e2c363efb597784d429c52e3cdf77f2e6bd811082bdbcc0e6545a9e34d245628",
+    "build_info": {
+      "package": "spiraltorch-py",
+      "version": "0.4.27",
+      "profile": "release",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "family": "unix",
+        "pointer_width": 64
+      },
+      "features": {
+        "cpu": false,
+        "wgpu": true,
+        "wgpu-rt": true,
+        "mps": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "logic": false,
+        "logic-learn": false,
+        "kdsl": true,
+        "nn": true,
+        "rec": true,
+        "text": true,
+        "selfsup": true,
+        "robotics": true
+      }
+    },
+    "wasm_assets": {
+      "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "spiraltorch_wasm.d.ts": "40ff61c9ad82b43c9a7f9e80922873e2357c89286cdc43056c8b6d606ea8bcd3",
+      "spiraltorch_wasm.js": "61369c5e70120aa7ea5f4ce540202178c05911c8403ee2cd74bcf19738f75f90",
+      "spiraltorch_wasm_bg.wasm": "183dcef9224821b9e84ff8a24cad90277445379c579305c87fed9185d448e232",
+      "spiraltorch_wasm_bg.wasm.d.ts": "e5d29570de62d7109e84b2b931b8a2d420b828eedca02058675b6fb6496d2e16"
+    },
+    "baseline_wasm_assets": {
+      "snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "spiraltorch_wasm.d.ts": "d8f6638a7cc7e399d71e8705281222435548f5d4a041e61088db34739a79d209",
+      "spiraltorch_wasm.js": "1ad3645e646de3bacec78a6338e8db28b2a47d7a520e28765fcc8fb8f8286353",
+      "spiraltorch_wasm_bg.wasm": "56f66b67eb044183d7acd4687c75d766767e93bfb5bc579e68145e4969907a9e",
+      "spiraltorch_wasm_bg.wasm.d.ts": "9a61560d1e44da8979cc9ae48e8aaa6d7d4cf40eeb7e9dda35cdaa96ef7fe960"
+    }
+  },
+  "limitations": [
+    "Internal error injection replaces one real scope's result with a synthetic GPUInternalError; not a real driver fault.",
+    "The separate invalid-query case is a real WebGPU Validation error, not an Internal-error hardware test.",
+    "No new normal-path performance claim. Ordinary rank dispatch and shaders are unchanged from b7999e8f.",
+    "Rank-only maximum repetitions; the matmul/copy/rank chain is outside this test."
+  ],
+  "raw_sha256": {
+    "products-d8749294.json": "cce57baeb385d9165ca3779f5149f3f87582232e8eff561fe05200f74b408804",
+    "browser-internal-red-detail.json": "fdeab5d629d61fdb7a9e3c5adcce88b472971e37e5dc0e667f2485dc4fcfec6d",
+    "browser-profile-d8749294.json": "b79ef975b26eb0dbdd48b63aa9788d8410e9dd4249603f01e08b4d6b070e656f",
+    "stage-probe-d8749294.json": "a120209838e1ccc64d693d1ac62b8ef8ced0c564275fdd8006fe8dc3f7459a47",
+    "analyze_internal.py": "d39b2c1d70fd73732d2ffcf7bd05fe7e457196174a0e2bfb820dee4e3d16a3e0",
+    "analyze_review.py": "88b548cddcafb527985ed5cd44336d6992dc2bad03e7e92081959c8472598878",
+    "backend-clippy-wasm.log": "55ad27c72ec6518236cd2926b7d15e65ea4fdb05461d56862df2484233ad5860",
+    "backend-clippy.log": "4a7c03ddad627ac2ccdfa8a792dc6e59e3415a44d7000e1d93094c3aa5d18448",
+    "backend-linux-d8749294.log": "59dfcffd645ef17309566788895fb9141328857604fbb9ccb741bdec603aa628",
+    "backend-mac.log": "34a2c0273e7792e5ed6e82eb7bdf0d19b1a1b8c913052a7439ec69fdc476eb03",
+    "browser-internal-red-detail.log": "65a2ea8a703da7862320c3db81218b37e7b2e544438fc175d62f9e048d575f4d",
+    "browser-internal-red.log": "7a54122dc056bd1960e99e208cd264ee1b9c9bc2851e24138f08ee4ebf3f9b74",
+    "browser-profile-d8749294.log": "93d403e1d801f182ddabc111537d9ffbe3c73c883b31742a6bcc0edd471aa067",
+    "build-profile-d8749294.log": "97979751b8dad838d9cc85f62e292af50015b04bfdbdc7a052fe295ad1895e4e",
+    "capture_products.py": "d034144cca85dc28c57b7df4cc615ca09e23219dff8682aaa07e1645ead2a03c",
+    "commands.md": "fb6bac0df70d2d5b8fe70ac9d00914f6eaa0049a0612016390a2b0e4a2a11725",
+    "internal-browser-red.patch": "7dbba58132333aceaa63750bf5930a0027f46e5c263de5d27e443f7be661e08b",
+    "python-d8749294.log": "51dbee2b2fc1f2f374e1304870c1496491792c73b8362aadd966c3aa924a0c1e",
+    "run_profile_probe.py": "9027b7262c0fbd8152e7565ef631f0fc3646dd7eb9a3ab23f94cf2a761cd57e2",
+    "source-d8749294.bundle": "298479766929f682146e2757d1468e8ca17919cca8fcb435bba16ab685ae7a2e",
+    "stage-probe-d8749294.log": "98650f53d1a6d19aa240c64145a0e37aa2063f0b9cf14939e9160c46178b2374",
+    "typescript-d8749294.log": "65489c1e8d32c3e23238bffd3af534d6561560d387406311cb24744c1ab6b00e",
+    "wasm-build-d8749294.log": "fea3dba3650dbae1ee60fb83ef3d7819d7eee794d72f668d45b0d68040c846f9",
+    "wheel-build-d8749294.log": "5ff7b7828ff4f4b9d10d2135b84820d0a3614aaa845b4ca2651ff128311f045a"
+  }
+}

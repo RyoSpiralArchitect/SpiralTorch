@@ -35,13 +35,17 @@ mod enabled {
     }
 
     impl PyWgpuRank {
-        fn from_kernel_plan(py: Python<'_>, plan: Plan) -> PyResult<Self> {
+        fn from_kernel_plan(py: Python<'_>, plan: Plan, timestamp_queries: bool) -> PyResult<Self> {
             py.detach(move || {
-                let (runtime, _) = runtime::ensure_default_runtime_blocking("python.resident.rank")
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-                Ok(Self {
-                    inner: ResidentRank::new(runtime, plan).map_err(error)?,
-                })
+                let inner = if timestamp_queries {
+                    ResidentRank::request_profiled_blocking(plan).map_err(error)?
+                } else {
+                    let (runtime, _) =
+                        runtime::ensure_default_runtime_blocking("python.resident.rank")
+                            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                    ResidentRank::new(runtime, plan).map_err(error)?
+                };
+                Ok(Self { inner })
             })
         }
     }
@@ -49,7 +53,7 @@ mod enabled {
     #[pymethods]
     impl PyWgpuRank {
         #[new]
-        #[pyo3(signature = (kind, rows, cols, k, *, tile_cols=256))]
+        #[pyo3(signature = (kind, rows, cols, k, *, tile_cols=256, timestamp_queries=false))]
         fn new(
             py: Python<'_>,
             kind: &str,
@@ -57,6 +61,7 @@ mod enabled {
             cols: u32,
             k: u32,
             tile_cols: u32,
+            timestamp_queries: bool,
         ) -> PyResult<Self> {
             let kind = match kind {
                 "topk" => Kind::TopK,
@@ -71,26 +76,33 @@ mod enabled {
                     "rank workspace dimensions must be positive",
                 ));
             }
-            Self::from_kernel_plan(py, plan)
+            Self::from_kernel_plan(py, plan, timestamp_queries)
         }
 
         #[cfg(feature = "kdsl")]
         #[staticmethod]
+        #[pyo3(signature = (session, candidate_index, *, timestamp_queries=false))]
         fn from_adaptation(
             py: Python<'_>,
             session: &crate::rank_adaptation::PyRankAdaptationSession,
             candidate_index: usize,
+            timestamp_queries: bool,
         ) -> PyResult<Self> {
             let spec = session.wgpu_resident_candidate(candidate_index)?;
             let plan = Plan::try_new(spec.kind, spec.rows, spec.cols, spec.k, spec.tile_cols)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
-            Self::from_kernel_plan(py, plan)
+            Self::from_kernel_plan(py, plan, timestamp_queries)
         }
 
         #[cfg(not(feature = "kdsl"))]
         #[staticmethod]
-        fn from_adaptation(session: &Bound<'_, PyAny>, candidate_index: usize) -> PyResult<Self> {
-            let _ = (session, candidate_index);
+        #[pyo3(signature = (session, candidate_index, *, timestamp_queries=false))]
+        fn from_adaptation(
+            session: &Bound<'_, PyAny>,
+            candidate_index: usize,
+            timestamp_queries: bool,
+        ) -> PyResult<Self> {
+            let _ = (session, candidate_index, timestamp_queries);
             Err(pyo3::exceptions::PyNotImplementedError::new_err(
                 "resident rank adaptation requires the 'kdsl' feature",
             ))
@@ -115,6 +127,20 @@ mod enabled {
         #[getter]
         fn output_is_current(&self) -> bool {
             self.inner.output_is_current()
+        }
+
+        #[getter]
+        fn timestamp_queries_enabled(&self) -> bool {
+            self.inner.timestamp_queries_enabled()
+        }
+
+        /// Execute instrumented passes and return the Rust-owned GPU timing schema.
+        #[pyo3(signature = (repetitions=1))]
+        fn profile(&mut self, py: Python<'_>, repetitions: u32) -> PyResult<Py<PyAny>> {
+            let profile = py
+                .detach(|| self.inner.dispatch_profiled(repetitions)?.read())
+                .map_err(error)?;
+            crate::json::json_to_py(py, &profile.report())
         }
 
         fn adapter_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -191,17 +217,29 @@ pub(crate) struct PyWgpuRank;
 #[pymethods]
 impl PyWgpuRank {
     #[staticmethod]
-    fn from_adaptation(session: &Bound<'_, PyAny>, candidate_index: usize) -> PyResult<Self> {
-        let _ = (session, candidate_index);
+    #[pyo3(signature = (session, candidate_index, *, timestamp_queries=false))]
+    fn from_adaptation(
+        session: &Bound<'_, PyAny>,
+        candidate_index: usize,
+        timestamp_queries: bool,
+    ) -> PyResult<Self> {
+        let _ = (session, candidate_index, timestamp_queries);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "WgpuRank requires a wheel built with the 'wgpu' feature",
         ))
     }
 
     #[new]
-    #[pyo3(signature = (kind, rows, cols, k, *, tile_cols=256))]
-    fn new(kind: &str, rows: u32, cols: u32, k: u32, tile_cols: u32) -> PyResult<Self> {
-        let _ = (kind, rows, cols, k, tile_cols);
+    #[pyo3(signature = (kind, rows, cols, k, *, tile_cols=256, timestamp_queries=false))]
+    fn new(
+        kind: &str,
+        rows: u32,
+        cols: u32,
+        k: u32,
+        tile_cols: u32,
+        timestamp_queries: bool,
+    ) -> PyResult<Self> {
+        let _ = (kind, rows, cols, k, tile_cols, timestamp_queries);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "WgpuRank requires a wheel built with the 'wgpu' feature",
         ))

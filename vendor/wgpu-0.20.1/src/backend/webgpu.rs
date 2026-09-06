@@ -100,6 +100,13 @@ impl crate::Error {
             }
         } else if js_error.has_type::<webgpu_sys::GpuOutOfMemoryError>() {
             crate::Error::OutOfMemory { source }
+        } else if let Some(js_error) = js_error.dyn_ref::<webgpu_sys::GpuError>() {
+            // GPUInternalError inherits GPUError but is absent from this pinned
+            // web-sys snapshot. Keep the failure typed instead of trapping.
+            crate::Error::Internal {
+                source,
+                description: js_error.message(),
+            }
         } else {
             panic!("Unexpected error");
         }
@@ -842,6 +849,10 @@ fn future_pop_error_scope(result: JsFutureResult) -> Option<crate::Error> {
             let js_error = wasm_bindgen::JsCast::dyn_into(js_value).unwrap();
             Some(crate::Error::from_js(js_error))
         }
+        Err(error) => Some(crate::Error::Internal {
+            source: Box::<dyn std::error::Error + Send + Sync>::from("<WebGPU Error>"),
+            description: format!("WebGPU popErrorScope rejected: {error:?}"),
+        }),
         _ => None,
     }
 }
@@ -939,6 +950,10 @@ impl ContextWebGpu {
             .expect("canvas context is not a GPUCanvasContext");
 
         Ok(create_identified((canvas, context)))
+    }
+
+    pub fn query_set_destroy(&self, query_set_data: &Sendable<webgpu_sys::GpuQuerySet>) {
+        query_set_data.0.destroy();
     }
 
     /// Get mapped buffer range directly as a `js_sys::ArrayBuffer`.

@@ -18,6 +18,8 @@ use bytemuck::Pod;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+pub mod timestamps;
+
 #[cfg(not(target_arch = "wasm32"))]
 const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -93,27 +95,48 @@ impl WgpuRuntime {
 
     /// Request a headless adapter and enable SpiralTorch's supported optional features.
     pub async fn request_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
+        Self::request_headless_inner(label, false).await
+    }
+
+    /// Request a separate timestamp-enabled runtime, without replacing the default.
+    /// Unsupported devices fail explicitly instead of fabricating CPU-based GPU timings.
+    /// This low-level runtime is shareable. Scoped rank profiling instead uses
+    /// `ResidentRank::request_profiled`, which never exposes its device handles.
+    pub async fn request_profiled_headless(label: &str) -> Result<Self, WgpuRuntimeError> {
+        Self::request_headless_inner(label, true).await
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn request_profiled_headless_blocking(label: &str) -> Result<Self, WgpuRuntimeError> {
+        pollster::block_on(Self::request_profiled_headless(label))
+    }
+
+    async fn request_headless_inner(
+        label: &str,
+        timestamps: bool,
+    ) -> Result<Self, WgpuRuntimeError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let mut selected = None;
-        for (power_preference, force_fallback_adapter) in [
-            (wgpu::PowerPreference::HighPerformance, false),
-            (wgpu::PowerPreference::LowPower, false),
-            (wgpu::PowerPreference::LowPower, true),
-        ] {
-            let options = wgpu::RequestAdapterOptions {
-                power_preference,
-                compatible_surface: None,
-                force_fallback_adapter,
-            };
-            if let Some(adapter) = instance.request_adapter(&options).await {
-                selected = Some(adapter);
-                break;
-            }
-        }
-        let adapter = selected.ok_or(WgpuRuntimeError::NoAdapter)?;
+        let instance = &instance;
+        let adapter = request_compatible_headless_adapter(
+            timestamps,
+            |power_preference, force_fallback_adapter| async move {
+                let options = wgpu::RequestAdapterOptions {
+                    power_preference,
+                    compatible_surface: None,
+                    force_fallback_adapter,
+                };
+                let adapter = instance.request_adapter(&options).await?;
+                let features = adapter.features();
+                Some((adapter, features))
+            },
+        )
+        .await?;
         let adapter_info = adapter.get_info();
         let optional_features = wgpu::Features::SUBGROUP | wgpu::Features::SHADER_F16;
-        let required_features = adapter.features() & optional_features;
+        let mut required_features = adapter.features() & optional_features;
+        if timestamps {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -134,10 +157,41 @@ impl WgpuRuntime {
     }
 }
 
+async fn request_compatible_headless_adapter<A, F, Fut>(
+    timestamps: bool,
+    mut request: F,
+) -> Result<A, WgpuRuntimeError>
+where
+    F: FnMut(wgpu::PowerPreference, bool) -> Fut,
+    Fut: std::future::Future<Output = Option<(A, wgpu::Features)>>,
+{
+    let mut unavailable = WgpuRuntimeError::NoAdapter;
+    for (preference, fallback) in [
+        (wgpu::PowerPreference::HighPerformance, false),
+        (wgpu::PowerPreference::LowPower, false),
+        (wgpu::PowerPreference::LowPower, true),
+    ] {
+        if let Some((adapter, features)) = request(preference, fallback).await {
+            if timestamps && !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+                unavailable = WgpuRuntimeError::TimestampQueriesUnavailable;
+                continue;
+            }
+            return Ok(adapter);
+        }
+    }
+    Err(unavailable)
+}
+
 /// Failures while sizing, allocating, or reading WGPU buffers.
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum WgpuRuntimeError {
+    #[error("GPU timestamp queries are not enabled; use an explicitly profiled runtime")]
+    TimestampQueriesUnavailable,
+    #[error("another timestamp profile is currently encoding on this device; no profile commands were submitted")]
+    TimestampProfilingBusy,
+    #[error("invalid GPU timestamp data: {message}")]
+    InvalidTimestamps { message: String },
     #[error("no suitable headless WGPU adapter is available")]
     NoAdapter,
     #[error("WGPU device request failed: {message}")]
@@ -608,9 +662,10 @@ impl ReadbackSlot {
 
 /// One idle staging buffer per workspace; outstanding snapshots are never shared.
 pub(crate) struct ReadbackPool {
-    context: WgpuContext,
     bytes: u64,
     idle: Shared<ReadbackSlot>,
+    // Drop cached GPU resources before the last device handle polls and retires.
+    context: WgpuContext,
 }
 
 impl ReadbackPool {
@@ -656,7 +711,6 @@ pub(crate) struct ReadbackLease {
 }
 
 impl ReadbackLease {
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn unpooled(buffer: wgpu::Buffer) -> Self {
         Self {
             buffer: Some(buffer),
@@ -819,6 +873,44 @@ pub fn read_buffer<T: Pod>(
 mod tests {
     use super::*;
 
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn adapter_search_filters_features_before_accepting_a_preference() {
+        let empty = Some(wgpu::Features::empty());
+        let capable = Some(wgpu::Features::TIMESTAMP_QUERY);
+        let preferences = [
+            (wgpu::PowerPreference::HighPerformance, false),
+            (wgpu::PowerPreference::LowPower, false),
+            (wgpu::PowerPreference::LowPower, true),
+        ];
+        for (timestamps, candidates, expected) in [
+            (true, [empty, capable, None], Ok(1)),
+            (true, [empty, None, capable], Ok(2)),
+            (true, [None, None, None], Err(WgpuRuntimeError::NoAdapter)),
+            (
+                true,
+                [empty, None, None],
+                Err(WgpuRuntimeError::TimestampQueriesUnavailable),
+            ),
+            (false, [empty, capable, capable], Ok(0)),
+            (true, [capable, capable, capable], Ok(0)),
+        ] {
+            let mut candidates = candidates.into_iter();
+            let mut probes = Vec::new();
+            let selected = pollster::block_on(request_compatible_headless_adapter(
+                timestamps,
+                |preference, fallback| {
+                    let index = probes.len();
+                    probes.push((preference, fallback));
+                    std::future::ready(candidates.next().unwrap().map(|features| (index, features)))
+                },
+            ));
+            assert_eq!(selected, expected);
+            let expected_probes = expected.map_or(3, |index| index + 1);
+            assert_eq!(probes, preferences[..expected_probes]);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn readback_pool_cancels_maps_and_keeps_one_idle_buffer_when_enabled() {
@@ -859,7 +951,7 @@ mod tests {
         let bytes = reused
             .read(context, Duration::from_secs(30), "pool.reused")
             .unwrap();
-        assert_eq!(bytes, bytemuck::cast_slice(&[99u32; 4]));
+        assert_eq!(bytes, bytemuck::cast_slice::<_, u8>(&[99u32; 4]));
         // Whether already completed or aborted, the old callback must settle.
         let _ = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
         drop(reused);
@@ -884,7 +976,7 @@ mod tests {
             survivor
                 .read(context, Duration::from_secs(30), "pool.survivor")
                 .unwrap(),
-            bytemuck::cast_slice(&[7u32; 4])
+            bytemuck::cast_slice::<_, u8>(&[7u32; 4])
         );
     }
 

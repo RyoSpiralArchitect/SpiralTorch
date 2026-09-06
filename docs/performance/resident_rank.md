@@ -23,6 +23,10 @@ rank.free();
 ```
 
 `dispatch(repetitions=1)` enqueues 1..1024 repetitions without reading back.
+All sort/merge dispatches share one compute pass and queue submission. Each
+dispatch is a separate [WebGPU usage scope](https://gpuweb.github.io/gpuweb/#synchronization);
+wgpu inserts the storage dependencies between dispatches, including scratch
+reuse. This avoids allocating a separate native pass for every kernel.
 `synchronize()` waits using a four-byte map completion fence. `readback()`
 immediately snapshots values and indices into one staging buffer, then returns
 an asynchronous mapping promise. Later uploads, dispatches or `free()` do not
@@ -108,6 +112,108 @@ assert result["indices"] == [4, 5, 0]
 that raises `NotImplementedError`, rather than silently executing on CPU.
 Rust callers construct `ResidentRank` from a `WgpuRuntime` and checked `Plan`,
 then use `upload`, `dispatch`, `snapshot().read()` and `synchronize` directly.
+
+## Opt-In GPU Stage Diagnostics
+
+Pass timestamps require a separate, explicitly profiled runtime. Default
+workspaces never request the feature or silently substitute wall-clock timing
+when it is unavailable. These factories do not replace the shared runtime.
+Adapter selection tests the requested timestamp feature before accepting a
+candidate, preserving high-performance, low-power, then fallback preference
+order. A profiled factory may therefore choose a different capable adapter from
+an ordinary runtime: compare `adapterInfo` rather than assuming physical device
+identity. If no candidate supports timestamps, creation fails explicitly. A
+device-creation failure is returned without retrying on a different adapter.
+
+```js
+const rank = await WgpuRank.create("midk", 1, 8193, 65, 256, true);
+rank.upload(Float32Array.from({length: 8193}, (_, i) => i));
+const profile = await rank.profile(16);
+console.log(profile.tile_sort_total_ns, profile.row_merge_total_ns);
+rank.free();
+```
+
+```python
+rank = st.WgpuRank("midk", 1, 8193, 65, timestamp_queries=True)
+rank.upload(st.Tensor(1, 8193, list(map(float, range(8193)))))
+profile = rank.profile(16)
+```
+
+Rust uses `ResidentRank::request_profiled(plan).await` or
+`ResidentRank::request_profiled_blocking(plan)`, then
+`dispatch_profiled(n)?.read()?` (or `read_async().await?` on WASM).
+`createFromAdaptation(session, index, true)` / Python's
+`from_adaptation(session, index, timestamp_queries=True)` retain the same Rust
+candidate geometry, but do not feed diagnostic timings back to the policy.
+
+The shared Rust `spiraltorch.rank_gpu_profile.v1` report keeps per-pass raw
+ticks and generation as decimal strings, subtracts integer clocks before float
+conversion, and records timestamp period, zero/quantized intervals, stage sums,
+merge entry point, submission count and native host pacing. Pending reads own
+their query storage even after later uploads or workspace destruction.
+
+**This is a diagnostic execution path, not the ordinary fast path.** Portable
+stage timestamps require separate passes. Up to 256 repetitions fit each
+submission; larger calls use multiple submissions, and native Metal waits
+between chunks with a timeout to avoid exhausting its command-buffer pool.
+Browser timestamps may be quantized to zero. `gpu_span_ns` includes gaps between
+passes/submissions; stage sums exclude those gaps and query readback. Neither
+can be subtracted from host clocks to infer pure overhead. A profiled runtime
+also does not share device handles with default matmul workspaces.
+
+`resident_rank_profile_bench` pairs uninstrumented dispatch/completion with
+instrumented query readback, validating exact outputs outside timing. The
+isolated browser runner's `rank-profile` fixture exercises the same schema,
+ownership and 1024-repetition boundaries. Native/Python live timestamp tests
+require `SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS=1`; lack of capability is an error,
+not a CPU fallback or a successful zero-timing measurement.
+
+Query creation/encoding/submission errors are captured in owned error-scope
+futures before another profile can begin. Reads reject validation, allocation
+and internal failures instead of accepting cleared query buffers as zero-duration
+evidence. The pinned browser backend maps `GPUInternalError` through its
+`GPUError` base type, preserving a typed error instead of trapping during conversion.
+A rejected `popErrorScope()` Promise also becomes an internal error: unavailable
+validation is not a clean scope and cannot publish profiled output.
+Browser query resources are explicitly destroyed after submission/readback or
+cancellation, rather than waiting for JavaScript garbage collection. This uses
+a narrow `destroy_webgpu` extension in the pinned wgpu dependency; normal
+query-handle Drop and all non-profiled execution retain their existing behavior.
+
+Rank profiling requires the dedicated factory's private device. Its runtime
+handles never escape, so another workspace's ordinary construction/dispatch
+cannot enter its device-wide scopes. `ResidentRank::new` with a shareable
+timestamp-enabled runtime still supports ordinary work, but profiling rejects
+with `ProfileRequiresPrivateDevice` before allocating queries or changing output
+freshness. No lock or coordination cost was added to ordinary dispatch. Python
+and WASM keep the same public `timestamp_queries` arguments and use the private
+factory internally. Profile construction validates all three error classes too.
+An internal device-scope lease remains as a defensive encoding check, not an
+execution/readback lock. WASM pops scopes synchronously before returning a promise.
+
+Workspace buffers, idle staging buffers and pending query storage retire before
+their final owning native device. Keeping the device alive until those resources
+drop prevents repeated private-workspace creation from leaking retired device
+resources. Pending reads still outlive the workspace; the lifetime regression
+exercises both successful reads and cancellation over 96 creation/drop cycles.
+
+Profiled output remains stale until the corresponding query read and captured
+validation succeed. `synchronize()` alone does not publish it. Failed or dropped
+Rust readbacks cannot expose output, and an older profile cannot publish after
+a newer profile, upload, copy or ordinary dispatch supersedes it.
+Profiling detaches earlier publication state before fallible encoding/submission,
+so a native intermediate-chunk timeout cannot leave prior output marked current.
+Initial admission failures (invalid repetitions, missing input, unsupported or
+shareable devices) remain transactional. Python's
+blocking `profile()` and an awaited successful WASM `profile()` publish the
+same state. Ordinary dispatch keeps its existing submission-freshness contract
+and does not allocate or read a diagnostic publication token.
+
+The [single-pass comparison and stage study](../../benchmarks/results/2026-09-07-rank-single-pass/README.md)
+retain repeated RTX 5090/PyTorch CUDA controls, matched browser and A/A runs,
+raw query intervals, and the rejected allocation-failure prototype. Native
+fixed controls improve at the median, but CUDA remains faster and browser
+timing noise prevents a general browser speedup claim.
 
 ## Projection To Rank Without Host Staging
 

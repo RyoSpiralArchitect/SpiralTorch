@@ -5377,6 +5377,25 @@ impl Texture {
 }
 
 impl QuerySet {
+    /// Release WebGPU query resources without waiting for JavaScript GC.
+    ///
+    /// Call only after submitting all commands that use this query set. Like
+    /// WebGPU `GPUQuerySet.destroy`, future submissions using it are invalid.
+    /// Returns false on non-WebGPU contexts; ordinary Drop is unchanged.
+    #[cfg(webgpu)]
+    pub fn destroy_webgpu(&self) -> bool {
+        if let Some(ctx) = self
+            .context
+            .as_any()
+            .downcast_ref::<crate::backend::ContextWebGpu>()
+        {
+            ctx.query_set_destroy(crate::context::downcast_ref(self.data.as_ref()));
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns a globally-unique identifier for this `QuerySet`.
     ///
     /// Calling this method multiple times on the same object will always return the same value.

@@ -9,9 +9,9 @@ const {chromium} = require("playwright");
 async function main() {
   const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes, fixture, baselineDir] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-adaptation|matmul|matmul-rank] [BASELINE_MODULE_DIR]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-profile|rank-adaptation|matmul|matmul-rank] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-adaptation", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
   if((fixture === "rank-matched") !== Boolean(baselineDir)) throw Error("rank-matched requires BASELINE_MODULE_DIR; other fixtures must omit it");
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
@@ -19,7 +19,7 @@ async function main() {
   let metadata = {}, pageErrors = [], consoleMessages = [];
   try {
     const files = new Map([
-      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/", fixture === "rank-matched" ? "resident_rank_matched_webgpu.html" : fixture === "rank-adaptation" ? "resident_rank_adaptation_webgpu.html" : fixture === "matmul-rank" ? "resident_matmul_rank_webgpu.html" : rankFixture ? "resident_rank_webgpu.html" : "resident_webgpu.html"), "text/html"]],
+      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/", fixture === "rank-profile" ? "resident_rank_profile_webgpu.html" : fixture === "rank-matched" ? "resident_rank_matched_webgpu.html" : fixture === "rank-adaptation" ? "resident_rank_adaptation_webgpu.html" : fixture === "matmul-rank" ? "resident_matmul_rank_webgpu.html" : rankFixture ? "resident_rank_webgpu.html" : "resident_webgpu.html"), "text/html"]],
       ["/module/spiraltorch_wasm.js", [path.join(moduleDir,"spiraltorch_wasm.js"), "text/javascript"]],
       ["/module/spiraltorch_wasm_bg.wasm", [path.join(moduleDir,"spiraltorch_wasm_bg.wasm"), "application/wasm"]],
     ]);
@@ -88,6 +88,10 @@ async function main() {
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);
     report = JSON.parse(await page.locator("#result").textContent());
     if(pageErrors.length) report.status="error";
+    if(fixture === "rank-profile" && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
+      report.status="error";
+      report.error="uncaptured WebGPU timestamp validation/allocation failure";
+    }
   } catch(error) {
     report = {status:"error",error:String(error.stack||error)};
     if(page) report.last_page_result = await page.locator("#result").textContent({timeout:2000}).catch(()=>null);

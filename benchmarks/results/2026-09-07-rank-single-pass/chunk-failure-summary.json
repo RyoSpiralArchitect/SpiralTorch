@@ -1,0 +1,42 @@
+{
+  "schema": "spiraltorch.rank_chunk_failure_review.v1",
+  "status": "passed",
+  "executable_source": "5229a06d501c9370688b92989a9ebedff25783c1",
+  "native_tests_per_host": 91,
+  "packaged_python_tests": 103,
+  "browser_cases": 12,
+  "validated_profiles": 145,
+  "red_basis": "1336ebb2 plus the local callback harness, retaining late publication",
+  "injection": "one real chunk submission followed by a synthetic scoped SubmitTimeout; not an induced driver hang",
+  "limitations": [
+    "No new native/CUDA or browser speedup measurement is claimed.",
+    "Furnace's correctness test briefly overlapped a newly started external training process; its timings are excluded from performance evidence.",
+    "No further Furnace GPU execution was started after detecting the contention; the external process was not modified.",
+    "The earlier uncontended source-bound comparisons and archives remain unchanged.",
+    "Python/WASM attribution uses clean build logs and product hashes, not embedded Git attestation."
+  ],
+  "raw_sha256": {
+    "analyze_chunk_failure.py": "f35118407f1a6979810fdc09d45aede6769cb32be142a6d1a4c1e3ed752f9eb6",
+    "analyze_review.py": "88b548cddcafb527985ed5cd44336d6992dc2bad03e7e92081959c8472598878",
+    "backend-frozen-mac.log": "0480f4e0b7b994cae1a4aad808bb6f1b19e1f054f90169e53eb31b3e5396a764",
+    "backend-linux.log": "eaa69a2206d277a26eb73a0610c1bce2cf00dce1abde5736608116789470580e",
+    "backend-mac.log": "09d3ec8f06c1fc5670f5f39e61ceed418852206fce06ee4cfe22851ebafffdf8",
+    "browser-profile.json": "865b510da7da650ea2495db8a589466fee91a8dfde113d82f49c3fab4a95cddd",
+    "browser-profile.log": "f5e7316edd45d3ad90aabde77686d1964086dbb79cb8086ffed18f735893f999",
+    "capture_products.py": "d034144cca85dc28c57b7df4cc615ca09e23219dff8682aaa07e1645ead2a03c",
+    "chunk-red.log": "5b116ba0069c3ad2c90a449592c537ac7e1cb20cbde4de013f2694bb8869823a",
+    "clippy-native.log": "8a83c80b05f6eebc26ac47dde868eee0a6893d1ee8ed392450a43099cdff5064",
+    "clippy-wasm.log": "10da7a27a5f4b099d938a2301c59b44ee769637b5f9920ab18a6aa34c51711f1",
+    "commands.md": "8e0e597d07abebe60ac19deb03d6a475c9213c04df015f8d3170a2488a72d129",
+    "fix.patch": "f23381205d5e6e180962dd1ee025b8c009f8c49e309ca0acffa02223c0a22260",
+    "format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "products-5229a06d.json": "827cfd7b2efeda93bcc84c40f3d82510b41a77e5bc38e0c3c4b1c72ac981a535",
+    "python.log": "c7fa093532781f4946e5c38f4fcff3bcbdad4f2002d4b78663f1ed6c2798e2b0",
+    "red-harness.patch": "8883a0eb392a2f94d3bf737effaa662eb33554237e6478f37ff373c23f6d9588",
+    "source-chunk-code.bundle": "ebb0e17a1847ee1032d102ceacee2c350ee076be69fd968353cc8fa0b9966639",
+    "typescript.log": "c5971b0cbc4533b1c15582c69f45d983a976863e4abb44e25ef21ecf318293c1",
+    "wasm-build.log": "d4088a8eb94fb7eed9f269dc22ab9d8818e8dd829da02c84b9c0d9762a40cb5b",
+    "wheel-build.log": "1ff59699baa273fe27a3827baf6cf9e1e164bde5f334e0193672b73a9911b500",
+    "wheel-install.log": "3f34afeb0ad08682b8164bf420c964023fd94805dda834f9f0189f0039492a6d"
+  }
+}

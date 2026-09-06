@@ -9,15 +9,42 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Explicit WebGPU feature; persistent device-local matrix storage. */
+    export class WgpuMatmul {
+        private constructor();
+        static create(rows: number, inner: number, cols: number): Promise<WgpuMatmul>;
+        static createWithTile(rows: number, inner: number, cols: number, tile_m: number, tile_n: number, tile_k: number): Promise<WgpuMatmul>;
+        static createWithKernel(rows: number, inner: number, cols: number, tile_m: number, tile_n: number, tile_k: number, kernel: string): Promise<WgpuMatmul>;
+        static createWithOptions(rows: number, inner: number, cols: number, tile_m: number, tile_n: number, tile_k: number, kernel: string, accumulation: string): Promise<WgpuMatmul>;
+        free(): void;
+        readonly generation: bigint;
+        readonly outputIsCurrent: boolean;
+        readonly kernel: string;
+        readonly accumulation: string;
+        shape(): Uint32Array;
+        tileMNK(): Uint32Array;
+        workgroupSize(): Uint32Array;
+        outputsPerThread(): Uint32Array;
+        adapterInfo(): unknown;
+        upload(lhs: Float32Array, rhs: Float32Array): void;
+        uploadRhs(rhs: Float32Array): void;
+        setLhsFrom(source: WgpuMatmul): void;
+        dispatch(repetitions?: number | null): bigint;
+        synchronize(): Promise<void>;
+        readback(): Promise<Float32Array>;
+    }
+
     /** Explicit WebGPU feature; exact two-stage rank, no CPU fallback. */
     export class WgpuRank {
-        static create(kind: "topk" | "midk" | "bottomk", rows: number, cols: number, k: number, tile_cols?: number): Promise<WgpuRank>;
-        static createFromAdaptation(session: RankAdaptationSession, candidate_index: number): Promise<WgpuRank>;
+        private constructor();
+        static create(kind: "topk" | "midk" | "bottomk", rows: number, cols: number, k: number, tile_cols?: number | null, timestamp_queries?: boolean | null): Promise<WgpuRank>;
+        static createFromAdaptation(session: RankAdaptationSession, candidate_index: number, timestamp_queries?: boolean | null): Promise<WgpuRank>;
         free(): void;
         readonly kind: string;
         readonly tileCols: number;
         readonly generation: bigint;
         readonly outputIsCurrent: boolean;
+        readonly timestampQueriesEnabled: boolean;
         shape(): Uint32Array;
         adapterInfo(): unknown;
         upload(input: Float32Array): void;
@@ -25,6 +52,8 @@ declare module "spiraltorch-wasm" {
         setInputFromMatmul(source: WgpuMatmul): void;
         dispatchFromMatmul(source: WgpuMatmul, repetitions?: number): bigint;
         dispatch(repetitions?: number): bigint;
+        /** Opt-in private-device diagnostics; never policy feedback or fast-path timing. */
+        profile(repetitions?: number | null): Promise<Record<string, unknown>>;
         synchronize(): Promise<void>;
         readback(): Promise<{values: Float32Array; indices: Int32Array; generation: bigint}>;
     }
