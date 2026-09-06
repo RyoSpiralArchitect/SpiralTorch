@@ -2383,7 +2383,7 @@ mod tests {
                             } else {
                                 Arc::new(AtomicBool::new(false))
                             },
-                            inner: MeanSquaredError::default(),
+                            inner: MeanSquaredError,
                         },
                     }
                     .with_epoch(owned_worker_loader(), schedule),
