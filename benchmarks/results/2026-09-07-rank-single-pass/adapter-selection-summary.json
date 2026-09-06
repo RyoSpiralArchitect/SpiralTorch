@@ -1,0 +1,39 @@
+{
+  "schema": "spiraltorch.rank_adapter_selection_review.v1",
+  "status": "passed",
+  "executable_source": "a64fe2486bf8a9ed33d967770f43a1e3221073c3",
+  "injected_selection_cases": 6,
+  "native_tests_local": 92,
+  "packaged_python_tests": 103,
+  "browser_cases": 12,
+  "validated_profiles": 145,
+  "limitations": [
+    "Selection cases inject capabilities into the production asynchronous preference loop; they are not a physical multi-GPU experiment.",
+    "Ordinary selection retains first-available behavior; device request failures still return without retry.",
+    "Profile creation can select a different capable adapter than an ordinary runtime; compare adapterInfo explicitly.",
+    "No further Furnace GPU work or new performance measurement was run while external training occupied the node.",
+    "Earlier timing studies remain attributed to their original source; Python/WASM attribution is build logs plus product hashes."
+  ],
+  "raw_sha256": {
+    "adapter-red.log": "188cb971bfe2c3a8ef34c2646a90f5ebf1476d62b13c818b93c2bda6da8680cf",
+    "analyze_adapter_selection.py": "c67542544801470634269e9609766a4ff05b46a3920b0bdd0963a228a14a28d6",
+    "analyze_review.py": "88b548cddcafb527985ed5cd44336d6992dc2bad03e7e92081959c8472598878",
+    "backend-frozen-mac.log": "47258ed88565325c639569a658e7d7b9b720663bac9137d6a74acc51f38f2e3b",
+    "backend-mac.log": "344b1947cd481eedb122fa6340ed4e4eb6bca6c3fc8b1e4ff22e9ba256c513d6",
+    "browser-profile.json": "d919c55f72843151e2652ae711773ae6b64c3c2a157485f90359964d19abea68",
+    "browser-profile.log": "7bc68714872f9fc950358259a477bc1b49d438f37a58304263b8e66f8cf075a0",
+    "capture_products.py": "d034144cca85dc28c57b7df4cc615ca09e23219dff8682aaa07e1645ead2a03c",
+    "clippy-native.log": "997e19bd7eaf4b6ca18488ca6c00fb4b03909b292e3d17ffe561d75360c59478",
+    "clippy-wasm.log": "9b92a207a4c800bd22a853922ae7fd54594078dc5352d5add2adb7cf1e9c6708",
+    "commands.md": "95d8cb4774230ed353b0f603d2bf34e1832b60117cc743da957767727ef3988c",
+    "fix.patch": "2bfede72390c9376ec9887fa3ab03bdecc8f7f472326b5e6fc495045316e3aa3",
+    "products-a64fe248.json": "8daad9ffdb56857010da81a15b30b6bbfacbc7ec4271542418eb686f72276367",
+    "python.log": "63bd26217db64e5017a6bc9b2c745771c38fef7067ab2b2a53e397bd59b590ca",
+    "red-harness.patch": "003a0ef22968a5ce44ce68ca75e30aef125f1b14b8ba88e613274fc8b5143da7",
+    "source-adapter.bundle": "d4fed7e400f8a9ef032c59c4751193a5769fa5dff3ac5d8e0d36b8e118107797",
+    "typescript.log": "c5971b0cbc4533b1c15582c69f45d983a976863e4abb44e25ef21ecf318293c1",
+    "wasm-build.log": "a42b5e5b1ded538b55431dfec57e361eab7e1aa775b80a03bc25cbdbd5550c1a",
+    "wheel-build.log": "f681a88efeabc03a0897e1269433cec9c20614c56a9cc3a667473d8346986bd6",
+    "wheel-install.log": "18bd45609401c3e83b7b2c379c2747dcb87baa8c86add4939023b22e9907c8d9"
+  }
+}

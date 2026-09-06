@@ -118,6 +118,12 @@ then use `upload`, `dispatch`, `snapshot().read()` and `synchronize` directly.
 Pass timestamps require a separate, explicitly profiled runtime. Default
 workspaces never request the feature or silently substitute wall-clock timing
 when it is unavailable. These factories do not replace the shared runtime.
+Adapter selection tests the requested timestamp feature before accepting a
+candidate, preserving high-performance, low-power, then fallback preference
+order. A profiled factory may therefore choose a different capable adapter from
+an ordinary runtime: compare `adapterInfo` rather than assuming physical device
+identity. If no candidate supports timestamps, creation fails explicitly. A
+device-creation failure is returned without retrying on a different adapter.
 
 ```js
 const rank = await WgpuRank.create("midk", 1, 8193, 65, 256, true);

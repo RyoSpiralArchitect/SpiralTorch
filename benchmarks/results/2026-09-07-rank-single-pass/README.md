@@ -292,3 +292,32 @@ reproduces the summary byte-for-byte. Earlier archives remain unchanged.
 
 Chunk-failure archive SHA-256: `9a21254ad185a9c44122708301046184672f7ddada7670a95561784649cf23fb`.
 Chunk-failure summary SHA-256: `e9e6fcfbfb4ea815155fd5688d8168be17acbb87e3e8f97645d23848bb289b2c`.
+
+## Feature-Aware Adapter Selection
+
+Review found that the first available adapter could lack timestamp support even
+when a later preference would satisfy the request. Executable source
+`a64fe2486bf8a9ed33d967770f43a1e3221073c3` filters capabilities inside the actual
+asynchronous preference loop, rather than rejecting after its first selection.
+Ordinary creation still accepts the first available adapter. Device-creation
+failures remain explicit and do not trigger another request.
+
+Six injected adapter sequences check selection, errors and probe order/count;
+retaining the old immediate feature error reproduces the failure. This is not a
+physical multi-GPU experiment. Profiled and ordinary factories can select
+different adapters, so callers must compare `adapterInfo` explicitly.
+
+Fresh products pass 92 live local backend tests plus WGSL parsing, 103 packaged
+Python tests, 12 browser cases with 145 validated timestamp reports, generated
+and shipped TypeScript contract checks, and native/WASM strict Clippy. No further
+Furnace GPU work or new performance measurement was run while external training
+occupied the node. Earlier comparisons retain their original source identities.
+
+[adapter-selection-summary.json](adapter-selection-summary.json) and
+[adapter-selection-logs.tar.xz](adapter-selection-logs.tar.xz) preserve the
+red harness, source bundle, build/test logs, product hashes and replay script.
+After extraction, `python -I analyze_adapter_selection.py --output recomputed.json`
+reproduces the summary byte-for-byte. Earlier archives remain unchanged.
+
+Adapter-selection archive SHA-256: `265a14ae751a71199340a582fa29698aba46834c14f8c24a79f9bf60af026d7e`.
+Adapter-selection summary SHA-256: `e0e87f4cd9680a437ff5e153fe2c415ff2d62154398ac631d50322be6dee7d60`.
