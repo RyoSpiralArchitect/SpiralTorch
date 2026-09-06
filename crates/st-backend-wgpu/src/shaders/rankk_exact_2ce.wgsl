@@ -127,7 +127,11 @@ fn initialize_merge_bounds(row: u32, lane: u32) {
             finite_count = finite_count + tile_counts[row * params.tiles_x + tile];
         }
         let take = min(params.k, finite_count);
-        merge_start = select(0u, (finite_count - take) / 2u, params.kind == KIND_MIDK);
+        if (params.kind == KIND_MIDK) {
+            merge_start = (finite_count - take) / 2u;
+        } else {
+            merge_start = 0u;
+        }
         merge_end = merge_start + take;
     }
     workgroupBarrier();
@@ -412,7 +416,7 @@ fn rankk_exact_2ce_row_merge(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let parallel_midk = params.merge_mode == MERGE_PARALLEL_MIDK;
+    let parallel_midk = params.kind == KIND_MIDK && params.merge_mode == MERGE_PARALLEL_MIDK;
     let row = select(workgroup_id.x, workgroup_id.y, parallel_midk);
     if (row >= params.rows) {
         return;
