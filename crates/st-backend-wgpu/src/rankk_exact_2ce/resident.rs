@@ -579,6 +579,64 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
+    fn snapshot_copy_stages_match_output_when_enabled() {
+        use std::time::{Duration, Instant};
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime =
+            pollster::block_on(WgpuRuntime::request_headless("rank.snapshot.stages")).unwrap();
+        let context = runtime.context();
+        let mut rank = ResidentRank::new(
+            runtime.clone(),
+            Plan::try_new(Kind::TopK, 2, 257, 7, 256).unwrap(),
+        )
+        .unwrap();
+        let values = (0..514).map(|i| (i % 31) as f32).collect::<Vec<_>>();
+        rank.upload(&values).unwrap();
+        rank.dispatch(1).unwrap();
+        let expected = cpu_reference(Kind::TopK, 2, 257, 7, &values);
+        for _ in 0..14 {
+            rank.synchronize().unwrap();
+            let t0 = Instant::now();
+            let staging = runtime::empty_buffer::<u64>(
+                context.device(),
+                "resident.rank.snapshot",
+                rank.plan.output_elements() as usize,
+                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            )
+            .unwrap();
+            let t1 = Instant::now();
+            let mut encoder = context.device().create_command_encoder(&Default::default());
+            let t2 = Instant::now();
+            let bytes = u64::from(rank.plan.output_elements()) * 4;
+            encoder.copy_buffer_to_buffer(&rank.values, 0, &staging, 0, bytes);
+            let t3 = Instant::now();
+            encoder.copy_buffer_to_buffer(&rank.indices, 0, &staging, bytes, bytes);
+            let t4 = Instant::now();
+            let commands = encoder.finish();
+            let t5 = Instant::now();
+            context.queue().submit(Some(commands));
+            let t6 = Instant::now();
+            let mapped = runtime::map_read_bytes_with_timeout(
+                context.device(),
+                &staging,
+                0..staging.size(),
+                Duration::from_secs(30),
+                "snapshot.stage.test",
+            )
+            .unwrap();
+            let t7 = Instant::now();
+            assert_eq!(decode(&mapped), expected);
+            eprintln!("snapshot stages us allocate={:.3} encoder={:.3} values_copy={:.3} indices_copy={:.3} finish={:.3} submit={:.3} map={:.3}",
+                (t1-t0).as_secs_f64()*1e6, (t2-t1).as_secs_f64()*1e6,
+                (t3-t2).as_secs_f64()*1e6, (t4-t3).as_secs_f64()*1e6,
+                (t5-t4).as_secs_f64()*1e6, (t6-t5).as_secs_f64()*1e6, (t7-t6).as_secs_f64()*1e6);
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn matmul_chain_is_owned_and_transactional_when_enabled() {
         use crate::resident_matmul::MatmulShape;
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
