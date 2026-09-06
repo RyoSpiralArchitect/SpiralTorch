@@ -307,6 +307,7 @@ fn normalize_hint_field(field: &str) -> PyResult<&'static str> {
         "midk" | "midk_mode" => Ok("midk"),
         "bottomk" | "bottomk_mode" => Ok("bottomk"),
         "ctile" | "compaction_tile" => Ok("ctile"),
+        "rank_tile" => Ok("rank_tile"),
         "tile_cols" => Ok("tile_cols"),
         "radix" => Ok("radix"),
         "segments" => Ok("segments"),

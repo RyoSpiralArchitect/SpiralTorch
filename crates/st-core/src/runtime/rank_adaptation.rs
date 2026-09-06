@@ -928,15 +928,10 @@ mod tests {
             assert!(WgpuResidentRankSpec::try_from_plan(&plan).is_err());
         }
         for (rows, cols, k) in [(0, 256, 8), (2, 256, 0), (2, 0, 0)] {
-            let mut plan = try_plan_rank_with_config(
-                RankKind::TopK,
-                rows,
-                cols,
-                k,
-                BackendKind::Wgpu.default_caps(),
-                ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
-            )
-            .unwrap();
+            let mut plan = base_plan();
+            plan.rows = rows;
+            plan.cols = cols;
+            plan.k = k;
             plan.choice.use_2ce = true;
             assert!(WgpuResidentRankSpec::try_from_plan(&plan).is_err());
         }
