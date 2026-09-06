@@ -9,15 +9,16 @@ const {chromium} = require("playwright");
 async function main() {
   const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes, fixture] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|matmul|matmul-rank]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|matmul|matmul-rank]");
   }
-  if(fixture && !["rank", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
+  if(fixture && !["rank", "rank-active-lanes", "matmul", "matmul-rank"].includes(fixture)) throw Error("unknown fixture");
+  const rankFixture = fixture === "rank" || fixture === "rank-active-lanes";
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
   let metadata = {}, pageErrors = [], consoleMessages = [];
   try {
     const files = new Map([
-      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/", fixture === "matmul-rank" ? "resident_matmul_rank_webgpu.html" : fixture === "rank" ? "resident_rank_webgpu.html" : "resident_webgpu.html"), "text/html"]],
+      ["/", [path.join(__dirname,"../bindings/st-wasm/tests/", fixture === "matmul-rank" ? "resident_matmul_rank_webgpu.html" : rankFixture ? "resident_rank_webgpu.html" : "resident_webgpu.html"), "text/html"]],
       ["/module/spiraltorch_wasm.js", [path.join(moduleDir,"spiraltorch_wasm.js"), "text/javascript"]],
       ["/module/spiraltorch_wasm_bg.wasm", [path.join(moduleDir,"spiraltorch_wasm_bg.wasm"), "application/wasm"]],
     ]);
@@ -42,6 +43,7 @@ async function main() {
       kernels_request: kernels ?? null,
       accumulations_request: accumulations ?? null,
       shapes_request: shapes ?? null,
+      fixture_request: fixture ?? "matmul",
       asset_sha256: Object.fromEntries([...files].map(([url,[file]])=>[
         url,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
       ])),
@@ -71,6 +73,7 @@ async function main() {
     if(kernels) params.set("kernels",kernels);
     if(accumulations) params.set("accumulations",accumulations);
     if(shapes) params.set("shapes",shapes);
+    if(fixture === "rank-active-lanes") params.set("suite","active-lanes");
     const query = "?"+params.toString();
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);

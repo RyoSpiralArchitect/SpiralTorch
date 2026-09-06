@@ -716,6 +716,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn reduction_lane_boundaries_match_reference_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let (device, queue) = test_device().expect("requested runtime test requires WGPU");
+        let pipelines = Pipelines::new(&device).unwrap();
+        for tiles in [
+            1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256,
+            257,
+        ] {
+            let cols = tiles * 8 - 1;
+            let mut input = vec![f32::NAN; (5 * cols) as usize];
+            for column in 0..cols as usize {
+                input[column] = ((column * 37 % 101) as f32 - 50.0) / 8.0;
+                input[2 * cols as usize + column] = if column % 3 == 0 { -0.0 } else { 0.0 };
+                input[4 * cols as usize + column] = [
+                    f32::MIN,
+                    -f32::MIN_POSITIVE,
+                    -0.0,
+                    0.0,
+                    f32::MIN_POSITIVE,
+                    f32::MAX,
+                    f32::INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NAN,
+                ][column % 9];
+            }
+            // A sole finite candidate in the last partial tile must survive
+            // every padded reduction level, also when tiles exceed 256 lanes.
+            input[2 * cols as usize - 1] = -3.0;
+            for k in [1, 7.min(cols), 65.min(cols)] {
+                for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+                    let plan = Plan::try_new(kind, 5, cols, k, 8).unwrap();
+                    assert_eq!(plan.tiles_x(), tiles);
+                    let output = dispatch_host(&device, &queue, &pipelines, plan, &input).unwrap();
+                    let expected = cpu_reference(kind, 5, cols, k, &input);
+                    assert_eq!(
+                        output.indices, expected.indices,
+                        "{kind:?} tiles={tiles} k={k}"
+                    );
+                    for (a, b) in output.values.iter().zip(&expected.values) {
+                        assert!((a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {

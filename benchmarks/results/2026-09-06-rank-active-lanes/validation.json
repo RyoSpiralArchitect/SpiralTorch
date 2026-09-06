@@ -1,0 +1,224 @@
+{
+  "schema": "spiraltorch.active_lane_validation.v1",
+  "baseline": "c4532d3e30b39b1fbb28cdde9b535fac797101f6",
+  "candidate": "189a2f0e35d7347bc1763fc4a38d84db3ba39352",
+  "native_sequence": [
+    {
+      "label": "A1",
+      "file": "active-lanes-a1-c4532d3e.json",
+      "exit_code": 0,
+      "source": "c4532d3e30b39b1fbb28cdde9b535fac797101f6"
+    },
+    {
+      "label": "B1",
+      "file": "active-lanes-b1-189a2f0e.json",
+      "exit_code": 0,
+      "source": "189a2f0e35d7347bc1763fc4a38d84db3ba39352"
+    },
+    {
+      "label": "B2",
+      "file": "active-lanes-b2-189a2f0e.json",
+      "exit_code": 0,
+      "source": "189a2f0e35d7347bc1763fc4a38d84db3ba39352"
+    },
+    {
+      "label": "A2",
+      "file": "active-lanes-a2-c4532d3e.json",
+      "exit_code": 0,
+      "source": "c4532d3e30b39b1fbb28cdde9b535fac797101f6"
+    }
+  ],
+  "browser_sequence": [
+    {
+      "label": "A1",
+      "file": "browser-a1.json",
+      "exit_code": 0
+    },
+    {
+      "label": "B1",
+      "file": "browser-b1.json",
+      "exit_code": 0
+    },
+    {
+      "label": "B2",
+      "file": "browser-b2.json",
+      "exit_code": 0
+    },
+    {
+      "label": "A2",
+      "file": "browser-a2.json",
+      "exit_code": 0
+    }
+  ],
+  "native_binary_sha256": {
+    "baseline": "109fc4e1ccb819432de2ec78b5340b62e39ed47aa75a4161395760bd3a428d88",
+    "candidate": "7bed5cf7a60fa00c4581ce05a8181584b9e1863e1194c0c6d7f8cccae594e040"
+  },
+  "private_python_wheel": {
+    "version": "0.4.27",
+    "sha256": "4e84e57aabd67a6a160c9fc7c11ea1d7b1a21b78791b420c0f865526b21674d1",
+    "native_payload_sha256": "1e79f2bde4a225c0160bfa55fc7400233e285b90a7a2a85fc016a06ca8917c35",
+    "installed_payload_matches": true,
+    "published": false
+  },
+  "checks": {
+    "metal_backend": {
+      "passed": 71,
+      "runtime_tests_enabled": true
+    },
+    "furnace_backend": {
+      "passed": 71,
+      "runtime_tests_enabled": true
+    },
+    "python_resident_api": {
+      "passed": 61,
+      "runtime_tests_enabled": true,
+      "import_mode": "installed private wheel, importlib mode outside repository"
+    },
+    "native_static_shader": {
+      "passed": 8,
+      "runtime_tests_enabled": false
+    },
+    "native_strict_clippy": "passed",
+    "wasm_strict_clippy": "passed",
+    "rustfmt": "nightly-2026-04-15 passed",
+    "harness_unit_tests": 9,
+    "negative_evidence_checks": 6
+  },
+  "initial_rejected_shader": {
+    "revision": "23de5e2e3c7aac2154c698447927c4634f7cff14",
+    "log": "candidate-static-tests.log",
+    "reason": "Naga InvalidReturnType(None) in helper with return only inside loop",
+    "gpu_comparison_admitted": false
+  },
+  "bounds": {
+    "exclusive_gpu_reservation": false,
+    "interleaved_framework_timing": false,
+    "gpu_event_timing": false,
+    "all_shape_nonregression_proven": false,
+    "full_model_speedup_proven": false,
+    "native_lifetime_fixed": false,
+    "adaptive_policy_improvement_proven": false,
+    "public_release": false
+  },
+  "archive": {
+    "name": "raw-logs.tar.gz",
+    "bytes": 55302,
+    "sha256": "5c1349b91086987b2bf717a9453034f3d649414b85ae8947f7f8e18a30583af5"
+  },
+  "archived_files": {
+    "baseline-furnace-build.log": {
+      "bytes": 114628,
+      "sha256": "15e7714a2d9b717f10b3800d8f6dce6f13c040eb2051b131b76e01cc5bb85f07"
+    },
+    "baseline-wasm-build.log": {
+      "bytes": 111511,
+      "sha256": "1b0ec17a35576bcca8b5889b5dc56ef1033033f433545987d670c79b93413278"
+    },
+    "browser-a1.log": {
+      "bytes": 131,
+      "sha256": "c388d5c929a4c0e1fcbc9883350d52b3e513a79df3aab0f7da70544fe28750d3"
+    },
+    "browser-a2.log": {
+      "bytes": 131,
+      "sha256": "9c400166a842895329e6609fd18fe4137bd49d645d60cc556968eb05e789ff79"
+    },
+    "browser-b1.log": {
+      "bytes": 131,
+      "sha256": "7c58b78d9476372327948d2e13e17051a0912f2f6dc7457c2c37eb925920bf9a"
+    },
+    "browser-b2.log": {
+      "bytes": 131,
+      "sha256": "16a6849bd9bec252f73438c10a268c230973f1a207c42de3faf8234170a3cade"
+    },
+    "candidate-furnace-build.log": {
+      "bytes": 114155,
+      "sha256": "241805361a96643427923a4ba75011b9f668940f54af16e444198dbcf5813b43"
+    },
+    "candidate-furnace-runtime.log": {
+      "bytes": 124141,
+      "sha256": "d3114d0d1d3e2cb184c9e00a16893f595002415eb439aa2087fc8b7991ccca03"
+    },
+    "candidate-metal-runtime.log": {
+      "bytes": 119160,
+      "sha256": "17edb3b803e19f8236adf394f6ab0820cec4f524413908ed0c922becde30dbb7"
+    },
+    "candidate-static-tests-fixed.log": {
+      "bytes": 114436,
+      "sha256": "9aba3bac3167405c426e702e093d94d6de157a76647537de4ab72a0b2319f12b"
+    },
+    "candidate-static-tests.log": {
+      "bytes": 115420,
+      "sha256": "d72ca489fe115f221afd4d1325bca99d7601e029878a51fc5759d7dc457f7196"
+    },
+    "candidate-wasm-build.log": {
+      "bytes": 110667,
+      "sha256": "0140f1c57ba12bba4f39a52223907e38aafc7f9e79fba7e8421bef2136649e04"
+    },
+    "fmt.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "harness-tests.log": {
+      "bytes": 107,
+      "sha256": "d9165423ba19b58e8a6b71c86ee510ee02fb375591fa327c9cc0cbb307b95318"
+    },
+    "native-a1.log": {
+      "bytes": 50,
+      "sha256": "0abf295d4c62ad04e269dc015a2f9f3aff1babaf62ae051b48fa544539458914"
+    },
+    "native-a2.log": {
+      "bytes": 50,
+      "sha256": "0abf295d4c62ad04e269dc015a2f9f3aff1babaf62ae051b48fa544539458914"
+    },
+    "native-b1.log": {
+      "bytes": 50,
+      "sha256": "0abf295d4c62ad04e269dc015a2f9f3aff1babaf62ae051b48fa544539458914"
+    },
+    "native-b2.log": {
+      "bytes": 50,
+      "sha256": "0abf295d4c62ad04e269dc015a2f9f3aff1babaf62ae051b48fa544539458914"
+    },
+    "native-clippy.log": {
+      "bytes": 113735,
+      "sha256": "8996950296573ec3116846aee022540cb4cab8da6eb098b6f4c08fe89a354e98"
+    },
+    "native-image-hashes.log": {
+      "bytes": 195,
+      "sha256": "56633c1107a62562ac4d16bf341ae2541650502ee9e1aeeaff29adc89d10266e"
+    },
+    "python-adapter-smoke.log": {
+      "bytes": 156,
+      "sha256": "5ef4b614a1eba477f373441f88a506393ec2c0b2a0737bae02a8e41db939e88f"
+    },
+    "python-tests.log": {
+      "bytes": 99,
+      "sha256": "acf056c7f43d1fcd0d507725e1d9c1223b4314cff464db493e28bd405b5bb32b"
+    },
+    "wasm-clippy.log": {
+      "bytes": 110549,
+      "sha256": "26038105b2547acd48919110cd2c17ff055656875812b5a6a83c559c1b11c43a"
+    },
+    "wheel-build.log": {
+      "bytes": 119904,
+      "sha256": "707e2f94f95d1658d4f03616529d04931f2aeef761f094d0dbb074c200ba5f33"
+    },
+    "wheel-install.log": {
+      "bytes": 331,
+      "sha256": "40610056c8398cf23dc9610728e35966fa4a5b44176aa902db6117d7aa035ad0"
+    },
+    "python-image.json": {
+      "bytes": 382,
+      "sha256": "8c23e35baec65686673dc4d3e8b823e44c7b979992b56e8035ebd54c341e02bc"
+    }
+  },
+  "source_file_sha256": {
+    "crates/st-backend-wgpu/src/shaders/rankk_exact_2ce.wgsl": "d2c2430ef6e86077770c574b347d64f1508d0a2b08df2e901e166e5a6c803804",
+    "crates/st-backend-wgpu/src/rankk_exact_2ce.rs": "14374c5b568f33907c50874315f581d88802342f5c143d4945b2721d09a9c147",
+    "examples/resident_rank_bench.rs": "effe3f7436c360a496c8968572c954446057cd3aa4fd5f63ab08369df65bd8b9",
+    "tools/bench_resident_rank_vs_torch.py": "2f95d7535856de7d69d4f32e881500e6c638323a7a744a410edd8cd2d9db6e0c",
+    "tests/test_resident_rank_bench.py": "35f1324adb0584b39b328d75d05e0b4beb539b36b651f9b7c9803355b5b4230f",
+    "tools/test_resident_browser.cjs": "ab8eb89c296b0ab424e351d1403b80313cfaa9a6e781085243b8b8b944b1066b",
+    "bindings/st-wasm/tests/resident_rank_webgpu.html": "af12306f114f38ac584ef77067a6dbe074584349bb83a543abb22fcf455a3a41"
+  }
+}

@@ -34,13 +34,17 @@ def requests_for(bench, suite):
         geometries = [(cols, 7, tile) for cols, tile in
                       [(1024, 32), (1025, 32), (1025, 256), (4097, 128),
                        (8193, 256), (257, 1), (1025, 8)]]
+    elif suite == "active-lanes":
+        geometries = [(tiles * 32 - 1, k, 32)
+                      for tiles in [1, 2, 3, 5, 17, 33, 65, 129, 257]
+                      for k in [1, 7, min(65, tiles * 32 - 1)]]
     else:
         raise ValueError(f"unknown rank suite: {suite}")
     for seed in [17, 29, 43]:
         for kind in ["topk", "midk", "bottomk"]:
             for cols, k, tile in geometries:
                 values, _ = bench.fixture(2 * cols, seed)
-                if suite == "midk-boundary" and seed == 43:
+                if suite != "standard" and seed == 43:
                     # Ties without mixed signed zeros, whose PyTorch order differs.
                     values = [float(int(value * 8)) for value in values]
                 yield dict(kind=kind, rows=2, cols=cols, k=k, tile=tile, input=values, seed=seed)
@@ -171,7 +175,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--suite", choices=["standard", "midk-boundary"], default="standard")
+    parser.add_argument("--suite", choices=["standard", "midk-boundary", "active-lanes"], default="standard")
     parser.add_argument("--resident-only", action="store_true")
     args = parser.parse_args()
     try:
